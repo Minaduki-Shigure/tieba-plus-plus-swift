@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_live_tests:
+        description: Run the anonymous Tieba integration flow
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-tests:
+    name: Core tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+      - name: Resolve and test TiebaCore
+        run: swift test --package-path Packages/TiebaCore
+      - name: Run opt-in anonymous integration test
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_live_tests }}
+        env:
+          TIEBA_LIVE_TESTS: "1"
+        run: swift test --package-path Packages/TiebaCore --filter TiebaLiveTests
+
+  app-tests:
+    name: iOS app tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate
+      - name: Build and test app
+        run: >-
+          xcodebuild
+          -project TiebaPlusPlus.xcodeproj
+          -scheme TiebaPlusPlus
+          -configuration Debug
+          -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest'
+          CODE_SIGNING_ALLOWED=NO
+          test

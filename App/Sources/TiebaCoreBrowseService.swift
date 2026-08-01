@@ -1,0 +1,305 @@
+import Foundation
+import TiebaCore
+
+struct TiebaCoreBrowseService: BrowseService {
+  private let client: TiebaClient
+
+  init(client: TiebaClient = TiebaClient()) {
+    self.client = client
+  }
+
+  func threads(forumName: String, page: Int, pageSize: Int) async throws -> ThreadPageData {
+    let response: TiebaThreadPage
+    do {
+      response = try await client.getThreads(
+        forumName: forumName,
+        page: page,
+        pageSize: pageSize
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    return ThreadPageData(
+      forumName: response.forum.name.isEmpty ? forumName : response.forum.name,
+      threads: response.threads.map(Self.mapThread),
+      currentPage: response.pagination.currentPage,
+      hasMore: response.pagination.hasMore
+    )
+  }
+
+  func posts(threadID: Int64, page: Int, pageSize: Int) async throws -> PostPageData {
+    let response: TiebaPostPage
+    do {
+      response = try await client.getPosts(
+        threadID: threadID,
+        page: page,
+        pageSize: pageSize
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    return PostPageData(
+      thread: Self.mapThread(response.thread),
+      posts: response.posts.map(Self.mapPost),
+      currentPage: response.pagination.currentPage,
+      hasMore: response.pagination.hasMore
+    )
+  }
+
+  func comments(threadID: Int64, postID: Int64, page: Int) async throws -> CommentPageData {
+    let response: TiebaCommentPage
+    do {
+      response = try await client.getComments(
+        threadID: threadID,
+        postID: postID,
+        page: page
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    return CommentPageData(
+      comments: response.comments.map(Self.mapComment),
+      currentPage: response.pagination.currentPage,
+      hasMore: response.pagination.hasMore
+    )
+  }
+
+  private static func mapThread(_ thread: TiebaThread) -> BrowseThread {
+    BrowseThread(
+      id: thread.id,
+      forumID: thread.forumID,
+      forumName: thread.forumName,
+      title: thread.title,
+      excerpt: summary(for: thread.content),
+      authorName: authorName(thread.author),
+      replyCount: thread.replyCount,
+      viewCount: thread.viewCount,
+      createdAt: thread.createdAt,
+      lastReplyAt: thread.lastReplyAt,
+      contents: mapContent(thread.content)
+    )
+  }
+
+  private static func mapPost(_ post: TiebaPost) -> BrowsePost {
+    BrowsePost(
+      id: post.id,
+      threadID: post.threadID,
+      floor: post.floor,
+      authorID: post.author?.id ?? 0,
+      authorName: authorName(post.author),
+      authorPortraitURL: SecureTiebaURL.portrait(post.author?.portrait),
+      createdAt: post.createdAt,
+      nestedReplyCount: post.commentCount,
+      isThreadAuthor: post.isThreadAuthor,
+      contents: mapContent(post.content)
+    )
+  }
+
+  private static func mapComment(_ comment: TiebaComment) -> BrowseComment {
+    BrowseComment(
+      id: comment.id,
+      authorID: comment.author?.id ?? 0,
+      authorName: authorName(comment.author),
+      authorPortraitURL: SecureTiebaURL.portrait(comment.author?.portrait),
+      createdAt: comment.createdAt,
+      contents: mapContent(comment.content)
+    )
+  }
+
+  private static func authorName(_ author: TiebaUser?) -> String {
+    guard let author else { return "匿名用户" }
+    let name = author.preferredName.trimmingCharacters(in: .whitespacesAndNewlines)
+    return name.isEmpty ? "匿名用户" : name
+  }
+
+  private static func browseError(_ error: Error) -> BrowseError {
+    guard let error = error as? TiebaClientError else {
+      return .unavailable(error.localizedDescription)
+    }
+    let message: String
+    switch error {
+    case .invalidArgument:
+      message = "请求参数无效。"
+    case .invalidEndpoint:
+      message = "无法建立安全的贴吧请求。"
+    case .network:
+      message = "网络连接失败，请检查网络后重试。"
+    case .transportFailure, .invalidHTTPResponse:
+      message = "网络响应异常，请稍后重试。"
+    case .httpStatus(let status):
+      message = "贴吧服务暂时不可用（HTTP \(status)）。"
+    case .invalidProtobuf:
+      message = "贴吧返回了无法识别的数据，协议可能已经更新。"
+    case .server(let code, let serverMessage):
+      message = serverMessage.isEmpty ? "贴吧返回错误 \(code)。" : serverMessage
+    @unknown default:
+      message = error.localizedDescription
+    }
+    return .unavailable(message)
+  }
+
+  private static func summary(for content: TiebaContent) -> String {
+    let text = content.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !text.isEmpty {
+      return text
+    }
+    if !content.images.isEmpty {
+      return "[图片]"
+    }
+    if content.fragments.contains(where: {
+      if case .video = $0 { return true }
+      return false
+    }) {
+      return "[视频]"
+    }
+    if content.fragments.contains(where: {
+      if case .voice = $0 { return true }
+      return false
+    }) {
+      return "[语音]"
+    }
+    return ""
+  }
+
+  private static func mapContent(_ content: TiebaContent) -> [BrowseContent] {
+    content.fragments.map { fragment in
+      switch fragment {
+      case .text(let text):
+        return .text(text)
+      case .emoji(let identifier, let description):
+        let label = description.isEmpty ? identifier : description
+        return .emoticon(name: label, url: nil)
+      case .image(let image):
+        guard
+          let thumbnail = SecureTiebaURL.media(
+            image.thumbnailURL ?? image.fullSizeURL ?? image.originalURL
+          )
+        else {
+          return .unsupported(label: "图片地址不可用")
+        }
+        return .image(
+          thumbnail: thumbnail,
+          original: SecureTiebaURL.media(image.originalURL ?? image.fullSizeURL),
+          width: image.width,
+          height: image.height
+        )
+      case .mention(let mention):
+        return .mention(
+          name: mention.text.trimmingCharacters(in: CharacterSet(charactersIn: "@")),
+          userID: mention.userID)
+      case .link(let link):
+        guard let url = SecureTiebaURL.web(link.url) else {
+          return .text(link.title.isEmpty ? link.text : link.title)
+        }
+        return .link(label: link.title.isEmpty ? link.text : link.title, url: url)
+      case .video(let video):
+        return .video(
+          url: SecureTiebaURL.media(video.streamURL),
+          cover: SecureTiebaURL.media(video.coverURL),
+          width: video.width,
+          height: video.height
+        )
+      case .voice(let voice):
+        guard let url = SecureTiebaURL.voice(md5: voice.md5) else {
+          return .unsupported(label: "语音地址不可用")
+        }
+        return .voice(url: url, duration: max(0, Int(voice.duration.rounded())))
+      case .tiebaPlus(let description, let url):
+        let label = description.isEmpty ? "贴吧组件" : description
+        guard let url = SecureTiebaURL.web(url) else {
+          return .unsupported(label: label)
+        }
+        return .link(label: label, url: url)
+      case .unknown(let type, let text):
+        return text.isEmpty ? .unsupported(label: "暂不支持的内容（类型 \(type)）") : .text(text)
+      }
+    }
+  }
+}
+
+enum SecureTiebaURL {
+  private static let upgradeableHostSuffixes = [
+    "baidu.com",
+    "bdimg.com",
+    "bdstatic.com",
+    "bcebos.com",
+    "baidubce.com",
+  ]
+
+  static func portrait(_ rawValue: String?) -> URL? {
+    guard let rawValue else { return nil }
+    let portrait = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !portrait.isEmpty else { return nil }
+
+    if portrait.contains("://") || portrait.hasPrefix("//") {
+      return media(URL(string: portrait.hasPrefix("//") ? "https:\(portrait)" : portrait))
+    }
+
+    var components = URLComponents()
+    components.scheme = "https"
+    components.host = "himg.bdimg.com"
+    components.path = "/sys/portraitn/item/\(portrait)"
+    return components.url
+  }
+
+  static func media(_ url: URL?) -> URL? {
+    guard let url else { return nil }
+    return normalized(url, allowHTTPUpgradeOnly: true)
+  }
+
+  static func web(_ url: URL?) -> URL? {
+    guard let url else { return nil }
+    return normalized(url, allowHTTPUpgradeOnly: false)
+  }
+
+  static func voice(md5: String) -> URL? {
+    let md5 = md5.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !md5.isEmpty else { return nil }
+    var components = URLComponents()
+    components.scheme = "https"
+    components.host = "tiebac.baidu.com"
+    components.path = "/c/p/voice"
+    components.queryItems = [
+      URLQueryItem(name: "voice_md5", value: md5),
+      URLQueryItem(name: "play_from", value: "pb_voice_play"),
+    ]
+    return components.url
+  }
+
+  private static func normalized(_ url: URL, allowHTTPUpgradeOnly: Bool) -> URL? {
+    guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+      return nil
+    }
+    let scheme = components.scheme?.lowercased()
+    let host = components.host?.lowercased()
+    guard let host, !host.isEmpty else { return nil }
+
+    if host == "tb.himg.baidu.com" {
+      components.host = "himg.bdimg.com"
+    }
+
+    switch scheme {
+    case "https":
+      break
+    case "http" where isUpgradeable(host):
+      components.scheme = "https"
+    case "http" where !allowHTTPUpgradeOnly:
+      return url
+    default:
+      return nil
+    }
+    return components.url
+  }
+
+  private static func isUpgradeable(_ host: String) -> Bool {
+    upgradeableHostSuffixes.contains { suffix in
+      host == suffix || host.hasSuffix(".\(suffix)")
+    }
+  }
+}

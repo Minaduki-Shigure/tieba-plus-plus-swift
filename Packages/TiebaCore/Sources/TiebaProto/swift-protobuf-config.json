@@ -1,0 +1,32 @@
+{
+  "invocations": [
+    {
+      "protoFiles": [
+        "Agree.proto",
+        "CommonReq.proto",
+        "Error.proto",
+        "FrsPageReqIdl.proto",
+        "FrsPageResIdl.proto",
+        "FrsTabInfo.proto",
+        "Media.proto",
+        "Page.proto",
+        "PbContent.proto",
+        "PbFloorReqIdl.proto",
+        "PbFloorResIdl.proto",
+        "PbPageReqIdl.proto",
+        "PbPageResIdl.proto",
+        "PollInfo.proto",
+        "Post.proto",
+        "SimpleForum.proto",
+        "SubPostList.proto",
+        "ThreadInfo.proto",
+        "User.proto",
+        "VideoInfo.proto",
+        "Voice.proto"
+      ],
+      "protoPath": "Protos",
+      "visibility": "Public",
+      "fileNaming": "DropPath"
+    }
+  ]
+}

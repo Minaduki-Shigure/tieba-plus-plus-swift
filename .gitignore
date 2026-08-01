@@ -1,0 +1,9 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+TiebaPlusPlus.xcodeproj/
+xcuserdata/
+*.ipa
+*.xcarchive
+.secrets/

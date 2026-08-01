@@ -1,0 +1,188 @@
+import Foundation
+import TiebaProto
+import XCTest
+
+@testable import TiebaCore
+
+#if canImport(FoundationNetworking)
+  import FoundationNetworking
+#endif
+
+final class TiebaRequestFactoryTests: XCTestCase {
+  private let factory = TiebaRequestFactory(configuration: .init())
+
+  func testThreadRequestMatchesAiotiebaWireFixture() throws {
+    let request = try factory.threads(
+      forumName: "starry",
+      page: 1,
+      pageSize: 10,
+      sort: .replyTime,
+      featuredOnly: false
+    )
+    let payload = try protobufPayload(from: request)
+
+    let aiotiebaFixture = try XCTUnwrap(
+      Data(hexString: "0a1fba020d0802120931322e36342e312e310a06737461727279100a180ff80206")
+    )
+    let decoded = try FrsPageReqIdl(serializedBytes: payload)
+    XCTAssertEqual(decoded, try FrsPageReqIdl(serializedBytes: aiotiebaFixture))
+    XCTAssertEqual(decoded.data.common.clientType, 2)
+    XCTAssertEqual(decoded.data.common.clientVersion, "12.64.1.1")
+    XCTAssertEqual(decoded.data.common.bduss, "")
+    XCTAssertEqual(decoded.data.common.stoken, "")
+    XCTAssertEqual(decoded.data.common.zID, "")
+    XCTAssertEqual(decoded.data.kw, "starry")
+    XCTAssertEqual(decoded.data.pn, 0)
+    XCTAssertEqual(decoded.data.rnNeed, 15)
+  }
+
+  func testPostAndCommentRequestWireFixtures() throws {
+    let postRequest = try factory.posts(
+      threadID: 123_456,
+      page: 1,
+      pageSize: 10,
+      sort: .ascending,
+      onlyThreadAuthor: false,
+      includeComments: false,
+      commentsSortedByAgree: true,
+      commentPageSize: 4
+    )
+    let postFixture = try XCTUnwrap(
+      Data(hexString: "0a19ca010d0802120931322e36342e312e3120c0c407680a900101")
+    )
+    XCTAssertEqual(
+      try PbPageReqIdl(serializedBytes: protobufPayload(from: postRequest)),
+      try PbPageReqIdl(serializedBytes: postFixture)
+    )
+
+    let commentRequest = try factory.comments(
+      threadID: 123_456,
+      anchorID: 654_321,
+      page: 1,
+      anchorIsComment: false
+    )
+    let commentFixture = try XCTUnwrap(
+      Data(hexString: "0a194a0d0802120931322e36342e312e3108c0c40710f1f7272001")
+    )
+    XCTAssertEqual(
+      try PbFloorReqIdl(serializedBytes: protobufPayload(from: commentRequest)),
+      try PbFloorReqIdl(serializedBytes: commentFixture)
+    )
+
+    let aroundRequest = try factory.comments(
+      threadID: 123_456,
+      anchorID: 654_321,
+      page: 2,
+      anchorIsComment: true
+    )
+    let aroundFixture = try XCTUnwrap(
+      Data(hexString: "0a194a0d0802120931322e36342e312e3108c0c40718f1f7272002")
+    )
+    XCTAssertEqual(
+      try PbFloorReqIdl(serializedBytes: protobufPayload(from: aroundRequest)),
+      try PbFloorReqIdl(serializedBytes: aroundFixture)
+    )
+  }
+
+  func testEveryEndpointIsHTTPSAndCredentialFree() throws {
+    let requests = [
+      try factory.threads(
+        forumName: "swift",
+        page: 1,
+        pageSize: 30,
+        sort: .replyTime,
+        featuredOnly: false
+      ),
+      try factory.posts(
+        threadID: 1,
+        page: 1,
+        pageSize: 30,
+        sort: .ascending,
+        onlyThreadAuthor: false,
+        includeComments: true,
+        commentsSortedByAgree: true,
+        commentPageSize: 4
+      ),
+      try factory.comments(threadID: 1, anchorID: 2, page: 1, anchorIsComment: false),
+    ]
+
+    XCTAssertEqual(requests.map(\.url?.path), ["/c/f/frs/page", "/c/f/pb/page", "/c/f/pb/floor"])
+    XCTAssertEqual(requests.map(\.url?.query), ["cmd=301001", "cmd=302001", "cmd=302002"])
+    for request in requests {
+      XCTAssertEqual(request.url?.scheme, "https")
+      XCTAssertEqual(request.url?.host, "tiebac.baidu.com")
+      XCTAssertEqual(request.httpMethod, "POST")
+      XCTAssertEqual(request.value(forHTTPHeaderField: "x_bd_data_type"), "protobuf")
+      XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+      XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+
+      let body = try XCTUnwrap(request.httpBody)
+      let printableBody = String(decoding: body, as: UTF8.self).lowercased()
+      XCTAssertFalse(printableBody.contains("bduss"))
+      XCTAssertFalse(printableBody.contains("stoken"))
+    }
+  }
+
+  func testRejectsInvalidArgumentsAndHeaderInjection() throws {
+    XCTAssertThrowsError(
+      try factory.threads(
+        forumName: "  ",
+        page: 1,
+        pageSize: 30,
+        sort: .replyTime,
+        featuredOnly: false
+      )
+    )
+    XCTAssertThrowsError(
+      try factory.comments(threadID: 0, anchorID: 1, page: 1, anchorIsComment: false)
+    )
+
+    let injected = TiebaRequestFactory(
+      configuration: .init(userAgent: "client\r\nAuthorization: secret")
+    )
+    XCTAssertThrowsError(
+      try injected.threads(
+        forumName: "swift",
+        page: 1,
+        pageSize: 30,
+        sort: .replyTime,
+        featuredOnly: false
+      )
+    )
+  }
+
+  func testEndpointPolicyRejectsDowngradeAndCrossHostRedirects() {
+    XCTAssertTrue(TiebaEndpointPolicy.allows(URL(string: "https://tiebac.baidu.com/c/f/pb/page")))
+    XCTAssertFalse(TiebaEndpointPolicy.allows(URL(string: "http://tiebac.baidu.com/c/f/pb/page")))
+    XCTAssertFalse(TiebaEndpointPolicy.allows(URL(string: "https://tieba.baidu.com/c/f/pb/page")))
+    XCTAssertFalse(
+      TiebaEndpointPolicy.allows(URL(string: "https://tiebac.baidu.com.example/c/f/pb/page")))
+  }
+
+  private func protobufPayload(from request: URLRequest) throws -> Data {
+    let body = try XCTUnwrap(request.httpBody)
+    let prefix = Data(
+      "---*_r1999\r\nContent-Disposition: form-data; name=\"data\"; filename=\"file\"\r\n\r\n".utf8)
+    let suffix = Data("\r\n---*_r1999--\r\n".utf8)
+    XCTAssertTrue(body.starts(with: prefix))
+    XCTAssertTrue(body.count >= prefix.count + suffix.count)
+    XCTAssertEqual(body.suffix(suffix.count), suffix)
+    return body.subdata(in: prefix.count..<body.count - suffix.count)
+  }
+}
+
+extension Data {
+  fileprivate init?(hexString: String) {
+    let characters = Array(hexString.utf8)
+    guard characters.count.isMultiple(of: 2) else { return nil }
+    self.init()
+    reserveCapacity(characters.count / 2)
+    for index in stride(from: 0, to: characters.count, by: 2) {
+      guard
+        let byte = UInt8(
+          String(bytes: characters[index...index + 1], encoding: .utf8) ?? "", radix: 16)
+      else { return nil }
+      append(byte)
+    }
+  }
+}

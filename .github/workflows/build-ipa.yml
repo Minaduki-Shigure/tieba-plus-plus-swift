@@ -1,0 +1,36 @@
+name: Build unsigned IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate
+      - name: Archive unsigned app
+        run: >-
+          xcodebuild
+          -project TiebaPlusPlus.xcodeproj
+          -scheme TiebaPlusPlus
+          -configuration Release
+          -destination 'generic/platform=iOS'
+          -archivePath build/TiebaPlusPlus.xcarchive
+          CODE_SIGNING_ALLOWED=NO
+          archive
+      - name: Package IPA
+        run: |
+          mkdir -p build/Payload
+          cp -R build/TiebaPlusPlus.xcarchive/Products/Applications/TiebaPlusPlus.app build/Payload/
+          cd build
+          ditto -c -k --sequesterRsrc --keepParent Payload TiebaPlusPlus-SideStore.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TiebaPlusPlus-SideStore
+          path: build/TiebaPlusPlus-SideStore.ipa
