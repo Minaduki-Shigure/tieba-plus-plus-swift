@@ -99,7 +99,7 @@ private struct ForumSearchRow: View {
 
   var body: some View {
     HStack(alignment: .top, spacing: 12) {
-      AsyncImage(url: forum.avatarURL) { phase in
+      DownsampledRemoteImage(url: forum.avatarURL, maxPixelSize: 256) { phase in
         switch phase {
         case .success(let image):
           image.resizable().scaledToFill()

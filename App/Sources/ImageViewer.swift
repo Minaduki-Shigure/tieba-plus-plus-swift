@@ -29,7 +29,7 @@ private struct ZoomableRemoteImage: View {
   @State private var lastScale: CGFloat = 1
 
   var body: some View {
-    AsyncImage(url: url) { phase in
+    DownsampledRemoteImage(url: url, maxPixelSize: 4_096) { phase in
       switch phase {
       case .success(let image):
         image

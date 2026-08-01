@@ -111,7 +111,7 @@ private struct BrowseImageView: View {
     Button {
       isPresented = true
     } label: {
-      AsyncImage(url: thumbnailURL) { phase in
+      DownsampledRemoteImage(url: thumbnailURL, maxPixelSize: 1_600) { phase in
         switch phase {
         case .success(let image):
           image.resizable().scaledToFill()
@@ -130,6 +130,7 @@ private struct BrowseImageView: View {
       .clipped()
     }
     .buttonStyle(.plain)
+    .accessibilityLabel("查看大图")
     .fullScreenCover(isPresented: $isPresented) {
       ImageViewer(url: originalURL ?? thumbnailURL)
     }
@@ -155,10 +156,13 @@ private struct BrowseVideoView: View {
         VideoPlayer(player: player)
       } else {
         ZStack {
-          AsyncImage(url: coverURL) { image in
-            image.resizable().scaledToFill()
-          } placeholder: {
-            Color.black.opacity(0.88)
+          DownsampledRemoteImage(url: coverURL, maxPixelSize: 1_600) { phase in
+            switch phase {
+            case .success(let image):
+              image.resizable().scaledToFill()
+            case .empty, .failure:
+              Color.black.opacity(0.88)
+            }
           }
           if let url {
             Button {
