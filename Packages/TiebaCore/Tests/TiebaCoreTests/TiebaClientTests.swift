@@ -135,6 +135,19 @@ final class TiebaClientTests: XCTestCase {
     }
   }
 
+  func testPreservesCancelledURLErrorAsCancellationError() async {
+    let client = TiebaClient(transport: StubTransport(error: URLError(.cancelled)))
+
+    do {
+      _ = try await client.getThreads(forumName: "swift")
+      XCTFail("Expected CancellationError")
+    } catch is CancellationError {
+      // Expected: callers use cancellation to suppress stale UI updates.
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+  }
+
   private func assertClientError(
     _ expected: TiebaClientError,
     operation: () async throws -> Void

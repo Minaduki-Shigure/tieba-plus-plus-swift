@@ -32,26 +32,32 @@ struct ForumView: View {
   }
 
   private var threadList: some View {
-    List(viewModel.threads) { thread in
-      NavigationLink {
-        ThreadView(thread: thread, service: service)
-      } label: {
-        ThreadRow(thread: thread)
+    List {
+      ForEach(viewModel.threads) { thread in
+        NavigationLink {
+          ThreadView(thread: thread, service: service)
+        } label: {
+          ThreadRow(thread: thread)
+        }
+        .onAppear {
+          viewModel.loadMoreIfNeeded(current: thread)
+        }
       }
-      .onAppear {
-        viewModel.loadMoreIfNeeded(current: thread)
+
+      if viewModel.isLoadingMore {
+        HStack {
+          Spacer()
+          ProgressView()
+          Spacer()
+        }
+        .listRowSeparator(.hidden)
+      } else if let message = viewModel.loadMoreError {
+        LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
+          .listRowSeparator(.hidden)
       }
     }
     .listStyle(.plain)
     .refreshable { await viewModel.refresh() }
-    .overlay(alignment: .bottom) {
-      if viewModel.isLoadingMore {
-        ProgressView()
-          .padding(12)
-          .background(.regularMaterial, in: Circle())
-          .padding()
-      }
-    }
   }
 }
 

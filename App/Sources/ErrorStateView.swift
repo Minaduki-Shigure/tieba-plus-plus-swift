@@ -37,3 +37,23 @@ struct EmptyStateView: View {
     .padding(24)
   }
 }
+
+struct LoadMoreErrorView: View {
+  let message: String
+  let retry: () -> Void
+
+  var body: some View {
+    VStack(spacing: 8) {
+      Text(message)
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+      Button(action: retry) {
+        Label("重试加载", systemImage: "arrow.clockwise")
+      }
+      .buttonStyle(.bordered)
+    }
+    .frame(maxWidth: .infinity)
+    .padding(.vertical, 12)
+  }
+}

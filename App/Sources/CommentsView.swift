@@ -48,6 +48,9 @@ struct CommentsView: View {
               Spacer()
             }
             .listRowSeparator(.hidden)
+          } else if let message = viewModel.loadMoreError {
+            LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
+              .listRowSeparator(.hidden)
           }
         }
         .listStyle(.plain)

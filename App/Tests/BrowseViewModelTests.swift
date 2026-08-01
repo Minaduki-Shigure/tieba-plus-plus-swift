@@ -88,6 +88,51 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testForumPaginationFailureCanRetry() async throws {
+    let service = ScriptedBrowseService()
+    let firstPage = [Fixtures.thread(id: 24)]
+    await service.enqueueThreads(
+      .value(
+        ThreadPageData(
+          forumName: "Swift",
+          threads: firstPage,
+          currentPage: 1,
+          hasMore: true
+        )
+      )
+    )
+    await service.enqueueThreads(.failure(StubFailure(message: "next forum page failed")))
+    let viewModel = ForumViewModel(forumName: "Swift", service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadMoreIfNeeded(current: firstPage[0])
+
+    try await waitUntil {
+      viewModel.loadMoreError == "next forum page failed" && !viewModel.isLoadingMore
+    }
+    XCTAssertEqual(viewModel.threads, firstPage)
+    XCTAssertEqual(viewModel.state, .loaded)
+
+    await service.enqueueThreads(
+      .value(
+        ThreadPageData(
+          forumName: "Swift",
+          threads: [Fixtures.thread(id: 25)],
+          currentPage: 2,
+          hasMore: false
+        )
+      )
+    )
+    viewModel.retryLoadMore()
+
+    try await waitUntil { viewModel.threads.map(\.id) == [24, 25] }
+    XCTAssertNil(viewModel.loadMoreError)
+    let requests = await service.threadRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2, 2])
+  }
+
+  @MainActor
   func testForumReloadDoesNotAllowCancelledResponseToOverwriteFreshData() async throws {
     let service = ScriptedBrowseService()
     await service.enqueueThreads(.suspended(101))
@@ -123,6 +168,38 @@ final class BrowseViewModelTests: XCTestCase {
 
     XCTAssertEqual(viewModel.threads.map(\.title), ["fresh"])
     XCTAssertEqual(viewModel.state, .loaded)
+  }
+
+  @MainActor
+  func testForumReloadIgnoresCancelledURLErrorFromStaleRequest() async throws {
+    let service = ScriptedBrowseService()
+    await service.enqueueThreads(.suspended(102))
+    await service.enqueueThreads(
+      .value(
+        ThreadPageData(
+          forumName: "Swift",
+          threads: [Fixtures.thread(id: 33, title: "fresh")],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ForumViewModel(forumName: "Swift", service: service)
+
+    viewModel.reload()
+    try await waitUntil { await service.threadRequestCount() == 1 }
+    viewModel.reload()
+    try await waitUntil { viewModel.threads.first?.title == "fresh" }
+
+    let cancelled = await service.cancelThreads(id: 102)
+    XCTAssertTrue(cancelled)
+    try await waitUntil { await service.completedThreadRequestCount() == 2 }
+    await drainMainActor()
+
+    XCTAssertEqual(viewModel.threads.map(\.title), ["fresh"])
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertFalse(viewModel.isLoadingMore)
+    XCTAssertNil(viewModel.loadMoreError)
   }
 
   @MainActor
@@ -210,6 +287,52 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testThreadPaginationFailureCanRetry() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 62)
+    let firstPage = [Fixtures.post(id: 621, threadID: 62)]
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: firstPage,
+          currentPage: 1,
+          hasMore: true
+        )
+      )
+    )
+    await service.enqueuePosts(.failure(StubFailure(message: "next post page failed")))
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadMoreIfNeeded(current: firstPage[0])
+
+    try await waitUntil {
+      viewModel.loadMoreError == "next post page failed" && !viewModel.isLoadingMore
+    }
+    XCTAssertEqual(viewModel.posts, firstPage)
+    XCTAssertEqual(viewModel.state, .loaded)
+
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 622, threadID: 62)],
+          currentPage: 2,
+          hasMore: false
+        )
+      )
+    )
+    viewModel.retryLoadMore()
+
+    try await waitUntil { viewModel.posts.map(\.id) == [621, 622] }
+    XCTAssertNil(viewModel.loadMoreError)
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2, 2])
+  }
+
+  @MainActor
   func testThreadReloadDoesNotAllowCancelledResponseToOverwriteFreshData() async throws {
     let service = ScriptedBrowseService()
     let initialThread = Fixtures.thread(id: 71, title: "initial")
@@ -249,6 +372,41 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.thread.title, "fresh")
     XCTAssertEqual(viewModel.posts.map(\.authorName), ["fresh"])
     XCTAssertEqual(viewModel.state, .loaded)
+  }
+
+  @MainActor
+  func testThreadReloadIgnoresCancelledURLErrorFromStaleRequest() async throws {
+    let service = ScriptedBrowseService()
+    let initialThread = Fixtures.thread(id: 72, title: "initial")
+    let freshThread = Fixtures.thread(id: 72, title: "fresh")
+    await service.enqueuePosts(.suspended(202))
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: freshThread,
+          posts: [Fixtures.post(id: 722, threadID: 72, authorName: "fresh")],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: initialThread, service: service)
+
+    viewModel.reload()
+    try await waitUntil { await service.postRequestCount() == 1 }
+    viewModel.reload()
+    try await waitUntil { viewModel.posts.first?.authorName == "fresh" }
+
+    let cancelled = await service.cancelPosts(id: 202)
+    XCTAssertTrue(cancelled)
+    try await waitUntil { await service.completedPostRequestCount() == 2 }
+    await drainMainActor()
+
+    XCTAssertEqual(viewModel.thread.title, "fresh")
+    XCTAssertEqual(viewModel.posts.map(\.authorName), ["fresh"])
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertFalse(viewModel.isLoadingMore)
+    XCTAssertNil(viewModel.loadMoreError)
   }
 
   @MainActor
@@ -317,6 +475,43 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testCommentsPaginationFailureCanRetry() async throws {
+    let service = ScriptedBrowseService()
+    let firstPage = [Fixtures.comment(id: 104)]
+    await service.enqueueComments(
+      .value(CommentPageData(comments: firstPage, currentPage: 1, hasMore: true))
+    )
+    await service.enqueueComments(.failure(StubFailure(message: "next comment page failed")))
+    let viewModel = CommentsViewModel(threadID: 10, postID: 103, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadMoreIfNeeded(current: firstPage[0])
+
+    try await waitUntil {
+      viewModel.loadMoreError == "next comment page failed" && !viewModel.isLoadingMore
+    }
+    XCTAssertEqual(viewModel.comments, firstPage)
+    XCTAssertEqual(viewModel.state, .loaded)
+
+    await service.enqueueComments(
+      .value(
+        CommentPageData(
+          comments: [Fixtures.comment(id: 105)],
+          currentPage: 2,
+          hasMore: false
+        )
+      )
+    )
+    viewModel.retryLoadMore()
+
+    try await waitUntil { viewModel.comments.map(\.id) == [104, 105] }
+    XCTAssertNil(viewModel.loadMoreError)
+    let requests = await service.commentRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2, 2])
+  }
+
+  @MainActor
   func testCommentsReloadDoesNotAllowCancelledResponseToOverwriteFreshData() async throws {
     let service = ScriptedBrowseService()
     await service.enqueueComments(.suspended(301))
@@ -350,6 +545,37 @@ final class BrowseViewModelTests: XCTestCase {
 
     XCTAssertEqual(viewModel.comments.map(\.authorName), ["fresh"])
     XCTAssertEqual(viewModel.state, .loaded)
+  }
+
+  @MainActor
+  func testCommentsReloadIgnoresCancelledURLErrorFromStaleRequest() async throws {
+    let service = ScriptedBrowseService()
+    await service.enqueueComments(.suspended(302))
+    await service.enqueueComments(
+      .value(
+        CommentPageData(
+          comments: [Fixtures.comment(id: 94, authorName: "fresh")],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = CommentsViewModel(threadID: 9, postID: 93, service: service)
+
+    viewModel.reload()
+    try await waitUntil { await service.commentRequestCount() == 1 }
+    viewModel.reload()
+    try await waitUntil { viewModel.comments.first?.authorName == "fresh" }
+
+    let cancelled = await service.cancelComments(id: 302)
+    XCTAssertTrue(cancelled)
+    try await waitUntil { await service.completedCommentRequestCount() == 2 }
+    await drainMainActor()
+
+    XCTAssertEqual(viewModel.comments.map(\.authorName), ["fresh"])
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertFalse(viewModel.isLoadingMore)
+    XCTAssertNil(viewModel.loadMoreError)
   }
 }
 
@@ -475,15 +701,33 @@ private actor ScriptedBrowseService: BrowseService {
     return true
   }
 
+  func cancelThreads(id: Int) -> Bool {
+    guard let continuation = pendingThreads.removeValue(forKey: id) else { return false }
+    continuation.resume(throwing: URLError(.cancelled))
+    return true
+  }
+
   func resumePosts(id: Int, returning value: PostPageData) -> Bool {
     guard let continuation = pendingPosts.removeValue(forKey: id) else { return false }
     continuation.resume(returning: value)
     return true
   }
 
+  func cancelPosts(id: Int) -> Bool {
+    guard let continuation = pendingPosts.removeValue(forKey: id) else { return false }
+    continuation.resume(throwing: URLError(.cancelled))
+    return true
+  }
+
   func resumeComments(id: Int, returning value: CommentPageData) -> Bool {
     guard let continuation = pendingComments.removeValue(forKey: id) else { return false }
     continuation.resume(returning: value)
+    return true
+  }
+
+  func cancelComments(id: Int) -> Bool {
+    guard let continuation = pendingComments.removeValue(forKey: id) else { return false }
+    continuation.resume(throwing: URLError(.cancelled))
     return true
   }
 

@@ -7,11 +7,13 @@ final class ThreadViewModel: ObservableObject {
   @Published private(set) var posts: [BrowsePost] = []
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
+  @Published private(set) var loadMoreError: String?
 
   private let service: any BrowseService
   private var currentPage = 0
   private var hasMore = true
   private var loadTask: Task<Void, Never>?
+  private var loadGeneration = 0
 
   init(thread: BrowseThread, service: any BrowseService) {
     self.thread = thread
@@ -24,10 +26,11 @@ final class ThreadViewModel: ObservableObject {
   }
 
   func reload() {
-    loadTask?.cancel()
+    invalidateCurrentLoad()
     currentPage = 0
     hasMore = true
     isLoadingMore = false
+    loadMoreError = nil
     posts = []
     state = .loading
     load(page: 1, replacing: true)
@@ -39,8 +42,7 @@ final class ThreadViewModel: ObservableObject {
   }
 
   func cancel() {
-    loadTask?.cancel()
-    loadTask = nil
+    invalidateCurrentLoad()
     isLoadingMore = false
     if state == .loading {
       state = posts.isEmpty ? .idle : .loaded
@@ -48,20 +50,43 @@ final class ThreadViewModel: ObservableObject {
   }
 
   func loadMoreIfNeeded(current post: BrowsePost) {
-    guard post.id == posts.last?.id, hasMore, !isLoadingMore, state == .loaded else {
+    guard
+      post.id == posts.last?.id,
+      hasMore,
+      !isLoadingMore,
+      loadMoreError == nil,
+      state == .loaded
+    else {
       return
     }
-    isLoadingMore = true
+    load(page: currentPage + 1, replacing: false)
+  }
+
+  func retryLoadMore() {
+    guard loadMoreError != nil, hasMore, !isLoadingMore, state == .loaded else { return }
     load(page: currentPage + 1, replacing: false)
   }
 
   private func load(page: Int, replacing: Bool) {
     let threadID = thread.id
     let service = service
+    loadGeneration &+= 1
+    let generation = loadGeneration
+    if !replacing {
+      loadMoreError = nil
+      isLoadingMore = true
+    }
     loadTask = Task {
+      defer {
+        if generation == loadGeneration {
+          isLoadingMore = false
+          loadTask = nil
+        }
+      }
       do {
         let response = try await service.posts(threadID: threadID, page: page, pageSize: 30)
         try Task.checkCancellation()
+        guard generation == loadGeneration else { return }
         thread = response.thread
         currentPage = response.currentPage
         hasMore = response.hasMore
@@ -70,12 +95,20 @@ final class ThreadViewModel: ObservableObject {
       } catch is CancellationError {
         return
       } catch {
+        guard generation == loadGeneration, !Task.isCancelled else { return }
         if replacing {
           state = .failed(error.localizedDescription)
+        } else {
+          loadMoreError = error.localizedDescription
         }
       }
-      isLoadingMore = false
     }
+  }
+
+  private func invalidateCurrentLoad() {
+    loadGeneration &+= 1
+    loadTask?.cancel()
+    loadTask = nil
   }
 
   private func merge(_ existing: [BrowsePost], _ newItems: [BrowsePost]) -> [BrowsePost] {

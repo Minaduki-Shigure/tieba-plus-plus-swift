@@ -60,6 +60,8 @@ struct ThreadView: View {
         if viewModel.isLoadingMore {
           ProgressView()
             .padding(20)
+        } else if let message = viewModel.loadMoreError {
+          LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
         }
       }
     }

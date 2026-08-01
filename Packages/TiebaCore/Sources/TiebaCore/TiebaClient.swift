@@ -182,6 +182,8 @@ public actor TiebaClient {
       throw error
     } catch is CancellationError {
       throw CancellationError()
+    } catch let error as URLError where error.code == .cancelled {
+      throw CancellationError()
     } catch let error as URLError {
       throw TiebaClientError.network(code: error.errorCode)
     } catch {
