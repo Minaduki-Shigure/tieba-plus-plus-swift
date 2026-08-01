@@ -52,7 +52,8 @@ jobs:
           -project TiebaPlusPlus.xcodeproj
           -scheme TiebaPlusPlus
           -configuration Debug
-          -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest'
+          -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.5'
+          -skipPackagePluginValidation
           CODE_SIGNING_ALLOWED=NO
           test 2>&1 | tee xcodebuild.log
       - name: Report Xcode diagnostics

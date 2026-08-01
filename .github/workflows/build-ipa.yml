@@ -22,6 +22,7 @@ jobs:
           -configuration Release
           -destination 'generic/platform=iOS'
           -archivePath build/TiebaPlusPlus.xcarchive
+          -skipPackagePluginValidation
           CODE_SIGNING_ALLOWED=NO
           archive
       - name: Package IPA
