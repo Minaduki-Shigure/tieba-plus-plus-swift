@@ -569,6 +569,6 @@ private func waitUntil(
 @MainActor
 private func drainMainActor() async {
   for _ in 0..<20 {
-    await Task<Void, Never>.yield()
+    await Task<Never, Never>.yield()
   }
 }

@@ -44,11 +44,17 @@ jobs:
       - name: Generate project
         run: xcodegen generate
       - name: Build and test app
+        id: app_tests
+        continue-on-error: true
         run: >-
+          set -o pipefail;
           xcodebuild
           -project TiebaPlusPlus.xcodeproj
           -scheme TiebaPlusPlus
           -configuration Debug
           -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest'
           CODE_SIGNING_ALLOWED=NO
-          test
+          test 2>&1 | tee xcodebuild.log
+      - name: Report Xcode diagnostics
+        if: steps.app_tests.outcome == 'failure'
+        run: ruby Scripts/report_xcode_errors.rb xcodebuild.log
