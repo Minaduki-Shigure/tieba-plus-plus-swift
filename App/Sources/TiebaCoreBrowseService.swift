@@ -299,6 +299,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, UserProfileService 
       .female
     case .unknown:
       .unknown
+    @unknown default:
+      .unknown
     }
   }
 
