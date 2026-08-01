@@ -54,7 +54,7 @@ final class BrowsingHistoryTests: XCTestCase {
     defaults.set("swift\nios", forKey: FileBrowsingHistoryStore.legacyRecentForumsKey)
     let store = FileBrowsingHistoryStore(
       fileURL: location.fileURL,
-      legacyDefaults: defaults
+      legacyDefaults: .suite(suiteName)
     )
 
     let migrated = try await store.entries(kind: .forum)

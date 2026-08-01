@@ -379,6 +379,12 @@ extension BrowsingHistoryRepository {
 }
 
 actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
+  enum LegacyDefaultsScope: Sendable {
+    case none
+    case standard
+    case suite(String)
+  }
+
   static let schemaVersion = 1
   static let defaultMaximumEntriesPerKind = 200
   static let defaultMaximumArchiveBytes = 4 * 1_024 * 1_024
@@ -401,22 +407,21 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
   private let fileURL: URL
   private let maximumEntriesPerKind: Int
   private let maximumArchiveBytes: Int
-  private let fileManager: FileManager
-  private let legacyDefaults: UserDefaults?
+  private let legacyDefaultsScope: LegacyDefaultsScope
   private var cachedArchive: Archive?
+
+  private var fileManager: FileManager { .default }
 
   init(
     fileURL: URL,
     maximumEntriesPerKind: Int = defaultMaximumEntriesPerKind,
     maximumArchiveBytes: Int = defaultMaximumArchiveBytes,
-    fileManager: FileManager = .default,
-    legacyDefaults: UserDefaults? = nil
+    legacyDefaults: LegacyDefaultsScope = .none
   ) {
     self.fileURL = fileURL
     self.maximumEntriesPerKind = max(maximumEntriesPerKind, 1)
     self.maximumArchiveBytes = max(maximumArchiveBytes, 1_024)
-    self.fileManager = fileManager
-    self.legacyDefaults = legacyDefaults
+    self.legacyDefaultsScope = legacyDefaults
   }
 
   static func live(fileManager: FileManager = .default) -> FileBrowsingHistoryStore {
@@ -428,7 +433,6 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
       fileURL: applicationSupport
         .appendingPathComponent("TiebaPlusPlus", isDirectory: true)
         .appendingPathComponent("browsing-history.json", isDirectory: false),
-      fileManager: fileManager,
       legacyDefaults: .standard
     )
   }
@@ -590,7 +594,7 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
 
   func deleteAll(kind: BrowsingHistoryKind?) async throws {
     if kind == nil || kind == .forum {
-      legacyDefaults?.removeObject(forKey: Self.legacyRecentForumsKey)
+      legacyDefaults()?.removeObject(forKey: Self.legacyRecentForumsKey)
     }
     var candidate = try loadArchive()
     let oldCount = candidate.entries.count
@@ -657,7 +661,7 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
 
   private func migrateLegacyForumsIfNeeded(into archive: Archive) throws -> Archive {
     guard
-      let legacyDefaults,
+      let legacyDefaults = legacyDefaults(),
       let storedForums = legacyDefaults.string(forKey: Self.legacyRecentForumsKey)
     else { return archive }
 
@@ -690,6 +694,17 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
     }
     legacyDefaults.removeObject(forKey: Self.legacyRecentForumsKey)
     return candidate
+  }
+
+  private func legacyDefaults() -> UserDefaults? {
+    switch legacyDefaultsScope {
+    case .none:
+      return nil
+    case .standard:
+      return .standard
+    case .suite(let name):
+      return UserDefaults(suiteName: name)
+    }
   }
 
   private func commit(_ candidate: Archive) throws {
