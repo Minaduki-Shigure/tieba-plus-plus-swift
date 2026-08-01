@@ -45,6 +45,32 @@ final class BrowsingHistoryTests: XCTestCase {
     XCTAssertTrue(archive.contains("\"schemaVersion\":1"))
   }
 
+  func testMigratesAndRemovesLegacyRecentForumsBeforeClear() async throws {
+    let location = try HistoryTestLocation()
+    defer { location.remove() }
+    let suiteName = "BrowsingHistoryTests.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    defaults.set("swift\nios", forKey: FileBrowsingHistoryStore.legacyRecentForumsKey)
+    let store = FileBrowsingHistoryStore(
+      fileURL: location.fileURL,
+      legacyDefaults: defaults
+    )
+
+    let migrated = try await store.entries(kind: .forum)
+
+    XCTAssertEqual(migrated.map(\.id), ["forum:swift", "forum:ios"])
+    XCTAssertNil(defaults.object(forKey: FileBrowsingHistoryStore.legacyRecentForumsKey))
+
+    try await store.deleteAll(kind: nil)
+    let cleared = try await store.entries(kind: nil)
+    XCTAssertTrue(cleared.isEmpty)
+
+    defaults.set("legacy", forKey: FileBrowsingHistoryStore.legacyRecentForumsKey)
+    try await store.deleteAll(kind: nil)
+    XCTAssertNil(defaults.object(forKey: FileBrowsingHistoryStore.legacyRecentForumsKey))
+  }
+
   func testUpsertDeduplicatesAndRefreshesMetadata() async throws {
     let location = try HistoryTestLocation()
     defer { location.remove() }
@@ -252,6 +278,45 @@ final class BrowsingHistoryTests: XCTestCase {
     XCTAssertEqual(thread.browseOptions.sort, .hot)
     XCTAssertNil(thread.lastPostID)
     XCTAssertNil(thread.lastFloor)
+  }
+
+  func testOptionUpdatePersistsWithoutNewProgressAndRejectsStaleWrite() async throws {
+    let location = try HistoryTestLocation()
+    defer { location.remove() }
+    let store = FileBrowsingHistoryStore(fileURL: location.fileURL)
+    try await store.record(
+      .thread(
+        ThreadHistorySnapshot(
+          threadID: 14,
+          title: "options",
+          lastPostID: 140,
+          lastFloor: 14
+        )
+      ),
+      at: Date(timeIntervalSince1970: 10)
+    )
+
+    let newestOptions = ThreadBrowseOptions(sort: .descending, onlyThreadAuthor: true)
+    try await store.updateThreadOptions(
+      threadID: 14,
+      options: newestOptions,
+      at: Date(timeIntervalSince1970: 30)
+    )
+    try await store.updateThreadOptions(
+      threadID: 14,
+      options: ThreadBrowseOptions(sort: .ascending),
+      at: Date(timeIntervalSince1970: 20)
+    )
+
+    let entries = try await store.entries(kind: .thread)
+    let entry = try XCTUnwrap(entries.first)
+    guard case .thread(let thread) = entry.target else {
+      return XCTFail("Expected a thread history entry")
+    }
+    XCTAssertEqual(thread.browseOptions, newestOptions)
+    XCTAssertEqual(thread.lastPostID, 140)
+    XCTAssertEqual(thread.lastFloor, 14)
+    XCTAssertEqual(entry.lastVisitedAt, Date(timeIntervalSince1970: 30))
   }
 
   @MainActor

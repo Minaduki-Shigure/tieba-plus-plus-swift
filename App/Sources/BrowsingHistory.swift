@@ -333,6 +333,11 @@ protocol BrowsingHistoryRepository: Sendable {
     options: ThreadBrowseOptions,
     at date: Date
   ) async throws
+  func updateThreadOptions(
+    threadID: Int64,
+    options: ThreadBrowseOptions,
+    at date: Date
+  ) async throws
   func delete(id: String) async throws
   func deleteAll(kind: BrowsingHistoryKind?) async throws
 }
@@ -361,6 +366,13 @@ extension BrowsingHistoryRepository {
     )
   }
 
+  func updateThreadOptions(
+    threadID: Int64,
+    options: ThreadBrowseOptions
+  ) async throws {
+    try await updateThreadOptions(threadID: threadID, options: options, at: Date())
+  }
+
   func deleteAll() async throws {
     try await deleteAll(kind: nil)
   }
@@ -370,6 +382,7 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
   static let schemaVersion = 1
   static let defaultMaximumEntriesPerKind = 200
   static let defaultMaximumArchiveBytes = 4 * 1_024 * 1_024
+  static let legacyRecentForumsKey = "recentForums"
 
   private struct Archive: Codable, Equatable, Sendable {
     let schemaVersion: Int
@@ -389,18 +402,21 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
   private let maximumEntriesPerKind: Int
   private let maximumArchiveBytes: Int
   private let fileManager: FileManager
+  private let legacyDefaults: UserDefaults?
   private var cachedArchive: Archive?
 
   init(
     fileURL: URL,
     maximumEntriesPerKind: Int = defaultMaximumEntriesPerKind,
     maximumArchiveBytes: Int = defaultMaximumArchiveBytes,
-    fileManager: FileManager = .default
+    fileManager: FileManager = .default,
+    legacyDefaults: UserDefaults? = nil
   ) {
     self.fileURL = fileURL
     self.maximumEntriesPerKind = max(maximumEntriesPerKind, 1)
     self.maximumArchiveBytes = max(maximumArchiveBytes, 1_024)
     self.fileManager = fileManager
+    self.legacyDefaults = legacyDefaults
   }
 
   static func live(fileManager: FileManager = .default) -> FileBrowsingHistoryStore {
@@ -412,7 +428,8 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
       fileURL: applicationSupport
         .appendingPathComponent("TiebaPlusPlus", isDirectory: true)
         .appendingPathComponent("browsing-history.json", isDirectory: false),
-      fileManager: fileManager
+      fileManager: fileManager,
+      legacyDefaults: .standard
     )
   }
 
@@ -497,6 +514,7 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
       let index = candidate.entries.firstIndex(where: { $0.id == "thread:\(threadID)" }),
       case .thread(let thread) = candidate.entries[index].target
     else { return }
+    guard date >= candidate.entries[index].lastVisitedAt else { return }
 
     let updatedThread = ThreadHistorySnapshot(
       threadID: thread.threadID,
@@ -523,6 +541,45 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
     try commit(candidate)
   }
 
+  func updateThreadOptions(
+    threadID: Int64,
+    options: ThreadBrowseOptions,
+    at date: Date
+  ) async throws {
+    var candidate = try loadArchive()
+    guard candidate.recordingEnabled else { return }
+    guard
+      threadID > 0,
+      let index = candidate.entries.firstIndex(where: { $0.id == "thread:\(threadID)" }),
+      case .thread(let thread) = candidate.entries[index].target,
+      date >= candidate.entries[index].lastVisitedAt
+    else { return }
+
+    let updatedThread = ThreadHistorySnapshot(
+      threadID: thread.threadID,
+      forumID: thread.forumID,
+      forumName: thread.forumName,
+      title: thread.title,
+      excerpt: thread.excerpt,
+      authorName: thread.authorName,
+      replyCount: thread.replyCount,
+      viewCount: thread.viewCount,
+      createdAt: thread.createdAt,
+      lastReplyAt: thread.lastReplyAt,
+      authorAvatarURL: thread.authorAvatarURL,
+      browseOptions: options,
+      lastPostID: options.sort == .hot ? nil : thread.lastPostID,
+      lastFloor: options.sort == .hot ? nil : thread.lastFloor
+    )
+    candidate.entries[index] = BrowsingHistoryEntry(
+      target: .thread(updatedThread),
+      lastVisitedAt: date,
+      visitCount: candidate.entries[index].visitCount
+    )
+    candidate.entries = normalized(candidate.entries)
+    try commit(candidate)
+  }
+
   func delete(id: String) async throws {
     var candidate = try loadArchive()
     let oldCount = candidate.entries.count
@@ -532,6 +589,9 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
   }
 
   func deleteAll(kind: BrowsingHistoryKind?) async throws {
+    if kind == nil || kind == .forum {
+      legacyDefaults?.removeObject(forKey: Self.legacyRecentForumsKey)
+    }
     var candidate = try loadArchive()
     let oldCount = candidate.entries.count
     if let kind {
@@ -547,12 +607,16 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
     if let cachedArchive {
       return cachedArchive
     }
-    guard fileManager.fileExists(atPath: fileURL.path) else {
-      let archive = Archive.empty
-      cachedArchive = archive
-      return archive
-    }
+    var archive = try fileManager.fileExists(atPath: fileURL.path)
+      ? decodedArchiveFromDisk()
+      : Archive.empty
+    archive.entries = normalized(archive.entries)
+    archive = try migrateLegacyForumsIfNeeded(into: archive)
+    cachedArchive = archive
+    return archive
+  }
 
+  private func decodedArchiveFromDisk() throws -> Archive {
     let data: Data
     do {
       data = try Data(contentsOf: fileURL, options: .mappedIfSafe)
@@ -574,13 +638,13 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
       throw BrowsingHistoryStoreError.unsupportedSchemaVersion(header.schemaVersion)
     }
 
-    let decoded: Archive
     do {
-      decoded = try decoder.decode(Archive.self, from: data)
+      let decoded = try decoder.decode(Archive.self, from: data)
       try decoded.entries.forEach { entry in
         try Self.validate(entry.target)
         guard entry.visitCount > 0 else { throw BrowsingHistoryStoreError.corruptedArchive }
       }
+      return decoded
     } catch let error as BrowsingHistoryStoreError {
       if error == .invalidTarget {
         throw BrowsingHistoryStoreError.corruptedArchive
@@ -589,11 +653,43 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
     } catch {
       throw BrowsingHistoryStoreError.corruptedArchive
     }
+  }
 
-    var archive = decoded
-    archive.entries = normalized(decoded.entries)
-    cachedArchive = archive
-    return archive
+  private func migrateLegacyForumsIfNeeded(into archive: Archive) throws -> Archive {
+    guard
+      let legacyDefaults,
+      let storedForums = legacyDefaults.string(forKey: Self.legacyRecentForumsKey)
+    else { return archive }
+
+    let names = storedForums
+      .split(separator: "\n")
+      .map(String.init)
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty }
+    guard archive.recordingEnabled, !names.isEmpty else {
+      legacyDefaults.removeObject(forKey: Self.legacyRecentForumsKey)
+      return archive
+    }
+
+    var candidate = archive
+    let migratedAt = Date()
+    for (index, name) in names.enumerated() {
+      let target = BrowsingHistoryTarget.forum(ForumHistorySnapshot(name: name))
+      guard !candidate.entries.contains(where: { $0.id == target.storageKey }) else { continue }
+      candidate.entries.append(
+        BrowsingHistoryEntry(
+          target: target,
+          lastVisitedAt: migratedAt.addingTimeInterval(-Double(index) / 1_000),
+          visitCount: 1
+        )
+      )
+    }
+    candidate.entries = normalized(candidate.entries)
+    if candidate != archive {
+      try commit(candidate)
+    }
+    legacyDefaults.removeObject(forKey: Self.legacyRecentForumsKey)
+    return candidate
   }
 
   private func commit(_ candidate: Archive) throws {

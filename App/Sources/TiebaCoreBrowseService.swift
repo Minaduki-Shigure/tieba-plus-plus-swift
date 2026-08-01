@@ -68,7 +68,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService {
       totalCount: response.pagination.totalCount,
       nextPagePostID: Self.nextPagePostID(
         from: response.thread.pagePostIDs,
-        returnedPosts: response.posts,
+        returnedPostIDs: Set(response.posts.map(\.id)),
         sort: options.sort
       )
     )
@@ -267,9 +267,9 @@ struct TiebaCoreBrowseService: BrowseService, SearchService {
     }
   }
 
-  private static func nextPagePostID(
+  static func nextPagePostID(
     from pagePostIDs: [Int64],
-    returnedPosts: [TiebaPost],
+    returnedPostIDs: Set<Int64>,
     sort: ThreadPostSort
   ) -> Int64? {
     switch sort {
@@ -278,8 +278,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService {
     case .hot:
       return nil
     case .ascending:
-      let returnedIDs = Set(returnedPosts.map(\.id))
-      return pagePostIDs.last(where: { $0 > 0 && !returnedIDs.contains($0) })
+      return pagePostIDs.last(where: { $0 > 0 && !returnedPostIDs.contains($0) })
     }
   }
 
@@ -422,9 +421,10 @@ enum SecureTiebaURL {
 
   static func media(_ rawValue: String?) -> URL? {
     guard let rawValue else { return nil }
-    let rawValue = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !rawValue.isEmpty else { return nil }
-    let absoluteValue = rawValue.hasPrefix("//") ? "https:\(rawValue)" : rawValue
+    let trimmedValue = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedValue.isEmpty else { return nil }
+    let absoluteValue = trimmedValue.hasPrefix("//")
+      ? "https:\(trimmedValue)" : trimmedValue
     return media(URL(string: absoluteValue))
   }
 

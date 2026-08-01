@@ -341,7 +341,7 @@ private struct HistoryRow: View {
   private var title: String {
     switch entry.target {
     case .forum(let forum):
-      forum.displayName
+      return forum.displayName
     case .thread(let thread):
       if !thread.title.isEmpty { return thread.title }
       if !thread.excerpt.isEmpty { return thread.excerpt }
@@ -364,18 +364,18 @@ private struct HistoryRow: View {
   private var avatarURL: URL? {
     switch entry.target {
     case .forum(let forum):
-      forum.avatarURL
+      return forum.avatarURL
     case .thread(let thread):
-      thread.authorAvatarURL
+      return thread.authorAvatarURL
     }
   }
 
   private var avatarName: String {
     switch entry.target {
     case .forum(let forum):
-      forum.displayName
+      return forum.displayName
     case .thread(let thread):
-      thread.authorName.isEmpty ? title : thread.authorName
+      return thread.authorName.isEmpty ? title : thread.authorName
     }
   }
 }

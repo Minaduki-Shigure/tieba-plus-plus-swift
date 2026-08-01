@@ -200,6 +200,7 @@ final class ThreadViewModel: ObservableObject {
         guard generation == loadGeneration else { return }
 
         var resolvedScrollTarget: Int64?
+        var effectiveLocation = location
         var didFallBackFromMissingPosition = false
         if case .postID(let postID) = location {
           if response.posts.contains(where: { $0.id == postID }) {
@@ -215,6 +216,7 @@ final class ThreadViewModel: ObservableObject {
                 options: options,
                 location: nil
               )
+              effectiveLocation = nil
             } catch is CancellationError {
               throw CancellationError()
             } catch {
@@ -229,6 +231,13 @@ final class ThreadViewModel: ObservableObject {
         }
 
         let previousPosts = posts
+        let previousPage = currentPage
+        let requestedCursor: Int64?
+        if case .pageCursor(let cursor) = effectiveLocation {
+          requestedCursor = cursor
+        } else {
+          requestedCursor = nil
+        }
         let mergedPosts = replacing ? response.posts : merge(previousPosts, response.posts)
         thread = response.thread
         currentPage = response.currentPage
@@ -237,13 +246,34 @@ final class ThreadViewModel: ObservableObject {
         updateDescendingFallbackPage(
           requestedPage: page,
           replacing: replacing,
-          location: location,
+          location: effectiveLocation,
+          currentPage: response.currentPage,
           totalPages: response.totalPages
         )
         let addedPosts = mergedPosts.count > previousPosts.count
         let exhaustedFallbackPage =
-          !replacing && options.sort == .descending && location == .pageNumber && page == 1
-        hasMore = response.hasMore && (replacing || addedPosts) && !exhaustedFallbackPage
+          !replacing && options.sort == .descending
+          && effectiveLocation == .pageNumber && page == 1
+        let noDescendingContinuation =
+          options.sort == .descending && response.nextPagePostID == nil
+          && descendingFallbackPage == nil
+        let stalledDescendingPage =
+          !replacing && options.sort == .descending && !addedPosts
+        let canAdvancePastDuplicateAscendingPage =
+          !replacing && options.sort == .ascending && !addedPosts && response.hasMore
+          && (response.currentPage > previousPage
+            || (response.nextPagePostID != nil && response.nextPagePostID != requestedCursor))
+        let stalledAscendingPage =
+          !replacing && options.sort == .ascending && !addedPosts
+          && !canAdvancePastDuplicateAscendingPage
+        let stalledHotPage =
+          !replacing && options.sort == .hot && !addedPosts
+        hasMore = response.hasMore
+          && !exhaustedFallbackPage
+          && !noDescendingContinuation
+          && !stalledDescendingPage
+          && !stalledAscendingPage
+          && !stalledHotPage
         posts = mergedPosts
         if replacing, let resolvedScrollTarget {
           scrollTargetPostID = resolvedScrollTarget
@@ -256,6 +286,15 @@ final class ThreadViewModel: ObservableObject {
         jumpError = nil
         failedJumpPage = nil
         state = .loaded
+        if canAdvancePastDuplicateAscendingPage {
+          let request = nextLoadMoreRequest()
+          load(
+            page: request.page,
+            replacing: false,
+            location: request.location,
+            jumping: false
+          )
+        }
       } catch is CancellationError {
         return
       } catch {
@@ -292,6 +331,12 @@ final class ThreadViewModel: ObservableObject {
         location: .pageNumber
       )
     }
+    if options.sort == .ascending, let nextPagePostID {
+      return (
+        page: max(currentPage, 1) + 1,
+        location: .pageCursor(nextPagePostID)
+      )
+    }
     return (page: max(currentPage, 1) + 1, location: .pageNumber)
   }
 
@@ -299,6 +344,7 @@ final class ThreadViewModel: ObservableObject {
     requestedPage: Int,
     replacing: Bool,
     location: ThreadPostLocation?,
+    currentPage: Int,
     totalPages: Int
   ) {
     guard options.sort == .descending else {
@@ -306,7 +352,14 @@ final class ThreadViewModel: ObservableObject {
       return
     }
     if replacing {
-      descendingFallbackPage = totalPages > 1 ? totalPages - 1 : nil
+      switch location {
+      case nil:
+        descendingFallbackPage = totalPages > 1 ? totalPages - 1 : nil
+      case .pageNumber:
+        descendingFallbackPage = requestedPage > 1 ? requestedPage - 1 : nil
+      case .postID(_), .pageCursor(_):
+        descendingFallbackPage = currentPage > 1 ? currentPage - 1 : nil
+      }
     } else if location == .pageNumber {
       descendingFallbackPage = requestedPage > 1 ? requestedPage - 1 : nil
     } else if let page = descendingFallbackPage {

@@ -143,10 +143,14 @@ struct ThreadView: View {
         options: viewModel.options
       )
     }
-    .onChange(of: viewModel.options) { _ in
+    .onChange(of: viewModel.options) { options in
       visiblePost = nil
+      persistBrowseOptions(options)
     }
-    .onDisappear(perform: viewModel.cancel)
+    .onDisappear {
+      persistBrowseOptions(viewModel.options)
+      viewModel.cancel()
+    }
     .sheet(item: $commentsPost) { post in
       NavigationStack {
         CommentsView(
@@ -266,6 +270,19 @@ struct ThreadView: View {
       return nil
     }
     return snapshot
+  }
+
+  private func persistBrowseOptions(_ options: ThreadBrowseOptions) {
+    let repository = historyRepository
+    let threadID = viewModel.thread.id
+    let updatedAt = Date()
+    Task {
+      try? await repository.updateThreadOptions(
+        threadID: threadID,
+        options: options,
+        at: updatedAt
+      )
+    }
   }
 }
 

@@ -4,6 +4,35 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class BrowseViewModelTests: XCTestCase {
+  func testPostCursorSelectionRejectsHotRankingPIDs() {
+    let pagePostIDs: [Int64] = [10, 20, 30]
+    let returnedPostIDs: Set<Int64> = [10, 20]
+
+    XCTAssertEqual(
+      TiebaCoreBrowseService.nextPagePostID(
+        from: pagePostIDs,
+        returnedPostIDs: returnedPostIDs,
+        sort: .descending
+      ),
+      10
+    )
+    XCTAssertEqual(
+      TiebaCoreBrowseService.nextPagePostID(
+        from: pagePostIDs,
+        returnedPostIDs: returnedPostIDs,
+        sort: .ascending
+      ),
+      30
+    )
+    XCTAssertNil(
+      TiebaCoreBrowseService.nextPagePostID(
+        from: pagePostIDs,
+        returnedPostIDs: returnedPostIDs,
+        sort: .hot
+      )
+    )
+  }
+
   @MainActor
   func testForumInitialLoadSucceeds() async throws {
     let service = ScriptedBrowseService()
@@ -825,6 +854,166 @@ final class BrowseViewModelTests: XCTestCase {
         ),
       ]
     )
+  }
+
+  @MainActor
+  func testAscendingPaginationUsesCursorAndSkipsAWholeDuplicatePage() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 59)
+    let firstPage = [Fixtures.post(id: 5_901, threadID: 59)]
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: firstPage,
+          currentPage: 1,
+          hasMore: true,
+          totalPages: 3,
+          nextPagePostID: 5_900
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: firstPage,
+          currentPage: 2,
+          hasMore: true,
+          totalPages: 3,
+          nextPagePostID: 5_910
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 5_902, threadID: 59)],
+          currentPage: 3,
+          hasMore: false,
+          totalPages: 3
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadMoreIfNeeded(current: firstPage[0])
+
+    try await waitUntil {
+      let requestCount = await service.postRequestCount()
+      return viewModel.posts.map(\.id) == [5_901, 5_902]
+        && requestCount == 3 && !viewModel.isLoadingMore
+    }
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2, 3])
+    XCTAssertNil(requests[0].location)
+    XCTAssertEqual(requests[1].location, .pageCursor(5_900))
+    XCTAssertEqual(requests[2].location, .pageCursor(5_910))
+  }
+
+  @MainActor
+  func testDescendingJumpWithoutCursorFallsBackFromJumpedPage() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 590)
+    let firstPage = [Fixtures.post(id: 59_001, threadID: 590)]
+    let jumpedPage = [Fixtures.post(id: 59_030, threadID: 590)]
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: firstPage,
+          currentPage: 1,
+          hasMore: true,
+          totalPages: 5
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: jumpedPage,
+          currentPage: 3,
+          hasMore: true,
+          totalPages: 5
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 59_020, threadID: 590)],
+          currentPage: 2,
+          hasMore: false,
+          totalPages: 5
+        )
+      )
+    )
+    let options = ThreadBrowseOptions(sort: .descending)
+    let viewModel = ThreadViewModel(thread: thread, service: service, options: options)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.jump(toPage: 3)
+    try await waitUntil { viewModel.posts == jumpedPage && !viewModel.isJumping }
+    viewModel.loadMoreIfNeeded(current: jumpedPage[0])
+
+    try await waitUntil { viewModel.posts.map(\.id) == [59_030, 59_020] }
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 3, 2])
+    XCTAssertNil(requests[0].location)
+    XCTAssertEqual(requests[1].location, .pageNumber)
+    XCTAssertEqual(requests[2].location, .pageNumber)
+  }
+
+  @MainActor
+  func testDescendingPIDResumeWithoutCursorFallsBackFromLocatedPage() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 591)
+    let target = Fixtures.post(id: 59_140, threadID: 591)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [target],
+          currentPage: 4,
+          hasMore: true,
+          totalPages: 5
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 59_130, threadID: 591)],
+          currentPage: 3,
+          hasMore: false,
+          totalPages: 5
+        )
+      )
+    )
+    let options = ThreadBrowseOptions(sort: .descending)
+    let viewModel = ThreadViewModel(
+      thread: thread,
+      service: service,
+      options: options,
+      initialLocation: .postID(target.id)
+    )
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadMoreIfNeeded(current: target)
+
+    try await waitUntil { viewModel.posts.map(\.id) == [59_140, 59_130] }
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 3])
+    XCTAssertEqual(requests[0].location, .postID(target.id))
+    XCTAssertEqual(requests[1].location, .pageNumber)
   }
 
   @MainActor
