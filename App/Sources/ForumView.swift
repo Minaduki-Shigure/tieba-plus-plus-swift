@@ -41,7 +41,7 @@ struct ForumView: View {
           "主题排序",
           selection: Binding(
             get: { viewModel.options.sort },
-            set: viewModel.setSort
+            set: { sort in viewModel.setSort(sort) }
           )
         ) {
           ForEach(ForumThreadSort.allCases) { sort in
@@ -56,7 +56,7 @@ struct ForumView: View {
           "精华",
           isOn: Binding(
             get: { viewModel.options.featuredOnly },
-            set: viewModel.setFeaturedOnly
+            set: { featuredOnly in viewModel.setFeaturedOnly(featuredOnly) }
           )
         )
         .toggleStyle(.switch)

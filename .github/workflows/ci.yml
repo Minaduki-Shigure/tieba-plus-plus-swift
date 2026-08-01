@@ -76,8 +76,15 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
           test 2>&1 | tee xcodebuild.log
       - name: Report Xcode diagnostics
-        if: steps.app_tests.outcome == 'failure'
+        if: ${{ always() && steps.app_tests.outcome == 'failure' }}
         run: ruby Scripts/report_xcode_errors.rb xcodebuild.log
+      - name: Upload Xcode failure log
+        if: ${{ always() && steps.app_tests.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: xcodebuild.log
+          retention-days: 7
       - name: Fail when app tests fail
-        if: steps.app_tests.outcome == 'failure'
+        if: ${{ always() && steps.app_tests.outcome == 'failure' }}
         run: exit 1

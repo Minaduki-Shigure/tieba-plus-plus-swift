@@ -54,7 +54,7 @@ struct ThreadView: View {
           "楼层排序",
           selection: Binding(
             get: { viewModel.options.sort },
-            set: viewModel.setSort
+            set: { sort in viewModel.setSort(sort) }
           )
         ) {
           ForEach(ThreadPostSort.allCases) { sort in
@@ -69,7 +69,7 @@ struct ThreadView: View {
           "只看楼主",
           isOn: Binding(
             get: { viewModel.options.onlyThreadAuthor },
-            set: viewModel.setOnlyThreadAuthor
+            set: { onlyThreadAuthor in viewModel.setOnlyThreadAuthor(onlyThreadAuthor) }
           )
         )
         .toggleStyle(.switch)
