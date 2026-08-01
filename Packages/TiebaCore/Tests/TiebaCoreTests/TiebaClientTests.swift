@@ -1,4 +1,5 @@
 import Foundation
+import TiebaProto
 import XCTest
 
 @testable import TiebaCore
@@ -17,6 +18,12 @@ final class TiebaClientTests: XCTestCase {
     XCTAssertEqual(result.forum.id, 42)
     XCTAssertTrue(result.forum.hasModerators)
     XCTAssertTrue(result.forum.hasRules)
+    XCTAssertEqual(result.forum.avatar, "https://img.example/forum.png")
+    XCTAssertEqual(result.forum.slogan, "A forum for Swift")
+    XCTAssertEqual(
+      result.forum.featuredClassifications,
+      [TiebaForumClassification(id: 9, name: "Tutorials")]
+    )
     XCTAssertEqual(result.pagination.nextPage, 2)
     XCTAssertEqual(result.tabs["Latest"], 3)
 
@@ -56,12 +63,35 @@ final class TiebaClientTests: XCTestCase {
         return false
       }.count, 1)
     XCTAssertEqual(result.pagination.currentPage, 2)
+    XCTAssertEqual(result.pagination.totalPages, 6)
+    XCTAssertEqual(result.thread.pagePostIDs, [301, 302])
     let post = try XCTUnwrap(result.posts.first)
     XCTAssertEqual(post.signature, "Sent from fixture")
     XCTAssertEqual(post.content.plainText, "Floor content")
     XCTAssertTrue(post.isThreadAuthor)
     XCTAssertEqual(post.comments.first?.author?.id, 8)
     XCTAssertEqual(post.comments.first?.parentPostID, post.id)
+  }
+
+  func testPostCursorIsForwardedToTheWireRequest() async throws {
+    let transport = CapturingTransport(body: try ProtoFixtures.postPage().serializedData())
+    let client = TiebaClient(transport: transport)
+
+    _ = try await client.getPosts(
+      threadID: 100,
+      page: 4,
+      sort: .descending,
+      location: .pageCursor(201)
+    )
+
+    let capturedRequest = await transport.lastRequest()
+    let request = try XCTUnwrap(capturedRequest)
+    let body = try XCTUnwrap(request.httpBody)
+    let payload = try protobufPayload(from: body)
+    let decoded = try PbPageReqIdl(serializedBytes: payload)
+    XCTAssertEqual(decoded.data.pid, 201)
+    XCTAssertEqual(decoded.data.pn, 4)
+    XCTAssertEqual(decoded.data.r, TiebaPostSort.descending.rawValue)
   }
 
   func testAuthorIDsPreserveThreadAuthorFlagsWithoutExpandedUsers() async throws {
@@ -161,6 +191,33 @@ final class TiebaClientTests: XCTestCase {
       XCTFail("Unexpected error: \(error)")
     }
   }
+}
+
+private actor CapturingTransport: TiebaTransport {
+  let body: Data
+  private var request: URLRequest?
+
+  init(body: Data) {
+    self.body = body
+  }
+
+  func send(_ request: URLRequest) async throws -> TiebaHTTPResponse {
+    self.request = request
+    return TiebaHTTPResponse(body: body, statusCode: 200)
+  }
+
+  func lastRequest() -> URLRequest? { request }
+}
+
+private func protobufPayload(from body: Data) throws -> Data {
+  let prefix = Data(
+    "---*_r1999\r\nContent-Disposition: form-data; name=\"data\"; filename=\"file\"\r\n\r\n".utf8
+  )
+  let suffix = Data("\r\n---*_r1999--\r\n".utf8)
+  guard body.starts(with: prefix), body.count >= prefix.count + suffix.count else {
+    throw TiebaClientError.invalidProtobuf
+  }
+  return body.subdata(in: prefix.count..<body.count - suffix.count)
 }
 
 private struct StubTransport: TiebaTransport, Sendable {

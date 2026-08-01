@@ -13,7 +13,7 @@ public struct TiebaClientConfiguration: Sendable, Hashable {
 
   public init(
     clientVersion: String = "12.64.1.1",
-    userAgent: String = "TiebaPlusPlus/0.1 (iOS)",
+    userAgent: String = "TiebaPlusPlus/0.3 (iOS)",
     requestTimeout: TimeInterval = 30
   ) {
     self.clientVersion = clientVersion
@@ -91,14 +91,16 @@ public actor TiebaClient {
     page: Int = 1,
     pageSize: Int = 30,
     sort: TiebaThreadSort = .replyTime,
-    featuredOnly: Bool = false
+    featuredOnly: Bool = false,
+    featuredClassificationID: Int? = nil
   ) async throws -> TiebaThreadPage {
     let request = try requestFactory.threads(
       forumName: forumName,
       page: page,
       pageSize: pageSize,
       sort: sort,
-      featuredOnly: featuredOnly
+      featuredOnly: featuredOnly,
+      featuredClassificationID: featuredClassificationID
     )
     let body = try await send(request)
     let response: FrsPageResIdl = try decode(body)
@@ -112,6 +114,7 @@ public actor TiebaClient {
     pageSize: Int = 30,
     sort: TiebaPostSort = .ascending,
     onlyThreadAuthor: Bool = false,
+    location: TiebaPostLocation? = nil,
     includeComments: Bool = false,
     commentsSortedByAgree: Bool = true,
     commentPageSize: Int = 4
@@ -122,6 +125,7 @@ public actor TiebaClient {
       pageSize: pageSize,
       sort: sort,
       onlyThreadAuthor: onlyThreadAuthor,
+      location: location,
       includeComments: includeComments,
       commentsSortedByAgree: commentsSortedByAgree,
       commentPageSize: commentPageSize

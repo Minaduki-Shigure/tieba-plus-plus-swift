@@ -13,7 +13,15 @@ enum TiebaProtoMapper {
       threadCount: Int(forumProto.threadNum),
       postCount: Int(forumProto.postNum),
       hasModerators: !forumProto.managers.isEmpty,
-      hasRules: data.forumRule.hasForumRule_p != 0
+      hasRules: data.forumRule.hasForumRule_p != 0,
+      avatar: forumProto.avatar,
+      slogan: forumProto.slogan,
+      featuredClassifications: forumProto.goodClassify.compactMap { classification in
+        let name = classification.className.isEmpty
+          ? classification.name : classification.className
+        guard classification.classID > 0, !name.isEmpty else { return nil }
+        return TiebaForumClassification(id: Int(classification.classID), name: name)
+      }
     )
     let users = userLookup(data.userList)
 
@@ -103,7 +111,7 @@ enum TiebaProtoMapper {
   private static func pagination(_ proto: Page) -> TiebaPagination {
     let pageSize = Int(proto.pageSize)
     let currentPage = proto.currentPage == 0 && pageSize > 0 ? 1 : Int(proto.currentPage)
-    let totalPages = Int(proto.totalPage)
+    let totalPages = Int(proto.newTotalPage > 0 ? proto.newTotalPage : proto.totalPage)
     let hasMore = proto.hasMore_p != 0 || (totalPages > 0 && currentPage < totalPages)
     let hasPrevious = proto.hasPrev_p != 0 || currentPage > 1
     return TiebaPagination(
@@ -239,7 +247,12 @@ enum TiebaProtoMapper {
       isFeatured: proto.isGood != 0,
       isShared: proto.isShareThread != 0,
       isHidden: proto.isFrsMask != 0,
-      isLive: proto.isLivepost != 0
+      isLive: proto.isLivepost != 0,
+      pagePostIDs: proto.pids.split(separator: ",").compactMap {
+        guard let postID = Int64($0.trimmingCharacters(in: .whitespacesAndNewlines)), postID > 0
+        else { return nil }
+        return postID
+      }
     )
   }
 

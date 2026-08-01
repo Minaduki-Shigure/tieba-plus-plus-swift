@@ -30,6 +30,7 @@ message ThreadInfo {
     int64 post_id = 52;
     int64 author_id = 56;
     uint32 is_ad = 59;
+    string pids = 61;
     PollInfo poll_info = 74;
     VideoInfo video_info = 79;
     int32 is_godthread_recommend = 85;

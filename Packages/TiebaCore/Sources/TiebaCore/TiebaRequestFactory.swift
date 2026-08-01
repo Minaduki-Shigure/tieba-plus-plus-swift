@@ -37,7 +37,8 @@ struct TiebaRequestFactory: Sendable {
     page: Int,
     pageSize: Int,
     sort: TiebaThreadSort,
-    featuredOnly: Bool
+    featuredOnly: Bool,
+    featuredClassificationID: Int? = nil
   ) throws -> URLRequest {
     let forumName = forumName.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !forumName.isEmpty else {
@@ -56,7 +57,13 @@ struct TiebaRequestFactory: Sendable {
     data.pn = Int32(page == 1 ? 0 : page)
     data.rn = Int32(pageSize)
     data.rnNeed = Int32(pageSize + 5)
-    data.isGood = featuredOnly ? 1 : 0
+    if let featuredClassificationID {
+      guard (1...Int(Int32.max)).contains(featuredClassificationID) else {
+        throw TiebaClientError.invalidArgument("Featured classification ID must be positive.")
+      }
+      data.classID = Int32(featuredClassificationID)
+    }
+    data.isGood = featuredOnly || featuredClassificationID != nil ? 1 : 0
     data.sortType = sort.rawValue
 
     var message = FrsPageReqIdl()
@@ -74,12 +81,17 @@ struct TiebaRequestFactory: Sendable {
     pageSize: Int,
     sort: TiebaPostSort,
     onlyThreadAuthor: Bool,
+    location: TiebaPostLocation? = nil,
     includeComments: Bool,
     commentsSortedByAgree: Bool,
     commentPageSize: Int
   ) throws -> URLRequest {
     try validate(identifier: threadID, name: "Thread ID")
-    try validate(page: page)
+    if case .pageCursor = location {
+      try validate(cursorPage: page)
+    } else {
+      try validate(page: page)
+    }
     try validate(pageSize: pageSize, maximum: 100)
     try validate(pageSize: commentPageSize, maximum: 50, name: "Comment page size")
 
@@ -90,7 +102,20 @@ struct TiebaRequestFactory: Sendable {
     var data = PbPageReqIdl.DataReq()
     data.common = common
     data.kz = threadID
-    data.pn = Int32(page)
+    switch location {
+    case .postID(let postID):
+      try validate(identifier: postID, name: "Post ID")
+      data.pid = postID
+      data.pn = 0
+    case .pageNumber:
+      data.pn = Int32(page)
+    case .pageCursor(let postID):
+      try validate(identifier: postID, name: "Post cursor ID")
+      data.pid = postID
+      data.pn = Int32(page)
+    case nil:
+      data.pn = sort == .descending && page == 1 ? 0 : Int32(page)
+    }
     data.rn = Int32(max(pageSize, 2))
     data.r = sort.rawValue
     data.lz = onlyThreadAuthor ? 1 : 0
@@ -242,6 +267,14 @@ struct TiebaRequestFactory: Sendable {
   private func validate(page: Int) throws {
     guard page >= 1, page <= Int(Int32.max) else {
       throw TiebaClientError.invalidArgument("Page must be between 1 and \(Int32.max).")
+    }
+  }
+
+  private func validate(cursorPage: Int) throws {
+    guard cursorPage >= 0, cursorPage <= Int(Int32.max) else {
+      throw TiebaClientError.invalidArgument(
+        "Cursor page hint must be between 0 and \(Int32.max)."
+      )
     }
   }
 

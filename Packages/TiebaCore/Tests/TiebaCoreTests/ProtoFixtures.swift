@@ -12,6 +12,12 @@ enum ProtoFixtures {
     forum.threadNum = 200
     forum.postNum = 3_000
     forum.managers = [FrsPageResIdl.DataRes.ForumInfo.Manager()]
+    forum.avatar = "https://img.example/forum.png"
+    forum.slogan = "A forum for Swift"
+    var classification = FrsPageResIdl.DataRes.ForumInfo.Classify()
+    classification.classID = 9
+    classification.className = "Tutorials"
+    forum.goodClassify = [classification]
 
     var page = Page()
     page.pageSize = 30
@@ -92,7 +98,9 @@ enum ProtoFixtures {
     page.pageSize = 30
     page.currentPage = 2
     page.totalPage = 4
+    page.newTotalPage = 6
     page.totalCount = 100
+    page.lzTotalFloor = 33
     page.hasMore_p = 1
     page.hasPrev_p = 1
 
@@ -103,6 +111,7 @@ enum ProtoFixtures {
     thread.author = author
     thread.authorID = author.id
     thread.replyNum = 99
+    thread.pids = "301, invalid, 0, 302,"
 
     var inlineImage = PbContent()
     inlineImage.type = 3

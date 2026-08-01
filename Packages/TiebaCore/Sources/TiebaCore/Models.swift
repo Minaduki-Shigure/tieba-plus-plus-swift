@@ -264,6 +264,22 @@ public enum TiebaPostSort: Int32, Sendable, Hashable {
   case hot = 2
 }
 
+public enum TiebaPostLocation: Sendable, Hashable {
+  case postID(Int64)
+  case pageNumber
+  case pageCursor(Int64)
+}
+
+public struct TiebaForumClassification: Identifiable, Sendable, Hashable {
+  public let id: Int
+  public let name: String
+
+  public init(id: Int, name: String) {
+    self.id = id
+    self.name = name
+  }
+}
+
 public struct TiebaForum: Identifiable, Sendable, Hashable {
   public let id: Int64
   public let name: String
@@ -274,6 +290,9 @@ public struct TiebaForum: Identifiable, Sendable, Hashable {
   public let postCount: Int
   public let hasModerators: Bool
   public let hasRules: Bool
+  public let avatar: String
+  public let slogan: String
+  public let featuredClassifications: [TiebaForumClassification]
 
   public init(
     id: Int64,
@@ -284,7 +303,10 @@ public struct TiebaForum: Identifiable, Sendable, Hashable {
     threadCount: Int,
     postCount: Int,
     hasModerators: Bool,
-    hasRules: Bool
+    hasRules: Bool,
+    avatar: String = "",
+    slogan: String = "",
+    featuredClassifications: [TiebaForumClassification] = []
   ) {
     self.id = id
     self.name = name
@@ -295,6 +317,9 @@ public struct TiebaForum: Identifiable, Sendable, Hashable {
     self.postCount = postCount
     self.hasModerators = hasModerators
     self.hasRules = hasRules
+    self.avatar = avatar
+    self.slogan = slogan
+    self.featuredClassifications = featuredClassifications
   }
 }
 
@@ -320,6 +345,7 @@ public struct TiebaThread: Identifiable, Sendable, Hashable {
   public let isShared: Bool
   public let isHidden: Bool
   public let isLive: Bool
+  public let pagePostIDs: [Int64]
 
   public init(
     id: Int64,
@@ -342,7 +368,8 @@ public struct TiebaThread: Identifiable, Sendable, Hashable {
     isFeatured: Bool,
     isShared: Bool,
     isHidden: Bool,
-    isLive: Bool
+    isLive: Bool,
+    pagePostIDs: [Int64] = []
   ) {
     self.id = id
     self.firstPostID = firstPostID
@@ -365,6 +392,7 @@ public struct TiebaThread: Identifiable, Sendable, Hashable {
     self.isShared = isShared
     self.isHidden = isHidden
     self.isLive = isLive
+    self.pagePostIDs = pagePostIDs
   }
 }
 

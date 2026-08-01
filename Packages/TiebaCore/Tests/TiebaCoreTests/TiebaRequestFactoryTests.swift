@@ -90,13 +90,15 @@ final class TiebaRequestFactoryTests: XCTestCase {
       page: 2,
       pageSize: 30,
       sort: .creationTime,
-      featuredOnly: true
+      featuredOnly: true,
+      featuredClassificationID: 9
     )
     let featuredCreation = try FrsPageReqIdl(
       serializedBytes: protobufPayload(from: featuredCreationRequest)
     )
     XCTAssertEqual(featuredCreation.data.sortType, TiebaThreadSort.creationTime.rawValue)
     XCTAssertEqual(featuredCreation.data.isGood, 1)
+    XCTAssertEqual(featuredCreation.data.classID, 9)
 
     let descendingAuthorRequest = try factory.posts(
       threadID: 123_456,
@@ -127,6 +129,88 @@ final class TiebaRequestFactoryTests: XCTestCase {
     let hot = try PbPageReqIdl(serializedBytes: protobufPayload(from: hotRequest))
     XCTAssertEqual(hot.data.r, TiebaPostSort.hot.rawValue)
     XCTAssertEqual(hot.data.lz, 0)
+  }
+
+  func testPostLocationWireSemantics() throws {
+    let descendingInitialRequest = try factory.posts(
+      threadID: 123_456,
+      page: 1,
+      pageSize: 30,
+      sort: .descending,
+      onlyThreadAuthor: false,
+      includeComments: false,
+      commentsSortedByAgree: true,
+      commentPageSize: 4
+    )
+    let descendingInitial = try PbPageReqIdl(
+      serializedBytes: protobufPayload(from: descendingInitialRequest)
+    )
+    XCTAssertEqual(descendingInitial.data.pid, 0)
+    XCTAssertEqual(descendingInitial.data.pn, 0)
+    XCTAssertEqual(descendingInitial.data.r, TiebaPostSort.descending.rawValue)
+
+    let explicitPageRequest = try factory.posts(
+      threadID: 123_456,
+      page: 1,
+      pageSize: 30,
+      sort: .descending,
+      onlyThreadAuthor: false,
+      location: .pageNumber,
+      includeComments: false,
+      commentsSortedByAgree: true,
+      commentPageSize: 4
+    )
+    let explicitPage = try PbPageReqIdl(
+      serializedBytes: protobufPayload(from: explicitPageRequest)
+    )
+    XCTAssertEqual(explicitPage.data.pid, 0)
+    XCTAssertEqual(explicitPage.data.pn, 1)
+
+    let locatedRequest = try factory.posts(
+      threadID: 123_456,
+      page: 5,
+      pageSize: 30,
+      sort: .ascending,
+      onlyThreadAuthor: false,
+      location: .postID(654_321),
+      includeComments: false,
+      commentsSortedByAgree: true,
+      commentPageSize: 4
+    )
+    let located = try PbPageReqIdl(serializedBytes: protobufPayload(from: locatedRequest))
+    XCTAssertEqual(located.data.pid, 654_321)
+    XCTAssertEqual(located.data.pn, 0)
+
+    let cursorRequest = try factory.posts(
+      threadID: 123_456,
+      page: 4,
+      pageSize: 30,
+      sort: .descending,
+      onlyThreadAuthor: false,
+      location: .pageCursor(654_321),
+      includeComments: false,
+      commentsSortedByAgree: true,
+      commentPageSize: 4
+    )
+    let cursor = try PbPageReqIdl(serializedBytes: protobufPayload(from: cursorRequest))
+    XCTAssertEqual(cursor.data.pid, 654_321)
+    XCTAssertEqual(cursor.data.pn, 4)
+    XCTAssertEqual(cursor.data.r, TiebaPostSort.descending.rawValue)
+
+    let zeroHintRequest = try factory.posts(
+      threadID: 123_456,
+      page: 0,
+      pageSize: 30,
+      sort: .descending,
+      onlyThreadAuthor: false,
+      location: .pageCursor(654_321),
+      includeComments: false,
+      commentsSortedByAgree: true,
+      commentPageSize: 4
+    )
+    let zeroHint = try PbPageReqIdl(serializedBytes: protobufPayload(from: zeroHintRequest))
+    XCTAssertEqual(zeroHint.data.pid, 654_321)
+    XCTAssertEqual(zeroHint.data.pn, 0)
   }
 
   func testEveryEndpointIsHTTPSAndCredentialFree() throws {
@@ -180,6 +264,32 @@ final class TiebaRequestFactoryTests: XCTestCase {
     )
     XCTAssertThrowsError(
       try factory.comments(threadID: 0, anchorID: 1, page: 1, anchorIsComment: false)
+    )
+    XCTAssertThrowsError(
+      try factory.posts(
+        threadID: 1,
+        page: 1,
+        pageSize: 30,
+        sort: .descending,
+        onlyThreadAuthor: false,
+        location: .pageCursor(0),
+        includeComments: false,
+        commentsSortedByAgree: true,
+        commentPageSize: 4
+      )
+    )
+    XCTAssertThrowsError(
+      try factory.posts(
+        threadID: 1,
+        page: 0,
+        pageSize: 30,
+        sort: .descending,
+        onlyThreadAuthor: false,
+        location: .pageNumber,
+        includeComments: false,
+        commentsSortedByAgree: true,
+        commentPageSize: 4
+      )
     )
 
     let injected = TiebaRequestFactory(
