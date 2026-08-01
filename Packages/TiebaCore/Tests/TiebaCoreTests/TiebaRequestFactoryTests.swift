@@ -233,10 +233,21 @@ final class TiebaRequestFactoryTests: XCTestCase {
         commentPageSize: 4
       ),
       try factory.comments(threadID: 1, anchorID: 2, page: 1, anchorIsComment: false),
+      try factory.userProfile(userID: 957_339_815),
+      try factory.userThreads(userID: 957_339_815, page: 1, pageSize: 20),
     ]
 
-    XCTAssertEqual(requests.map(\.url?.path), ["/c/f/frs/page", "/c/f/pb/page", "/c/f/pb/floor"])
-    XCTAssertEqual(requests.map(\.url?.query), ["cmd=301001", "cmd=302001", "cmd=302002"])
+    XCTAssertEqual(
+      requests.map(\.url?.path),
+      [
+        "/c/f/frs/page", "/c/f/pb/page", "/c/f/pb/floor", "/c/u/user/profile",
+        "/c/u/feed/userpost",
+      ]
+    )
+    XCTAssertEqual(
+      requests.map(\.url?.query),
+      ["cmd=301001", "cmd=302001", "cmd=302002", "cmd=303012", "cmd=303002"]
+    )
     for request in requests {
       XCTAssertEqual(request.url?.scheme, "https")
       XCTAssertEqual(request.url?.host, "tiebac.baidu.com")
@@ -250,6 +261,42 @@ final class TiebaRequestFactoryTests: XCTestCase {
       XCTAssertFalse(printableBody.contains("bduss"))
       XCTAssertFalse(printableBody.contains("stoken"))
     }
+  }
+
+  func testPublicUserRequestsEncodeTiebaLiteCompatibleFields() throws {
+    let profileRequest = try factory.userProfile(userID: 957_339_815)
+    let profile = try ProfileReqIdl(
+      serializedBytes: protobufPayload(from: profileRequest)
+    )
+    XCTAssertEqual(profile.data.uid, 0)
+    XCTAssertEqual(profile.data.needPostCount, 1)
+    XCTAssertEqual(profile.data.friendUid, 957_339_815)
+    XCTAssertEqual(profile.data.isGuest, 1)
+    XCTAssertEqual(profile.data.pn, 1)
+    XCTAssertEqual(profile.data.rn, 20)
+    XCTAssertEqual(profile.data.hasPlist_p, 1)
+    XCTAssertEqual(profile.data.isFromUsercenter, 1)
+    XCTAssertEqual(profile.data.page, 1)
+    XCTAssertEqual(profile.data.common.clientType, 2)
+    XCTAssertEqual(profile.data.common.bduss, "")
+    XCTAssertEqual(profile.data.common.stoken, "")
+
+    let threadsRequest = try factory.userThreads(
+      userID: 957_339_815,
+      page: 2,
+      pageSize: 20
+    )
+    let threads = try UserPostReqIdl(
+      serializedBytes: protobufPayload(from: threadsRequest)
+    )
+    XCTAssertEqual(threads.data.uid, 957_339_815)
+    XCTAssertEqual(threads.data.rn, 20)
+    XCTAssertEqual(threads.data.isThread, 1)
+    XCTAssertEqual(threads.data.needContent, 1)
+    XCTAssertEqual(threads.data.pn, 2)
+    XCTAssertEqual(threads.data.isViewCard, 1)
+    XCTAssertEqual(threads.data.common.bduss, "")
+    XCTAssertEqual(threads.data.common.stoken, "")
   }
 
   func testRejectsInvalidArgumentsAndHeaderInjection() throws {
@@ -308,6 +355,9 @@ final class TiebaRequestFactoryTests: XCTestCase {
     XCTAssertThrowsError(try factory.searchForums(query: String(repeating: "a", count: 101)))
     XCTAssertThrowsError(try factory.searchThreads(query: "swift", page: 0, pageSize: 20))
     XCTAssertThrowsError(try factory.searchThreads(query: "swift", page: 1, pageSize: 51))
+    XCTAssertThrowsError(try factory.userProfile(userID: 0))
+    XCTAssertThrowsError(try factory.userThreads(userID: 1, page: 0, pageSize: 20))
+    XCTAssertThrowsError(try factory.userThreads(userID: 1, page: 1, pageSize: 101))
     XCTAssertThrowsError(try injected.searchForums(query: "swift"))
   }
 

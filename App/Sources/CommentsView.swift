@@ -3,8 +3,17 @@ import SwiftUI
 struct CommentsView: View {
   @Environment(\.dismiss) private var dismiss
   @StateObject private var viewModel: CommentsViewModel
+  let service: any BrowseService & UserProfileService
+  let historyRepository: any BrowsingHistoryRepository
 
-  init(threadID: Int64, postID: Int64, service: any BrowseService) {
+  init(
+    threadID: Int64,
+    postID: Int64,
+    service: any BrowseService & UserProfileService,
+    historyRepository: any BrowsingHistoryRepository
+  ) {
+    self.service = service
+    self.historyRepository = historyRepository
     _viewModel = StateObject(
       wrappedValue: CommentsViewModel(threadID: threadID, postID: postID, service: service)
     )
@@ -20,21 +29,46 @@ struct CommentsView: View {
       case .loaded:
         List {
           ForEach(viewModel.comments) { comment in
-            HStack(alignment: .top, spacing: 10) {
-              AvatarView(url: comment.authorPortraitURL, name: comment.authorName, size: 32)
-              VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                  Text(comment.authorName)
-                    .font(.subheadline.weight(.semibold))
-                  Spacer()
-                  if let date = comment.createdAt {
-                    Text(date, style: .relative)
-                      .font(.caption)
-                      .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 7) {
+              HStack {
+                if comment.authorID > 0 {
+                  NavigationLink {
+                    UserProfileView(
+                      userID: comment.authorID,
+                      service: service,
+                      historyRepository: historyRepository
+                    )
+                  } label: {
+                    HStack(spacing: 10) {
+                      AvatarView(
+                        url: comment.authorPortraitURL,
+                        name: comment.authorName,
+                        size: 32
+                      )
+                      Text(comment.authorName)
+                        .font(.subheadline.weight(.semibold))
+                    }
+                  }
+                  .buttonStyle(.plain)
+                } else {
+                  HStack(spacing: 10) {
+                    AvatarView(
+                      url: comment.authorPortraitURL,
+                      name: comment.authorName,
+                      size: 32
+                    )
+                    Text(comment.authorName)
+                      .font(.subheadline.weight(.semibold))
                   }
                 }
-                BrowseContentView(contents: comment.contents)
+                Spacer()
+                if let date = comment.createdAt {
+                  Text(date, style: .relative)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
               }
+              BrowseContentView(contents: comment.contents)
             }
             .padding(.vertical, 4)
             .onAppear {

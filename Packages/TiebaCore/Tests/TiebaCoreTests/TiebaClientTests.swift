@@ -139,6 +139,57 @@ final class TiebaClientTests: XCTestCase {
     XCTAssertEqual(comment.floor, 2)
   }
 
+  func testMapsPublicUserProfile() async throws {
+    let transport = StubTransport(body: try ProtoFixtures.userProfile().serializedData())
+    let client = TiebaClient(transport: transport)
+
+    let profile = try await client.getUserProfile(userID: 957_339_815)
+
+    XCTAssertEqual(profile.user.id, 957_339_815)
+    XCTAssertEqual(profile.user.preferredName, "Profile User")
+    XCTAssertEqual(profile.user.portrait, "profile-portrait")
+    XCTAssertEqual(profile.user.growthLevel, 12)
+    XCTAssertEqual(profile.user.gender, .female)
+    XCTAssertEqual(profile.tiebaUID, 123_456_789)
+    XCTAssertEqual(profile.biography, "Public biography")
+    XCTAssertEqual(profile.threadCount, 123)
+    XCTAssertEqual(profile.followerCount, 345)
+    XCTAssertEqual(profile.totalAgreeCount, 12_345)
+    XCTAssertTrue(profile.user.isVIP)
+    XCTAssertTrue(profile.user.isVerifiedCreator)
+    XCTAssertTrue(profile.isBlocked)
+  }
+
+  func testMapsPublicUserThreadsAndUsesEmptyPageAsPaginationTerminator() async throws {
+    let transport = StubTransport(body: try ProtoFixtures.userThreadPage().serializedData())
+    let client = TiebaClient(transport: transport)
+
+    let page = try await client.getUserThreads(
+      userID: 957_339_815,
+      page: 2,
+      pageSize: 20
+    )
+
+    XCTAssertEqual(page.userID, 957_339_815)
+    XCTAssertEqual(page.pagination.currentPage, 2)
+    XCTAssertTrue(page.pagination.hasMore)
+    let thread = try XCTUnwrap(page.threads.first)
+    XCTAssertEqual(thread.id, 700)
+    XCTAssertEqual(thread.firstPostID, 701)
+    XCTAssertEqual(thread.forumName, "swift")
+    XCTAssertEqual(thread.author?.preferredName, "Profile User")
+    XCTAssertEqual(thread.content.plainText, "Public activity")
+    XCTAssertEqual(thread.content.images.count, 1)
+    XCTAssertEqual(thread.replyCount, 19)
+    XCTAssertEqual(thread.viewCount, 456)
+
+    let empty = UserPostResIdl()
+    let emptyClient = TiebaClient(transport: StubTransport(body: try empty.serializedData()))
+    let lastPage = try await emptyClient.getUserThreads(userID: 957_339_815, page: 3)
+    XCTAssertFalse(lastPage.pagination.hasMore)
+    XCTAssertTrue(lastPage.threads.isEmpty)
+  }
+
   func testMapsServerHTTPDecodeAndNetworkErrors() async throws {
     let serverTransport = StubTransport(
       body: try ProtoFixtures.serverError(code: 4, message: "not found").serializedData()

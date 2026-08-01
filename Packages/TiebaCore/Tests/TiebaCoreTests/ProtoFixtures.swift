@@ -269,6 +269,78 @@ enum ProtoFixtures {
     return response
   }
 
+  static func userProfile() -> ProfileResIdl {
+    var user = User()
+    user.id = 957_339_815
+    user.name = "profile-user"
+    user.nameShow = "Profile User"
+    user.portrait = "profile-portrait?t=1234567890"
+    user.userGrowth.levelID = 12
+    user.sex = 2
+    user.fansNum = 345
+    user.concernNum = 67
+    user.myLikeNum = 23
+    user.intro = "Legacy introduction"
+    user.displayIntro = "Public biography"
+    user.postNum = 890
+    user.threadNum = 123
+    user.tbAge = "14.2"
+    user.tiebaUid = "123456789"
+    user.ipAddress = "上海"
+    user.iconinfo = [User.Icon.with { $0.name = "fixture badge" }]
+    user.newTshowIcon = [User.TshowInfo.with { $0.name = "vip" }]
+    user.newGodData.status = 1
+
+    var data = ProfileResIdl.DataRes()
+    data.user = user
+    data.userAgreeInfo.totalAgreeNum = 12_345
+    data.antiStat.blockStat = 1
+    data.antiStat.hideStat = 1
+    data.antiStat.daysTofree = 31
+
+    var response = ProfileResIdl()
+    response.data = data
+    return response
+  }
+
+  static func userThreadPage() -> UserPostResIdl {
+    var duplicateImage = PbContent()
+    duplicateImage.type = 3
+    duplicateImage.cdnSrc = "https://img.example/duplicate.jpg"
+
+    var media = Media()
+    media.waterPic = "https://img.example/user-thread-thumb.jpg"
+    media.smallPic = "https://img.example/user-thread-full.jpg"
+    media.bigPic = "https://img.example/user-thread-original.jpg"
+    media.width = 800
+    media.height = 600
+
+    var thread = PostInfoList()
+    thread.forumID = 42
+    thread.threadID = 700
+    thread.postID = 701
+    thread.createTime = 1_700_100_000
+    thread.forumName = "swift"
+    thread.title = "A public user thread"
+    thread.userName = "profile-user"
+    thread.userID = 957_339_815
+    thread.userPortrait = "profile-portrait?t=1234567890"
+    thread.nameShow = "Profile User"
+    thread.replyNum = 19
+    thread.freqNum = 456
+    thread.threadType = 0
+    thread.firstPostContent = [text("Public activity"), duplicateImage]
+    thread.media = [media]
+    thread.agree.agreeNum = 8
+
+    var data = UserPostResIdl.DataRes()
+    data.postList = [thread]
+
+    var response = UserPostResIdl()
+    response.data = data
+    return response
+  }
+
   static func serverError(code: Int32, message: String) -> FrsPageResIdl {
     var response = FrsPageResIdl()
     response.error.errorno = code

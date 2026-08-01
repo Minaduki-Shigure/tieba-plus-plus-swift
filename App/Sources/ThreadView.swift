@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ThreadView: View {
-  let service: any BrowseService
+  let service: any BrowseService & UserProfileService
   let historyRepository: any BrowsingHistoryRepository
 
   @StateObject private var viewModel: ThreadViewModel
@@ -13,7 +13,7 @@ struct ThreadView: View {
 
   init(
     thread: BrowseThread,
-    service: any BrowseService,
+    service: any BrowseService & UserProfileService,
     historyRepository: any BrowsingHistoryRepository,
     historySnapshot: ThreadHistorySnapshot? = nil
   ) {
@@ -156,7 +156,8 @@ struct ThreadView: View {
         CommentsView(
           threadID: post.threadID,
           postID: post.id,
-          service: service
+          service: service,
+          historyRepository: historyRepository
         )
       }
       .presentationDetents([.medium, .large])
@@ -208,9 +209,12 @@ struct ThreadView: View {
         ScrollView {
           LazyVStack(spacing: 0) {
             ForEach(viewModel.posts) { post in
-              PostView(post: post) {
-                commentsPost = post
-              }
+              PostView(
+                post: post,
+                service: service,
+                historyRepository: historyRepository,
+                openComments: { commentsPost = post }
+              )
               .id(post.id)
               .background {
                 GeometryReader { geometry in
@@ -236,7 +240,8 @@ struct ThreadView: View {
         }
         .coordinateSpace(name: "thread-scroll")
         .onPreferenceChange(PostFramePreferenceKey.self) { frames in
-          let lastVisibleID = frames
+          let lastVisibleID =
+            frames
             .filter { _, frame in
               frame.maxY > 0 && frame.minY < viewport.size.height
             }
@@ -296,32 +301,25 @@ private struct PostFramePreferenceKey: PreferenceKey {
 
 private struct PostView: View {
   let post: BrowsePost
+  let service: any BrowseService & UserProfileService
+  let historyRepository: any BrowsingHistoryRepository
   let openComments: () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      HStack(alignment: .top, spacing: 10) {
-        AvatarView(url: post.authorPortraitURL, name: post.authorName)
-        VStack(alignment: .leading, spacing: 2) {
-          HStack(spacing: 5) {
-            Text(post.authorName)
-              .font(.subheadline.weight(.semibold))
-            if post.isThreadAuthor {
-              Text("楼主")
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.tint)
-            }
-          }
-          HStack(spacing: 6) {
-            Text("\(post.floor) 楼")
-            if let date = post.createdAt {
-              Text(date, style: .relative)
-            }
-          }
-          .font(.caption)
-          .foregroundStyle(.secondary)
+      if post.authorID > 0 {
+        NavigationLink {
+          UserProfileView(
+            userID: post.authorID,
+            service: service,
+            historyRepository: historyRepository
+          )
+        } label: {
+          authorHeader
         }
-        Spacer(minLength: 0)
+        .buttonStyle(.plain)
+      } else {
+        authorHeader
       }
 
       BrowseContentView(contents: post.contents)
@@ -337,5 +335,36 @@ private struct PostView: View {
     }
     .padding(.horizontal, 14)
     .padding(.vertical, 12)
+  }
+
+  private var authorHeader: some View {
+    HStack(alignment: .top, spacing: 10) {
+      AvatarView(url: post.authorPortraitURL, name: post.authorName)
+      VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 5) {
+          Text(post.authorName)
+            .font(.subheadline.weight(.semibold))
+          if post.isThreadAuthor {
+            Text("楼主")
+              .font(.caption2.weight(.medium))
+              .foregroundStyle(.tint)
+          }
+        }
+        HStack(spacing: 6) {
+          Text("\(post.floor) 楼")
+          if let date = post.createdAt {
+            Text(date, style: .relative)
+          }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      }
+      Spacer(minLength: 0)
+      Image(systemName: "chevron.right")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.tertiary)
+        .opacity(post.authorID > 0 ? 1 : 0)
+    }
+    .contentShape(Rectangle())
   }
 }

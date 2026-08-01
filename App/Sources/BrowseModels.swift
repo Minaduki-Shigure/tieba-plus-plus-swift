@@ -104,6 +104,48 @@ struct CommentPageData: Sendable {
   let hasMore: Bool
 }
 
+enum BrowseGender: Sendable, Hashable {
+  case unknown
+  case male
+  case female
+}
+
+struct BrowseUserProfile: Identifiable, Sendable, Hashable {
+  let id: Int64
+  let tiebaUID: Int64?
+  let username: String
+  let displayName: String
+  let portraitURL: URL?
+  let growthLevel: Int
+  let gender: BrowseGender
+  let ipLocation: String
+  let badges: [String]
+  let biography: String
+  let tiebaAge: String
+  let threadCount: Int
+  let postCount: Int
+  let followerCount: Int
+  let followingCount: Int
+  let followedForumCount: Int
+  let totalAgreeCount: Int64
+  let isModerator: Bool
+  let isVIP: Bool
+  let isVerifiedCreator: Bool
+  let isBlocked: Bool
+
+  var preferredName: String {
+    let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+    return name.isEmpty ? username : name
+  }
+}
+
+struct UserThreadPageData: Sendable {
+  let threads: [BrowseThread]
+  let currentPage: Int
+  let hasMore: Bool
+  let isHidden: Bool
+}
+
 struct ForumSearchItem: Identifiable, Hashable, Sendable {
   let id: Int64
   let name: String

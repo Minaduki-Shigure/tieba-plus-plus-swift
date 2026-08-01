@@ -86,6 +86,46 @@ public struct TiebaUser: Identifiable, Sendable, Hashable {
   }
 }
 
+public struct TiebaUserProfile: Sendable, Hashable {
+  public let user: TiebaUser
+  public let tiebaUID: Int64?
+  public let biography: String
+  public let tiebaAge: String
+  public let threadCount: Int
+  public let postCount: Int
+  public let followerCount: Int
+  public let followingCount: Int
+  public let followedForumCount: Int
+  public let totalAgreeCount: Int64
+  public let isBlocked: Bool
+
+  public init(
+    user: TiebaUser,
+    tiebaUID: Int64?,
+    biography: String,
+    tiebaAge: String,
+    threadCount: Int,
+    postCount: Int,
+    followerCount: Int,
+    followingCount: Int,
+    followedForumCount: Int,
+    totalAgreeCount: Int64,
+    isBlocked: Bool
+  ) {
+    self.user = user
+    self.tiebaUID = tiebaUID
+    self.biography = biography
+    self.tiebaAge = tiebaAge
+    self.threadCount = threadCount
+    self.postCount = postCount
+    self.followerCount = followerCount
+    self.followingCount = followingCount
+    self.followedForumCount = followedForumCount
+    self.totalAgreeCount = totalAgreeCount
+    self.isBlocked = isBlocked
+  }
+}
+
 public struct TiebaImage: Sendable, Hashable {
   public let thumbnailURL: URL?
   public let fullSizeURL: URL?
@@ -498,6 +538,25 @@ public struct TiebaThreadPage: Sendable, Hashable {
     self.threads = threads
     self.pagination = pagination
     self.tabs = tabs
+  }
+}
+
+public struct TiebaUserThreadPage: Sendable, Hashable {
+  public let userID: Int64
+  public let threads: [TiebaThread]
+  public let pagination: TiebaPagination
+  public let isHidden: Bool
+
+  public init(
+    userID: Int64,
+    threads: [TiebaThread],
+    pagination: TiebaPagination,
+    isHidden: Bool
+  ) {
+    self.userID = userID
+    self.threads = threads
+    self.pagination = pagination
+    self.isHidden = isHidden
   }
 }
 

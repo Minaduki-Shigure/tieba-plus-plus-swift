@@ -12,6 +12,10 @@ let comments = try await client.getComments(
     threadID: posts.thread.id,
     postID: posts.posts[0].id
 )
+if let userID = posts.posts[0].author?.id {
+    let profile = try await client.getUserProfile(userID: userID)
+    let publicThreads = try await client.getUserThreads(userID: userID)
+}
 ```
 
 ## Wire assumptions
@@ -19,7 +23,9 @@ let comments = try await client.getComments(
 - Protocol Buffer requests use `https://tiebac.baidu.com`; anonymous JSON
   search uses `https://tieba.baidu.com`. Redirects must remain on the request's
   original HTTPS host.
-- The three browsing commands are FRS `301001`, PB `302001`, and floor `302002`.
+- Forum and post browsing use FRS `301001`, PB `302001`, and floor `302002`.
+- Public profiles use Profile `303012` with explicit guest fields; public user
+  threads use UserPost `303002` and terminate pagination on an empty page.
 - Search supports `/mo/q/search/forum` and `/mo/q/search/thread`; thread search
   is restricted to topic results and relevance sorting.
 - Requests identify as client type `2` and version `12.64.1.1` by default.

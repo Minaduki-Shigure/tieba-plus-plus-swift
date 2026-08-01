@@ -167,6 +167,60 @@ struct TiebaRequestFactory: Sendable {
     )
   }
 
+  func userProfile(userID: Int64) throws -> URLRequest {
+    try validate(identifier: userID, name: "User ID")
+
+    var common = CommonReq()
+    common.clientType = 2
+    common.clientVersion = configuration.clientVersion
+
+    var data = ProfileReqIdl.DataReq()
+    data.needPostCount = 1
+    data.friendUid = userID
+    data.isGuest = 1
+    data.pn = 1
+    data.rn = 20
+    data.hasPlist_p = 1
+    data.common = common
+    data.isFromUsercenter = 1
+    data.page = 1
+
+    var message = ProfileReqIdl()
+    message.data = data
+    return try request(
+      path: "/c/u/user/profile",
+      command: 303_012,
+      protobuf: message.serializedData()
+    )
+  }
+
+  func userThreads(userID: Int64, page: Int, pageSize: Int) throws -> URLRequest {
+    try validate(identifier: userID, name: "User ID")
+    try validate(page: page)
+    try validate(pageSize: pageSize, maximum: 100)
+
+    var common = CommonReq()
+    common.clientType = 2
+    common.clientVersion = configuration.clientVersion
+
+    var data = UserPostReqIdl.DataReq()
+    data.uid = userID
+    data.rn = UInt32(pageSize)
+    data.isThread = 1
+    data.needContent = 1
+    data.pn = UInt32(page)
+    data.common = common
+    data.isViewCard = 1
+
+    var message = UserPostReqIdl()
+    message.data = data
+    return try request(
+      path: "/c/u/feed/userpost",
+      command: 303_002,
+      protobuf: message.serializedData()
+    )
+  }
+
   func searchForums(query: String) throws -> URLRequest {
     let query = try validatedSearchQuery(query)
     return try webRequest(

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct RootView: View {
-  let service: any BrowseService & SearchService
+  let service: any BrowseService & SearchService & UserProfileService
   let historyRepository: any BrowsingHistoryRepository
 
   @State private var query = ""

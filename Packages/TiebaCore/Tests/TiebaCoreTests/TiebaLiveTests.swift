@@ -10,7 +10,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.3 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.4 integration-test")
     )
     let threads = try await client.getThreads(forumName: "starry", pageSize: 10)
     XCTAssertFalse(threads.threads.isEmpty)
@@ -57,7 +57,10 @@ final class TiebaLiveTests: XCTestCase {
     XCTAssertFalse(descendingPosts.posts.isEmpty)
     let descendingFloors = descendingPosts.posts.map(\.floor).filter { $0 > 0 }
     XCTAssertGreaterThan(descendingFloors.count, 1)
-    XCTAssertGreaterThan(try XCTUnwrap(descendingFloors.first), try XCTUnwrap(descendingFloors.last))
+    XCTAssertGreaterThan(
+      try XCTUnwrap(descendingFloors.first),
+      try XCTUnwrap(descendingFloors.last)
+    )
     XCTAssertTrue(
       zip(descendingFloors, descendingFloors.dropFirst()).allSatisfy { pair in
         pair.0 >= pair.1
@@ -116,7 +119,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.3 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.4 integration-test")
     )
     let forums = try await client.searchForums(query: "swift")
     XCTAssertFalse(forums.isLoggedIn)
@@ -126,5 +129,28 @@ final class TiebaLiveTests: XCTestCase {
     XCTAssertFalse(threads.isLoggedIn)
     XCTAssertFalse(threads.results.isEmpty)
     XCTAssertEqual(threads.pagination.currentPage, 1)
+  }
+
+  func testAnonymousPublicUserProfileAndThreads() async throws {
+    guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
+      throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
+    }
+
+    let userID: Int64 = 957_339_815
+    let client = TiebaClient(
+      configuration: .init(userAgent: "TiebaPlusPlus/0.4 integration-test")
+    )
+
+    let profile = try await client.getUserProfile(userID: userID)
+    XCTAssertEqual(profile.user.id, userID)
+    XCTAssertFalse(profile.user.preferredName.isEmpty)
+    XCTAssertFalse(profile.user.portrait.isEmpty)
+
+    let activity = try await client.getUserThreads(userID: userID, page: 1, pageSize: 20)
+    XCTAssertEqual(activity.userID, userID)
+    XCTAssertEqual(activity.pagination.currentPage, 1)
+    XCTAssertFalse(activity.isHidden)
+    XCTAssertFalse(activity.threads.isEmpty)
+    XCTAssertTrue(activity.threads.allSatisfy { $0.id > 0 && $0.forumID > 0 })
   }
 }

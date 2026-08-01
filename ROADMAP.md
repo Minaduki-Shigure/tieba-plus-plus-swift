@@ -15,22 +15,30 @@ reference for expected workflows; its source code and assets are not copied.
 - Page-number jump and last-visible-post restoration
 - Versioned local browsing history with delete, clear, and recording controls
 - Nested replies, images, video links, and voice playback
+- Public user profiles opened from post and nested-reply authors
+- Paginated public threads on user profiles
 - HTTPS-only, credential-free anonymous requests
 
 ## Next milestones
 
-1. Public user profiles and public user activity
-2. Local favorites and followed-forum shortcuts
-3. Richer forum rules and moderator details
-4. Account login backed by Keychain and an explicit security review
-5. Authenticated follow, favorite, like, post, and reply workflows
-6. Notifications, moderation tools, and broader settings parity
+1. Local favorites and followed-forum shortcuts
+2. Richer forum rules and moderator details
+3. Account login backed by Keychain and an explicit security review
+4. Authenticated follow, favorite, like, post, and reply workflows
+5. Notifications, moderation tools, and broader settings parity
 
 Tieba's anonymous post endpoint does not currently honor its nominal numeric
 floor-jump fields. The app therefore restores a stable post ID and offers page
 jumps instead of presenting an unreliable arbitrary-floor jump as supported.
 Hot ranking responses expose physical-page PIDs unrelated to the ranking, so a
 hot history entry restores the mode but deliberately reopens its first page.
+
+Public profiles use the protocol's guest fields instead of impersonating the
+target user as the current account. The public-theme endpoint ignores its
+nominal page-size field, so pagination deliberately continues until an empty
+page and deduplicates by thread ID. Tieba's followed-forum list rejects
+anonymous requests, and TiebaLite only presents reply history for the current
+account; neither is exposed as a misleading anonymous profile tab.
 
 Each authenticated milestone remains gated on protocol tests, credential
 isolation, and real-device validation. Anonymous browsing must continue to work

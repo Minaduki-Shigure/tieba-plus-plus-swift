@@ -1,7 +1,7 @@
 import Foundation
 import TiebaCore
 
-struct TiebaCoreBrowseService: BrowseService, SearchService {
+struct TiebaCoreBrowseService: BrowseService, SearchService, UserProfileService {
   private let client: TiebaClient
 
   init(client: TiebaClient = TiebaClient()) {
@@ -127,6 +127,63 @@ struct TiebaCoreBrowseService: BrowseService, SearchService {
     )
   }
 
+  func userProfile(userID: Int64) async throws -> BrowseUserProfile {
+    let response: TiebaUserProfile
+    do {
+      response = try await client.getUserProfile(userID: userID)
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    return BrowseUserProfile(
+      id: response.user.id,
+      tiebaUID: response.tiebaUID,
+      username: response.user.username,
+      displayName: response.user.displayName,
+      portraitURL: SecureTiebaURL.portrait(response.user.portrait),
+      growthLevel: response.user.growthLevel,
+      gender: Self.mapGender(response.user.gender),
+      ipLocation: response.user.ipLocation,
+      badges: response.user.badges,
+      biography: response.biography,
+      tiebaAge: response.tiebaAge,
+      threadCount: response.threadCount,
+      postCount: response.postCount,
+      followerCount: response.followerCount,
+      followingCount: response.followingCount,
+      followedForumCount: response.followedForumCount,
+      totalAgreeCount: response.totalAgreeCount,
+      isModerator: response.user.isModerator,
+      isVIP: response.user.isVIP,
+      isVerifiedCreator: response.user.isVerifiedCreator,
+      isBlocked: response.isBlocked
+    )
+  }
+
+  func userThreads(userID: Int64, page: Int, pageSize: Int) async throws
+    -> UserThreadPageData
+  {
+    let response: TiebaUserThreadPage
+    do {
+      response = try await client.getUserThreads(
+        userID: userID,
+        page: page,
+        pageSize: pageSize
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    return UserThreadPageData(
+      threads: response.threads.map(Self.mapThread),
+      currentPage: response.pagination.currentPage,
+      hasMore: response.pagination.hasMore,
+      isHidden: response.isHidden
+    )
+  }
+
   private static func mapThread(_ thread: TiebaThread) -> BrowseThread {
     BrowseThread(
       id: thread.id,
@@ -232,6 +289,17 @@ struct TiebaCoreBrowseService: BrowseService, SearchService {
     guard let author else { return "匿名用户" }
     let name = author.preferredName.trimmingCharacters(in: .whitespacesAndNewlines)
     return name.isEmpty ? "匿名用户" : name
+  }
+
+  private static func mapGender(_ gender: TiebaGender) -> BrowseGender {
+    switch gender {
+    case .male:
+      .male
+    case .female:
+      .female
+    case .unknown:
+      .unknown
+    }
   }
 
   private static func threadSort(_ sort: ForumThreadSort) -> TiebaThreadSort {
@@ -423,8 +491,10 @@ enum SecureTiebaURL {
     guard let rawValue else { return nil }
     let trimmedValue = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmedValue.isEmpty else { return nil }
-    let absoluteValue = trimmedValue.hasPrefix("//")
-      ? "https:\(trimmedValue)" : trimmedValue
+    let absoluteValue =
+      trimmedValue.hasPrefix("//")
+      ? "https:\(trimmedValue)"
+      : trimmedValue
     return media(URL(string: absoluteValue))
   }
 

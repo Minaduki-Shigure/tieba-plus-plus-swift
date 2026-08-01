@@ -13,7 +13,7 @@ public struct TiebaClientConfiguration: Sendable, Hashable {
 
   public init(
     clientVersion: String = "12.64.1.1",
-    userAgent: String = "TiebaPlusPlus/0.3 (iOS)",
+    userAgent: String = "TiebaPlusPlus/0.4 (iOS)",
     requestTimeout: TimeInterval = 30
   ) {
     self.clientVersion = clientVersion
@@ -146,6 +146,38 @@ public actor TiebaClient {
       anchorID: postID,
       page: page,
       anchorIsComment: false
+    )
+  }
+
+  public func getUserProfile(userID: Int64) async throws -> TiebaUserProfile {
+    let request = try requestFactory.userProfile(userID: userID)
+    let body = try await send(request)
+    let response: ProfileResIdl = try decode(body)
+    try checkServerError(code: response.error.errorno, message: response.error.errmsg)
+    guard let profile = TiebaProtoMapper.userProfile(response.data) else {
+      throw TiebaClientError.invalidProtobuf
+    }
+    return profile
+  }
+
+  public func getUserThreads(
+    userID: Int64,
+    page: Int = 1,
+    pageSize: Int = 20
+  ) async throws -> TiebaUserThreadPage {
+    let request = try requestFactory.userThreads(
+      userID: userID,
+      page: page,
+      pageSize: pageSize
+    )
+    let body = try await send(request)
+    let response: UserPostResIdl = try decode(body)
+    try checkServerError(code: response.error.errorno, message: response.error.errmsg)
+    return TiebaProtoMapper.userThreadPage(
+      response.data,
+      userID: userID,
+      requestedPage: page,
+      pageSize: pageSize
     )
   }
 

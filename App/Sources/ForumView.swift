@@ -1,14 +1,14 @@
 import SwiftUI
 
 struct ForumView: View {
-  let service: any BrowseService
+  let service: any BrowseService & UserProfileService
   let historyRepository: any BrowsingHistoryRepository
 
   @StateObject private var viewModel: ForumViewModel
 
   init(
     forumName: String,
-    service: any BrowseService,
+    service: any BrowseService & UserProfileService,
     historyRepository: any BrowsingHistoryRepository
   ) {
     self.service = service

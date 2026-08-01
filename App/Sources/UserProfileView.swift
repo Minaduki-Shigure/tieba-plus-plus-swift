@@ -1,0 +1,243 @@
+import SwiftUI
+import UIKit
+
+struct UserProfileView: View {
+  let service: any BrowseService & UserProfileService
+  let historyRepository: any BrowsingHistoryRepository
+
+  @StateObject private var viewModel: UserProfileViewModel
+
+  init(
+    userID: Int64,
+    service: any BrowseService & UserProfileService,
+    historyRepository: any BrowsingHistoryRepository
+  ) {
+    self.service = service
+    self.historyRepository = historyRepository
+    _viewModel = StateObject(
+      wrappedValue: UserProfileViewModel(userID: userID, service: service)
+    )
+  }
+
+  var body: some View {
+    Group {
+      switch viewModel.state {
+      case .idle, .loading:
+        ProgressView()
+      case .failed(let message):
+        ErrorStateView(message: message, retry: viewModel.reload)
+      case .loaded:
+        profileList
+      }
+    }
+    .navigationTitle(viewModel.profile?.preferredName ?? "用户主页")
+    .navigationBarTitleDisplayMode(.inline)
+    .task { viewModel.loadIfNeeded() }
+    .onDisappear(perform: viewModel.cancel)
+  }
+
+  private var profileList: some View {
+    List {
+      if let profile = viewModel.profile {
+        UserProfileHeader(profile: profile)
+          .listRowSeparator(.hidden)
+      }
+
+      Section {
+        if viewModel.isActivityHidden {
+          Label("该用户未公开主题", systemImage: "eye.slash")
+            .foregroundStyle(.secondary)
+        } else if viewModel.threads.isEmpty {
+          Label("暂无公开主题", systemImage: "text.bubble")
+            .foregroundStyle(.secondary)
+        } else {
+          ForEach(viewModel.threads) { thread in
+            NavigationLink {
+              ThreadView(
+                thread: thread,
+                service: service,
+                historyRepository: historyRepository
+              )
+            } label: {
+              UserActivityThreadRow(thread: thread)
+            }
+            .onAppear { viewModel.loadMoreIfNeeded(current: thread) }
+          }
+        }
+
+        if viewModel.isLoadingMore {
+          HStack {
+            Spacer()
+            ProgressView()
+            Spacer()
+          }
+          .listRowSeparator(.hidden)
+        } else if let message = viewModel.loadMoreError {
+          LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
+            .listRowSeparator(.hidden)
+        }
+      } header: {
+        if let profile = viewModel.profile {
+          Text("公开主题 \(profile.threadCount.formatted())")
+        } else {
+          Text("公开主题")
+        }
+      }
+    }
+    .listStyle(.plain)
+    .refreshable { await viewModel.refresh() }
+  }
+}
+
+private struct UserProfileHeader: View {
+  let profile: BrowseUserProfile
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      HStack(alignment: .center, spacing: 14) {
+        AvatarView(url: profile.portraitURL, name: profile.preferredName, size: 82)
+        VStack(alignment: .leading, spacing: 5) {
+          HStack(spacing: 6) {
+            Text(profile.preferredName)
+              .font(.title3.weight(.bold))
+              .lineLimit(2)
+            if profile.isVerifiedCreator {
+              Image(systemName: "checkmark.seal.fill")
+                .foregroundStyle(.tint)
+                .accessibilityLabel("创作者认证")
+            }
+          }
+          if !profile.username.isEmpty, profile.username != profile.displayName {
+            Text(profile.username)
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+          }
+          HStack(spacing: 8) {
+            if profile.isVIP {
+              Label("会员", systemImage: "crown.fill")
+            }
+            if profile.isModerator {
+              Label("吧务", systemImage: "checkmark.shield")
+            }
+            if profile.isBlocked {
+              Label("账号受限", systemImage: "exclamationmark.shield")
+            }
+          }
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        }
+      }
+
+      HStack(spacing: 0) {
+        stat(title: "关注", value: Int64(profile.followingCount))
+        Divider().frame(height: 30)
+        stat(title: "粉丝", value: Int64(profile.followerCount))
+        Divider().frame(height: 30)
+        stat(title: "获赞", value: profile.totalAgreeCount)
+      }
+
+      Text(profile.biography.isEmpty ? "这个用户还没有填写简介" : profile.biography)
+        .font(.subheadline)
+        .foregroundColor(profile.biography.isEmpty ? Color.secondary : Color.primary)
+        .fixedSize(horizontal: false, vertical: true)
+
+      LazyVGrid(
+        columns: [GridItem(.adaptive(minimum: 130), alignment: .leading)],
+        alignment: .leading,
+        spacing: 8
+      ) {
+        profileDetails
+      }
+
+      if !profile.badges.isEmpty {
+        ScrollView(.horizontal, showsIndicators: false) {
+          HStack(spacing: 12) {
+            ForEach(Array(profile.badges.enumerated()), id: \.offset) { _, badge in
+              Label(badge, systemImage: "seal")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+          }
+        }
+      }
+    }
+    .padding(.vertical, 8)
+  }
+
+  @ViewBuilder
+  private var profileDetails: some View {
+    if profile.growthLevel > 0 {
+      Label("成长等级 \(profile.growthLevel)", systemImage: "chart.line.uptrend.xyaxis")
+    }
+    if !profile.tiebaAge.isEmpty {
+      Label("吧龄 \(profile.tiebaAge) 年", systemImage: "calendar")
+    }
+    if !profile.ipLocation.isEmpty {
+      Label(profile.ipLocation, systemImage: "location")
+    }
+    switch profile.gender {
+    case .male:
+      Label("男", systemImage: "person")
+    case .female:
+      Label("女", systemImage: "person")
+    case .unknown:
+      EmptyView()
+    }
+    HStack(spacing: 5) {
+      Text("用户 ID \(profile.id)")
+      Button {
+        UIPasteboard.general.string = String(profile.id)
+      } label: {
+        Image(systemName: "doc.on.doc")
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("复制用户 ID")
+      .help("复制用户 ID")
+    }
+    if let tiebaUID = profile.tiebaUID {
+      Text("主页 UID \(tiebaUID)")
+    }
+  }
+
+  private func stat(title: String, value: Int64) -> some View {
+    VStack(spacing: 2) {
+      Text(max(value, 0).formatted())
+        .font(.headline)
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
+      Text(title)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+    .frame(maxWidth: .infinity)
+  }
+}
+
+private struct UserActivityThreadRow: View {
+  let thread: BrowseThread
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 7) {
+      Text(thread.title.isEmpty ? thread.excerpt : thread.title)
+        .font(.headline)
+        .lineLimit(2)
+      if !thread.title.isEmpty, !thread.excerpt.isEmpty {
+        Text(thread.excerpt)
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .lineLimit(3)
+      }
+      HStack(spacing: 12) {
+        Label(thread.forumName, systemImage: "text.bubble")
+          .lineLimit(1)
+        Spacer(minLength: 0)
+        Label(thread.replyCount.formatted(), systemImage: "bubble.left")
+        Label(thread.viewCount.formatted(), systemImage: "eye")
+      }
+      .font(.caption)
+      .foregroundStyle(.secondary)
+    }
+    .padding(.vertical, 3)
+  }
+}

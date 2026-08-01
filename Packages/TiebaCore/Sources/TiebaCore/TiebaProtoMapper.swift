@@ -17,8 +17,10 @@ enum TiebaProtoMapper {
       avatar: forumProto.avatar,
       slogan: forumProto.slogan,
       featuredClassifications: forumProto.goodClassify.compactMap { classification in
-        let name = classification.className.isEmpty
-          ? classification.name : classification.className
+        let name =
+          classification.className.isEmpty
+          ? classification.name
+          : classification.className
         guard classification.classID > 0, !name.isEmpty else { return nil }
         return TiebaForumClassification(id: Int(classification.classID), name: name)
       }
@@ -108,6 +110,53 @@ enum TiebaProtoMapper {
     )
   }
 
+  static func userProfile(_ data: ProfileResIdl.DataRes) -> TiebaUserProfile? {
+    guard let user = optionalUser(data.user), user.id > 0 else { return nil }
+    let rawTiebaUID = Int64(data.user.tiebaUid) ?? 0
+    let biography =
+      data.user.displayIntro.isEmpty
+      ? data.user.intro
+      : data.user.displayIntro
+    let responseAgreeCount = data.userAgreeInfo.totalAgreeNum
+    let userAgreeCount = Int64(data.user.totalAgreeNum)
+    let anti = data.antiStat
+    return TiebaUserProfile(
+      user: user,
+      tiebaUID: rawTiebaUID > 0 ? rawTiebaUID : nil,
+      biography: biography,
+      tiebaAge: data.user.tbAge,
+      threadCount: Int(data.user.threadNum),
+      postCount: Int(data.user.postNum),
+      followerCount: Int(data.user.fansNum),
+      followingCount: Int(data.user.concernNum),
+      followedForumCount: Int(data.user.myLikeNum),
+      totalAgreeCount: max(responseAgreeCount, userAgreeCount),
+      isBlocked: anti.blockStat != 0 && anti.hideStat != 0 && anti.daysTofree > 30
+    )
+  }
+
+  static func userThreadPage(
+    _ data: UserPostResIdl.DataRes,
+    userID: Int64,
+    requestedPage: Int,
+    pageSize: Int
+  ) -> TiebaUserThreadPage {
+    let threads = data.postList.compactMap(userThread)
+    return TiebaUserThreadPage(
+      userID: userID,
+      threads: threads,
+      pagination: TiebaPagination(
+        pageSize: pageSize,
+        currentPage: requestedPage,
+        totalPages: 0,
+        totalCount: 0,
+        hasMore: !data.postList.isEmpty,
+        hasPrevious: requestedPage > 1
+      ),
+      isHidden: data.hidePost != 0
+    )
+  }
+
   private static func pagination(_ proto: Page) -> TiebaPagination {
     let pageSize = Int(proto.pageSize)
     let currentPage = proto.currentPage == 0 && pageSize > 0 ? 1 : Int(proto.currentPage)
@@ -155,6 +204,7 @@ enum TiebaProtoMapper {
       .split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
       .first
       .map(String.init) ?? proto.portrait
+    let rawGender = proto.gender == 0 ? proto.sex : proto.gender
     return TiebaUser(
       id: proto.id,
       username: proto.name,
@@ -162,12 +212,73 @@ enum TiebaProtoMapper {
       portrait: portrait,
       level: Int(proto.levelID),
       growthLevel: Int(proto.userGrowth.levelID),
-      gender: TiebaGender(rawValue: proto.gender) ?? .unknown,
+      gender: TiebaGender(rawValue: rawGender) ?? .unknown,
       ipLocation: proto.ipAddress,
       badges: proto.iconinfo.map(\.name).filter { !$0.isEmpty },
       isModerator: proto.isBawu != 0,
       isVIP: !proto.newTshowIcon.isEmpty || proto.vipInfo.vStatus != 0,
       isVerifiedCreator: proto.newGodData.status != 0
+    )
+  }
+
+  private static func userThread(_ proto: PostInfoList) -> TiebaThread? {
+    guard
+      let threadID = Int64(exactly: proto.threadID), threadID > 0,
+      let forumID = Int64(exactly: proto.forumID),
+      let firstPostID = Int64(exactly: proto.postID)
+    else { return nil }
+
+    var authorProto = User()
+    authorProto.id = proto.userID
+    authorProto.name = proto.userName
+    authorProto.nameShow = proto.nameShow
+    authorProto.portrait = proto.userPortrait
+
+    var contentProtos = proto.firstPostContent
+    contentProtos.removeAll { content in
+      switch content.type {
+      case 3, 20:
+        !proto.media.isEmpty
+      case 5:
+        hasVideo(proto.videoInfo)
+      case 10:
+        !proto.voiceInfo.isEmpty
+      default:
+        false
+      }
+    }
+    var fragments = content(contentProtos).fragments
+    fragments.append(contentsOf: proto.media.map(mediaFragment))
+    if hasVideo(proto.videoInfo) {
+      fragments.append(.video(videoFragment(proto.videoInfo)))
+    }
+    fragments.append(
+      contentsOf: proto.voiceInfo.filter { !$0.voiceMd5.isEmpty }.map {
+        .voice(TiebaVoice(md5: $0.voiceMd5, duration: TimeInterval($0.duringTime) / 1_000))
+      })
+
+    return TiebaThread(
+      id: threadID,
+      firstPostID: firstPostID,
+      forumID: forumID,
+      forumName: proto.forumName,
+      title: proto.title,
+      content: TiebaContent(fragments: fragments),
+      author: optionalUser(authorProto),
+      kind: TiebaThreadKind(rawValue: Int32(clamping: proto.threadType)),
+      tabID: 0,
+      viewCount: Int(proto.freqNum),
+      replyCount: Int(proto.replyNum),
+      shareCount: Int(proto.shareNum),
+      agreeCount: Int(proto.agree.agreeNum),
+      disagreeCount: Int(proto.agree.disagreeNum),
+      createdAt: date(Int64(proto.createTime)),
+      lastReplyAt: nil,
+      isPinned: false,
+      isFeatured: false,
+      isShared: proto.isShareThread != 0,
+      isHidden: false,
+      isLive: false
     )
   }
 

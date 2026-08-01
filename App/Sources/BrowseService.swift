@@ -90,6 +90,12 @@ protocol SearchService: Sendable {
     -> ThreadSearchPageData
 }
 
+protocol UserProfileService: Sendable {
+  func userProfile(userID: Int64) async throws -> BrowseUserProfile
+  func userThreads(userID: Int64, page: Int, pageSize: Int) async throws
+    -> UserThreadPageData
+}
+
 enum BrowseError: LocalizedError, Sendable {
   case invalidForumName
   case unavailable(String)
