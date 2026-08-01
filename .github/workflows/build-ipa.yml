@@ -2,6 +2,9 @@ name: Build unsigned IPA
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - "v*"
 
 jobs:
   build:
@@ -31,7 +34,16 @@ jobs:
           cp -R build/TiebaPlusPlus.xcarchive/Products/Applications/TiebaPlusPlus.app build/Payload/
           cd build
           ditto -c -k --sequesterRsrc --keepParent Payload TiebaPlusPlus-SideStore.ipa
+      - name: Verify unsigned IPA
+        run: |
+          set -euo pipefail
+          test -f build/TiebaPlusPlus-SideStore.ipa
+          test -f build/Payload/TiebaPlusPlus.app/Info.plist
+          test ! -d build/Payload/TiebaPlusPlus.app/_CodeSignature
+          plutil -lint build/Payload/TiebaPlusPlus.app/Info.plist
+          unzip -tq build/TiebaPlusPlus-SideStore.ipa
       - uses: actions/upload-artifact@v4
         with:
-          name: TiebaPlusPlus-SideStore
+          name: TiebaPlusPlus-SideStore-${{ github.ref_name }}
           path: build/TiebaPlusPlus-SideStore.ipa
+          retention-days: 14

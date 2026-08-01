@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import SwiftUI
 
 struct VoicePlaybackButton: View {
@@ -27,12 +28,23 @@ struct VoicePlaybackButton: View {
           .monospacedDigit()
       }
       .padding(.horizontal, 12)
-      .frame(height: 36)
+      .frame(minHeight: 44)
       .background(Color(uiColor: .secondarySystemFill))
       .clipShape(Capsule())
     }
     .buttonStyle(.plain)
     .accessibilityLabel(isPlaying ? "暂停语音" : "播放语音")
+    .accessibilityValue("\(duration) 秒")
+    .onReceive(NotificationCenter.default.publisher(for: AVPlayerItem.didPlayToEndTimeNotification))
+    {
+      notification in
+      guard
+        let finishedItem = notification.object as? AVPlayerItem,
+        finishedItem === player?.currentItem
+      else { return }
+      player?.seek(to: .zero)
+      isPlaying = false
+    }
     .onDisappear {
       player?.pause()
       isPlaying = false
