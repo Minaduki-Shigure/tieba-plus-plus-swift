@@ -44,6 +44,72 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testForumSortChangeReloadsAndRejectsStaleResponse() async throws {
+    let service = ScriptedBrowseService()
+    await service.enqueueThreads(.suspended(103))
+    await service.enqueueThreads(
+      .value(
+        ThreadPageData(
+          forumName: "Swift",
+          threads: [Fixtures.thread(id: 14, title: "按发帖时间")],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ForumViewModel(forumName: "Swift", service: service)
+
+    viewModel.reload()
+    try await waitUntil { await service.threadRequestCount() == 1 }
+    viewModel.setSort(.creationTime)
+    try await waitUntil { viewModel.threads.first?.title == "按发帖时间" }
+
+    let resumed = await service.resumeThreads(
+      id: 103,
+      returning: ThreadPageData(
+        forumName: "Swift",
+        threads: [Fixtures.thread(id: 13, title: "过期回复")],
+        currentPage: 1,
+        hasMore: false
+      )
+    )
+    XCTAssertTrue(resumed)
+    try await waitUntil { await service.completedThreadRequestCount() == 2 }
+    await drainMainActor()
+
+    XCTAssertEqual(viewModel.threads.map(\.title), ["按发帖时间"])
+    XCTAssertEqual(viewModel.options, ForumBrowseOptions(sort: .creationTime))
+    let requests = await service.threadRequestSnapshot()
+    XCTAssertEqual(
+      requests.map(\.options),
+      [ForumBrowseOptions(), ForumBrowseOptions(sort: .creationTime)]
+    )
+  }
+
+  @MainActor
+  func testForumFeaturedFilterIsForwarded() async throws {
+    let service = ScriptedBrowseService()
+    await service.enqueueThreads(
+      .value(
+        ThreadPageData(
+          forumName: "Swift",
+          threads: [Fixtures.thread(id: 15)],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ForumViewModel(forumName: "Swift", service: service)
+
+    viewModel.setFeaturedOnly(true)
+
+    try await waitUntil { viewModel.state == .loaded }
+    XCTAssertEqual(viewModel.options, ForumBrowseOptions(featuredOnly: true))
+    let requests = await service.threadRequestSnapshot()
+    XCTAssertEqual(requests.map(\.options), [ForumBrowseOptions(featuredOnly: true)])
+  }
+
+  @MainActor
   func testForumPaginationDeduplicatesThreads() async throws {
     let service = ScriptedBrowseService()
     let firstPage = [
@@ -239,6 +305,80 @@ final class BrowseViewModelTests: XCTestCase {
 
     try await waitUntil { viewModel.state == .failed("thread unavailable") }
     XCTAssertTrue(viewModel.posts.isEmpty)
+  }
+
+  @MainActor
+  func testThreadSortChangeReloadsAndRejectsStaleResponse() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 52)
+    await service.enqueuePosts(.suspended(203))
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 522, threadID: 52, authorName: "倒序结果")],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+
+    viewModel.reload()
+    try await waitUntil { await service.postRequestCount() == 1 }
+    viewModel.setSort(.descending)
+    try await waitUntil { viewModel.posts.first?.authorName == "倒序结果" }
+
+    let resumed = await service.resumePosts(
+      id: 203,
+      returning: PostPageData(
+        thread: thread,
+        posts: [Fixtures.post(id: 521, threadID: 52, authorName: "过期结果")],
+        currentPage: 1,
+        hasMore: false
+      )
+    )
+    XCTAssertTrue(resumed)
+    try await waitUntil { await service.completedPostRequestCount() == 2 }
+    await drainMainActor()
+
+    XCTAssertEqual(viewModel.posts.map(\.authorName), ["倒序结果"])
+    XCTAssertEqual(viewModel.options, ThreadBrowseOptions(sort: .descending))
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(
+      requests.map(\.options),
+      [ThreadBrowseOptions(), ThreadBrowseOptions(sort: .descending)]
+    )
+  }
+
+  @MainActor
+  func testThreadOnlyAuthorFilterAndHotSortAreForwarded() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 53)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 531, threadID: 53)],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(
+      thread: thread,
+      service: service,
+      options: ThreadBrowseOptions(sort: .hot, onlyThreadAuthor: true)
+    )
+
+    viewModel.loadIfNeeded()
+
+    try await waitUntil { viewModel.state == .loaded }
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(
+      requests.map(\.options),
+      [ThreadBrowseOptions(sort: .hot, onlyThreadAuthor: true)]
+    )
   }
 
   @MainActor
@@ -583,12 +723,38 @@ private struct ThreadRequest: Equatable, Sendable {
   let forumName: String
   let page: Int
   let pageSize: Int
+  let options: ForumBrowseOptions
+
+  init(
+    forumName: String,
+    page: Int,
+    pageSize: Int,
+    options: ForumBrowseOptions = ForumBrowseOptions()
+  ) {
+    self.forumName = forumName
+    self.page = page
+    self.pageSize = pageSize
+    self.options = options
+  }
 }
 
 private struct PostRequest: Equatable, Sendable {
   let threadID: Int64
   let page: Int
   let pageSize: Int
+  let options: ThreadBrowseOptions
+
+  init(
+    threadID: Int64,
+    page: Int,
+    pageSize: Int,
+    options: ThreadBrowseOptions = ThreadBrowseOptions()
+  ) {
+    self.threadID = threadID
+    self.page = page
+    self.pageSize = pageSize
+    self.options = options
+  }
 }
 
 private struct CommentRequest: Equatable, Sendable {
@@ -638,8 +804,15 @@ private actor ScriptedBrowseService: BrowseService {
     commentStubs.append(stub)
   }
 
-  func threads(forumName: String, page: Int, pageSize: Int) async throws -> ThreadPageData {
-    threadRequests.append(ThreadRequest(forumName: forumName, page: page, pageSize: pageSize))
+  func threads(
+    forumName: String,
+    page: Int,
+    pageSize: Int,
+    options: ForumBrowseOptions
+  ) async throws -> ThreadPageData {
+    threadRequests.append(
+      ThreadRequest(forumName: forumName, page: page, pageSize: pageSize, options: options)
+    )
     defer { completedThreadRequests += 1 }
     guard !threadStubs.isEmpty else {
       throw StubFailure(message: "Unexpected threads request")
@@ -657,8 +830,15 @@ private actor ScriptedBrowseService: BrowseService {
     }
   }
 
-  func posts(threadID: Int64, page: Int, pageSize: Int) async throws -> PostPageData {
-    postRequests.append(PostRequest(threadID: threadID, page: page, pageSize: pageSize))
+  func posts(
+    threadID: Int64,
+    page: Int,
+    pageSize: Int,
+    options: ThreadBrowseOptions
+  ) async throws -> PostPageData {
+    postRequests.append(
+      PostRequest(threadID: threadID, page: page, pageSize: pageSize, options: options)
+    )
     defer { completedPostRequests += 1 }
     guard !postStubs.isEmpty else {
       throw StubFailure(message: "Unexpected posts request")

@@ -30,6 +30,9 @@ struct ThreadView: View {
       viewModel.thread.title.isEmpty ? viewModel.thread.forumName : viewModel.thread.title
     )
     .navigationBarTitleDisplayMode(.inline)
+    .safeAreaInset(edge: .top, spacing: 0) {
+      optionsBar
+    }
     .task { viewModel.loadIfNeeded() }
     .onDisappear(perform: viewModel.cancel)
     .sheet(item: $commentsPost) { post in
@@ -41,6 +44,45 @@ struct ThreadView: View {
         )
       }
       .presentationDetents([.medium, .large])
+    }
+  }
+
+  private var optionsBar: some View {
+    VStack(spacing: 0) {
+      HStack(spacing: 12) {
+        Picker(
+          "楼层排序",
+          selection: Binding(
+            get: { viewModel.options.sort },
+            set: viewModel.setSort
+          )
+        ) {
+          ForEach(ThreadPostSort.allCases) { sort in
+            Text(sort.title).tag(sort)
+          }
+        }
+        .pickerStyle(.segmented)
+        .frame(maxWidth: .infinity, minHeight: 32)
+        .accessibilityIdentifier("thread-sort-picker")
+
+        Toggle(
+          "只看楼主",
+          isOn: Binding(
+            get: { viewModel.options.onlyThreadAuthor },
+            set: viewModel.setOnlyThreadAuthor
+          )
+        )
+        .toggleStyle(.switch)
+        .controlSize(.small)
+        .fixedSize()
+        .accessibilityIdentifier("thread-author-toggle")
+      }
+      .font(.subheadline)
+      .padding(.horizontal, 12)
+      .padding(.vertical, 8)
+      .background(.regularMaterial)
+
+      Divider()
     }
   }
 

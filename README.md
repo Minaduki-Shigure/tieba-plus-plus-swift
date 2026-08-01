@@ -6,10 +6,14 @@ from TiebaLite.
 
 ## Status
 
-Development is in progress. The first milestone covers anonymous forum and
-thread search plus forum, post, and nested-reply browsing over verified HTTPS.
-Account credentials and write operations are intentionally excluded until the
-anonymous protocol path is stable on real devices.
+Development is in progress. Anonymous mode supports forum and thread search,
+forum, post, and nested-reply browsing, remote media, forum thread sorting and
+featured filtering, plus post sorting and an only-thread-author filter. Account
+credentials and write operations are intentionally excluded until the anonymous
+protocol path is stable on real devices.
+
+See [`ROADMAP.md`](ROADMAP.md) for the current TiebaLite parity matrix and the
+next implementation milestones.
 
 ## Architecture
 

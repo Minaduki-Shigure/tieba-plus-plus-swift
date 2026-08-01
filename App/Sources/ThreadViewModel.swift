@@ -8,6 +8,7 @@ final class ThreadViewModel: ObservableObject {
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
   @Published private(set) var loadMoreError: String?
+  @Published private(set) var options = ThreadBrowseOptions()
 
   private let service: any BrowseService
   private var currentPage = 0
@@ -15,9 +16,14 @@ final class ThreadViewModel: ObservableObject {
   private var loadTask: Task<Void, Never>?
   private var loadGeneration = 0
 
-  init(thread: BrowseThread, service: any BrowseService) {
+  init(
+    thread: BrowseThread,
+    service: any BrowseService,
+    options: ThreadBrowseOptions = ThreadBrowseOptions()
+  ) {
     self.thread = thread
     self.service = service
+    self.options = options
   }
 
   func loadIfNeeded() {
@@ -39,6 +45,18 @@ final class ThreadViewModel: ObservableObject {
   func refresh() async {
     reload()
     await loadTask?.value
+  }
+
+  func setSort(_ sort: ThreadPostSort) {
+    guard options.sort != sort else { return }
+    options.sort = sort
+    reload()
+  }
+
+  func setOnlyThreadAuthor(_ onlyThreadAuthor: Bool) {
+    guard options.onlyThreadAuthor != onlyThreadAuthor else { return }
+    options.onlyThreadAuthor = onlyThreadAuthor
+    reload()
   }
 
   func cancel() {
@@ -70,6 +88,7 @@ final class ThreadViewModel: ObservableObject {
   private func load(page: Int, replacing: Bool) {
     let threadID = thread.id
     let service = service
+    let options = options
     loadGeneration &+= 1
     let generation = loadGeneration
     if !replacing {
@@ -84,7 +103,12 @@ final class ThreadViewModel: ObservableObject {
         }
       }
       do {
-        let response = try await service.posts(threadID: threadID, page: page, pageSize: 30)
+        let response = try await service.posts(
+          threadID: threadID,
+          page: page,
+          pageSize: 30,
+          options: options
+        )
         try Task.checkCancellation()
         guard generation == loadGeneration else { return }
         thread = response.thread

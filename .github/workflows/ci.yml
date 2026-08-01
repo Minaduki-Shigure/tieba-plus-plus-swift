@@ -78,3 +78,6 @@ jobs:
       - name: Report Xcode diagnostics
         if: steps.app_tests.outcome == 'failure'
         run: ruby Scripts/report_xcode_errors.rb xcodebuild.log
+      - name: Fail when app tests fail
+        if: steps.app_tests.outcome == 'failure'
+        run: exit 1

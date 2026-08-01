@@ -84,6 +84,51 @@ final class TiebaRequestFactoryTests: XCTestCase {
     )
   }
 
+  func testBrowseSortAndFilterOptionsAreEncoded() throws {
+    let featuredCreationRequest = try factory.threads(
+      forumName: "swift",
+      page: 2,
+      pageSize: 30,
+      sort: .creationTime,
+      featuredOnly: true
+    )
+    let featuredCreation = try FrsPageReqIdl(
+      serializedBytes: protobufPayload(from: featuredCreationRequest)
+    )
+    XCTAssertEqual(featuredCreation.data.sortType, TiebaThreadSort.creationTime.rawValue)
+    XCTAssertEqual(featuredCreation.data.isGood, 1)
+
+    let descendingAuthorRequest = try factory.posts(
+      threadID: 123_456,
+      page: 2,
+      pageSize: 30,
+      sort: .descending,
+      onlyThreadAuthor: true,
+      includeComments: false,
+      commentsSortedByAgree: true,
+      commentPageSize: 4
+    )
+    let descendingAuthor = try PbPageReqIdl(
+      serializedBytes: protobufPayload(from: descendingAuthorRequest)
+    )
+    XCTAssertEqual(descendingAuthor.data.r, TiebaPostSort.descending.rawValue)
+    XCTAssertEqual(descendingAuthor.data.lz, 1)
+
+    let hotRequest = try factory.posts(
+      threadID: 123_456,
+      page: 1,
+      pageSize: 30,
+      sort: .hot,
+      onlyThreadAuthor: false,
+      includeComments: false,
+      commentsSortedByAgree: true,
+      commentPageSize: 4
+    )
+    let hot = try PbPageReqIdl(serializedBytes: protobufPayload(from: hotRequest))
+    XCTAssertEqual(hot.data.r, TiebaPostSort.hot.rawValue)
+    XCTAssertEqual(hot.data.lz, 0)
+  }
+
   func testEveryEndpointIsHTTPSAndCredentialFree() throws {
     let requests = [
       try factory.threads(

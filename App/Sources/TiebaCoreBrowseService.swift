@@ -8,13 +8,20 @@ struct TiebaCoreBrowseService: BrowseService, SearchService {
     self.client = client
   }
 
-  func threads(forumName: String, page: Int, pageSize: Int) async throws -> ThreadPageData {
+  func threads(
+    forumName: String,
+    page: Int,
+    pageSize: Int,
+    options: ForumBrowseOptions
+  ) async throws -> ThreadPageData {
     let response: TiebaThreadPage
     do {
       response = try await client.getThreads(
         forumName: forumName,
         page: page,
-        pageSize: pageSize
+        pageSize: pageSize,
+        sort: Self.threadSort(options.sort),
+        featuredOnly: options.featuredOnly
       )
     } catch is CancellationError {
       throw CancellationError()
@@ -29,13 +36,20 @@ struct TiebaCoreBrowseService: BrowseService, SearchService {
     )
   }
 
-  func posts(threadID: Int64, page: Int, pageSize: Int) async throws -> PostPageData {
+  func posts(
+    threadID: Int64,
+    page: Int,
+    pageSize: Int,
+    options: ThreadBrowseOptions
+  ) async throws -> PostPageData {
     let response: TiebaPostPage
     do {
       response = try await client.getPosts(
         threadID: threadID,
         page: page,
-        pageSize: pageSize
+        pageSize: pageSize,
+        sort: Self.postSort(options.sort),
+        onlyThreadAuthor: options.onlyThreadAuthor
       )
     } catch is CancellationError {
       throw CancellationError()
@@ -189,6 +203,26 @@ struct TiebaCoreBrowseService: BrowseService, SearchService {
     guard let author else { return "匿名用户" }
     let name = author.preferredName.trimmingCharacters(in: .whitespacesAndNewlines)
     return name.isEmpty ? "匿名用户" : name
+  }
+
+  private static func threadSort(_ sort: ForumThreadSort) -> TiebaThreadSort {
+    switch sort {
+    case .replyTime:
+      .replyTime
+    case .creationTime:
+      .creationTime
+    }
+  }
+
+  private static func postSort(_ sort: ThreadPostSort) -> TiebaPostSort {
+    switch sort {
+    case .ascending:
+      .ascending
+    case .descending:
+      .descending
+    case .hot:
+      .hot
+    }
   }
 
   private static func browseError(_ error: Error) -> BrowseError {

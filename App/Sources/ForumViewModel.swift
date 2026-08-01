@@ -7,6 +7,7 @@ final class ForumViewModel: ObservableObject {
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
   @Published private(set) var loadMoreError: String?
+  @Published private(set) var options = ForumBrowseOptions()
 
   let forumName: String
 
@@ -42,6 +43,18 @@ final class ForumViewModel: ObservableObject {
     await loadTask?.value
   }
 
+  func setSort(_ sort: ForumThreadSort) {
+    guard options.sort != sort else { return }
+    options.sort = sort
+    reload()
+  }
+
+  func setFeaturedOnly(_ featuredOnly: Bool) {
+    guard options.featuredOnly != featuredOnly else { return }
+    options.featuredOnly = featuredOnly
+    reload()
+  }
+
   func cancel() {
     invalidateCurrentLoad()
     isLoadingMore = false
@@ -71,6 +84,7 @@ final class ForumViewModel: ObservableObject {
   private func load(page: Int, replacing: Bool) {
     let forumName = forumName
     let service = service
+    let options = options
     loadGeneration &+= 1
     let generation = loadGeneration
     if !replacing {
@@ -88,7 +102,8 @@ final class ForumViewModel: ObservableObject {
         let response = try await service.threads(
           forumName: forumName,
           page: page,
-          pageSize: 30
+          pageSize: 30,
+          options: options
         )
         try Task.checkCancellation()
         guard generation == loadGeneration else { return }

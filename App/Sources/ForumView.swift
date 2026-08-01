@@ -27,8 +27,50 @@ struct ForumView: View {
     }
     .navigationTitle(viewModel.forumName)
     .navigationBarTitleDisplayMode(.inline)
+    .safeAreaInset(edge: .top, spacing: 0) {
+      optionsBar
+    }
     .task { viewModel.loadIfNeeded() }
     .onDisappear(perform: viewModel.cancel)
+  }
+
+  private var optionsBar: some View {
+    VStack(spacing: 0) {
+      HStack(spacing: 12) {
+        Picker(
+          "主题排序",
+          selection: Binding(
+            get: { viewModel.options.sort },
+            set: viewModel.setSort
+          )
+        ) {
+          ForEach(ForumThreadSort.allCases) { sort in
+            Text(sort.title).tag(sort)
+          }
+        }
+        .pickerStyle(.segmented)
+        .frame(maxWidth: .infinity, minHeight: 32)
+        .accessibilityIdentifier("forum-sort-picker")
+
+        Toggle(
+          "精华",
+          isOn: Binding(
+            get: { viewModel.options.featuredOnly },
+            set: viewModel.setFeaturedOnly
+          )
+        )
+        .toggleStyle(.switch)
+        .controlSize(.small)
+        .fixedSize()
+        .accessibilityIdentifier("forum-featured-toggle")
+      }
+      .font(.subheadline)
+      .padding(.horizontal, 12)
+      .padding(.vertical, 8)
+      .background(.regularMaterial)
+
+      Divider()
+    }
   }
 
   private var threadList: some View {
