@@ -21,7 +21,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService {
         page: page,
         pageSize: pageSize,
         sort: Self.threadSort(options.sort),
-        featuredOnly: options.featuredOnly
+        featuredOnly: options.featuredOnly,
+        featuredClassificationID: options.featuredClassificationID
       )
     } catch is CancellationError {
       throw CancellationError()
@@ -29,7 +30,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService {
       throw Self.browseError(error)
     }
     return ThreadPageData(
-      forumName: response.forum.name.isEmpty ? forumName : response.forum.name,
+      forum: Self.mapForum(response.forum, fallbackName: forumName),
       threads: response.threads.map(Self.mapThread),
       currentPage: response.pagination.currentPage,
       hasMore: response.pagination.hasMore
@@ -40,7 +41,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService {
     threadID: Int64,
     page: Int,
     pageSize: Int,
-    options: ThreadBrowseOptions
+    options: ThreadBrowseOptions,
+    location: ThreadPostLocation?
   ) async throws -> PostPageData {
     let response: TiebaPostPage
     do {
@@ -49,7 +51,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService {
         page: page,
         pageSize: pageSize,
         sort: Self.postSort(options.sort),
-        onlyThreadAuthor: options.onlyThreadAuthor
+        onlyThreadAuthor: options.onlyThreadAuthor,
+        location: Self.postLocation(location)
       )
     } catch is CancellationError {
       throw CancellationError()
@@ -60,7 +63,14 @@ struct TiebaCoreBrowseService: BrowseService, SearchService {
       thread: Self.mapThread(response.thread),
       posts: response.posts.map(Self.mapPost),
       currentPage: response.pagination.currentPage,
-      hasMore: response.pagination.hasMore
+      hasMore: response.pagination.hasMore,
+      totalPages: response.pagination.totalPages,
+      totalCount: response.pagination.totalCount,
+      nextPagePostID: Self.nextPagePostID(
+        from: response.thread.pagePostIDs,
+        returnedPosts: response.posts,
+        sort: options.sort
+      )
     )
   }
 
@@ -130,6 +140,25 @@ struct TiebaCoreBrowseService: BrowseService, SearchService {
       createdAt: thread.createdAt,
       lastReplyAt: thread.lastReplyAt,
       contents: mapContent(thread.content)
+    )
+  }
+
+  private static func mapForum(_ forum: TiebaForum, fallbackName: String) -> BrowseForum {
+    BrowseForum(
+      id: forum.id,
+      name: forum.name.isEmpty ? fallbackName : forum.name,
+      category: forum.category,
+      subcategory: forum.subcategory,
+      memberCount: forum.memberCount,
+      threadCount: forum.threadCount,
+      postCount: forum.postCount,
+      avatarURL: SecureTiebaURL.media(forum.avatar),
+      slogan: forum.slogan,
+      hasModerators: forum.hasModerators,
+      hasRules: forum.hasRules,
+      featuredClassifications: forum.featuredClassifications.map {
+        BrowseForumClassification(id: $0.id, name: $0.name)
+      }
     )
   }
 
@@ -222,6 +251,35 @@ struct TiebaCoreBrowseService: BrowseService, SearchService {
       .descending
     case .hot:
       .hot
+    }
+  }
+
+  private static func postLocation(_ location: ThreadPostLocation?) -> TiebaPostLocation? {
+    switch location {
+    case .postID(let postID):
+      .postID(postID)
+    case .pageNumber:
+      .pageNumber
+    case .pageCursor(let postID):
+      .pageCursor(postID)
+    case nil:
+      nil
+    }
+  }
+
+  private static func nextPagePostID(
+    from pagePostIDs: [Int64],
+    returnedPosts: [TiebaPost],
+    sort: ThreadPostSort
+  ) -> Int64? {
+    switch sort {
+    case .descending:
+      return pagePostIDs.first(where: { $0 > 0 })
+    case .hot:
+      return nil
+    case .ascending:
+      let returnedIDs = Set(returnedPosts.map(\.id))
+      return pagePostIDs.last(where: { $0 > 0 && !returnedIDs.contains($0) })
     }
   }
 
@@ -360,6 +418,14 @@ enum SecureTiebaURL {
   static func media(_ url: URL?) -> URL? {
     guard let url else { return nil }
     return normalized(url, allowHTTPUpgradeOnly: true)
+  }
+
+  static func media(_ rawValue: String?) -> URL? {
+    guard let rawValue else { return nil }
+    let rawValue = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !rawValue.isEmpty else { return nil }
+    let absoluteValue = rawValue.hasPrefix("//") ? "https:\(rawValue)" : rawValue
+    return media(URL(string: absoluteValue))
   }
 
   static func web(_ url: URL?) -> URL? {

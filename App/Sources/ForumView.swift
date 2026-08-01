@@ -2,11 +2,17 @@ import SwiftUI
 
 struct ForumView: View {
   let service: any BrowseService
+  let historyRepository: any BrowsingHistoryRepository
 
   @StateObject private var viewModel: ForumViewModel
 
-  init(forumName: String, service: any BrowseService) {
+  init(
+    forumName: String,
+    service: any BrowseService,
+    historyRepository: any BrowsingHistoryRepository
+  ) {
     self.service = service
+    self.historyRepository = historyRepository
     _viewModel = StateObject(wrappedValue: ForumViewModel(forumName: forumName, service: service))
   }
 
@@ -31,6 +37,12 @@ struct ForumView: View {
       optionsBar
     }
     .task { viewModel.loadIfNeeded() }
+    .task(id: viewModel.forum.id) {
+      guard viewModel.forum.id > 0 else { return }
+      try? await historyRepository.record(
+        .forum(ForumHistorySnapshot(forum: viewModel.forum))
+      )
+    }
     .onDisappear(perform: viewModel.cancel)
   }
 
@@ -69,15 +81,51 @@ struct ForumView: View {
       .padding(.vertical, 8)
       .background(.regularMaterial)
 
+      if viewModel.options.featuredOnly,
+        !viewModel.forum.featuredClassifications.isEmpty
+      {
+        HStack(spacing: 10) {
+          Label("精华分类", systemImage: "line.3.horizontal.decrease.circle")
+          Spacer(minLength: 0)
+          Picker(
+            "精华分类",
+            selection: Binding(
+              get: { viewModel.options.featuredClassificationID },
+              set: { classificationID in
+                viewModel.setFeaturedClassificationID(classificationID)
+              }
+            )
+          ) {
+            Text("全部").tag(Int?.none)
+            ForEach(viewModel.forum.featuredClassifications) { classification in
+              Text(classification.name).tag(Optional(classification.id))
+            }
+          }
+          .pickerStyle(.menu)
+          .accessibilityIdentifier("forum-featured-classification-picker")
+        }
+        .font(.subheadline)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+        .background(.regularMaterial)
+      }
+
       Divider()
     }
   }
 
   private var threadList: some View {
     List {
+      ForumHeaderView(forum: viewModel.forum)
+        .listRowSeparator(.hidden)
+
       ForEach(viewModel.threads) { thread in
         NavigationLink {
-          ThreadView(thread: thread, service: service)
+          ThreadView(
+            thread: thread,
+            service: service,
+            historyRepository: historyRepository
+          )
         } label: {
           ThreadRow(thread: thread)
         }
@@ -100,6 +148,72 @@ struct ForumView: View {
     }
     .listStyle(.plain)
     .refreshable { await viewModel.refresh() }
+  }
+}
+
+private struct ForumHeaderView: View {
+  let forum: BrowseForum
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 14) {
+      DownsampledRemoteImage(url: forum.avatarURL, maxPixelSize: 256) { phase in
+        switch phase {
+        case .success(let image):
+          image.resizable().scaledToFill()
+        default:
+          Image(systemName: "text.bubble.fill")
+            .foregroundStyle(.tint)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(uiColor: .secondarySystemFill))
+        }
+      }
+      .frame(width: 58, height: 58)
+      .clipShape(RoundedRectangle(cornerRadius: 8))
+      .accessibilityHidden(true)
+
+      VStack(alignment: .leading, spacing: 7) {
+        Text("\(forum.name)吧")
+          .font(.headline)
+          .lineLimit(1)
+
+        if !forum.slogan.isEmpty {
+          Text(forum.slogan)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+        }
+
+        VStack(alignment: .leading, spacing: 5) {
+          HStack(spacing: 12) {
+            Label(forum.memberCount.formatted(), systemImage: "person.2")
+            Label(forum.threadCount.formatted(), systemImage: "text.bubble")
+          }
+
+          if forum.hasRules || forum.hasModerators {
+            HStack(spacing: 12) {
+              if forum.hasRules {
+                Label("吧规", systemImage: "doc.text")
+              }
+              if forum.hasModerators {
+                Label("吧务", systemImage: "checkmark.shield")
+              }
+            }
+          }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+
+        let category = [forum.category, forum.subcategory]
+          .filter { !$0.isEmpty }
+          .joined(separator: " · ")
+        if !category.isEmpty {
+          Text(category)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      }
+    }
+    .padding(.vertical, 6)
   }
 }
 

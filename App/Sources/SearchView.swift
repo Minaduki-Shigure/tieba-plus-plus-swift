@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SearchView: View {
   let browseService: any BrowseService
+  let historyRepository: any BrowsingHistoryRepository
 
   @StateObject private var viewModel: SearchViewModel
   @State private var query: String
@@ -9,9 +10,11 @@ struct SearchView: View {
   init(
     query: String,
     browseService: any BrowseService,
-    searchService: any SearchService
+    searchService: any SearchService,
+    historyRepository: any BrowsingHistoryRepository
   ) {
     self.browseService = browseService
+    self.historyRepository = historyRepository
     _query = State(initialValue: query)
     _viewModel = StateObject(wrappedValue: SearchViewModel(query: query, service: searchService))
   }
@@ -59,7 +62,11 @@ struct SearchView: View {
         Section("帖子") {
           ForEach(viewModel.threads) { thread in
             NavigationLink {
-              ThreadView(thread: thread, service: browseService)
+              ThreadView(
+                thread: thread,
+                service: browseService,
+                historyRepository: historyRepository
+              )
             } label: {
               SearchThreadRow(thread: thread)
             }
@@ -86,7 +93,11 @@ struct SearchView: View {
 
   private func forumLink(_ forum: ForumSearchItem, exact: Bool) -> some View {
     NavigationLink {
-      ForumView(forumName: forum.name, service: browseService)
+      ForumView(
+        forumName: forum.name,
+        service: browseService,
+        historyRepository: historyRepository
+      )
     } label: {
       ForumSearchRow(forum: forum, exact: exact)
     }

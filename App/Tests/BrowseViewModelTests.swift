@@ -7,11 +7,12 @@ final class BrowseViewModelTests: XCTestCase {
   @MainActor
   func testForumInitialLoadSucceeds() async throws {
     let service = ScriptedBrowseService()
+    let forum = Fixtures.forum(name: "Swift")
     let threads = [Fixtures.thread(id: 11), Fixtures.thread(id: 12)]
     await service.enqueueThreads(
       .value(
         ThreadPageData(
-          forumName: "Swift",
+          forum: forum,
           threads: threads,
           currentPage: 1,
           hasMore: false
@@ -24,6 +25,7 @@ final class BrowseViewModelTests: XCTestCase {
 
     try await waitUntil { viewModel.state == .loaded }
     XCTAssertEqual(viewModel.threads, threads)
+    XCTAssertEqual(viewModel.forum, forum)
     let requests = await service.threadRequestSnapshot()
     XCTAssertEqual(
       requests,
@@ -107,6 +109,51 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.options, ForumBrowseOptions(featuredOnly: true))
     let requests = await service.threadRequestSnapshot()
     XCTAssertEqual(requests.map(\.options), [ForumBrowseOptions(featuredOnly: true)])
+  }
+
+  @MainActor
+  func testForumFeaturedClassificationReloadsWithServerClassID() async throws {
+    let service = ScriptedBrowseService()
+    let forum = Fixtures.forum(
+      name: "Swift",
+      classifications: [BrowseForumClassification(id: 9, name: "教程")]
+    )
+    await service.enqueueThreads(
+      .value(
+        ThreadPageData(
+          forum: forum,
+          threads: [Fixtures.thread(id: 16)],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    await service.enqueueThreads(
+      .value(
+        ThreadPageData(
+          forum: forum,
+          threads: [Fixtures.thread(id: 17)],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ForumViewModel(forumName: "Swift", service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.threads.first?.id == 16 }
+
+    viewModel.setFeaturedClassificationID(9)
+
+    try await waitUntil { viewModel.threads.first?.id == 17 }
+    XCTAssertEqual(
+      viewModel.options,
+      ForumBrowseOptions(featuredOnly: true, featuredClassificationID: 9)
+    )
+    let requests = await service.threadRequestSnapshot()
+    XCTAssertEqual(
+      requests.map(\.options),
+      [ForumBrowseOptions(), ForumBrowseOptions(featuredOnly: true, featuredClassificationID: 9)]
+    )
   }
 
   @MainActor
@@ -382,6 +429,405 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testThreadResumeForwardsPostIDAndRestoredOptions() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 54)
+    let target = Fixtures.post(id: 542, threadID: 54)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 541, threadID: 54), target],
+          currentPage: 2,
+          hasMore: true,
+          totalPages: 5,
+          totalCount: 120
+        )
+      )
+    )
+    let options = ThreadBrowseOptions(sort: .descending, onlyThreadAuthor: true)
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+
+    viewModel.prepareResume(options: options, postID: target.id)
+    viewModel.loadIfNeeded()
+
+    try await waitUntil { viewModel.state == .loaded }
+    XCTAssertEqual(viewModel.currentPage, 2)
+    XCTAssertEqual(viewModel.totalPages, 5)
+    XCTAssertEqual(viewModel.scrollTargetPostID, target.id)
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(
+      requests,
+      [
+        PostRequest(
+          threadID: 54,
+          page: 1,
+          pageSize: 30,
+          options: options,
+          location: .postID(target.id)
+        )
+      ]
+    )
+  }
+
+  @MainActor
+  func testThreadHotResumeRestoresModeWithoutUsingUnstablePostID() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 540)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 54_001, threadID: 540, floor: 0)],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let options = ThreadBrowseOptions(sort: .hot, onlyThreadAuthor: true)
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+
+    viewModel.prepareResume(options: options, postID: 99_999)
+    viewModel.loadIfNeeded()
+
+    try await waitUntil { viewModel.state == .loaded }
+    XCTAssertEqual(viewModel.options, options)
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(
+      requests,
+      [PostRequest(threadID: 540, page: 1, pageSize: 30, options: options)]
+    )
+  }
+
+  @MainActor
+  func testThreadMissingResumePostFallsBackToOrdinaryFirstPage() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 541)
+    let missingPostID: Int64 = 54_199
+    let locationPage = [Fixtures.post(id: 54_101, threadID: 541)]
+    let firstPage = [Fixtures.post(id: 54_102, threadID: 541)]
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: locationPage,
+          currentPage: 2,
+          hasMore: true,
+          totalPages: 5
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: firstPage,
+          currentPage: 1,
+          hasMore: true,
+          totalPages: 5
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(
+      thread: thread,
+      service: service,
+      initialLocation: .postID(missingPostID)
+    )
+
+    viewModel.loadIfNeeded()
+
+    try await waitUntil {
+      let requestCount = await service.postRequestCount()
+      return viewModel.state == .loaded && requestCount == 2
+    }
+    XCTAssertEqual(viewModel.posts, firstPage)
+    XCTAssertEqual(viewModel.currentPage, 1)
+    XCTAssertNotNil(viewModel.positionNotice)
+    XCTAssertNotEqual(viewModel.scrollTargetPostID, missingPostID)
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(
+      requests,
+      [
+        PostRequest(
+          threadID: 541,
+          page: 1,
+          pageSize: 30,
+          location: .postID(missingPostID)
+        ),
+        PostRequest(threadID: 541, page: 1, pageSize: 30),
+      ]
+    )
+  }
+
+  @MainActor
+  func testThreadPageJumpReplacesPageAndSetsScrollTarget() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 55)
+    let firstPage = [Fixtures.post(id: 551, threadID: 55)]
+    let thirdPage = [Fixtures.post(id: 571, threadID: 55), Fixtures.post(id: 572, threadID: 55)]
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: firstPage,
+          currentPage: 1,
+          hasMore: true,
+          totalPages: 5
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: thirdPage,
+          currentPage: 3,
+          hasMore: true,
+          totalPages: 5
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.jump(toPage: 3)
+
+    try await waitUntil { viewModel.currentPage == 3 && !viewModel.isJumping }
+    XCTAssertEqual(viewModel.posts, thirdPage)
+    XCTAssertEqual(viewModel.scrollTargetPostID, thirdPage.first?.id)
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 3])
+    XCTAssertNil(requests[0].location)
+    XCTAssertEqual(requests[1].location, .pageNumber)
+
+    viewModel.jump(toPage: 6)
+    let requestCount = await service.postRequestCount()
+    XCTAssertEqual(requestCount, 2)
+    XCTAssertEqual(viewModel.jumpError, "请输入 1 到 5 之间的页码。")
+  }
+
+  @MainActor
+  func testThreadPageJumpFailureKeepsCurrentPostsAndCanRetry() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 56)
+    let firstPage = [Fixtures.post(id: 561, threadID: 56)]
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: firstPage,
+          currentPage: 1,
+          hasMore: true,
+          totalPages: 3
+        )
+      )
+    )
+    await service.enqueuePosts(.failure(StubFailure(message: "jump failed")))
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.jump(toPage: 2)
+
+    try await waitUntil { viewModel.jumpError == "jump failed" && !viewModel.isJumping }
+    XCTAssertEqual(viewModel.posts, firstPage)
+    XCTAssertEqual(viewModel.state, .loaded)
+
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 562, threadID: 56)],
+          currentPage: 2,
+          hasMore: true,
+          totalPages: 3
+        )
+      )
+    )
+    viewModel.retryJump()
+
+    try await waitUntil { viewModel.currentPage == 2 && viewModel.jumpError == nil }
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2, 2])
+    XCTAssertNil(requests[0].location)
+    XCTAssertEqual(requests[1].location, .pageNumber)
+    XCTAssertEqual(requests[2].location, .pageNumber)
+  }
+
+  @MainActor
+  func testThreadPageJumpClearsPreviousPaginationFailure() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 561)
+    let firstPage = [Fixtures.post(id: 56_101, threadID: 561)]
+    let secondPage = [Fixtures.post(id: 56_102, threadID: 561)]
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: firstPage,
+          currentPage: 1,
+          hasMore: true,
+          totalPages: 3
+        )
+      )
+    )
+    await service.enqueuePosts(.failure(StubFailure(message: "next page failed")))
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadMoreIfNeeded(current: firstPage[0])
+    try await waitUntil { viewModel.loadMoreError == "next page failed" }
+
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: secondPage,
+          currentPage: 2,
+          hasMore: true,
+          totalPages: 3
+        )
+      )
+    )
+    viewModel.jump(toPage: 2)
+
+    try await waitUntil { viewModel.posts == secondPage && !viewModel.isJumping }
+    XCTAssertNil(viewModel.loadMoreError)
+
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 56_103, threadID: 561)],
+          currentPage: 3,
+          hasMore: false,
+          totalPages: 3
+        )
+      )
+    )
+    viewModel.loadMoreIfNeeded(current: secondPage[0])
+
+    try await waitUntil { viewModel.posts.map(\.id) == [56_102, 56_103] }
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2, 2, 3])
+    XCTAssertEqual(requests.dropFirst().map(\.location), [.pageNumber, .pageNumber, .pageNumber])
+  }
+
+  @MainActor
+  func testDescendingThreadPaginationUsesCursorAndDeduplicatesPosts() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 57)
+    let firstPage = [
+      Fixtures.post(id: 5_701, threadID: 57, authorName: "first"),
+      Fixtures.post(id: 5_702, threadID: 57, authorName: "original duplicate"),
+    ]
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: firstPage,
+          currentPage: 1,
+          hasMore: true,
+          totalPages: 5,
+          nextPagePostID: 5_700
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [
+            Fixtures.post(id: 5_702, threadID: 57, authorName: "replacement duplicate"),
+            Fixtures.post(id: 5_703, threadID: 57, authorName: "third"),
+          ],
+          currentPage: 4,
+          hasMore: false,
+          totalPages: 5
+        )
+      )
+    )
+    let options = ThreadBrowseOptions(sort: .descending)
+    let viewModel = ThreadViewModel(thread: thread, service: service, options: options)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadMoreIfNeeded(current: firstPage[1])
+
+    try await waitUntil {
+      viewModel.posts.map(\.id) == [5_701, 5_702, 5_703] && !viewModel.isLoadingMore
+    }
+    XCTAssertEqual(viewModel.posts[1].authorName, "original duplicate")
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(
+      requests,
+      [
+        PostRequest(threadID: 57, page: 1, pageSize: 30, options: options),
+        PostRequest(
+          threadID: 57,
+          page: 4,
+          pageSize: 30,
+          options: options,
+          location: .pageCursor(5_700)
+        ),
+      ]
+    )
+  }
+
+  @MainActor
+  func testDescendingThreadPaginationFallsBackToPreviousPhysicalPageWithoutCursor() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 58)
+    let firstPage = [Fixtures.post(id: 5_801, threadID: 58)]
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: firstPage,
+          currentPage: 1,
+          hasMore: true,
+          totalPages: 5
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 5_802, threadID: 58)],
+          currentPage: 4,
+          hasMore: true,
+          totalPages: 5
+        )
+      )
+    )
+    let options = ThreadBrowseOptions(sort: .descending)
+    let viewModel = ThreadViewModel(thread: thread, service: service, options: options)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadMoreIfNeeded(current: firstPage[0])
+
+    try await waitUntil { viewModel.posts.map(\.id) == [5_801, 5_802] }
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(
+      requests,
+      [
+        PostRequest(threadID: 58, page: 1, pageSize: 30, options: options),
+        PostRequest(
+          threadID: 58,
+          page: 4,
+          pageSize: 30,
+          options: options,
+          location: .pageNumber
+        ),
+      ]
+    )
+  }
+
+  @MainActor
   func testThreadPaginationDeduplicatesPosts() async throws {
     let service = ScriptedBrowseService()
     let thread = Fixtures.thread(id: 61)
@@ -427,7 +873,7 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
-  func testThreadPaginationFailureCanRetry() async throws {
+  func testThreadPaginationFailureRetriesSameDescendingCursorRequest() async throws {
     let service = ScriptedBrowseService()
     let thread = Fixtures.thread(id: 62)
     let firstPage = [Fixtures.post(id: 621, threadID: 62)]
@@ -437,12 +883,15 @@ final class BrowseViewModelTests: XCTestCase {
           thread: thread,
           posts: firstPage,
           currentPage: 1,
-          hasMore: true
+          hasMore: true,
+          totalPages: 5,
+          nextPagePostID: 620
         )
       )
     )
     await service.enqueuePosts(.failure(StubFailure(message: "next post page failed")))
-    let viewModel = ThreadViewModel(thread: thread, service: service)
+    let options = ThreadBrowseOptions(sort: .descending)
+    let viewModel = ThreadViewModel(thread: thread, service: service, options: options)
     viewModel.loadIfNeeded()
     try await waitUntil { viewModel.state == .loaded }
 
@@ -459,8 +908,9 @@ final class BrowseViewModelTests: XCTestCase {
         PostPageData(
           thread: thread,
           posts: [Fixtures.post(id: 622, threadID: 62)],
-          currentPage: 2,
-          hasMore: false
+          currentPage: 4,
+          hasMore: false,
+          totalPages: 5
         )
       )
     )
@@ -469,7 +919,26 @@ final class BrowseViewModelTests: XCTestCase {
     try await waitUntil { viewModel.posts.map(\.id) == [621, 622] }
     XCTAssertNil(viewModel.loadMoreError)
     let requests = await service.postRequestSnapshot()
-    XCTAssertEqual(requests.map(\.page), [1, 2, 2])
+    XCTAssertEqual(
+      requests,
+      [
+        PostRequest(threadID: 62, page: 1, pageSize: 30, options: options),
+        PostRequest(
+          threadID: 62,
+          page: 4,
+          pageSize: 30,
+          options: options,
+          location: .pageCursor(620)
+        ),
+        PostRequest(
+          threadID: 62,
+          page: 4,
+          pageSize: 30,
+          options: options,
+          location: .pageCursor(620)
+        ),
+      ]
+    )
   }
 
   @MainActor
@@ -743,17 +1212,20 @@ private struct PostRequest: Equatable, Sendable {
   let page: Int
   let pageSize: Int
   let options: ThreadBrowseOptions
+  let location: ThreadPostLocation?
 
   init(
     threadID: Int64,
     page: Int,
     pageSize: Int,
-    options: ThreadBrowseOptions = ThreadBrowseOptions()
+    options: ThreadBrowseOptions = ThreadBrowseOptions(),
+    location: ThreadPostLocation? = nil
   ) {
     self.threadID = threadID
     self.page = page
     self.pageSize = pageSize
     self.options = options
+    self.location = location
   }
 }
 
@@ -834,10 +1306,17 @@ private actor ScriptedBrowseService: BrowseService {
     threadID: Int64,
     page: Int,
     pageSize: Int,
-    options: ThreadBrowseOptions
+    options: ThreadBrowseOptions,
+    location: ThreadPostLocation?
   ) async throws -> PostPageData {
     postRequests.append(
-      PostRequest(threadID: threadID, page: page, pageSize: pageSize, options: options)
+      PostRequest(
+        threadID: threadID,
+        page: page,
+        pageSize: pageSize,
+        options: options,
+        location: location
+      )
     )
     defer { completedPostRequests += 1 }
     guard !postStubs.isEmpty else {
@@ -925,6 +1404,26 @@ private actor ScriptedBrowseService: BrowseService {
 }
 
 private enum Fixtures {
+  static func forum(
+    name: String,
+    classifications: [BrowseForumClassification] = []
+  ) -> BrowseForum {
+    BrowseForum(
+      id: 100,
+      name: name,
+      category: "科技",
+      subcategory: "编程",
+      memberCount: 1_000,
+      threadCount: 200,
+      postCount: 3_000,
+      avatarURL: URL(string: "https://example.com/forum.png"),
+      slogan: "Swift forum",
+      hasModerators: true,
+      hasRules: true,
+      featuredClassifications: classifications
+    )
+  }
+
   static func thread(
     id: Int64,
     title: String? = nil,
@@ -948,12 +1447,13 @@ private enum Fixtures {
   static func post(
     id: Int64,
     threadID: Int64,
-    authorName: String? = nil
+    authorName: String? = nil,
+    floor: Int? = nil
   ) -> BrowsePost {
     BrowsePost(
       id: id,
       threadID: threadID,
-      floor: Int(id % 100),
+      floor: floor ?? Int(id % 100),
       authorID: id + 1_000,
       authorName: authorName ?? "post-author-\(id)",
       authorPortraitURL: URL(string: "https://example.com/avatar/\(id).png"),

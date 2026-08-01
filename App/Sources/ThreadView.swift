@@ -2,12 +2,24 @@ import SwiftUI
 
 struct ThreadView: View {
   let service: any BrowseService
+  let historyRepository: any BrowsingHistoryRepository
 
   @StateObject private var viewModel: ThreadViewModel
   @State private var commentsPost: BrowsePost?
+  @State private var showsPageJump = false
+  @State private var pageInput = ""
+  @State private var visiblePost: BrowsePost?
+  private let historySnapshot: ThreadHistorySnapshot?
 
-  init(thread: BrowseThread, service: any BrowseService) {
+  init(
+    thread: BrowseThread,
+    service: any BrowseService,
+    historyRepository: any BrowsingHistoryRepository,
+    historySnapshot: ThreadHistorySnapshot? = nil
+  ) {
     self.service = service
+    self.historyRepository = historyRepository
+    self.historySnapshot = historySnapshot
     _viewModel = StateObject(wrappedValue: ThreadViewModel(thread: thread, service: service))
   }
 
@@ -33,7 +45,107 @@ struct ThreadView: View {
     .safeAreaInset(edge: .top, spacing: 0) {
       optionsBar
     }
-    .task { viewModel.loadIfNeeded() }
+    .safeAreaInset(edge: .bottom, spacing: 0) {
+      if let message = viewModel.jumpError {
+        if viewModel.canRetryJump {
+          LoadMoreErrorView(message: message, retry: viewModel.retryJump)
+            .padding(.horizontal, 12)
+            .background(.regularMaterial)
+        } else {
+          HStack(spacing: 10) {
+            Text(message)
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Button(action: viewModel.dismissJumpError) {
+              Image(systemName: "xmark.circle.fill")
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("关闭")
+          }
+          .padding(.horizontal, 14)
+          .padding(.vertical, 10)
+          .background(.regularMaterial)
+        }
+      } else if let message = viewModel.positionNotice {
+        HStack(spacing: 10) {
+          Image(systemName: "location.slash")
+            .foregroundStyle(.secondary)
+          Text(message)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+          Spacer(minLength: 0)
+          Button(action: viewModel.dismissPositionNotice) {
+            Image(systemName: "xmark.circle.fill")
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("关闭")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.regularMaterial)
+      }
+    }
+    .toolbar {
+      ToolbarItem(placement: .navigationBarTrailing) {
+        Button {
+          pageInput = viewModel.currentPage > 0 ? String(viewModel.currentPage) : ""
+          showsPageJump = true
+        } label: {
+          Image(systemName: "number.square")
+        }
+        .disabled(viewModel.totalPages <= 1 || viewModel.isJumping)
+        .accessibilityLabel("跳转页码")
+        .help("跳转页码")
+      }
+    }
+    .alert("跳转页码", isPresented: $showsPageJump) {
+      TextField("页码", text: $pageInput)
+        .keyboardType(.numberPad)
+      Button("跳转") {
+        viewModel.jump(toPage: Int(pageInput) ?? 0)
+      }
+      Button("取消", role: .cancel) {}
+    } message: {
+      if viewModel.totalPages > 0 {
+        Text("当前第 \(max(viewModel.currentPage, 1)) 页，共 \(viewModel.totalPages) 页")
+      }
+    }
+    .task {
+      let snapshot = await resumeSnapshot()
+      guard !Task.isCancelled else { return }
+      if let snapshot {
+        viewModel.prepareResume(
+          options: snapshot.browseOptions,
+          postID: snapshot.lastPostID
+        )
+      }
+      viewModel.loadIfNeeded()
+      try? await historyRepository.record(
+        .thread(
+          ThreadHistorySnapshot(
+            thread: viewModel.thread,
+            browseOptions: viewModel.options,
+            lastPostID: snapshot?.lastPostID,
+            lastFloor: snapshot?.lastFloor
+          )
+        )
+      )
+    }
+    .task(id: visiblePost?.id) {
+      guard let visiblePost else { return }
+      try? await Task.sleep(nanoseconds: 600_000_000)
+      guard !Task.isCancelled else { return }
+      try? await historyRepository.updateThreadProgress(
+        threadID: viewModel.thread.id,
+        postID: visiblePost.id,
+        floor: visiblePost.floor,
+        options: viewModel.options
+      )
+    }
+    .onChange(of: viewModel.options) { _ in
+      visiblePost = nil
+    }
     .onDisappear(perform: viewModel.cancel)
     .sheet(item: $commentsPost) { post in
       NavigationStack {
@@ -87,27 +199,81 @@ struct ThreadView: View {
   }
 
   private var postList: some View {
-    ScrollView {
-      LazyVStack(spacing: 0) {
-        ForEach(viewModel.posts) { post in
-          PostView(post: post) {
-            commentsPost = post
+    GeometryReader { viewport in
+      ScrollViewReader { proxy in
+        ScrollView {
+          LazyVStack(spacing: 0) {
+            ForEach(viewModel.posts) { post in
+              PostView(post: post) {
+                commentsPost = post
+              }
+              .id(post.id)
+              .background {
+                GeometryReader { geometry in
+                  Color.clear.preference(
+                    key: PostFramePreferenceKey.self,
+                    value: [post.id: geometry.frame(in: .named("thread-scroll"))]
+                  )
+                }
+              }
+              .onAppear {
+                viewModel.loadMoreIfNeeded(current: post)
+              }
+              Divider()
+                .padding(.leading, 52)
+            }
+            if viewModel.isLoadingMore || viewModel.isJumping {
+              ProgressView()
+                .padding(20)
+            } else if let message = viewModel.loadMoreError {
+              LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
+            }
           }
-          .onAppear {
-            viewModel.loadMoreIfNeeded(current: post)
+        }
+        .coordinateSpace(name: "thread-scroll")
+        .onPreferenceChange(PostFramePreferenceKey.self) { frames in
+          let lastVisibleID = frames
+            .filter { _, frame in
+              frame.maxY > 0 && frame.minY < viewport.size.height
+            }
+            .max { lhs, rhs in lhs.value.minY < rhs.value.minY }?
+            .key
+          visiblePost = lastVisibleID.flatMap { postID in
+            viewModel.posts.first(where: { $0.id == postID })
           }
-          Divider()
-            .padding(.leading, 52)
         }
-        if viewModel.isLoadingMore {
-          ProgressView()
-            .padding(20)
-        } else if let message = viewModel.loadMoreError {
-          LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
+        .task(id: viewModel.scrollTargetPostID) {
+          guard let postID = viewModel.scrollTargetPostID else { return }
+          await Task.yield()
+          guard !Task.isCancelled else { return }
+          proxy.scrollTo(postID, anchor: .top)
+          viewModel.consumeScrollTarget()
         }
+        .refreshable { await viewModel.refresh() }
       }
     }
-    .refreshable { await viewModel.refresh() }
+  }
+
+  private func resumeSnapshot() async -> ThreadHistorySnapshot? {
+    if let historySnapshot {
+      return historySnapshot
+    }
+    guard
+      let entry = try? await historyRepository.entries(kind: .thread)
+        .first(where: { $0.id == "thread:\(viewModel.thread.id)" }),
+      case .thread(let snapshot) = entry.target
+    else {
+      return nil
+    }
+    return snapshot
+  }
+}
+
+private struct PostFramePreferenceKey: PreferenceKey {
+  static let defaultValue: [Int64: CGRect] = [:]
+
+  static func reduce(value: inout [Int64: CGRect], nextValue: () -> [Int64: CGRect]) {
+    value.merge(nextValue(), uniquingKeysWith: { _, newValue in newValue })
   }
 }
 

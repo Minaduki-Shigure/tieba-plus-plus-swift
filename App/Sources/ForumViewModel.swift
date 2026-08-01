@@ -3,6 +3,7 @@ import Foundation
 
 @MainActor
 final class ForumViewModel: ObservableObject {
+  @Published private(set) var forum: BrowseForum
   @Published private(set) var threads: [BrowseThread] = []
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
@@ -19,6 +20,7 @@ final class ForumViewModel: ObservableObject {
 
   init(forumName: String, service: any BrowseService) {
     self.forumName = forumName
+    self.forum = .placeholder(name: forumName)
     self.service = service
   }
 
@@ -52,6 +54,16 @@ final class ForumViewModel: ObservableObject {
   func setFeaturedOnly(_ featuredOnly: Bool) {
     guard options.featuredOnly != featuredOnly else { return }
     options.featuredOnly = featuredOnly
+    if !featuredOnly {
+      options.featuredClassificationID = nil
+    }
+    reload()
+  }
+
+  func setFeaturedClassificationID(_ classificationID: Int?) {
+    guard options.featuredClassificationID != classificationID else { return }
+    options.featuredOnly = true
+    options.featuredClassificationID = classificationID
     reload()
   }
 
@@ -107,6 +119,7 @@ final class ForumViewModel: ObservableObject {
         )
         try Task.checkCancellation()
         guard generation == loadGeneration else { return }
+        forum = response.forum
         currentPage = response.currentPage
         hasMore = response.hasMore
         threads = replacing ? response.threads : merge(threads, response.threads)

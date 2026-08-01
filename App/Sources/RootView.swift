@@ -2,17 +2,10 @@ import SwiftUI
 
 struct RootView: View {
   let service: any BrowseService & SearchService
+  let historyRepository: any BrowsingHistoryRepository
 
-  @AppStorage("recentForums") private var recentForumsStorage = ""
   @State private var query = ""
   @State private var path: [RootDestination] = []
-
-  private var recentForums: [String] {
-    recentForumsStorage
-      .split(separator: "\n")
-      .map(String.init)
-      .filter { !$0.isEmpty }
-  }
 
   var body: some View {
     NavigationStack(path: $path) {
@@ -43,35 +36,58 @@ struct RootView: View {
           }
         }
 
-        if !recentForums.isEmpty {
-          Section("最近访问") {
-            ForEach(recentForums, id: \.self) { forum in
-              Button {
-                rememberAndOpen(forum)
-              } label: {
-                Label(forum, systemImage: "text.bubble")
-              }
-              .buttonStyle(.plain)
-            }
-            .onDelete(perform: removeRecentForums)
-          }
-        }
       }
       .listStyle(.insetGrouped)
       .navigationTitle("贴吧++")
+      .toolbar {
+        ToolbarItem(placement: .navigationBarTrailing) {
+          Button {
+            path.append(.history)
+          } label: {
+            Image(systemName: "clock.arrow.circlepath")
+          }
+          .accessibilityLabel("浏览记录")
+          .help("浏览记录")
+        }
+      }
       .navigationDestination(for: RootDestination.self) { destination in
         switch destination {
         case .forum(let forumName):
-          ForumView(forumName: forumName, service: service)
+          ForumView(
+            forumName: forumName,
+            service: service,
+            historyRepository: historyRepository
+          )
         case .search(let query):
-          SearchView(query: query, browseService: service, searchService: service)
+          SearchView(
+            query: query,
+            browseService: service,
+            searchService: service,
+            historyRepository: historyRepository
+          )
+        case .history:
+          HistoryView(repository: historyRepository) { target in
+            switch target {
+            case .forum(let forum):
+              path.append(.forum(forum.name))
+            case .thread(let thread):
+              path.append(.thread(thread))
+            }
+          }
+        case .thread(let thread):
+          ThreadView(
+            thread: thread.browseThread,
+            service: service,
+            historyRepository: historyRepository,
+            historySnapshot: thread
+          )
         }
       }
     }
   }
 
   private func openForum() {
-    rememberAndOpen(query)
+    openForum(named: query)
   }
 
   private func search() {
@@ -81,24 +97,17 @@ struct RootView: View {
     path.append(.search(searchQuery))
   }
 
-  private func rememberAndOpen(_ rawName: String) {
+  private func openForum(named rawName: String) {
     let forumName = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !forumName.isEmpty else { return }
-    var updated = recentForums.filter { $0.caseInsensitiveCompare(forumName) != .orderedSame }
-    updated.insert(forumName, at: 0)
-    recentForumsStorage = updated.prefix(12).joined(separator: "\n")
     query = ""
     path.append(.forum(forumName))
-  }
-
-  private func removeRecentForums(at offsets: IndexSet) {
-    var updated = recentForums
-    updated.remove(atOffsets: offsets)
-    recentForumsStorage = updated.joined(separator: "\n")
   }
 }
 
 private enum RootDestination: Hashable {
   case forum(String)
   case search(String)
+  case history
+  case thread(ThreadHistorySnapshot)
 }

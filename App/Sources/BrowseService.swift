@@ -1,6 +1,6 @@
 import Foundation
 
-enum ForumThreadSort: String, CaseIterable, Hashable, Identifiable, Sendable {
+enum ForumThreadSort: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
   case replyTime
   case creationTime
 
@@ -16,17 +16,23 @@ enum ForumThreadSort: String, CaseIterable, Hashable, Identifiable, Sendable {
   }
 }
 
-struct ForumBrowseOptions: Equatable, Sendable {
+struct ForumBrowseOptions: Codable, Equatable, Sendable {
   var sort: ForumThreadSort
   var featuredOnly: Bool
+  var featuredClassificationID: Int?
 
-  init(sort: ForumThreadSort = .replyTime, featuredOnly: Bool = false) {
+  init(
+    sort: ForumThreadSort = .replyTime,
+    featuredOnly: Bool = false,
+    featuredClassificationID: Int? = nil
+  ) {
     self.sort = sort
     self.featuredOnly = featuredOnly
+    self.featuredClassificationID = featuredClassificationID
   }
 }
 
-enum ThreadPostSort: String, CaseIterable, Hashable, Identifiable, Sendable {
+enum ThreadPostSort: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
   case ascending
   case descending
   case hot
@@ -45,7 +51,7 @@ enum ThreadPostSort: String, CaseIterable, Hashable, Identifiable, Sendable {
   }
 }
 
-struct ThreadBrowseOptions: Equatable, Sendable {
+struct ThreadBrowseOptions: Codable, Equatable, Sendable {
   var sort: ThreadPostSort
   var onlyThreadAuthor: Bool
 
@@ -53,6 +59,12 @@ struct ThreadBrowseOptions: Equatable, Sendable {
     self.sort = sort
     self.onlyThreadAuthor = onlyThreadAuthor
   }
+}
+
+enum ThreadPostLocation: Equatable, Sendable {
+  case postID(Int64)
+  case pageNumber
+  case pageCursor(Int64)
 }
 
 protocol BrowseService: Sendable {
@@ -66,7 +78,8 @@ protocol BrowseService: Sendable {
     threadID: Int64,
     page: Int,
     pageSize: Int,
-    options: ThreadBrowseOptions
+    options: ThreadBrowseOptions,
+    location: ThreadPostLocation?
   ) async throws -> PostPageData
   func comments(threadID: Int64, postID: Int64, page: Int) async throws -> CommentPageData
 }

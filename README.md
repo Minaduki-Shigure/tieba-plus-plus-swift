@@ -7,10 +7,13 @@ from TiebaLite.
 ## Status
 
 Development is in progress. Anonymous mode supports forum and thread search,
-forum, post, and nested-reply browsing, remote media, forum thread sorting and
-featured filtering, plus post sorting and an only-thread-author filter. Account
-credentials and write operations are intentionally excluded until the anonymous
-protocol path is stable on real devices.
+forum, post, and nested-reply browsing, remote media, forum metadata and
+featured classifications, post sorting, page jumps, and an only-thread-author
+filter. Local browsing history records the last visible post ID for stable post
+orders and restores it with the active sort/filter options; the changing hot
+ranking reopens at its first page. Recording can be disabled or cleared in the
+app. Account credentials and write operations are intentionally excluded until
+the anonymous protocol path is stable on real devices.
 
 See [`ROADMAP.md`](ROADMAP.md) for the current TiebaLite parity matrix and the
 next implementation milestones.

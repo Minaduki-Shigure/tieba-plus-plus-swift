@@ -1,10 +1,73 @@
 import Foundation
 
+struct BrowseForumClassification: Identifiable, Hashable, Sendable {
+  let id: Int
+  let name: String
+}
+
+struct BrowseForum: Identifiable, Hashable, Sendable {
+  let id: Int64
+  let name: String
+  let category: String
+  let subcategory: String
+  let memberCount: Int
+  let threadCount: Int
+  let postCount: Int
+  let avatarURL: URL?
+  let slogan: String
+  let hasModerators: Bool
+  let hasRules: Bool
+  let featuredClassifications: [BrowseForumClassification]
+
+  static func placeholder(name: String) -> BrowseForum {
+    BrowseForum(
+      id: 0,
+      name: name,
+      category: "",
+      subcategory: "",
+      memberCount: 0,
+      threadCount: 0,
+      postCount: 0,
+      avatarURL: nil,
+      slogan: "",
+      hasModerators: false,
+      hasRules: false,
+      featuredClassifications: []
+    )
+  }
+}
+
 struct ThreadPageData: Sendable {
-  let forumName: String
+  let forum: BrowseForum
   let threads: [BrowseThread]
   let currentPage: Int
   let hasMore: Bool
+
+  init(
+    forum: BrowseForum,
+    threads: [BrowseThread],
+    currentPage: Int,
+    hasMore: Bool
+  ) {
+    self.forum = forum
+    self.threads = threads
+    self.currentPage = currentPage
+    self.hasMore = hasMore
+  }
+
+  init(
+    forumName: String,
+    threads: [BrowseThread],
+    currentPage: Int,
+    hasMore: Bool
+  ) {
+    self.init(
+      forum: .placeholder(name: forumName),
+      threads: threads,
+      currentPage: currentPage,
+      hasMore: hasMore
+    )
+  }
 }
 
 struct PostPageData: Sendable {
@@ -12,6 +75,27 @@ struct PostPageData: Sendable {
   let posts: [BrowsePost]
   let currentPage: Int
   let hasMore: Bool
+  let totalPages: Int
+  let totalCount: Int
+  let nextPagePostID: Int64?
+
+  init(
+    thread: BrowseThread,
+    posts: [BrowsePost],
+    currentPage: Int,
+    hasMore: Bool,
+    totalPages: Int = 0,
+    totalCount: Int = 0,
+    nextPagePostID: Int64? = nil
+  ) {
+    self.thread = thread
+    self.posts = posts
+    self.currentPage = currentPage
+    self.hasMore = hasMore
+    self.totalPages = totalPages
+    self.totalCount = totalCount
+    self.nextPagePostID = nextPagePostID
+  }
 }
 
 struct CommentPageData: Sendable {
