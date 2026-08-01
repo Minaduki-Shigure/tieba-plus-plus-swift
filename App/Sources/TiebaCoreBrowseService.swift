@@ -1,7 +1,7 @@
 import Foundation
 import TiebaCore
 
-struct TiebaCoreBrowseService: BrowseService {
+struct TiebaCoreBrowseService: BrowseService, SearchService {
   private let client: TiebaClient
 
   init(client: TiebaClient = TiebaClient()) {
@@ -70,6 +70,39 @@ struct TiebaCoreBrowseService: BrowseService {
     )
   }
 
+  func searchForums(query: String) async throws -> ForumSearchData {
+    let response: TiebaForumSearchResults
+    do {
+      response = try await client.searchForums(query: query)
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    return ForumSearchData(
+      exactMatch: response.exactMatch.map(Self.mapForumSearchResult),
+      related: response.fuzzyMatches.map(Self.mapForumSearchResult)
+    )
+  }
+
+  func searchThreads(query: String, page: Int, pageSize: Int) async throws
+    -> ThreadSearchPageData
+  {
+    let response: TiebaThreadSearchPage
+    do {
+      response = try await client.searchThreads(query: query, page: page, pageSize: pageSize)
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    return ThreadSearchPageData(
+      threads: response.results.map(Self.mapThreadSearchResult),
+      currentPage: response.pagination.currentPage,
+      hasMore: response.pagination.hasMore
+    )
+  }
+
   private static func mapThread(_ thread: TiebaThread) -> BrowseThread {
     BrowseThread(
       id: thread.id,
@@ -83,6 +116,46 @@ struct TiebaCoreBrowseService: BrowseService {
       createdAt: thread.createdAt,
       lastReplyAt: thread.lastReplyAt,
       contents: mapContent(thread.content)
+    )
+  }
+
+  private static func mapForumSearchResult(_ result: TiebaForumSearchResult) -> ForumSearchItem {
+    let summary = result.slogan.isEmpty ? result.introduction : result.slogan
+    return ForumSearchItem(
+      id: result.id,
+      name: result.name,
+      displayName: result.displayName,
+      avatarURL: SecureTiebaURL.media(result.avatarURL),
+      postCount: result.postCount,
+      memberCount: result.memberCount,
+      summary: summary
+    )
+  }
+
+  private static func mapThreadSearchResult(_ result: TiebaThreadSearchResult) -> BrowseThread {
+    let images: [BrowseContent] = result.images.compactMap { image in
+      guard
+        let thumbnail = SecureTiebaURL.media(image.thumbnailURL ?? image.fullSizeURL)
+      else { return nil }
+      return .image(
+        thumbnail: thumbnail,
+        original: SecureTiebaURL.media(image.fullSizeURL),
+        width: image.width,
+        height: image.height
+      )
+    }
+    return BrowseThread(
+      id: result.threadID,
+      forumID: result.forumID,
+      forumName: result.forumName,
+      title: result.title,
+      excerpt: result.excerpt,
+      authorName: result.authorName,
+      replyCount: result.replyCount,
+      viewCount: 0,
+      createdAt: result.createdAt,
+      lastReplyAt: nil,
+      contents: [.text(result.excerpt)] + images
     )
   }
 
@@ -136,6 +209,8 @@ struct TiebaCoreBrowseService: BrowseService {
       message = "贴吧服务暂时不可用（HTTP \(status)）。"
     case .invalidProtobuf:
       message = "贴吧返回了无法识别的数据，协议可能已经更新。"
+    case .invalidJSON:
+      message = "贴吧返回了无法识别的搜索数据，接口可能已经更新。"
     case .server(let code, let serverMessage):
       message = serverMessage.isEmpty ? "贴吧返回错误 \(code)。" : serverMessage
     @unknown default:

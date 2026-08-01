@@ -6,6 +6,12 @@ protocol BrowseService: Sendable {
   func comments(threadID: Int64, postID: Int64, page: Int) async throws -> CommentPageData
 }
 
+protocol SearchService: Sendable {
+  func searchForums(query: String) async throws -> ForumSearchData
+  func searchThreads(query: String, page: Int, pageSize: Int) async throws
+    -> ThreadSearchPageData
+}
+
 enum BrowseError: LocalizedError, Sendable {
   case invalidForumName
   case unavailable(String)

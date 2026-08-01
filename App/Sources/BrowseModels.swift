@@ -20,6 +20,27 @@ struct CommentPageData: Sendable {
   let hasMore: Bool
 }
 
+struct ForumSearchItem: Identifiable, Hashable, Sendable {
+  let id: Int64
+  let name: String
+  let displayName: String
+  let avatarURL: URL?
+  let postCount: Int
+  let memberCount: Int
+  let summary: String
+}
+
+struct ForumSearchData: Sendable {
+  let exactMatch: ForumSearchItem?
+  let related: [ForumSearchItem]
+}
+
+struct ThreadSearchPageData: Sendable {
+  let threads: [BrowseThread]
+  let currentPage: Int
+  let hasMore: Bool
+}
+
 struct BrowseThread: Identifiable, Hashable, Sendable {
   let id: Int64
   let forumID: Int64

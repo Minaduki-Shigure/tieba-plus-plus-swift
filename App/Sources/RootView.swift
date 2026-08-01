@@ -1,11 +1,11 @@
 import SwiftUI
 
 struct RootView: View {
-  let service: any BrowseService
+  let service: any BrowseService & SearchService
 
   @AppStorage("recentForums") private var recentForumsStorage = ""
   @State private var query = ""
-  @State private var path: [String] = []
+  @State private var path: [RootDestination] = []
 
   private var recentForums: [String] {
     recentForumsStorage
@@ -19,20 +19,27 @@ struct RootView: View {
       List {
         Section {
           HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-              .foregroundStyle(.secondary)
-            TextField("输入吧名", text: $query)
+            TextField("输入吧名或关键词", text: $query)
               .textInputAutocapitalization(.never)
               .autocorrectionDisabled()
-              .submitLabel(.go)
-              .onSubmit(openForum)
+              .submitLabel(.search)
+              .onSubmit(search)
+            Button(action: search) {
+              Image(systemName: "magnifyingglass.circle.fill")
+                .font(.title2)
+            }
+            .buttonStyle(.plain)
+            .disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .accessibilityLabel("搜索贴吧和帖子")
+            .help("搜索贴吧和帖子")
             Button(action: openForum) {
               Image(systemName: "arrow.right.circle.fill")
                 .font(.title2)
             }
             .buttonStyle(.plain)
             .disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .accessibilityLabel("打开贴吧")
+            .accessibilityLabel("直接打开贴吧")
+            .help("直接打开贴吧")
           }
         }
 
@@ -52,14 +59,26 @@ struct RootView: View {
       }
       .listStyle(.insetGrouped)
       .navigationTitle("贴吧++")
-      .navigationDestination(for: String.self) { forumName in
-        ForumView(forumName: forumName, service: service)
+      .navigationDestination(for: RootDestination.self) { destination in
+        switch destination {
+        case .forum(let forumName):
+          ForumView(forumName: forumName, service: service)
+        case .search(let query):
+          SearchView(query: query, browseService: service, searchService: service)
+        }
       }
     }
   }
 
   private func openForum() {
     rememberAndOpen(query)
+  }
+
+  private func search() {
+    let searchQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !searchQuery.isEmpty else { return }
+    query = ""
+    path.append(.search(searchQuery))
   }
 
   private func rememberAndOpen(_ rawName: String) {
@@ -69,7 +88,7 @@ struct RootView: View {
     updated.insert(forumName, at: 0)
     recentForumsStorage = updated.prefix(12).joined(separator: "\n")
     query = ""
-    path.append(forumName)
+    path.append(.forum(forumName))
   }
 
   private func removeRecentForums(at offsets: IndexSet) {
@@ -77,4 +96,9 @@ struct RootView: View {
     updated.remove(atOffsets: offsets)
     recentForumsStorage = updated.joined(separator: "\n")
   }
+}
+
+private enum RootDestination: Hashable {
+  case forum(String)
+  case search(String)
 }

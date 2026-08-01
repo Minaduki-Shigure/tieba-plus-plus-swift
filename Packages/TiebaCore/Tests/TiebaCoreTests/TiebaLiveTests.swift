@@ -26,4 +26,22 @@ final class TiebaLiveTests: XCTestCase {
     XCTAssertEqual(comments.thread.id, thread.id)
     XCTAssertEqual(comments.parentPost.id, post.id)
   }
+
+  func testAnonymousForumAndThreadSearch() async throws {
+    guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
+      throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
+    }
+
+    let client = TiebaClient(
+      configuration: .init(userAgent: "TiebaPlusPlus/0.1 integration-test")
+    )
+    let forums = try await client.searchForums(query: "swift")
+    XCTAssertFalse(forums.isLoggedIn)
+    XCTAssertTrue(forums.exactMatch != nil || !forums.fuzzyMatches.isEmpty)
+
+    let threads = try await client.searchThreads(query: "swift", pageSize: 5)
+    XCTAssertFalse(threads.isLoggedIn)
+    XCTAssertFalse(threads.results.isEmpty)
+    XCTAssertEqual(threads.pagination.currentPage, 1)
+  }
 }

@@ -2,11 +2,11 @@ import SwiftUI
 
 @main
 struct TiebaPlusPlusApp: App {
-  private let browseService: any BrowseService = TiebaCoreBrowseService()
+  private let service: any BrowseService & SearchService = TiebaCoreBrowseService()
 
   var body: some Scene {
     WindowGroup {
-      RootView(service: browseService)
+      RootView(service: service)
     }
   }
 }

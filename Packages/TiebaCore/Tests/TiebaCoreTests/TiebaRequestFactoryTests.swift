@@ -149,14 +149,78 @@ final class TiebaRequestFactoryTests: XCTestCase {
         featuredOnly: false
       )
     )
+    XCTAssertThrowsError(try factory.searchForums(query: "  "))
+    XCTAssertThrowsError(try factory.searchForums(query: String(repeating: "a", count: 101)))
+    XCTAssertThrowsError(try factory.searchThreads(query: "swift", page: 0, pageSize: 20))
+    XCTAssertThrowsError(try factory.searchThreads(query: "swift", page: 1, pageSize: 51))
+    XCTAssertThrowsError(try injected.searchForums(query: "swift"))
+  }
+
+  func testSearchRequestsUseEncodedCredentialFreeHTTPSWebEndpoint() throws {
+    let forumRequest = try factory.searchForums(query: " Swift & iOS ")
+    let threadRequest = try factory.searchThreads(query: "Swift 中文", page: 2, pageSize: 15)
+
+    XCTAssertEqual(forumRequest.url?.scheme, "https")
+    XCTAssertEqual(forumRequest.url?.host, "tieba.baidu.com")
+    XCTAssertEqual(forumRequest.url?.path, "/mo/q/search/forum")
+    XCTAssertEqual(queryItems(forumRequest)["word"], "Swift & iOS")
+
+    XCTAssertEqual(threadRequest.url?.scheme, "https")
+    XCTAssertEqual(threadRequest.url?.host, "tieba.baidu.com")
+    XCTAssertEqual(threadRequest.url?.path, "/mo/q/search/thread")
+    XCTAssertEqual(
+      queryItems(threadRequest),
+      [
+        "word": "Swift 中文",
+        "pn": "2",
+        "rn": "15",
+        "st": "2",
+        "tt": "1",
+        "ct": "1",
+        "is_use_zonghe": "1",
+        "cv": "99.9.101",
+      ]
+    )
+
+    for request in [forumRequest, threadRequest] {
+      XCTAssertEqual(request.httpMethod, "GET")
+      XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+      XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+      XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+      XCTAssertNil(request.httpBody)
+    }
   }
 
   func testEndpointPolicyRejectsDowngradeAndCrossHostRedirects() {
     XCTAssertTrue(TiebaEndpointPolicy.allows(URL(string: "https://tiebac.baidu.com/c/f/pb/page")))
+    XCTAssertTrue(
+      TiebaEndpointPolicy.allows(URL(string: "https://tieba.baidu.com/mo/q/search/forum")))
     XCTAssertFalse(TiebaEndpointPolicy.allows(URL(string: "http://tiebac.baidu.com/c/f/pb/page")))
-    XCTAssertFalse(TiebaEndpointPolicy.allows(URL(string: "https://tieba.baidu.com/c/f/pb/page")))
     XCTAssertFalse(
       TiebaEndpointPolicy.allows(URL(string: "https://tiebac.baidu.com.example/c/f/pb/page")))
+    XCTAssertTrue(
+      TiebaEndpointPolicy.allowsRedirect(
+        from: URL(string: "https://tieba.baidu.com/mo/q/search/forum"),
+        to: URL(string: "https://tieba.baidu.com/mo/q/search/forum?word=swift")
+      )
+    )
+    XCTAssertFalse(
+      TiebaEndpointPolicy.allowsRedirect(
+        from: URL(string: "https://tiebac.baidu.com/c/f/pb/page"),
+        to: URL(string: "https://tieba.baidu.com/mo/q/search/thread")
+      )
+    )
+  }
+
+  private func queryItems(_ request: URLRequest) -> [String: String] {
+    guard
+      let url = request.url,
+      let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+    else { return [:] }
+    return Dictionary(
+      uniqueKeysWithValues: components.queryItems?.compactMap { item in
+        item.value.map { (item.name, $0) }
+      } ?? [])
   }
 
   private func protobufPayload(from request: URLRequest) throws -> Data {

@@ -7,15 +7,27 @@ import TiebaProto
 #endif
 
 enum TiebaEndpointPolicy {
-  static let serviceHost = "tiebac.baidu.com"
+  static let protobufHost = "tiebac.baidu.com"
+  static let webHost = "tieba.baidu.com"
+  static let allowedHosts: Set<String> = [protobufHost, webHost]
 
   static func allows(_ url: URL?) -> Bool {
-    url?.scheme?.lowercased() == "https" && url?.host?.lowercased() == serviceHost
+    guard
+      url?.scheme?.lowercased() == "https",
+      let host = url?.host?.lowercased()
+    else { return false }
+    return allowedHosts.contains(host)
+  }
+
+  static func allowsRedirect(from source: URL?, to destination: URL?) -> Bool {
+    guard allows(source), allows(destination) else { return false }
+    return source?.host?.caseInsensitiveCompare(destination?.host ?? "") == .orderedSame
   }
 }
 
 struct TiebaRequestFactory: Sendable {
-  static let serviceHost = TiebaEndpointPolicy.serviceHost
+  static let serviceHost = TiebaEndpointPolicy.protobufHost
+  static let webHost = TiebaEndpointPolicy.webHost
   static let multipartBoundary = "-*_r1999"
 
   let configuration: TiebaClientConfiguration
@@ -130,19 +142,35 @@ struct TiebaRequestFactory: Sendable {
     )
   }
 
+  func searchForums(query: String) throws -> URLRequest {
+    let query = try validatedSearchQuery(query)
+    return try webRequest(
+      path: "/mo/q/search/forum",
+      queryItems: [URLQueryItem(name: "word", value: query)]
+    )
+  }
+
+  func searchThreads(query: String, page: Int, pageSize: Int) throws -> URLRequest {
+    let query = try validatedSearchQuery(query)
+    try validate(page: page)
+    try validate(pageSize: pageSize, maximum: 50)
+    return try webRequest(
+      path: "/mo/q/search/thread",
+      queryItems: [
+        URLQueryItem(name: "word", value: query),
+        URLQueryItem(name: "pn", value: String(page)),
+        URLQueryItem(name: "rn", value: String(pageSize)),
+        URLQueryItem(name: "st", value: "2"),
+        URLQueryItem(name: "tt", value: "1"),
+        URLQueryItem(name: "ct", value: "1"),
+        URLQueryItem(name: "is_use_zonghe", value: "1"),
+        URLQueryItem(name: "cv", value: "99.9.101"),
+      ]
+    )
+  }
+
   private func request(path: String, command: Int, protobuf: Data) throws -> URLRequest {
-    guard
-      !configuration.clientVersion.isEmpty,
-      !configuration.clientVersion.contains(where: { $0.isNewline }),
-      !configuration.userAgent.isEmpty,
-      !configuration.userAgent.contains(where: { $0.isNewline }),
-      configuration.requestTimeout.isFinite,
-      configuration.requestTimeout > 0
-    else {
-      throw TiebaClientError.invalidArgument(
-        "Client version and user agent must be non-empty single-line values, and timeout must be positive."
-      )
-    }
+    try validateConfiguration()
 
     var components = URLComponents()
     components.scheme = "https"
@@ -175,6 +203,32 @@ struct TiebaRequestFactory: Sendable {
     return request
   }
 
+  private func webRequest(path: String, queryItems: [URLQueryItem]) throws -> URLRequest {
+    try validateConfiguration()
+
+    var components = URLComponents()
+    components.scheme = "https"
+    components.host = Self.webHost
+    components.path = path
+    components.queryItems = queryItems
+
+    guard let url = components.url, TiebaEndpointPolicy.allows(url) else {
+      throw TiebaClientError.invalidEndpoint
+    }
+
+    var request = URLRequest(
+      url: url,
+      cachePolicy: .reloadIgnoringLocalCacheData,
+      timeoutInterval: configuration.requestTimeout
+    )
+    request.httpMethod = "GET"
+    request.httpShouldHandleCookies = false
+    request.setValue(configuration.userAgent, forHTTPHeaderField: "User-Agent")
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    request.setValue("gzip", forHTTPHeaderField: "Accept-Encoding")
+    return request
+  }
+
   static func multipartBody(protobuf: Data) -> Data {
     var body = Data()
     body.append(Data("--\(multipartBoundary)\r\n".utf8))
@@ -200,6 +254,31 @@ struct TiebaRequestFactory: Sendable {
   private func validate(identifier: Int64, name: String) throws {
     guard identifier > 0 else {
       throw TiebaClientError.invalidArgument("\(name) must be positive.")
+    }
+  }
+
+  private func validatedSearchQuery(_ rawValue: String) throws -> String {
+    let query = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !query.isEmpty, query.count <= 100 else {
+      throw TiebaClientError.invalidArgument(
+        "Search query must contain between 1 and 100 characters."
+      )
+    }
+    return query
+  }
+
+  private func validateConfiguration() throws {
+    guard
+      !configuration.clientVersion.isEmpty,
+      !configuration.clientVersion.contains(where: { $0.isNewline }),
+      !configuration.userAgent.isEmpty,
+      !configuration.userAgent.contains(where: { $0.isNewline }),
+      configuration.requestTimeout.isFinite,
+      configuration.requestTimeout > 0
+    else {
+      throw TiebaClientError.invalidArgument(
+        "Client version and user agent must be non-empty single-line values, and timeout must be positive."
+      )
     }
   }
 }

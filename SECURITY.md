@@ -7,5 +7,9 @@ The networking layer must use HTTPS with URLSession's default certificate and
 hostname verification. Any endpoint that requires disabled verification or a
 global cleartext exception must remain unsupported.
 
+API traffic is restricted to the exact HTTPS hosts `tiebac.baidu.com` and
+`tieba.baidu.com`. Redirects between those hosts are rejected even though both
+are individually allowed.
+
 Report security issues privately to the repository owner rather than opening a
 public issue.

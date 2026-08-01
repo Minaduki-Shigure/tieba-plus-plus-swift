@@ -6,10 +6,10 @@ from TiebaLite.
 
 ## Status
 
-Development is in progress. The first milestone covers anonymous forum, thread,
-post, and nested-reply browsing over verified HTTPS. Account credentials and
-write operations are intentionally excluded until the anonymous protocol path
-is stable on real devices.
+Development is in progress. The first milestone covers anonymous forum and
+thread search plus forum, post, and nested-reply browsing over verified HTTPS.
+Account credentials and write operations are intentionally excluded until the
+anonymous protocol path is stable on real devices.
 
 ## Architecture
 

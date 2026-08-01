@@ -39,7 +39,9 @@ final class HTTPSOnlySessionDelegate: NSObject, URLSessionTaskDelegate, @uncheck
     newRequest request: URLRequest,
     completionHandler: @escaping @Sendable (URLRequest?) -> Void
   ) {
-    completionHandler(TiebaEndpointPolicy.allows(request.url) ? request : nil)
+    completionHandler(
+      TiebaEndpointPolicy.allowsRedirect(from: response.url, to: request.url) ? request : nil
+    )
   }
 }
 
@@ -140,6 +142,26 @@ public actor TiebaClient {
       anchorID: postID,
       page: page,
       anchorIsComment: false
+    )
+  }
+
+  public func searchForums(query: String) async throws -> TiebaForumSearchResults {
+    let request = try requestFactory.searchForums(query: query)
+    let body = try await send(request)
+    return try TiebaSearchDecoder.forums(from: body)
+  }
+
+  public func searchThreads(
+    query: String,
+    page: Int = 1,
+    pageSize: Int = 20
+  ) async throws -> TiebaThreadSearchPage {
+    let request = try requestFactory.searchThreads(query: query, page: page, pageSize: pageSize)
+    let body = try await send(request)
+    return try TiebaSearchDecoder.threads(
+      from: body,
+      requestedPage: page,
+      pageSize: pageSize
     )
   }
 
