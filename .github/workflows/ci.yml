@@ -43,6 +43,25 @@ jobs:
         run: brew install xcodegen
       - name: Generate project
         run: xcodegen generate
+      - name: Select available iOS simulator
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            device_id="$(xcrun simctl list devices available -j | jq -r '
+              [.devices[][] | select(.isAvailable == true and (.name | startswith("iPhone")))] as $phones
+              | (($phones | map(select(.name == "iPhone 16 Pro"))) + $phones
+              | .[0].udid // empty)
+            ')"
+            if [ -n "$device_id" ]; then
+              echo "IOS_SIMULATOR_DESTINATION=platform=iOS Simulator,id=$device_id" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            killall -9 com.apple.CoreSimulator.CoreSimulatorService 2>/dev/null || true
+            sleep 5
+          done
+          xcrun simctl list runtimes
+          xcrun simctl list devices available
+          exit 1
       - name: Build and test app
         id: app_tests
         continue-on-error: true
@@ -52,7 +71,7 @@ jobs:
           -project TiebaPlusPlus.xcodeproj
           -scheme TiebaPlusPlus
           -configuration Debug
-          -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.5'
+          -destination "$IOS_SIMULATOR_DESTINATION"
           -skipPackagePluginValidation
           CODE_SIGNING_ALLOWED=NO
           test 2>&1 | tee xcodebuild.log
