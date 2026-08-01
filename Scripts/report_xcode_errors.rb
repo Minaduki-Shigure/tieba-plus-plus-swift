@@ -18,4 +18,9 @@ diagnostics.last(80).each do |line|
   puts "::error title=Xcode diagnostic::#{escaped}"
 end
 
+tail = lines.last(100).join("\n")
+tail = tail.chars.last(50_000).join if tail.length > 50_000
+escaped_tail = tail.gsub("%", "%25").gsub("\r", "%0D").gsub("\n", "%0A")
+puts "::error title=Xcode log tail::#{escaped_tail}"
+
 exit 1
