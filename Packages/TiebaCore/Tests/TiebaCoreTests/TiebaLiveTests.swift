@@ -10,14 +10,42 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.1 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.2 integration-test")
     )
     let threads = try await client.getThreads(forumName: "starry", pageSize: 10)
     XCTAssertFalse(threads.threads.isEmpty)
 
+    let creationSorted = try await client.getThreads(
+      forumName: "starry",
+      pageSize: 5,
+      sort: .creationTime
+    )
+    XCTAssertFalse(creationSorted.threads.isEmpty)
+
+    _ = try await client.getThreads(
+      forumName: "starry",
+      pageSize: 5,
+      featuredOnly: true
+    )
+
     let thread = try XCTUnwrap(threads.threads.max { $0.replyCount < $1.replyCount })
     let posts = try await client.getPosts(threadID: thread.id, pageSize: 10)
     XCTAssertFalse(posts.posts.isEmpty)
+
+    let descendingPosts = try await client.getPosts(
+      threadID: thread.id,
+      pageSize: 10,
+      sort: .descending
+    )
+    XCTAssertFalse(descendingPosts.posts.isEmpty)
+
+    let hotAuthorPosts = try await client.getPosts(
+      threadID: thread.id,
+      pageSize: 10,
+      sort: .hot,
+      onlyThreadAuthor: true
+    )
+    XCTAssertFalse(hotAuthorPosts.posts.isEmpty)
 
     guard let post = posts.posts.first(where: { $0.commentCount > 0 }) else {
       throw XCTSkip("The sampled live posts have no nested comments.")
@@ -33,7 +61,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.1 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.2 integration-test")
     )
     let forums = try await client.searchForums(query: "swift")
     XCTAssertFalse(forums.isLoggedIn)
