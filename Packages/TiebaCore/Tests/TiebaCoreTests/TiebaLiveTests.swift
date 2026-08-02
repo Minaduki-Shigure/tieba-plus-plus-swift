@@ -196,7 +196,7 @@ final class TiebaLiveTests: XCTestCase {
     XCTAssertEqual(firstPage.topic.id, topic.id)
     XCTAssertFalse(firstPage.topic.name.isEmpty)
     XCTAssertFalse(firstPage.threads.isEmpty && firstPage.relatedForums.isEmpty)
-    XCTAssertTrue(firstPage.threads.allSatisfy { $0.id > 0 })
+    XCTAssertTrue(firstPage.threads.allSatisfy { $0.threadID > 0 })
 
     if firstPage.pagination.hasMore, let cursor = firstPage.nextPageCursor {
       let secondPage = try await client.getHotTopic(
@@ -207,7 +207,7 @@ final class TiebaLiveTests: XCTestCase {
         lastID: cursor
       )
       XCTAssertEqual(secondPage.pagination.currentPage, 2)
-      XCTAssertTrue(secondPage.threads.allSatisfy { $0.id > 0 })
+      XCTAssertTrue(secondPage.threads.allSatisfy { $0.threadID > 0 })
     }
   }
 
