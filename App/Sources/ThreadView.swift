@@ -255,9 +255,10 @@ struct ThreadView: View {
             favoritesRepository: favoritesRepository,
             searchHistoryRepository: searchHistoryRepository
           )
-        case .comment(let threadID, let commentID):
+        case .comment(let threadID, let postID, let commentID):
           CommentsView(
             threadID: threadID,
+            postID: postID,
             aroundCommentID: commentID,
             service: service,
             historyRepository: historyRepository,
@@ -647,29 +648,16 @@ private struct PostView: View {
   }
 
   private var authorIdentity: some View {
-    HStack(alignment: .top, spacing: 10) {
-      AvatarView(url: post.authorPortraitURL, name: post.authorName)
-      VStack(alignment: .leading, spacing: 2) {
-        PostAuthorNameLine(
-          name: post.authorName,
-          level: post.authorLevel,
-          isThreadAuthor: post.isThreadAuthor
-        )
-        PostContextLine(
-          floor: post.floor,
-          date: post.createdAt,
-          ipLocation: post.authorIPLocation
-        )
-      }
-      Spacer(minLength: 0)
-      if post.authorID > 0 {
-        Image(systemName: "chevron.right")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.tertiary)
-      }
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .contentShape(Rectangle())
+    PostAuthorIdentityView(
+      name: post.authorName,
+      portraitURL: post.authorPortraitURL,
+      level: post.authorLevel,
+      isThreadAuthor: post.isThreadAuthor,
+      floor: post.floor,
+      date: post.createdAt,
+      ipLocation: post.authorIPLocation,
+      showsDisclosureIndicator: post.authorID > 0
+    )
   }
 }
 

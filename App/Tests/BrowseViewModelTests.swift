@@ -381,6 +381,157 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(mapped.nestedReplyCount, 4)
   }
 
+  func testCommentPageMappingValidatesOwnershipAndFiltersParentAndReplies() throws {
+    let author = TiebaUser(
+      id: 7,
+      username: "author",
+      displayName: "Parent Author",
+      portrait: "parent-portrait",
+      level: 9,
+      growthLevel: 0,
+      gender: .unknown,
+      ipLocation: " Shanghai ",
+      badges: [],
+      isModerator: false,
+      isVIP: false,
+      isVerifiedCreator: false
+    )
+    let forum = TiebaForum(
+      id: 1,
+      name: "swift",
+      category: "Technology",
+      subcategory: "Programming",
+      memberCount: 0,
+      threadCount: 0,
+      postCount: 0,
+      hasModerators: false,
+      hasRules: false
+    )
+    let thread = TiebaThread(
+      id: 100,
+      firstPostID: 101,
+      forumID: 1,
+      forumName: "swift",
+      title: "Thread",
+      content: TiebaContent(fragments: []),
+      author: author,
+      kind: .article,
+      tabID: 0,
+      viewCount: 0,
+      replyCount: 0,
+      shareCount: 0,
+      agreeCount: 0,
+      disagreeCount: 0,
+      createdAt: nil,
+      lastReplyAt: nil,
+      isPinned: false,
+      isFeatured: false,
+      isShared: false,
+      isHidden: false,
+      isLive: false
+    )
+    let parent = TiebaPost(
+      id: 201,
+      threadID: 100,
+      floor: 2,
+      author: author,
+      content: TiebaContent(fragments: [.text("blocked parent")]),
+      signature: "",
+      comments: [],
+      commentCount: 8,
+      agreeCount: 5,
+      disagreeCount: 1,
+      createdAt: Date(timeIntervalSince1970: 100),
+      isThreadAuthor: true,
+      isAIMeme: false,
+      agreeScore: 4
+    )
+    func comment(
+      id: Int64,
+      threadID: Int64 = 100,
+      parentPostID: Int64 = 201,
+      text: String
+    ) -> TiebaComment {
+      TiebaComment(
+        id: id,
+        threadID: threadID,
+        parentPostID: parentPostID,
+        floor: 2,
+        author: nil,
+        replyToUserID: nil,
+        content: TiebaContent(fragments: [.text(text)]),
+        agreeCount: 0,
+        disagreeCount: 0,
+        createdAt: nil,
+        isThreadAuthor: false
+      )
+    }
+    let response = TiebaCommentPage(
+      forum: forum,
+      thread: thread,
+      parentPost: parent,
+      comments: [
+        comment(id: 301, text: "blocked child"),
+        comment(id: 301, text: "duplicate"),
+        comment(id: 0, text: "invalid"),
+        comment(id: 302, threadID: 999, text: "wrong thread"),
+        comment(id: 303, parentPostID: 999, text: "wrong parent"),
+        comment(id: 304, text: "ordinary child"),
+      ],
+      pagination: TiebaPagination(
+        pageSize: 20,
+        currentPage: 2,
+        totalPages: 4,
+        totalCount: 10,
+        hasMore: true,
+        hasPrevious: true
+      )
+    )
+    let filter = ContentFilterSnapshot(
+      displayMode: .placeholder,
+      blockVideos: false,
+      rules: [.keyword("blocked", list: .block)]
+    )
+
+    let mapped = try TiebaCoreBrowseService.mapCommentPage(
+      response,
+      requestedThreadID: 100,
+      expectedPostID: 201,
+      filter: filter
+    )
+
+    XCTAssertEqual(mapped.parentPost.id, 201)
+    XCTAssertEqual(mapped.parentPost.floor, 2)
+    XCTAssertEqual(mapped.parentPost.authorLevel, 9)
+    XCTAssertEqual(mapped.parentPost.authorIPLocation, "Shanghai")
+    XCTAssertEqual(mapped.parentPost.agreeScore, 4)
+    XCTAssertEqual(mapped.parentPost.localVisibility, .placeholder)
+    XCTAssertEqual(mapped.comments.map(\.id), [301, 304])
+    XCTAssertEqual(mapped.comments.map(\.localVisibility), [.placeholder, .visible])
+    XCTAssertEqual(mapped.currentPage, 2)
+    XCTAssertTrue(mapped.hasPrevious)
+    XCTAssertTrue(mapped.hasMore)
+    XCTAssertEqual(mapped.totalPages, 4)
+    XCTAssertEqual(mapped.totalCount, 10)
+
+    XCTAssertThrowsError(
+      try TiebaCoreBrowseService.mapCommentPage(
+        response,
+        requestedThreadID: 100,
+        expectedPostID: 999,
+        filter: filter
+      )
+    )
+    XCTAssertThrowsError(
+      try TiebaCoreBrowseService.mapCommentPage(
+        response,
+        requestedThreadID: 999,
+        expectedPostID: 201,
+        filter: filter
+      )
+    )
+  }
+
   @MainActor
   func testMentionLinksUseOnlyExactPositiveInternalUserDestinations() throws {
     let url = try XCTUnwrap(BrowseContentView.mentionURL(for: 77))
@@ -2058,7 +2209,15 @@ final class BrowseViewModelTests: XCTestCase {
     let service = ScriptedBrowseService()
     let comments = [Fixtures.comment(id: 81), Fixtures.comment(id: 82)]
     await service.enqueueComments(
-      .value(CommentPageData(comments: comments, currentPage: 1, hasMore: false))
+      .value(
+        Fixtures.commentPage(
+          threadID: 8,
+          postID: 80,
+          comments: comments,
+          currentPage: 1,
+          hasMore: false
+        )
+      )
     )
     let viewModel = CommentsViewModel(threadID: 8, postID: 80, service: service)
 
@@ -2066,6 +2225,7 @@ final class BrowseViewModelTests: XCTestCase {
 
     try await waitUntil { viewModel.state == .loaded }
     XCTAssertEqual(viewModel.comments, comments)
+    XCTAssertEqual(viewModel.parentPost?.id, 80)
     let requests = await service.commentRequestSnapshot()
     XCTAssertEqual(requests, [CommentRequest(threadID: 8, postID: 80, page: 1)])
   }
@@ -2075,10 +2235,19 @@ final class BrowseViewModelTests: XCTestCase {
     let service = ScriptedBrowseService()
     let comments = [Fixtures.comment(id: 8_001), Fixtures.comment(id: 8_002)]
     await service.enqueueComments(
-      .value(CommentPageData(comments: comments, currentPage: 1, hasMore: false))
+      .value(
+        Fixtures.commentPage(
+          threadID: 8,
+          postID: 800,
+          comments: comments,
+          currentPage: 1,
+          hasMore: false
+        )
+      )
     )
     let viewModel = CommentsViewModel(
       threadID: 8,
+      postID: 800,
       aroundCommentID: 8_002,
       service: service
     )
@@ -2092,7 +2261,7 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertTrue(normalRequests.isEmpty)
     XCTAssertEqual(
       anchoredRequests,
-      [CommentRequest(threadID: 8, postID: 8_002, page: 1)]
+      [CommentRequest(threadID: 8, postID: 800, page: 1, commentID: 8_002)]
     )
     XCTAssertEqual(viewModel.scrollTargetCommentID, 8_002)
     viewModel.consumeScrollTarget()
@@ -2104,7 +2273,9 @@ final class BrowseViewModelTests: XCTestCase {
     let service = ScriptedBrowseService()
     await service.enqueueComments(
       .value(
-        CommentPageData(
+        Fixtures.commentPage(
+          threadID: 8,
+          postID: 800,
           comments: [Fixtures.comment(id: 8_001)],
           currentPage: 1,
           hasMore: false
@@ -2113,6 +2284,7 @@ final class BrowseViewModelTests: XCTestCase {
     )
     let viewModel = CommentsViewModel(
       threadID: 8,
+      postID: 800,
       aroundCommentID: 8_002,
       service: service
     )
@@ -2121,6 +2293,39 @@ final class BrowseViewModelTests: XCTestCase {
 
     try await waitUntil { viewModel.state == .loaded }
     XCTAssertNil(viewModel.scrollTargetCommentID)
+    XCTAssertEqual(viewModel.positionNotice, "未能在返回页面中定位目标回复。")
+  }
+
+  @MainActor
+  func testCommentsDoNotExposeHiddenAnchorAsAScrollTarget() async throws {
+    let service = ScriptedBrowseService()
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 8,
+          postID: 800,
+          comments: [Fixtures.comment(id: 8_002, localVisibility: .hidden)],
+          currentPage: 2,
+          hasMore: false,
+          hasPrevious: true
+        )
+      )
+    )
+    let viewModel = CommentsViewModel(
+      threadID: 8,
+      postID: 800,
+      aroundCommentID: 8_002,
+      service: service
+    )
+
+    viewModel.loadIfNeeded()
+
+    try await waitUntil { viewModel.state == .loaded }
+    XCTAssertNil(viewModel.scrollTargetCommentID)
+    XCTAssertEqual(viewModel.positionNotice, "目标回复已按本地规则隐藏。")
+    XCTAssertTrue(viewModel.canLoadPrevious)
+    viewModel.dismissPositionNotice()
+    XCTAssertNil(viewModel.positionNotice)
   }
 
   @MainActor
@@ -2129,28 +2334,33 @@ final class BrowseViewModelTests: XCTestCase {
     let firstPage = [Fixtures.comment(id: 8_001), Fixtures.comment(id: 8_002)]
     await service.enqueueComments(
       .value(
-        CommentPageData(
+        Fixtures.commentPage(
+          threadID: 8,
+          postID: 800,
           comments: firstPage,
           currentPage: 3,
           hasMore: true,
-          parentPostID: 800,
+          hasPrevious: true,
+          totalPages: 5,
           totalCount: 5
         )
       )
     )
     await service.enqueueComments(
       .value(
-        CommentPageData(
+        Fixtures.commentPage(
+          threadID: 8,
+          postID: 800,
           comments: [Fixtures.comment(id: 8_003)],
           currentPage: 4,
           hasMore: false,
-          parentPostID: 800,
           totalCount: 0
         )
       )
     )
     let viewModel = CommentsViewModel(
       threadID: 8,
+      postID: 800,
       aroundCommentID: 8_002,
       service: service
     )
@@ -2165,12 +2375,160 @@ final class BrowseViewModelTests: XCTestCase {
     let normalRequests = await service.commentRequestSnapshot()
     XCTAssertEqual(
       anchoredRequests,
-      [CommentRequest(threadID: 8, postID: 8_002, page: 1)]
+      [CommentRequest(threadID: 8, postID: 800, page: 1, commentID: 8_002)]
     )
     XCTAssertEqual(
       normalRequests,
       [CommentRequest(threadID: 8, postID: 800, page: 4)]
     )
+  }
+
+  @MainActor
+  func testAnchoredCommentsCanPrependEarlierPagesAndStopOnDuplicatePage() async throws {
+    let service = ScriptedBrowseService()
+    let anchoredPage = [Fixtures.comment(id: 301), Fixtures.comment(id: 302)]
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 8,
+          postID: 800,
+          comments: anchoredPage,
+          currentPage: 3,
+          hasMore: true,
+          hasPrevious: true,
+          totalPages: 4,
+          totalCount: 4
+        )
+      )
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 8,
+          postID: 800,
+          comments: [Fixtures.comment(id: 201), Fixtures.comment(id: 301)],
+          currentPage: 2,
+          hasMore: true,
+          hasPrevious: true,
+          totalPages: 4,
+          totalCount: 4
+        )
+      )
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 8,
+          postID: 800,
+          comments: [Fixtures.comment(id: 201)],
+          currentPage: 1,
+          hasMore: true,
+          hasPrevious: false,
+          totalPages: 4,
+          totalCount: 4
+        )
+      )
+    )
+    let viewModel = CommentsViewModel(
+      threadID: 8,
+      postID: 800,
+      aroundCommentID: 302,
+      service: service
+    )
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+    viewModel.consumeScrollTarget()
+
+    viewModel.loadPrevious()
+
+    try await waitUntil {
+      viewModel.comments.map(\.id) == [201, 301, 302] && !viewModel.isLoadingPrevious
+    }
+    XCTAssertEqual(viewModel.prependRestoreCommentID, 301)
+    XCTAssertTrue(viewModel.canLoadPrevious)
+    viewModel.consumePrependRestoreTarget()
+
+    viewModel.loadPrevious()
+
+    try await waitUntil { !viewModel.canLoadPrevious && !viewModel.isLoadingPrevious }
+    XCTAssertEqual(viewModel.comments.map(\.id), [201, 301, 302])
+    let anchoredRequests = await service.aroundCommentRequestSnapshot()
+    let normalRequests = await service.commentRequestSnapshot()
+    XCTAssertEqual(
+      anchoredRequests,
+      [CommentRequest(threadID: 8, postID: 800, page: 1, commentID: 302)]
+    )
+    XCTAssertEqual(normalRequests.map(\.page), [2, 1])
+    XCTAssertTrue(normalRequests.allSatisfy { $0.postID == 800 && $0.commentID == nil })
+  }
+
+  @MainActor
+  func testCommentsRejectMismatchedParentWithoutMutatingLoadedPage() async throws {
+    let service = ScriptedBrowseService()
+    let firstPage = [Fixtures.comment(id: 101)]
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 10,
+          postID: 100,
+          comments: firstPage,
+          currentPage: 1,
+          hasMore: true,
+          totalCount: 2
+        )
+      )
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 10,
+          postID: 999,
+          comments: [Fixtures.comment(id: 102)],
+          currentPage: 2,
+          hasMore: false,
+          totalCount: 2
+        )
+      )
+    )
+    let viewModel = CommentsViewModel(threadID: 10, postID: 100, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadMoreIfNeeded(current: firstPage[0])
+
+    try await waitUntil { viewModel.loadMoreError != nil && !viewModel.isLoadingMore }
+    XCTAssertEqual(viewModel.parentPost?.id, 100)
+    XCTAssertEqual(viewModel.comments, firstPage)
+    XCTAssertEqual(viewModel.totalCount, 2)
+    XCTAssertEqual(viewModel.state, .loaded)
+  }
+
+  @MainActor
+  func testCommentsFirstPageDropsInvalidAndDuplicateIDsInServerOrder() async throws {
+    let service = ScriptedBrowseService()
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 10,
+          postID: 100,
+          comments: [
+            Fixtures.comment(id: 2, authorName: "first"),
+            Fixtures.comment(id: 0, authorName: "invalid"),
+            Fixtures.comment(id: 2, authorName: "duplicate"),
+            Fixtures.comment(id: 1, authorName: "second"),
+          ],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = CommentsViewModel(threadID: 10, postID: 100, service: service)
+
+    viewModel.loadIfNeeded()
+
+    try await waitUntil { viewModel.state == .loaded }
+    XCTAssertEqual(viewModel.comments.map(\.id), [2, 1])
+    XCTAssertEqual(viewModel.comments.first?.authorName, "first")
   }
 
   @MainActor
@@ -2193,11 +2551,21 @@ final class BrowseViewModelTests: XCTestCase {
       Fixtures.comment(id: 102, authorName: "original duplicate"),
     ]
     await service.enqueueComments(
-      .value(CommentPageData(comments: firstPage, currentPage: 1, hasMore: true))
+      .value(
+        Fixtures.commentPage(
+          threadID: 10,
+          postID: 100,
+          comments: firstPage,
+          currentPage: 1,
+          hasMore: true
+        )
+      )
     )
     await service.enqueueComments(
       .value(
-        CommentPageData(
+        Fixtures.commentPage(
+          threadID: 10,
+          postID: 100,
           comments: [
             Fixtures.comment(id: 102, authorName: "replacement duplicate"),
             Fixtures.comment(id: 103, authorName: "third"),
@@ -2222,11 +2590,107 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testCommentsRejectStalledPreviousPageBeforeMergingNewIDs() async throws {
+    let service = ScriptedBrowseService()
+    let currentPage = [Fixtures.comment(id: 301), Fixtures.comment(id: 302)]
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 10,
+          postID: 100,
+          comments: currentPage,
+          currentPage: 3,
+          hasMore: true,
+          hasPrevious: true,
+          totalCount: 4
+        )
+      )
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 10,
+          postID: 100,
+          comments: [Fixtures.comment(id: 999), Fixtures.comment(id: 301)],
+          currentPage: 3,
+          hasMore: true,
+          hasPrevious: true,
+          totalCount: 99
+        )
+      )
+    )
+    let viewModel = CommentsViewModel(threadID: 10, postID: 100, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadPrevious()
+
+    try await waitUntil { !viewModel.isLoadingPrevious }
+    XCTAssertEqual(viewModel.comments, currentPage)
+    XCTAssertEqual(viewModel.totalCount, 4)
+    XCTAssertNil(viewModel.prependRestoreCommentID)
+    XCTAssertFalse(viewModel.canLoadPrevious)
+    XCTAssertNil(viewModel.loadPreviousError)
+  }
+
+  @MainActor
+  func testCommentsRejectStalledNextPageBeforeMergingNewIDs() async throws {
+    let service = ScriptedBrowseService()
+    let firstPage = [Fixtures.comment(id: 101), Fixtures.comment(id: 102)]
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 10,
+          postID: 100,
+          comments: firstPage,
+          currentPage: 1,
+          hasMore: true,
+          totalCount: 3
+        )
+      )
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 10,
+          postID: 100,
+          comments: [Fixtures.comment(id: 102), Fixtures.comment(id: 999)],
+          currentPage: 0,
+          hasMore: true,
+          totalCount: 99
+        )
+      )
+    )
+    let viewModel = CommentsViewModel(threadID: 10, postID: 100, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadMoreIfNeeded(current: firstPage[1])
+
+    try await waitUntil { !viewModel.isLoadingMore }
+    XCTAssertEqual(viewModel.comments, firstPage)
+    XCTAssertEqual(viewModel.totalCount, 3)
+    XCTAssertNil(viewModel.loadMoreError)
+    viewModel.loadMoreIfNeeded(current: firstPage[1])
+    await drainMainActor()
+    let requestCount = await service.commentRequestCount()
+    XCTAssertEqual(requestCount, 2)
+  }
+
+  @MainActor
   func testCommentsPaginationFailureCanRetry() async throws {
     let service = ScriptedBrowseService()
     let firstPage = [Fixtures.comment(id: 104)]
     await service.enqueueComments(
-      .value(CommentPageData(comments: firstPage, currentPage: 1, hasMore: true))
+      .value(
+        Fixtures.commentPage(
+          threadID: 10,
+          postID: 103,
+          comments: firstPage,
+          currentPage: 1,
+          hasMore: true
+        )
+      )
     )
     await service.enqueueComments(.failure(StubFailure(message: "next comment page failed")))
     let viewModel = CommentsViewModel(threadID: 10, postID: 103, service: service)
@@ -2243,7 +2707,9 @@ final class BrowseViewModelTests: XCTestCase {
 
     await service.enqueueComments(
       .value(
-        CommentPageData(
+        Fixtures.commentPage(
+          threadID: 10,
+          postID: 103,
           comments: [Fixtures.comment(id: 105)],
           currentPage: 2,
           hasMore: false
@@ -2259,12 +2725,183 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testCommentsPreviousPageFailureCanRetryWithoutChangingCurrentItems() async throws {
+    let service = ScriptedBrowseService()
+    let currentPage = [Fixtures.comment(id: 201), Fixtures.comment(id: 202)]
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 10,
+          postID: 100,
+          comments: currentPage,
+          currentPage: 2,
+          hasMore: false,
+          hasPrevious: true
+        )
+      )
+    )
+    await service.enqueueComments(.failure(StubFailure(message: "previous page failed")))
+    let viewModel = CommentsViewModel(threadID: 10, postID: 100, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadPrevious()
+
+    try await waitUntil {
+      viewModel.loadPreviousError == "previous page failed" && !viewModel.isLoadingPrevious
+    }
+    XCTAssertEqual(viewModel.comments, currentPage)
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 10,
+          postID: 100,
+          comments: [Fixtures.comment(id: 101)],
+          currentPage: 1,
+          hasMore: true,
+          hasPrevious: false
+        )
+      )
+    )
+
+    viewModel.retryLoadPrevious()
+
+    try await waitUntil { viewModel.comments.map(\.id) == [101, 201, 202] }
+    XCTAssertNil(viewModel.loadPreviousError)
+    XCTAssertFalse(viewModel.canLoadPrevious)
+    let requests = await service.commentRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 1, 1])
+  }
+
+  @MainActor
+  func testCommentsRefreshPreservesSnapshotOnFailureAndAtomicallyReplacesOnSuccess()
+    async throws
+  {
+    let service = ScriptedBrowseService()
+    let originalParent = Fixtures.commentParentPost(
+      id: 100,
+      threadID: 10,
+      authorName: "original parent"
+    )
+    let freshParent = Fixtures.commentParentPost(
+      id: 100,
+      threadID: 10,
+      authorName: "fresh parent"
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 10,
+          postID: 100,
+          comments: [Fixtures.comment(id: 201, authorName: "original")],
+          currentPage: 1,
+          hasMore: false,
+          totalCount: 5,
+          parentPost: originalParent
+        )
+      )
+    )
+    await service.enqueueComments(.failure(StubFailure(message: "refresh failed")))
+    let viewModel = CommentsViewModel(threadID: 10, postID: 100, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    await viewModel.refresh()
+
+    XCTAssertEqual(viewModel.parentPost?.authorName, "original parent")
+    XCTAssertEqual(viewModel.comments.map(\.authorName), ["original"])
+    XCTAssertEqual(viewModel.totalCount, 5)
+    XCTAssertEqual(viewModel.refreshError, "refresh failed")
+    XCTAssertEqual(viewModel.state, .loaded)
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 10,
+          postID: 100,
+          comments: [Fixtures.comment(id: 202, authorName: "fresh")],
+          currentPage: 1,
+          hasMore: false,
+          totalCount: 1,
+          parentPost: freshParent
+        )
+      )
+    )
+
+    await viewModel.refresh()
+
+    XCTAssertEqual(viewModel.parentPost?.authorName, "fresh parent")
+    XCTAssertEqual(viewModel.comments.map(\.authorName), ["fresh"])
+    XCTAssertEqual(viewModel.totalCount, 1)
+    XCTAssertNil(viewModel.refreshError)
+    XCTAssertEqual(viewModel.state, .loaded)
+  }
+
+  @MainActor
+  func testCommentsRefreshBlocksPaginationUntilItsSnapshotCommits() async throws {
+    let service = ScriptedBrowseService()
+    let oldComments = [Fixtures.comment(id: 201), Fixtures.comment(id: 202)]
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 10,
+          postID: 100,
+          comments: oldComments,
+          currentPage: 2,
+          hasMore: true,
+          hasPrevious: true,
+          totalCount: 4
+        )
+      )
+    )
+    await service.enqueueComments(.suspended(303))
+    let viewModel = CommentsViewModel(threadID: 10, postID: 100, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    let refreshTask = Task { await viewModel.refresh() }
+    try await waitUntil {
+      let requestCount = await service.commentRequestCount()
+      return viewModel.isRefreshing && requestCount == 2
+    }
+    viewModel.loadMoreIfNeeded(current: oldComments[1])
+    viewModel.loadPrevious()
+    await drainMainActor()
+
+    var requestCount = await service.commentRequestCount()
+    XCTAssertEqual(requestCount, 2)
+    XCTAssertTrue(viewModel.isRefreshing)
+    let resumed = await service.resumeComments(
+      id: 303,
+      returning: Fixtures.commentPage(
+        threadID: 10,
+        postID: 100,
+        comments: [Fixtures.comment(id: 101, authorName: "fresh")],
+        currentPage: 1,
+        hasMore: false,
+        totalCount: 1
+      )
+    )
+    XCTAssertTrue(resumed)
+    await refreshTask.value
+
+    XCTAssertEqual(viewModel.comments.map(\.authorName), ["fresh"])
+    XCTAssertEqual(viewModel.totalCount, 1)
+    XCTAssertFalse(viewModel.isRefreshing)
+    XCTAssertFalse(viewModel.isLoadingMore)
+    XCTAssertFalse(viewModel.isLoadingPrevious)
+    requestCount = await service.commentRequestCount()
+    XCTAssertEqual(requestCount, 2)
+  }
+
+  @MainActor
   func testCommentsReloadDoesNotAllowCancelledResponseToOverwriteFreshData() async throws {
     let service = ScriptedBrowseService()
     await service.enqueueComments(.suspended(301))
     await service.enqueueComments(
       .value(
-        CommentPageData(
+        Fixtures.commentPage(
+          threadID: 9,
+          postID: 91,
           comments: [Fixtures.comment(id: 92, authorName: "fresh")],
           currentPage: 1,
           hasMore: false
@@ -2280,7 +2917,9 @@ final class BrowseViewModelTests: XCTestCase {
 
     let resumed = await service.resumeComments(
       id: 301,
-      returning: CommentPageData(
+      returning: Fixtures.commentPage(
+        threadID: 9,
+        postID: 91,
         comments: [Fixtures.comment(id: 91, authorName: "stale")],
         currentPage: 1,
         hasMore: false
@@ -2300,7 +2939,9 @@ final class BrowseViewModelTests: XCTestCase {
     await service.enqueueComments(.suspended(302))
     await service.enqueueComments(
       .value(
-        CommentPageData(
+        Fixtures.commentPage(
+          threadID: 9,
+          postID: 93,
           comments: [Fixtures.comment(id: 94, authorName: "fresh")],
           currentPage: 1,
           hasMore: false
@@ -2381,6 +3022,19 @@ private struct CommentRequest: Equatable, Sendable {
   let threadID: Int64
   let postID: Int64
   let page: Int
+  let commentID: Int64?
+
+  init(
+    threadID: Int64,
+    postID: Int64,
+    page: Int,
+    commentID: Int64? = nil
+  ) {
+    self.threadID = threadID
+    self.postID = postID
+    self.page = page
+    self.commentID = commentID
+  }
 }
 
 private struct StubFailure: LocalizedError, Equatable, Sendable {
@@ -2550,11 +3204,17 @@ private actor ScriptedBrowseService: BrowseService {
 
   func comments(
     threadID: Int64,
+    postID: Int64,
     aroundCommentID commentID: Int64,
     page: Int
   ) async throws -> CommentPageData {
     aroundCommentRequests.append(
-      CommentRequest(threadID: threadID, postID: commentID, page: page)
+      CommentRequest(
+        threadID: threadID,
+        postID: postID,
+        page: page,
+        commentID: commentID
+      )
     )
     defer { completedCommentRequests += 1 }
     guard !commentStubs.isEmpty else {
@@ -2703,14 +3363,62 @@ private enum Fixtures {
     )
   }
 
-  static func comment(id: Int64, authorName: String? = nil) -> BrowseComment {
+  static func comment(
+    id: Int64,
+    authorName: String? = nil,
+    localVisibility: LocalContentVisibility = .visible
+  ) -> BrowseComment {
     BrowseComment(
       id: id,
       authorID: id + 2_000,
       authorName: authorName ?? "comment-author-\(id)",
       authorPortraitURL: URL(string: "https://example.com/avatar/\(id).png"),
       createdAt: Date(timeIntervalSince1970: 1_700_000_300),
-      contents: [.text("comment content")]
+      contents: [.text("comment content")],
+      localVisibility: localVisibility
+    )
+  }
+
+  static func commentParentPost(
+    id: Int64,
+    threadID: Int64,
+    authorName: String? = nil,
+    floor: Int = 2,
+    localVisibility: LocalContentVisibility = .visible
+  ) -> CommentParentPostContext {
+    CommentParentPostContext(
+      id: id,
+      threadID: threadID,
+      floor: floor,
+      authorID: id + 1_000,
+      authorName: authorName ?? "parent-author-\(id)",
+      authorPortraitURL: URL(string: "https://example.com/avatar/parent-\(id).png"),
+      createdAt: Date(timeIntervalSince1970: 1_700_000_200),
+      isThreadAuthor: false,
+      contents: [.text("parent content")],
+      localVisibility: localVisibility
+    )
+  }
+
+  static func commentPage(
+    threadID: Int64,
+    postID: Int64,
+    comments: [BrowseComment],
+    currentPage: Int,
+    hasMore: Bool,
+    hasPrevious: Bool = false,
+    totalPages: Int = 0,
+    totalCount: Int = 0,
+    parentPost: CommentParentPostContext? = nil
+  ) -> CommentPageData {
+    CommentPageData(
+      parentPost: parentPost ?? commentParentPost(id: postID, threadID: threadID),
+      comments: comments,
+      currentPage: currentPage,
+      hasMore: hasMore,
+      hasPrevious: hasPrevious,
+      totalPages: totalPages,
+      totalCount: totalCount
     )
   }
 }

@@ -109,6 +109,23 @@ media, expose active external links, or put resource URLs on the pasteboard.
 Every child is filtered independently, while filtering must not change the
 server reply count or remove access to the complete nested-reply page.
 
+Complete nested-reply requests remain credential-free. A direct request sends
+only the public thread, parent-post, and page fields; anchored opening adds the
+public target-comment field while retaining the parent-post field. Before any
+response is displayed or merged, the app requires a matching positive thread and
+parent identity and discards nonpositive, cross-thread, cross-parent, or duplicate
+child identities. Earlier and later pages must advance strictly in their requested
+direction, and an invalid or stalled response must not mutate the loaded snapshot.
+The parent floor is projected into a dedicated model without embedded reply
+previews, preventing duplicate storage and recursive entry points.
+
+Parent-floor links, media, profiles, and copying reuse the same strict routing,
+credential-free media, and text-projection policies as ordinary post content.
+Parent and child filtering use one immutable rule snapshot; hiding the parent or
+anchor must not expose filtered content, alter pagination identity, or synthesize
+a pasteboard value. The page remains read only and must not expose reply, like,
+delete, report, or other authenticated write operations.
+
 Internal navigation uses one strict parser for exact `tieba.baidu.com` HTTP(S)
 forum/thread URLs, supported `com.baidu.tieba` forum/thread route text, and the
 app-owned `tieba-plus-plus` forum/thread/user scheme. It rejects URL

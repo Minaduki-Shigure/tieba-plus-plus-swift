@@ -57,9 +57,8 @@ final class TiebaRequestFactoryTests: XCTestCase {
 
     let commentRequest = try factory.comments(
       threadID: 123_456,
-      anchorID: 654_321,
-      page: 1,
-      anchorIsComment: false
+      postID: 654_321,
+      page: 1
     )
     let commentFixture = try XCTUnwrap(
       Data(hexString: "0a194a0d0802120931322e36342e312e3108c0c40710f1f7272001")
@@ -71,17 +70,19 @@ final class TiebaRequestFactoryTests: XCTestCase {
 
     let aroundRequest = try factory.comments(
       threadID: 123_456,
-      anchorID: 654_321,
-      page: 2,
-      anchorIsComment: true
+      postID: 654_321,
+      aroundCommentID: 777_888,
+      page: 2
     )
-    let aroundFixture = try XCTUnwrap(
-      Data(hexString: "0a194a0d0802120931322e36342e312e3108c0c40718f1f7272002")
+    let around = try PbFloorReqIdl(
+      serializedBytes: protobufPayload(from: aroundRequest)
     )
-    XCTAssertEqual(
-      try PbFloorReqIdl(serializedBytes: protobufPayload(from: aroundRequest)),
-      try PbFloorReqIdl(serializedBytes: aroundFixture)
-    )
+    XCTAssertEqual(around.data.kz, 123_456)
+    XCTAssertEqual(around.data.pid, 654_321)
+    XCTAssertEqual(around.data.spid, 777_888)
+    XCTAssertEqual(around.data.pn, 2)
+    XCTAssertEqual(around.data.common.bduss, "")
+    XCTAssertEqual(around.data.common.stoken, "")
   }
 
   func testBrowseSortAndFilterOptionsAreEncoded() throws {
@@ -277,7 +278,7 @@ final class TiebaRequestFactoryTests: XCTestCase {
         commentsSortedByAgree: true,
         commentPageSize: 4
       ),
-      try factory.comments(threadID: 1, anchorID: 2, page: 1, anchorIsComment: false),
+      try factory.comments(threadID: 1, postID: 2, page: 1),
       try factory.userProfile(userID: 957_339_815),
       try factory.userThreads(userID: 957_339_815, page: 1, pageSize: 20),
       try factory.forumOverview(forumID: 42),
@@ -401,7 +402,10 @@ final class TiebaRequestFactoryTests: XCTestCase {
       )
     )
     XCTAssertThrowsError(
-      try factory.comments(threadID: 0, anchorID: 1, page: 1, anchorIsComment: false)
+      try factory.comments(threadID: 0, postID: 1, page: 1)
+    )
+    XCTAssertThrowsError(
+      try factory.comments(threadID: 1, postID: 2, aroundCommentID: 0, page: 1)
     )
     XCTAssertThrowsError(
       try factory.posts(

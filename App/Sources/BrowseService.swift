@@ -93,6 +93,7 @@ protocol BrowseService: Sendable {
   func comments(threadID: Int64, postID: Int64, page: Int) async throws -> CommentPageData
   func comments(
     threadID: Int64,
+    postID: Int64,
     aroundCommentID commentID: Int64,
     page: Int
   ) async throws -> CommentPageData

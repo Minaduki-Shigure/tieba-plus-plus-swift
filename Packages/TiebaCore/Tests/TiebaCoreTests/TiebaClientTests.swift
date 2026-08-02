@@ -242,6 +242,27 @@ final class TiebaClientTests: XCTestCase {
     XCTAssertEqual(comment.floor, 2)
   }
 
+  func testAnchoredCommentRequestForwardsBothParentAndCommentIDs() async throws {
+    let transport = CapturingTransport(body: try ProtoFixtures.commentPage().serializedData())
+    let client = TiebaClient(transport: transport)
+
+    _ = try await client.getComments(
+      threadID: 100,
+      postID: 201,
+      aroundCommentID: 301,
+      page: 2
+    )
+
+    let capturedRequest = await transport.lastRequest()
+    let request = try XCTUnwrap(capturedRequest)
+    let body = try XCTUnwrap(request.httpBody)
+    let decoded = try PbFloorReqIdl(serializedBytes: protobufPayload(from: body))
+    XCTAssertEqual(decoded.data.kz, 100)
+    XCTAssertEqual(decoded.data.pid, 201)
+    XCTAssertEqual(decoded.data.spid, 301)
+    XCTAssertEqual(decoded.data.pn, 2)
+  }
+
   func testMapsPublicUserProfile() async throws {
     let transport = StubTransport(body: try ProtoFixtures.userProfile().serializedData())
     let client = TiebaClient(transport: transport)

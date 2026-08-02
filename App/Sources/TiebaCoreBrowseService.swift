@@ -145,20 +145,17 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       throw Self.browseError(error)
     }
     let filter = await contentFilterSnapshot()
-    return CommentPageData(
-      comments: response.comments.map { filter.applying(to: Self.mapComment($0)) },
-      currentPage: response.pagination.currentPage,
-      hasMore: response.pagination.hasMore,
-      parentPostID: response.parentPost.id > 0 ? response.parentPost.id : nil,
-      totalCount: max(
-        max(response.pagination.totalCount, response.parentPost.commentCount),
-        response.comments.count
-      )
+    return try Self.mapCommentPage(
+      response,
+      requestedThreadID: threadID,
+      expectedPostID: postID,
+      filter: filter
     )
   }
 
   func comments(
     threadID: Int64,
+    postID: Int64,
     aroundCommentID commentID: Int64,
     page: Int
   ) async throws -> CommentPageData {
@@ -166,6 +163,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     do {
       response = try await client.getComments(
         threadID: threadID,
+        postID: postID,
         aroundCommentID: commentID,
         page: page
       )
@@ -175,15 +173,11 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       throw Self.browseError(error)
     }
     let filter = await contentFilterSnapshot()
-    return CommentPageData(
-      comments: response.comments.map { filter.applying(to: Self.mapComment($0)) },
-      currentPage: response.pagination.currentPage,
-      hasMore: response.pagination.hasMore,
-      parentPostID: response.parentPost.id > 0 ? response.parentPost.id : nil,
-      totalCount: max(
-        max(response.pagination.totalCount, response.parentPost.commentCount),
-        response.comments.count
-      )
+    return try Self.mapCommentPage(
+      response,
+      requestedThreadID: threadID,
+      expectedPostID: postID,
+      filter: filter
     )
   }
 
@@ -738,6 +732,67 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       ),
       agreeScore: max(post.agreeScore, 0),
       inlineComments: inlineComments
+    )
+  }
+
+  static func mapCommentPage(
+    _ response: TiebaCommentPage,
+    requestedThreadID: Int64,
+    expectedPostID: Int64,
+    filter: ContentFilterSnapshot
+  ) throws -> CommentPageData {
+    let parentPost = response.parentPost
+    guard
+      requestedThreadID > 0,
+      expectedPostID > 0,
+      response.thread.id == requestedThreadID,
+      parentPost.id > 0,
+      parentPost.threadID == requestedThreadID,
+      expectedPostID == parentPost.id
+    else {
+      throw BrowseError.unavailable("贴吧返回的楼中楼归属异常，未显示该响应。")
+    }
+
+    var seen = Set<Int64>()
+    let comments = response.comments.compactMap { comment -> BrowseComment? in
+      guard
+        comment.id > 0,
+        comment.threadID == requestedThreadID,
+        comment.parentPostID == parentPost.id,
+        seen.insert(comment.id).inserted
+      else { return nil }
+      return filter.applying(to: mapComment(comment))
+    }
+    return CommentPageData(
+      parentPost: filter.applying(to: mapCommentParentPost(parentPost)),
+      comments: comments,
+      currentPage: response.pagination.currentPage,
+      hasMore: response.pagination.hasMore,
+      hasPrevious: response.pagination.hasPrevious,
+      totalPages: response.pagination.totalPages,
+      totalCount: max(
+        max(response.pagination.totalCount, parentPost.commentCount),
+        comments.count
+      )
+    )
+  }
+
+  static func mapCommentParentPost(_ post: TiebaPost) -> CommentParentPostContext {
+    CommentParentPostContext(
+      id: post.id,
+      threadID: post.threadID,
+      floor: post.floor,
+      authorID: post.author?.id ?? 0,
+      authorName: authorName(post.author),
+      authorPortraitURL: SecureTiebaURL.portrait(post.author?.portrait),
+      createdAt: post.createdAt,
+      isThreadAuthor: post.isThreadAuthor,
+      contents: mapContent(post.content),
+      authorLevel: max(post.author?.level ?? 0, 0),
+      authorIPLocation: (post.author?.ipLocation ?? "").trimmingCharacters(
+        in: .whitespacesAndNewlines
+      ),
+      agreeScore: max(post.agreeScore, 0)
     )
   }
 

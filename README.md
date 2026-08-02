@@ -11,8 +11,8 @@ Development is in progress. Anonymous mode supports a ranked hot-topic feed
 with paginated topic details, categorized forum, thread, and user search,
 global post search with newest, oldest, and relevance sorting,
 per-forum post search with newest/relevance and topic/all-content filters,
-forum, post, and nested-reply browsing with server-ranked inline nested-reply
-previews and anchored opening, remote media, forum metadata and
+forum, post, and nested-reply browsing with server-ranked inline previews,
+parent-floor context, bidirectional pagination, and anchored opening, remote media, forum metadata and
 featured classifications, server-defined forum channels with independent
 sorting and cursor pagination, complete public forum introductions, forum rules,
 moderator teams, and shared-thread origin cards with original media and
@@ -34,8 +34,9 @@ a persistent setting to hide the section. Settings also provide native
 system/light/dark appearance, a global default plus remembered per-forum topic
 sorting, and a no-history mode backed by the same versioned archive rather than
 a second preference. Thread pages provide up to four text-only nested-reply
-previews per floor, reliable full-reply access, anchored reply sheets, a
-transient pure-reading mode, and per-floor or per-reply copy actions. Forum and
+previews per floor plus full-reply pages with parent-floor context, earlier and
+later pagination, anchored target highlighting, and safe copy actions. They also
+provide a transient pure-reading mode and full-floor copying. Forum and
 thread pages use the native iOS share sheet with canonical HTTPS links; copied
 thread links retain the
 only-thread-author mode. A single strict router handles supported links in rich

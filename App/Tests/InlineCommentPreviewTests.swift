@@ -112,7 +112,7 @@ final class InlineCommentPreviewTests: XCTestCase {
     )
     XCTAssertEqual(
       CommentsRoute(threadID: 10, postID: 20, commentID: 30),
-      .comment(threadID: 10, commentID: 30)
+      .comment(threadID: 10, postID: 20, commentID: 30)
     )
     XCTAssertNil(CommentsRoute(threadID: 0, postID: 20, commentID: nil))
     XCTAssertNil(CommentsRoute(threadID: 10, postID: 0, commentID: 30))

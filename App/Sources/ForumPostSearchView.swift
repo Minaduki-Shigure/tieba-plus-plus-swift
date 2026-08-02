@@ -360,9 +360,10 @@ struct ForumPostSearchView: View {
           lastPostID: postID
         )
       )
-    case .comment(_, let commentID):
+    case .comment(let postID, let commentID):
       CommentsView(
         threadID: result.thread.id,
+        postID: postID,
         aroundCommentID: commentID,
         service: service,
         historyRepository: historyRepository,

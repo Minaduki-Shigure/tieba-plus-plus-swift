@@ -37,6 +37,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Strict internal routing for supported Tieba HTTPS, pasted official-scheme, and app links
 - Nested replies, images, video links, and voice playback
 - Server-ranked inline nested-reply previews with anchored opening and safe text copying
+- Full nested-reply pages with parent-floor context and bidirectional anchored pagination
 - Shared-thread origin cards with original content, media, and navigation
 - Anonymous single- and multiple-choice poll result cards
 - Read-only post and nested-reply scores, author forum levels, and IP locations
@@ -232,3 +233,20 @@ be centered after load. Once that response resolves the enclosing parent post,
 later pages switch to ordinary parent-post pagination; refresh deliberately uses
 the comment anchor again. This avoids repeating an `spid` anchor for unrelated
 continuation pages while retaining deterministic entry from a preview.
+
+The complete nested-reply page renders its parent floor through a dedicated
+context model that cannot retain or recursively display the inline preview list.
+Both parent and child content use the same local-filter snapshot and the normal
+rich-content, media, internal-link, profile, and copy boundaries. The page
+rejects responses whose thread or parent identity differs from the request and
+drops nonpositive, cross-context, or duplicate child IDs before they reach the
+list. A hidden anchor produces an explicit notice instead of an invalid scroll
+target.
+
+Anchored requests carry both the enclosing `pid` and target `spid`. Replies can
+then paginate toward either earlier or later pages using the locked parent ID;
+prepending restores the previously visible reply. A page must advance strictly
+in the requested direction before any new IDs or counts are merged, so duplicate,
+stalled, invalid, or reversed pages terminate that direction without corrupting
+server order. Pull to refresh keeps the prior snapshot on failure and atomically
+replaces it on success, including allowing a decreased server reply count.

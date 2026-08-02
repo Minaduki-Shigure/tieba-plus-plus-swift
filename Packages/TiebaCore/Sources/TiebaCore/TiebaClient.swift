@@ -15,7 +15,7 @@ public struct TiebaClientConfiguration: Sendable, Hashable {
   public init(
     clientVersion: String = "12.64.1.1",
     authenticatedClientVersion: String = "22.6.5.1",
-    userAgent: String = "TiebaPlusPlus/0.21 (iOS)",
+    userAgent: String = "TiebaPlusPlus/0.22 (iOS)",
     requestTimeout: TimeInterval = 30
   ) {
     self.clientVersion = clientVersion
@@ -200,9 +200,9 @@ public actor TiebaClient {
   ) async throws -> TiebaCommentPage {
     try await getComments(
       threadID: threadID,
-      anchorID: postID,
+      postID: postID,
       page: page,
-      anchorIsComment: false
+      commentID: nil
     )
   }
 
@@ -355,28 +355,29 @@ public actor TiebaClient {
 
   public func getComments(
     threadID: Int64,
+    postID: Int64,
     aroundCommentID commentID: Int64,
     page: Int = 1
   ) async throws -> TiebaCommentPage {
     try await getComments(
       threadID: threadID,
-      anchorID: commentID,
+      postID: postID,
       page: page,
-      anchorIsComment: true
+      commentID: commentID
     )
   }
 
   private func getComments(
     threadID: Int64,
-    anchorID: Int64,
+    postID: Int64,
     page: Int,
-    anchorIsComment: Bool
+    commentID: Int64?
   ) async throws -> TiebaCommentPage {
     let request = try requestFactory.comments(
       threadID: threadID,
-      anchorID: anchorID,
-      page: page,
-      anchorIsComment: anchorIsComment
+      postID: postID,
+      aroundCommentID: commentID,
+      page: page
     )
     let body = try await send(request)
     let response: PbFloorResIdl = try decode(body)

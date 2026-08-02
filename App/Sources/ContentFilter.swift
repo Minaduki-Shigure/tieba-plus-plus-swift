@@ -526,6 +526,13 @@ extension ContentFilterSnapshot {
     )
   }
 
+  func visibility(for parentPost: CommentParentPostContext) -> LocalContentVisibility {
+    visibility(
+      isBlocked: blocksKeyword(Self.plainText(parentPost.contents))
+        || blocksUser(id: parentPost.authorID, name: parentPost.authorName)
+    )
+  }
+
   func applying(to thread: BrowseThread) -> BrowseThread {
     thread.withLocalVisibility(visibility(for: thread))
   }
@@ -539,6 +546,10 @@ extension ContentFilterSnapshot {
 
   func applying(to comment: BrowseComment) -> BrowseComment {
     comment.withLocalVisibility(visibility(for: comment))
+  }
+
+  func applying(to parentPost: CommentParentPostContext) -> CommentParentPostContext {
+    parentPost.withLocalVisibility(visibility(for: parentPost))
   }
 
   private func visibility(isBlocked: Bool) -> LocalContentVisibility {

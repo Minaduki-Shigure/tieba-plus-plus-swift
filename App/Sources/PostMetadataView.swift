@@ -1,5 +1,61 @@
 import SwiftUI
 
+struct PostAuthorIdentityView: View {
+  let name: String
+  let portraitURL: URL?
+  let level: Int
+  let isThreadAuthor: Bool
+  let floor: Int?
+  let date: Date?
+  let ipLocation: String
+  let avatarSize: CGFloat
+  let showsDisclosureIndicator: Bool
+
+  init(
+    name: String,
+    portraitURL: URL?,
+    level: Int,
+    isThreadAuthor: Bool,
+    floor: Int? = nil,
+    date: Date?,
+    ipLocation: String,
+    avatarSize: CGFloat = 36,
+    showsDisclosureIndicator: Bool = false
+  ) {
+    self.name = name
+    self.portraitURL = portraitURL
+    self.level = level
+    self.isThreadAuthor = isThreadAuthor
+    self.floor = floor
+    self.date = date
+    self.ipLocation = ipLocation
+    self.avatarSize = avatarSize
+    self.showsDisclosureIndicator = showsDisclosureIndicator
+  }
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 10) {
+      AvatarView(url: portraitURL, name: name, size: avatarSize)
+      VStack(alignment: .leading, spacing: 2) {
+        PostAuthorNameLine(
+          name: name,
+          level: level,
+          isThreadAuthor: isThreadAuthor
+        )
+        PostContextLine(floor: floor, date: date, ipLocation: ipLocation)
+      }
+      Spacer(minLength: 0)
+      if showsDisclosureIndicator {
+        Image(systemName: "chevron.right")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.tertiary)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .contentShape(Rectangle())
+  }
+}
+
 struct PostAuthorNameLine: View {
   let name: String
   let level: Int

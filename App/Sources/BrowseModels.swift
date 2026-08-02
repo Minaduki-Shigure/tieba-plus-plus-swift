@@ -194,25 +194,33 @@ struct PostPageData: Sendable {
 }
 
 struct CommentPageData: Sendable {
+  let parentPost: CommentParentPostContext
   let comments: [BrowseComment]
   let currentPage: Int
   let hasMore: Bool
-  let parentPostID: Int64?
+  let hasPrevious: Bool
+  let totalPages: Int
   let totalCount: Int
 
   init(
+    parentPost: CommentParentPostContext,
     comments: [BrowseComment],
     currentPage: Int,
     hasMore: Bool,
-    parentPostID: Int64? = nil,
+    hasPrevious: Bool = false,
+    totalPages: Int = 0,
     totalCount: Int = 0
   ) {
+    self.parentPost = parentPost
     self.comments = comments
     self.currentPage = currentPage
     self.hasMore = hasMore
-    self.parentPostID = parentPostID
+    self.hasPrevious = hasPrevious
+    self.totalPages = totalPages
     self.totalCount = totalCount
   }
+
+  var parentPostID: Int64 { parentPost.id }
 }
 
 enum BrowseGender: Sendable, Hashable {
@@ -640,6 +648,70 @@ struct BrowsePost: Identifiable, Hashable, Sendable {
       authorIPLocation: authorIPLocation,
       agreeScore: agreeScore,
       inlineComments: inlineComments,
+      localVisibility: visibility
+    )
+  }
+}
+
+struct CommentParentPostContext: Identifiable, Hashable, Sendable {
+  let id: Int64
+  let threadID: Int64
+  let floor: Int
+  let authorID: Int64
+  let authorName: String
+  let authorPortraitURL: URL?
+  let authorLevel: Int
+  let authorIPLocation: String
+  let createdAt: Date?
+  let agreeScore: Int
+  let isThreadAuthor: Bool
+  let contents: [BrowseContent]
+  let localVisibility: LocalContentVisibility
+
+  init(
+    id: Int64,
+    threadID: Int64,
+    floor: Int,
+    authorID: Int64,
+    authorName: String,
+    authorPortraitURL: URL?,
+    createdAt: Date?,
+    isThreadAuthor: Bool,
+    contents: [BrowseContent],
+    authorLevel: Int = 0,
+    authorIPLocation: String = "",
+    agreeScore: Int = 0,
+    localVisibility: LocalContentVisibility = .visible
+  ) {
+    self.id = id
+    self.threadID = threadID
+    self.floor = floor
+    self.authorID = authorID
+    self.authorName = authorName
+    self.authorPortraitURL = authorPortraitURL
+    self.authorLevel = authorLevel
+    self.authorIPLocation = authorIPLocation
+    self.createdAt = createdAt
+    self.agreeScore = agreeScore
+    self.isThreadAuthor = isThreadAuthor
+    self.contents = contents
+    self.localVisibility = localVisibility
+  }
+
+  func withLocalVisibility(_ visibility: LocalContentVisibility) -> Self {
+    CommentParentPostContext(
+      id: id,
+      threadID: threadID,
+      floor: floor,
+      authorID: authorID,
+      authorName: authorName,
+      authorPortraitURL: authorPortraitURL,
+      createdAt: createdAt,
+      isThreadAuthor: isThreadAuthor,
+      contents: contents,
+      authorLevel: authorLevel,
+      authorIPLocation: authorIPLocation,
+      agreeScore: agreeScore,
       localVisibility: visibility
     )
   }
