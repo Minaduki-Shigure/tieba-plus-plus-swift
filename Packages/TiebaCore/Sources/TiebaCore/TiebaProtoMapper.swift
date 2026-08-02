@@ -473,7 +473,7 @@ enum TiebaProtoMapper {
     if let directPoll = poll(proto.pollInfo) {
       return directPoll
     }
-    guard proto.isShareThread != 1 else { return nil }
+    guard proto.isShareThread == 0 else { return nil }
     return poll(proto.originThreadInfo.pollInfo)
   }
 

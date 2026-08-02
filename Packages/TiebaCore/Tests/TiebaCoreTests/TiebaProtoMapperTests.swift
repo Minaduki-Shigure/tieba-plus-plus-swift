@@ -135,6 +135,11 @@ final class TiebaProtoMapperTests: XCTestCase {
     let origin = try XCTUnwrap(result.originThread)
     let originPoll = try XCTUnwrap(origin.poll)
     XCTAssertEqual(originPoll.options.map(\.text), ["Origin option"])
+
+    fixture.thread.isShareThread = 2
+    let unknownFlagResult = TiebaProtoMapper.postPage(fixture)
+    XCTAssertNil(unknownFlagResult.poll)
+    XCTAssertNil(unknownFlagResult.originThread)
   }
 
   func testForumOverviewRequiresARepresentablePositiveForumID() {
