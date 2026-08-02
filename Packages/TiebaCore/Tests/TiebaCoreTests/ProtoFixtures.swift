@@ -427,7 +427,7 @@ enum ProtoFixtures {
 
     var data = GeneralTabListResIdl.DataRes()
     data.generalList = [first, invalid, second]
-    data.hasMore = 1
+    data.hasMore_p = 1
     data.userList = [author]
     data.sortType = 1
 

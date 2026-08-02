@@ -99,7 +99,7 @@ enum TiebaProtoMapper {
         currentPage: requestedPage,
         totalPages: 0,
         totalCount: 0,
-        hasMore: data.hasMore != 0,
+        hasMore: data.hasMore_p != 0,
         hasPrevious: requestedPage > 1
       ),
       nextPageCursor: threads.last?.id
