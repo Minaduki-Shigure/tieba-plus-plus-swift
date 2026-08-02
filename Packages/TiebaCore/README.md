@@ -75,6 +75,10 @@ let followed = try await authenticatedClient.getFollowedForums(
   origin poll remains owned by the original thread. A direct thread poll, when
   present, is authoritative for the outer thread; the ordinary mirror is its
   compatibility fallback.
+- Post and nested-reply agreement summaries use `diff_agree_num` when present,
+  falling back to the difference between raw agree and disagree counts for
+  older responses. Author forum levels and IP locations come from the same
+  anonymous response and do not require a separate profile request.
 - Browsing bodies use the endpoint's multipart `data` part and Protocol Buffer
   payload. Search requests use percent-encoded GET query items and JSON.
 - Anonymous requests contain no Cookie, Authorization, BDUSS, STOKEN, device

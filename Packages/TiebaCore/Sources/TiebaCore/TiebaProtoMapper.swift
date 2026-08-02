@@ -628,11 +628,12 @@ enum TiebaProtoMapper {
       signature: signature,
       comments: comments,
       commentCount: Int(proto.subPostNumber),
-      agreeCount: Int(proto.agree.agreeNum),
-      disagreeCount: Int(proto.agree.disagreeNum),
+      agreeCount: Int(clamping: proto.agree.agreeNum),
+      disagreeCount: Int(clamping: proto.agree.disagreeNum),
       createdAt: date(Int64(proto.time)),
       isThreadAuthor: threadAuthorID != 0 && authorID == threadAuthorID,
-      isAIMeme: proto.spriteMemeInfo.memeID != 0
+      isAIMeme: proto.spriteMemeInfo.memeID != 0,
+      agreeScore: agreeScore(proto.agree)
     )
   }
 
@@ -670,11 +671,21 @@ enum TiebaProtoMapper {
       author: author,
       replyToUserID: replyToUserID,
       content: content(contentProtos),
-      agreeCount: Int(proto.agree.agreeNum),
-      disagreeCount: Int(proto.agree.disagreeNum),
+      agreeCount: Int(clamping: proto.agree.agreeNum),
+      disagreeCount: Int(clamping: proto.agree.disagreeNum),
       createdAt: date(Int64(proto.time)),
-      isThreadAuthor: threadAuthorID != 0 && authorID == threadAuthorID
+      isThreadAuthor: threadAuthorID != 0 && authorID == threadAuthorID,
+      agreeScore: agreeScore(proto.agree)
     )
+  }
+
+  private static func agreeScore(_ proto: Agree) -> Int {
+    if proto.diffAgreeNum != 0 {
+      return Int(clamping: proto.diffAgreeNum)
+    }
+    let (score, overflow) = proto.agreeNum.subtractingReportingOverflow(proto.disagreeNum)
+    guard overflow else { return Int(clamping: score) }
+    return proto.agreeNum >= 0 ? Int.max : Int.min
   }
 
   private static func content(_ protos: [PbContent]) -> TiebaContent {

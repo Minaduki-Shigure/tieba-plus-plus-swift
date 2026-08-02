@@ -85,8 +85,12 @@ enum ProtoFixtures {
   }
 
   static func postPage() -> PbPageResIdl {
-    let author = makeUser(id: 7, name: "thread-author")
-    let commenter = makeUser(id: 8, name: "commenter")
+    var author = makeUser(id: 7, name: "thread-author")
+    author.levelID = 12
+    author.ipAddress = "Shanghai"
+    var commenter = makeUser(id: 8, name: "commenter")
+    commenter.levelID = 9
+    commenter.ipAddress = "Guangdong"
 
     var forum = SimpleForum()
     forum.id = 42
@@ -152,7 +156,9 @@ enum ProtoFixtures {
     nested.authorID = commenter.id
     nested.content = [text("Nested reply")]
     nested.time = 1_700_000_200
-    nested.agree.agreeNum = 3
+    nested.agree.agreeNum = 4
+    nested.agree.disagreeNum = 1
+    nested.agree.diffAgreeNum = 3
 
     var post = Post()
     post.id = 201
@@ -168,7 +174,9 @@ enum ProtoFixtures {
         $0.text = "Sent from fixture"
       }
     ]
-    post.agree.agreeNum = 5
+    post.agree.agreeNum = 7
+    post.agree.disagreeNum = 2
+    post.agree.diffAgreeNum = 5
     post.time = 1_700_000_150
 
     var data = PbPageResIdl.DataRes()

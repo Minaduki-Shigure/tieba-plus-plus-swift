@@ -412,10 +412,43 @@ struct BrowsePost: Identifiable, Hashable, Sendable {
   let authorID: Int64
   let authorName: String
   let authorPortraitURL: URL?
+  let authorLevel: Int
+  let authorIPLocation: String
   let createdAt: Date?
   let nestedReplyCount: Int
+  let agreeScore: Int
   let isThreadAuthor: Bool
   let contents: [BrowseContent]
+
+  init(
+    id: Int64,
+    threadID: Int64,
+    floor: Int,
+    authorID: Int64,
+    authorName: String,
+    authorPortraitURL: URL?,
+    createdAt: Date?,
+    nestedReplyCount: Int,
+    isThreadAuthor: Bool,
+    contents: [BrowseContent],
+    authorLevel: Int = 0,
+    authorIPLocation: String = "",
+    agreeScore: Int = 0
+  ) {
+    self.id = id
+    self.threadID = threadID
+    self.floor = floor
+    self.authorID = authorID
+    self.authorName = authorName
+    self.authorPortraitURL = authorPortraitURL
+    self.authorLevel = authorLevel
+    self.authorIPLocation = authorIPLocation
+    self.createdAt = createdAt
+    self.nestedReplyCount = nestedReplyCount
+    self.agreeScore = agreeScore
+    self.isThreadAuthor = isThreadAuthor
+    self.contents = contents
+  }
 }
 
 struct BrowseComment: Identifiable, Hashable, Sendable {
@@ -423,8 +456,36 @@ struct BrowseComment: Identifiable, Hashable, Sendable {
   let authorID: Int64
   let authorName: String
   let authorPortraitURL: URL?
+  let authorLevel: Int
+  let authorIPLocation: String
   let createdAt: Date?
+  let agreeScore: Int
+  let isThreadAuthor: Bool
   let contents: [BrowseContent]
+
+  init(
+    id: Int64,
+    authorID: Int64,
+    authorName: String,
+    authorPortraitURL: URL?,
+    createdAt: Date?,
+    contents: [BrowseContent],
+    authorLevel: Int = 0,
+    authorIPLocation: String = "",
+    agreeScore: Int = 0,
+    isThreadAuthor: Bool = false
+  ) {
+    self.id = id
+    self.authorID = authorID
+    self.authorName = authorName
+    self.authorPortraitURL = authorPortraitURL
+    self.authorLevel = authorLevel
+    self.authorIPLocation = authorIPLocation
+    self.createdAt = createdAt
+    self.agreeScore = agreeScore
+    self.isThreadAuthor = isThreadAuthor
+    self.contents = contents
+  }
 }
 
 enum BrowseContent: Hashable, Sendable {

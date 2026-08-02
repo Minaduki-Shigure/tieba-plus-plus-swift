@@ -70,8 +70,17 @@ final class TiebaClientTests: XCTestCase {
     XCTAssertEqual(post.signature, "Sent from fixture")
     XCTAssertEqual(post.content.plainText, "Floor content")
     XCTAssertTrue(post.isThreadAuthor)
-    XCTAssertEqual(post.comments.first?.author?.id, 8)
-    XCTAssertEqual(post.comments.first?.parentPostID, post.id)
+    XCTAssertEqual(post.author?.level, 12)
+    XCTAssertEqual(post.author?.ipLocation, "Shanghai")
+    XCTAssertEqual(post.agreeCount, 7)
+    XCTAssertEqual(post.disagreeCount, 2)
+    XCTAssertEqual(post.agreeScore, 5)
+    let comment = try XCTUnwrap(post.comments.first)
+    XCTAssertEqual(comment.author?.id, 8)
+    XCTAssertEqual(comment.author?.level, 9)
+    XCTAssertEqual(comment.author?.ipLocation, "Guangdong")
+    XCTAssertEqual(comment.parentPostID, post.id)
+    XCTAssertEqual(comment.agreeScore, 3)
   }
 
   func testPostCursorIsForwardedToTheWireRequest() async throws {

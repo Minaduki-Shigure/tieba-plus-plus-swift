@@ -23,6 +23,18 @@ final class TiebaProtoMapperTests: XCTestCase {
     XCTAssertEqual(result.pagination.totalPages, 4)
   }
 
+  func testPostAgreementScorePrefersDeclaredValueAndFallsBackToDifference() throws {
+    var fixture = ProtoFixtures.postPage().data
+    fixture.postList[0].agree.agreeNum = 5
+    fixture.postList[0].agree.disagreeNum = 2
+    fixture.postList[0].agree.diffAgreeNum = 9
+
+    XCTAssertEqual(try XCTUnwrap(TiebaProtoMapper.postPage(fixture).posts.first).agreeScore, 9)
+
+    fixture.postList[0].agree.diffAgreeNum = 0
+    XCTAssertEqual(try XCTUnwrap(TiebaProtoMapper.postPage(fixture).posts.first).agreeScore, 3)
+  }
+
   func testPostPageMapsDistinctValidOriginOnlyForSharedThread() throws {
     var fixture = ProtoFixtures.postPage().data
     fixture.thread.isShareThread = 1

@@ -84,6 +84,12 @@ shared thread's origin poll must never be attributed to the outer thread. The
 anonymous UI is strictly read-only and must not expose selection state, collect
 votes, call a submission endpoint, or attach account credentials.
 
+Post author levels, IP locations, and net approval scores are also read only from
+the anonymous post response. An IP location is server-supplied public author
+context, not the device's current location; displaying it must never request
+Core Location permission. These values are not persisted in local history, and
+their static labels must not call an agree, disagree, or profile-write endpoint.
+
 Browsing history, local favorites, global search history, and per-forum search
 history are separate versioned JSON archives in Application Support. They use
 atomic writes, enforce bounded archive sizes, refuse to overwrite malformed or

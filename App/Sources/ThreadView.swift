@@ -360,21 +360,7 @@ private struct PostView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      if post.authorID > 0 {
-        NavigationLink {
-          UserProfileView(
-            userID: post.authorID,
-            service: service,
-            historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository
-          )
-        } label: {
-          authorHeader
-        }
-        .buttonStyle(.plain)
-      } else {
-        authorHeader
-      }
+      authorRow
 
       BrowseContentView(contents: post.contents)
 
@@ -404,34 +390,52 @@ private struct PostView: View {
     .padding(.vertical, 12)
   }
 
-  private var authorHeader: some View {
+  private var authorRow: some View {
+    HStack(alignment: .top, spacing: 10) {
+      if post.authorID > 0 {
+        NavigationLink {
+          UserProfileView(
+            userID: post.authorID,
+            service: service,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository
+          )
+        } label: {
+          authorIdentity
+        }
+        .buttonStyle(.plain)
+      } else {
+        authorIdentity
+      }
+
+      ReadOnlyAgreeLabel(score: post.agreeScore)
+        .padding(.top, 2)
+    }
+  }
+
+  private var authorIdentity: some View {
     HStack(alignment: .top, spacing: 10) {
       AvatarView(url: post.authorPortraitURL, name: post.authorName)
       VStack(alignment: .leading, spacing: 2) {
-        HStack(spacing: 5) {
-          Text(post.authorName)
-            .font(.subheadline.weight(.semibold))
-          if post.isThreadAuthor {
-            Text("楼主")
-              .font(.caption2.weight(.medium))
-              .foregroundStyle(.tint)
-          }
-        }
-        HStack(spacing: 6) {
-          Text("\(post.floor) 楼")
-          if let date = post.createdAt {
-            Text(date, style: .relative)
-          }
-        }
-        .font(.caption)
-        .foregroundStyle(.secondary)
+        PostAuthorNameLine(
+          name: post.authorName,
+          level: post.authorLevel,
+          isThreadAuthor: post.isThreadAuthor
+        )
+        PostContextLine(
+          floor: post.floor,
+          date: post.createdAt,
+          ipLocation: post.authorIPLocation
+        )
       }
       Spacer(minLength: 0)
-      Image(systemName: "chevron.right")
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.tertiary)
-        .opacity(post.authorID > 0 ? 1 : 0)
+      if post.authorID > 0 {
+        Image(systemName: "chevron.right")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.tertiary)
+      }
     }
+    .frame(maxWidth: .infinity, alignment: .leading)
     .contentShape(Rectangle())
   }
 }

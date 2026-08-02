@@ -604,7 +604,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     }
   }
 
-  private static func mapPost(_ post: TiebaPost) -> BrowsePost {
+  static func mapPost(_ post: TiebaPost) -> BrowsePost {
     BrowsePost(
       id: post.id,
       threadID: post.threadID,
@@ -615,18 +615,29 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       createdAt: post.createdAt,
       nestedReplyCount: post.commentCount,
       isThreadAuthor: post.isThreadAuthor,
-      contents: mapContent(post.content)
+      contents: mapContent(post.content),
+      authorLevel: max(post.author?.level ?? 0, 0),
+      authorIPLocation: (post.author?.ipLocation ?? "").trimmingCharacters(
+        in: .whitespacesAndNewlines
+      ),
+      agreeScore: max(post.agreeScore, 0)
     )
   }
 
-  private static func mapComment(_ comment: TiebaComment) -> BrowseComment {
+  static func mapComment(_ comment: TiebaComment) -> BrowseComment {
     BrowseComment(
       id: comment.id,
       authorID: comment.author?.id ?? 0,
       authorName: authorName(comment.author),
       authorPortraitURL: SecureTiebaURL.portrait(comment.author?.portrait),
       createdAt: comment.createdAt,
-      contents: mapContent(comment.content)
+      contents: mapContent(comment.content),
+      authorLevel: max(comment.author?.level ?? 0, 0),
+      authorIPLocation: (comment.author?.ipLocation ?? "").trimmingCharacters(
+        in: .whitespacesAndNewlines
+      ),
+      agreeScore: max(comment.agreeScore, 0),
+      isThreadAuthor: comment.isThreadAuthor
     )
   }
 

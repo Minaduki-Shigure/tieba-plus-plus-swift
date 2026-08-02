@@ -598,6 +598,7 @@ public struct TiebaComment: Identifiable, Sendable, Hashable {
   public let content: TiebaContent
   public let agreeCount: Int
   public let disagreeCount: Int
+  public let agreeScore: Int
   public let createdAt: Date?
   public let isThreadAuthor: Bool
 
@@ -612,7 +613,8 @@ public struct TiebaComment: Identifiable, Sendable, Hashable {
     agreeCount: Int,
     disagreeCount: Int,
     createdAt: Date?,
-    isThreadAuthor: Bool
+    isThreadAuthor: Bool,
+    agreeScore: Int? = nil
   ) {
     self.id = id
     self.threadID = threadID
@@ -623,6 +625,7 @@ public struct TiebaComment: Identifiable, Sendable, Hashable {
     self.content = content
     self.agreeCount = agreeCount
     self.disagreeCount = disagreeCount
+    self.agreeScore = agreeScore ?? inferredAgreeScore(agreeCount, disagreeCount)
     self.createdAt = createdAt
     self.isThreadAuthor = isThreadAuthor
   }
@@ -639,6 +642,7 @@ public struct TiebaPost: Identifiable, Sendable, Hashable {
   public let commentCount: Int
   public let agreeCount: Int
   public let disagreeCount: Int
+  public let agreeScore: Int
   public let createdAt: Date?
   public let isThreadAuthor: Bool
   public let isAIMeme: Bool
@@ -656,7 +660,8 @@ public struct TiebaPost: Identifiable, Sendable, Hashable {
     disagreeCount: Int,
     createdAt: Date?,
     isThreadAuthor: Bool,
-    isAIMeme: Bool
+    isAIMeme: Bool,
+    agreeScore: Int? = nil
   ) {
     self.id = id
     self.threadID = threadID
@@ -668,10 +673,17 @@ public struct TiebaPost: Identifiable, Sendable, Hashable {
     self.commentCount = commentCount
     self.agreeCount = agreeCount
     self.disagreeCount = disagreeCount
+    self.agreeScore = agreeScore ?? inferredAgreeScore(agreeCount, disagreeCount)
     self.createdAt = createdAt
     self.isThreadAuthor = isThreadAuthor
     self.isAIMeme = isAIMeme
   }
+}
+
+private func inferredAgreeScore(_ agreeCount: Int, _ disagreeCount: Int) -> Int {
+  let (score, overflow) = agreeCount.subtractingReportingOverflow(disagreeCount)
+  guard overflow else { return score }
+  return agreeCount >= 0 ? Int.max : Int.min
 }
 
 public struct TiebaThreadPage: Sendable, Hashable {

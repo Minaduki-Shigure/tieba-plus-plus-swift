@@ -52,7 +52,7 @@ struct CommentsView: View {
         List {
           ForEach(viewModel.comments) { comment in
             VStack(alignment: .leading, spacing: 7) {
-              HStack {
+              HStack(alignment: .top, spacing: 10) {
                 if comment.authorID > 0 {
                   NavigationLink {
                     UserProfileView(
@@ -62,34 +62,15 @@ struct CommentsView: View {
                       favoritesRepository: favoritesRepository
                     )
                   } label: {
-                    HStack(spacing: 10) {
-                      AvatarView(
-                        url: comment.authorPortraitURL,
-                        name: comment.authorName,
-                        size: 32
-                      )
-                      Text(comment.authorName)
-                        .font(.subheadline.weight(.semibold))
-                    }
+                    commentAuthorIdentity(comment)
                   }
                   .buttonStyle(.plain)
                 } else {
-                  HStack(spacing: 10) {
-                    AvatarView(
-                      url: comment.authorPortraitURL,
-                      name: comment.authorName,
-                      size: 32
-                    )
-                    Text(comment.authorName)
-                      .font(.subheadline.weight(.semibold))
-                  }
+                  commentAuthorIdentity(comment)
                 }
-                Spacer()
-                if let date = comment.createdAt {
-                  Text(date, style: .relative)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
+
+                ReadOnlyAgreeLabel(score: comment.agreeScore)
+                  .padding(.top, 2)
               }
               BrowseContentView(contents: comment.contents)
             }
@@ -128,5 +109,29 @@ struct CommentsView: View {
     }
     .task { viewModel.loadIfNeeded() }
     .onDisappear(perform: viewModel.cancel)
+  }
+
+  private func commentAuthorIdentity(_ comment: BrowseComment) -> some View {
+    HStack(alignment: .top, spacing: 10) {
+      AvatarView(
+        url: comment.authorPortraitURL,
+        name: comment.authorName,
+        size: 32
+      )
+      VStack(alignment: .leading, spacing: 2) {
+        PostAuthorNameLine(
+          name: comment.authorName,
+          level: comment.authorLevel,
+          isThreadAuthor: comment.isThreadAuthor
+        )
+        PostContextLine(
+          date: comment.createdAt,
+          ipLocation: comment.authorIPLocation
+        )
+      }
+      Spacer(minLength: 0)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .contentShape(Rectangle())
   }
 }

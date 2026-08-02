@@ -1,4 +1,5 @@
 import Foundation
+import TiebaCore
 import XCTest
 
 @testable import TiebaPlusPlus
@@ -69,6 +70,83 @@ final class BrowseViewModelTests: XCTestCase {
     let emptyOption = try XCTUnwrap(emptyTotalPoll.options.first)
     XCTAssertEqual(emptyTotalPoll.progress(for: emptyOption), 0)
     XCTAssertEqual(emptyTotalPoll.percentage(for: emptyOption), 0)
+  }
+
+  func testBrowseMappingPreservesReadOnlyPostAndCommentMetadata() {
+    let author = TiebaUser(
+      id: 7,
+      username: "author",
+      displayName: "Author",
+      portrait: "portrait-token",
+      level: 12,
+      growthLevel: 0,
+      gender: .unknown,
+      ipLocation: " Shanghai ",
+      badges: [],
+      isModerator: false,
+      isVIP: false,
+      isVerifiedCreator: false
+    )
+    let post = TiebaPost(
+      id: 101,
+      threadID: 100,
+      floor: 2,
+      author: author,
+      content: TiebaContent(fragments: [.text("Post")]),
+      signature: "",
+      comments: [],
+      commentCount: 0,
+      agreeCount: 7,
+      disagreeCount: 2,
+      createdAt: nil,
+      isThreadAuthor: true,
+      isAIMeme: false,
+      agreeScore: 5
+    )
+    let comment = TiebaComment(
+      id: 102,
+      threadID: 100,
+      parentPostID: 101,
+      floor: 2,
+      author: author,
+      replyToUserID: nil,
+      content: TiebaContent(fragments: [.text("Comment")]),
+      agreeCount: 4,
+      disagreeCount: 1,
+      createdAt: nil,
+      isThreadAuthor: true,
+      agreeScore: 3
+    )
+
+    let mappedPost = TiebaCoreBrowseService.mapPost(post)
+    let mappedComment = TiebaCoreBrowseService.mapComment(comment)
+
+    XCTAssertEqual(mappedPost.authorLevel, 12)
+    XCTAssertEqual(mappedPost.authorIPLocation, "Shanghai")
+    XCTAssertEqual(mappedPost.agreeScore, 5)
+    XCTAssertTrue(mappedPost.isThreadAuthor)
+    XCTAssertEqual(mappedComment.authorLevel, 12)
+    XCTAssertEqual(mappedComment.authorIPLocation, "Shanghai")
+    XCTAssertEqual(mappedComment.agreeScore, 3)
+    XCTAssertTrue(mappedComment.isThreadAuthor)
+
+    let negativeScorePost = TiebaPost(
+      id: 103,
+      threadID: 100,
+      floor: 3,
+      author: author,
+      content: TiebaContent(fragments: []),
+      signature: "",
+      comments: [],
+      commentCount: 0,
+      agreeCount: 0,
+      disagreeCount: 2,
+      createdAt: nil,
+      isThreadAuthor: false,
+      isAIMeme: false,
+      agreeScore: -2
+    )
+    XCTAssertEqual(TiebaCoreBrowseService.mapPost(negativeScorePost).agreeScore, 0)
   }
 
   @MainActor

@@ -16,6 +16,9 @@ request and response schemas are adapted from
 closure. TiebaLite is authored by zzc10086 and contributors and is released
 under GPL-3.0; this project is distributed under the same license.
 
+The `Agree.diff_agree_num` field used for read-only post score display is
+adapted from TiebaLite commit `b8409486a2f7bd85881835163bd2c1ebe4fed7f7`.
+
 Only the dependency closure needed by the implemented anonymous endpoints is
 included here. The schemas document an unofficial Baidu Tieba wire protocol and
 do not imply endorsement by or affiliation with Baidu.

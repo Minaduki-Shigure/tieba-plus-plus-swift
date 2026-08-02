@@ -28,6 +28,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Nested replies, images, video links, and voice playback
 - Shared-thread origin cards with original content, media, and navigation
 - Anonymous single- and multiple-choice poll result cards
+- Read-only post and nested-reply scores, author forum levels, and IP locations
 - Public user profiles opened from post and nested-reply authors
 - Paginated public threads on user profiles
 - Independent local forum and thread favorites
@@ -117,3 +118,9 @@ ordinary thread's mirror as a compatibility fallback.
 Percentages use the server's total option-vote count, with a sanitized option-sum
 fallback for missing totals; zero and inconsistent totals cannot produce an
 invalid or oversized progress bar. Poll submission remains unsupported.
+
+Post and nested-reply headers preserve the public author context already present
+in anonymous responses: the author's level in that forum, the server-supplied IP
+location, and `diff_agree_num` as the displayed net approval score. Missing or
+malformed values collapse to a quiet empty state instead of creating a control.
+These values are response snapshots only; anonymous cards do not submit likes.

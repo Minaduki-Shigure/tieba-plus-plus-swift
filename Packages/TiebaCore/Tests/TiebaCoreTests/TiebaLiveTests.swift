@@ -10,7 +10,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.14 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.15 integration-test")
     )
     let threads = try await client.getThreads(forumName: "starry", pageSize: 10)
     XCTAssertFalse(threads.threads.isEmpty)
@@ -119,7 +119,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.14 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.15 integration-test")
     )
     let forums = try await client.searchForums(query: "swift")
     XCTAssertFalse(forums.isLoggedIn)
@@ -183,7 +183,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.14 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.15 integration-test")
     )
     let feed = try await client.getThreads(forumName: "steam", pageSize: 100)
     let candidates = feed.threads.filter(\.isShared)
@@ -203,13 +203,31 @@ final class TiebaLiveTests: XCTestCase {
     XCTFail("Public shared-thread candidates did not expose a valid distinct origin context.")
   }
 
+  func testAnonymousPostAuthorContextAndAgreementScore() async throws {
+    guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
+      throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
+    }
+
+    let client = TiebaClient(
+      configuration: .init(userAgent: "TiebaPlusPlus/0.15 integration-test")
+    )
+    let page = try await client.getPosts(threadID: 8_211_419_000, pageSize: 2)
+    let firstPost = try XCTUnwrap(page.posts.first(where: { $0.floor == 1 }))
+    let author = try XCTUnwrap(firstPost.author)
+
+    XCTAssertGreaterThan(author.level, 0)
+    XCTAssertFalse(author.ipLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    XCTAssertGreaterThan(firstPost.agreeScore, 0)
+    XCTAssertEqual(firstPost.agreeScore, firstPost.agreeCount - firstPost.disagreeCount)
+  }
+
   func testAnonymousPollResultsAndSharedOriginOwnership() async throws {
     guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
       throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.14 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.15 integration-test")
     )
     let feed = try await client.getThreads(forumName: "starry", pageSize: 100)
     var candidateIDs = feed.threads.compactMap { thread -> Int64? in
@@ -249,7 +267,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.14 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.15 integration-test")
     )
     let topics = try await client.getHotTopics()
     let topic = try XCTUnwrap(topics.first)
@@ -287,7 +305,7 @@ final class TiebaLiveTests: XCTestCase {
 
     let userID: Int64 = 957_339_815
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.14 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.15 integration-test")
     )
 
     let profile = try await client.getUserProfile(userID: userID)
@@ -309,7 +327,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.14 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.15 integration-test")
     )
     let forumID: Int64 = 2_432_903
 
