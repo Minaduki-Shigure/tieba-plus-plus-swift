@@ -7,13 +7,13 @@ in `Packages/TiebaCore/Sources/TiebaProto/NOTICE.md`.
 
 ## Status
 
-Development is in progress. Anonymous mode supports forum and thread search,
-forum, post, and nested-reply browsing, remote media, forum metadata and
-featured classifications, complete public forum introductions, forum rules,
-and moderator teams, plus post sorting, page jumps, and an only-thread-author
-filter. Moderator rows, post authors, and nested-reply authors open
-credential-free public user
-profiles with profile statistics and paginated public threads. Local browsing
+Development is in progress. Anonymous mode supports categorized forum, thread,
+and user search, forum, post, and nested-reply browsing, remote media, forum
+metadata and featured classifications, complete public forum introductions,
+forum rules, and moderator teams, plus post sorting, page jumps, and an
+only-thread-author filter. Search results, moderator rows, post authors, and
+nested-reply authors open credential-free public user profiles with profile
+statistics and paginated public threads. Local browsing
 history records the last visible post ID for stable post orders and restores it
 with the active sort/filter options; the changing hot ranking reopens at its
 first page. Forums and threads can also be saved in an independent local

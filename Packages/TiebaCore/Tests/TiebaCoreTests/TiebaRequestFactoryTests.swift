@@ -399,6 +399,8 @@ final class TiebaRequestFactoryTests: XCTestCase {
     )
     XCTAssertThrowsError(try factory.searchForums(query: "  "))
     XCTAssertThrowsError(try factory.searchForums(query: String(repeating: "a", count: 101)))
+    XCTAssertThrowsError(try factory.searchUsers(query: "  "))
+    XCTAssertThrowsError(try factory.searchUsers(query: String(repeating: "a", count: 101)))
     XCTAssertThrowsError(try factory.searchThreads(query: "swift", page: 0, pageSize: 20))
     XCTAssertThrowsError(try factory.searchThreads(query: "swift", page: 1, pageSize: 51))
     XCTAssertThrowsError(try factory.userProfile(userID: 0))
@@ -408,16 +410,23 @@ final class TiebaRequestFactoryTests: XCTestCase {
     XCTAssertThrowsError(try factory.forumModerators(forumID: -1))
     XCTAssertThrowsError(try factory.forumRules(forumID: 0))
     XCTAssertThrowsError(try injected.searchForums(query: "swift"))
+    XCTAssertThrowsError(try injected.searchUsers(query: "swift"))
   }
 
   func testSearchRequestsUseEncodedCredentialFreeHTTPSWebEndpoint() throws {
     let forumRequest = try factory.searchForums(query: " Swift & iOS ")
+    let userRequest = try factory.searchUsers(query: "Swift 用户")
     let threadRequest = try factory.searchThreads(query: "Swift 中文", page: 2, pageSize: 15)
 
     XCTAssertEqual(forumRequest.url?.scheme, "https")
     XCTAssertEqual(forumRequest.url?.host, "tieba.baidu.com")
     XCTAssertEqual(forumRequest.url?.path, "/mo/q/search/forum")
     XCTAssertEqual(queryItems(forumRequest)["word"], "Swift & iOS")
+
+    XCTAssertEqual(userRequest.url?.scheme, "https")
+    XCTAssertEqual(userRequest.url?.host, "tieba.baidu.com")
+    XCTAssertEqual(userRequest.url?.path, "/mo/q/search/user")
+    XCTAssertEqual(queryItems(userRequest), ["word": "Swift 用户"])
 
     XCTAssertEqual(threadRequest.url?.scheme, "https")
     XCTAssertEqual(threadRequest.url?.host, "tieba.baidu.com")
@@ -436,7 +445,7 @@ final class TiebaRequestFactoryTests: XCTestCase {
       ]
     )
 
-    for request in [forumRequest, threadRequest] {
+    for request in [forumRequest, userRequest, threadRequest] {
       XCTAssertEqual(request.httpMethod, "GET")
       XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
       XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))

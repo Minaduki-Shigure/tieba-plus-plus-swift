@@ -6,7 +6,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 
 ## Available
 
-- Anonymous forum and thread search
+- Categorized anonymous forum, thread, and user search
 - Forum thread list with pagination and pull to refresh
 - Reply-time and creation-time forum sorting
 - Forum header, statistics, rules state, and featured classifications
@@ -67,3 +67,8 @@ isolation, and real-device validation. The initial authenticated feature is
 read-only: it validates identity and fetches followed forums. Anonymous
 browsing must continue to work without creating, reading, or storing an account
 session.
+
+Search categories load independently so one endpoint failure does not discard
+another category's results. User search uses the credential-free Web endpoint,
+accepts the server's object/array result variants and 64-bit user identifiers,
+and opens the same anonymous public profile workflow used by author rows.

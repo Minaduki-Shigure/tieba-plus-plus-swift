@@ -23,70 +23,81 @@ struct SearchView: View {
   }
 
   var body: some View {
-    Group {
-      if !viewModel.hasResults {
-        switch viewModel.state {
-        case .idle, .loading:
-          ProgressView()
-        case .failed(let message):
-          ErrorStateView(message: message) { viewModel.submit(query) }
-        case .loaded:
-          EmptyStateView(title: "没有找到结果", systemImage: "magnifyingglass")
+    VStack(spacing: 0) {
+      Picker(
+        "搜索范围",
+        selection: Binding(
+          get: { viewModel.selectedScope },
+          set: { viewModel.selectScope($0) }
+        )
+      ) {
+        ForEach(SearchScope.allCases) { scope in
+          Text(scope.title).tag(scope)
         }
-      } else {
-        resultsList
       }
+      .pickerStyle(.segmented)
+      .padding(.horizontal, 16)
+      .padding(.vertical, 8)
+      .background(.regularMaterial)
+
+      Divider()
+      selectedResults
     }
-    .navigationTitle(viewModel.submittedQuery)
+    .navigationTitle(viewModel.submittedQuery.isEmpty ? "搜索" : viewModel.submittedQuery)
     .navigationBarTitleDisplayMode(.inline)
-    .searchable(text: $query, prompt: "搜索贴吧和帖子")
+    .searchable(text: $query, prompt: "搜索贴吧、帖子和用户")
     .onSubmit(of: .search) { viewModel.submit(query) }
     .task { viewModel.loadIfNeeded() }
     .onDisappear(perform: viewModel.cancel)
+    .alert(
+      "刷新失败",
+      isPresented: Binding(
+        get: { viewModel.refreshError != nil },
+        set: { if !$0 { viewModel.clearRefreshError() } }
+      )
+    ) {
+      Button("好", role: .cancel) { viewModel.clearRefreshError() }
+    } message: {
+      Text(viewModel.refreshError ?? "无法刷新搜索结果。")
+    }
   }
 
-  private var resultsList: some View {
+  @ViewBuilder
+  private var selectedResults: some View {
+    if !viewModel.hasResults {
+      switch viewModel.state {
+      case .idle, .loading:
+        ProgressView()
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+      case .failed(let message):
+        ErrorStateView(message: message, retry: viewModel.retry)
+      case .loaded:
+        emptyResults
+      }
+    } else {
+      switch viewModel.selectedScope {
+      case .forums:
+        forumResults
+      case .threads:
+        threadResults
+      case .users:
+        userResults
+      }
+    }
+  }
+
+  private var forumResults: some View {
     List {
       if let exactForum = viewModel.exactForum {
-        Section("贴吧") {
-          forumLink(exactForum, exact: true)
+        Section("精确匹配") {
+          forumLink(exactForum)
         }
       }
 
       if !viewModel.relatedForums.isEmpty {
         Section(viewModel.exactForum == nil ? "贴吧" : "相关贴吧") {
           ForEach(viewModel.relatedForums) { forum in
-            forumLink(forum, exact: false)
-          }
-        }
-      }
-
-      if !viewModel.threads.isEmpty {
-        Section("帖子") {
-          ForEach(viewModel.threads) { thread in
-            NavigationLink {
-              ThreadView(
-                thread: thread,
-                service: browseService,
-                historyRepository: historyRepository,
-                favoritesRepository: favoritesRepository
-              )
-            } label: {
-              SearchThreadRow(thread: thread)
-            }
-            .onAppear { viewModel.loadMoreIfNeeded(current: thread) }
-          }
-
-          if viewModel.isLoadingMore {
-            HStack {
-              Spacer()
-              ProgressView()
-              Spacer()
-            }
-            .listRowSeparator(.hidden)
-          } else if let message = viewModel.loadMoreError {
-            LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
-              .listRowSeparator(.hidden)
+            forumLink(forum)
           }
         }
       }
@@ -95,7 +106,70 @@ struct SearchView: View {
     .refreshable { await viewModel.refresh() }
   }
 
-  private func forumLink(_ forum: ForumSearchItem, exact: Bool) -> some View {
+  private var threadResults: some View {
+    List {
+      Section("帖子") {
+        ForEach(viewModel.threads) { thread in
+          NavigationLink {
+            ThreadView(
+              thread: thread,
+              service: browseService,
+              historyRepository: historyRepository,
+              favoritesRepository: favoritesRepository
+            )
+          } label: {
+            SearchThreadRow(thread: thread)
+          }
+          .onAppear { viewModel.loadMoreIfNeeded(current: thread) }
+        }
+
+        if viewModel.isLoadingMore {
+          HStack {
+            Spacer()
+            ProgressView()
+            Spacer()
+          }
+          .listRowSeparator(.hidden)
+        } else if let message = viewModel.loadMoreError {
+          LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
+            .listRowSeparator(.hidden)
+        }
+      }
+    }
+    .listStyle(.insetGrouped)
+    .refreshable { await viewModel.refresh() }
+  }
+
+  private var userResults: some View {
+    List {
+      if let exactUser = viewModel.exactUser {
+        Section("推荐") {
+          userLink(exactUser)
+        }
+      }
+
+      if !viewModel.relatedUsers.isEmpty {
+        Section(viewModel.exactUser == nil ? "用户" : "相关用户") {
+          ForEach(viewModel.relatedUsers) { user in
+            userLink(user)
+          }
+        }
+      }
+    }
+    .listStyle(.insetGrouped)
+    .refreshable { await viewModel.refresh() }
+  }
+
+  private var emptyResults: some View {
+    List {}
+      .listStyle(.insetGrouped)
+      .overlay {
+        EmptyStateView(title: emptyTitle, systemImage: emptySystemImage)
+      }
+      .refreshable { await viewModel.refresh() }
+  }
+
+  private func forumLink(_ forum: ForumSearchItem) -> some View {
     NavigationLink {
       ForumView(
         forumName: forum.name,
@@ -104,14 +178,48 @@ struct SearchView: View {
         favoritesRepository: favoritesRepository
       )
     } label: {
-      ForumSearchRow(forum: forum, exact: exact)
+      ForumSearchRow(forum: forum)
+    }
+  }
+
+  private func userLink(_ user: UserSearchItem) -> some View {
+    NavigationLink {
+      UserProfileView(
+        userID: user.id,
+        service: browseService,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository
+      )
+    } label: {
+      UserSearchRow(user: user)
+    }
+  }
+
+  private var emptyTitle: String {
+    switch viewModel.selectedScope {
+    case .forums:
+      "没有找到贴吧"
+    case .threads:
+      "没有找到帖子"
+    case .users:
+      "没有找到用户"
+    }
+  }
+
+  private var emptySystemImage: String {
+    switch viewModel.selectedScope {
+    case .forums:
+      "text.bubble"
+    case .threads:
+      "text.page"
+    case .users:
+      "person.crop.circle"
     }
   }
 }
 
 private struct ForumSearchRow: View {
   let forum: ForumSearchItem
-  let exact: Bool
 
   var body: some View {
     HStack(alignment: .top, spacing: 12) {
@@ -131,15 +239,8 @@ private struct ForumSearchRow: View {
       .accessibilityHidden(true)
 
       VStack(alignment: .leading, spacing: 5) {
-        HStack(spacing: 6) {
-          Text(forum.displayName)
-            .font(.headline)
-          if exact {
-            Text("精确匹配")
-              .font(.caption2)
-              .foregroundStyle(.tint)
-          }
-        }
+        Text(forum.displayName)
+          .font(.headline)
         if !forum.summary.isEmpty {
           Text(forum.summary)
             .font(.subheadline)
@@ -182,6 +283,35 @@ private struct SearchThreadRow: View {
       }
       .font(.caption)
       .foregroundStyle(.secondary)
+    }
+    .padding(.vertical, 3)
+  }
+}
+
+private struct UserSearchRow: View {
+  let user: UserSearchItem
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 12) {
+      AvatarView(url: user.portraitURL, name: user.preferredName, size: 48)
+      VStack(alignment: .leading, spacing: 4) {
+        Text(user.preferredName)
+          .font(.headline)
+          .lineLimit(2)
+        if !user.username.isEmpty, user.username != user.preferredName {
+          Text(user.username)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+        if !user.introduction.isEmpty {
+          Text(user.introduction)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
     .padding(.vertical, 3)
   }

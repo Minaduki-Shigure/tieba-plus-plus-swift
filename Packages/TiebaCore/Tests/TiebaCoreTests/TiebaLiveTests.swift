@@ -10,7 +10,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.7 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.8 integration-test")
     )
     let threads = try await client.getThreads(forumName: "starry", pageSize: 10)
     XCTAssertFalse(threads.threads.isEmpty)
@@ -119,7 +119,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.7 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.8 integration-test")
     )
     let forums = try await client.searchForums(query: "swift")
     XCTAssertFalse(forums.isLoggedIn)
@@ -129,6 +129,10 @@ final class TiebaLiveTests: XCTestCase {
     XCTAssertFalse(threads.isLoggedIn)
     XCTAssertFalse(threads.results.isEmpty)
     XCTAssertEqual(threads.pagination.currentPage, 1)
+
+    let users = try await client.searchUsers(query: "swift")
+    XCTAssertTrue(users.exactMatch != nil || !users.fuzzyMatches.isEmpty)
+    XCTAssertTrue(users.fuzzyMatches.allSatisfy { $0.id > 0 && !$0.preferredName.isEmpty })
   }
 
   func testAnonymousPublicUserProfileAndThreads() async throws {
@@ -138,7 +142,7 @@ final class TiebaLiveTests: XCTestCase {
 
     let userID: Int64 = 957_339_815
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.7 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.8 integration-test")
     )
 
     let profile = try await client.getUserProfile(userID: userID)
@@ -160,7 +164,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.7 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.8 integration-test")
     )
     let forumID: Int64 = 2_432_903
 

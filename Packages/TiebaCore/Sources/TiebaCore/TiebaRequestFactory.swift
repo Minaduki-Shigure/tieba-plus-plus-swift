@@ -292,6 +292,14 @@ struct TiebaRequestFactory: Sendable {
     )
   }
 
+  func searchUsers(query: String) throws -> URLRequest {
+    let query = try validatedSearchQuery(query)
+    return try webRequest(
+      path: "/mo/q/search/user",
+      queryItems: [URLQueryItem(name: "word", value: query)]
+    )
+  }
+
   func searchThreads(query: String, page: Int, pageSize: Int) throws -> URLRequest {
     let query = try validatedSearchQuery(query)
     try validate(page: page)

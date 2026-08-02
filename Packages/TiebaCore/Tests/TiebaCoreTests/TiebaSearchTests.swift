@@ -185,6 +185,94 @@ final class TiebaSearchTests: XCTestCase {
     XCTAssertEqual(page.results.first?.images, [])
   }
 
+  func testUserSearchDecodesFlexibleCollectionsAndDeduplicatesExactMatch() throws {
+    let body = Data(
+      #"""
+      {
+        "no": "0",
+        "error": "success",
+        "data": {
+          "pn": 1,
+          "has_more": 0,
+          "exactMatch": {
+            "id": "88897",
+            "name": "swift",
+            "show_nickname": "Swift User",
+            "user_nickname": "Alternate",
+            "portrait": "https://gss0.bdstatic.com/avatar.jpg",
+            "intro": "  Exact introduction  ",
+            "fans_num": "104W"
+          },
+          "fuzzyMatch": {
+            "2": {
+              "id": 9,
+              "name": "fallback-name",
+              "show_nickname": "",
+              "user_nickname": "Alternate Name",
+              "portrait": "tb.1.portrait-token",
+              "intro": "Related user"
+            },
+            "1": {
+              "id": 88897,
+              "name": "duplicate-exact",
+              "show_nickname": "Duplicate"
+            },
+            "3": {
+              "id": 17596400272242,
+              "name": "large-uid",
+              "show_nickname": "Large UID",
+              "portrait": "file:///private/avatar.png"
+            },
+            "4": {
+              "id": "10",
+              "name": "",
+              "show_nickname": "Nickname Only"
+            }
+          }
+        }
+      }
+      """#.utf8)
+
+    let result = try TiebaSearchDecoder.users(from: body)
+
+    let exact = try XCTUnwrap(result.exactMatch)
+    XCTAssertEqual(exact.id, 88_897)
+    XCTAssertEqual(exact.username, "swift")
+    XCTAssertEqual(exact.preferredName, "Swift User")
+    XCTAssertEqual(exact.introduction, "Exact introduction")
+    XCTAssertEqual(exact.portrait, "https://gss0.bdstatic.com/avatar.jpg")
+    XCTAssertEqual(result.fuzzyMatches.map(\.id), [9, 17_596_400_272_242, 10])
+    XCTAssertEqual(result.fuzzyMatches.first?.preferredName, "Alternate Name")
+    XCTAssertEqual(result.fuzzyMatches.first?.portrait, "tb.1.portrait-token")
+    XCTAssertEqual(
+      result.fuzzyMatches.first(where: { $0.id == 17_596_400_272_242 })?.portrait,
+      "file:///private/avatar.png"
+    )
+    XCTAssertEqual(result.fuzzyMatches.last?.username, "")
+    XCTAssertEqual(result.fuzzyMatches.last?.preferredName, "Nickname Only")
+  }
+
+  func testUserSearchAcceptsEmptyArraysNullDataAndDropsInvalidUsers() throws {
+    let emptyBody = Data(
+      #"{"no":0,"error":"success","data":{"exactMatch":[],"fuzzyMatch":[]}}"#.utf8)
+    let nullBody = Data(#"{"no":0,"error":"success","data":null}"#.utf8)
+    let arrayBody = Data(
+      #"{"no":0,"error":"success","data":{"exactMatch":[],"fuzzyMatch":[{"id":"7","name":"","show_nickname":"Nickname"}]}}"#.utf8)
+    let invalidBody = Data(
+      #"{"no":0,"error":"success","data":{"exactMatch":{"id":0,"name":"invalid"},"fuzzyMatch":[{"id":"7","name":""}]}}"#.utf8)
+
+    for body in [emptyBody, nullBody, invalidBody] {
+      let result = try TiebaSearchDecoder.users(from: body)
+      XCTAssertNil(result.exactMatch)
+      XCTAssertTrue(result.fuzzyMatches.isEmpty)
+    }
+
+    let arrayResult = try TiebaSearchDecoder.users(from: arrayBody)
+    XCTAssertNil(arrayResult.exactMatch)
+    XCTAssertEqual(arrayResult.fuzzyMatches.map(\.id), [7])
+    XCTAssertEqual(arrayResult.fuzzyMatches.first?.preferredName, "Nickname")
+  }
+
   func testSearchMapsServerAndMalformedJSONErrors() throws {
     let serverError = Data(#"{"no":300003,"error":"internal error"}"#.utf8)
     XCTAssertThrowsError(try TiebaSearchDecoder.forums(from: serverError)) { error in
@@ -196,6 +284,17 @@ final class TiebaSearchTests: XCTestCase {
 
     XCTAssertThrowsError(try TiebaSearchDecoder.forums(from: Data(#"{"unexpected":true}"#.utf8))) {
       error in
+      XCTAssertEqual(error as? TiebaClientError, .invalidJSON)
+    }
+    XCTAssertThrowsError(try TiebaSearchDecoder.users(from: serverError)) { error in
+      XCTAssertEqual(
+        error as? TiebaClientError,
+        .server(code: 300003, message: "internal error")
+      )
+    }
+    let malformedUsers = Data(
+      #"{"no":0,"error":"success","data":{"exactMatch":true,"fuzzyMatch":[]}}"#.utf8)
+    XCTAssertThrowsError(try TiebaSearchDecoder.users(from: malformedUsers)) { error in
       XCTAssertEqual(error as? TiebaClientError, .invalidJSON)
     }
   }

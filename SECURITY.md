@@ -50,6 +50,11 @@ Anonymous public-profile requests must use the protocol's guest target fields.
 They must not place the target user in the current-account field, attach account
 credentials, or attempt to bypass profile privacy settings.
 
+Forum, thread, and user search must use the anonymous request factory even when
+an account is active. Search requests may contain only the submitted public
+keyword and endpoint-specific pagination or sorting fields; they must never
+attach Cookie, Authorization, BDUSS, STOKEN, or a device identifier.
+
 Public forum introductions, rules, and moderator-team requests must remain
 credential-free. They may include only the forum identifier and anonymous
 client metadata; no future account Cookie, BDUSS, or STOKEN may be attached to

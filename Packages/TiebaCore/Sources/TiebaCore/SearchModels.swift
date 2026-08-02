@@ -47,6 +47,45 @@ public struct TiebaForumSearchResults: Sendable, Hashable {
   }
 }
 
+public struct TiebaUserSearchResult: Identifiable, Sendable, Hashable {
+  public let id: Int64
+  public let username: String
+  public let displayName: String
+  public let portrait: String
+  public let introduction: String
+
+  public init(
+    id: Int64,
+    username: String,
+    displayName: String,
+    portrait: String,
+    introduction: String
+  ) {
+    self.id = id
+    self.username = username
+    self.displayName = displayName
+    self.portrait = portrait
+    self.introduction = introduction
+  }
+
+  public var preferredName: String {
+    displayName.isEmpty ? username : displayName
+  }
+}
+
+public struct TiebaUserSearchResults: Sendable, Hashable {
+  public let exactMatch: TiebaUserSearchResult?
+  public let fuzzyMatches: [TiebaUserSearchResult]
+
+  public init(
+    exactMatch: TiebaUserSearchResult?,
+    fuzzyMatches: [TiebaUserSearchResult]
+  ) {
+    self.exactMatch = exactMatch
+    self.fuzzyMatches = fuzzyMatches
+  }
+}
+
 public struct TiebaSearchImage: Sendable, Hashable {
   public let thumbnailURL: URL?
   public let fullSizeURL: URL?

@@ -201,6 +201,23 @@ struct ForumSearchData: Sendable {
   let related: [ForumSearchItem]
 }
 
+struct UserSearchItem: Identifiable, Hashable, Sendable {
+  let id: Int64
+  let username: String
+  let displayName: String
+  let portraitURL: URL?
+  let introduction: String
+
+  var preferredName: String {
+    displayName.isEmpty ? username : displayName
+  }
+}
+
+struct UserSearchData: Sendable {
+  let exactMatch: UserSearchItem?
+  let related: [UserSearchItem]
+}
+
 struct ThreadSearchPageData: Sendable {
   let threads: [BrowseThread]
   let currentPage: Int

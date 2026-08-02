@@ -48,6 +48,23 @@ enum TiebaSearchDecoder {
     )
   }
 
+  static func users(from body: Data) throws -> TiebaUserSearchResults {
+    let envelope: SearchEnvelope<UserSearchPayload> = try decode(body)
+    try checkServerError(envelope)
+    guard let data = envelope.data else {
+      return TiebaUserSearchResults(exactMatch: nil, fuzzyMatches: [])
+    }
+
+    let exactMatch = data.exactMatch.values.compactMap(mapUser).first
+    let exactID = exactMatch?.id
+    var seen = Set<Int64>()
+    if let exactID { seen.insert(exactID) }
+    let fuzzyMatches = data.fuzzyMatch.values.compactMap(mapUser).filter {
+      seen.insert($0.id).inserted
+    }
+    return TiebaUserSearchResults(exactMatch: exactMatch, fuzzyMatches: fuzzyMatches)
+  }
+
   private static func mapForum(_ payload: ForumPayload) -> TiebaForumSearchResult? {
     let id = payload.forumID.value
     let name = payload.forumName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -85,6 +102,24 @@ enum TiebaSearchDecoder {
       shareCount: clampedInt(max(payload.shareCount.value, 0)),
       createdAt: date(seconds: payload.createdAt.value),
       images: payload.media.compactMap(mapImage)
+    )
+  }
+
+  private static func mapUser(_ payload: UserPayload) -> TiebaUserSearchResult? {
+    let id = payload.userID.value
+    guard id > 0 else { return nil }
+    let username = payload.username.trimmingCharacters(in: .whitespacesAndNewlines)
+    let displayName =
+      nonempty(payload.displayName.trimmingCharacters(in: .whitespacesAndNewlines))
+      ?? nonempty(payload.alternateDisplayName.trimmingCharacters(in: .whitespacesAndNewlines))
+      ?? username
+    guard !displayName.isEmpty else { return nil }
+    return TiebaUserSearchResult(
+      id: id,
+      username: username,
+      displayName: displayName,
+      portrait: payload.portrait?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+      introduction: payload.introduction.trimmingCharacters(in: .whitespacesAndNewlines)
     )
   }
 
@@ -163,7 +198,11 @@ private struct SearchEnvelope<Payload: Decodable>: Decodable {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     code = try container.decode(FlexibleInteger.self, forKey: .code)
     error = (try? container.decode(String.self, forKey: .error)) ?? ""
-    data = try? container.decodeIfPresent(Payload.self, forKey: .data)
+    if code.value == 0 {
+      data = try container.decodeIfPresent(Payload.self, forKey: .data)
+    } else {
+      data = nil
+    }
   }
 }
 
@@ -208,6 +247,22 @@ private struct ThreadSearchPayload: Decodable {
     isLoggedIn =
       (try? container.decode(FlexibleInteger.self, forKey: .isLoggedIn)) ?? .zero
     postList = (try? container.decodeIfPresent([ThreadPayload].self, forKey: .postList)) ?? []
+  }
+}
+
+private struct UserSearchPayload: Decodable {
+  let exactMatch: UserCollection
+  let fuzzyMatch: UserCollection
+
+  enum CodingKeys: String, CodingKey {
+    case exactMatch
+    case fuzzyMatch
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    exactMatch = try container.decodeIfPresent(UserCollection.self, forKey: .exactMatch) ?? .empty
+    fuzzyMatch = try container.decodeIfPresent(UserCollection.self, forKey: .fuzzyMatch) ?? .empty
   }
 }
 
@@ -270,6 +325,65 @@ private struct ForumCollection: Decodable {
       values = [value]
     } else {
       values = []
+    }
+  }
+}
+
+private struct UserPayload: Decodable {
+  let userID: FlexibleInteger
+  let username: String
+  let displayName: String
+  let alternateDisplayName: String
+  let portrait: String?
+  let introduction: String
+
+  enum CodingKeys: String, CodingKey {
+    case userID = "id"
+    case username = "name"
+    case displayName = "show_nickname"
+    case alternateDisplayName = "user_nickname"
+    case portrait
+    case introduction = "intro"
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    userID = (try? container.decode(FlexibleInteger.self, forKey: .userID)) ?? .zero
+    username = (try? container.decode(String.self, forKey: .username)) ?? ""
+    displayName = (try? container.decode(String.self, forKey: .displayName)) ?? ""
+    alternateDisplayName =
+      (try? container.decode(String.self, forKey: .alternateDisplayName)) ?? ""
+    portrait = try? container.decodeIfPresent(String.self, forKey: .portrait)
+    introduction = (try? container.decode(String.self, forKey: .introduction)) ?? ""
+  }
+}
+
+private struct UserCollection: Decodable {
+  static let empty = UserCollection(values: [])
+
+  let values: [UserPayload]
+
+  private init(values: [UserPayload]) {
+    self.values = values
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.singleValueContainer()
+    if container.decodeNil() {
+      values = []
+    } else if let array = try? container.decode([UserPayload].self) {
+      values = array
+    } else if let dictionary = try? container.decode([String: UserPayload].self) {
+      values = dictionary.sorted { lhs, rhs in
+        (Int(lhs.key) ?? .max, lhs.key) < (Int(rhs.key) ?? .max, rhs.key)
+      }.map(\.value)
+    } else if let value = try? container.decode(UserPayload.self) {
+      values = [value]
+    } else {
+      throw DecodingError.dataCorruptedError(
+        in: container,
+        debugDescription: "Expected a user, user array, or keyed user collection."
+      )
     }
   }
 }

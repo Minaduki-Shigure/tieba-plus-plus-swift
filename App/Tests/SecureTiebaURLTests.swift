@@ -12,6 +12,17 @@ final class SecureTiebaURLTests: XCTestCase {
     XCTAssertEqual(url.path, "/sys/portraitn/item/portrait token")
   }
 
+  func testPortraitAcceptsHTTPSURLAndRejectsUnsafeAbsoluteURL() throws {
+    let remote = try XCTUnwrap(
+      SecureTiebaURL.portrait("https://gss0.bdstatic.com/sys/portrait/item/token.jpg")
+    )
+
+    XCTAssertEqual(remote.scheme, "https")
+    XCTAssertEqual(remote.host, "gss0.bdstatic.com")
+    XCTAssertNil(SecureTiebaURL.portrait("file:///private/avatar.png"))
+    XCTAssertNil(SecureTiebaURL.portrait("javascript://alert"))
+  }
+
   func testLegacyPortraitHostIsRewrittenForHTTPAndHTTPS() throws {
     for scheme in ["http", "https"] {
       let legacy = try XCTUnwrap(

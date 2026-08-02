@@ -8,6 +8,7 @@ values to the app.
 ```swift
 let client = TiebaClient()
 let search = try await client.searchThreads(query: "swift")
+let users = try await client.searchUsers(query: "swift")
 let threads = try await client.getThreads(forumName: "swift")
 let posts = try await client.getPosts(threadID: threads.threads[0].id)
 let comments = try await client.getComments(
@@ -42,8 +43,9 @@ let followed = try await authenticatedClient.getFollowedForums(
 - Forum and post browsing use FRS `301001`, PB `302001`, and floor `302002`.
 - Public profiles use Profile `303012` with explicit guest fields; public user
   threads use UserPost `303002` and terminate pagination on an empty page.
-- Search supports `/mo/q/search/forum` and `/mo/q/search/thread`; thread search
-  is restricted to topic results and relevance sorting.
+- Search supports `/mo/q/search/forum`, `/mo/q/search/thread`, and
+  `/mo/q/search/user`; thread search is restricted to topic results and
+  relevance sorting, while user search is a single nonpaginated request.
 - Requests identify as client type `2` and version `12.64.1.1` by default.
 - Account validation and authenticated read requests use version `22.6.5.1`.
 - The first FRS page is encoded as `pn = 0`, matching aiotieba behavior.

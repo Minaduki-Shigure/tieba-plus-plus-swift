@@ -15,7 +15,7 @@ public struct TiebaClientConfiguration: Sendable, Hashable {
   public init(
     clientVersion: String = "12.64.1.1",
     authenticatedClientVersion: String = "22.6.5.1",
-    userAgent: String = "TiebaPlusPlus/0.7 (iOS)",
+    userAgent: String = "TiebaPlusPlus/0.8 (iOS)",
     requestTimeout: TimeInterval = 30
   ) {
     self.clientVersion = clientVersion
@@ -237,6 +237,12 @@ public actor TiebaClient {
     let request = try requestFactory.searchForums(query: query)
     let body = try await send(request)
     return try TiebaSearchDecoder.forums(from: body)
+  }
+
+  public func searchUsers(query: String) async throws -> TiebaUserSearchResults {
+    let request = try requestFactory.searchUsers(query: query)
+    let body = try await send(request)
+    return try TiebaSearchDecoder.users(from: body)
   }
 
   public func searchThreads(

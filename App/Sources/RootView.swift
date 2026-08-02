@@ -47,8 +47,8 @@ struct RootView: View {
             }
             .buttonStyle(.plain)
             .disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .accessibilityLabel("搜索贴吧和帖子")
-            .help("搜索贴吧和帖子")
+            .accessibilityLabel("搜索贴吧、帖子和用户")
+            .help("搜索贴吧、帖子和用户")
             Button(action: openForum) {
               Image(systemName: "arrow.right.circle.fill")
                 .font(.title2)

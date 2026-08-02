@@ -111,6 +111,21 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, UserProfileService,
     )
   }
 
+  func searchUsers(query: String) async throws -> UserSearchData {
+    let response: TiebaUserSearchResults
+    do {
+      response = try await client.searchUsers(query: query)
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    return UserSearchData(
+      exactMatch: response.exactMatch.map(Self.mapUserSearchResult),
+      related: response.fuzzyMatches.map(Self.mapUserSearchResult)
+    )
+  }
+
   func searchThreads(query: String, page: Int, pageSize: Int) async throws
     -> ThreadSearchPageData
   {
@@ -302,6 +317,16 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, UserProfileService,
       postCount: result.postCount,
       memberCount: result.memberCount,
       summary: summary
+    )
+  }
+
+  private static func mapUserSearchResult(_ result: TiebaUserSearchResult) -> UserSearchItem {
+    UserSearchItem(
+      id: result.id,
+      username: result.username,
+      displayName: result.displayName,
+      portraitURL: SecureTiebaURL.portrait(result.portrait),
+      introduction: result.introduction
     )
   }
 
