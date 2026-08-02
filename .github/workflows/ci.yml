@@ -26,7 +26,25 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
       - name: Resolve and test TiebaCore
-        run: swift test --package-path Packages/TiebaCore
+        id: core_tests
+        continue-on-error: true
+        run: >-
+          set -o pipefail;
+          swift test --package-path Packages/TiebaCore
+          2>&1 | tee core-test.log
+      - name: Report Core diagnostics
+        if: ${{ always() && steps.core_tests.outcome == 'failure' }}
+        run: ruby Scripts/report_xcode_errors.rb core-test.log
+      - name: Upload Core failure log
+        if: ${{ always() && steps.core_tests.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-test-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: core-test.log
+          retention-days: 7
+      - name: Fail when Core tests fail
+        if: ${{ always() && steps.core_tests.outcome == 'failure' }}
+        run: exit 1
       - name: Run anonymous integration test for release or opt-in dispatch
         if: >-
           ${{ startsWith(github.ref, 'refs/tags/v') ||
