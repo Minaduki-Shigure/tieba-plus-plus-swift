@@ -1,23 +1,28 @@
 import SwiftUI
 
 struct SearchView: View {
-  let browseService: any BrowseService & UserProfileService & ForumInformationService
+  let browseService:
+    any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
+  let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @StateObject private var viewModel: SearchViewModel
   @State private var query: String
 
   init(
     query: String,
-    browseService: any BrowseService & UserProfileService & ForumInformationService,
+    browseService: any BrowseService & ForumPostSearchService & UserProfileService
+      & ForumInformationService,
     searchService: any SearchService,
     historyRepository: any BrowsingHistoryRepository,
-    favoritesRepository: any LocalFavoritesRepository
+    favoritesRepository: any LocalFavoritesRepository,
+    searchHistoryRepository: any ForumSearchHistoryRepository
   ) {
     self.browseService = browseService
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
+    self.searchHistoryRepository = searchHistoryRepository
     _query = State(initialValue: query)
     _viewModel = StateObject(wrappedValue: SearchViewModel(query: query, service: searchService))
   }
@@ -175,7 +180,8 @@ struct SearchView: View {
         forumName: forum.name,
         service: browseService,
         historyRepository: historyRepository,
-        favoritesRepository: favoritesRepository
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository
       )
     } label: {
       ForumSearchRow(forum: forum)

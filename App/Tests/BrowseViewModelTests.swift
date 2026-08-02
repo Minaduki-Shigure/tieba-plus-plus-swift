@@ -1225,6 +1225,32 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testCommentsCanLoadAroundMatchedNestedReply() async throws {
+    let service = ScriptedBrowseService()
+    let comments = [Fixtures.comment(id: 8_001), Fixtures.comment(id: 8_002)]
+    await service.enqueueComments(
+      .value(CommentPageData(comments: comments, currentPage: 1, hasMore: false))
+    )
+    let viewModel = CommentsViewModel(
+      threadID: 8,
+      aroundCommentID: 8_002,
+      service: service
+    )
+
+    viewModel.loadIfNeeded()
+
+    try await waitUntil { viewModel.state == .loaded }
+    XCTAssertEqual(viewModel.comments, comments)
+    let normalRequests = await service.commentRequestSnapshot()
+    let anchoredRequests = await service.aroundCommentRequestSnapshot()
+    XCTAssertTrue(normalRequests.isEmpty)
+    XCTAssertEqual(
+      anchoredRequests,
+      [CommentRequest(threadID: 8, postID: 8_002, page: 1)]
+    )
+  }
+
+  @MainActor
   func testCommentsInitialLoadReportsError() async throws {
     let service = ScriptedBrowseService()
     await service.enqueueComments(.failure(StubFailure(message: "comments unavailable")))
@@ -1444,6 +1470,7 @@ private actor ScriptedBrowseService: BrowseService {
   private var threadRequests: [ThreadRequest] = []
   private var postRequests: [PostRequest] = []
   private var commentRequests: [CommentRequest] = []
+  private var aroundCommentRequests: [CommentRequest] = []
 
   private var completedThreadRequests = 0
   private var completedPostRequests = 0
@@ -1543,6 +1570,31 @@ private actor ScriptedBrowseService: BrowseService {
     }
   }
 
+  func comments(
+    threadID: Int64,
+    aroundCommentID commentID: Int64,
+    page: Int
+  ) async throws -> CommentPageData {
+    aroundCommentRequests.append(
+      CommentRequest(threadID: threadID, postID: commentID, page: page)
+    )
+    defer { completedCommentRequests += 1 }
+    guard !commentStubs.isEmpty else {
+      throw StubFailure(message: "Unexpected comments request")
+    }
+
+    switch commentStubs.removeFirst() {
+    case .value(let value):
+      return value
+    case .failure(let error):
+      throw error
+    case .suspended(let identifier):
+      return try await withCheckedThrowingContinuation { continuation in
+        pendingComments[identifier] = continuation
+      }
+    }
+  }
+
   func resumeThreads(id: Int, returning value: ThreadPageData) -> Bool {
     guard let continuation = pendingThreads.removeValue(forKey: id) else { return false }
     continuation.resume(returning: value)
@@ -1582,6 +1634,7 @@ private actor ScriptedBrowseService: BrowseService {
   func threadRequestSnapshot() -> [ThreadRequest] { threadRequests }
   func postRequestSnapshot() -> [PostRequest] { postRequests }
   func commentRequestSnapshot() -> [CommentRequest] { commentRequests }
+  func aroundCommentRequestSnapshot() -> [CommentRequest] { aroundCommentRequests }
 
   func threadRequestCount() -> Int { threadRequests.count }
   func postRequestCount() -> Int { postRequests.count }

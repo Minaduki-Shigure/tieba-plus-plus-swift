@@ -22,6 +22,25 @@ struct CommentsView: View {
     )
   }
 
+  init(
+    threadID: Int64,
+    aroundCommentID commentID: Int64,
+    service: any BrowseService & UserProfileService,
+    historyRepository: any BrowsingHistoryRepository,
+    favoritesRepository: any LocalFavoritesRepository
+  ) {
+    self.service = service
+    self.historyRepository = historyRepository
+    self.favoritesRepository = favoritesRepository
+    _viewModel = StateObject(
+      wrappedValue: CommentsViewModel(
+        threadID: threadID,
+        aroundCommentID: commentID,
+        service: service
+      )
+    )
+  }
+
   var body: some View {
     Group {
       switch viewModel.state {

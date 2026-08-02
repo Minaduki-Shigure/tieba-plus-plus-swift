@@ -235,6 +235,39 @@ final class TiebaClientTests: XCTestCase {
     XCTAssertEqual(rules.author?.roleName, "吧主")
   }
 
+  func testForumPostSearchClientForwardsOptionsAndDecodesPage() async throws {
+    let body = Data(
+      #"{"no":0,"error":"success","data":{"current_page":3,"has_more":1,"post_list":[{"tid":"42","pid":"201","content":"match","main_post":{"tid":42,"title":"topic"}}]}}"#.utf8
+    )
+    let transport = CapturingTransport(body: body)
+    let client = TiebaClient(transport: transport)
+
+    let page = try await client.searchForumPosts(
+      query: "async",
+      forumName: "swift",
+      page: 3,
+      pageSize: 5,
+      sort: .relevance,
+      filter: .all
+    )
+
+    XCTAssertEqual(page.pagination.currentPage, 3)
+    XCTAssertTrue(page.pagination.hasMore)
+    XCTAssertEqual(page.results.first?.target, .post(201))
+    let capturedRequest = await transport.lastRequest()
+    let request = try XCTUnwrap(capturedRequest)
+    let query = try XCTUnwrap(
+      URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)
+    )
+    XCTAssertEqual(
+      Dictionary(uniqueKeysWithValues: (query.queryItems ?? []).map { ($0.name, $0.value ?? "") }),
+      [
+        "word": "async", "pn": "3", "rn": "5", "st": "2", "tt": "2",
+        "fname": "swift", "ct": "2", "cv": "12.64.1.1",
+      ]
+    )
+  }
+
   func testMapsModeratorEndpointServerErrorFromItsSecondResponseField() async throws {
     var response = GetBawuInfoResIdl()
     response.error.errorno = 4

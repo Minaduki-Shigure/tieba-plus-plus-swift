@@ -82,6 +82,11 @@ protocol BrowseService: Sendable {
     location: ThreadPostLocation?
   ) async throws -> PostPageData
   func comments(threadID: Int64, postID: Int64, page: Int) async throws -> CommentPageData
+  func comments(
+    threadID: Int64,
+    aroundCommentID commentID: Int64,
+    page: Int
+  ) async throws -> CommentPageData
 }
 
 protocol SearchService: Sendable {
@@ -89,6 +94,17 @@ protocol SearchService: Sendable {
   func searchUsers(query: String) async throws -> UserSearchData
   func searchThreads(query: String, page: Int, pageSize: Int) async throws
     -> ThreadSearchPageData
+}
+
+protocol ForumPostSearchService: Sendable {
+  func searchForumPosts(
+    query: String,
+    forumName: String,
+    page: Int,
+    pageSize: Int,
+    sort: ForumPostSearchSort,
+    filter: ForumPostSearchFilter
+  ) async throws -> ForumPostSearchPageData
 }
 
 protocol HotTopicService: Sendable {

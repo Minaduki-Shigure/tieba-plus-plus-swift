@@ -9,6 +9,9 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Ranked anonymous hot-topic discovery with images and discussion counts
 - Hot-topic details with related forums and cursor-aware thread pagination
 - Categorized anonymous forum, thread, and user search
+- Anonymous per-forum post search with newest/relevance sorting
+- Topic-only and topic-plus-reply search filters with target-aware navigation
+- Versioned, per-forum local search history with delete and clear controls
 - Forum thread list with pagination and pull to refresh
 - Reply-time and creation-time forum sorting
 - Forum header, statistics, rules state, and featured classifications
@@ -74,6 +77,13 @@ Search categories load independently so one endpoint failure does not discard
 another category's results. User search uses the credential-free Web endpoint,
 accepts the server's object/array result variants and 64-bit user identifiers,
 and opens the same anonymous public profile workflow used by author rows.
+
+Per-forum search uses the same credential-free Web transport but keeps its
+TiebaLite-compatible request contract separate from global topic search. Topic,
+floor-reply, and nested-reply matches have distinct identities so pagination
+does not collapse valid results from the same thread. Floor replies reopen the
+thread at the matched post ID; nested replies use the comment-anchor endpoint.
+Search history is local-only, versioned, and isolated by normalized forum name.
 
 Hot-topic discovery uses credential-free Web endpoints and treats topic IDs,
 thread IDs, and pagination cursors as 64-bit values. Detail refresh preserves

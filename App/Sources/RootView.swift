@@ -4,10 +4,11 @@ import SwiftUI
 
 struct RootView: View {
   let service:
-    any BrowseService & SearchService & HotTopicService & UserProfileService
-      & ForumInformationService
+    any BrowseService & SearchService & ForumPostSearchService & HotTopicService
+      & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
+  let searchHistoryRepository: any ForumSearchHistoryRepository
   let accountVault: any AccountVault
   let accountService: any AccountService
 
@@ -16,16 +17,18 @@ struct RootView: View {
   @StateObject private var favoritesViewModel: LocalFavoritesViewModel
 
   init(
-    service: any BrowseService & SearchService & HotTopicService & UserProfileService
-      & ForumInformationService,
+    service: any BrowseService & SearchService & ForumPostSearchService & HotTopicService
+      & UserProfileService & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
+    searchHistoryRepository: any ForumSearchHistoryRepository,
     accountVault: any AccountVault,
     accountService: any AccountService
   ) {
     self.service = service
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
+    self.searchHistoryRepository = searchHistoryRepository
     self.accountVault = accountVault
     self.accountService = accountService
     _favoritesViewModel = StateObject(
@@ -134,7 +137,8 @@ struct RootView: View {
             forumName: forumName,
             service: service,
             historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
           )
         case .search(let query):
           SearchView(
@@ -142,13 +146,15 @@ struct RootView: View {
             browseService: service,
             searchService: service,
             historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
           )
         case .hotTopics:
           HotTopicListView(
             service: service,
             historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
           )
         case .history:
           HistoryView(repository: historyRepository) { target in
@@ -174,7 +180,8 @@ struct RootView: View {
             accountService: accountService,
             vault: accountVault,
             historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
           )
         case .thread(let thread):
           ThreadView(

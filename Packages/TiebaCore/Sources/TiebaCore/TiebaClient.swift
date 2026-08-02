@@ -15,7 +15,7 @@ public struct TiebaClientConfiguration: Sendable, Hashable {
   public init(
     clientVersion: String = "12.64.1.1",
     authenticatedClientVersion: String = "22.6.5.1",
-    userAgent: String = "TiebaPlusPlus/0.9 (iOS)",
+    userAgent: String = "TiebaPlusPlus/0.10 (iOS)",
     requestTimeout: TimeInterval = 30
   ) {
     self.clientVersion = clientVersion
@@ -281,6 +281,30 @@ public actor TiebaClient {
     pageSize: Int = 20
   ) async throws -> TiebaThreadSearchPage {
     let request = try requestFactory.searchThreads(query: query, page: page, pageSize: pageSize)
+    let body = try await send(request)
+    return try TiebaSearchDecoder.threads(
+      from: body,
+      requestedPage: page,
+      pageSize: pageSize
+    )
+  }
+
+  public func searchForumPosts(
+    query: String,
+    forumName: String,
+    page: Int = 1,
+    pageSize: Int = 20,
+    sort: TiebaThreadSearchSort = .newest,
+    filter: TiebaThreadSearchFilter = .all
+  ) async throws -> TiebaThreadSearchPage {
+    let request = try requestFactory.searchForumPosts(
+      query: query,
+      forumName: forumName,
+      page: page,
+      pageSize: pageSize,
+      sort: sort,
+      filter: filter
+    )
     let body = try await send(request)
     return try TiebaSearchDecoder.threads(
       from: body,

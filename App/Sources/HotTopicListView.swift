@@ -2,20 +2,25 @@ import SwiftUI
 
 struct HotTopicListView: View {
   let service:
-    any BrowseService & HotTopicService & UserProfileService & ForumInformationService
+    any BrowseService & ForumPostSearchService & HotTopicService & UserProfileService
+      & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
+  let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @StateObject private var viewModel: HotTopicListViewModel
 
   init(
-    service: any BrowseService & HotTopicService & UserProfileService & ForumInformationService,
+    service: any BrowseService & ForumPostSearchService & HotTopicService & UserProfileService
+      & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
-    favoritesRepository: any LocalFavoritesRepository
+    favoritesRepository: any LocalFavoritesRepository,
+    searchHistoryRepository: any ForumSearchHistoryRepository
   ) {
     self.service = service
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
+    self.searchHistoryRepository = searchHistoryRepository
     _viewModel = StateObject(wrappedValue: HotTopicListViewModel(service: service))
   }
 
@@ -59,7 +64,8 @@ struct HotTopicListView: View {
             topic: topic,
             service: service,
             historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
           )
         } label: {
           HotTopicRow(topic: topic, featured: topic.rank > 0 && topic.rank <= 3)

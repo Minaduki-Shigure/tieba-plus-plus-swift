@@ -1,8 +1,8 @@
 import Foundation
 import TiebaCore
 
-struct TiebaCoreBrowseService: BrowseService, SearchService, HotTopicService, UserProfileService,
-  ForumInformationService
+struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchService,
+  HotTopicService, UserProfileService, ForumInformationService
 {
   private let client: TiebaClient
 
@@ -96,6 +96,30 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, HotTopicService, Us
     )
   }
 
+  func comments(
+    threadID: Int64,
+    aroundCommentID commentID: Int64,
+    page: Int
+  ) async throws -> CommentPageData {
+    let response: TiebaCommentPage
+    do {
+      response = try await client.getComments(
+        threadID: threadID,
+        aroundCommentID: commentID,
+        page: page
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    return CommentPageData(
+      comments: response.comments.map(Self.mapComment),
+      currentPage: response.pagination.currentPage,
+      hasMore: response.pagination.hasMore
+    )
+  }
+
   func searchForums(query: String) async throws -> ForumSearchData {
     let response: TiebaForumSearchResults
     do {
@@ -139,6 +163,36 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, HotTopicService, Us
     }
     return ThreadSearchPageData(
       threads: response.results.map(Self.mapThreadSearchResult),
+      currentPage: response.pagination.currentPage,
+      hasMore: response.pagination.hasMore
+    )
+  }
+
+  func searchForumPosts(
+    query: String,
+    forumName: String,
+    page: Int,
+    pageSize: Int,
+    sort: ForumPostSearchSort,
+    filter: ForumPostSearchFilter
+  ) async throws -> ForumPostSearchPageData {
+    let response: TiebaThreadSearchPage
+    do {
+      response = try await client.searchForumPosts(
+        query: query,
+        forumName: forumName,
+        page: page,
+        pageSize: pageSize,
+        sort: Self.mapForumPostSearchSort(sort),
+        filter: Self.mapForumPostSearchFilter(filter)
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    return ForumPostSearchPageData(
+      results: response.results.map(Self.mapForumPostSearchResult),
       currentPage: response.pagination.currentPage,
       hasMore: response.pagination.hasMore
     )
@@ -424,6 +478,88 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, HotTopicService, Us
     )
   }
 
+  static func mapForumPostSearchResult(
+    _ result: TiebaThreadSearchResult
+  ) -> ForumPostSearchItem {
+    let threadContext = result.mainPost ?? result.postInfo
+    let displayContext = result.postInfo ?? result.mainPost
+    let contextTitle = threadContext?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let contextExcerpt = threadContext?.excerpt.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let threadTitle = contextTitle.isEmpty ? result.title : contextTitle
+    let threadExcerpt = contextExcerpt.isEmpty ? result.excerpt : contextExcerpt
+    let contextAuthorName =
+      threadContext?.authorName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let threadAuthorName = contextAuthorName.isEmpty ? result.authorName : contextAuthorName
+    let matchedContents = mapSearchImages(result.images)
+    let target = mapForumPostSearchTarget(result.target)
+    let threadReplyCount = target == .thread ? result.replyCount : threadContext?.replyCount ?? 0
+
+    return ForumPostSearchItem(
+      thread: BrowseThread(
+        id: result.threadID,
+        forumID: result.forumID,
+        forumName: result.forumName,
+        title: threadTitle,
+        excerpt: threadExcerpt,
+        authorName: threadAuthorName,
+        replyCount: threadReplyCount,
+        viewCount: 0,
+        createdAt: target == .thread ? result.createdAt : nil,
+        lastReplyAt: nil,
+        contents: threadExcerpt.isEmpty ? [] : [.text(threadExcerpt)]
+      ),
+      target: target,
+      matchedTitle: result.title,
+      matchedExcerpt: result.excerpt,
+      matchedAuthorID: result.authorID,
+      matchedAuthorName: result.authorName,
+      matchedAuthorPortraitURL: SecureTiebaURL.media(result.authorPortraitURL),
+      matchedAt: result.createdAt,
+      replyCount: result.replyCount,
+      likeCount: result.likeCount,
+      shareCount: result.shareCount,
+      matchedContents: matchedContents,
+      context: displayContext.map {
+        ForumPostSearchSummary(
+          postID: $0.postID ?? 0,
+          title: $0.title,
+          excerpt: $0.excerpt,
+          authorID: $0.authorID,
+          authorName: $0.authorName
+        )
+      }
+    )
+  }
+
+  private static func mapForumPostSearchTarget(
+    _ target: TiebaThreadSearchTarget
+  ) -> ForumPostSearchTarget {
+    switch target {
+    case .thread:
+      .thread
+    case .post(let postID):
+      .post(postID)
+    case .comment(let postID, let commentID):
+      .comment(postID: postID, commentID: commentID)
+    @unknown default:
+      .thread
+    }
+  }
+
+  private static func mapSearchImages(_ images: [TiebaSearchImage]) -> [BrowseContent] {
+    images.compactMap { image in
+      guard
+        let thumbnail = SecureTiebaURL.media(image.thumbnailURL ?? image.fullSizeURL)
+      else { return nil }
+      return .image(
+        thumbnail: thumbnail,
+        original: SecureTiebaURL.media(image.fullSizeURL),
+        width: image.width,
+        height: image.height
+      )
+    }
+  }
+
   private static func mapPost(_ post: TiebaPost) -> BrowsePost {
     BrowsePost(
       id: post.id,
@@ -499,6 +635,28 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, HotTopicService, Us
       .pageCursor(postID)
     case nil:
       nil
+    }
+  }
+
+  private static func mapForumPostSearchSort(
+    _ sort: ForumPostSearchSort
+  ) -> TiebaThreadSearchSort {
+    switch sort {
+    case .newest:
+      .newest
+    case .relevance:
+      .relevance
+    }
+  }
+
+  private static func mapForumPostSearchFilter(
+    _ filter: ForumPostSearchFilter
+  ) -> TiebaThreadSearchFilter {
+    switch filter {
+    case .all:
+      .all
+    case .threadsOnly:
+      .threadsOnly
     }
   }
 

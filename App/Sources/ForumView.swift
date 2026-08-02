@@ -1,21 +1,26 @@
 import SwiftUI
 
 struct ForumView: View {
-  let service: any BrowseService & UserProfileService & ForumInformationService
+  let service:
+    any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
+  let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @StateObject private var viewModel: ForumViewModel
 
   init(
     forumName: String,
-    service: any BrowseService & UserProfileService & ForumInformationService,
+    service: any BrowseService & ForumPostSearchService & UserProfileService
+      & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
-    favoritesRepository: any LocalFavoritesRepository
+    favoritesRepository: any LocalFavoritesRepository,
+    searchHistoryRepository: any ForumSearchHistoryRepository
   ) {
     self.service = service
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
+    self.searchHistoryRepository = searchHistoryRepository
     _viewModel = StateObject(wrappedValue: ForumViewModel(forumName: forumName, service: service))
   }
 
@@ -37,7 +42,21 @@ struct ForumView: View {
     .navigationTitle(viewModel.forumName)
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
-      ToolbarItem(placement: .navigationBarTrailing) {
+      ToolbarItemGroup(placement: .navigationBarTrailing) {
+        NavigationLink {
+          ForumPostSearchView(
+            forumName: viewModel.forumName,
+            service: service,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
+          )
+        } label: {
+          Image(systemName: "magnifyingglass")
+        }
+        .accessibilityLabel("吧内搜索")
+        .help("吧内搜索")
+
         LocalFavoriteButton(
           target: .forum(ForumHistorySnapshot(forum: viewModel.forum)),
           repository: favoritesRepository

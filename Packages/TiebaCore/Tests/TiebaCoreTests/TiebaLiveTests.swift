@@ -10,7 +10,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.9 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.10 integration-test")
     )
     let threads = try await client.getThreads(forumName: "starry", pageSize: 10)
     XCTAssertFalse(threads.threads.isEmpty)
@@ -119,7 +119,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.9 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.10 integration-test")
     )
     let forums = try await client.searchForums(query: "swift")
     XCTAssertFalse(forums.isLoggedIn)
@@ -129,6 +129,45 @@ final class TiebaLiveTests: XCTestCase {
     XCTAssertFalse(threads.isLoggedIn)
     XCTAssertFalse(threads.results.isEmpty)
     XCTAssertEqual(threads.pagination.currentPage, 1)
+
+    let scopedThreads = try await client.searchForumPosts(
+      query: "游戏",
+      forumName: "minecraft",
+      pageSize: 5,
+      sort: .relevance,
+      filter: .threadsOnly
+    )
+    XCTAssertFalse(scopedThreads.isLoggedIn)
+    XCTAssertFalse(scopedThreads.results.isEmpty)
+    XCTAssertEqual(scopedThreads.pagination.currentPage, 1)
+    XCTAssertTrue(scopedThreads.results.allSatisfy { $0.target == .thread })
+
+    let scopedAllContent = try await client.searchForumPosts(
+      query: "游戏",
+      forumName: "minecraft",
+      pageSize: 20,
+      sort: .newest,
+      filter: .all
+    )
+    XCTAssertFalse(scopedAllContent.results.isEmpty)
+    let containsReply = scopedAllContent.results.contains(where: { result in
+      if case .post = result.target { return true }
+      return false
+    })
+    XCTAssertTrue(containsReply)
+
+    if scopedThreads.pagination.hasMore {
+      let nextScopedPage = try await client.searchForumPosts(
+        query: "游戏",
+        forumName: "minecraft",
+        page: 2,
+        pageSize: 5,
+        sort: .relevance,
+        filter: .threadsOnly
+      )
+      XCTAssertEqual(nextScopedPage.pagination.currentPage, 2)
+      XCTAssertFalse(nextScopedPage.results.isEmpty)
+    }
 
     let users = try await client.searchUsers(query: "swift")
     XCTAssertTrue(users.exactMatch != nil || !users.fuzzyMatches.isEmpty)
@@ -141,7 +180,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.9 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.10 integration-test")
     )
     let topics = try await client.getHotTopics()
     let topic = try XCTUnwrap(topics.first)
@@ -179,7 +218,7 @@ final class TiebaLiveTests: XCTestCase {
 
     let userID: Int64 = 957_339_815
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.9 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.10 integration-test")
     )
 
     let profile = try await client.getUserProfile(userID: userID)
@@ -201,7 +240,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.9 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.10 integration-test")
     )
     let forumID: Int64 = 2_432_903
 

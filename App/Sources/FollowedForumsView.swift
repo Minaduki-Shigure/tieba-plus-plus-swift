@@ -1,26 +1,31 @@
 import SwiftUI
 
 struct FollowedForumsView: View {
-  let browseService: any BrowseService & UserProfileService & ForumInformationService
+  let browseService:
+    any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let accountService: any AccountService
   let vault: any AccountVault
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
+  let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @StateObject private var viewModel: FollowedForumsViewModel
 
   init(
-    browseService: any BrowseService & UserProfileService & ForumInformationService,
+    browseService: any BrowseService & ForumPostSearchService & UserProfileService
+      & ForumInformationService,
     accountService: any AccountService,
     vault: any AccountVault,
     historyRepository: any BrowsingHistoryRepository,
-    favoritesRepository: any LocalFavoritesRepository
+    favoritesRepository: any LocalFavoritesRepository,
+    searchHistoryRepository: any ForumSearchHistoryRepository
   ) {
     self.browseService = browseService
     self.accountService = accountService
     self.vault = vault
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
+    self.searchHistoryRepository = searchHistoryRepository
     _viewModel = StateObject(
       wrappedValue: FollowedForumsViewModel(service: accountService, vault: vault)
     )
@@ -55,7 +60,8 @@ struct FollowedForumsView: View {
             forumName: forum.name,
             service: browseService,
             historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
           )
         } label: {
           VStack(alignment: .leading, spacing: 5) {

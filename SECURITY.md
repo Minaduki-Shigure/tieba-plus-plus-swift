@@ -50,10 +50,12 @@ Anonymous public-profile requests must use the protocol's guest target fields.
 They must not place the target user in the current-account field, attach account
 credentials, or attempt to bypass profile privacy settings.
 
-Forum, thread, and user search must use the anonymous request factory even when
-an account is active. Search requests may contain only the submitted public
-keyword and endpoint-specific pagination or sorting fields; they must never
-attach Cookie, Authorization, BDUSS, STOKEN, or a device identifier.
+Forum, global thread, per-forum post, and user search must use the anonymous
+request factory even when an account is active. Search requests may contain
+only the submitted public keyword, public forum name, and endpoint-specific
+pagination, sorting, or content-filter fields; they must never attach Cookie,
+Authorization, BDUSS, STOKEN, a Referer containing device metadata, or a device
+identifier.
 
 Hot-topic list and detail requests follow the same anonymous boundary. They may
 send only the public topic identifier/name and pagination fields documented by
@@ -67,11 +69,13 @@ credential-free. They may include only the forum identifier and anonymous
 client metadata; no future account Cookie, BDUSS, or STOKEN may be attached to
 these read-only calls.
 
-Browsing history and local favorites are separate versioned JSON archives in
-Application Support. Both use atomic writes, enforce bounded archive sizes,
-refuse to overwrite malformed or future-version data, and are excluded from
-device backups. They must never contain account credentials or private server
-responses.
+Browsing history, local favorites, and per-forum search history are separate
+versioned JSON archives in Application Support. They use atomic writes, enforce
+bounded archive sizes, refuse to overwrite malformed or future-version data,
+and are excluded from device backups. They must never contain account
+credentials or private server responses.
+An unreadable search-history archive may be deleted only through the explicit,
+user-confirmed recovery action; ordinary reads and writes must preserve it.
 
 Remote media uses an ephemeral, credential-free session, rejects cleartext
 requests or redirect destinations, and is decoded through ImageIO with a

@@ -87,9 +87,33 @@ enum TiebaSearchDecoder {
     guard threadID > 0 else { return nil }
     let authorName = payload.user?.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
     let username = payload.user?.username.trimmingCharacters(in: .whitespacesAndNewlines)
+    let mainPost = payload.mainPost.map { mapPostContext($0, fallbackThreadID: threadID) }
+    let postInfo = payload.postInfo.map { mapPostContext($0, fallbackThreadID: threadID) }
+    let postID = max(payload.postID.value, 0)
+    let commentID = max(payload.commentID.value, 0)
+    let target: TiebaThreadSearchTarget
+    if payload.postInfo != nil, commentID > 0 {
+      let contextPostID = max(payload.postInfo?.postID.value ?? 0, 0)
+      let parentPostID = contextPostID > 0 ? contextPostID : postID
+      target = parentPostID > 0
+        ? .comment(postID: parentPostID, commentID: commentID)
+        : .thread
+    } else if payload.mainPost != nil, postID > 0 {
+      target = .post(postID)
+    } else {
+      target = .thread
+    }
+    let firstPostID: Int64
+    switch target {
+    case .thread:
+      firstPostID = postID
+    case .post, .comment:
+      firstPostID = mainPost?.postID ?? 0
+    }
     return TiebaThreadSearchResult(
       threadID: threadID,
-      firstPostID: max(payload.postID.value, 0),
+      firstPostID: firstPostID,
+      matchedPostID: postID,
       forumID: max(payload.forumID.value, 0),
       forumName: payload.forumName,
       title: payload.title,
@@ -101,7 +125,31 @@ enum TiebaSearchDecoder {
       likeCount: clampedInt(max(payload.likeCount.value, 0)),
       shareCount: clampedInt(max(payload.shareCount.value, 0)),
       createdAt: date(seconds: payload.createdAt.value),
-      images: payload.media.compactMap(mapImage)
+      images: payload.media.compactMap(mapImage),
+      target: target,
+      mainPost: mainPost,
+      postInfo: postInfo
+    )
+  }
+
+  private static func mapPostContext(
+    _ payload: SearchPostContextPayload,
+    fallbackThreadID: Int64
+  ) -> TiebaSearchPostContext {
+    let displayName = payload.user?.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+    let username = payload.user?.username.trimmingCharacters(in: .whitespacesAndNewlines)
+    let postID = payload.postID.value > 0 ? payload.postID.value : nil
+    return TiebaSearchPostContext(
+      threadID: payload.threadID.value > 0 ? payload.threadID.value : fallbackThreadID,
+      postID: postID,
+      title: payload.title,
+      excerpt: payload.content,
+      authorID: max(payload.user?.userID.value ?? 0, 0),
+      authorName: nonempty(displayName) ?? nonempty(username) ?? "匿名用户",
+      authorPortraitURL: remoteURL(payload.user?.portrait),
+      replyCount: clampedInt(max(payload.replyCount.value, 0)),
+      likeCount: clampedInt(max(payload.likeCount.value, 0)),
+      shareCount: clampedInt(max(payload.shareCount.value, 0))
     )
   }
 
@@ -391,6 +439,7 @@ private struct UserCollection: Decodable {
 private struct ThreadPayload: Decodable {
   let threadID: FlexibleInteger
   let postID: FlexibleInteger
+  let commentID: FlexibleInteger
   let forumID: FlexibleInteger
   let forumName: String
   let title: String
@@ -401,10 +450,13 @@ private struct ThreadPayload: Decodable {
   let shareCount: FlexibleInteger
   let user: SearchUserPayload?
   let media: [SearchMediaPayload]
+  let mainPost: SearchPostContextPayload?
+  let postInfo: SearchPostContextPayload?
 
   enum CodingKeys: String, CodingKey {
     case threadID = "tid"
     case postID = "pid"
+    case commentID = "cid"
     case forumID = "forum_id"
     case forumName = "forum_name"
     case title
@@ -415,12 +467,15 @@ private struct ThreadPayload: Decodable {
     case shareCount = "share_num"
     case user
     case media
+    case mainPost = "main_post"
+    case postInfo = "post_info"
   }
 
   init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     threadID = (try? container.decode(FlexibleInteger.self, forKey: .threadID)) ?? .zero
     postID = (try? container.decode(FlexibleInteger.self, forKey: .postID)) ?? .zero
+    commentID = (try? container.decode(FlexibleInteger.self, forKey: .commentID)) ?? .zero
     forumID = (try? container.decode(FlexibleInteger.self, forKey: .forumID)) ?? .zero
     forumName = (try? container.decode(String.self, forKey: .forumName)) ?? ""
     title = (try? container.decode(String.self, forKey: .title)) ?? ""
@@ -433,6 +488,42 @@ private struct ThreadPayload: Decodable {
       (try? container.decode(FlexibleInteger.self, forKey: .shareCount)) ?? .zero
     user = try? container.decodeIfPresent(SearchUserPayload.self, forKey: .user)
     media = (try? container.decodeIfPresent([SearchMediaPayload].self, forKey: .media)) ?? []
+    mainPost = try? container.decodeIfPresent(SearchPostContextPayload.self, forKey: .mainPost)
+    postInfo = try? container.decodeIfPresent(SearchPostContextPayload.self, forKey: .postInfo)
+  }
+}
+
+private struct SearchPostContextPayload: Decodable {
+  let threadID: FlexibleInteger
+  let postID: FlexibleInteger
+  let title: String
+  let content: String
+  let user: SearchUserPayload?
+  let replyCount: FlexibleInteger
+  let likeCount: FlexibleInteger
+  let shareCount: FlexibleInteger
+
+  enum CodingKeys: String, CodingKey {
+    case threadID = "tid"
+    case postID = "pid"
+    case title
+    case content
+    case user
+    case replyCount = "post_num"
+    case likeCount = "like_num"
+    case shareCount = "share_num"
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    threadID = (try? container.decode(FlexibleInteger.self, forKey: .threadID)) ?? .zero
+    postID = (try? container.decode(FlexibleInteger.self, forKey: .postID)) ?? .zero
+    title = (try? container.decode(String.self, forKey: .title)) ?? ""
+    content = (try? container.decode(String.self, forKey: .content)) ?? ""
+    user = try? container.decodeIfPresent(SearchUserPayload.self, forKey: .user)
+    replyCount = (try? container.decode(FlexibleInteger.self, forKey: .replyCount)) ?? .zero
+    likeCount = (try? container.decode(FlexibleInteger.self, forKey: .likeCount)) ?? .zero
+    shareCount = (try? container.decode(FlexibleInteger.self, forKey: .shareCount)) ?? .zero
   }
 }
 

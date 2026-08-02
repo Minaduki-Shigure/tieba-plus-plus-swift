@@ -1,6 +1,11 @@
 import Combine
 import Foundation
 
+enum CommentsAnchor: Hashable, Sendable {
+  case post(Int64)
+  case comment(Int64)
+}
+
 @MainActor
 final class CommentsViewModel: ObservableObject {
   @Published private(set) var comments: [BrowseComment] = []
@@ -9,7 +14,7 @@ final class CommentsViewModel: ObservableObject {
   @Published private(set) var loadMoreError: String?
 
   let threadID: Int64
-  let postID: Int64
+  let anchor: CommentsAnchor
 
   private let service: any BrowseService
   private var currentPage = 0
@@ -19,7 +24,13 @@ final class CommentsViewModel: ObservableObject {
 
   init(threadID: Int64, postID: Int64, service: any BrowseService) {
     self.threadID = threadID
-    self.postID = postID
+    self.anchor = .post(postID)
+    self.service = service
+  }
+
+  init(threadID: Int64, aroundCommentID commentID: Int64, service: any BrowseService) {
+    self.threadID = threadID
+    self.anchor = .comment(commentID)
     self.service = service
   }
 
@@ -73,7 +84,7 @@ final class CommentsViewModel: ObservableObject {
   private func load(page: Int, replacing: Bool) {
     let service = service
     let threadID = threadID
-    let postID = postID
+    let anchor = anchor
     loadGeneration &+= 1
     let generation = loadGeneration
     if !replacing {
@@ -88,11 +99,21 @@ final class CommentsViewModel: ObservableObject {
         }
       }
       do {
-        let response = try await service.comments(
-          threadID: threadID,
-          postID: postID,
-          page: page
-        )
+        let response: CommentPageData
+        switch anchor {
+        case .post(let postID):
+          response = try await service.comments(
+            threadID: threadID,
+            postID: postID,
+            page: page
+          )
+        case .comment(let commentID):
+          response = try await service.comments(
+            threadID: threadID,
+            aroundCommentID: commentID,
+            page: page
+          )
+        }
         try Task.checkCancellation()
         guard generation == loadGeneration else { return }
         currentPage = response.currentPage

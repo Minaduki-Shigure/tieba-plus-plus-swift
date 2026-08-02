@@ -3,11 +3,13 @@ import SwiftUI
 @main
 struct TiebaPlusPlusApp: App {
   private let service:
-    any BrowseService & SearchService & HotTopicService & UserProfileService
-      & ForumInformationService =
+    any BrowseService & SearchService & ForumPostSearchService & HotTopicService
+      & UserProfileService & ForumInformationService =
       TiebaCoreBrowseService()
   private let historyRepository: any BrowsingHistoryRepository = FileBrowsingHistoryStore.live()
   private let favoritesRepository: any LocalFavoritesRepository = FileLocalFavoritesStore.live()
+  private let searchHistoryRepository: any ForumSearchHistoryRepository =
+    FileForumSearchHistoryStore.live()
   private let accountVault: any AccountVault = KeychainAccountVault()
   private let accountService: any AccountService = TiebaCoreAccountService()
 
@@ -17,6 +19,7 @@ struct TiebaPlusPlusApp: App {
         service: service,
         historyRepository: historyRepository,
         favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository,
         accountVault: accountVault,
         accountService: accountService
       )

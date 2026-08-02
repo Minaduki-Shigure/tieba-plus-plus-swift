@@ -2,21 +2,26 @@ import SwiftUI
 
 struct HotTopicDetailView: View {
   let service:
-    any BrowseService & HotTopicService & UserProfileService & ForumInformationService
+    any BrowseService & ForumPostSearchService & HotTopicService & UserProfileService
+      & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
+  let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @StateObject private var viewModel: HotTopicDetailViewModel
 
   init(
     topic: HotTopicItem,
-    service: any BrowseService & HotTopicService & UserProfileService & ForumInformationService,
+    service: any BrowseService & ForumPostSearchService & HotTopicService & UserProfileService
+      & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
-    favoritesRepository: any LocalFavoritesRepository
+    favoritesRepository: any LocalFavoritesRepository,
+    searchHistoryRepository: any ForumSearchHistoryRepository
   ) {
     self.service = service
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
+    self.searchHistoryRepository = searchHistoryRepository
     _viewModel = StateObject(
       wrappedValue: HotTopicDetailViewModel(topic: topic, service: service)
     )
@@ -68,7 +73,8 @@ struct HotTopicDetailView: View {
                 forumName: forum.name,
                 service: service,
                 historyRepository: historyRepository,
-                favoritesRepository: favoritesRepository
+                favoritesRepository: favoritesRepository,
+                searchHistoryRepository: searchHistoryRepository
               )
             } label: {
               HotTopicForumRow(forum: forum)

@@ -100,11 +100,74 @@ public struct TiebaSearchImage: Sendable, Hashable {
   }
 }
 
+public enum TiebaThreadSearchSort: Int, CaseIterable, Sendable, Hashable {
+  case newest = 1
+  case relevance = 2
+}
+
+public enum TiebaThreadSearchFilter: Int, CaseIterable, Sendable, Hashable {
+  case threadsOnly = 1
+  case all = 2
+}
+
+public enum TiebaThreadSearchTarget: Sendable, Hashable {
+  case thread
+  case post(Int64)
+  case comment(postID: Int64, commentID: Int64)
+}
+
+public struct TiebaSearchPostContext: Sendable, Hashable {
+  public let threadID: Int64
+  public let postID: Int64?
+  public let title: String
+  public let excerpt: String
+  public let authorID: Int64
+  public let authorName: String
+  public let authorPortraitURL: URL?
+  public let replyCount: Int
+  public let likeCount: Int
+  public let shareCount: Int
+
+  public init(
+    threadID: Int64,
+    postID: Int64?,
+    title: String,
+    excerpt: String,
+    authorID: Int64,
+    authorName: String,
+    authorPortraitURL: URL?,
+    replyCount: Int = 0,
+    likeCount: Int = 0,
+    shareCount: Int = 0
+  ) {
+    self.threadID = threadID
+    self.postID = postID
+    self.title = title
+    self.excerpt = excerpt
+    self.authorID = authorID
+    self.authorName = authorName
+    self.authorPortraitURL = authorPortraitURL
+    self.replyCount = replyCount
+    self.likeCount = likeCount
+    self.shareCount = shareCount
+  }
+}
+
 public struct TiebaThreadSearchResult: Identifiable, Sendable, Hashable {
-  public var id: Int64 { threadID }
+  public var id: String {
+    switch target {
+    case .thread:
+      "thread:\(threadID)"
+    case .post(let postID):
+      "post:\(threadID):\(postID)"
+    case .comment(let postID, let commentID):
+      "comment:\(threadID):\(postID):\(commentID)"
+    }
+  }
 
   public let threadID: Int64
   public let firstPostID: Int64
+  public let matchedPostID: Int64
   public let forumID: Int64
   public let forumName: String
   public let title: String
@@ -117,10 +180,14 @@ public struct TiebaThreadSearchResult: Identifiable, Sendable, Hashable {
   public let shareCount: Int
   public let createdAt: Date?
   public let images: [TiebaSearchImage]
+  public let target: TiebaThreadSearchTarget
+  public let mainPost: TiebaSearchPostContext?
+  public let postInfo: TiebaSearchPostContext?
 
   public init(
     threadID: Int64,
     firstPostID: Int64,
+    matchedPostID: Int64? = nil,
     forumID: Int64,
     forumName: String,
     title: String,
@@ -132,10 +199,14 @@ public struct TiebaThreadSearchResult: Identifiable, Sendable, Hashable {
     likeCount: Int,
     shareCount: Int,
     createdAt: Date?,
-    images: [TiebaSearchImage]
+    images: [TiebaSearchImage],
+    target: TiebaThreadSearchTarget = .thread,
+    mainPost: TiebaSearchPostContext? = nil,
+    postInfo: TiebaSearchPostContext? = nil
   ) {
     self.threadID = threadID
     self.firstPostID = firstPostID
+    self.matchedPostID = matchedPostID ?? firstPostID
     self.forumID = forumID
     self.forumName = forumName
     self.title = title
@@ -148,6 +219,9 @@ public struct TiebaThreadSearchResult: Identifiable, Sendable, Hashable {
     self.shareCount = shareCount
     self.createdAt = createdAt
     self.images = images
+    self.target = target
+    self.mainPost = mainPost
+    self.postInfo = postInfo
   }
 }
 

@@ -404,6 +404,41 @@ final class TiebaRequestFactoryTests: XCTestCase {
     XCTAssertThrowsError(try factory.searchThreads(query: "swift", page: 0, pageSize: 20))
     XCTAssertThrowsError(try factory.searchThreads(query: "swift", page: 1, pageSize: 51))
     XCTAssertThrowsError(
+      try factory.searchForumPosts(
+        query: "  ", forumName: "swift", page: 1, pageSize: 20, sort: .newest,
+        filter: .all)
+    )
+    XCTAssertThrowsError(
+      try factory.searchForumPosts(
+        query: "async", forumName: "  ", page: 1, pageSize: 20, sort: .newest,
+        filter: .all)
+    )
+    XCTAssertThrowsError(
+      try factory.searchForumPosts(
+        query: String(repeating: "a", count: 101), forumName: "swift", page: 1,
+        pageSize: 20, sort: .newest, filter: .all)
+    )
+    XCTAssertThrowsError(
+      try factory.searchForumPosts(
+        query: "async", forumName: String(repeating: "a", count: 101), page: 1,
+        pageSize: 20, sort: .newest, filter: .all)
+    )
+    XCTAssertThrowsError(
+      try factory.searchForumPosts(
+        query: "async", forumName: "swift", page: 0, pageSize: 20, sort: .newest,
+        filter: .all)
+    )
+    XCTAssertThrowsError(
+      try factory.searchForumPosts(
+        query: "async", forumName: "swift", page: 1, pageSize: 0, sort: .newest,
+        filter: .all)
+    )
+    XCTAssertThrowsError(
+      try factory.searchForumPosts(
+        query: "async", forumName: "swift", page: 1, pageSize: 51, sort: .newest,
+        filter: .all)
+    )
+    XCTAssertThrowsError(
       try factory.hotTopic(topicID: 0, topicName: "topic", page: 1, pageSize: 10, lastID: nil)
     )
     XCTAssertThrowsError(
@@ -438,6 +473,11 @@ final class TiebaRequestFactoryTests: XCTestCase {
     XCTAssertThrowsError(try factory.forumRules(forumID: 0))
     XCTAssertThrowsError(try injected.searchForums(query: "swift"))
     XCTAssertThrowsError(try injected.searchUsers(query: "swift"))
+    XCTAssertThrowsError(
+      try injected.searchForumPosts(
+        query: "async", forumName: "swift", page: 1, pageSize: 20, sort: .newest,
+        filter: .all)
+    )
     XCTAssertThrowsError(try injected.hotTopics())
     XCTAssertThrowsError(
       try injected.hotTopic(
@@ -532,6 +572,48 @@ final class TiebaRequestFactoryTests: XCTestCase {
       XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
       XCTAssertNil(request.httpBody)
     }
+  }
+
+  func testForumPostSearchUsesTiebaLiteCompatibleCredentialFreeRequest() throws {
+    let request = try factory.searchForumPosts(
+      query: " async await ",
+      forumName: " swift ",
+      page: 2,
+      pageSize: 15,
+      sort: .relevance,
+      filter: .threadsOnly
+    )
+
+    XCTAssertEqual(TiebaThreadSearchSort.newest.rawValue, 1)
+    XCTAssertEqual(TiebaThreadSearchSort.relevance.rawValue, 2)
+    XCTAssertEqual(TiebaThreadSearchFilter.threadsOnly.rawValue, 1)
+    XCTAssertEqual(TiebaThreadSearchFilter.all.rawValue, 2)
+    XCTAssertEqual(request.url?.scheme, "https")
+    XCTAssertEqual(request.url?.host, "tieba.baidu.com")
+    XCTAssertEqual(request.url?.path, "/mo/q/search/thread")
+    XCTAssertEqual(
+      queryItems(request),
+      [
+        "word": "async await",
+        "pn": "2",
+        "rn": "15",
+        "st": "2",
+        "tt": "1",
+        "fname": "swift",
+        "ct": "2",
+        "cv": "12.64.1.1",
+      ]
+    )
+    XCTAssertEqual(request.httpMethod, "GET")
+    XCTAssertFalse(request.httpShouldHandleCookies)
+    XCTAssertNil(request.httpBody)
+    XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+    XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+    XCTAssertNil(request.value(forHTTPHeaderField: "Referer"))
+    XCTAssertEqual(
+      Set(request.allHTTPHeaderFields?.keys.map { $0.lowercased() } ?? []),
+      Set(["accept", "accept-encoding", "user-agent"])
+    )
   }
 
   func testEndpointPolicyRejectsDowngradeAndCrossHostRedirects() {

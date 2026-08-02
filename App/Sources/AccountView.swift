@@ -1,11 +1,13 @@
 import SwiftUI
 
 struct AccountView: View {
-  let browseService: any BrowseService & UserProfileService & ForumInformationService
+  let browseService:
+    any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let accountService: any AccountService
   let vault: any AccountVault
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
+  let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @StateObject private var viewModel: AccountViewModel
   @State private var showsLogin = false
@@ -13,17 +15,20 @@ struct AccountView: View {
   @State private var confirmsReset = false
 
   init(
-    browseService: any BrowseService & UserProfileService & ForumInformationService,
+    browseService: any BrowseService & ForumPostSearchService & UserProfileService
+      & ForumInformationService,
     accountService: any AccountService,
     vault: any AccountVault,
     historyRepository: any BrowsingHistoryRepository,
-    favoritesRepository: any LocalFavoritesRepository
+    favoritesRepository: any LocalFavoritesRepository,
+    searchHistoryRepository: any ForumSearchHistoryRepository
   ) {
     self.browseService = browseService
     self.accountService = accountService
     self.vault = vault
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
+    self.searchHistoryRepository = searchHistoryRepository
     _viewModel = StateObject(wrappedValue: AccountViewModel(vault: vault))
   }
 
@@ -150,7 +155,8 @@ struct AccountView: View {
                 accountService: accountService,
                 vault: vault,
                 historyRepository: historyRepository,
-                favoritesRepository: favoritesRepository
+                favoritesRepository: favoritesRepository,
+                searchHistoryRepository: searchHistoryRepository
               )
             } label: {
               Label("我的关注", systemImage: "star")

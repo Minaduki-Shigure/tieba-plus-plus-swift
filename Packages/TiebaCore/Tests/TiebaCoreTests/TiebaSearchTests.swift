@@ -149,7 +149,9 @@ final class TiebaSearchTests: XCTestCase {
     XCTAssertFalse(page.isLoggedIn)
     let result = try XCTUnwrap(page.results.first)
     XCTAssertEqual(result.threadID, 10_867_321_468)
+    XCTAssertEqual(result.id, "thread:10867321468")
     XCTAssertEqual(result.firstPostID, 153_721_418_012)
+    XCTAssertEqual(result.matchedPostID, 153_721_418_012)
     XCTAssertEqual(result.forumID, 216)
     XCTAssertEqual(result.authorName, "Display name")
     XCTAssertNil(result.authorPortraitURL)
@@ -160,6 +162,9 @@ final class TiebaSearchTests: XCTestCase {
     XCTAssertEqual(result.images.count, 1)
     XCTAssertEqual(result.images.first?.width, 560)
     XCTAssertEqual(result.images.first?.height, 746)
+    XCTAssertEqual(result.target, .thread)
+    XCTAssertNil(result.mainPost)
+    XCTAssertNil(result.postInfo)
   }
 
   func testThreadSearchAcceptsNullMediaAndMissingOptionalFields() throws {
@@ -183,6 +188,129 @@ final class TiebaSearchTests: XCTestCase {
     XCTAssertEqual(page.pagination.currentPage, 3)
     XCTAssertFalse(page.pagination.hasMore)
     XCTAssertEqual(page.results.first?.images, [])
+  }
+
+  func testForumPostSearchPreservesThreadReplyAndCommentUnionShapes() throws {
+    let body = Data(
+      #"""
+      {
+        "no": 0,
+        "error": "success",
+        "data": {
+          "current_page": 1,
+          "has_more": 0,
+          "post_list": [
+            {
+              "tid": "42",
+              "pid": "100",
+              "cid": "0",
+              "title": "Thread match",
+              "content": "Opening post",
+              "type": 1,
+              "user": {
+                "user_id": "1",
+                "user_name": "thread-author",
+                "show_nickname": "Thread Author"
+              }
+            },
+            {
+              "tid": "42",
+              "pid": "201",
+              "cid": "0",
+              "title": "Reply match",
+              "content": "Matched floor reply",
+              "type": 2,
+              "user": {
+                "user_id": "2",
+                "user_name": "reply-author",
+                "show_nickname": "Reply Author"
+              },
+              "main_post": {
+                "tid": 42,
+                "title": "Thread match",
+                "content": "Opening post",
+                "post_num": "89",
+                "like_num": 12,
+                "share_num": "3",
+                "user": {
+                  "user_id": 1,
+                  "user_name": "thread-author",
+                  "show_nickname": "Thread Author",
+                  "portrait": "https://himg.bdimg.com/sys/portrait/item/thread-author"
+                }
+              }
+            },
+            {
+              "tid": 42,
+              "pid": 202,
+              "cid": "301",
+              "title": "Comment match",
+              "content": "Matched nested reply",
+              "type": 2,
+              "user": {
+                "user_id": 3,
+                "user_name": "comment-author",
+                "show_nickname": "Comment Author"
+              },
+              "main_post": {
+                "tid": 42,
+                "title": "Thread match",
+                "content": "Opening post",
+                "user": {"user_id": 1, "show_nickname": "Thread Author"}
+              },
+              "post_info": {
+                "tid": "42",
+                "pid": "202",
+                "title": "Parent floor",
+                "content": "Parent floor content",
+                "user": {
+                  "user_id": "4",
+                  "user_name": "parent-author",
+                  "show_nickname": "Parent Author",
+                  "portrait": "javascript:alert(1)"
+                }
+              }
+            }
+          ]
+        }
+      }
+      """#.utf8)
+
+    let page = try TiebaSearchDecoder.threads(from: body, requestedPage: 1, pageSize: 20)
+
+    XCTAssertEqual(page.results.count, 3)
+    XCTAssertEqual(page.results.map(\.threadID), [42, 42, 42])
+    XCTAssertEqual(
+      page.results.map(\.id),
+      ["thread:42", "post:42:201", "comment:42:202:301"]
+    )
+    XCTAssertEqual(Set(page.results.map(\.id)).count, page.results.count)
+    XCTAssertEqual(page.results[0].target, .thread)
+    XCTAssertNil(page.results[0].mainPost)
+    XCTAssertNil(page.results[0].postInfo)
+
+    XCTAssertEqual(page.results[1].target, .post(201))
+    XCTAssertEqual(page.results[1].firstPostID, 0)
+    XCTAssertEqual(page.results[1].matchedPostID, 201)
+    XCTAssertEqual(page.results[1].mainPost?.threadID, 42)
+    XCTAssertNil(page.results[1].mainPost?.postID)
+    XCTAssertEqual(page.results[1].mainPost?.title, "Thread match")
+    XCTAssertEqual(page.results[1].mainPost?.authorName, "Thread Author")
+    XCTAssertEqual(page.results[1].mainPost?.replyCount, 89)
+    XCTAssertEqual(page.results[1].mainPost?.likeCount, 12)
+    XCTAssertEqual(page.results[1].mainPost?.shareCount, 3)
+    XCTAssertEqual(
+      page.results[1].mainPost?.authorPortraitURL?.absoluteString,
+      "https://himg.bdimg.com/sys/portrait/item/thread-author"
+    )
+
+    XCTAssertEqual(page.results[2].target, .comment(postID: 202, commentID: 301))
+    XCTAssertEqual(page.results[2].firstPostID, 0)
+    XCTAssertEqual(page.results[2].matchedPostID, 202)
+    XCTAssertEqual(page.results[2].postInfo?.postID, 202)
+    XCTAssertEqual(page.results[2].postInfo?.excerpt, "Parent floor content")
+    XCTAssertEqual(page.results[2].postInfo?.authorID, 4)
+    XCTAssertNil(page.results[2].postInfo?.authorPortraitURL)
   }
 
   func testUserSearchDecodesFlexibleCollectionsAndDeduplicatesExactMatch() throws {

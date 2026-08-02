@@ -176,7 +176,7 @@ final class TiebaHotTopicTests: XCTestCase {
     XCTAssertEqual(page.relatedForums.map(\.id), [70_579])
     XCTAssertEqual(page.relatedForums.first?.memberCount, 1_000)
     XCTAssertEqual(page.relatedForums.first?.avatarURL?.scheme, "http")
-    XCTAssertEqual(page.threads.map(\.id), [10_911_476_537, 10_911_476_539])
+    XCTAssertEqual(page.threads.map(\.threadID), [10_911_476_537, 10_911_476_539])
     XCTAssertEqual(page.pagination.currentPage, 2)
     XCTAssertTrue(page.pagination.hasMore)
     XCTAssertTrue(page.pagination.hasPrevious)

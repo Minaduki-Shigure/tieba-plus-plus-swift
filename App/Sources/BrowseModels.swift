@@ -224,6 +224,98 @@ struct ThreadSearchPageData: Sendable {
   let hasMore: Bool
 }
 
+enum ForumPostSearchSort: String, CaseIterable, Hashable, Identifiable, Sendable {
+  case newest
+  case relevance
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .newest:
+      "最新"
+    case .relevance:
+      "相关"
+    }
+  }
+}
+
+enum ForumPostSearchFilter: String, CaseIterable, Hashable, Identifiable, Sendable {
+  case all
+  case threadsOnly
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .all:
+      "全部"
+    case .threadsOnly:
+      "主题帖"
+    }
+  }
+}
+
+enum ForumPostSearchTarget: Hashable, Sendable {
+  case thread
+  case post(Int64)
+  case comment(postID: Int64, commentID: Int64)
+
+  var title: String {
+    switch self {
+    case .thread:
+      "主题帖"
+    case .post:
+      "回复"
+    case .comment:
+      "楼中楼"
+    }
+  }
+
+  fileprivate var storageKey: String {
+    switch self {
+    case .thread:
+      "thread"
+    case .post(let postID):
+      "post:\(postID)"
+    case .comment(let postID, let commentID):
+      "comment:\(postID):\(commentID)"
+    }
+  }
+}
+
+struct ForumPostSearchSummary: Hashable, Sendable {
+  let postID: Int64
+  let title: String
+  let excerpt: String
+  let authorID: Int64
+  let authorName: String
+}
+
+struct ForumPostSearchItem: Identifiable, Hashable, Sendable {
+  var id: String { "\(thread.id):\(target.storageKey)" }
+
+  let thread: BrowseThread
+  let target: ForumPostSearchTarget
+  let matchedTitle: String
+  let matchedExcerpt: String
+  let matchedAuthorID: Int64
+  let matchedAuthorName: String
+  let matchedAuthorPortraitURL: URL?
+  let matchedAt: Date?
+  let replyCount: Int
+  let likeCount: Int
+  let shareCount: Int
+  let matchedContents: [BrowseContent]
+  let context: ForumPostSearchSummary?
+}
+
+struct ForumPostSearchPageData: Sendable {
+  let results: [ForumPostSearchItem]
+  let currentPage: Int
+  let hasMore: Bool
+}
+
 struct HotTopicItem: Identifiable, Hashable, Sendable {
   let id: Int64
   let name: String

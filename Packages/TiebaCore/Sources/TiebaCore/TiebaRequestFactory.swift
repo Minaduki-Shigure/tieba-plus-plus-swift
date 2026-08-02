@@ -370,6 +370,38 @@ struct TiebaRequestFactory: Sendable {
     )
   }
 
+  func searchForumPosts(
+    query: String,
+    forumName: String,
+    page: Int,
+    pageSize: Int,
+    sort: TiebaThreadSearchSort,
+    filter: TiebaThreadSearchFilter
+  ) throws -> URLRequest {
+    let query = try validatedSearchQuery(query)
+    let forumName = forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !forumName.isEmpty, forumName.count <= 100 else {
+      throw TiebaClientError.invalidArgument(
+        "Forum name must contain between 1 and 100 characters."
+      )
+    }
+    try validate(page: page)
+    try validate(pageSize: pageSize, maximum: 50)
+    return try webRequest(
+      path: "/mo/q/search/thread",
+      queryItems: [
+        URLQueryItem(name: "word", value: query),
+        URLQueryItem(name: "pn", value: String(page)),
+        URLQueryItem(name: "rn", value: String(pageSize)),
+        URLQueryItem(name: "st", value: String(sort.rawValue)),
+        URLQueryItem(name: "tt", value: String(filter.rawValue)),
+        URLQueryItem(name: "fname", value: forumName),
+        URLQueryItem(name: "ct", value: "2"),
+        URLQueryItem(name: "cv", value: configuration.clientVersion),
+      ]
+    )
+  }
+
   private func request(path: String, command: Int, protobuf: Data) throws -> URLRequest {
     try validateConfiguration()
 

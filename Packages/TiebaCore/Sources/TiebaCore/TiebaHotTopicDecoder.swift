@@ -36,7 +36,7 @@ enum TiebaHotTopicDecoder {
 
     var seenThreads = Set<Int64>()
     let mappedThreads = data.relatedThreads.items.compactMap(mapThread).filter {
-      seenThreads.insert($0.thread.id).inserted
+      seenThreads.insert($0.thread.threadID).inserted
     }
     let threads = mappedThreads.map(\.thread)
     let reportedPage = data.request.currentPage.value

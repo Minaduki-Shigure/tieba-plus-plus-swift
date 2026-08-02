@@ -9,6 +9,7 @@ in `Packages/TiebaCore/Sources/TiebaProto/NOTICE.md`.
 
 Development is in progress. Anonymous mode supports a ranked hot-topic feed
 with paginated topic details, categorized forum, thread, and user search,
+per-forum post search with newest/relevance and topic/all-content filters,
 forum, post, and nested-reply browsing, remote media, forum metadata and
 featured classifications, complete public forum introductions, forum rules,
 and moderator teams, plus post sorting, page jumps, and an only-thread-author
@@ -20,7 +21,9 @@ with the active sort/filter options; the changing hot ranking reopens at its
 first page. Forums and threads can also be saved in an independent local
 favorites list; saved threads retain their reading position and browsing mode,
 while saved forums appear as home-screen shortcuts. History and favorites can
-be cleared independently. The first authenticated milestone adds an ephemeral
+be cleared independently. Per-forum search terms are kept in a separate,
+versioned local history and can be deleted individually or cleared for that
+forum. The first authenticated milestone adds an ephemeral
 Baidu login flow with an exact host allowlist, device-only Keychain storage,
 local multi-account switching, and the current account's followed-forum list.
 Authenticated write operations
