@@ -67,6 +67,9 @@ let followed = try await authenticatedClient.getFollowedForums(
 - The first FRS page is encoded as `pn = 0`, matching aiotieba behavior.
 - PB asks for at least two posts because the upstream endpoint does not honor a
   request size of one consistently.
+- Post pages expose a shared-thread origin only when the explicit share flag is
+  set and the origin TID is positive and distinct from the outer thread. The
+  origin reuses the normal rich-content and media mapping path.
 - Browsing bodies use the endpoint's multipart `data` part and Protocol Buffer
   payload. Search requests use percent-encoded GET query items and JSON.
 - Anonymous requests contain no Cookie, Authorization, BDUSS, STOKEN, device

@@ -528,6 +528,31 @@ public struct TiebaThread: Identifiable, Sendable, Hashable {
   }
 }
 
+public struct TiebaOriginThread: Identifiable, Sendable, Hashable {
+  public let id: Int64
+  public let firstPostID: Int64
+  public let forumID: Int64
+  public let forumName: String
+  public let title: String
+  public let content: TiebaContent
+
+  public init(
+    id: Int64,
+    firstPostID: Int64,
+    forumID: Int64,
+    forumName: String,
+    title: String,
+    content: TiebaContent
+  ) {
+    self.id = id
+    self.firstPostID = firstPostID
+    self.forumID = forumID
+    self.forumName = forumName
+    self.title = title
+    self.content = content
+  }
+}
+
 public struct TiebaComment: Identifiable, Sendable, Hashable {
   public let id: Int64
   public let threadID: Int64
@@ -655,6 +680,7 @@ public struct TiebaUserThreadPage: Sendable, Hashable {
 public struct TiebaPostPage: Sendable, Hashable {
   public let forum: TiebaForum
   public let thread: TiebaThread
+  public let originThread: TiebaOriginThread?
   public let posts: [TiebaPost]
   public let pagination: TiebaPagination
 
@@ -662,10 +688,12 @@ public struct TiebaPostPage: Sendable, Hashable {
     forum: TiebaForum,
     thread: TiebaThread,
     posts: [TiebaPost],
-    pagination: TiebaPagination
+    pagination: TiebaPagination,
+    originThread: TiebaOriginThread? = nil
   ) {
     self.forum = forum
     self.thread = thread
+    self.originThread = originThread
     self.posts = posts
     self.pagination = pagination
   }

@@ -26,6 +26,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Page-number jump and last-visible-post restoration
 - Versioned local browsing history with delete, clear, and recording controls
 - Nested replies, images, video links, and voice playback
+- Shared-thread origin cards with original content, media, and navigation
 - Public user profiles opened from post and nested-reply authors
 - Paginated public threads on user profiles
 - Independent local forum and thread favorites
@@ -100,3 +101,9 @@ thread IDs, and pagination cursors as 64-bit values. Detail refresh preserves
 the prior page and cursor on failure; duplicate-only pages terminate pagination
 instead of repeatedly requesting the same feed. Login-related fields returned
 incidentally by the public detail response are ignored.
+
+Post pages expose an origin-thread object for both ordinary and shared topics,
+so the app treats it as a share only when `is_share_thread == 1` and the origin
+has a positive, distinct thread ID. Pagination may omit the repeated origin
+object; a loaded card remains until a replacing first-page response says it is
+absent. Opening the origin reuses the normal anonymous thread workflow.

@@ -45,6 +45,7 @@ final class TiebaClientTests: XCTestCase {
     let result = try await client.getPosts(threadID: 100)
 
     XCTAssertEqual(result.thread.title, "A test thread")
+    XCTAssertNil(result.originThread)
     XCTAssertEqual(result.thread.viewCount, 500)
     XCTAssertEqual(result.thread.content.plainText, "Opening post")
     XCTAssertEqual(result.thread.content.images.count, 1)

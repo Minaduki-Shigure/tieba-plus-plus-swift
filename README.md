@@ -13,8 +13,9 @@ global post search with newest, oldest, and relevance sorting,
 per-forum post search with newest/relevance and topic/all-content filters,
 forum, post, and nested-reply browsing, remote media, forum metadata and
 featured classifications, complete public forum introductions, forum rules,
-and moderator teams, plus post sorting, page jumps, and an only-thread-author
-filter. Topic threads, search results, moderator rows, post authors, and
+moderator teams, and shared-thread origin cards with original media and
+navigation, plus post sorting, page jumps, and an only-thread-author filter.
+Topic threads, search results, moderator rows, post authors, and
 nested-reply authors open credential-free public user profiles with profile
 statistics and paginated public threads. Local browsing
 history records the last visible post ID for stable post orders and restores it

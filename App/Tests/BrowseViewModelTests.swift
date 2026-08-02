@@ -372,6 +372,81 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testThreadOriginContextLoadsAndSurvivesPaginationWithoutRepeat() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 42)
+    let origin = Fixtures.thread(id: 900, title: "original", forumName: "Origin")
+    let firstPost = Fixtures.post(id: 4_201, threadID: 42, floor: 1)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [firstPost],
+          currentPage: 1,
+          hasMore: true,
+          originThread: origin
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 4_202, threadID: 42, floor: 2)],
+          currentPage: 2,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+    XCTAssertEqual(viewModel.originThread, origin)
+
+    viewModel.loadMoreIfNeeded(current: firstPost)
+    try await waitUntil { viewModel.posts.map(\.id) == [4_201, 4_202] }
+    XCTAssertEqual(viewModel.originThread, origin)
+  }
+
+  @MainActor
+  func testThreadRefreshReplacesStaleOriginContext() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 43)
+    let origin = Fixtures.thread(id: 901, title: "original", forumName: "Origin")
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 4_301, threadID: 43, floor: 1)],
+          currentPage: 1,
+          hasMore: false,
+          originThread: origin
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 4_302, threadID: 43, floor: 1)],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.originThread == origin }
+
+    await viewModel.refresh()
+
+    XCTAssertNil(viewModel.originThread)
+    XCTAssertEqual(viewModel.posts.map(\.id), [4_302])
+  }
+
+  @MainActor
   func testThreadInitialLoadReportsError() async throws {
     let service = ScriptedBrowseService()
     await service.enqueuePosts(.failure(StubFailure(message: "thread unavailable")))

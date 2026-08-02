@@ -217,6 +217,7 @@ struct ThreadView: View {
             ForEach(viewModel.posts) { post in
               PostView(
                 post: post,
+                originThread: post.floor == 1 ? viewModel.originThread : nil,
                 service: service,
                 historyRepository: historyRepository,
                 favoritesRepository: favoritesRepository,
@@ -349,6 +350,7 @@ private struct PostFramePreferenceKey: PreferenceKey {
 
 private struct PostView: View {
   let post: BrowsePost
+  let originThread: BrowseThread?
   let service: any BrowseService & UserProfileService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
@@ -373,6 +375,15 @@ private struct PostView: View {
       }
 
       BrowseContentView(contents: post.contents)
+
+      if let originThread {
+        OriginThreadCard(
+          thread: originThread,
+          service: service,
+          historyRepository: historyRepository,
+          favoritesRepository: favoritesRepository
+        )
+      }
 
       if post.nestedReplyCount > 0 {
         Button(action: openComments) {
@@ -416,5 +427,68 @@ private struct PostView: View {
         .opacity(post.authorID > 0 ? 1 : 0)
     }
     .contentShape(Rectangle())
+  }
+}
+
+private struct OriginThreadCard: View {
+  let thread: BrowseThread
+  let service: any BrowseService & UserProfileService
+  let historyRepository: any BrowsingHistoryRepository
+  let favoritesRepository: any LocalFavoritesRepository
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      NavigationLink {
+        ThreadView(
+          thread: thread,
+          service: service,
+          historyRepository: historyRepository,
+          favoritesRepository: favoritesRepository
+        )
+      } label: {
+        HStack(alignment: .top, spacing: 10) {
+          Image(systemName: "arrowshape.turn.up.right.fill")
+            .foregroundStyle(.tint)
+            .frame(width: 20, height: 20)
+          VStack(alignment: .leading, spacing: 3) {
+            Text("转发的原帖")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            Text(thread.title.isEmpty ? "查看原帖" : thread.title)
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(.primary)
+              .lineLimit(3)
+            if !thread.forumName.isEmpty {
+              Text("\(thread.forumName)吧")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+          }
+          Spacer(minLength: 8)
+          Image(systemName: "chevron.right")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.tertiary)
+            .padding(.top, 3)
+        }
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel(
+        thread.title.isEmpty ? "打开原帖" : "打开原帖，\(thread.title)"
+      )
+
+      if !thread.contents.isEmpty {
+        Divider()
+        BrowseContentView(contents: thread.contents)
+      }
+    }
+    .padding(12)
+    .background(Color(uiColor: .secondarySystemGroupedBackground))
+    .clipShape(RoundedRectangle(cornerRadius: 6))
+    .overlay {
+      RoundedRectangle(cornerRadius: 6)
+        .stroke(Color(uiColor: .separator).opacity(0.45), lineWidth: 0.5)
+    }
   }
 }

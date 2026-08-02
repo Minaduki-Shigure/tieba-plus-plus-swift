@@ -10,7 +10,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.12 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.13 integration-test")
     )
     let threads = try await client.getThreads(forumName: "starry", pageSize: 10)
     XCTAssertFalse(threads.threads.isEmpty)
@@ -119,7 +119,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.12 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.13 integration-test")
     )
     let forums = try await client.searchForums(query: "swift")
     XCTAssertFalse(forums.isLoggedIn)
@@ -177,13 +177,39 @@ final class TiebaLiveTests: XCTestCase {
     XCTAssertTrue(users.fuzzyMatches.allSatisfy { $0.id > 0 && !$0.preferredName.isEmpty })
   }
 
+  func testAnonymousSharedThreadOriginContext() async throws {
+    guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
+      throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
+    }
+
+    let client = TiebaClient(
+      configuration: .init(userAgent: "TiebaPlusPlus/0.13 integration-test")
+    )
+    let feed = try await client.getThreads(forumName: "steam", pageSize: 100)
+    let candidates = feed.threads.filter(\.isShared)
+    guard !candidates.isEmpty else {
+      throw XCTSkip("The current public feed contains no shared-thread sample.")
+    }
+
+    for candidate in candidates.prefix(5) {
+      guard let page = try? await client.getPosts(threadID: candidate.id, pageSize: 2),
+        let origin = page.originThread
+      else { continue }
+      XCTAssertGreaterThan(origin.id, 0)
+      XCTAssertNotEqual(origin.id, candidate.id)
+      XCTAssertTrue(!origin.title.isEmpty || !origin.content.fragments.isEmpty)
+      return
+    }
+    XCTFail("Public shared-thread candidates did not expose a valid distinct origin context.")
+  }
+
   func testAnonymousHotTopicListDetailAndPagination() async throws {
     guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
       throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.12 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.13 integration-test")
     )
     let topics = try await client.getHotTopics()
     let topic = try XCTUnwrap(topics.first)
@@ -221,7 +247,7 @@ final class TiebaLiveTests: XCTestCase {
 
     let userID: Int64 = 957_339_815
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.12 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.13 integration-test")
     )
 
     let profile = try await client.getUserProfile(userID: userID)
@@ -243,7 +269,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.12 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.13 integration-test")
     )
     let forumID: Int64 = 2_432_903
 

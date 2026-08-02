@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class ThreadViewModel: ObservableObject {
   @Published private(set) var thread: BrowseThread
+  @Published private(set) var originThread: BrowseThread?
   @Published private(set) var posts: [BrowsePost] = []
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
@@ -32,6 +33,7 @@ final class ThreadViewModel: ObservableObject {
     initialLocation: ThreadPostLocation? = nil
   ) {
     self.thread = thread
+    self.originThread = nil
     self.service = service
     self.options = options
     self.initialLocation = options.sort == .hot ? nil : initialLocation
@@ -240,6 +242,11 @@ final class ThreadViewModel: ObservableObject {
         }
         let mergedPosts = replacing ? response.posts : merge(previousPosts, response.posts)
         thread = response.thread
+        if replacing {
+          originThread = response.originThread
+        } else if let responseOriginThread = response.originThread {
+          originThread = responseOriginThread
+        }
         currentPage = response.currentPage
         totalPages = response.totalPages
         nextPagePostID = response.nextPagePostID

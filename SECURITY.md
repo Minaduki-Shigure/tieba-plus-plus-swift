@@ -72,6 +72,12 @@ credential-free. They may include only the forum identifier and anonymous
 client metadata; no future account Cookie, BDUSS, or STOKEN may be attached to
 these read-only calls.
 
+Shared-thread origin cards are decoded only from the existing anonymous post
+response. They must require the explicit share flag and a positive origin TID
+different from the outer thread, and all origin links and media must pass the
+same HTTPS normalization used by ordinary post content. Opening an origin uses
+the normal credential-free thread request and must not forward response metadata.
+
 Browsing history, local favorites, global search history, and per-forum search
 history are separate versioned JSON archives in Application Support. They use
 atomic writes, enforce bounded archive sizes, refuse to overwrite malformed or

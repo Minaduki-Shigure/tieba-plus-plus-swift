@@ -72,7 +72,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
         from: response.thread.pagePostIDs,
         returnedPostIDs: Set(response.posts.map(\.id)),
         sort: options.sort
-      )
+      ),
+      originThread: response.originThread.map(Self.mapOriginThread)
     )
   }
 
@@ -378,6 +379,22 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       viewCount: thread.viewCount,
       createdAt: thread.createdAt,
       lastReplyAt: thread.lastReplyAt,
+      contents: mapContent(thread.content)
+    )
+  }
+
+  private static func mapOriginThread(_ thread: TiebaOriginThread) -> BrowseThread {
+    BrowseThread(
+      id: thread.id,
+      forumID: thread.forumID,
+      forumName: thread.forumName,
+      title: thread.title,
+      excerpt: summary(for: thread.content),
+      authorName: "",
+      replyCount: 0,
+      viewCount: 0,
+      createdAt: nil,
+      lastReplyAt: nil,
       contents: mapContent(thread.content)
     )
   }

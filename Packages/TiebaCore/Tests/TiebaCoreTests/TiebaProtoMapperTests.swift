@@ -23,6 +23,51 @@ final class TiebaProtoMapperTests: XCTestCase {
     XCTAssertEqual(result.pagination.totalPages, 4)
   }
 
+  func testPostPageMapsDistinctValidOriginOnlyForSharedThread() throws {
+    var fixture = ProtoFixtures.postPage().data
+    fixture.thread.isShareThread = 1
+    fixture.thread.originThreadInfo.tid = " 900 "
+    fixture.thread.originThreadInfo.pid = 901
+    fixture.thread.originThreadInfo.fid = 77
+    fixture.thread.originThreadInfo.fname = " Original Forum "
+    fixture.thread.originThreadInfo.title = " Original title "
+
+    let result = TiebaProtoMapper.postPage(fixture)
+    let origin = try XCTUnwrap(result.originThread)
+
+    XCTAssertEqual(origin.id, 900)
+    XCTAssertEqual(origin.firstPostID, 901)
+    XCTAssertEqual(origin.forumID, 77)
+    XCTAssertEqual(origin.forumName, "Original Forum")
+    XCTAssertEqual(origin.title, "Original title")
+    XCTAssertEqual(origin.content.plainText, "Opening post")
+    XCTAssertEqual(origin.content.images.count, 1)
+    XCTAssertEqual(
+      origin.content.fragments.filter { fragment in
+        if case .video = fragment { return true }
+        return false
+      }.count,
+      1
+    )
+    XCTAssertEqual(
+      origin.content.fragments.filter { fragment in
+        if case .voice = fragment { return true }
+        return false
+      }.count,
+      1
+    )
+  }
+
+  func testPostPageRejectsInvalidOrSelfReferentialSharedOrigin() {
+    var fixture = ProtoFixtures.postPage().data
+    fixture.thread.isShareThread = 1
+    fixture.thread.originThreadInfo.tid = "not-a-thread"
+    XCTAssertNil(TiebaProtoMapper.postPage(fixture).originThread)
+
+    fixture.thread.originThreadInfo.tid = String(fixture.thread.id)
+    XCTAssertNil(TiebaProtoMapper.postPage(fixture).originThread)
+  }
+
   func testForumOverviewRequiresARepresentablePositiveForumID() {
     let mapped = TiebaProtoMapper.forumOverview(ProtoFixtures.forumOverview().data)
     XCTAssertEqual(mapped?.forum.id, 42)

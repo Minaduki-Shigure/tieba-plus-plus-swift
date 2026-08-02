@@ -76,7 +76,8 @@ enum TiebaProtoMapper {
       forum: forum,
       thread: mappedThread,
       posts: posts,
-      pagination: pagination(data.page)
+      pagination: pagination(data.page),
+      originThread: originThread(data.thread)
     )
   }
 
@@ -342,28 +343,12 @@ enum TiebaProtoMapper {
     authorProto.nameShow = proto.nameShow
     authorProto.portrait = proto.userPortrait
 
-    var contentProtos = proto.firstPostContent
-    contentProtos.removeAll { content in
-      switch content.type {
-      case 3, 20:
-        !proto.media.isEmpty
-      case 5:
-        hasVideo(proto.videoInfo)
-      case 10:
-        !proto.voiceInfo.isEmpty
-      default:
-        false
-      }
-    }
-    var fragments = content(contentProtos).fragments
-    fragments.append(contentsOf: proto.media.map(mediaFragment))
-    if hasVideo(proto.videoInfo) {
-      fragments.append(.video(videoFragment(proto.videoInfo)))
-    }
-    fragments.append(
-      contentsOf: proto.voiceInfo.filter { !$0.voiceMd5.isEmpty }.map {
-        .voice(TiebaVoice(md5: $0.voiceMd5, duration: TimeInterval($0.duringTime) / 1_000))
-      })
+    let mappedContent = assembledContent(
+      contentProtos: proto.firstPostContent,
+      mediaProtos: proto.media,
+      video: proto.videoInfo,
+      voices: proto.voiceInfo
+    )
 
     return TiebaThread(
       id: threadID,
@@ -371,7 +356,7 @@ enum TiebaProtoMapper {
       forumID: forumID,
       forumName: proto.forumName,
       title: proto.title,
-      content: TiebaContent(fragments: fragments),
+      content: mappedContent,
       author: optionalUser(authorProto),
       kind: TiebaThreadKind(rawValue: Int32(clamping: proto.threadType)),
       tabID: 0,
@@ -422,6 +407,73 @@ enum TiebaProtoMapper {
       ? (origin.voiceInfo.isEmpty ? proto.voiceInfo : origin.voiceInfo)
       : (proto.voiceInfo.isEmpty ? origin.voiceInfo : proto.voiceInfo)
 
+    return TiebaThread(
+      id: proto.id,
+      firstPostID: proto.firstPostID == 0 ? proto.postID : proto.firstPostID,
+      forumID: forum.id,
+      forumName: forum.name,
+      title: proto.title,
+      content: assembledContent(
+        contentProtos: contentProtos,
+        mediaProtos: mediaProtos,
+        video: video,
+        voices: voices
+      ),
+      author: author,
+      kind: TiebaThreadKind(rawValue: proto.threadType),
+      tabID: Int(proto.tabID),
+      viewCount: viewCountOverride ?? Int(proto.viewNum),
+      replyCount: Int(proto.replyNum),
+      shareCount: Int(proto.shareNum),
+      agreeCount: Int(proto.agree.agreeNum),
+      disagreeCount: Int(proto.agree.disagreeNum),
+      createdAt: date(Int64(proto.createTime)),
+      lastReplyAt: date(Int64(proto.lastTimeInt)),
+      isPinned: proto.isTop != 0,
+      isFeatured: proto.isGood != 0,
+      isShared: proto.isShareThread != 0,
+      isHidden: proto.isFrsMask != 0,
+      isLive: proto.isLivepost != 0,
+      pagePostIDs: proto.pids.split(separator: ",").compactMap {
+        guard let postID = Int64($0.trimmingCharacters(in: .whitespacesAndNewlines)), postID > 0
+        else { return nil }
+        return postID
+      }
+    )
+  }
+
+  private static func originThread(_ proto: ThreadInfo) -> TiebaOriginThread? {
+    guard proto.isShareThread == 1 else { return nil }
+    let origin = proto.originThreadInfo
+    let rawThreadID = origin.tid.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard
+      let threadID = Int64(rawThreadID),
+      threadID > 0,
+      threadID != proto.id
+    else { return nil }
+
+    return TiebaOriginThread(
+      id: threadID,
+      firstPostID: max(origin.pid, 0),
+      forumID: max(origin.fid, 0),
+      forumName: origin.fname.trimmingCharacters(in: .whitespacesAndNewlines),
+      title: origin.title.trimmingCharacters(in: .whitespacesAndNewlines),
+      content: assembledContent(
+        contentProtos: origin.content,
+        mediaProtos: origin.media,
+        video: origin.videoInfo,
+        voices: origin.voiceInfo
+      )
+    )
+  }
+
+  private static func assembledContent(
+    contentProtos: [PbContent],
+    mediaProtos: [Media],
+    video: VideoInfo,
+    voices: [Voice]
+  ) -> TiebaContent {
+    var contentProtos = contentProtos
     contentProtos.removeAll { content in
       switch content.type {
       case 3, 20:
@@ -444,35 +496,7 @@ enum TiebaProtoMapper {
       contentsOf: voices.filter { !$0.voiceMd5.isEmpty }.map {
         .voice(TiebaVoice(md5: $0.voiceMd5, duration: TimeInterval($0.duringTime) / 1_000))
       })
-
-    return TiebaThread(
-      id: proto.id,
-      firstPostID: proto.firstPostID == 0 ? proto.postID : proto.firstPostID,
-      forumID: forum.id,
-      forumName: forum.name,
-      title: proto.title,
-      content: TiebaContent(fragments: fragments),
-      author: author,
-      kind: TiebaThreadKind(rawValue: proto.threadType),
-      tabID: Int(proto.tabID),
-      viewCount: viewCountOverride ?? Int(proto.viewNum),
-      replyCount: Int(proto.replyNum),
-      shareCount: Int(proto.shareNum),
-      agreeCount: Int(proto.agree.agreeNum),
-      disagreeCount: Int(proto.agree.disagreeNum),
-      createdAt: date(Int64(proto.createTime)),
-      lastReplyAt: date(Int64(proto.lastTimeInt)),
-      isPinned: proto.isTop != 0,
-      isFeatured: proto.isGood != 0,
-      isShared: proto.isShareThread != 0,
-      isHidden: proto.isFrsMask != 0,
-      isLive: proto.isLivepost != 0,
-      pagePostIDs: proto.pids.split(separator: ",").compactMap {
-        guard let postID = Int64($0.trimmingCharacters(in: .whitespacesAndNewlines)), postID > 0
-        else { return nil }
-        return postID
-      }
-    )
+    return TiebaContent(fragments: fragments)
   }
 
   private static func feedThread(

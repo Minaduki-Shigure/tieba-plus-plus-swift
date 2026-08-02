@@ -112,6 +112,7 @@ struct ThreadPageData: Sendable {
 
 struct PostPageData: Sendable {
   let thread: BrowseThread
+  let originThread: BrowseThread?
   let posts: [BrowsePost]
   let currentPage: Int
   let hasMore: Bool
@@ -126,9 +127,11 @@ struct PostPageData: Sendable {
     hasMore: Bool,
     totalPages: Int = 0,
     totalCount: Int = 0,
-    nextPagePostID: Int64? = nil
+    nextPagePostID: Int64? = nil,
+    originThread: BrowseThread? = nil
   ) {
     self.thread = thread
+    self.originThread = originThread
     self.posts = posts
     self.currentPage = currentPage
     self.hasMore = hasMore
