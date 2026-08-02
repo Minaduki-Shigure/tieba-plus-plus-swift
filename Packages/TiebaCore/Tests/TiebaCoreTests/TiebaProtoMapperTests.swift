@@ -4,6 +4,43 @@ import XCTest
 @testable import TiebaCore
 
 final class TiebaProtoMapperTests: XCTestCase {
+  func testUserProfileKeepsOnlyValidUniqueLikedForumPreviews() throws {
+    var fixture = ProtoFixtures.userProfile().data
+    fixture.user.myLikeNum = 1
+    fixture.user.likeForum.append(
+      User.LikeForumInfo.with {
+        $0.forumID = 42
+        $0.forumName = "duplicate"
+      }
+    )
+    fixture.user.likeForum.append(
+      User.LikeForumInfo.with {
+        $0.forumID = 0
+        $0.forumName = "invalid-id"
+      }
+    )
+    fixture.user.likeForum.append(
+      User.LikeForumInfo.with {
+        $0.forumID = UInt64(Int64.max) + 1
+        $0.forumName = "overflow"
+      }
+    )
+    fixture.user.likeForum.append(
+      User.LikeForumInfo.with {
+        $0.forumID = 88
+        $0.forumName = "   "
+      }
+    )
+
+    let profile = try XCTUnwrap(TiebaProtoMapper.userProfile(fixture))
+
+    XCTAssertEqual(profile.followedForumCount, 1)
+    XCTAssertEqual(
+      profile.likedForums,
+      [TiebaProfileForum(id: 42, name: "swift"), TiebaProfileForum(id: 77, name: "ios")]
+    )
+  }
+
   func testPostPagePrefersNewTotalPageAndMapsCursorPostIDs() {
     let fixture = ProtoFixtures.postPage().data
 

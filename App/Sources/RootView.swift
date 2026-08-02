@@ -216,6 +216,7 @@ struct RootView: View {
             service: service,
             historyRepository: historyRepository,
             favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository,
             historySnapshot: thread
           )
         }

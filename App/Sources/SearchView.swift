@@ -154,7 +154,8 @@ struct SearchView: View {
               thread: thread,
               service: browseService,
               historyRepository: historyRepository,
-              favoritesRepository: favoritesRepository
+              favoritesRepository: favoritesRepository,
+              searchHistoryRepository: searchHistoryRepository
             )
           } label: {
             SearchThreadRow(thread: thread)
@@ -228,7 +229,8 @@ struct SearchView: View {
         userID: user.id,
         service: browseService,
         historyRepository: historyRepository,
-        favoritesRepository: favoritesRepository
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository
       )
     } label: {
       UserSearchRow(user: user)

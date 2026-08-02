@@ -4,20 +4,25 @@ struct CommentsView: View {
   @Environment(\.dismiss) private var dismiss
   @StateObject private var viewModel: CommentsViewModel
   @State private var mentionedUserID: Int64?
-  let service: any BrowseService & UserProfileService
+  let service:
+    any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
+  let searchHistoryRepository: any ForumSearchHistoryRepository
 
   init(
     threadID: Int64,
     postID: Int64,
-    service: any BrowseService & UserProfileService,
+    service: any BrowseService & ForumPostSearchService & UserProfileService
+      & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
-    favoritesRepository: any LocalFavoritesRepository
+    favoritesRepository: any LocalFavoritesRepository,
+    searchHistoryRepository: any ForumSearchHistoryRepository
   ) {
     self.service = service
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
+    self.searchHistoryRepository = searchHistoryRepository
     _viewModel = StateObject(
       wrappedValue: CommentsViewModel(threadID: threadID, postID: postID, service: service)
     )
@@ -26,13 +31,16 @@ struct CommentsView: View {
   init(
     threadID: Int64,
     aroundCommentID commentID: Int64,
-    service: any BrowseService & UserProfileService,
+    service: any BrowseService & ForumPostSearchService & UserProfileService
+      & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
-    favoritesRepository: any LocalFavoritesRepository
+    favoritesRepository: any LocalFavoritesRepository,
+    searchHistoryRepository: any ForumSearchHistoryRepository
   ) {
     self.service = service
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
+    self.searchHistoryRepository = searchHistoryRepository
     _viewModel = StateObject(
       wrappedValue: CommentsViewModel(
         threadID: threadID,
@@ -60,7 +68,8 @@ struct CommentsView: View {
                       userID: comment.authorID,
                       service: service,
                       historyRepository: historyRepository,
-                      favoritesRepository: favoritesRepository
+                      favoritesRepository: favoritesRepository,
+                      searchHistoryRepository: searchHistoryRepository
                     )
                   } label: {
                     commentAuthorIdentity(comment)
@@ -112,7 +121,8 @@ struct CommentsView: View {
           userID: userID,
           service: service,
           historyRepository: historyRepository,
-          favoritesRepository: favoritesRepository
+          favoritesRepository: favoritesRepository,
+          searchHistoryRepository: searchHistoryRepository
         )
       }
     }

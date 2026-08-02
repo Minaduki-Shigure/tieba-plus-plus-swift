@@ -344,6 +344,7 @@ final class BrowseViewModelTests: XCTestCase {
   @MainActor
   func testForumPaginationDeduplicatesThreads() async throws {
     let service = ScriptedBrowseService()
+    let channel = BrowseForumChannel(id: 7, name: "教程", isDefault: false)
     let firstPage = [
       Fixtures.thread(id: 21, title: "first"),
       Fixtures.thread(id: 22, title: "original duplicate"),
@@ -354,7 +355,8 @@ final class BrowseViewModelTests: XCTestCase {
           forumName: "Swift",
           threads: firstPage,
           currentPage: 1,
-          hasMore: true
+          hasMore: true,
+          channels: [channel]
         )
       )
     )
@@ -381,8 +383,158 @@ final class BrowseViewModelTests: XCTestCase {
       viewModel.threads.map(\.id) == [21, 22, 23] && !viewModel.isLoadingMore
     }
     XCTAssertEqual(viewModel.threads[1].title, "original duplicate")
+    XCTAssertEqual(viewModel.channels, [channel])
     let requests = await service.threadRequestSnapshot()
     XCTAssertEqual(requests.map(\.page), [1, 2])
+  }
+
+  @MainActor
+  func testForumChannelSelectionUsesCursorAndSortReloadClearsIt() async throws {
+    let service = ScriptedBrowseService()
+    let channel = BrowseForumChannel(id: 8, name: "问答", isDefault: true)
+    let forum = Fixtures.forum(name: "Swift")
+    await service.enqueueThreads(
+      .value(
+        ThreadPageData(
+          forum: forum,
+          threads: [Fixtures.thread(id: 30)],
+          currentPage: 1,
+          hasMore: false,
+          channels: [channel]
+        )
+      )
+    )
+    await service.enqueueForumChannelThreads(
+      .value(
+        ForumChannelPageData(
+          threads: [Fixtures.thread(id: 31), Fixtures.thread(id: 32)],
+          currentPage: 1,
+          hasMore: true,
+          nextPageCursor: 32
+        )
+      )
+    )
+    await service.enqueueForumChannelThreads(
+      .value(
+        ForumChannelPageData(
+          threads: [Fixtures.thread(id: 32), Fixtures.thread(id: 33)],
+          currentPage: 2,
+          hasMore: true,
+          nextPageCursor: 33
+        )
+      )
+    )
+    await service.enqueueForumChannelThreads(
+      .value(
+        ForumChannelPageData(
+          threads: [Fixtures.thread(id: 34)],
+          currentPage: 1,
+          hasMore: false,
+          nextPageCursor: 34
+        )
+      )
+    )
+    let viewModel = ForumViewModel(forumName: "Swift", service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.threads.map(\.id) == [30] }
+
+    XCTAssertEqual(viewModel.channels, [channel])
+    viewModel.setChannelID(channel.id)
+    try await waitUntil { viewModel.threads.map(\.id) == [31, 32] }
+
+    viewModel.loadMoreIfNeeded(current: viewModel.threads[1])
+    try await waitUntil { viewModel.threads.map(\.id) == [31, 32, 33] }
+
+    viewModel.setSort(.creationTime)
+    try await waitUntil { viewModel.threads.map(\.id) == [34] }
+
+    XCTAssertEqual(viewModel.selectedChannelID, channel.id)
+    XCTAssertEqual(viewModel.options, ForumBrowseOptions(sort: .creationTime))
+    let requests = await service.forumChannelRequestSnapshot()
+    XCTAssertEqual(
+      requests,
+      [
+        ForumChannelRequest(
+          forumID: forum.id,
+          forumName: "Swift",
+          channel: channel,
+          page: 1,
+          pageSize: 30,
+          sort: .replyTime,
+          lastThreadID: nil
+        ),
+        ForumChannelRequest(
+          forumID: forum.id,
+          forumName: "Swift",
+          channel: channel,
+          page: 2,
+          pageSize: 30,
+          sort: .replyTime,
+          lastThreadID: 32
+        ),
+        ForumChannelRequest(
+          forumID: forum.id,
+          forumName: "Swift",
+          channel: channel,
+          page: 1,
+          pageSize: 30,
+          sort: .creationTime,
+          lastThreadID: nil
+        ),
+      ]
+    )
+  }
+
+  @MainActor
+  func testForumChannelStopsAfterDuplicatePageWithStalledCursor() async throws {
+    let service = ScriptedBrowseService()
+    let channel = BrowseForumChannel(id: 9, name: "攻略", isDefault: false)
+    await service.enqueueThreads(
+      .value(
+        ThreadPageData(
+          forum: Fixtures.forum(name: "Swift"),
+          threads: [Fixtures.thread(id: 40)],
+          currentPage: 1,
+          hasMore: false,
+          channels: [channel]
+        )
+      )
+    )
+    await service.enqueueForumChannelThreads(
+      .value(
+        ForumChannelPageData(
+          threads: [Fixtures.thread(id: 41)],
+          currentPage: 1,
+          hasMore: true,
+          nextPageCursor: 41
+        )
+      )
+    )
+    await service.enqueueForumChannelThreads(
+      .value(
+        ForumChannelPageData(
+          threads: [Fixtures.thread(id: 41)],
+          currentPage: 2,
+          hasMore: true,
+          nextPageCursor: 41
+        )
+      )
+    )
+    let viewModel = ForumViewModel(forumName: "Swift", service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+    viewModel.setChannelID(channel.id)
+    try await waitUntil { viewModel.threads.map(\.id) == [41] }
+
+    viewModel.loadMoreIfNeeded(current: viewModel.threads[0])
+    try await waitUntil { await service.forumChannelRequestCount() == 2 }
+    try await waitUntil { !viewModel.isLoadingMore }
+    viewModel.loadMoreIfNeeded(current: viewModel.threads[0])
+    await drainMainActor()
+
+    let requestCount = await service.forumChannelRequestCount()
+    XCTAssertEqual(requestCount, 2)
+    XCTAssertEqual(viewModel.threads.map(\.id), [41])
   }
 
   @MainActor
@@ -1728,6 +1880,16 @@ private struct ThreadRequest: Equatable, Sendable {
   }
 }
 
+private struct ForumChannelRequest: Equatable, Sendable {
+  let forumID: Int64
+  let forumName: String
+  let channel: BrowseForumChannel
+  let page: Int
+  let pageSize: Int
+  let sort: ForumThreadSort
+  let lastThreadID: Int64?
+}
+
 private struct PostRequest: Equatable, Sendable {
   let threadID: Int64
   let page: Int
@@ -1770,10 +1932,12 @@ private enum Stub<Value: Sendable>: Sendable {
 
 private actor ScriptedBrowseService: BrowseService {
   private var threadStubs: [Stub<ThreadPageData>] = []
+  private var forumChannelStubs: [Stub<ForumChannelPageData>] = []
   private var postStubs: [Stub<PostPageData>] = []
   private var commentStubs: [Stub<CommentPageData>] = []
 
   private var threadRequests: [ThreadRequest] = []
+  private var forumChannelRequests: [ForumChannelRequest] = []
   private var postRequests: [PostRequest] = []
   private var commentRequests: [CommentRequest] = []
   private var aroundCommentRequests: [CommentRequest] = []
@@ -1783,11 +1947,18 @@ private actor ScriptedBrowseService: BrowseService {
   private var completedCommentRequests = 0
 
   private var pendingThreads: [Int: CheckedContinuation<ThreadPageData, any Error>] = [:]
+  private var pendingForumChannels: [
+    Int: CheckedContinuation<ForumChannelPageData, any Error>
+  ] = [:]
   private var pendingPosts: [Int: CheckedContinuation<PostPageData, any Error>] = [:]
   private var pendingComments: [Int: CheckedContinuation<CommentPageData, any Error>] = [:]
 
   func enqueueThreads(_ stub: Stub<ThreadPageData>) {
     threadStubs.append(stub)
+  }
+
+  func enqueueForumChannelThreads(_ stub: Stub<ForumChannelPageData>) {
+    forumChannelStubs.append(stub)
   }
 
   func enqueuePosts(_ stub: Stub<PostPageData>) {
@@ -1820,6 +1991,42 @@ private actor ScriptedBrowseService: BrowseService {
     case .suspended(let identifier):
       return try await withCheckedThrowingContinuation { continuation in
         pendingThreads[identifier] = continuation
+      }
+    }
+  }
+
+  func forumChannelThreads(
+    forumID: Int64,
+    forumName: String,
+    channel: BrowseForumChannel,
+    page: Int,
+    pageSize: Int,
+    sort: ForumThreadSort,
+    lastThreadID: Int64?
+  ) async throws -> ForumChannelPageData {
+    forumChannelRequests.append(
+      ForumChannelRequest(
+        forumID: forumID,
+        forumName: forumName,
+        channel: channel,
+        page: page,
+        pageSize: pageSize,
+        sort: sort,
+        lastThreadID: lastThreadID
+      )
+    )
+    guard !forumChannelStubs.isEmpty else {
+      throw StubFailure(message: "Unexpected forum channel request")
+    }
+
+    switch forumChannelStubs.removeFirst() {
+    case .value(let value):
+      return value
+    case .failure(let error):
+      throw error
+    case .suspended(let identifier):
+      return try await withCheckedThrowingContinuation { continuation in
+        pendingForumChannels[identifier] = continuation
       }
     }
   }
@@ -1938,11 +2145,13 @@ private actor ScriptedBrowseService: BrowseService {
   }
 
   func threadRequestSnapshot() -> [ThreadRequest] { threadRequests }
+  func forumChannelRequestSnapshot() -> [ForumChannelRequest] { forumChannelRequests }
   func postRequestSnapshot() -> [PostRequest] { postRequests }
   func commentRequestSnapshot() -> [CommentRequest] { commentRequests }
   func aroundCommentRequestSnapshot() -> [CommentRequest] { aroundCommentRequests }
 
   func threadRequestCount() -> Int { threadRequests.count }
+  func forumChannelRequestCount() -> Int { forumChannelRequests.count }
   func postRequestCount() -> Int { postRequests.count }
   func commentRequestCount() -> Int { commentRequests.count }
 

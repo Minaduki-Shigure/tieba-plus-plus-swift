@@ -35,7 +35,47 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       forum: Self.mapForum(response.forum, fallbackName: forumName),
       threads: response.threads.map(Self.mapThread),
       currentPage: response.pagination.currentPage,
-      hasMore: response.pagination.hasMore
+      hasMore: response.pagination.hasMore,
+      channels: response.channels.map {
+        BrowseForumChannel(id: $0.id, name: $0.name, isDefault: $0.isDefault)
+      }
+    )
+  }
+
+  func forumChannelThreads(
+    forumID: Int64,
+    forumName: String,
+    channel: BrowseForumChannel,
+    page: Int,
+    pageSize: Int,
+    sort: ForumThreadSort,
+    lastThreadID: Int64?
+  ) async throws -> ForumChannelPageData {
+    let response: TiebaForumChannelPage
+    do {
+      response = try await client.getForumChannelThreads(
+        forumID: forumID,
+        forumName: forumName,
+        channel: TiebaForumChannel(
+          id: channel.id,
+          name: channel.name,
+          isDefault: channel.isDefault
+        ),
+        page: page,
+        pageSize: pageSize,
+        sort: Self.channelSort(sort),
+        lastThreadID: lastThreadID
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    return ForumChannelPageData(
+      threads: response.threads.map(Self.mapThread),
+      currentPage: response.pagination.currentPage,
+      hasMore: response.pagination.hasMore,
+      nextPageCursor: response.nextPageCursor
     )
   }
 
@@ -278,7 +318,10 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       postCount: response.postCount,
       followerCount: response.followerCount,
       followingCount: response.followingCount,
-      followedForumCount: response.followedForumCount,
+      followedForumCount: max(response.followedForumCount, response.likedForums.count),
+      likedForums: response.likedForums.map {
+        BrowseProfileForum(id: $0.id, name: $0.name)
+      },
       totalAgreeCount: response.totalAgreeCount,
       isModerator: response.user.isModerator,
       isVIP: response.user.isVIP,
@@ -665,6 +708,15 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
   }
 
   private static func threadSort(_ sort: ForumThreadSort) -> TiebaThreadSort {
+    switch sort {
+    case .replyTime:
+      .replyTime
+    case .creationTime:
+      .creationTime
+    }
+  }
+
+  private static func channelSort(_ sort: ForumThreadSort) -> TiebaForumChannelSort {
     switch sort {
     case .replyTime:
       .replyTime

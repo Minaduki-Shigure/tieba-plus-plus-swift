@@ -16,6 +16,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Versioned, per-forum local search history with delete and clear controls
 - Forum thread list with pagination and pull to refresh
 - Reply-time and creation-time forum sorting
+- Server-defined forum channels with independent sorting and cursor pagination
 - Forum header, statistics, rules state, and featured classifications
 - Public forum introductions with original avatars and server statistics
 - Full forum-rule documents with publisher and rich section content
@@ -31,6 +32,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Read-only post and nested-reply scores, author forum levels, and IP locations
 - Lossless nested-reply context and public-profile links for user mentions
 - Public user profiles opened from post and nested-reply authors
+- Limited public liked-forum previews with direct forum navigation
 - Paginated public threads on user profiles
 - Independent local forum and thread favorites
 - Saved-thread reading-position and browse-mode restoration
@@ -60,6 +62,10 @@ nominal page-size field, so pagination deliberately continues until an empty
 page and deduplicates by thread ID. Tieba's followed-forum list rejects
 anonymous requests, and TiebaLite only presents reply history for the current
 account; neither is exposed as a misleading anonymous profile tab.
+The profile response may include a small public liked-forum preview. It is
+presented as a preview alongside the server's declared total, never as a full
+list, and an empty preview remains a valid privacy state. The authenticated
+full-list endpoint is not called from a public profile.
 
 Local favorites are deliberately separate from browsing history and from
 Tieba's account-backed collection service. Disabling or clearing history does
@@ -72,6 +78,11 @@ credential-free protobuf endpoints. Moderator role names are treated as an
 open server-defined set instead of being hard-coded to only large and small
 moderators. A forum without published rules is a normal empty state rather than
 an API failure.
+
+Forum channels are accepted only from FRS tabs marked as general type 15.
+Their `GeneralTabList` requests use a channel-specific sort type and advance
+with both the page number and the final valid thread ID. Missing, duplicate, or
+stalled cursors terminate pagination instead of repeatedly loading one page.
 
 Each authenticated milestone remains gated on protocol tests, credential
 isolation, and real-device validation. The initial authenticated feature is

@@ -78,6 +78,55 @@ struct TiebaRequestFactory: Sendable {
     )
   }
 
+  func forumChannelThreads(
+    forumID: Int64,
+    channel: TiebaForumChannel,
+    page: Int,
+    pageSize: Int,
+    sort: TiebaForumChannelSort,
+    lastThreadID: Int64?
+  ) throws -> URLRequest {
+    try validate(identifier: forumID, name: "Forum ID")
+    guard channel.id > 0, channel.id <= Int(Int32.max) else {
+      throw TiebaClientError.invalidArgument("Channel ID must be positive.")
+    }
+    let channelName = channel.name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !channelName.isEmpty else {
+      throw TiebaClientError.invalidArgument("Channel name must not be empty.")
+    }
+    try validate(page: page)
+    try validate(pageSize: pageSize, maximum: 100)
+    if let lastThreadID {
+      try validate(identifier: lastThreadID, name: "Last thread ID")
+    }
+
+    var common = CommonReq()
+    common.clientType = 2
+    common.clientVersion = configuration.clientVersion
+
+    var data = GeneralTabListReqIdl.DataReq()
+    data.common = common
+    data.tabID = Int32(channel.id)
+    data.forumID = forumID
+    data.pn = Int32(page)
+    data.rn = Int32(pageSize)
+    data.lastThreadID = lastThreadID ?? 0
+    data.isDefaultNavtab = channel.isDefault ? 1 : 0
+    data.tabName = channelName
+    data.isGeneralTab = 1
+    data.sortType = sort.rawValue
+    data.tabType = 15
+    data.isNewfrs = 1
+
+    var message = GeneralTabListReqIdl()
+    message.data = data
+    return try request(
+      path: "/c/f/frs/generalTabList",
+      command: 309_622,
+      protobuf: message.serializedData()
+    )
+  }
+
   func posts(
     threadID: Int64,
     page: Int,

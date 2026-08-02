@@ -41,11 +41,68 @@ enum TiebaProtoMapper {
       guard !$1.tabName.isEmpty else { return }
       $0[$1.tabName] = Int($1.tabID)
     }
+    var seenChannelIDs = Set<Int>()
+    let channels = data.navTabInfo.tab.compactMap { tab -> TiebaForumChannel? in
+      let id = Int(tab.tabID)
+      let name = tab.tabName.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard
+        tab.isGeneralTab == 1,
+        tab.tabType == 15,
+        id > 0,
+        !name.isEmpty,
+        seenChannelIDs.insert(id).inserted
+      else { return nil }
+      return TiebaForumChannel(id: id, name: name, isDefault: tab.isDefault == 1)
+    }
     return TiebaThreadPage(
       forum: forum,
       threads: threads,
       pagination: pagination(data.page),
-      tabs: tabs
+      tabs: tabs,
+      channels: channels
+    )
+  }
+
+  static func forumChannelPage(
+    _ data: GeneralTabListResIdl.DataRes,
+    forumID: Int64,
+    forumName: String,
+    channel: TiebaForumChannel,
+    requestedPage: Int,
+    pageSize: Int
+  ) -> TiebaForumChannelPage {
+    let forum = TiebaForum(
+      id: forumID,
+      name: forumName,
+      category: "",
+      subcategory: "",
+      memberCount: 0,
+      threadCount: 0,
+      postCount: 0,
+      hasModerators: false,
+      hasRules: false
+    )
+    let users = userLookup(data.userList)
+    let threads = data.generalList.compactMap { proto -> TiebaThread? in
+      guard proto.id > 0 else { return nil }
+      return thread(
+        proto,
+        forum: forum,
+        author: users[proto.authorID] ?? optionalUser(proto.author)
+      )
+    }
+    return TiebaForumChannelPage(
+      channel: channel,
+      threads: threads,
+      pagination: TiebaPagination(
+        pageSize: pageSize,
+        currentPage: requestedPage,
+        totalPages: 0,
+        totalCount: 0,
+        hasMore: data.hasMore != 0,
+        hasPrevious: requestedPage > 1
+      ),
+      nextPageCursor: threads.last?.id
     )
   }
 
@@ -132,9 +189,23 @@ enum TiebaProtoMapper {
       followerCount: Int(data.user.fansNum),
       followingCount: Int(data.user.concernNum),
       followedForumCount: Int(data.user.myLikeNum),
+      likedForums: profileForums(data.user.likeForum),
       totalAgreeCount: max(responseAgreeCount, userAgreeCount),
       isBlocked: anti.blockStat != 0 && anti.hideStat != 0 && anti.daysTofree > 30
     )
+  }
+
+  private static func profileForums(
+    _ protos: [User.LikeForumInfo]
+  ) -> [TiebaProfileForum] {
+    var seen = Set<Int64>()
+    return protos.compactMap { proto in
+      guard proto.forumID > 0, proto.forumID <= UInt64(Int64.max) else { return nil }
+      let id = Int64(proto.forumID)
+      let name = proto.forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !name.isEmpty, seen.insert(id).inserted else { return nil }
+      return TiebaProfileForum(id: id, name: name)
+    }
   }
 
   static func userThreadPage(

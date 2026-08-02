@@ -70,13 +70,31 @@ enum ProtoFixtures {
     var tab = FrsTabInfo()
     tab.tabID = 3
     tab.tabName = "Latest"
+    var channel = FrsTabInfo()
+    channel.tabID = 3_631_832
+    channel.tabType = 15
+    channel.tabName = " Help "
+    channel.isGeneralTab = 1
+    channel.isDefault = 1
+    var videoChannel = FrsTabInfo()
+    videoChannel.tabID = 452_782
+    videoChannel.tabType = 100
+    videoChannel.tabName = "Video"
+    videoChannel.isGeneralTab = 1
+    var duplicateChannel = channel
+    duplicateChannel.tabName = "Duplicate"
+    var emptyChannel = FrsTabInfo()
+    emptyChannel.tabID = 88
+    emptyChannel.tabType = 15
+    emptyChannel.tabName = "   "
+    emptyChannel.isGeneralTab = 1
 
     var data = FrsPageResIdl.DataRes()
     data.forum = forum
     data.page = page
     data.threadList = [thread]
     data.userList = [user]
-    data.navTabInfo.tab = [tab]
+    data.navTabInfo.tab = [tab, channel, videoChannel, duplicateChannel, emptyChannel]
     data.forumRule.hasForumRule_p = 1
 
     var response = FrsPageResIdl()
@@ -302,6 +320,16 @@ enum ProtoFixtures {
     user.iconinfo = [User.Icon.with { $0.name = "fixture badge" }]
     user.newTshowIcon = [User.TshowInfo.with { $0.name = "vip" }]
     user.newGodData.status = 1
+    user.likeForum = [
+      User.LikeForumInfo.with {
+        $0.forumID = 42
+        $0.forumName = " swift "
+      },
+      User.LikeForumInfo.with {
+        $0.forumID = 77
+        $0.forumName = "ios"
+      },
+    ]
 
     var data = ProfileResIdl.DataRes()
     data.user = user
@@ -370,6 +398,40 @@ enum ProtoFixtures {
     data.electionTab.newStrategyText = "已有吧主"
 
     var response = GetForumDetailResIdl()
+    response.data = data
+    return response
+  }
+
+  static func forumChannelPage() -> GeneralTabListResIdl {
+    var author = makeUser(id: 7, name: "channel-author")
+    author.nameShow = "Channel Author"
+
+    var first = ThreadInfo()
+    first.id = 900
+    first.firstPostID = 901
+    first.title = "A channel thread"
+    first.authorID = author.id
+    first.replyNum = 12
+    first.viewNum = 345
+    first.firstPostContent = [text("Channel content")]
+
+    var invalid = ThreadInfo()
+    invalid.id = 0
+    invalid.title = "Invalid"
+
+    var second = ThreadInfo()
+    second.id = 800
+    second.firstPostID = 801
+    second.title = "Cursor thread"
+    second.authorID = author.id
+
+    var data = GeneralTabListResIdl.DataRes()
+    data.generalList = [first, invalid, second]
+    data.hasMore = 1
+    data.userList = [author]
+    data.sortType = 1
+
+    var response = GeneralTabListResIdl()
     response.data = data
     return response
   }

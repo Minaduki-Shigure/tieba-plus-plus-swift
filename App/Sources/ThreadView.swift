@@ -1,9 +1,11 @@
 import SwiftUI
 
 struct ThreadView: View {
-  let service: any BrowseService & UserProfileService
+  let service:
+    any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
+  let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @StateObject private var viewModel: ThreadViewModel
   @State private var commentsPost: BrowsePost?
@@ -15,14 +17,17 @@ struct ThreadView: View {
 
   init(
     thread: BrowseThread,
-    service: any BrowseService & UserProfileService,
+    service: any BrowseService & ForumPostSearchService & UserProfileService
+      & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
+    searchHistoryRepository: any ForumSearchHistoryRepository,
     historySnapshot: ThreadHistorySnapshot? = nil
   ) {
     self.service = service
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
+    self.searchHistoryRepository = searchHistoryRepository
     self.historySnapshot = historySnapshot
     _viewModel = StateObject(wrappedValue: ThreadViewModel(thread: thread, service: service))
   }
@@ -163,7 +168,8 @@ struct ThreadView: View {
           userID: userID,
           service: service,
           historyRepository: historyRepository,
-          favoritesRepository: favoritesRepository
+          favoritesRepository: favoritesRepository,
+          searchHistoryRepository: searchHistoryRepository
         )
       }
     }
@@ -174,7 +180,8 @@ struct ThreadView: View {
           postID: post.id,
           service: service,
           historyRepository: historyRepository,
-          favoritesRepository: favoritesRepository
+          favoritesRepository: favoritesRepository,
+          searchHistoryRepository: searchHistoryRepository
         )
       }
       .presentationDetents([.medium, .large])
@@ -247,6 +254,7 @@ struct ThreadView: View {
                 service: service,
                 historyRepository: historyRepository,
                 favoritesRepository: favoritesRepository,
+                searchHistoryRepository: searchHistoryRepository,
                 openMentionedUser: openMentionedUser,
                 openComments: { commentsPost = post }
               )
@@ -379,9 +387,11 @@ private struct PostView: View {
   let post: BrowsePost
   let originThread: BrowseThread?
   let poll: BrowsePoll?
-  let service: any BrowseService & UserProfileService
+  let service:
+    any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
+  let searchHistoryRepository: any ForumSearchHistoryRepository
   let openMentionedUser: (Int64) -> Void
   let openComments: () -> Void
 
@@ -397,6 +407,7 @@ private struct PostView: View {
           service: service,
           historyRepository: historyRepository,
           favoritesRepository: favoritesRepository,
+          searchHistoryRepository: searchHistoryRepository,
           openMentionedUser: openMentionedUser
         )
       }
@@ -426,7 +437,8 @@ private struct PostView: View {
             userID: post.authorID,
             service: service,
             historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
           )
         } label: {
           authorIdentity
@@ -561,9 +573,11 @@ private struct PollResultsCard: View {
 
 private struct OriginThreadCard: View {
   let thread: BrowseThread
-  let service: any BrowseService & UserProfileService
+  let service:
+    any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
+  let searchHistoryRepository: any ForumSearchHistoryRepository
   let openMentionedUser: (Int64) -> Void
 
   var body: some View {
@@ -573,7 +587,8 @@ private struct OriginThreadCard: View {
           thread: thread,
           service: service,
           historyRepository: historyRepository,
-          favoritesRepository: favoritesRepository
+          favoritesRepository: favoritesRepository,
+          searchHistoryRepository: searchHistoryRepository
         )
       } label: {
         HStack(alignment: .top, spacing: 10) {

@@ -10,6 +10,8 @@
         "FrsPageReqIdl.proto",
         "FrsPageResIdl.proto",
         "FrsTabInfo.proto",
+        "GeneralTabListReqIdl.proto",
+        "GeneralTabListResIdl.proto",
         "GetBawuInfoReqIdl.proto",
         "GetBawuInfoResIdl.proto",
         "GetForumDetailReqIdl.proto",

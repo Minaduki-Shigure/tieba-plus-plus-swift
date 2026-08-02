@@ -6,9 +6,11 @@ private enum ForumSearchHistoryAction {
 }
 
 struct ForumPostSearchView: View {
-  let service: any BrowseService & ForumPostSearchService & UserProfileService
+  let service:
+    any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
+  let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @StateObject private var viewModel: ForumPostSearchViewModel
   @State private var query = ""
@@ -16,7 +18,8 @@ struct ForumPostSearchView: View {
 
   init(
     forumName: String,
-    service: any BrowseService & ForumPostSearchService & UserProfileService,
+    service: any BrowseService & ForumPostSearchService & UserProfileService
+      & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository
@@ -24,6 +27,7 @@ struct ForumPostSearchView: View {
     self.service = service
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
+    self.searchHistoryRepository = searchHistoryRepository
     _viewModel = StateObject(
       wrappedValue: ForumPostSearchViewModel(
         forumName: forumName,
@@ -312,7 +316,8 @@ struct ForumPostSearchView: View {
           userID: result.matchedAuthorID,
           service: service,
           historyRepository: historyRepository,
-          favoritesRepository: favoritesRepository
+          favoritesRepository: favoritesRepository,
+          searchHistoryRepository: searchHistoryRepository
         )
       } label: {
         AvatarView(
@@ -340,7 +345,8 @@ struct ForumPostSearchView: View {
         thread: result.thread,
         service: service,
         historyRepository: historyRepository,
-        favoritesRepository: favoritesRepository
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository
       )
     case .post(let postID):
       ThreadView(
@@ -348,6 +354,7 @@ struct ForumPostSearchView: View {
         service: service,
         historyRepository: historyRepository,
         favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository,
         historySnapshot: ThreadHistorySnapshot(
           thread: result.thread,
           lastPostID: postID
@@ -359,7 +366,8 @@ struct ForumPostSearchView: View {
         aroundCommentID: commentID,
         service: service,
         historyRepository: historyRepository,
-        favoritesRepository: favoritesRepository
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository
       )
     }
   }

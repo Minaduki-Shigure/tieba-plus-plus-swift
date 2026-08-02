@@ -78,6 +78,31 @@ struct ForumView: View {
 
   private var optionsBar: some View {
     VStack(spacing: 0) {
+      if !viewModel.channels.isEmpty {
+        HStack(spacing: 10) {
+          Label("频道", systemImage: "rectangle.3.group")
+          Spacer(minLength: 0)
+          Picker(
+            "频道",
+            selection: Binding(
+              get: { viewModel.selectedChannelID },
+              set: { channelID in viewModel.setChannelID(channelID) }
+            )
+          ) {
+            Text("全部主题").tag(Int?.none)
+            ForEach(viewModel.channels) { channel in
+              Text(channel.name).tag(Optional(channel.id))
+            }
+          }
+          .pickerStyle(.menu)
+          .accessibilityIdentifier("forum-channel-picker")
+        }
+        .font(.subheadline)
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .background(.regularMaterial)
+      }
+
       HStack(spacing: 12) {
         Picker(
           "主题排序",
@@ -94,24 +119,27 @@ struct ForumView: View {
         .frame(maxWidth: .infinity, minHeight: 32)
         .accessibilityIdentifier("forum-sort-picker")
 
-        Toggle(
-          "精华",
-          isOn: Binding(
-            get: { viewModel.options.featuredOnly },
-            set: { featuredOnly in viewModel.setFeaturedOnly(featuredOnly) }
+        if viewModel.selectedChannelID == nil {
+          Toggle(
+            "精华",
+            isOn: Binding(
+              get: { viewModel.options.featuredOnly },
+              set: { featuredOnly in viewModel.setFeaturedOnly(featuredOnly) }
+            )
           )
-        )
-        .toggleStyle(.switch)
-        .controlSize(.small)
-        .fixedSize()
-        .accessibilityIdentifier("forum-featured-toggle")
+          .toggleStyle(.switch)
+          .controlSize(.small)
+          .fixedSize()
+          .accessibilityIdentifier("forum-featured-toggle")
+        }
       }
       .font(.subheadline)
       .padding(.horizontal, 12)
       .padding(.vertical, 8)
       .background(.regularMaterial)
 
-      if viewModel.options.featuredOnly,
+      if viewModel.selectedChannelID == nil,
+        viewModel.options.featuredOnly,
         !viewModel.forum.featuredClassifications.isEmpty
       {
         HStack(spacing: 10) {
@@ -151,7 +179,8 @@ struct ForumView: View {
           forum: viewModel.forum,
           service: service,
           historyRepository: historyRepository,
-          favoritesRepository: favoritesRepository
+          favoritesRepository: favoritesRepository,
+          searchHistoryRepository: searchHistoryRepository
         )
       } label: {
         ForumHeaderView(forum: viewModel.forum)
@@ -165,7 +194,8 @@ struct ForumView: View {
             thread: thread,
             service: service,
             historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
           )
         } label: {
           ThreadRow(thread: thread)

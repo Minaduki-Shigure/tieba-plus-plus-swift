@@ -15,7 +15,7 @@ public struct TiebaClientConfiguration: Sendable, Hashable {
   public init(
     clientVersion: String = "12.64.1.1",
     authenticatedClientVersion: String = "22.6.5.1",
-    userAgent: String = "TiebaPlusPlus/0.16 (iOS)",
+    userAgent: String = "TiebaPlusPlus/0.17 (iOS)",
     requestTimeout: TimeInterval = 30
   ) {
     self.clientVersion = clientVersion
@@ -129,6 +129,40 @@ public actor TiebaClient {
     let response: FrsPageResIdl = try decode(body)
     try checkServerError(code: response.error.errorno, message: response.error.errmsg)
     return TiebaProtoMapper.threadPage(response.data)
+  }
+
+  public func getForumChannelThreads(
+    forumID: Int64,
+    forumName: String,
+    channel: TiebaForumChannel,
+    page: Int = 1,
+    pageSize: Int = 30,
+    sort: TiebaForumChannelSort = .replyTime,
+    lastThreadID: Int64? = nil
+  ) async throws -> TiebaForumChannelPage {
+    let normalizedForumName = forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !normalizedForumName.isEmpty else {
+      throw TiebaClientError.invalidArgument("Forum name must not be empty.")
+    }
+    let request = try requestFactory.forumChannelThreads(
+      forumID: forumID,
+      channel: channel,
+      page: page,
+      pageSize: pageSize,
+      sort: sort,
+      lastThreadID: lastThreadID
+    )
+    let body = try await send(request)
+    let response: GeneralTabListResIdl = try decode(body)
+    try checkServerError(code: response.error.errorno, message: response.error.errmsg)
+    return TiebaProtoMapper.forumChannelPage(
+      response.data,
+      forumID: forumID,
+      forumName: normalizedForumName,
+      channel: channel,
+      requestedPage: page,
+      pageSize: pageSize
+    )
   }
 
   public func getPosts(

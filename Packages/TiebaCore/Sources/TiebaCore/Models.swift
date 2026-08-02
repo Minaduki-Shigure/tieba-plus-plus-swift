@@ -96,6 +96,7 @@ public struct TiebaUserProfile: Sendable, Hashable {
   public let followerCount: Int
   public let followingCount: Int
   public let followedForumCount: Int
+  public let likedForums: [TiebaProfileForum]
   public let totalAgreeCount: Int64
   public let isBlocked: Bool
 
@@ -109,6 +110,7 @@ public struct TiebaUserProfile: Sendable, Hashable {
     followerCount: Int,
     followingCount: Int,
     followedForumCount: Int,
+    likedForums: [TiebaProfileForum] = [],
     totalAgreeCount: Int64,
     isBlocked: Bool
   ) {
@@ -121,8 +123,19 @@ public struct TiebaUserProfile: Sendable, Hashable {
     self.followerCount = followerCount
     self.followingCount = followingCount
     self.followedForumCount = followedForumCount
+    self.likedForums = likedForums
     self.totalAgreeCount = totalAgreeCount
     self.isBlocked = isBlocked
+  }
+}
+
+public struct TiebaProfileForum: Identifiable, Sendable, Hashable {
+  public let id: Int64
+  public let name: String
+
+  public init(id: Int64, name: String) {
+    self.id = id
+    self.name = name
   }
 }
 
@@ -298,6 +311,11 @@ public enum TiebaThreadSort: Int32, Sendable, Hashable {
   case followedUsers = 2
 }
 
+public enum TiebaForumChannelSort: Int32, Sendable, Hashable {
+  case replyTime = 0
+  case creationTime = 1
+}
+
 public enum TiebaPostSort: Int32, Sendable, Hashable {
   case ascending = 0
   case descending = 1
@@ -317,6 +335,18 @@ public struct TiebaForumClassification: Identifiable, Sendable, Hashable {
   public init(id: Int, name: String) {
     self.id = id
     self.name = name
+  }
+}
+
+public struct TiebaForumChannel: Identifiable, Sendable, Hashable {
+  public let id: Int
+  public let name: String
+  public let isDefault: Bool
+
+  public init(id: Int, name: String, isDefault: Bool = false) {
+    self.id = id
+    self.name = name
+    self.isDefault = isDefault
   }
 }
 
@@ -694,17 +724,39 @@ public struct TiebaThreadPage: Sendable, Hashable {
   public let threads: [TiebaThread]
   public let pagination: TiebaPagination
   public let tabs: [String: Int]
+  public let channels: [TiebaForumChannel]
 
   public init(
     forum: TiebaForum,
     threads: [TiebaThread],
     pagination: TiebaPagination,
-    tabs: [String: Int]
+    tabs: [String: Int],
+    channels: [TiebaForumChannel] = []
   ) {
     self.forum = forum
     self.threads = threads
     self.pagination = pagination
     self.tabs = tabs
+    self.channels = channels
+  }
+}
+
+public struct TiebaForumChannelPage: Sendable, Hashable {
+  public let channel: TiebaForumChannel
+  public let threads: [TiebaThread]
+  public let pagination: TiebaPagination
+  public let nextPageCursor: Int64?
+
+  public init(
+    channel: TiebaForumChannel,
+    threads: [TiebaThread],
+    pagination: TiebaPagination,
+    nextPageCursor: Int64?
+  ) {
+    self.channel = channel
+    self.threads = threads
+    self.pagination = pagination
+    self.nextPageCursor = nextPageCursor
   }
 }
 

@@ -49,6 +49,15 @@ belong to the same returned account before storing or using the pair.
 Anonymous public-profile requests must use the protocol's guest target fields.
 They must not place the target user in the current-account field, attach account
 credentials, or attempt to bypass profile privacy settings.
+Liked forums embedded in that public response are a bounded preview only. The
+app must not call the login-required full-list endpoint, infer hidden entries,
+or describe an empty or partial preview as the user's complete forum list.
+
+Anonymous forum-channel requests may contain only the public forum ID, a
+type-15 general channel's ID/name/default flag, page size and number, independent
+sort value, and the previous page's last thread ID. They must not attach account
+cookies, STOKEN, device identifiers, or personalized metadata. A rejected
+minimal request must remain unsupported rather than broadening that boundary.
 
 Forum, global thread, per-forum post, and user search must use the anonymous
 request factory even when an account is active. Search requests may contain

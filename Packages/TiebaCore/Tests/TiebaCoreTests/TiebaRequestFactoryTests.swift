@@ -131,6 +131,43 @@ final class TiebaRequestFactoryTests: XCTestCase {
     XCTAssertEqual(hot.data.lz, 0)
   }
 
+  func testForumChannelRequestUsesIndependentSortAndMinimalAnonymousFields() throws {
+    let channel = TiebaForumChannel(id: 3_631_832, name: " Help ", isDefault: true)
+    let request = try factory.forumChannelThreads(
+      forumID: 2_432_903,
+      channel: channel,
+      page: 2,
+      pageSize: 30,
+      sort: .creationTime,
+      lastThreadID: 10_911_529_130
+    )
+    let decoded = try GeneralTabListReqIdl(
+      serializedBytes: protobufPayload(from: request)
+    )
+
+    XCTAssertEqual(TiebaForumChannelSort.replyTime.rawValue, 0)
+    XCTAssertEqual(TiebaForumChannelSort.creationTime.rawValue, 1)
+    XCTAssertEqual(request.url?.path, "/c/f/frs/generalTabList")
+    XCTAssertEqual(request.url?.query, "cmd=309622")
+    XCTAssertEqual(decoded.data.common.clientType, 2)
+    XCTAssertEqual(decoded.data.common.clientVersion, "12.64.1.1")
+    XCTAssertEqual(decoded.data.common.bduss, "")
+    XCTAssertEqual(decoded.data.common.stoken, "")
+    XCTAssertEqual(decoded.data.common.clientID, "")
+    XCTAssertEqual(decoded.data.common.phoneImei, "")
+    XCTAssertEqual(decoded.data.tabID, 3_631_832)
+    XCTAssertEqual(decoded.data.forumID, 2_432_903)
+    XCTAssertEqual(decoded.data.pn, 2)
+    XCTAssertEqual(decoded.data.rn, 30)
+    XCTAssertEqual(decoded.data.lastThreadID, 10_911_529_130)
+    XCTAssertEqual(decoded.data.isDefaultNavtab, 1)
+    XCTAssertEqual(decoded.data.tabName, "Help")
+    XCTAssertEqual(decoded.data.isGeneralTab, 1)
+    XCTAssertEqual(decoded.data.sortType, 1)
+    XCTAssertEqual(decoded.data.tabType, 15)
+    XCTAssertEqual(decoded.data.isNewfrs, 1)
+  }
+
   func testPostLocationWireSemantics() throws {
     let descendingInitialRequest = try factory.posts(
       threadID: 123_456,
@@ -222,6 +259,14 @@ final class TiebaRequestFactoryTests: XCTestCase {
         sort: .replyTime,
         featuredOnly: false
       ),
+      try factory.forumChannelThreads(
+        forumID: 42,
+        channel: TiebaForumChannel(id: 9, name: "Help"),
+        page: 1,
+        pageSize: 30,
+        sort: .replyTime,
+        lastThreadID: nil
+      ),
       try factory.posts(
         threadID: 1,
         page: 1,
@@ -243,16 +288,16 @@ final class TiebaRequestFactoryTests: XCTestCase {
     XCTAssertEqual(
       requests.map(\.url?.path),
       [
-        "/c/f/frs/page", "/c/f/pb/page", "/c/f/pb/floor", "/c/u/user/profile",
-        "/c/u/feed/userpost", "/c/f/forum/getforumdetail", "/c/f/forum/getBawuInfo",
-        "/c/f/forum/forumRuleDetail",
+        "/c/f/frs/page", "/c/f/frs/generalTabList", "/c/f/pb/page", "/c/f/pb/floor",
+        "/c/u/user/profile", "/c/u/feed/userpost", "/c/f/forum/getforumdetail",
+        "/c/f/forum/getBawuInfo", "/c/f/forum/forumRuleDetail",
       ]
     )
     XCTAssertEqual(
       requests.map(\.url?.query),
       [
-        "cmd=301001", "cmd=302001", "cmd=302002", "cmd=303012", "cmd=303002",
-        "cmd=303021", "cmd=301007", "cmd=309690",
+        "cmd=301001", "cmd=309622", "cmd=302001", "cmd=302002", "cmd=303012",
+        "cmd=303002", "cmd=303021", "cmd=301007", "cmd=309690",
       ]
     )
     for request in requests {
@@ -466,6 +511,36 @@ final class TiebaRequestFactoryTests: XCTestCase {
       try factory.hotTopic(topicID: 1, topicName: "topic", page: 2, pageSize: 10, lastID: 0)
     )
     XCTAssertThrowsError(try factory.userProfile(userID: 0))
+    XCTAssertThrowsError(
+      try factory.forumChannelThreads(
+        forumID: 0,
+        channel: TiebaForumChannel(id: 1, name: "Help"),
+        page: 1,
+        pageSize: 30,
+        sort: .replyTime,
+        lastThreadID: nil
+      )
+    )
+    XCTAssertThrowsError(
+      try factory.forumChannelThreads(
+        forumID: 1,
+        channel: TiebaForumChannel(id: 0, name: "Help"),
+        page: 1,
+        pageSize: 30,
+        sort: .replyTime,
+        lastThreadID: nil
+      )
+    )
+    XCTAssertThrowsError(
+      try factory.forumChannelThreads(
+        forumID: 1,
+        channel: TiebaForumChannel(id: 1, name: "   "),
+        page: 0,
+        pageSize: 101,
+        sort: .replyTime,
+        lastThreadID: 0
+      )
+    )
     XCTAssertThrowsError(try factory.userThreads(userID: 1, page: 0, pageSize: 20))
     XCTAssertThrowsError(try factory.userThreads(userID: 1, page: 1, pageSize: 101))
     XCTAssertThrowsError(try factory.forumOverview(forumID: 0))

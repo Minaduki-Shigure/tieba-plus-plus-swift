@@ -23,6 +23,11 @@ final class UserProfileViewModelTests: XCTestCase {
 
     XCTAssertEqual(viewModel.profile?.id, 7)
     XCTAssertEqual(viewModel.profile?.preferredName, "测试用户")
+    XCTAssertEqual(viewModel.profile?.followedForumCount, 5)
+    XCTAssertEqual(
+      viewModel.profile?.likedForums,
+      [BrowseProfileForum(id: 42, name: "swift"), BrowseProfileForum(id: 77, name: "ios")]
+    )
     XCTAssertEqual(viewModel.threads.map(\.id), [10])
     XCTAssertFalse(viewModel.isActivityHidden)
     let profileRequests = await service.profileRequestSnapshot()
@@ -129,6 +134,10 @@ extension BrowseUserProfile {
     followerCount: 100,
     followingCount: 10,
     followedForumCount: 5,
+    likedForums: [
+      BrowseProfileForum(id: 42, name: "swift"),
+      BrowseProfileForum(id: 77, name: "ios"),
+    ],
     totalAgreeCount: 500,
     isModerator: false,
     isVIP: true,

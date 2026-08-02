@@ -3,5 +3,8 @@ syntax = "proto3";
 
 message FrsTabInfo {
     int32 tab_id = 1;
+    int32 tab_type = 2;
     string tab_name = 3;
+    int32 is_general_tab = 7;
+    int32 is_default = 10;
 }

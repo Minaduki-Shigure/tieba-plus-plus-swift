@@ -3,9 +3,11 @@ import SwiftUI
 
 struct ForumInformationView: View {
   let forum: BrowseForum
-  let service: any BrowseService & UserProfileService & ForumInformationService
+  let service:
+    any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
+  let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @StateObject private var viewModel: ForumInformationViewModel
   @State private var selection = ForumInformationTab.overview
@@ -13,14 +15,17 @@ struct ForumInformationView: View {
 
   init(
     forum: BrowseForum,
-    service: any BrowseService & UserProfileService & ForumInformationService,
+    service: any BrowseService & ForumPostSearchService & UserProfileService
+      & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
-    favoritesRepository: any LocalFavoritesRepository
+    favoritesRepository: any LocalFavoritesRepository,
+    searchHistoryRepository: any ForumSearchHistoryRepository
   ) {
     self.forum = forum
     self.service = service
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
+    self.searchHistoryRepository = searchHistoryRepository
     _viewModel = StateObject(
       wrappedValue: ForumInformationViewModel(forumID: forum.id, service: service)
     )
@@ -178,7 +183,8 @@ struct ForumInformationView: View {
           userID: moderator.id,
           service: service,
           historyRepository: historyRepository,
-          favoritesRepository: favoritesRepository
+          favoritesRepository: favoritesRepository,
+          searchHistoryRepository: searchHistoryRepository
         )
       } label: {
         label()

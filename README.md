@@ -12,7 +12,8 @@ with paginated topic details, categorized forum, thread, and user search,
 global post search with newest, oldest, and relevance sorting,
 per-forum post search with newest/relevance and topic/all-content filters,
 forum, post, and nested-reply browsing, remote media, forum metadata and
-featured classifications, complete public forum introductions, forum rules,
+featured classifications, server-defined forum channels with independent
+sorting and cursor pagination, complete public forum introductions, forum rules,
 moderator teams, and shared-thread origin cards with original media and
 navigation, plus anonymous single- and multiple-choice poll results, post
 author forum levels, IP locations, read-only net approval counts, post sorting,
@@ -20,7 +21,8 @@ page jumps, an only-thread-author filter, and in-app public-profile navigation
 from user mentions without dropping reply context.
 Topic threads, search results, moderator rows, post authors, and
 nested-reply authors open credential-free public user profiles with profile
-statistics and paginated public threads. Local browsing
+statistics, a limited public liked-forum preview, and paginated public threads.
+Local browsing
 history records the last visible post ID for stable post orders and restores it
 with the active sort/filter options; the changing hot ranking reopens at its
 first page. Forums and threads can also be saved in an independent local

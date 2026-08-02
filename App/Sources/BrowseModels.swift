@@ -5,6 +5,12 @@ struct BrowseForumClassification: Identifiable, Hashable, Sendable {
   let name: String
 }
 
+struct BrowseForumChannel: Identifiable, Hashable, Sendable {
+  let id: Int
+  let name: String
+  let isDefault: Bool
+}
+
 struct BrowseForum: Identifiable, Hashable, Sendable {
   let id: Int64
   let name: String
@@ -82,32 +88,44 @@ struct ThreadPageData: Sendable {
   let threads: [BrowseThread]
   let currentPage: Int
   let hasMore: Bool
+  let channels: [BrowseForumChannel]
 
   init(
     forum: BrowseForum,
     threads: [BrowseThread],
     currentPage: Int,
-    hasMore: Bool
+    hasMore: Bool,
+    channels: [BrowseForumChannel] = []
   ) {
     self.forum = forum
     self.threads = threads
     self.currentPage = currentPage
     self.hasMore = hasMore
+    self.channels = channels
   }
 
   init(
     forumName: String,
     threads: [BrowseThread],
     currentPage: Int,
-    hasMore: Bool
+    hasMore: Bool,
+    channels: [BrowseForumChannel] = []
   ) {
     self.init(
       forum: .placeholder(name: forumName),
       threads: threads,
       currentPage: currentPage,
-      hasMore: hasMore
+      hasMore: hasMore,
+      channels: channels
     )
   }
+}
+
+struct ForumChannelPageData: Sendable {
+  let threads: [BrowseThread]
+  let currentPage: Int
+  let hasMore: Bool
+  let nextPageCursor: Int64?
 }
 
 struct BrowsePollOption: Identifiable, Hashable, Sendable {
@@ -187,6 +205,11 @@ enum BrowseGender: Sendable, Hashable {
   case female
 }
 
+struct BrowseProfileForum: Identifiable, Sendable, Hashable {
+  let id: Int64
+  let name: String
+}
+
 struct BrowseUserProfile: Identifiable, Sendable, Hashable {
   let id: Int64
   let tiebaUID: Int64?
@@ -204,6 +227,7 @@ struct BrowseUserProfile: Identifiable, Sendable, Hashable {
   let followerCount: Int
   let followingCount: Int
   let followedForumCount: Int
+  let likedForums: [BrowseProfileForum]
   let totalAgreeCount: Int64
   let isModerator: Bool
   let isVIP: Bool

@@ -10,7 +10,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.16 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.17 integration-test")
     )
     let threads = try await client.getThreads(forumName: "starry", pageSize: 10)
     XCTAssertFalse(threads.threads.isEmpty)
@@ -113,13 +113,63 @@ final class TiebaLiveTests: XCTestCase {
     XCTAssertEqual(comments.parentPost.id, post.id)
   }
 
+  func testAnonymousForumChannelsSortAndCursorPagination() async throws {
+    guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
+      throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
+    }
+
+    let client = TiebaClient(
+      configuration: .init(userAgent: "TiebaPlusPlus/0.17 integration-test")
+    )
+    let forumPage = try await client.getThreads(forumName: "minecraft", pageSize: 10)
+    let channel = try XCTUnwrap(
+      forumPage.channels.first(where: { $0.name == "图文攻略" })
+        ?? forumPage.channels.first
+    )
+    XCTAssertGreaterThan(channel.id, 0)
+    XCTAssertFalse(channel.name.isEmpty)
+
+    for sort in [TiebaForumChannelSort.replyTime, .creationTime] {
+      let firstPage = try await client.getForumChannelThreads(
+        forumID: forumPage.forum.id,
+        forumName: forumPage.forum.name,
+        channel: channel,
+        page: 1,
+        pageSize: 20,
+        sort: sort
+      )
+      XCTAssertEqual(firstPage.channel, channel)
+      XCTAssertEqual(firstPage.pagination.currentPage, 1)
+      XCTAssertFalse(firstPage.threads.isEmpty)
+      XCTAssertTrue(firstPage.threads.allSatisfy {
+        $0.id > 0 && $0.forumID == forumPage.forum.id && !$0.forumName.isEmpty
+      })
+
+      guard sort == .replyTime, firstPage.pagination.hasMore else { continue }
+      let cursor = try XCTUnwrap(firstPage.nextPageCursor)
+      let secondPage = try await client.getForumChannelThreads(
+        forumID: forumPage.forum.id,
+        forumName: forumPage.forum.name,
+        channel: channel,
+        page: 2,
+        pageSize: 20,
+        sort: sort,
+        lastThreadID: cursor
+      )
+      XCTAssertEqual(secondPage.pagination.currentPage, 2)
+      XCTAssertFalse(secondPage.threads.isEmpty)
+      let firstPageIDs = Set(firstPage.threads.map(\.id))
+      XCTAssertTrue(secondPage.threads.contains { !firstPageIDs.contains($0.id) })
+    }
+  }
+
   func testAnonymousForumAndThreadSearch() async throws {
     guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
       throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.16 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.17 integration-test")
     )
     let forums = try await client.searchForums(query: "swift")
     XCTAssertFalse(forums.isLoggedIn)
@@ -183,7 +233,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.16 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.17 integration-test")
     )
     let feed = try await client.getThreads(forumName: "steam", pageSize: 100)
     let candidates = feed.threads.filter(\.isShared)
@@ -209,7 +259,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.16 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.17 integration-test")
     )
     let page = try await client.getPosts(threadID: 8_211_419_000, pageSize: 2)
     let firstPost = try XCTUnwrap(page.posts.first(where: { $0.floor == 1 }))
@@ -227,7 +277,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.16 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.17 integration-test")
     )
     let page = try await client.getComments(
       threadID: 7_763_274_602,
@@ -251,7 +301,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.16 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.17 integration-test")
     )
     let feed = try await client.getThreads(forumName: "starry", pageSize: 100)
     var candidateIDs = feed.threads.compactMap { thread -> Int64? in
@@ -291,7 +341,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.16 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.17 integration-test")
     )
     let topics = try await client.getHotTopics()
     let topic = try XCTUnwrap(topics.first)
@@ -329,13 +379,17 @@ final class TiebaLiveTests: XCTestCase {
 
     let userID: Int64 = 957_339_815
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.16 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.17 integration-test")
     )
 
     let profile = try await client.getUserProfile(userID: userID)
     XCTAssertEqual(profile.user.id, userID)
     XCTAssertFalse(profile.user.preferredName.isEmpty)
     XCTAssertFalse(profile.user.portrait.isEmpty)
+    XCTAssertFalse(profile.likedForums.isEmpty)
+    XCTAssertGreaterThanOrEqual(profile.followedForumCount, profile.likedForums.count)
+    XCTAssertTrue(profile.likedForums.allSatisfy { $0.id > 0 && !$0.name.isEmpty })
+    XCTAssertEqual(Set(profile.likedForums.map(\.id)).count, profile.likedForums.count)
 
     let activity = try await client.getUserThreads(userID: userID, page: 1, pageSize: 20)
     XCTAssertEqual(activity.userID, userID)
@@ -351,7 +405,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.16 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.17 integration-test")
     )
     let forumID: Int64 = 2_432_903
 

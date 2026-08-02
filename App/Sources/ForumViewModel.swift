@@ -9,12 +9,15 @@ final class ForumViewModel: ObservableObject {
   @Published private(set) var isLoadingMore = false
   @Published private(set) var loadMoreError: String?
   @Published private(set) var options = ForumBrowseOptions()
+  @Published private(set) var channels: [BrowseForumChannel] = []
+  @Published private(set) var selectedChannelID: Int?
 
   let forumName: String
 
   private let service: any BrowseService
   private var currentPage = 0
   private var hasMore = true
+  private var channelCursor: Int64?
   private var loadTask: Task<Void, Never>?
   private var loadGeneration = 0
 
@@ -33,6 +36,7 @@ final class ForumViewModel: ObservableObject {
     invalidateCurrentLoad()
     currentPage = 0
     hasMore = true
+    channelCursor = nil
     isLoadingMore = false
     loadMoreError = nil
     threads = []
@@ -51,7 +55,21 @@ final class ForumViewModel: ObservableObject {
     reload()
   }
 
+  func setChannelID(_ channelID: Int?) {
+    if let channelID, !channels.contains(where: { $0.id == channelID }) {
+      return
+    }
+    guard selectedChannelID != channelID else { return }
+    selectedChannelID = channelID
+    if channelID != nil {
+      options.featuredOnly = false
+      options.featuredClassificationID = nil
+    }
+    reload()
+  }
+
   func setFeaturedOnly(_ featuredOnly: Bool) {
+    guard selectedChannelID == nil else { return }
     guard options.featuredOnly != featuredOnly else { return }
     options.featuredOnly = featuredOnly
     if !featuredOnly {
@@ -61,6 +79,7 @@ final class ForumViewModel: ObservableObject {
   }
 
   func setFeaturedClassificationID(_ classificationID: Int?) {
+    guard selectedChannelID == nil else { return }
     guard options.featuredClassificationID != classificationID else { return }
     options.featuredOnly = true
     options.featuredClassificationID = classificationID
@@ -97,6 +116,9 @@ final class ForumViewModel: ObservableObject {
     let forumName = forumName
     let service = service
     let options = options
+    let forum = forum
+    let selectedChannel = channels.first { $0.id == selectedChannelID }
+    let requestedChannelCursor = replacing ? nil : channelCursor
     loadGeneration &+= 1
     let generation = loadGeneration
     if !replacing {
@@ -111,18 +133,46 @@ final class ForumViewModel: ObservableObject {
         }
       }
       do {
-        let response = try await service.threads(
-          forumName: forumName,
-          page: page,
-          pageSize: 30,
-          options: options
-        )
-        try Task.checkCancellation()
-        guard generation == loadGeneration else { return }
-        forum = response.forum
-        currentPage = response.currentPage
-        hasMore = response.hasMore
-        threads = replacing ? response.threads : merge(threads, response.threads)
+        if let selectedChannel, forum.id > 0 {
+          let response = try await service.forumChannelThreads(
+            forumID: forum.id,
+            forumName: forumName,
+            channel: selectedChannel,
+            page: page,
+            pageSize: 30,
+            sort: options.sort,
+            lastThreadID: requestedChannelCursor
+          )
+          try Task.checkCancellation()
+          guard generation == loadGeneration else { return }
+          let merged = replacing ? response.threads : merge(threads, response.threads)
+          let addedItems = replacing
+            ? !response.threads.isEmpty
+            : merged.count > threads.count
+          let cursorAdvanced = response.nextPageCursor != nil
+            && response.nextPageCursor != requestedChannelCursor
+          threads = merged
+          currentPage = response.currentPage
+          channelCursor = response.nextPageCursor
+          hasMore = response.hasMore && addedItems && cursorAdvanced
+        } else {
+          let response = try await service.threads(
+            forumName: forumName,
+            page: page,
+            pageSize: 30,
+            options: options
+          )
+          try Task.checkCancellation()
+          guard generation == loadGeneration else { return }
+          self.forum = response.forum
+          if replacing || !response.channels.isEmpty {
+            channels = response.channels
+          }
+          currentPage = response.currentPage
+          hasMore = response.hasMore
+          channelCursor = nil
+          threads = replacing ? response.threads : merge(threads, response.threads)
+        }
         state = .loaded
       } catch is CancellationError {
         return

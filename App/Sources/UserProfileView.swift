@@ -2,21 +2,26 @@ import SwiftUI
 import UIKit
 
 struct UserProfileView: View {
-  let service: any BrowseService & UserProfileService
+  let service:
+    any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
+  let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @StateObject private var viewModel: UserProfileViewModel
 
   init(
     userID: Int64,
-    service: any BrowseService & UserProfileService,
+    service: any BrowseService & ForumPostSearchService & UserProfileService
+      & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
-    favoritesRepository: any LocalFavoritesRepository
+    favoritesRepository: any LocalFavoritesRepository,
+    searchHistoryRepository: any ForumSearchHistoryRepository
   ) {
     self.service = service
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
+    self.searchHistoryRepository = searchHistoryRepository
     _viewModel = StateObject(
       wrappedValue: UserProfileViewModel(userID: userID, service: service)
     )
@@ -44,6 +49,8 @@ struct UserProfileView: View {
       if let profile = viewModel.profile {
         UserProfileHeader(profile: profile)
           .listRowSeparator(.hidden)
+
+        likedForumPreview(profile)
       }
 
       Section {
@@ -60,7 +67,8 @@ struct UserProfileView: View {
                 thread: thread,
                 service: service,
                 historyRepository: historyRepository,
-                favoritesRepository: favoritesRepository
+                favoritesRepository: favoritesRepository,
+                searchHistoryRepository: searchHistoryRepository
               )
             } label: {
               UserActivityThreadRow(thread: thread)
@@ -90,6 +98,44 @@ struct UserProfileView: View {
     }
     .listStyle(.plain)
     .refreshable { await viewModel.refresh() }
+  }
+
+  @ViewBuilder
+  private func likedForumPreview(_ profile: BrowseUserProfile) -> some View {
+    let totalCount = max(profile.followedForumCount, profile.likedForums.count)
+    if totalCount > 0 {
+      Section {
+        if profile.likedForums.isEmpty {
+          Label("公开资料未提供贴吧预览", systemImage: "eye.slash")
+            .foregroundStyle(.secondary)
+        } else {
+          ForEach(profile.likedForums) { forum in
+            NavigationLink {
+              ForumView(
+                forumName: forum.name,
+                service: service,
+                historyRepository: historyRepository,
+                favoritesRepository: favoritesRepository,
+                searchHistoryRepository: searchHistoryRepository
+              )
+            } label: {
+              Label("\(forum.name)吧", systemImage: "text.bubble")
+                .foregroundStyle(.primary)
+            }
+          }
+        }
+      } header: {
+        Text("喜欢的吧 \(totalCount.formatted())")
+      } footer: {
+        if profile.likedForums.isEmpty {
+          Text("该用户共喜欢 \(totalCount.formatted()) 个吧，公开资料未提供可浏览的预览。")
+        } else {
+          Text(
+            "公开资料提供了 \(profile.likedForums.count.formatted()) 个预览；该用户共喜欢 \(totalCount.formatted()) 个吧。"
+          )
+        }
+      }
+    }
   }
 }
 

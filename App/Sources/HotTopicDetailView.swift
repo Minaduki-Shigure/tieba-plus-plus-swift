@@ -94,7 +94,8 @@ struct HotTopicDetailView: View {
                 thread: thread,
                 service: service,
                 historyRepository: historyRepository,
-                favoritesRepository: favoritesRepository
+                favoritesRepository: favoritesRepository,
+                searchHistoryRepository: searchHistoryRepository
               )
             } label: {
               HotTopicThreadRow(thread: thread)

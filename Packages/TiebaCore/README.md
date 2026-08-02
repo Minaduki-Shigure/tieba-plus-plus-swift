@@ -21,6 +21,13 @@ let scopedSearch = try await client.searchForumPosts(
 )
 let users = try await client.searchUsers(query: "swift")
 let threads = try await client.getThreads(forumName: "swift")
+if let channel = threads.channels.first {
+    let channelThreads = try await client.getForumChannelThreads(
+        forumID: threads.forum.id,
+        forumName: threads.forum.name,
+        channel: channel
+    )
+}
 let posts = try await client.getPosts(threadID: threads.threads[0].id)
 let comments = try await client.getComments(
     threadID: posts.thread.id,
@@ -51,9 +58,13 @@ let followed = try await authenticatedClient.getFollowedForums(
 - Protocol Buffer requests use `https://tiebac.baidu.com`; anonymous JSON
   search uses `https://tieba.baidu.com`. Redirects must remain on the request's
   original HTTPS host.
-- Forum and post browsing use FRS `301001`, PB `302001`, and floor `302002`.
+- Forum and post browsing use FRS `301001`, GeneralTab `309622`, PB `302001`,
+  and floor `302002`. GeneralTab receives only a public forum ID, a validated
+  type-15 channel, its independent sort value, and pagination cursor.
 - Public profiles use Profile `303012` with explicit guest fields; public user
-  threads use UserPost `303002` and terminate pagination on an empty page.
+  threads use UserPost `303002` and terminate pagination on an empty page. A
+  profile's liked-forum array is a limited public preview rather than a complete
+  anonymous followed-forum list.
 - Search supports `/mo/q/search/forum`, `/mo/q/search/thread`, and
   `/mo/q/search/user`; global thread search is restricted to topic results and
   supports newest/oldest/relevance sorting with endpoint-specific wire values,

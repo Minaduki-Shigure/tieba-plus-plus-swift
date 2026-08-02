@@ -74,6 +74,15 @@ protocol BrowseService: Sendable {
     pageSize: Int,
     options: ForumBrowseOptions
   ) async throws -> ThreadPageData
+  func forumChannelThreads(
+    forumID: Int64,
+    forumName: String,
+    channel: BrowseForumChannel,
+    page: Int,
+    pageSize: Int,
+    sort: ForumThreadSort,
+    lastThreadID: Int64?
+  ) async throws -> ForumChannelPageData
   func posts(
     threadID: Int64,
     page: Int,
@@ -87,6 +96,20 @@ protocol BrowseService: Sendable {
     aroundCommentID commentID: Int64,
     page: Int
   ) async throws -> CommentPageData
+}
+
+extension BrowseService {
+  func forumChannelThreads(
+    forumID: Int64,
+    forumName: String,
+    channel: BrowseForumChannel,
+    page: Int,
+    pageSize: Int,
+    sort: ForumThreadSort,
+    lastThreadID: Int64?
+  ) async throws -> ForumChannelPageData {
+    throw BrowseError.unavailable("当前浏览服务不支持贴吧频道。")
+  }
 }
 
 protocol SearchService: Sendable {

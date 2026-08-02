@@ -26,6 +26,10 @@ final class TiebaClientTests: XCTestCase {
     )
     XCTAssertEqual(result.pagination.nextPage, 2)
     XCTAssertEqual(result.tabs["Latest"], 3)
+    XCTAssertEqual(
+      result.channels,
+      [TiebaForumChannel(id: 3_631_832, name: "Help", isDefault: true)]
+    )
 
     let thread = try XCTUnwrap(result.threads.first)
     XCTAssertEqual(thread.id, 100)
@@ -36,6 +40,44 @@ final class TiebaClientTests: XCTestCase {
     XCTAssertEqual(
       thread.content.images.first?.thumbnailURL?.absoluteString, "https://img.example/thumb.jpg")
     XCTAssertTrue(thread.isPinned)
+  }
+
+  func testMapsForumChannelPageAndCursor() async throws {
+    let transport = CapturingTransport(
+      body: try ProtoFixtures.forumChannelPage().serializedData()
+    )
+    let client = TiebaClient(transport: transport)
+    let channel = TiebaForumChannel(id: 3_631_832, name: "Help")
+
+    let result = try await client.getForumChannelThreads(
+      forumID: 42,
+      forumName: " swift ",
+      channel: channel,
+      page: 2,
+      pageSize: 30,
+      sort: .creationTime,
+      lastThreadID: 950
+    )
+
+    XCTAssertEqual(result.channel, channel)
+    XCTAssertEqual(result.pagination.currentPage, 2)
+    XCTAssertTrue(result.pagination.hasMore)
+    XCTAssertTrue(result.pagination.hasPrevious)
+    XCTAssertEqual(result.threads.map(\.id), [900, 800])
+    XCTAssertEqual(result.threads.first?.forumID, 42)
+    XCTAssertEqual(result.threads.first?.forumName, "swift")
+    XCTAssertEqual(result.threads.first?.author?.preferredName, "Channel Author")
+    XCTAssertEqual(result.threads.first?.content.plainText, "Channel content")
+    XCTAssertEqual(result.nextPageCursor, 800)
+
+    let capturedRequest = await transport.lastRequest()
+    let request = try XCTUnwrap(capturedRequest)
+    let decoded = try GeneralTabListReqIdl(
+      serializedBytes: protobufPayload(from: try XCTUnwrap(request.httpBody))
+    )
+    XCTAssertEqual(decoded.data.pn, 2)
+    XCTAssertEqual(decoded.data.lastThreadID, 950)
+    XCTAssertEqual(decoded.data.sortType, 1)
   }
 
   func testMapsPostsAndEmbeddedComments() async throws {
@@ -168,6 +210,10 @@ final class TiebaClientTests: XCTestCase {
     XCTAssertEqual(profile.biography, "Public biography")
     XCTAssertEqual(profile.threadCount, 123)
     XCTAssertEqual(profile.followerCount, 345)
+    XCTAssertEqual(
+      profile.likedForums,
+      [TiebaProfileForum(id: 42, name: "swift"), TiebaProfileForum(id: 77, name: "ios")]
+    )
     XCTAssertEqual(profile.totalAgreeCount, 12_345)
     XCTAssertTrue(profile.user.isVIP)
     XCTAssertTrue(profile.user.isVerifiedCreator)
