@@ -282,7 +282,7 @@ private struct LocalFavoriteRow: View {
   private var subtitle: String {
     switch entry.target {
     case .forum(let forum):
-      forum.name == forum.displayName ? "" : forum.name
+      return forum.name == forum.displayName ? "" : forum.name
     case .thread(let thread):
       let progress = thread.lastFloor.map { "读至 \($0) 楼" } ?? ""
       return [thread.forumName, thread.authorName, progress]

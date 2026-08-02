@@ -1,4 +1,5 @@
 import Combine
+import Foundation
 import SwiftUI
 
 struct RootView: View {
@@ -151,7 +152,7 @@ struct RootView: View {
     }
     .onAppear { favoritesViewModel.reload() }
     .onReceive(NotificationCenter.default.publisher(for: .localFavoritesDidChange)) { _ in
-      favoritesViewModel.reload()
+      Task { @MainActor in favoritesViewModel.reload() }
     }
   }
 
