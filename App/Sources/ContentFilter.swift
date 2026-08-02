@@ -124,7 +124,7 @@ struct ContentFilterRule: Codable, Hashable, Identifiable, Sendable {
   var displayValue: String {
     switch kind {
     case .keyword:
-      keyword
+      return keyword
     case .user:
       if let userID, !username.isEmpty {
         return "\(username) · \(userID)"
