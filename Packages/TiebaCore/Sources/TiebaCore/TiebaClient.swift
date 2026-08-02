@@ -8,15 +8,18 @@ import TiebaProto
 
 public struct TiebaClientConfiguration: Sendable, Hashable {
   public var clientVersion: String
+  public var authenticatedClientVersion: String
   public var userAgent: String
   public var requestTimeout: TimeInterval
 
   public init(
     clientVersion: String = "12.64.1.1",
-    userAgent: String = "TiebaPlusPlus/0.6 (iOS)",
+    authenticatedClientVersion: String = "22.6.5.1",
+    userAgent: String = "TiebaPlusPlus/0.7 (iOS)",
     requestTimeout: TimeInterval = 30
   ) {
     self.clientVersion = clientVersion
+    self.authenticatedClientVersion = authenticatedClientVersion
     self.userAgent = userAgent
     self.requestTimeout = requestTimeout
   }
@@ -31,7 +34,27 @@ protocol TiebaTransport: Sendable {
   func send(_ request: URLRequest) async throws -> TiebaHTTPResponse
 }
 
+enum TiebaRedirectPolicy: Sendable {
+  case sameOrigin
+  case rejectAll
+
+  func allows(from source: URL?, to destination: URL?) -> Bool {
+    switch self {
+    case .sameOrigin:
+      TiebaEndpointPolicy.allowsRedirect(from: source, to: destination)
+    case .rejectAll:
+      false
+    }
+  }
+}
+
 final class HTTPSOnlySessionDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+  private let redirectPolicy: TiebaRedirectPolicy
+
+  init(redirectPolicy: TiebaRedirectPolicy) {
+    self.redirectPolicy = redirectPolicy
+  }
+
   func urlSession(
     _ session: URLSession,
     task: URLSessionTask,
@@ -40,7 +63,7 @@ final class HTTPSOnlySessionDelegate: NSObject, URLSessionTaskDelegate, @uncheck
     completionHandler: @escaping @Sendable (URLRequest?) -> Void
   ) {
     completionHandler(
-      TiebaEndpointPolicy.allowsRedirect(from: response.url, to: request.url) ? request : nil
+      redirectPolicy.allows(from: response.url, to: request.url) ? request : nil
     )
   }
 }
@@ -49,13 +72,13 @@ final class URLSessionTiebaTransport: TiebaTransport, @unchecked Sendable {
   private let delegate: HTTPSOnlySessionDelegate
   private let session: URLSession
 
-  init() {
+  init(redirectPolicy: TiebaRedirectPolicy = .sameOrigin) {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.httpCookieStorage = nil
     configuration.urlCredentialStorage = nil
     configuration.httpShouldSetCookies = false
     configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-    let delegate = HTTPSOnlySessionDelegate()
+    let delegate = HTTPSOnlySessionDelegate(redirectPolicy: redirectPolicy)
     self.delegate = delegate
     self.session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
   }

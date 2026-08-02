@@ -7,13 +7,17 @@ struct TiebaPlusPlusApp: App {
       TiebaCoreBrowseService()
   private let historyRepository: any BrowsingHistoryRepository = FileBrowsingHistoryStore.live()
   private let favoritesRepository: any LocalFavoritesRepository = FileLocalFavoritesStore.live()
+  private let accountVault: any AccountVault = KeychainAccountVault()
+  private let accountService: any AccountService = TiebaCoreAccountService()
 
   var body: some Scene {
     WindowGroup {
       RootView(
         service: service,
         historyRepository: historyRepository,
-        favoritesRepository: favoritesRepository
+        favoritesRepository: favoritesRepository,
+        accountVault: accountVault,
+        accountService: accountService
       )
     }
   }

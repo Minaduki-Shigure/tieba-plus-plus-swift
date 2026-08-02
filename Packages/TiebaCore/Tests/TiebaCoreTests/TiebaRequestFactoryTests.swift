@@ -452,6 +452,10 @@ final class TiebaRequestFactoryTests: XCTestCase {
     XCTAssertFalse(TiebaEndpointPolicy.allows(URL(string: "http://tiebac.baidu.com/c/f/pb/page")))
     XCTAssertFalse(
       TiebaEndpointPolicy.allows(URL(string: "https://tiebac.baidu.com.example/c/f/pb/page")))
+    XCTAssertFalse(
+      TiebaEndpointPolicy.allows(URL(string: "https://tiebac.baidu.com:8443/c/f/pb/page")))
+    XCTAssertFalse(
+      TiebaEndpointPolicy.allows(URL(string: "https://user@tiebac.baidu.com/c/f/pb/page")))
     XCTAssertTrue(
       TiebaEndpointPolicy.allowsRedirect(
         from: URL(string: "https://tieba.baidu.com/mo/q/search/forum"),
@@ -462,6 +466,24 @@ final class TiebaRequestFactoryTests: XCTestCase {
       TiebaEndpointPolicy.allowsRedirect(
         from: URL(string: "https://tiebac.baidu.com/c/f/pb/page"),
         to: URL(string: "https://tieba.baidu.com/mo/q/search/thread")
+      )
+    )
+    XCTAssertFalse(
+      TiebaEndpointPolicy.allowsRedirect(
+        from: URL(string: "https://tiebac.baidu.com/c/s/login"),
+        to: URL(string: "https://tiebac.baidu.com:8443/c/s/login")
+      )
+    )
+    XCTAssertTrue(
+      TiebaRedirectPolicy.sameOrigin.allows(
+        from: URL(string: "https://tieba.baidu.com/mo/q/search/forum"),
+        to: URL(string: "https://tieba.baidu.com/mo/q/search/forum?word=swift")
+      )
+    )
+    XCTAssertFalse(
+      TiebaRedirectPolicy.rejectAll.allows(
+        from: URL(string: "https://tiebac.baidu.com/c/s/login"),
+        to: URL(string: "https://tiebac.baidu.com/c/s/login-v2")
       )
     )
   }

@@ -1,0 +1,123 @@
+import CryptoKit
+import Foundation
+
+#if canImport(FoundationNetworking)
+  import FoundationNetworking
+#endif
+
+struct TiebaAuthenticatedRequestFactory: Sendable {
+  static let appSalt = "tiebaclient!!!"
+
+  let configuration: TiebaClientConfiguration
+
+  func validateAccount(credential: TiebaBDUSSCredential) throws -> URLRequest {
+    try validate(credential)
+    return try signedFormRequest(
+      path: "/c/s/login",
+      fields: [
+        ("_client_version", configuration.authenticatedClientVersion),
+        ("bdusstoken", credential.bduss),
+      ]
+    )
+  }
+
+  func followedForums(
+    credential: TiebaBDUSSCredential,
+    userID: Int64,
+    page: Int,
+    pageSize: Int
+  ) throws -> URLRequest {
+    try validate(credential)
+    guard userID > 0 else {
+      throw TiebaClientError.invalidArgument("User ID must be positive.")
+    }
+    guard (1...Int(Int32.max)).contains(page) else {
+      throw TiebaClientError.invalidArgument("Page must be between 1 and \(Int32.max).")
+    }
+    guard (1...100).contains(pageSize) else {
+      throw TiebaClientError.invalidArgument("Page size must be between 1 and 100.")
+    }
+    return try signedFormRequest(
+      path: "/c/f/forum/like",
+      fields: [
+        ("BDUSS", credential.bduss),
+        ("_client_version", configuration.authenticatedClientVersion),
+        ("page_no", String(page)),
+        ("page_size", String(pageSize)),
+        ("uid", String(userID)),
+      ]
+    )
+  }
+
+  static func signature(for fields: [(String, String)]) -> String {
+    let source = fields.sorted {
+      $0.0 == $1.0 ? $0.1 < $1.1 : $0.0 < $1.0
+    }
+    .map { "\($0.0)=\($0.1)" }
+    .joined() + appSalt
+    let digest = Insecure.MD5.hash(data: Data(source.utf8))
+    return digest.map { String(format: "%02x", $0) }.joined()
+  }
+
+  private func signedFormRequest(
+    path: String,
+    fields: [(String, String)]
+  ) throws -> URLRequest {
+    try validateConfiguration()
+
+    var urlComponents = URLComponents()
+    urlComponents.scheme = "https"
+    urlComponents.host = TiebaRequestFactory.serviceHost
+    urlComponents.path = path
+    guard let url = urlComponents.url, TiebaEndpointPolicy.allows(url) else {
+      throw TiebaClientError.invalidEndpoint
+    }
+
+    let signedFields = fields + [("sign", Self.signature(for: fields))]
+    var bodyComponents = URLComponents()
+    bodyComponents.queryItems = signedFields.map { URLQueryItem(name: $0.0, value: $0.1) }
+    // Query encoding leaves "+" literal, while form decoders interpret it as a space.
+    let formQuery = bodyComponents.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+    guard let encodedBody = formQuery?.data(using: .utf8) else {
+      throw TiebaClientError.invalidArgument("Unable to encode authenticated request.")
+    }
+
+    var request = URLRequest(
+      url: url,
+      cachePolicy: .reloadIgnoringLocalCacheData,
+      timeoutInterval: configuration.requestTimeout
+    )
+    request.httpMethod = "POST"
+    request.httpShouldHandleCookies = false
+    request.httpBody = encodedBody
+    request.setValue(configuration.userAgent, forHTTPHeaderField: "User-Agent")
+    request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    request.setValue("gzip", forHTTPHeaderField: "Accept-Encoding")
+    return request
+  }
+
+  private func validate(_ credential: TiebaBDUSSCredential) throws {
+    guard credential.bduss.count == 192 else {
+      throw TiebaClientError.invalidArgument("Account credentials have an invalid format.")
+    }
+    guard credential.bduss.allSatisfy({ $0.isASCII && !$0.isWhitespace && !$0.isNewline }) else {
+      throw TiebaClientError.invalidArgument("Account credentials have an invalid format.")
+    }
+  }
+
+  private func validateConfiguration() throws {
+    guard
+      !configuration.authenticatedClientVersion.isEmpty,
+      !configuration.authenticatedClientVersion.contains(where: { $0.isNewline }),
+      !configuration.userAgent.isEmpty,
+      !configuration.userAgent.contains(where: { $0.isNewline }),
+      configuration.requestTimeout.isFinite,
+      configuration.requestTimeout > 0
+    else {
+      throw TiebaClientError.invalidArgument(
+        "Client versions and user agent must be non-empty single-line values, and timeout must be positive."
+      )
+    }
+  }
+}

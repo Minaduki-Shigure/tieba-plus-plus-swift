@@ -1,7 +1,9 @@
 # TiebaCore
 
-`TiebaCore` is the transport and domain layer for anonymous Tieba browsing. It
-contains no account state and exposes only `Sendable` values to the app.
+`TiebaCore` is the transport and domain layer for Tieba browsing. `TiebaClient`
+is strictly anonymous. `TiebaAuthenticatedClient` is a separate, stateless
+client whose methods require credentials explicitly and expose only `Sendable`
+values to the app.
 
 ```swift
 let client = TiebaClient()
@@ -18,6 +20,20 @@ if let userID = posts.posts[0].author?.id {
 }
 ```
 
+The authenticated client currently supports identity validation and a
+read-only followed-forum list. Account persistence belongs to the app's
+Keychain vault, not this package:
+
+```swift
+let authenticatedClient = TiebaAuthenticatedClient()
+let credential = TiebaBDUSSCredential(bduss: bduss)
+let account = try await authenticatedClient.validateAccount(credential: credential)
+let followed = try await authenticatedClient.getFollowedForums(
+    credential: credential,
+    userID: account.userID
+)
+```
+
 ## Wire assumptions
 
 - Protocol Buffer requests use `https://tiebac.baidu.com`; anonymous JSON
@@ -29,16 +45,24 @@ if let userID = posts.posts[0].author?.id {
 - Search supports `/mo/q/search/forum` and `/mo/q/search/thread`; thread search
   is restricted to topic results and relevance sorting.
 - Requests identify as client type `2` and version `12.64.1.1` by default.
+- Account validation and authenticated read requests use version `22.6.5.1`.
 - The first FRS page is encoded as `pn = 0`, matching aiotieba behavior.
 - PB asks for at least two posts because the upstream endpoint does not honor a
   request size of one consistently.
 - Browsing bodies use the endpoint's multipart `data` part and Protocol Buffer
   payload. Search requests use percent-encoded GET query items and JSON.
-- No Cookie, Authorization, BDUSS, STOKEN, device identifier, or TLS override is
-  used by this package.
+- Anonymous requests contain no Cookie, Authorization, BDUSS, STOKEN, device
+  identifier, or TLS override.
+- Authenticated requests use a separate request factory and ephemeral transport,
+  disable cookie and credential storage, and put only the endpoint's required
+  account fields in the signed HTTPS form body. Their transport rejects every
+  redirect rather than replaying a credential-bearing POST.
+- Neither client retains account credentials. Credential values are redacted
+  from their public debug descriptions, and the login response's anti-CSRF
+  value is not exposed by this read-only API.
 
-These are unofficial APIs and may change without notice. Authentication and
-write operations intentionally remain outside this package.
+These are unofficial APIs and may change without notice. Authenticated write
+operations intentionally remain unsupported.
 
 ## Tests
 
@@ -56,3 +80,7 @@ TIEBA_LIVE_TESTS=1 swift test --filter TiebaLiveTests
 
 The Protocol Buffer definitions are a minimal dependency closure copied from
 aiotieba. See `Sources/TiebaProto/NOTICE.md` and `LICENSE.aiotieba`.
+The authenticated form fields and response shapes were independently
+implemented after cross-checking aiotieba commit
+`bae68256fd250d5178e1447899ffa155c77eda38` (Unlicense) and TiebaLite commit
+`5545326b2a8e0d784b2f3dfbcb219c7b121e61c2` (GPL-3.0).

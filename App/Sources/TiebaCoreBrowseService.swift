@@ -425,7 +425,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, UserProfileService,
     }
   }
 
-  private static func browseError(_ error: Error) -> BrowseError {
+  static func browseError(_ error: Error) -> BrowseError {
     guard let error = error as? TiebaClientError else {
       return .unavailable(error.localizedDescription)
     }

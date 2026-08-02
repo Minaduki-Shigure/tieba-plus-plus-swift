@@ -7,6 +7,8 @@ struct RootView: View {
     any BrowseService & SearchService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
+  let accountVault: any AccountVault
+  let accountService: any AccountService
 
   @State private var query = ""
   @State private var path: [RootDestination] = []
@@ -15,11 +17,15 @@ struct RootView: View {
   init(
     service: any BrowseService & SearchService & UserProfileService & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
-    favoritesRepository: any LocalFavoritesRepository
+    favoritesRepository: any LocalFavoritesRepository,
+    accountVault: any AccountVault,
+    accountService: any AccountService
   ) {
     self.service = service
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
+    self.accountVault = accountVault
+    self.accountService = accountService
     _favoritesViewModel = StateObject(
       wrappedValue: LocalFavoritesViewModel(repository: favoritesRepository)
     )
@@ -89,6 +95,14 @@ struct RootView: View {
       .toolbar {
         ToolbarItemGroup(placement: .navigationBarTrailing) {
           Button {
+            path.append(.account)
+          } label: {
+            Image(systemName: "person.crop.circle")
+          }
+          .accessibilityLabel("账户")
+          .help("账户")
+
+          Button {
             path.append(.favorites)
           } label: {
             Image(systemName: "bookmark")
@@ -140,6 +154,14 @@ struct RootView: View {
               path.append(.thread(thread))
             }
           }
+        case .account:
+          AccountView(
+            browseService: service,
+            accountService: accountService,
+            vault: accountVault,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository
+          )
         case .thread(let thread):
           ThreadView(
             thread: thread.browseThread,
@@ -181,5 +203,6 @@ private enum RootDestination: Hashable {
   case search(String)
   case history
   case favorites
+  case account
   case thread(ThreadHistorySnapshot)
 }

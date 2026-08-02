@@ -25,12 +25,17 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Saved-thread reading-position and browse-mode restoration
 - Home-screen shortcuts for locally saved forums
 - HTTPS-only, credential-free anonymous requests
+- Ephemeral, HTTPS-only Baidu Web login with an exact host allowlist
+- Device-only Keychain account storage, account switching, and local logout
+- Paginated followed-forum list for the active account
+- Isolated anonymous and authenticated networking clients
 
 ## Next milestones
 
-1. Account login backed by Keychain and an explicit security review
-2. Authenticated follow, favorite, like, post, and reply workflows
-3. Notifications, moderation tools, and broader settings parity
+1. Real-device validation of login, account switching, and followed forums
+2. Authenticated follow, favorite, and like workflows
+3. Post and reply workflows behind explicit confirmation and anti-CSRF tests
+4. Notifications, moderation tools, and broader settings parity
 
 Tieba's anonymous post endpoint does not currently honor its nominal numeric
 floor-jump fields. The app therefore restores a stable post ID and offers page
@@ -58,5 +63,7 @@ moderators. A forum without published rules is a normal empty state rather than
 an API failure.
 
 Each authenticated milestone remains gated on protocol tests, credential
-isolation, and real-device validation. Anonymous browsing must continue to work
-without creating or storing an account session.
+isolation, and real-device validation. The initial authenticated feature is
+read-only: it validates identity and fetches followed forums. Anonymous
+browsing must continue to work without creating, reading, or storing an account
+session.

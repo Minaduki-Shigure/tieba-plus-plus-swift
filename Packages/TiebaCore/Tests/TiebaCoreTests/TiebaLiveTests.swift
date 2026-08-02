@@ -10,7 +10,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.6 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.7 integration-test")
     )
     let threads = try await client.getThreads(forumName: "starry", pageSize: 10)
     XCTAssertFalse(threads.threads.isEmpty)
@@ -119,7 +119,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.6 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.7 integration-test")
     )
     let forums = try await client.searchForums(query: "swift")
     XCTAssertFalse(forums.isLoggedIn)
@@ -138,7 +138,7 @@ final class TiebaLiveTests: XCTestCase {
 
     let userID: Int64 = 957_339_815
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.6 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.7 integration-test")
     )
 
     let profile = try await client.getUserProfile(userID: userID)
@@ -160,7 +160,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.6 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.7 integration-test")
     )
     let forumID: Int64 = 2_432_903
 

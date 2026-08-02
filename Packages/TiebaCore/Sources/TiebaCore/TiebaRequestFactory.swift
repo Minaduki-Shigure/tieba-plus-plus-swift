@@ -14,7 +14,10 @@ enum TiebaEndpointPolicy {
   static func allows(_ url: URL?) -> Bool {
     guard
       url?.scheme?.lowercased() == "https",
-      let host = url?.host?.lowercased()
+      let host = url?.host?.lowercased(),
+      url?.port == nil || url?.port == 443,
+      url?.user == nil,
+      url?.password == nil
     else { return false }
     return allowedHosts.contains(host)
   }

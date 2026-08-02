@@ -19,8 +19,11 @@ with the active sort/filter options; the changing hot ranking reopens at its
 first page. Forums and threads can also be saved in an independent local
 favorites list; saved threads retain their reading position and browsing mode,
 while saved forums appear as home-screen shortcuts. History and favorites can
-be cleared independently. Account credentials and write operations are
-intentionally excluded until the anonymous protocol path is stable on real
+be cleared independently. The first authenticated milestone adds an ephemeral
+Baidu login flow with an exact host allowlist, device-only Keychain storage,
+local multi-account switching, and the current account's followed-forum list.
+Authenticated write operations
+remain intentionally unsupported while this read-only path is validated on real
 devices.
 
 See [`ROADMAP.md`](ROADMAP.md) for the current TiebaLite parity matrix and the
@@ -34,9 +37,15 @@ next implementation milestones.
 - `project.yml`: reproducible XcodeGen project definition.
 - `.github/workflows`: core tests, simulator builds, and unsigned SideStore IPA.
 
-The minimum deployment target is iOS 16. Account secrets will be stored only in
-Keychain with device-only accessibility. API traffic uses normal URLSession
-certificate validation; global App Transport Security exceptions are forbidden.
+The minimum deployment target is iOS 16. Account secrets are stored only in
+Keychain with unlocked, device-only accessibility. The login WebView uses a
+nonpersistent data store and is destroyed after login. Anonymous and
+authenticated API clients are separate, ephemeral transports. API traffic uses
+normal URLSession certificate validation; global App Transport Security
+exceptions are forbidden. See [`SECURITY.md`](SECURITY.md) before testing an
+account build.
+The current read-only vault persists BDUSS only; it does not extract or store
+STOKEN or the login response's anti-CSRF value.
 
 ## Build
 
