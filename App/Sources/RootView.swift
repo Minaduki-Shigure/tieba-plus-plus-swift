@@ -14,7 +14,10 @@ struct RootView: View {
 
   @State private var query = ""
   @State private var path: [RootDestination] = []
+  @State private var showsAllSearchHistory = false
+  @State private var searchHistoryAction: GlobalSearchHistoryAction?
   @StateObject private var favoritesViewModel: LocalFavoritesViewModel
+  @StateObject private var globalSearchHistoryViewModel: GlobalSearchHistoryViewModel
 
   init(
     service: any BrowseService & SearchService & ForumPostSearchService & HotTopicService
@@ -22,6 +25,7 @@ struct RootView: View {
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository,
+    globalSearchHistoryRepository: any GlobalSearchHistoryRepository,
     accountVault: any AccountVault,
     accountService: any AccountService
   ) {
@@ -33,6 +37,9 @@ struct RootView: View {
     self.accountService = accountService
     _favoritesViewModel = StateObject(
       wrappedValue: LocalFavoritesViewModel(repository: favoritesRepository)
+    )
+    _globalSearchHistoryViewModel = StateObject(
+      wrappedValue: GlobalSearchHistoryViewModel(repository: globalSearchHistoryRepository)
     )
   }
 
@@ -62,6 +69,25 @@ struct RootView: View {
             .disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             .accessibilityLabel("直接打开贴吧")
             .help("直接打开贴吧")
+          }
+        }
+
+        searchHistorySection
+
+        if let errorMessage = globalSearchHistoryViewModel.errorMessage {
+          Section("搜索记录错误") {
+            Label(errorMessage, systemImage: "exclamationmark.triangle")
+              .foregroundStyle(.secondary)
+            Button {
+              Task { await globalSearchHistoryViewModel.retry() }
+            } label: {
+              Label("重试", systemImage: "arrow.clockwise")
+            }
+            Button(role: .destructive) {
+              searchHistoryAction = .reset
+            } label: {
+              Label("重置搜索记录", systemImage: "trash")
+            }
           }
         }
 
@@ -147,7 +173,8 @@ struct RootView: View {
             searchService: service,
             historyRepository: historyRepository,
             favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository
+            searchHistoryRepository: searchHistoryRepository,
+            onSearchSubmitted: { globalSearchHistoryViewModel.record($0) }
           )
         case .hotTopics:
           HotTopicListView(
@@ -195,8 +222,156 @@ struct RootView: View {
       }
     }
     .onAppear { favoritesViewModel.reload() }
+    .task { await globalSearchHistoryViewModel.loadIfNeeded() }
     .onReceive(NotificationCenter.default.publisher(for: .localFavoritesDidChange)) { _ in
       Task { @MainActor in favoritesViewModel.reload() }
+    }
+    .confirmationDialog(
+      searchHistoryActionTitle,
+      isPresented: Binding(
+        get: { searchHistoryAction != nil },
+        set: { if !$0 { searchHistoryAction = nil } }
+      ),
+      titleVisibility: .visible
+    ) {
+      Button(searchHistoryActionButtonTitle, role: .destructive) {
+        let action = searchHistoryAction
+        searchHistoryAction = nil
+        Task {
+          switch action {
+          case .clear:
+            await globalSearchHistoryViewModel.deleteAll()
+          case .reset:
+            await globalSearchHistoryViewModel.reset()
+          case nil:
+            break
+          }
+        }
+      }
+      Button("取消", role: .cancel) { searchHistoryAction = nil }
+    } message: {
+      Text(searchHistoryActionMessage)
+    }
+  }
+
+  @ViewBuilder
+  private var searchHistorySection: some View {
+    if globalSearchHistoryViewModel.isLoading,
+      globalSearchHistoryViewModel.entries.isEmpty
+    {
+      Section("最近搜索") {
+        HStack {
+          Spacer()
+          ProgressView()
+          Spacer()
+        }
+      }
+    } else if !globalSearchHistoryViewModel.entries.isEmpty {
+      Section {
+        ForEach(visibleSearchHistoryEntries) { entry in
+          Button {
+            search(for: entry.query)
+          } label: {
+            HStack(spacing: 10) {
+              Image(systemName: "clock")
+                .foregroundStyle(.secondary)
+              Text(entry.query)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+              Spacer(minLength: 8)
+              Text(entry.searchedAt, style: .relative)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+              Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+        }
+        .onDelete(perform: deleteSearchHistory)
+
+        if globalSearchHistoryViewModel.entries.count > 6 {
+          Button {
+            showsAllSearchHistory.toggle()
+          } label: {
+            Label(
+              showsAllSearchHistory ? "收起" : "显示全部",
+              systemImage: showsAllSearchHistory ? "chevron.up" : "chevron.down"
+            )
+          }
+        }
+      } header: {
+        HStack {
+          Text("最近搜索")
+          Spacer()
+          Button {
+            searchHistoryAction = .clear
+          } label: {
+            Image(systemName: "trash")
+              .frame(width: 32, height: 32)
+          }
+          .buttonStyle(.borderless)
+          .accessibilityLabel("清空搜索记录")
+          .help("清空搜索记录")
+        }
+      }
+    }
+  }
+
+  private var visibleSearchHistoryEntries: [GlobalSearchHistoryEntry] {
+    if showsAllSearchHistory {
+      return globalSearchHistoryViewModel.entries
+    }
+    return Array(globalSearchHistoryViewModel.entries.prefix(6))
+  }
+
+  private func deleteSearchHistory(at offsets: IndexSet) {
+    let visibleEntries = visibleSearchHistoryEntries
+    let ids = offsets.compactMap { index in
+      visibleEntries.indices.contains(index)
+        ? visibleEntries[index].id
+        : nil
+    }
+    Task {
+      for id in ids {
+        await globalSearchHistoryViewModel.delete(id: id)
+      }
+    }
+  }
+
+  private var searchHistoryActionTitle: String {
+    switch searchHistoryAction {
+    case .clear:
+      "清空全部搜索记录？"
+    case .reset:
+      "重置全部搜索记录？"
+    case nil:
+      "管理搜索记录"
+    }
+  }
+
+  private var searchHistoryActionButtonTitle: String {
+    switch searchHistoryAction {
+    case .clear:
+      "清空"
+    case .reset:
+      "重置"
+    case nil:
+      "确认"
+    }
+  }
+
+  private var searchHistoryActionMessage: String {
+    switch searchHistoryAction {
+    case .clear:
+      "只会删除保存在本机的全局搜索词。"
+    case .reset:
+      "这会删除保存在本机的全局搜索历史文件，用于恢复损坏或版本不兼容的数据。"
+    case nil:
+      ""
     }
   }
 
@@ -205,8 +380,13 @@ struct RootView: View {
   }
 
   private func search() {
-    let searchQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    search(for: query)
+  }
+
+  private func search(for rawQuery: String) {
+    let searchQuery = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !searchQuery.isEmpty else { return }
+    globalSearchHistoryViewModel.record(searchQuery)
     query = ""
     path.append(.search(searchQuery))
   }
@@ -217,6 +397,11 @@ struct RootView: View {
     query = ""
     path.append(.forum(forumName))
   }
+}
+
+private enum GlobalSearchHistoryAction {
+  case clear
+  case reset
 }
 
 private enum RootDestination: Hashable {

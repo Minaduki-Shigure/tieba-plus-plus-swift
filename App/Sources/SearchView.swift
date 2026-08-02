@@ -6,6 +6,7 @@ struct SearchView: View {
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
+  let onSearchSubmitted: @MainActor (String) -> Void
 
   @StateObject private var viewModel: SearchViewModel
   @State private var query: String
@@ -17,12 +18,14 @@ struct SearchView: View {
     searchService: any SearchService,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
-    searchHistoryRepository: any ForumSearchHistoryRepository
+    searchHistoryRepository: any ForumSearchHistoryRepository,
+    onSearchSubmitted: @escaping @MainActor (String) -> Void
   ) {
     self.browseService = browseService
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
+    self.onSearchSubmitted = onSearchSubmitted
     _query = State(initialValue: query)
     _viewModel = StateObject(wrappedValue: SearchViewModel(query: query, service: searchService))
   }
@@ -55,7 +58,7 @@ struct SearchView: View {
     .navigationTitle(viewModel.submittedQuery.isEmpty ? "搜索" : viewModel.submittedQuery)
     .navigationBarTitleDisplayMode(.inline)
     .searchable(text: $query, prompt: "搜索贴吧、帖子和用户")
-    .onSubmit(of: .search) { viewModel.submit(query) }
+    .onSubmit(of: .search, submitSearch)
     .task { viewModel.loadIfNeeded() }
     .onDisappear(perform: viewModel.cancel)
     .alert(
@@ -69,6 +72,13 @@ struct SearchView: View {
     } message: {
       Text(viewModel.refreshError ?? "无法刷新搜索结果。")
     }
+  }
+
+  private func submitSearch() {
+    let submittedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    viewModel.submit(query)
+    guard !submittedQuery.isEmpty else { return }
+    onSearchSubmitted(submittedQuery)
   }
 
   private var threadSortPicker: some View {

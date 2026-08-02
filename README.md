@@ -24,7 +24,9 @@ favorites list; saved threads retain their reading position and browsing mode,
 while saved forums appear as home-screen shortcuts. History and favorites can
 be cleared independently. Per-forum search terms are kept in a separate,
 versioned local history and can be deleted individually or cleared for that
-forum. The first authenticated milestone adds an ephemeral
+forum. Global search terms use their own versioned local history on the home
+screen, with recent/all views, individual deletion, clear, and explicit
+corruption recovery. The first authenticated milestone adds an ephemeral
 Baidu login flow with an exact host allowlist, device-only Keychain storage,
 local multi-account switching, and the current account's followed-forum list.
 Authenticated write operations

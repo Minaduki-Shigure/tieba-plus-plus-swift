@@ -72,13 +72,15 @@ credential-free. They may include only the forum identifier and anonymous
 client metadata; no future account Cookie, BDUSS, or STOKEN may be attached to
 these read-only calls.
 
-Browsing history, local favorites, and per-forum search history are separate
-versioned JSON archives in Application Support. They use atomic writes, enforce
-bounded archive sizes, refuse to overwrite malformed or future-version data,
-and are excluded from device backups. They must never contain account
-credentials or private server responses.
+Browsing history, local favorites, global search history, and per-forum search
+history are separate versioned JSON archives in Application Support. They use
+atomic writes, enforce bounded archive sizes, refuse to overwrite malformed or
+future-version data, and are excluded from device backups. They must never
+contain account credentials or private server responses. Global search history
+stores only the trimmed public query and its local submission time.
 An unreadable search-history archive may be deleted only through the explicit,
-user-confirmed recovery action; ordinary reads and writes must preserve it.
+user-confirmed recovery action for that archive; ordinary reads and writes must
+preserve it and must not delete the other search-history domain.
 
 Remote media uses an ephemeral, credential-free session, rejects cleartext
 requests or redirect destinations, and is decoded through ImageIO with a

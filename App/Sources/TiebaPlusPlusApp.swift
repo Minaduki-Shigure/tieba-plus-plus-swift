@@ -10,6 +10,8 @@ struct TiebaPlusPlusApp: App {
   private let favoritesRepository: any LocalFavoritesRepository = FileLocalFavoritesStore.live()
   private let searchHistoryRepository: any ForumSearchHistoryRepository =
     FileForumSearchHistoryStore.live()
+  private let globalSearchHistoryRepository: any GlobalSearchHistoryRepository =
+    FileGlobalSearchHistoryStore.live()
   private let accountVault: any AccountVault = KeychainAccountVault()
   private let accountService: any AccountService = TiebaCoreAccountService()
 
@@ -20,6 +22,7 @@ struct TiebaPlusPlusApp: App {
         historyRepository: historyRepository,
         favoritesRepository: favoritesRepository,
         searchHistoryRepository: searchHistoryRepository,
+        globalSearchHistoryRepository: globalSearchHistoryRepository,
         accountVault: accountVault,
         accountService: accountService
       )

@@ -10,6 +10,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Hot-topic details with related forums and cursor-aware thread pagination
 - Categorized anonymous forum, thread, and user search
 - Global post search with newest, oldest, and relevance sorting
+- Versioned local global-search history with recent/all, delete, and clear controls
 - Anonymous per-forum post search with newest/relevance sorting
 - Topic-only and topic-plus-reply search filters with target-aware navigation
 - Versioned, per-forum local search history with delete and clear controls
@@ -82,6 +83,10 @@ Global post search defaults to newest and keeps its newest/oldest/relevance
 selection across first-page retries, refreshes, and pagination. Its wire values
 are intentionally modeled separately from per-forum search because the two Web
 endpoints assign different values to the same user-facing sort names.
+Global search history is a separate local-only archive capped at 20 entries.
+The home screen shows the six most recent terms by default, can expand the full
+list, and records searches submitted again from the results screen. It never
+shares storage with the per-forum history domain.
 
 Per-forum search uses the same credential-free Web transport but keeps its
 TiebaLite-compatible request contract separate from global topic search. Topic,
