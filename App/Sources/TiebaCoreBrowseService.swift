@@ -869,13 +869,13 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     guard let role else { return nil }
     switch role {
     case .manager:
-      .manager
+      return .manager
     case .assistant:
-      .assistant
+      return .assistant
     case .moderator:
-      .moderator
+      return .moderator
     @unknown default:
-      .moderator
+      return .moderator
     }
   }
 
