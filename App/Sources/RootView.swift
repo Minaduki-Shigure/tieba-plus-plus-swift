@@ -140,6 +140,14 @@ struct RootView: View {
           .help("账户")
 
           Button {
+            path.append(.contentFilters)
+          } label: {
+            Image(systemName: "gearshape")
+          }
+          .accessibilityLabel("内容屏蔽设置")
+          .help("内容屏蔽设置")
+
+          Button {
             path.append(.favorites)
           } label: {
             Image(systemName: "bookmark")
@@ -210,6 +218,8 @@ struct RootView: View {
             favoritesRepository: favoritesRepository,
             searchHistoryRepository: searchHistoryRepository
           )
+        case .contentFilters:
+          ContentFilterSettingsView()
         case .thread(let thread):
           ThreadView(
             thread: thread.browseThread,
@@ -412,5 +422,6 @@ private enum RootDestination: Hashable {
   case history
   case favorites
   case account
+  case contentFilters
   case thread(ThreadHistorySnapshot)
 }

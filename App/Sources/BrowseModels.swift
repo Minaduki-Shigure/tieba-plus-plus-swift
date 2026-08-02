@@ -415,6 +415,12 @@ struct HotTopicPageData: Sendable {
   let nextPageCursor: Int64?
 }
 
+enum LocalContentVisibility: String, Codable, Hashable, Sendable {
+  case visible
+  case placeholder
+  case hidden
+}
+
 struct BrowseThread: Identifiable, Hashable, Sendable {
   let id: Int64
   let forumID: Int64
@@ -422,11 +428,61 @@ struct BrowseThread: Identifiable, Hashable, Sendable {
   let title: String
   let excerpt: String
   let authorName: String
+  let authorID: Int64
   let replyCount: Int
   let viewCount: Int
   let createdAt: Date?
   let lastReplyAt: Date?
   let contents: [BrowseContent]
+  let localVisibility: LocalContentVisibility
+
+  init(
+    id: Int64,
+    forumID: Int64,
+    forumName: String,
+    title: String,
+    excerpt: String,
+    authorName: String,
+    replyCount: Int,
+    viewCount: Int,
+    createdAt: Date?,
+    lastReplyAt: Date?,
+    contents: [BrowseContent],
+    authorID: Int64 = 0,
+    localVisibility: LocalContentVisibility = .visible
+  ) {
+    self.id = id
+    self.forumID = forumID
+    self.forumName = forumName
+    self.title = title
+    self.excerpt = excerpt
+    self.authorName = authorName
+    self.authorID = authorID
+    self.replyCount = replyCount
+    self.viewCount = viewCount
+    self.createdAt = createdAt
+    self.lastReplyAt = lastReplyAt
+    self.contents = contents
+    self.localVisibility = localVisibility
+  }
+
+  func withLocalVisibility(_ visibility: LocalContentVisibility) -> Self {
+    BrowseThread(
+      id: id,
+      forumID: forumID,
+      forumName: forumName,
+      title: title,
+      excerpt: excerpt,
+      authorName: authorName,
+      replyCount: replyCount,
+      viewCount: viewCount,
+      createdAt: createdAt,
+      lastReplyAt: lastReplyAt,
+      contents: contents,
+      authorID: authorID,
+      localVisibility: visibility
+    )
+  }
 }
 
 struct BrowsePost: Identifiable, Hashable, Sendable {
@@ -443,6 +499,7 @@ struct BrowsePost: Identifiable, Hashable, Sendable {
   let agreeScore: Int
   let isThreadAuthor: Bool
   let contents: [BrowseContent]
+  let localVisibility: LocalContentVisibility
 
   init(
     id: Int64,
@@ -457,7 +514,8 @@ struct BrowsePost: Identifiable, Hashable, Sendable {
     contents: [BrowseContent],
     authorLevel: Int = 0,
     authorIPLocation: String = "",
-    agreeScore: Int = 0
+    agreeScore: Int = 0,
+    localVisibility: LocalContentVisibility = .visible
   ) {
     self.id = id
     self.threadID = threadID
@@ -472,6 +530,26 @@ struct BrowsePost: Identifiable, Hashable, Sendable {
     self.agreeScore = agreeScore
     self.isThreadAuthor = isThreadAuthor
     self.contents = contents
+    self.localVisibility = localVisibility
+  }
+
+  func withLocalVisibility(_ visibility: LocalContentVisibility) -> Self {
+    BrowsePost(
+      id: id,
+      threadID: threadID,
+      floor: floor,
+      authorID: authorID,
+      authorName: authorName,
+      authorPortraitURL: authorPortraitURL,
+      createdAt: createdAt,
+      nestedReplyCount: nestedReplyCount,
+      isThreadAuthor: isThreadAuthor,
+      contents: contents,
+      authorLevel: authorLevel,
+      authorIPLocation: authorIPLocation,
+      agreeScore: agreeScore,
+      localVisibility: visibility
+    )
   }
 }
 
@@ -488,6 +566,7 @@ struct BrowseComment: Identifiable, Hashable, Sendable {
   let replyToUserID: Int64?
   let replyToUserName: String
   let contents: [BrowseContent]
+  let localVisibility: LocalContentVisibility
 
   init(
     id: Int64,
@@ -501,7 +580,8 @@ struct BrowseComment: Identifiable, Hashable, Sendable {
     agreeScore: Int = 0,
     isThreadAuthor: Bool = false,
     replyToUserID: Int64? = nil,
-    replyToUserName: String = ""
+    replyToUserName: String = "",
+    localVisibility: LocalContentVisibility = .visible
   ) {
     self.id = id
     self.authorID = authorID
@@ -515,6 +595,25 @@ struct BrowseComment: Identifiable, Hashable, Sendable {
     self.replyToUserID = replyToUserID
     self.replyToUserName = replyToUserName
     self.contents = contents
+    self.localVisibility = localVisibility
+  }
+
+  func withLocalVisibility(_ visibility: LocalContentVisibility) -> Self {
+    BrowseComment(
+      id: id,
+      authorID: authorID,
+      authorName: authorName,
+      authorPortraitURL: authorPortraitURL,
+      createdAt: createdAt,
+      contents: contents,
+      authorLevel: authorLevel,
+      authorIPLocation: authorIPLocation,
+      agreeScore: agreeScore,
+      isThreadAuthor: isThreadAuthor,
+      replyToUserID: replyToUserID,
+      replyToUserName: replyToUserName,
+      localVisibility: visibility
+    )
   }
 }
 

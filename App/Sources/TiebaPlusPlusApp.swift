@@ -4,8 +4,8 @@ import SwiftUI
 struct TiebaPlusPlusApp: App {
   private let service:
     any BrowseService & SearchService & ForumPostSearchService & HotTopicService
-      & UserProfileService & ForumInformationService =
-      TiebaCoreBrowseService()
+      & UserProfileService & ForumInformationService
+  private let contentFilterRepository: any ContentFilterRepository
   private let historyRepository: any BrowsingHistoryRepository = FileBrowsingHistoryStore.live()
   private let favoritesRepository: any LocalFavoritesRepository = FileLocalFavoritesStore.live()
   private let searchHistoryRepository: any ForumSearchHistoryRepository =
@@ -14,6 +14,14 @@ struct TiebaPlusPlusApp: App {
     FileGlobalSearchHistoryStore.live()
   private let accountVault: any AccountVault = KeychainAccountVault()
   private let accountService: any AccountService = TiebaCoreAccountService()
+
+  init() {
+    let contentFilterRepository = FileContentFilterStore.live()
+    self.contentFilterRepository = contentFilterRepository
+    self.service = TiebaCoreBrowseService(
+      contentFilterRepository: contentFilterRepository
+    )
+  }
 
   var body: some Scene {
     WindowGroup {
@@ -26,6 +34,7 @@ struct TiebaPlusPlusApp: App {
         accountVault: accountVault,
         accountService: accountService
       )
+      .environment(\.contentFilterRepository, contentFilterRepository)
     }
   }
 }

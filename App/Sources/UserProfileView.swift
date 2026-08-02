@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 struct UserProfileView: View {
+  @Environment(\.contentFilterRepository) private var contentFilterRepository
   let service:
     any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
@@ -9,6 +10,7 @@ struct UserProfileView: View {
   let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @StateObject private var viewModel: UserProfileViewModel
+  @State private var contentFilterMessage: String?
 
   init(
     userID: Int64,
@@ -40,6 +42,39 @@ struct UserProfileView: View {
     }
     .navigationTitle(viewModel.profile?.preferredName ?? "用户主页")
     .navigationBarTitleDisplayMode(.inline)
+    .toolbar {
+      if let profile = viewModel.profile, profile.id > 0 {
+        ToolbarItem(placement: .navigationBarTrailing) {
+          Menu {
+            Button {
+              addUserRule(profile, to: .block)
+            } label: {
+              Label("加入屏蔽列表", systemImage: "hand.raised")
+            }
+            Button {
+              addUserRule(profile, to: .allow)
+            } label: {
+              Label("加入白名单", systemImage: "checkmark.shield")
+            }
+          } label: {
+            Image(systemName: "ellipsis.circle")
+          }
+          .accessibilityLabel("用户规则")
+          .help("用户规则")
+        }
+      }
+    }
+    .alert(
+      "本地用户规则",
+      isPresented: Binding(
+        get: { contentFilterMessage != nil },
+        set: { if !$0 { contentFilterMessage = nil } }
+      )
+    ) {
+      Button("好") { contentFilterMessage = nil }
+    } message: {
+      Text(contentFilterMessage ?? "")
+    }
     .task { viewModel.loadIfNeeded() }
     .onDisappear(perform: viewModel.cancel)
   }
@@ -98,6 +133,24 @@ struct UserProfileView: View {
     }
     .listStyle(.plain)
     .refreshable { await viewModel.refresh() }
+  }
+
+  private func addUserRule(_ profile: BrowseUserProfile, to list: ContentFilterList) {
+    let repository = contentFilterRepository
+    Task { @MainActor in
+      do {
+        _ = try await repository.add(
+          .user(
+            id: profile.id,
+            name: profile.preferredName,
+            list: list
+          )
+        )
+        contentFilterMessage = list == .block ? "已加入屏蔽列表。" : "已加入白名单。"
+      } catch {
+        contentFilterMessage = error.localizedDescription
+      }
+    }
   }
 
   @ViewBuilder

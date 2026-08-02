@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 struct CommentsView: View {
@@ -60,37 +61,50 @@ struct CommentsView: View {
       case .loaded:
         List {
           ForEach(viewModel.comments) { comment in
-            VStack(alignment: .leading, spacing: 7) {
-              HStack(alignment: .top, spacing: 10) {
-                if comment.authorID > 0 {
-                  NavigationLink {
-                    UserProfileView(
-                      userID: comment.authorID,
-                      service: service,
-                      historyRepository: historyRepository,
-                      favoritesRepository: favoritesRepository,
-                      searchHistoryRepository: searchHistoryRepository
-                    )
-                  } label: {
+            LocallyFilteredContent(
+              visibility: comment.localVisibility,
+              placeholder: "已屏蔽此条回复"
+            ) {
+              VStack(alignment: .leading, spacing: 7) {
+                HStack(alignment: .top, spacing: 10) {
+                  if comment.authorID > 0 {
+                    NavigationLink {
+                      UserProfileView(
+                        userID: comment.authorID,
+                        service: service,
+                        historyRepository: historyRepository,
+                        favoritesRepository: favoritesRepository,
+                        searchHistoryRepository: searchHistoryRepository
+                      )
+                    } label: {
+                      commentAuthorIdentity(comment)
+                    }
+                    .buttonStyle(.plain)
+                  } else {
                     commentAuthorIdentity(comment)
                   }
-                  .buttonStyle(.plain)
-                } else {
-                  commentAuthorIdentity(comment)
-                }
 
-                ReadOnlyAgreeLabel(score: comment.agreeScore)
-                  .padding(.top, 2)
+                  ReadOnlyAgreeLabel(score: comment.agreeScore)
+                    .padding(.top, 2)
+                }
+                BrowseContentView(
+                  contents: comment.contents,
+                  onUserMention: openMentionedUser
+                )
               }
-              BrowseContentView(
-                contents: comment.contents,
-                onUserMention: openMentionedUser
-              )
+              .padding(.vertical, 4)
             }
-            .padding(.vertical, 4)
             .onAppear {
               viewModel.loadMoreIfNeeded(current: comment)
             }
+          }
+          if let lastComment = viewModel.comments.last {
+            Color.clear
+              .frame(height: 1)
+              .listRowInsets(EdgeInsets())
+              .listRowSeparator(.hidden)
+              .accessibilityHidden(true)
+              .onAppear { viewModel.loadMoreIfNeeded(current: lastComment) }
           }
           if viewModel.isLoadingMore {
             HStack {
@@ -133,6 +147,9 @@ struct CommentsView: View {
     }
     .task { viewModel.loadIfNeeded() }
     .onDisappear(perform: viewModel.cancel)
+    .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
+      Task { @MainActor in viewModel.reload() }
+    }
   }
 
   private var mentionProfilePresented: Binding<Bool> {

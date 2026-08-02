@@ -389,6 +389,44 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testForumPaginationStillLoadsAfterHiddenFinalThread() async throws {
+    let service = ScriptedBrowseService()
+    let hiddenTail = Fixtures.thread(id: 25).withLocalVisibility(.hidden)
+    await service.enqueueThreads(
+      .value(
+        ThreadPageData(
+          forumName: "Swift",
+          threads: [Fixtures.thread(id: 24), hiddenTail],
+          currentPage: 1,
+          hasMore: true
+        )
+      )
+    )
+    await service.enqueueThreads(
+      .value(
+        ThreadPageData(
+          forumName: "Swift",
+          threads: [Fixtures.thread(id: 26)],
+          currentPage: 2,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ForumViewModel(forumName: "Swift", service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    XCTAssertEqual(viewModel.threads.last?.localVisibility, .hidden)
+    viewModel.loadMoreIfNeeded(current: hiddenTail)
+
+    try await waitUntil {
+      viewModel.threads.map(\.id) == [24, 25, 26] && !viewModel.isLoadingMore
+    }
+    let requests = await service.threadRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2])
+  }
+
+  @MainActor
   func testForumChannelSelectionUsesCursorAndSortReloadClearsIt() async throws {
     let service = ScriptedBrowseService()
     let channel = BrowseForumChannel(id: 8, name: "问答", isDefault: true)

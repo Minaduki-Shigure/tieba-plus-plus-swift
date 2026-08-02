@@ -34,6 +34,9 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Public user profiles opened from post and nested-reply authors
 - Limited public liked-forum previews with direct forum navigation
 - Paginated public threads on user profiles
+- Local case-sensitive literal-keyword and exact UID/name user block/allow lists
+- Placeholder or fully hidden presentation for locally blocked content
+- Local video-topic blocking and user-profile block/allow shortcuts
 - Independent local forum and thread favorites
 - Saved-thread reading-position and browse-mode restoration
 - Home-screen shortcuts for locally saved forums
@@ -83,6 +86,20 @@ Forum channels are accepted only from FRS tabs marked as general type 15.
 Their `GeneralTabList` requests use a channel-specific sort type and advance
 with both the page number and the final valid thread ID. Missing, duplicate, or
 stalled cursors terminate pagination instead of repeatedly loading one page.
+
+Local content filtering covers ordinary and channel forum thread lists, post
+floors, nested replies, and shared-thread origin cards. Keyword rules use
+case-sensitive literal substring matching; user rules match an exact positive
+UID or exact name. An allow rule takes precedence only within the same matching
+domain and inspected field: a user allow rule does not override a blocked
+keyword, and a keyword allowed in one field does not override a blocked match
+in another. Blocked content can remain as a placeholder or be fully hidden.
+The independent video-topic switch applies to thread rows. Filtering annotates
+the raw models instead of removing them, so page and cursor progression still
+uses every server result even when an entire visible page is hidden. Search
+results and public-profile activity are intentionally outside this milestone's
+filter scope. Regular-expression rules are intentionally unsupported until a
+bounded or non-backtracking implementation is available.
 
 Each authenticated milestone remains gated on protocol tests, credential
 isolation, and real-device validation. The initial authenticated feature is

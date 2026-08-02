@@ -115,6 +115,18 @@ An unreadable search-history archive may be deleted only through the explicit,
 user-confirmed recovery action for that archive; ordinary reads and writes must
 preserve it and must not delete the other search-history domain.
 
+Local content-filter rules use their own bounded, versioned JSON archive in
+Application Support with atomic writes and backup exclusion. It may contain
+only user-entered literal keywords, public UID/name identities, display mode,
+and the video-topic switch; it must never contain account credentials, cookies,
+private responses, or hidden-content copies. Malformed, oversized, or
+future-version archives must be preserved and must not be overwritten by
+ordinary rule changes. Browsing fails open when the archive cannot be read, so
+anonymous content remains available without loading credentials; deletion is
+allowed only through the explicit reset action. Keyword matching is currently
+case-sensitive and literal. Regular-expression rules must remain unsupported
+until their runtime can be bounded or a non-backtracking engine is adopted.
+
 Remote media uses an ephemeral, credential-free session, rejects cleartext
 requests or redirect destinations, and is decoded through ImageIO with a
 bounded pixel size and memory cache. Original image dimensions are never

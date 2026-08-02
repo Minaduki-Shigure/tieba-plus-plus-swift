@@ -22,6 +22,12 @@ from user mentions without dropping reply context.
 Topic threads, search results, moderator rows, post authors, and
 nested-reply authors open credential-free public user profiles with profile
 statistics, a limited public liked-forum preview, and paginated public threads.
+Local content filtering provides case-sensitive literal-keyword and exact
+UID/name user block and allow lists, placeholder or fully hidden presentation,
+and an independent switch for video topics. It applies to forum and channel
+thread lists, post floors, nested replies, and shared-thread origin cards;
+public profiles can add a user directly to either list. Filtering leaves the
+raw paginated result set intact and does not currently apply to search results.
 Local browsing
 history records the last visible post ID for stable post orders and restores it
 with the active sort/filter options; the changing hot ranking reopens at its

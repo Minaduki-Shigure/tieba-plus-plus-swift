@@ -5,9 +5,14 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
   HotTopicService, UserProfileService, ForumInformationService
 {
   private let client: TiebaClient
+  private let contentFilterRepository: any ContentFilterRepository
 
-  init(client: TiebaClient = TiebaClient()) {
+  init(
+    client: TiebaClient = TiebaClient(),
+    contentFilterRepository: any ContentFilterRepository = EmptyContentFilterRepository()
+  ) {
     self.client = client
+    self.contentFilterRepository = contentFilterRepository
   }
 
   func threads(
@@ -31,9 +36,10 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     } catch {
       throw Self.browseError(error)
     }
+    let filter = await contentFilterSnapshot()
     return ThreadPageData(
       forum: Self.mapForum(response.forum, fallbackName: forumName),
-      threads: response.threads.map(Self.mapThread),
+      threads: response.threads.map { filter.applying(to: Self.mapThread($0)) },
       currentPage: response.pagination.currentPage,
       hasMore: response.pagination.hasMore,
       channels: response.channels.map {
@@ -71,8 +77,9 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     } catch {
       throw Self.browseError(error)
     }
+    let filter = await contentFilterSnapshot()
     return ForumChannelPageData(
-      threads: response.threads.map(Self.mapThread),
+      threads: response.threads.map { filter.applying(to: Self.mapThread($0)) },
       currentPage: response.pagination.currentPage,
       hasMore: response.pagination.hasMore,
       nextPageCursor: response.nextPageCursor
@@ -101,9 +108,10 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     } catch {
       throw Self.browseError(error)
     }
+    let filter = await contentFilterSnapshot()
     return PostPageData(
       thread: Self.mapThread(response.thread),
-      posts: response.posts.map(Self.mapPost),
+      posts: response.posts.map { filter.applying(to: Self.mapPost($0)) },
       currentPage: response.pagination.currentPage,
       hasMore: response.pagination.hasMore,
       totalPages: response.pagination.totalPages,
@@ -113,7 +121,9 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
         returnedPostIDs: Set(response.posts.map(\.id)),
         sort: options.sort
       ),
-      originThread: response.originThread.map(Self.mapOriginThread),
+      originThread: response.originThread.map {
+        filter.applying(to: Self.mapOriginThread($0))
+      },
       poll: response.poll.map(Self.mapPoll)
     )
   }
@@ -131,8 +141,9 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     } catch {
       throw Self.browseError(error)
     }
+    let filter = await contentFilterSnapshot()
     return CommentPageData(
-      comments: response.comments.map(Self.mapComment),
+      comments: response.comments.map { filter.applying(to: Self.mapComment($0)) },
       currentPage: response.pagination.currentPage,
       hasMore: response.pagination.hasMore
     )
@@ -155,8 +166,9 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     } catch {
       throw Self.browseError(error)
     }
+    let filter = await contentFilterSnapshot()
     return CommentPageData(
-      comments: response.comments.map(Self.mapComment),
+      comments: response.comments.map { filter.applying(to: Self.mapComment($0)) },
       currentPage: response.pagination.currentPage,
       hasMore: response.pagination.hasMore
     )
@@ -423,7 +435,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       viewCount: thread.viewCount,
       createdAt: thread.createdAt,
       lastReplyAt: thread.lastReplyAt,
-      contents: mapContent(thread.content)
+      contents: mapContent(thread.content),
+      authorID: thread.author?.id ?? 0
     )
   }
 
@@ -561,7 +574,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       viewCount: 0,
       createdAt: result.createdAt,
       lastReplyAt: nil,
-      contents: [.text(result.excerpt)] + images
+      contents: [.text(result.excerpt)] + images,
+      authorID: result.authorID
     )
   }
 
@@ -593,7 +607,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
         viewCount: 0,
         createdAt: target == .thread ? result.createdAt : nil,
         lastReplyAt: nil,
-        contents: threadExcerpt.isEmpty ? [] : [.text(threadExcerpt)]
+        contents: threadExcerpt.isEmpty ? [] : [.text(threadExcerpt)],
+        authorID: threadContext?.authorID ?? result.authorID
       ),
       target: target,
       matchedTitle: result.title,
@@ -692,6 +707,10 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     guard let author else { return "匿名用户" }
     let name = author.preferredName.trimmingCharacters(in: .whitespacesAndNewlines)
     return name.isEmpty ? "匿名用户" : name
+  }
+
+  private func contentFilterSnapshot() async -> ContentFilterSnapshot {
+    (try? await contentFilterRepository.snapshot()) ?? .empty
   }
 
   private static func mapGender(_ gender: TiebaGender) -> BrowseGender {

@@ -54,6 +54,7 @@ final class ForumPostSearchViewModelTests: XCTestCase {
     XCTAssertEqual(mapped.thread.title, "Opening topic")
     XCTAssertEqual(mapped.thread.excerpt, "Opening content")
     XCTAssertEqual(mapped.thread.authorName, "topic author")
+    XCTAssertEqual(mapped.thread.authorID, 1)
     XCTAssertEqual(mapped.thread.replyCount, 89)
     XCTAssertEqual(mapped.replyCount, 8)
     XCTAssertEqual(mapped.context?.postID, 202)

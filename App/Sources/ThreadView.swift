@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 struct ThreadView: View {
@@ -162,6 +163,12 @@ struct ThreadView: View {
       }
       viewModel.cancel()
     }
+    .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
+      Task { @MainActor in
+        visiblePost = nil
+        viewModel.reload()
+      }
+    }
     .navigationDestination(isPresented: mentionProfilePresented) {
       if let userID = mentionedUserID {
         UserProfileView(
@@ -247,31 +254,44 @@ struct ThreadView: View {
         ScrollView {
           LazyVStack(spacing: 0) {
             ForEach(viewModel.posts) { post in
-              PostView(
-                post: post,
-                originThread: post.floor == 1 ? viewModel.originThread : nil,
-                poll: post.floor == 1 ? viewModel.poll : nil,
-                service: service,
-                historyRepository: historyRepository,
-                favoritesRepository: favoritesRepository,
-                searchHistoryRepository: searchHistoryRepository,
-                openMentionedUser: openMentionedUser,
-                openComments: { commentsPost = post }
-              )
-              .id(post.id)
-              .background {
-                GeometryReader { geometry in
-                  Color.clear.preference(
-                    key: PostFramePreferenceKey.self,
-                    value: [post.id: geometry.frame(in: .named("thread-scroll"))]
+              LocallyFilteredContent(
+                visibility: post.localVisibility,
+                placeholder: post.floor > 0 ? "已屏蔽第 \(post.floor) 楼" : "已屏蔽此楼层"
+              ) {
+                VStack(spacing: 0) {
+                  PostView(
+                    post: post,
+                    originThread: post.floor == 1 ? viewModel.originThread : nil,
+                    poll: post.floor == 1 ? viewModel.poll : nil,
+                    service: service,
+                    historyRepository: historyRepository,
+                    favoritesRepository: favoritesRepository,
+                    searchHistoryRepository: searchHistoryRepository,
+                    openMentionedUser: openMentionedUser,
+                    openComments: { commentsPost = post }
                   )
+                  Divider()
+                    .padding(.leading, 52)
+                }
+                .background {
+                  GeometryReader { geometry in
+                    Color.clear.preference(
+                      key: PostFramePreferenceKey.self,
+                      value: [post.id: geometry.frame(in: .named("thread-scroll"))]
+                    )
+                  }
                 }
               }
+              .id(post.id)
               .onAppear {
                 viewModel.loadMoreIfNeeded(current: post)
               }
-              Divider()
-                .padding(.leading, 52)
+            }
+            if let lastPost = viewModel.posts.last {
+              Color.clear
+                .frame(height: 1)
+                .accessibilityHidden(true)
+                .onAppear { viewModel.loadMoreIfNeeded(current: lastPost) }
             }
             if viewModel.isLoadingMore || viewModel.isJumping {
               ProgressView()
@@ -402,14 +422,19 @@ private struct PostView: View {
       BrowseContentView(contents: post.contents, onUserMention: openMentionedUser)
 
       if let originThread {
-        OriginThreadCard(
-          thread: originThread,
-          service: service,
-          historyRepository: historyRepository,
-          favoritesRepository: favoritesRepository,
-          searchHistoryRepository: searchHistoryRepository,
-          openMentionedUser: openMentionedUser
-        )
+        LocallyFilteredContent(
+          visibility: originThread.localVisibility,
+          placeholder: "已屏蔽转发的原帖"
+        ) {
+          OriginThreadCard(
+            thread: originThread,
+            service: service,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository,
+            openMentionedUser: openMentionedUser
+          )
+        }
       }
 
       if let poll {

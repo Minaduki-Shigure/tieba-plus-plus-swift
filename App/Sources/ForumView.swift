@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 struct ForumView: View {
@@ -74,6 +75,9 @@ struct ForumView: View {
       )
     }
     .onDisappear(perform: viewModel.cancel)
+    .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
+      Task { @MainActor in viewModel.reload() }
+    }
   }
 
   private var optionsBar: some View {
@@ -189,20 +193,34 @@ struct ForumView: View {
       .listRowSeparator(.hidden)
 
       ForEach(viewModel.threads) { thread in
-        NavigationLink {
-          ThreadView(
-            thread: thread,
-            service: service,
-            historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository
-          )
-        } label: {
-          ThreadRow(thread: thread)
+        LocallyFilteredContent(
+          visibility: thread.localVisibility,
+          placeholder: "已屏蔽此主题"
+        ) {
+          NavigationLink {
+            ThreadView(
+              thread: thread,
+              service: service,
+              historyRepository: historyRepository,
+              favoritesRepository: favoritesRepository,
+              searchHistoryRepository: searchHistoryRepository
+            )
+          } label: {
+            ThreadRow(thread: thread)
+          }
         }
         .onAppear {
           viewModel.loadMoreIfNeeded(current: thread)
         }
+      }
+
+      if let lastThread = viewModel.threads.last {
+        Color.clear
+          .frame(height: 1)
+          .listRowInsets(EdgeInsets())
+          .listRowSeparator(.hidden)
+          .accessibilityHidden(true)
+          .onAppear { viewModel.loadMoreIfNeeded(current: lastThread) }
       }
 
       if viewModel.isLoadingMore {
