@@ -3,6 +3,7 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class PostAuthorIdentityTests: XCTestCase {
+  @MainActor
   func testBadgesUseStableLevelRoleAndThreadAuthorOrder() {
     XCTAssertEqual(
       PostAuthorNameLine.badges(
@@ -14,6 +15,7 @@ final class PostAuthorIdentityTests: XCTestCase {
     )
   }
 
+  @MainActor
   func testBadgeTitlesUseOnlyBoundedRoleLabels() {
     XCTAssertEqual(PostAuthorBadge.moderator(.manager).title, "吧主")
     XCTAssertEqual(PostAuthorBadge.moderator(.assistant).title, "小吧主")
@@ -25,6 +27,7 @@ final class PostAuthorIdentityTests: XCTestCase {
     XCTAssertEqual(PostAuthorBadge.threadAuthor.accessibilityLabel, "本帖楼主")
   }
 
+  @MainActor
   func testMissingMetadataDoesNotCreateBadges() {
     XCTAssertTrue(
       PostAuthorNameLine.badges(
