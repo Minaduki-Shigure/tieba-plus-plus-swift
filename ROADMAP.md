@@ -17,15 +17,17 @@ reference for expected workflows; its source code and assets are not copied.
 - Nested replies, images, video links, and voice playback
 - Public user profiles opened from post and nested-reply authors
 - Paginated public threads on user profiles
+- Independent local forum and thread favorites
+- Saved-thread reading-position and browse-mode restoration
+- Home-screen shortcuts for locally saved forums
 - HTTPS-only, credential-free anonymous requests
 
 ## Next milestones
 
-1. Local favorites and followed-forum shortcuts
-2. Richer forum rules and moderator details
-3. Account login backed by Keychain and an explicit security review
-4. Authenticated follow, favorite, like, post, and reply workflows
-5. Notifications, moderation tools, and broader settings parity
+1. Richer forum rules and moderator details
+2. Account login backed by Keychain and an explicit security review
+3. Authenticated follow, favorite, like, post, and reply workflows
+4. Notifications, moderation tools, and broader settings parity
 
 Tieba's anonymous post endpoint does not currently honor its nominal numeric
 floor-jump fields. The app therefore restores a stable post ID and offers page
@@ -39,6 +41,12 @@ nominal page-size field, so pagination deliberately continues until an empty
 page and deduplicates by thread ID. Tieba's followed-forum list rejects
 anonymous requests, and TiebaLite only presents reply history for the current
 account; neither is exposed as a misleading anonymous profile tab.
+
+Local favorites are deliberately separate from browsing history and from
+Tieba's account-backed collection service. Disabling or clearing history does
+not remove favorites, and the UI labels them as local rather than implying
+cross-device account sync. Hot-ranked threads retain the mode but not an
+unstable ranking position.
 
 Each authenticated milestone remains gated on protocol tests, credential
 isolation, and real-device validation. Anonymous browsing must continue to work

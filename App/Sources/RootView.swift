@@ -1,11 +1,27 @@
+import Combine
 import SwiftUI
 
 struct RootView: View {
   let service: any BrowseService & SearchService & UserProfileService
   let historyRepository: any BrowsingHistoryRepository
+  let favoritesRepository: any LocalFavoritesRepository
 
   @State private var query = ""
   @State private var path: [RootDestination] = []
+  @StateObject private var favoritesViewModel: LocalFavoritesViewModel
+
+  init(
+    service: any BrowseService & SearchService & UserProfileService,
+    historyRepository: any BrowsingHistoryRepository,
+    favoritesRepository: any LocalFavoritesRepository
+  ) {
+    self.service = service
+    self.historyRepository = historyRepository
+    self.favoritesRepository = favoritesRepository
+    _favoritesViewModel = StateObject(
+      wrappedValue: LocalFavoritesViewModel(repository: favoritesRepository)
+    )
+  }
 
   var body: some View {
     NavigationStack(path: $path) {
@@ -36,11 +52,48 @@ struct RootView: View {
           }
         }
 
+        if !favoritesViewModel.favoriteForums.isEmpty {
+          Section("收藏的贴吧") {
+            ForEach(Array(favoritesViewModel.favoriteForums.prefix(6)), id: \.name) { forum in
+              Button {
+                path.append(.forum(forum.name))
+              } label: {
+                HStack(spacing: 12) {
+                  AvatarView(url: forum.avatarURL, name: forum.displayName, size: 36)
+                  VStack(alignment: .leading, spacing: 2) {
+                    Text(forum.displayName)
+                      .foregroundStyle(.primary)
+                    if forum.name != forum.displayName {
+                      Text(forum.name)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                  }
+                  Spacer(minLength: 0)
+                  Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                }
+                .contentShape(Rectangle())
+              }
+              .buttonStyle(.plain)
+            }
+          }
+        }
+
       }
       .listStyle(.insetGrouped)
       .navigationTitle("贴吧++")
       .toolbar {
-        ToolbarItem(placement: .navigationBarTrailing) {
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
+          Button {
+            path.append(.favorites)
+          } label: {
+            Image(systemName: "bookmark")
+          }
+          .accessibilityLabel("本地收藏")
+          .help("本地收藏")
+
           Button {
             path.append(.history)
           } label: {
@@ -56,17 +109,28 @@ struct RootView: View {
           ForumView(
             forumName: forumName,
             service: service,
-            historyRepository: historyRepository
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository
           )
         case .search(let query):
           SearchView(
             query: query,
             browseService: service,
             searchService: service,
-            historyRepository: historyRepository
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository
           )
         case .history:
           HistoryView(repository: historyRepository) { target in
+            switch target {
+            case .forum(let forum):
+              path.append(.forum(forum.name))
+            case .thread(let thread):
+              path.append(.thread(thread))
+            }
+          }
+        case .favorites:
+          LocalFavoritesView(repository: favoritesRepository) { target in
             switch target {
             case .forum(let forum):
               path.append(.forum(forum.name))
@@ -79,10 +143,15 @@ struct RootView: View {
             thread: thread.browseThread,
             service: service,
             historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository,
             historySnapshot: thread
           )
         }
       }
+    }
+    .onAppear { favoritesViewModel.reload() }
+    .onReceive(NotificationCenter.default.publisher(for: .localFavoritesDidChange)) { _ in
+      favoritesViewModel.reload()
     }
   }
 
@@ -109,5 +178,6 @@ private enum RootDestination: Hashable {
   case forum(String)
   case search(String)
   case history
+  case favorites
   case thread(ThreadHistorySnapshot)
 }

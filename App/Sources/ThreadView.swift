@@ -3,6 +3,7 @@ import SwiftUI
 struct ThreadView: View {
   let service: any BrowseService & UserProfileService
   let historyRepository: any BrowsingHistoryRepository
+  let favoritesRepository: any LocalFavoritesRepository
 
   @StateObject private var viewModel: ThreadViewModel
   @State private var commentsPost: BrowsePost?
@@ -15,10 +16,12 @@ struct ThreadView: View {
     thread: BrowseThread,
     service: any BrowseService & UserProfileService,
     historyRepository: any BrowsingHistoryRepository,
+    favoritesRepository: any LocalFavoritesRepository,
     historySnapshot: ThreadHistorySnapshot? = nil
   ) {
     self.service = service
     self.historyRepository = historyRepository
+    self.favoritesRepository = favoritesRepository
     self.historySnapshot = historySnapshot
     _viewModel = StateObject(wrappedValue: ThreadViewModel(thread: thread, service: service))
   }
@@ -87,7 +90,9 @@ struct ThreadView: View {
       }
     }
     .toolbar {
-      ToolbarItem(placement: .navigationBarTrailing) {
+      ToolbarItemGroup(placement: .navigationBarTrailing) {
+        LocalFavoriteButton(target: favoriteTarget, repository: favoritesRepository)
+
         Button {
           pageInput = viewModel.currentPage > 0 ? String(viewModel.currentPage) : ""
           showsPageJump = true
@@ -136,19 +141,19 @@ struct ThreadView: View {
       guard let visiblePost else { return }
       try? await Task.sleep(nanoseconds: 600_000_000)
       guard !Task.isCancelled else { return }
-      try? await historyRepository.updateThreadProgress(
-        threadID: viewModel.thread.id,
-        postID: visiblePost.id,
-        floor: visiblePost.floor,
-        options: viewModel.options
-      )
+      await persistProgress(visiblePost, options: viewModel.options)
     }
     .onChange(of: viewModel.options) { options in
       visiblePost = nil
       persistBrowseOptions(options)
     }
     .onDisappear {
-      persistBrowseOptions(viewModel.options)
+      if let visiblePost {
+        let options = viewModel.options
+        Task { await persistProgress(visiblePost, options: options) }
+      } else {
+        persistBrowseOptions(viewModel.options)
+      }
       viewModel.cancel()
     }
     .sheet(item: $commentsPost) { post in
@@ -157,7 +162,8 @@ struct ThreadView: View {
           threadID: post.threadID,
           postID: post.id,
           service: service,
-          historyRepository: historyRepository
+          historyRepository: historyRepository,
+          favoritesRepository: favoritesRepository
         )
       }
       .presentationDetents([.medium, .large])
@@ -213,6 +219,7 @@ struct ThreadView: View {
                 post: post,
                 service: service,
                 historyRepository: historyRepository,
+                favoritesRepository: favoritesRepository,
                 openComments: { commentsPost = post }
               )
               .id(post.id)
@@ -279,6 +286,7 @@ struct ThreadView: View {
 
   private func persistBrowseOptions(_ options: ThreadBrowseOptions) {
     let repository = historyRepository
+    let favoritesRepository = favoritesRepository
     let threadID = viewModel.thread.id
     let updatedAt = Date()
     Task {
@@ -287,7 +295,47 @@ struct ThreadView: View {
         options: options,
         at: updatedAt
       )
+      try? await favoritesRepository.updateThreadOptions(
+        threadID: threadID,
+        options: options,
+        at: updatedAt
+      )
     }
+  }
+
+  private func persistProgress(
+    _ post: BrowsePost,
+    options: ThreadBrowseOptions
+  ) async {
+    let updatedAt = Date()
+    try? await historyRepository.updateThreadProgress(
+      threadID: viewModel.thread.id,
+      postID: post.id,
+      floor: post.floor,
+      options: options,
+      at: updatedAt
+    )
+    try? await favoritesRepository.updateThreadProgress(
+      threadID: viewModel.thread.id,
+      postID: post.id,
+      floor: post.floor,
+      options: options,
+      at: updatedAt
+    )
+  }
+
+  private var favoriteTarget: LocalFavoriteTarget {
+    let progress = viewModel.options.sort == .hot ? nil : visiblePost
+    let authorAvatarURL = viewModel.posts.first(where: { $0.isThreadAuthor })?.authorPortraitURL
+    return .thread(
+      ThreadHistorySnapshot(
+        thread: viewModel.thread,
+        authorAvatarURL: authorAvatarURL,
+        browseOptions: viewModel.options,
+        lastPostID: progress?.id,
+        lastFloor: progress?.floor
+      )
+    )
   }
 }
 
@@ -303,6 +351,7 @@ private struct PostView: View {
   let post: BrowsePost
   let service: any BrowseService & UserProfileService
   let historyRepository: any BrowsingHistoryRepository
+  let favoritesRepository: any LocalFavoritesRepository
   let openComments: () -> Void
 
   var body: some View {
@@ -312,7 +361,8 @@ private struct PostView: View {
           UserProfileView(
             userID: post.authorID,
             service: service,
-            historyRepository: historyRepository
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository
           )
         } label: {
           authorHeader

@@ -3,6 +3,7 @@ import SwiftUI
 struct SearchView: View {
   let browseService: any BrowseService & UserProfileService
   let historyRepository: any BrowsingHistoryRepository
+  let favoritesRepository: any LocalFavoritesRepository
 
   @StateObject private var viewModel: SearchViewModel
   @State private var query: String
@@ -11,10 +12,12 @@ struct SearchView: View {
     query: String,
     browseService: any BrowseService & UserProfileService,
     searchService: any SearchService,
-    historyRepository: any BrowsingHistoryRepository
+    historyRepository: any BrowsingHistoryRepository,
+    favoritesRepository: any LocalFavoritesRepository
   ) {
     self.browseService = browseService
     self.historyRepository = historyRepository
+    self.favoritesRepository = favoritesRepository
     _query = State(initialValue: query)
     _viewModel = StateObject(wrappedValue: SearchViewModel(query: query, service: searchService))
   }
@@ -65,7 +68,8 @@ struct SearchView: View {
               ThreadView(
                 thread: thread,
                 service: browseService,
-                historyRepository: historyRepository
+                historyRepository: historyRepository,
+                favoritesRepository: favoritesRepository
               )
             } label: {
               SearchThreadRow(thread: thread)
@@ -96,7 +100,8 @@ struct SearchView: View {
       ForumView(
         forumName: forum.name,
         service: browseService,
-        historyRepository: historyRepository
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository
       )
     } label: {
       ForumSearchRow(forum: forum, exact: exact)

@@ -13,9 +13,12 @@ filter. Post and nested-reply authors now open credential-free public user
 profiles with profile statistics and paginated public threads. Local browsing
 history records the last visible post ID for stable post orders and restores it
 with the active sort/filter options; the changing hot ranking reopens at its
-first page. Recording can be disabled or cleared in the app. Account
-credentials and write operations are intentionally excluded until the
-anonymous protocol path is stable on real devices.
+first page. Forums and threads can also be saved in an independent local
+favorites list; saved threads retain their reading position and browsing mode,
+while saved forums appear as home-screen shortcuts. History and favorites can
+be cleared independently. Account credentials and write operations are
+intentionally excluded until the anonymous protocol path is stable on real
+devices.
 
 See [`ROADMAP.md`](ROADMAP.md) for the current TiebaLite parity matrix and the
 next implementation milestones.

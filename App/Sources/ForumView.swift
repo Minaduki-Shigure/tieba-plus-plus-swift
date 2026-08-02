@@ -3,16 +3,19 @@ import SwiftUI
 struct ForumView: View {
   let service: any BrowseService & UserProfileService
   let historyRepository: any BrowsingHistoryRepository
+  let favoritesRepository: any LocalFavoritesRepository
 
   @StateObject private var viewModel: ForumViewModel
 
   init(
     forumName: String,
     service: any BrowseService & UserProfileService,
-    historyRepository: any BrowsingHistoryRepository
+    historyRepository: any BrowsingHistoryRepository,
+    favoritesRepository: any LocalFavoritesRepository
   ) {
     self.service = service
     self.historyRepository = historyRepository
+    self.favoritesRepository = favoritesRepository
     _viewModel = StateObject(wrappedValue: ForumViewModel(forumName: forumName, service: service))
   }
 
@@ -33,6 +36,14 @@ struct ForumView: View {
     }
     .navigationTitle(viewModel.forumName)
     .navigationBarTitleDisplayMode(.inline)
+    .toolbar {
+      ToolbarItem(placement: .navigationBarTrailing) {
+        LocalFavoriteButton(
+          target: .forum(ForumHistorySnapshot(forum: viewModel.forum)),
+          repository: favoritesRepository
+        )
+      }
+    }
     .safeAreaInset(edge: .top, spacing: 0) {
       optionsBar
     }
@@ -124,7 +135,8 @@ struct ForumView: View {
           ThreadView(
             thread: thread,
             service: service,
-            historyRepository: historyRepository
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository
           )
         } label: {
           ThreadRow(thread: thread)

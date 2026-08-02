@@ -15,6 +15,12 @@ Anonymous public-profile requests must use the protocol's guest target fields.
 They must not place the target user in the current-account field, attach account
 credentials, or attempt to bypass profile privacy settings.
 
+Browsing history and local favorites are separate versioned JSON archives in
+Application Support. Both use atomic writes, enforce bounded archive sizes,
+refuse to overwrite malformed or future-version data, and are excluded from
+device backups. They must never contain account credentials or private server
+responses.
+
 Remote media uses an ephemeral, credential-free session, rejects cleartext
 requests or redirect destinations, and is decoded through ImageIO with a
 bounded pixel size and memory cache. Original image dimensions are never

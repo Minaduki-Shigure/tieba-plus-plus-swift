@@ -4,16 +4,19 @@ import UIKit
 struct UserProfileView: View {
   let service: any BrowseService & UserProfileService
   let historyRepository: any BrowsingHistoryRepository
+  let favoritesRepository: any LocalFavoritesRepository
 
   @StateObject private var viewModel: UserProfileViewModel
 
   init(
     userID: Int64,
     service: any BrowseService & UserProfileService,
-    historyRepository: any BrowsingHistoryRepository
+    historyRepository: any BrowsingHistoryRepository,
+    favoritesRepository: any LocalFavoritesRepository
   ) {
     self.service = service
     self.historyRepository = historyRepository
+    self.favoritesRepository = favoritesRepository
     _viewModel = StateObject(
       wrappedValue: UserProfileViewModel(userID: userID, service: service)
     )
@@ -56,7 +59,8 @@ struct UserProfileView: View {
               ThreadView(
                 thread: thread,
                 service: service,
-                historyRepository: historyRepository
+                historyRepository: historyRepository,
+                favoritesRepository: favoritesRepository
               )
             } label: {
               UserActivityThreadRow(thread: thread)

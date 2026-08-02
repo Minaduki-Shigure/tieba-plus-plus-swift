@@ -13,7 +13,7 @@ public struct TiebaClientConfiguration: Sendable, Hashable {
 
   public init(
     clientVersion: String = "12.64.1.1",
-    userAgent: String = "TiebaPlusPlus/0.4 (iOS)",
+    userAgent: String = "TiebaPlusPlus/0.5 (iOS)",
     requestTimeout: TimeInterval = 30
   ) {
     self.clientVersion = clientVersion

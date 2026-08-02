@@ -5,15 +5,18 @@ struct CommentsView: View {
   @StateObject private var viewModel: CommentsViewModel
   let service: any BrowseService & UserProfileService
   let historyRepository: any BrowsingHistoryRepository
+  let favoritesRepository: any LocalFavoritesRepository
 
   init(
     threadID: Int64,
     postID: Int64,
     service: any BrowseService & UserProfileService,
-    historyRepository: any BrowsingHistoryRepository
+    historyRepository: any BrowsingHistoryRepository,
+    favoritesRepository: any LocalFavoritesRepository
   ) {
     self.service = service
     self.historyRepository = historyRepository
+    self.favoritesRepository = favoritesRepository
     _viewModel = StateObject(
       wrappedValue: CommentsViewModel(threadID: threadID, postID: postID, service: service)
     )
@@ -36,7 +39,8 @@ struct CommentsView: View {
                     UserProfileView(
                       userID: comment.authorID,
                       service: service,
-                      historyRepository: historyRepository
+                      historyRepository: historyRepository,
+                      favoritesRepository: favoritesRepository
                     )
                   } label: {
                     HStack(spacing: 10) {
