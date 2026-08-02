@@ -106,9 +106,13 @@ enum ProtoFixtures {
     var author = makeUser(id: 7, name: "thread-author")
     author.levelID = 12
     author.ipAddress = "Shanghai"
+    author.isBawu = 1
+    author.bawuType = " Manager "
     var commenter = makeUser(id: 8, name: "commenter")
     commenter.levelID = 9
     commenter.ipAddress = "Guangdong"
+    commenter.isBawu = 1
+    commenter.bawuType = "assist"
 
     var forum = SimpleForum()
     forum.id = 42
@@ -246,8 +250,12 @@ enum ProtoFixtures {
   }
 
   static func commentPage() -> PbFloorResIdl {
-    let author = makeUser(id: 7, name: "thread-author")
-    let commenter = makeUser(id: 8, name: "commenter")
+    var author = makeUser(id: 7, name: "thread-author")
+    author.isBawu = 1
+    author.bawuType = "manager"
+    var commenter = makeUser(id: 8, name: "commenter")
+    commenter.isBawu = 1
+    commenter.bawuType = "assistant"
 
     var forum = SimpleForum()
     forum.id = 42

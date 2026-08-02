@@ -12,13 +12,14 @@ with paginated topic details, categorized forum, thread, and user search,
 global post search with newest, oldest, and relevance sorting,
 per-forum post search with newest/relevance and topic/all-content filters,
 forum, post, and nested-reply browsing with server-ranked inline previews,
-parent-floor context, bidirectional pagination, and anchored opening, remote media, forum metadata and
+parent-floor context, bidirectional pagination, and anchored opening, remote
+media, forum metadata and
 featured classifications, server-defined forum channels with independent
 sorting and cursor pagination, complete public forum introductions, forum rules,
 moderator teams, and shared-thread origin cards with original media and
 navigation, plus anonymous single- and multiple-choice poll results, post
-author forum levels, IP locations, read-only net approval counts, post sorting,
-page jumps, an only-thread-author filter, and in-app public-profile navigation
+author forum levels, bounded forum-moderator roles, IP locations, read-only net
+approval counts, post sorting, page jumps, an only-thread-author filter, and in-app public-profile navigation
 from user mentions without dropping reply context.
 Forum, channel, hot-topic, global-search, and public-profile thread lists share
 a metadata-aware card that distinguishes pinned, featured, live, shared, and

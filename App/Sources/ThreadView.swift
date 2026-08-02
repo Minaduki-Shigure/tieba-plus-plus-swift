@@ -653,6 +653,7 @@ private struct PostView: View {
       portraitURL: post.authorPortraitURL,
       level: post.authorLevel,
       isThreadAuthor: post.isThreadAuthor,
+      moderatorRole: post.moderatorRole,
       floor: post.floor,
       date: post.createdAt,
       ipLocation: post.authorIPLocation,

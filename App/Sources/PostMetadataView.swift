@@ -5,6 +5,7 @@ struct PostAuthorIdentityView: View {
   let portraitURL: URL?
   let level: Int
   let isThreadAuthor: Bool
+  let moderatorRole: BrowseModeratorRole?
   let floor: Int?
   let date: Date?
   let ipLocation: String
@@ -16,6 +17,7 @@ struct PostAuthorIdentityView: View {
     portraitURL: URL?,
     level: Int,
     isThreadAuthor: Bool,
+    moderatorRole: BrowseModeratorRole? = nil,
     floor: Int? = nil,
     date: Date?,
     ipLocation: String,
@@ -26,6 +28,7 @@ struct PostAuthorIdentityView: View {
     self.portraitURL = portraitURL
     self.level = level
     self.isThreadAuthor = isThreadAuthor
+    self.moderatorRole = moderatorRole
     self.floor = floor
     self.date = date
     self.ipLocation = ipLocation
@@ -40,7 +43,8 @@ struct PostAuthorIdentityView: View {
         PostAuthorNameLine(
           name: name,
           level: level,
-          isThreadAuthor: isThreadAuthor
+          isThreadAuthor: isThreadAuthor,
+          moderatorRole: moderatorRole
         )
         PostContextLine(floor: floor, date: date, ipLocation: ipLocation)
       }
@@ -49,6 +53,7 @@ struct PostAuthorIdentityView: View {
         Image(systemName: "chevron.right")
           .font(.caption.weight(.semibold))
           .foregroundStyle(.tertiary)
+          .accessibilityHidden(true)
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -56,33 +61,110 @@ struct PostAuthorIdentityView: View {
   }
 }
 
+enum PostAuthorBadge: Hashable, Sendable {
+  case level(Int)
+  case moderator(BrowseModeratorRole)
+  case threadAuthor
+
+  var title: String {
+    switch self {
+    case .level(let level):
+      "Lv.\(level)"
+    case .moderator(let role):
+      role.title
+    case .threadAuthor:
+      "楼主"
+    }
+  }
+
+  var accessibilityLabel: String {
+    switch self {
+    case .level(let level):
+      "本吧等级 \(level)"
+    case .moderator(let role):
+      "本吧身份：\(role.title)"
+    case .threadAuthor:
+      "本帖楼主"
+    }
+  }
+}
+
 struct PostAuthorNameLine: View {
   let name: String
   let level: Int
   let isThreadAuthor: Bool
+  let moderatorRole: BrowseModeratorRole?
 
   var body: some View {
-    HStack(spacing: 5) {
-      Text(name)
-        .font(.subheadline.weight(.semibold))
-        .lineLimit(1)
-        .layoutPriority(1)
+    if badges.isEmpty {
+      authorName
+    } else {
+      ViewThatFits(in: .horizontal) {
+        HStack(spacing: 5) {
+          authorName
+          badgeRow
+        }
+        .fixedSize(horizontal: true, vertical: false)
 
-      if level > 0 {
-        Text("Lv.\(level)")
-          .font(.caption2.weight(.semibold))
-          .foregroundStyle(.tint)
-          .fixedSize()
-          .accessibilityLabel("本吧等级 \(level)")
-      }
-
-      if isThreadAuthor {
-        Text("楼主")
-          .font(.caption2.weight(.medium))
-          .foregroundStyle(.tint)
-          .fixedSize()
+        VStack(alignment: .leading, spacing: 3) {
+          authorName
+          badgeRow
+        }
       }
     }
+  }
+
+  static func badges(
+    level: Int,
+    moderatorRole: BrowseModeratorRole?,
+    isThreadAuthor: Bool
+  ) -> [PostAuthorBadge] {
+    var result: [PostAuthorBadge] = []
+    if level > 0 { result.append(.level(level)) }
+    if let moderatorRole { result.append(.moderator(moderatorRole)) }
+    if isThreadAuthor { result.append(.threadAuthor) }
+    return result
+  }
+
+  private var badges: [PostAuthorBadge] {
+    Self.badges(
+      level: level,
+      moderatorRole: moderatorRole,
+      isThreadAuthor: isThreadAuthor
+    )
+  }
+
+  private var authorName: some View {
+    Text(name)
+      .font(.subheadline.weight(.semibold))
+      .lineLimit(1)
+      .minimumScaleFactor(0.8)
+      .layoutPriority(1)
+  }
+
+  private var badgeRow: some View {
+    ViewThatFits(in: .horizontal) {
+      HStack(spacing: 5) {
+        ForEach(badges, id: \.self) { badge in
+          badgeView(badge)
+        }
+      }
+      .fixedSize(horizontal: true, vertical: false)
+
+      VStack(alignment: .leading, spacing: 2) {
+        ForEach(badges, id: \.self) { badge in
+          badgeView(badge)
+        }
+      }
+    }
+  }
+
+  private func badgeView(_ badge: PostAuthorBadge) -> some View {
+    Text(badge.title)
+      .font(.caption2.weight(.semibold))
+      .foregroundStyle(.tint)
+      .fixedSize()
+      .accessibilityLabel(badge.accessibilityLabel)
   }
 }
 

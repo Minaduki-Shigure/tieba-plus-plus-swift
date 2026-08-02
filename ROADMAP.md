@@ -40,7 +40,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Full nested-reply pages with parent-floor context and bidirectional anchored pagination
 - Shared-thread origin cards with original content, media, and navigation
 - Anonymous single- and multiple-choice poll result cards
-- Read-only post and nested-reply scores, author forum levels, and IP locations
+- Read-only scores, author forum levels, bounded moderator roles, and IP locations
 - Lossless nested-reply context and public-profile links for user mentions
 - Public user profiles opened from post and nested-reply authors
 - Limited public liked-forum previews with direct forum navigation
@@ -206,10 +206,14 @@ fallback for missing totals; zero and inconsistent totals cannot produce an
 invalid or oversized progress bar. Poll submission remains unsupported.
 
 Post and nested-reply headers preserve the public author context already present
-in anonymous responses: the author's level in that forum, the server-supplied IP
-location, and `diff_agree_num` as the displayed net approval score. Missing or
-malformed values collapse to a quiet empty state instead of creating a control.
-These values are response snapshots only; anonymous cards do not submit likes.
+in anonymous responses: the author's level in that forum, bounded forum-moderator
+role, server-supplied IP location, and `diff_agree_num` as the displayed net
+approval score. Moderator roles normalize only recognized manager and assistant
+wire values; a flagged but empty or unknown value becomes the generic `吧务`
+label. The raw role string and arbitrary badge images never enter the UI. Missing
+or malformed values collapse to a quiet empty state instead of creating a
+control. These values are response snapshots only; anonymous cards do not submit
+likes or expose moderation actions.
 
 Nested replies preserve every server content fragment, including both direct
 leading mentions and the legacy `reply + mention + colon` form. Positive mention

@@ -99,6 +99,14 @@ context, not the device's current location; displaying it must never request
 Core Location permission. These values are not persisted in local history, and
 their static labels must not call an agree, disagree, or profile-write endpoint.
 
+Forum-moderator roles come from that same anonymous author object and are
+normalized into a closed manager, assistant, or generic-moderator enum. Raw,
+empty, oversized, newline-bearing, or unknown role text must never be rendered;
+an already flagged unknown role can only produce the fixed generic `吧务` label.
+The badge is scoped to the current forum response and must not be promoted to a
+global identity, persisted, copied into post text, or used to expose management
+requests or authorization decisions.
+
 Inline nested-reply previews are decoded from the existing anonymous post
 response. Enabling them adds only the public `with_floor`, `floor_sort_type`, and
 bounded `floor_rn` fields to that credential-free request; it must not attach an

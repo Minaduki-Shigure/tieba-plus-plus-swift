@@ -88,8 +88,9 @@ let followed = try await authenticatedClient.getFollowedForums(
   compatibility fallback.
 - Post and nested-reply agreement summaries use `diff_agree_num` when present,
   falling back to the difference between raw agree and disagree counts for
-  older responses. Author forum levels and IP locations come from the same
-  anonymous response and do not require a separate profile request.
+  older responses. Author forum levels, bounded moderator roles, and IP locations
+  come from the same anonymous response and do not require a separate profile
+  request.
 - Nested-reply content is lossless. Reply-target metadata recognizes both a
   direct leading mention and the legacy `reply + mention` prefix without
   removing the corresponding content fragments.

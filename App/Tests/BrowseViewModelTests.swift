@@ -247,9 +247,10 @@ final class BrowseViewModelTests: XCTestCase {
       gender: .unknown,
       ipLocation: " Shanghai ",
       badges: [],
-      isModerator: false,
+      isModerator: true,
       isVIP: false,
-      isVerifiedCreator: false
+      isVerifiedCreator: false,
+      moderatorRole: .manager
     )
     let post = TiebaPost(
       id: 101,
@@ -291,10 +292,12 @@ final class BrowseViewModelTests: XCTestCase {
 
     XCTAssertEqual(mappedPost.authorLevel, 12)
     XCTAssertEqual(mappedPost.authorIPLocation, "Shanghai")
+    XCTAssertEqual(mappedPost.moderatorRole, .manager)
     XCTAssertEqual(mappedPost.agreeScore, 5)
     XCTAssertTrue(mappedPost.isThreadAuthor)
     XCTAssertEqual(mappedComment.authorLevel, 12)
     XCTAssertEqual(mappedComment.authorIPLocation, "Shanghai")
+    XCTAssertEqual(mappedComment.moderatorRole, .manager)
     XCTAssertEqual(mappedComment.agreeScore, 3)
     XCTAssertTrue(mappedComment.isThreadAuthor)
     XCTAssertEqual(mappedComment.replyToUserID, 77)
@@ -303,6 +306,8 @@ final class BrowseViewModelTests: XCTestCase {
       mappedComment.contents,
       [.mention(name: "Target User", userID: 77), .text(" hello")]
     )
+    XCTAssertEqual(mappedPost.withLocalVisibility(.hidden).moderatorRole, .manager)
+    XCTAssertEqual(mappedComment.withLocalVisibility(.placeholder).moderatorRole, .manager)
 
     let negativeScorePost = TiebaPost(
       id: 103,
@@ -392,9 +397,10 @@ final class BrowseViewModelTests: XCTestCase {
       gender: .unknown,
       ipLocation: " Shanghai ",
       badges: [],
-      isModerator: false,
+      isModerator: true,
       isVIP: false,
-      isVerifiedCreator: false
+      isVerifiedCreator: false,
+      moderatorRole: .assistant
     )
     let forum = TiebaForum(
       id: 1,
@@ -504,6 +510,11 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(mapped.parentPost.floor, 2)
     XCTAssertEqual(mapped.parentPost.authorLevel, 9)
     XCTAssertEqual(mapped.parentPost.authorIPLocation, "Shanghai")
+    XCTAssertEqual(mapped.parentPost.moderatorRole, .assistant)
+    XCTAssertEqual(
+      mapped.parentPost.withLocalVisibility(.hidden).moderatorRole,
+      .assistant
+    )
     XCTAssertEqual(mapped.parentPost.agreeScore, 4)
     XCTAssertEqual(mapped.parentPost.localVisibility, .placeholder)
     XCTAssertEqual(mapped.comments.map(\.id), [301, 304])

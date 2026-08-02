@@ -4,6 +4,70 @@ import XCTest
 @testable import TiebaCore
 
 final class TiebaProtoMapperTests: XCTestCase {
+  func testModeratorRoleNormalizationIsBoundedAndRequiresModeratorFlag() {
+    XCTAssertNil(TiebaProtoMapper.moderatorRole(isModerator: false, rawValue: "manager"))
+    XCTAssertEqual(
+      TiebaProtoMapper.moderatorRole(isModerator: true, rawValue: " Manager\n"),
+      .manager
+    )
+    XCTAssertEqual(
+      TiebaProtoMapper.moderatorRole(isModerator: true, rawValue: "assist"),
+      .assistant
+    )
+    XCTAssertEqual(
+      TiebaProtoMapper.moderatorRole(isModerator: true, rawValue: "ASSISTANT"),
+      .assistant
+    )
+    XCTAssertEqual(
+      TiebaProtoMapper.moderatorRole(isModerator: true, rawValue: ""),
+      .moderator
+    )
+    XCTAssertEqual(
+      TiebaProtoMapper.moderatorRole(
+        isModerator: true,
+        rawValue: String(repeating: "untrusted", count: 100)
+      ),
+      .moderator
+    )
+  }
+
+  func testLegacyModeratorInitializerMaintainsRoleInvariant() {
+    let legacyModerator = TiebaUser(
+      id: 1,
+      username: "moderator",
+      displayName: "Moderator",
+      portrait: "",
+      level: 0,
+      growthLevel: 0,
+      gender: .unknown,
+      ipLocation: "",
+      badges: [],
+      isModerator: true,
+      isVIP: false,
+      isVerifiedCreator: false
+    )
+    let ordinaryUser = TiebaUser(
+      id: 2,
+      username: "ordinary",
+      displayName: "Ordinary",
+      portrait: "",
+      level: 0,
+      growthLevel: 0,
+      gender: .unknown,
+      ipLocation: "",
+      badges: [],
+      isModerator: false,
+      isVIP: false,
+      isVerifiedCreator: false,
+      moderatorRole: .manager
+    )
+
+    XCTAssertEqual(legacyModerator.moderatorRole, .moderator)
+    XCTAssertTrue(legacyModerator.isModerator)
+    XCTAssertNil(ordinaryUser.moderatorRole)
+    XCTAssertFalse(ordinaryUser.isModerator)
+  }
+
   func testUserProfileKeepsOnlyValidUniqueLikedForumPreviews() throws {
     var fixture = ProtoFixtures.userProfile().data
     fixture.user.myLikeNum = 1

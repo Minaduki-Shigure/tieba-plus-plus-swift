@@ -358,6 +358,10 @@ enum TiebaProtoMapper {
       return nil
     }
     let rawGender = proto.gender == 0 ? proto.sex : proto.gender
+    let moderatorRole = moderatorRole(
+      isModerator: proto.isBawu != 0,
+      rawValue: proto.bawuType
+    )
     return TiebaUser(
       id: proto.id,
       username: proto.name,
@@ -368,10 +372,27 @@ enum TiebaProtoMapper {
       gender: TiebaGender(rawValue: rawGender) ?? .unknown,
       ipLocation: proto.ipAddress,
       badges: proto.iconinfo.map(\.name).filter { !$0.isEmpty },
-      isModerator: proto.isBawu != 0,
+      isModerator: moderatorRole != nil,
       isVIP: !proto.newTshowIcon.isEmpty || proto.vipInfo.vStatus != 0,
-      isVerifiedCreator: proto.newGodData.status != 0
+      isVerifiedCreator: proto.newGodData.status != 0,
+      moderatorRole: moderatorRole
     )
+  }
+
+  static func moderatorRole(
+    isModerator: Bool,
+    rawValue: String
+  ) -> TiebaModeratorRole? {
+    guard isModerator else { return nil }
+    guard rawValue.utf8.count <= 64 else { return .moderator }
+    switch rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+    case "manager":
+      return .manager
+    case "assist", "assistant":
+      return .assistant
+    default:
+      return .moderator
+    }
   }
 
   private static func forumModerator(

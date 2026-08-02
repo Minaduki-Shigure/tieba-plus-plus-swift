@@ -583,6 +583,7 @@ struct BrowsePost: Identifiable, Hashable, Sendable {
   let authorPortraitURL: URL?
   let authorLevel: Int
   let authorIPLocation: String
+  let moderatorRole: BrowseModeratorRole?
   let createdAt: Date?
   let nestedReplyCount: Int
   let agreeScore: Int
@@ -604,6 +605,7 @@ struct BrowsePost: Identifiable, Hashable, Sendable {
     contents: [BrowseContent],
     authorLevel: Int = 0,
     authorIPLocation: String = "",
+    moderatorRole: BrowseModeratorRole? = nil,
     agreeScore: Int = 0,
     inlineComments: [BrowseComment] = [],
     localVisibility: LocalContentVisibility = .visible
@@ -616,6 +618,7 @@ struct BrowsePost: Identifiable, Hashable, Sendable {
     self.authorPortraitURL = authorPortraitURL
     self.authorLevel = authorLevel
     self.authorIPLocation = authorIPLocation
+    self.moderatorRole = moderatorRole
     self.createdAt = createdAt
     self.nestedReplyCount = nestedReplyCount
     self.agreeScore = agreeScore
@@ -646,10 +649,28 @@ struct BrowsePost: Identifiable, Hashable, Sendable {
       contents: contents,
       authorLevel: authorLevel,
       authorIPLocation: authorIPLocation,
+      moderatorRole: moderatorRole,
       agreeScore: agreeScore,
       inlineComments: inlineComments,
       localVisibility: visibility
     )
+  }
+}
+
+enum BrowseModeratorRole: Hashable, Sendable {
+  case manager
+  case assistant
+  case moderator
+
+  var title: String {
+    switch self {
+    case .manager:
+      "吧主"
+    case .assistant:
+      "小吧主"
+    case .moderator:
+      "吧务"
+    }
   }
 }
 
@@ -662,6 +683,7 @@ struct CommentParentPostContext: Identifiable, Hashable, Sendable {
   let authorPortraitURL: URL?
   let authorLevel: Int
   let authorIPLocation: String
+  let moderatorRole: BrowseModeratorRole?
   let createdAt: Date?
   let agreeScore: Int
   let isThreadAuthor: Bool
@@ -680,6 +702,7 @@ struct CommentParentPostContext: Identifiable, Hashable, Sendable {
     contents: [BrowseContent],
     authorLevel: Int = 0,
     authorIPLocation: String = "",
+    moderatorRole: BrowseModeratorRole? = nil,
     agreeScore: Int = 0,
     localVisibility: LocalContentVisibility = .visible
   ) {
@@ -691,6 +714,7 @@ struct CommentParentPostContext: Identifiable, Hashable, Sendable {
     self.authorPortraitURL = authorPortraitURL
     self.authorLevel = authorLevel
     self.authorIPLocation = authorIPLocation
+    self.moderatorRole = moderatorRole
     self.createdAt = createdAt
     self.agreeScore = agreeScore
     self.isThreadAuthor = isThreadAuthor
@@ -711,6 +735,7 @@ struct CommentParentPostContext: Identifiable, Hashable, Sendable {
       contents: contents,
       authorLevel: authorLevel,
       authorIPLocation: authorIPLocation,
+      moderatorRole: moderatorRole,
       agreeScore: agreeScore,
       localVisibility: visibility
     )
@@ -724,6 +749,7 @@ struct BrowseComment: Identifiable, Hashable, Sendable {
   let authorPortraitURL: URL?
   let authorLevel: Int
   let authorIPLocation: String
+  let moderatorRole: BrowseModeratorRole?
   let createdAt: Date?
   let agreeScore: Int
   let isThreadAuthor: Bool
@@ -741,6 +767,7 @@ struct BrowseComment: Identifiable, Hashable, Sendable {
     contents: [BrowseContent],
     authorLevel: Int = 0,
     authorIPLocation: String = "",
+    moderatorRole: BrowseModeratorRole? = nil,
     agreeScore: Int = 0,
     isThreadAuthor: Bool = false,
     replyToUserID: Int64? = nil,
@@ -753,6 +780,7 @@ struct BrowseComment: Identifiable, Hashable, Sendable {
     self.authorPortraitURL = authorPortraitURL
     self.authorLevel = authorLevel
     self.authorIPLocation = authorIPLocation
+    self.moderatorRole = moderatorRole
     self.createdAt = createdAt
     self.agreeScore = agreeScore
     self.isThreadAuthor = isThreadAuthor
@@ -772,6 +800,7 @@ struct BrowseComment: Identifiable, Hashable, Sendable {
       contents: contents,
       authorLevel: authorLevel,
       authorIPLocation: authorIPLocation,
+      moderatorRole: moderatorRole,
       agreeScore: agreeScore,
       isThreadAuthor: isThreadAuthor,
       replyToUserID: replyToUserID,

@@ -39,6 +39,12 @@ public enum TiebaGender: Int32, Sendable, Hashable {
   case female = 2
 }
 
+public enum TiebaModeratorRole: Sendable, Hashable {
+  case manager
+  case assistant
+  case moderator
+}
+
 public struct TiebaUser: Identifiable, Sendable, Hashable {
   public let id: Int64
   public let username: String
@@ -49,9 +55,11 @@ public struct TiebaUser: Identifiable, Sendable, Hashable {
   public let gender: TiebaGender
   public let ipLocation: String
   public let badges: [String]
-  public let isModerator: Bool
+  public let moderatorRole: TiebaModeratorRole?
   public let isVIP: Bool
   public let isVerifiedCreator: Bool
+
+  public var isModerator: Bool { moderatorRole != nil }
 
   public init(
     id: Int64,
@@ -65,7 +73,8 @@ public struct TiebaUser: Identifiable, Sendable, Hashable {
     badges: [String],
     isModerator: Bool,
     isVIP: Bool,
-    isVerifiedCreator: Bool
+    isVerifiedCreator: Bool,
+    moderatorRole: TiebaModeratorRole? = nil
   ) {
     self.id = id
     self.username = username
@@ -76,7 +85,7 @@ public struct TiebaUser: Identifiable, Sendable, Hashable {
     self.gender = gender
     self.ipLocation = ipLocation
     self.badges = badges
-    self.isModerator = isModerator
+    self.moderatorRole = isModerator ? (moderatorRole ?? .moderator) : nil
     self.isVIP = isVIP
     self.isVerifiedCreator = isVerifiedCreator
   }

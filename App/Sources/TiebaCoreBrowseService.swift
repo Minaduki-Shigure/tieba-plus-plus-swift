@@ -730,6 +730,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       authorIPLocation: (post.author?.ipLocation ?? "").trimmingCharacters(
         in: .whitespacesAndNewlines
       ),
+      moderatorRole: mapModeratorRole(post.author?.moderatorRole),
       agreeScore: max(post.agreeScore, 0),
       inlineComments: inlineComments
     )
@@ -792,6 +793,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       authorIPLocation: (post.author?.ipLocation ?? "").trimmingCharacters(
         in: .whitespacesAndNewlines
       ),
+      moderatorRole: mapModeratorRole(post.author?.moderatorRole),
       agreeScore: max(post.agreeScore, 0)
     )
   }
@@ -828,6 +830,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       authorIPLocation: (comment.author?.ipLocation ?? "").trimmingCharacters(
         in: .whitespacesAndNewlines
       ),
+      moderatorRole: mapModeratorRole(comment.author?.moderatorRole),
       agreeScore: max(comment.agreeScore, 0),
       isThreadAuthor: comment.isThreadAuthor,
       replyToUserID: comment.replyToUserID.flatMap { $0 > 0 ? $0 : nil },
@@ -857,6 +860,22 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       .unknown
     @unknown default:
       .unknown
+    }
+  }
+
+  private static func mapModeratorRole(
+    _ role: TiebaModeratorRole?
+  ) -> BrowseModeratorRole? {
+    guard let role else { return nil }
+    switch role {
+    case .manager:
+      .manager
+    case .assistant:
+      .assistant
+    case .moderator:
+      .moderator
+    @unknown default:
+      .moderator
     }
   }
 

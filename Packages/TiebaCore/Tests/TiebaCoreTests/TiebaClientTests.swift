@@ -35,6 +35,7 @@ final class TiebaClientTests: XCTestCase {
     XCTAssertEqual(thread.id, 100)
     XCTAssertEqual(thread.author?.preferredName, "Swift Author")
     XCTAssertEqual(thread.author?.portrait, "portrait-token")
+    XCTAssertEqual(thread.author?.moderatorRole, .moderator)
     XCTAssertEqual(thread.content.plainText, "Hello @reader")
     XCTAssertEqual(thread.content.images.first?.width, 640)
     XCTAssertEqual(
@@ -114,6 +115,8 @@ final class TiebaClientTests: XCTestCase {
     XCTAssertTrue(post.isThreadAuthor)
     XCTAssertEqual(post.author?.level, 12)
     XCTAssertEqual(post.author?.ipLocation, "Shanghai")
+    XCTAssertEqual(post.author?.moderatorRole, .manager)
+    XCTAssertEqual(post.author?.isModerator, true)
     XCTAssertEqual(post.agreeCount, 7)
     XCTAssertEqual(post.disagreeCount, 2)
     XCTAssertEqual(post.agreeScore, 5)
@@ -121,6 +124,8 @@ final class TiebaClientTests: XCTestCase {
     XCTAssertEqual(comment.author?.id, 8)
     XCTAssertEqual(comment.author?.level, 9)
     XCTAssertEqual(comment.author?.ipLocation, "Guangdong")
+    XCTAssertEqual(comment.author?.moderatorRole, .assistant)
+    XCTAssertEqual(comment.author?.isModerator, true)
     XCTAssertEqual(comment.parentPostID, post.id)
     XCTAssertEqual(comment.agreeScore, 3)
     XCTAssertEqual(comment.replyToUserID, 9)
@@ -234,12 +239,14 @@ final class TiebaClientTests: XCTestCase {
     let result = try await client.getComments(threadID: 100, postID: 201)
 
     XCTAssertEqual(result.parentPost.id, 201)
+    XCTAssertEqual(result.parentPost.author?.moderatorRole, .manager)
     let comment = try XCTUnwrap(result.comments.first)
     XCTAssertEqual(comment.parentPostID, 201)
     XCTAssertEqual(comment.replyToUserID, 7)
     XCTAssertEqual(comment.replyToUserName, "thread-author")
     XCTAssertEqual(comment.content.plainText, "回复 @thread-author :Nested reply")
     XCTAssertEqual(comment.floor, 2)
+    XCTAssertEqual(comment.author?.moderatorRole, .assistant)
   }
 
   func testAnchoredCommentRequestForwardsBothParentAndCommentIDs() async throws {

@@ -325,6 +325,7 @@ struct CommentsView: View {
       portraitURL: comment.authorPortraitURL,
       level: comment.authorLevel,
       isThreadAuthor: comment.isThreadAuthor,
+      moderatorRole: comment.moderatorRole,
       date: comment.createdAt,
       ipLocation: comment.authorIPLocation,
       avatarSize: 32
