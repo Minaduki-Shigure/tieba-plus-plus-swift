@@ -73,7 +73,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
         returnedPostIDs: Set(response.posts.map(\.id)),
         sort: options.sort
       ),
-      originThread: response.originThread.map(Self.mapOriginThread)
+      originThread: response.originThread.map(Self.mapOriginThread),
+      poll: response.poll.map(Self.mapPoll)
     )
   }
 
@@ -396,6 +397,22 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       createdAt: nil,
       lastReplyAt: nil,
       contents: mapContent(thread.content)
+    )
+  }
+
+  private static func mapPoll(_ poll: TiebaPoll) -> BrowsePoll {
+    BrowsePoll(
+      title: poll.title,
+      isMultipleChoice: poll.isMultipleChoice,
+      participantCount: max(poll.participantCount, 0),
+      totalVoteCount: max(poll.totalVoteCount, 0),
+      options: poll.options.enumerated().map { index, option in
+        BrowsePollOption(
+          id: index,
+          text: option.text,
+          voteCount: max(option.voteCount, 0)
+        )
+      }
     )
   }
 

@@ -68,6 +68,75 @@ final class TiebaProtoMapperTests: XCTestCase {
     XCTAssertNil(TiebaProtoMapper.postPage(fixture).originThread)
   }
 
+  func testPostPageMapsReadOnlyPollAndSanitizesCounts() throws {
+    var fixture = ProtoFixtures.postPage().data
+    fixture.thread.originThreadInfo.pollInfo.title = " Favorite language? "
+    fixture.thread.originThreadInfo.pollInfo.isMulti = 1
+    fixture.thread.originThreadInfo.pollInfo.totalNum = -4
+    fixture.thread.originThreadInfo.pollInfo.totalPoll = -8
+
+    var firstOption = PollInfo.PollOption()
+    firstOption.text = " Swift "
+    firstOption.num = 12
+    var secondOption = PollInfo.PollOption()
+    secondOption.text = " Objective-C "
+    secondOption.num = -3
+    fixture.thread.originThreadInfo.pollInfo.options = [firstOption, secondOption]
+
+    let poll = try XCTUnwrap(TiebaProtoMapper.postPage(fixture).poll)
+
+    XCTAssertEqual(poll.title, "Favorite language?")
+    XCTAssertTrue(poll.isMultipleChoice)
+    XCTAssertEqual(poll.participantCount, 0)
+    XCTAssertEqual(poll.totalVoteCount, 0)
+    XCTAssertEqual(poll.options.map(\.text), ["Swift", "Objective-C"])
+    XCTAssertEqual(poll.options.map(\.voteCount), [12, 0])
+  }
+
+  func testPostPageIgnoresPollMetadataWithoutOptions() {
+    var fixture = ProtoFixtures.postPage().data
+    fixture.thread.originThreadInfo.pollInfo.title = "Empty poll"
+    fixture.thread.originThreadInfo.pollInfo.totalNum = 10
+
+    XCTAssertNil(TiebaProtoMapper.postPage(fixture).poll)
+  }
+
+  func testPostPagePrefersDirectPollWhenBothCarriersArePopulated() throws {
+    var fixture = ProtoFixtures.postPage().data
+    var directOption = PollInfo.PollOption()
+    directOption.text = "Direct option"
+    directOption.num = 2
+    fixture.thread.pollInfo.options = [directOption]
+    fixture.thread.pollInfo.totalPoll = 2
+    var mirroredOption = PollInfo.PollOption()
+    mirroredOption.text = "Mirrored option"
+    mirroredOption.num = 3
+    fixture.thread.originThreadInfo.pollInfo.options = [mirroredOption]
+    fixture.thread.originThreadInfo.pollInfo.totalPoll = 3
+
+    let poll = try XCTUnwrap(TiebaProtoMapper.postPage(fixture).poll)
+
+    XCTAssertEqual(poll.options.map(\.text), ["Direct option"])
+  }
+
+  func testPostPageKeepsSharedOriginPollOffOuterThread() throws {
+    var fixture = ProtoFixtures.postPage().data
+    fixture.thread.isShareThread = 1
+    fixture.thread.originThreadInfo.tid = "900"
+    var option = PollInfo.PollOption()
+    option.text = "Origin option"
+    option.num = 5
+    fixture.thread.originThreadInfo.pollInfo.options = [option]
+    fixture.thread.originThreadInfo.pollInfo.totalPoll = 5
+
+    let result = TiebaProtoMapper.postPage(fixture)
+
+    XCTAssertNil(result.poll)
+    let origin = try XCTUnwrap(result.originThread)
+    let originPoll = try XCTUnwrap(origin.poll)
+    XCTAssertEqual(originPoll.options.map(\.text), ["Origin option"])
+  }
+
   func testForumOverviewRequiresARepresentablePositiveForumID() {
     let mapped = TiebaProtoMapper.forumOverview(ProtoFixtures.forumOverview().data)
     XCTAssertEqual(mapped?.forum.id, 42)

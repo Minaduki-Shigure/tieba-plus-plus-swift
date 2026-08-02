@@ -27,6 +27,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Versioned local browsing history with delete, clear, and recording controls
 - Nested replies, images, video links, and voice playback
 - Shared-thread origin cards with original content, media, and navigation
+- Anonymous single- and multiple-choice poll result cards
 - Public user profiles opened from post and nested-reply authors
 - Paginated public threads on user profiles
 - Independent local forum and thread favorites
@@ -107,3 +108,12 @@ so the app treats it as a share only when `is_share_thread == 1` and the origin
 has a positive, distinct thread ID. Pagination may omit the repeated origin
 object; a loaded card remains until a replacing first-page response says it is
 absent. Opening the origin reuses the normal anonymous thread workflow.
+
+Anonymous poll cards are read-only. Current post responses place an ordinary
+thread's poll in its mirrored `origin_thread_info`, while that same field belongs
+to the original topic when the outer thread is a share. The mapper keeps those
+owners distinct, prefers an authoritative direct poll when present, and uses the
+ordinary thread's mirror as a compatibility fallback.
+Percentages use the server's total option-vote count, with a sanitized option-sum
+fallback for missing totals; zero and inconsistent totals cannot produce an
+invalid or oversized progress bar. Poll submission remains unsupported.

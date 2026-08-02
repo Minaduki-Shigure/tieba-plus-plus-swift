@@ -218,6 +218,7 @@ struct ThreadView: View {
               PostView(
                 post: post,
                 originThread: post.floor == 1 ? viewModel.originThread : nil,
+                poll: post.floor == 1 ? viewModel.poll : nil,
                 service: service,
                 historyRepository: historyRepository,
                 favoritesRepository: favoritesRepository,
@@ -351,6 +352,7 @@ private struct PostFramePreferenceKey: PreferenceKey {
 private struct PostView: View {
   let post: BrowsePost
   let originThread: BrowseThread?
+  let poll: BrowsePoll?
   let service: any BrowseService & UserProfileService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
@@ -383,6 +385,10 @@ private struct PostView: View {
           historyRepository: historyRepository,
           favoritesRepository: favoritesRepository
         )
+      }
+
+      if let poll {
+        PollResultsCard(poll: poll)
       }
 
       if post.nestedReplyCount > 0 {
@@ -427,6 +433,92 @@ private struct PostView: View {
         .opacity(post.authorID > 0 ? 1 : 0)
     }
     .contentShape(Rectangle())
+  }
+}
+
+private struct PollResultsCard: View {
+  let poll: BrowsePoll
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      VStack(alignment: .leading, spacing: 5) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+          Label("投票结果", systemImage: "chart.bar.fill")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.tint)
+          Spacer(minLength: 8)
+          Label(
+            poll.isMultipleChoice ? "多选" : "单选",
+            systemImage: poll.isMultipleChoice ? "checklist" : "checkmark.circle"
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize()
+        }
+
+        Text(pollTitle)
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(.primary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+
+      VStack(alignment: .leading, spacing: 12) {
+        ForEach(poll.options) { option in
+          pollOption(option)
+        }
+      }
+
+      Text("\(max(poll.participantCount, 0)) 人参与")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .monospacedDigit()
+    }
+    .padding(12)
+    .background(Color(uiColor: .secondarySystemGroupedBackground))
+    .clipShape(RoundedRectangle(cornerRadius: 6))
+    .overlay {
+      RoundedRectangle(cornerRadius: 6)
+        .stroke(Color(uiColor: .separator).opacity(0.45), lineWidth: 0.5)
+    }
+    .accessibilityElement(children: .contain)
+  }
+
+  private var pollTitle: String {
+    let title = poll.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    return title.isEmpty ? "投票" : title
+  }
+
+  private func pollOption(_ option: BrowsePollOption) -> some View {
+    let percentage = poll.percentage(for: option)
+    let voteCount = max(option.voteCount, 0)
+    let text = option.text.isEmpty ? "选项 \(option.id + 1)" : option.text
+
+    return VStack(alignment: .leading, spacing: 6) {
+      HStack(alignment: .firstTextBaseline, spacing: 10) {
+        Text(text)
+          .font(.subheadline)
+          .fixedSize(horizontal: false, vertical: true)
+          .frame(maxWidth: .infinity, alignment: .leading)
+        Text("\(voteCount) 票 · \(percentage)%")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .monospacedDigit()
+          .fixedSize()
+      }
+
+      GeometryReader { geometry in
+        ZStack(alignment: .leading) {
+          Capsule()
+            .fill(Color(uiColor: .tertiarySystemFill))
+          Capsule()
+            .fill(Color.accentColor.opacity(0.65))
+            .frame(width: geometry.size.width * CGFloat(poll.progress(for: option)))
+        }
+      }
+      .frame(height: 5)
+    }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("\(text)，\(voteCount) 票，\(percentage)%")
   }
 }
 

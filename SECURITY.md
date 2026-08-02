@@ -78,6 +78,12 @@ different from the outer thread, and all origin links and media must pass the
 same HTTPS normalization used by ordinary post content. Opening an origin uses
 the normal credential-free thread request and must not forward response metadata.
 
+Poll result cards are decoded only from the existing anonymous post response.
+An ordinary thread may use its mirrored origin object as the poll carrier, but a
+shared thread's origin poll must never be attributed to the outer thread. The
+anonymous UI is strictly read-only and must not expose selection state, collect
+votes, call a submission endpoint, or attach account credentials.
+
 Browsing history, local favorites, global search history, and per-forum search
 history are separate versioned JSON archives in Application Support. They use
 atomic writes, enforce bounded archive sizes, refuse to overwrite malformed or

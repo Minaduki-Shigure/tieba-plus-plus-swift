@@ -70,6 +70,11 @@ let followed = try await authenticatedClient.getFollowedForums(
 - Post pages expose a shared-thread origin only when the explicit share flag is
   set and the origin TID is positive and distinct from the outer thread. The
   origin reuses the normal rich-content and media mapping path.
+- Anonymous post pages expose read-only poll results. Observed ordinary poll
+  pages carry the poll in their mirrored origin object, while a shared thread's
+  origin poll remains owned by the original thread. A direct thread poll, when
+  present, is authoritative for the outer thread; the ordinary mirror is its
+  compatibility fallback.
 - Browsing bodies use the endpoint's multipart `data` part and Protocol Buffer
   payload. Search requests use percent-encoded GET query items and JSON.
 - Anonymous requests contain no Cookie, Authorization, BDUSS, STOKEN, device

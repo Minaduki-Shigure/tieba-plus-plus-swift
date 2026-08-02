@@ -110,9 +110,41 @@ struct ThreadPageData: Sendable {
   }
 }
 
+struct BrowsePollOption: Identifiable, Hashable, Sendable {
+  let id: Int
+  let text: String
+  let voteCount: Int64
+}
+
+struct BrowsePoll: Hashable, Sendable {
+  let title: String
+  let isMultipleChoice: Bool
+  let participantCount: Int64
+  let totalVoteCount: Int64
+  let options: [BrowsePollOption]
+
+  func progress(for option: BrowsePollOption) -> Double {
+    let declaredTotal = Double(max(totalVoteCount, 0))
+    let fallbackTotal = options.reduce(0.0) { partialResult, candidate in
+      partialResult + Double(max(candidate.voteCount, 0))
+    }
+    let denominator = declaredTotal > 0 ? declaredTotal : fallbackTotal
+    guard denominator > 0, denominator.isFinite else { return 0 }
+
+    let ratio = Double(max(option.voteCount, 0)) / denominator
+    guard ratio.isFinite else { return 0 }
+    return min(max(ratio, 0), 1)
+  }
+
+  func percentage(for option: BrowsePollOption) -> Int {
+    Int((progress(for: option) * 100).rounded(.down))
+  }
+}
+
 struct PostPageData: Sendable {
   let thread: BrowseThread
   let originThread: BrowseThread?
+  let poll: BrowsePoll?
   let posts: [BrowsePost]
   let currentPage: Int
   let hasMore: Bool
@@ -128,10 +160,12 @@ struct PostPageData: Sendable {
     totalPages: Int = 0,
     totalCount: Int = 0,
     nextPagePostID: Int64? = nil,
-    originThread: BrowseThread? = nil
+    originThread: BrowseThread? = nil,
+    poll: BrowsePoll? = nil
   ) {
     self.thread = thread
     self.originThread = originThread
+    self.poll = poll
     self.posts = posts
     self.currentPage = currentPage
     self.hasMore = hasMore

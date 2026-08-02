@@ -5,6 +5,7 @@ import Foundation
 final class ThreadViewModel: ObservableObject {
   @Published private(set) var thread: BrowseThread
   @Published private(set) var originThread: BrowseThread?
+  @Published private(set) var poll: BrowsePoll?
   @Published private(set) var posts: [BrowsePost] = []
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
@@ -34,6 +35,7 @@ final class ThreadViewModel: ObservableObject {
   ) {
     self.thread = thread
     self.originThread = nil
+    self.poll = nil
     self.service = service
     self.options = options
     self.initialLocation = options.sort == .hot ? nil : initialLocation
@@ -246,6 +248,11 @@ final class ThreadViewModel: ObservableObject {
           originThread = response.originThread
         } else if let responseOriginThread = response.originThread {
           originThread = responseOriginThread
+        }
+        if replacing {
+          poll = response.poll
+        } else if let responsePoll = response.poll {
+          poll = responsePoll
         }
         currentPage = response.currentPage
         totalPages = response.totalPages

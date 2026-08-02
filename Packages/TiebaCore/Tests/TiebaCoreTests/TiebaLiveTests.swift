@@ -10,7 +10,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.13 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.14 integration-test")
     )
     let threads = try await client.getThreads(forumName: "starry", pageSize: 10)
     XCTAssertFalse(threads.threads.isEmpty)
@@ -119,7 +119,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.13 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.14 integration-test")
     )
     let forums = try await client.searchForums(query: "swift")
     XCTAssertFalse(forums.isLoggedIn)
@@ -183,7 +183,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.13 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.14 integration-test")
     )
     let feed = try await client.getThreads(forumName: "steam", pageSize: 100)
     let candidates = feed.threads.filter(\.isShared)
@@ -203,13 +203,53 @@ final class TiebaLiveTests: XCTestCase {
     XCTFail("Public shared-thread candidates did not expose a valid distinct origin context.")
   }
 
+  func testAnonymousPollResultsAndSharedOriginOwnership() async throws {
+    guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
+      throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
+    }
+
+    let client = TiebaClient(
+      configuration: .init(userAgent: "TiebaPlusPlus/0.14 integration-test")
+    )
+    let feed = try await client.getThreads(forumName: "starry", pageSize: 100)
+    var candidateIDs = feed.threads.compactMap { thread -> Int64? in
+      if case .vote = thread.kind { return thread.id }
+      return nil
+    }
+    candidateIDs.append(contentsOf: [9_222_422_736, 8_211_419_000])
+
+    var mappedPoll: TiebaPoll?
+    for threadID in candidateIDs {
+      guard let page = try? await client.getPosts(threadID: threadID, pageSize: 2),
+        let poll = page.poll
+      else { continue }
+      mappedPoll = poll
+      break
+    }
+    let poll = try XCTUnwrap(mappedPoll)
+    XCTAssertGreaterThanOrEqual(poll.options.count, 2)
+    XCTAssertEqual(
+      poll.options.reduce(Int64(0)) { $0 + $1.voteCount },
+      poll.totalVoteCount
+    )
+    XCTAssertGreaterThanOrEqual(poll.participantCount, 0)
+    XCTAssertTrue(poll.options.allSatisfy { $0.voteCount >= 0 })
+
+    let sharedPage = try await client.getPosts(threadID: 8_213_449_397, pageSize: 2)
+    XCTAssertNil(sharedPage.poll)
+    let origin = try XCTUnwrap(sharedPage.originThread)
+    XCTAssertEqual(origin.id, 8_211_419_000)
+    let originPoll = try XCTUnwrap(origin.poll)
+    XCTAssertFalse(originPoll.options.isEmpty)
+  }
+
   func testAnonymousHotTopicListDetailAndPagination() async throws {
     guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
       throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.13 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.14 integration-test")
     )
     let topics = try await client.getHotTopics()
     let topic = try XCTUnwrap(topics.first)
@@ -247,7 +287,7 @@ final class TiebaLiveTests: XCTestCase {
 
     let userID: Int64 = 957_339_815
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.13 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.14 integration-test")
     )
 
     let profile = try await client.getUserProfile(userID: userID)
@@ -269,7 +309,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.13 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.14 integration-test")
     )
     let forumID: Int64 = 2_432_903
 

@@ -33,6 +33,44 @@ final class BrowseViewModelTests: XCTestCase {
     )
   }
 
+  func testPollProgressUsesVoteTotalFallbackAndClampsInvalidRatios() throws {
+    let first = BrowsePollOption(id: 0, text: "First", voteCount: 2)
+    let second = BrowsePollOption(id: 1, text: "Second", voteCount: 1)
+    let fallbackPoll = BrowsePoll(
+      title: "Poll",
+      isMultipleChoice: true,
+      participantCount: 2,
+      totalVoteCount: 0,
+      options: [first, second]
+    )
+
+    XCTAssertEqual(fallbackPoll.progress(for: first), 2.0 / 3.0, accuracy: 0.000_001)
+    XCTAssertEqual(fallbackPoll.percentage(for: first), 66)
+    XCTAssertEqual(fallbackPoll.percentage(for: second), 33)
+
+    let inconsistentPoll = BrowsePoll(
+      title: "Poll",
+      isMultipleChoice: false,
+      participantCount: -1,
+      totalVoteCount: 1,
+      options: [BrowsePollOption(id: 0, text: "Too many", voteCount: 4)]
+    )
+    let option = try XCTUnwrap(inconsistentPoll.options.first)
+    XCTAssertEqual(inconsistentPoll.progress(for: option), 1)
+    XCTAssertEqual(inconsistentPoll.percentage(for: option), 100)
+
+    let emptyTotalPoll = BrowsePoll(
+      title: "Poll",
+      isMultipleChoice: false,
+      participantCount: 0,
+      totalVoteCount: 0,
+      options: [BrowsePollOption(id: 0, text: "None", voteCount: 0)]
+    )
+    let emptyOption = try XCTUnwrap(emptyTotalPoll.options.first)
+    XCTAssertEqual(emptyTotalPoll.progress(for: emptyOption), 0)
+    XCTAssertEqual(emptyTotalPoll.percentage(for: emptyOption), 0)
+  }
+
   @MainActor
   func testForumInitialLoadSucceeds() async throws {
     let service = ScriptedBrowseService()
@@ -444,6 +482,81 @@ final class BrowseViewModelTests: XCTestCase {
 
     XCTAssertNil(viewModel.originThread)
     XCTAssertEqual(viewModel.posts.map(\.id), [4_302])
+  }
+
+  @MainActor
+  func testThreadPollLoadsAndSurvivesPaginationWithoutRepeat() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 44)
+    let poll = Fixtures.poll()
+    let firstPost = Fixtures.post(id: 4_401, threadID: 44, floor: 1)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [firstPost],
+          currentPage: 1,
+          hasMore: true,
+          poll: poll
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 4_402, threadID: 44, floor: 2)],
+          currentPage: 2,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+    XCTAssertEqual(viewModel.poll, poll)
+
+    viewModel.loadMoreIfNeeded(current: firstPost)
+    try await waitUntil { viewModel.posts.map(\.id) == [4_401, 4_402] }
+    XCTAssertEqual(viewModel.poll, poll)
+  }
+
+  @MainActor
+  func testThreadRefreshClearsStalePoll() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 45)
+    let poll = Fixtures.poll()
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 4_501, threadID: 45, floor: 1)],
+          currentPage: 1,
+          hasMore: false,
+          poll: poll
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 4_502, threadID: 45, floor: 1)],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.poll == poll }
+
+    await viewModel.refresh()
+
+    XCTAssertNil(viewModel.poll)
+    XCTAssertEqual(viewModel.posts.map(\.id), [4_502])
   }
 
   @MainActor
@@ -1721,6 +1834,19 @@ private actor ScriptedBrowseService: BrowseService {
 }
 
 private enum Fixtures {
+  static func poll() -> BrowsePoll {
+    BrowsePoll(
+      title: "Favorite language?",
+      isMultipleChoice: false,
+      participantCount: 10,
+      totalVoteCount: 10,
+      options: [
+        BrowsePollOption(id: 0, text: "Swift", voteCount: 8),
+        BrowsePollOption(id: 1, text: "Objective-C", voteCount: 2),
+      ]
+    )
+  }
+
   static func forum(
     name: String,
     classifications: [BrowseForumClassification] = []

@@ -535,6 +535,7 @@ public struct TiebaOriginThread: Identifiable, Sendable, Hashable {
   public let forumName: String
   public let title: String
   public let content: TiebaContent
+  public let poll: TiebaPoll?
 
   public init(
     id: Int64,
@@ -542,7 +543,8 @@ public struct TiebaOriginThread: Identifiable, Sendable, Hashable {
     forumID: Int64,
     forumName: String,
     title: String,
-    content: TiebaContent
+    content: TiebaContent,
+    poll: TiebaPoll? = nil
   ) {
     self.id = id
     self.firstPostID = firstPostID
@@ -550,6 +552,39 @@ public struct TiebaOriginThread: Identifiable, Sendable, Hashable {
     self.forumName = forumName
     self.title = title
     self.content = content
+    self.poll = poll
+  }
+}
+
+public struct TiebaPollOption: Sendable, Hashable {
+  public let text: String
+  public let voteCount: Int64
+
+  public init(text: String, voteCount: Int64) {
+    self.text = text
+    self.voteCount = voteCount
+  }
+}
+
+public struct TiebaPoll: Sendable, Hashable {
+  public let title: String
+  public let isMultipleChoice: Bool
+  public let participantCount: Int64
+  public let totalVoteCount: Int64
+  public let options: [TiebaPollOption]
+
+  public init(
+    title: String,
+    isMultipleChoice: Bool,
+    participantCount: Int64,
+    totalVoteCount: Int64,
+    options: [TiebaPollOption]
+  ) {
+    self.title = title
+    self.isMultipleChoice = isMultipleChoice
+    self.participantCount = participantCount
+    self.totalVoteCount = totalVoteCount
+    self.options = options
   }
 }
 
@@ -681,6 +716,7 @@ public struct TiebaPostPage: Sendable, Hashable {
   public let forum: TiebaForum
   public let thread: TiebaThread
   public let originThread: TiebaOriginThread?
+  public let poll: TiebaPoll?
   public let posts: [TiebaPost]
   public let pagination: TiebaPagination
 
@@ -689,11 +725,13 @@ public struct TiebaPostPage: Sendable, Hashable {
     thread: TiebaThread,
     posts: [TiebaPost],
     pagination: TiebaPagination,
-    originThread: TiebaOriginThread? = nil
+    originThread: TiebaOriginThread? = nil,
+    poll: TiebaPoll? = nil
   ) {
     self.forum = forum
     self.thread = thread
     self.originThread = originThread
+    self.poll = poll
     self.posts = posts
     self.pagination = pagination
   }

@@ -77,7 +77,8 @@ enum TiebaProtoMapper {
       thread: mappedThread,
       posts: posts,
       pagination: pagination(data.page),
-      originThread: originThread(data.thread)
+      originThread: originThread(data.thread),
+      poll: threadPoll(data.thread)
     )
   }
 
@@ -463,7 +464,34 @@ enum TiebaProtoMapper {
         mediaProtos: origin.media,
         video: origin.videoInfo,
         voices: origin.voiceInfo
+      ),
+      poll: poll(origin.pollInfo)
+    )
+  }
+
+  private static func threadPoll(_ proto: ThreadInfo) -> TiebaPoll? {
+    if let directPoll = poll(proto.pollInfo) {
+      return directPoll
+    }
+    guard proto.isShareThread != 1 else { return nil }
+    return poll(proto.originThreadInfo.pollInfo)
+  }
+
+  private static func poll(_ proto: PollInfo) -> TiebaPoll? {
+    let options = proto.options.map { option in
+      TiebaPollOption(
+        text: option.text.trimmingCharacters(in: .whitespacesAndNewlines),
+        voteCount: max(option.num, 0)
       )
+    }
+    guard !options.isEmpty else { return nil }
+
+    return TiebaPoll(
+      title: proto.title.trimmingCharacters(in: .whitespacesAndNewlines),
+      isMultipleChoice: proto.isMulti == 1,
+      participantCount: max(proto.totalNum, 0),
+      totalVoteCount: max(proto.totalPoll, 0),
+      options: options
     )
   }
 
