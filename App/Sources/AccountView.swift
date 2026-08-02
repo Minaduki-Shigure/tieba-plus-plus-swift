@@ -65,14 +65,16 @@ struct AccountView: View {
       }
     }
     .confirmationDialog(
-      "退出当前账户？",
+      "从本机移除当前账户？",
       isPresented: $confirmsLogout,
       titleVisibility: .visible
     ) {
-      Button("退出账户", role: .destructive) {
+      Button("从本机移除", role: .destructive) {
         Task { await viewModel.removeActiveAccount() }
       }
       Button("取消", role: .cancel) {}
+    } message: {
+      Text("这只会删除本机保存的登录会话，不会使已签发的百度登录令牌失效。")
     }
     .confirmationDialog(
       "重置本地账户数据？",
@@ -155,7 +157,7 @@ struct AccountView: View {
             }
 
             Button(role: .destructive) { confirmsLogout = true } label: {
-              Label("退出当前账户", systemImage: "rectangle.portrait.and.arrow.right")
+              Label("从本机移除账户", systemImage: "trash")
             }
             .disabled(viewModel.isMutating)
           }

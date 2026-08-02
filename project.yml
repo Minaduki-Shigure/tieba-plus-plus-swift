@@ -73,6 +73,7 @@ targets:
       - path: App/Tests
     dependencies:
       - target: TiebaPlusPlus
+      - package: TiebaCore
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.minaduki.tieba-plus-plus.tests
