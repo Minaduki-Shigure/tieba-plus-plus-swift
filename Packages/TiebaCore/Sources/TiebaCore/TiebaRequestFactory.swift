@@ -221,6 +221,66 @@ struct TiebaRequestFactory: Sendable {
     )
   }
 
+  func forumOverview(forumID: Int64) throws -> URLRequest {
+    try validate(identifier: forumID, name: "Forum ID")
+
+    var common = CommonReq()
+    common.clientType = 2
+    common.clientVersion = configuration.clientVersion
+
+    var data = GetForumDetailReqIdl.DataReq()
+    data.forumID = forumID
+    data.common = common
+
+    var message = GetForumDetailReqIdl()
+    message.data = data
+    return try request(
+      path: "/c/f/forum/getforumdetail",
+      command: 303_021,
+      protobuf: message.serializedData()
+    )
+  }
+
+  func forumModerators(forumID: Int64) throws -> URLRequest {
+    try validate(identifier: forumID, name: "Forum ID")
+
+    var common = CommonReq()
+    common.clientType = 2
+    common.clientVersion = configuration.clientVersion
+
+    var data = GetBawuInfoReqIdl.DataReq()
+    data.common = common
+    data.fid = UInt64(forumID)
+
+    var message = GetBawuInfoReqIdl()
+    message.data = data
+    return try request(
+      path: "/c/f/forum/getBawuInfo",
+      command: 301_007,
+      protobuf: message.serializedData()
+    )
+  }
+
+  func forumRules(forumID: Int64) throws -> URLRequest {
+    try validate(identifier: forumID, name: "Forum ID")
+
+    var common = CommonReq()
+    common.clientType = 2
+    common.clientVersion = configuration.clientVersion
+
+    var data = ForumRuleDetailReqIdl.DataReq()
+    data.forumID = forumID
+    data.common = common
+
+    var message = ForumRuleDetailReqIdl()
+    message.data = data
+    return try request(
+      path: "/c/f/forum/forumRuleDetail",
+      command: 309_690,
+      protobuf: message.serializedData()
+    )
+  }
+
   func searchForums(query: String) throws -> URLRequest {
     let query = try validatedSearchQuery(query)
     return try webRequest(

@@ -37,6 +37,46 @@ struct BrowseForum: Identifiable, Hashable, Sendable {
   }
 }
 
+struct BrowseForumOverview: Hashable, Sendable {
+  let forum: BrowseForum
+  let introduction: String
+  let originalAvatarURL: URL?
+}
+
+struct BrowseForumModerator: Identifiable, Hashable, Sendable {
+  let id: Int64
+  let username: String
+  let displayName: String
+  let portraitURL: URL?
+  let level: Int
+  let roleName: String
+
+  var preferredName: String {
+    let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+    return name.isEmpty ? username : name
+  }
+}
+
+struct BrowseForumModeratorRole: Identifiable, Hashable, Sendable {
+  let id: Int
+  let name: String
+  let moderators: [BrowseForumModerator]
+}
+
+struct BrowseForumRule: Identifiable, Hashable, Sendable {
+  let id: Int
+  let title: String
+  let contents: [BrowseContent]
+}
+
+struct BrowseForumRules: Hashable, Sendable {
+  let title: String
+  let preface: String
+  let rules: [BrowseForumRule]
+  let publishTime: String
+  let author: BrowseForumModerator?
+}
+
 struct ThreadPageData: Sendable {
   let forum: BrowseForum
   let threads: [BrowseThread]

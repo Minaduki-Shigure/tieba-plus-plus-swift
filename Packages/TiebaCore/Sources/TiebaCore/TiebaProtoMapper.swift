@@ -157,6 +157,91 @@ enum TiebaProtoMapper {
     )
   }
 
+  static func forumOverview(_ data: GetForumDetailResIdl.DataRes) -> TiebaForumOverview? {
+    let proto = data.forumInfo
+    guard let forumID = Int64(exactly: proto.forumID), forumID > 0 else { return nil }
+    let forum = TiebaForum(
+      id: forumID,
+      name: proto.forumName,
+      category: proto.lv1Name,
+      subcategory: "",
+      memberCount: Int(proto.memberCount),
+      threadCount: 0,
+      // This endpoint's thread_count is the displayed post total (aiotieba's post_num).
+      postCount: Int(proto.threadCount),
+      hasModerators: data.electionTab.newStrategyText == "已有吧主",
+      hasRules: false,
+      avatar: proto.avatar,
+      slogan: proto.slogan
+    )
+    return TiebaForumOverview(
+      forum: forum,
+      introduction: content(proto.content).plainText,
+      originalAvatar: proto.avatarOrigin
+    )
+  }
+
+  static func forumModeratorRoles(
+    _ data: GetBawuInfoResIdl.DataRes
+  ) -> [TiebaForumModeratorRole] {
+    data.bawuTeamInfo.bawuTeamList.compactMap { role -> TiebaForumModeratorRole? in
+      let moderators = role.roleInfo.compactMap {
+        forumModerator(
+          id: $0.userID,
+          username: $0.userName,
+          displayName: $0.nameShow,
+          portrait: $0.portrait,
+          level: $0.userLevel,
+          roleName: role.roleName
+        )
+      }
+      guard !role.roleName.isEmpty || !moderators.isEmpty else { return nil }
+      return TiebaForumModeratorRole(name: role.roleName, moderators: moderators)
+    }
+  }
+
+  static func forumRules(
+    _ data: ForumRuleDetailResIdl.DataRes,
+    requestedForumID: Int64
+  ) -> TiebaForumRules {
+    let mappedRules = data.rules.map {
+      TiebaForumRule(
+        title: $0.title,
+        content: content($0.content),
+        status: Int($0.status)
+      )
+    }
+    let author = forumModerator(
+      id: data.bazhu.userID,
+      username: data.bazhu.userName,
+      displayName: data.bazhu.nameShow,
+      portrait: data.bazhu.portrait,
+      level: data.bazhu.userLevel,
+      roleName: data.bazhu.roleName
+    )
+    let responseForumID = Int64(data.forum.forumID)
+    let forum = TiebaForum(
+      id: responseForumID > 0 ? responseForumID : requestedForumID,
+      name: data.forum.forumName,
+      category: "",
+      subcategory: "",
+      memberCount: Int(data.forum.concernNum) ?? 0,
+      threadCount: 0,
+      postCount: Int(data.forum.postNum) ?? 0,
+      hasModerators: author != nil,
+      hasRules: !mappedRules.isEmpty,
+      avatar: data.forum.avatar
+    )
+    return TiebaForumRules(
+      forum: forum,
+      title: data.title,
+      preface: data.preface,
+      rules: mappedRules,
+      publishTime: data.publishTime,
+      author: author
+    )
+  }
+
   private static func pagination(_ proto: Page) -> TiebaPagination {
     let pageSize = Int(proto.pageSize)
     let currentPage = proto.currentPage == 0 && pageSize > 0 ? 1 : Int(proto.currentPage)
@@ -199,17 +284,12 @@ enum TiebaProtoMapper {
     else {
       return nil
     }
-    let portrait =
-      proto.portrait
-      .split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
-      .first
-      .map(String.init) ?? proto.portrait
     let rawGender = proto.gender == 0 ? proto.sex : proto.gender
     return TiebaUser(
       id: proto.id,
       username: proto.name,
       displayName: proto.nameShow,
-      portrait: portrait,
+      portrait: normalizedPortrait(proto.portrait),
       level: Int(proto.levelID),
       growthLevel: Int(proto.userGrowth.levelID),
       gender: TiebaGender(rawValue: rawGender) ?? .unknown,
@@ -219,6 +299,34 @@ enum TiebaProtoMapper {
       isVIP: !proto.newTshowIcon.isEmpty || proto.vipInfo.vStatus != 0,
       isVerifiedCreator: proto.newGodData.status != 0
     )
+  }
+
+  private static func forumModerator(
+    id: Int64,
+    username: String,
+    displayName: String,
+    portrait: String,
+    level: Int32,
+    roleName: String
+  ) -> TiebaForumModerator? {
+    guard id != 0 || !username.isEmpty || !displayName.isEmpty || !portrait.isEmpty else {
+      return nil
+    }
+    return TiebaForumModerator(
+      id: id,
+      username: username,
+      displayName: displayName,
+      portrait: normalizedPortrait(portrait),
+      level: Int(level),
+      roleName: roleName
+    )
+  }
+
+  private static func normalizedPortrait(_ portrait: String) -> String {
+    portrait
+      .split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+      .first
+      .map(String.init) ?? portrait
   }
 
   private static func userThread(_ proto: PostInfoList) -> TiebaThread? {

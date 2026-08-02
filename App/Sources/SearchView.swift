@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SearchView: View {
-  let browseService: any BrowseService & UserProfileService
+  let browseService: any BrowseService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
 
@@ -10,7 +10,7 @@ struct SearchView: View {
 
   init(
     query: String,
-    browseService: any BrowseService & UserProfileService,
+    browseService: any BrowseService & UserProfileService & ForumInformationService,
     searchService: any SearchService,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository

@@ -96,6 +96,12 @@ protocol UserProfileService: Sendable {
     -> UserThreadPageData
 }
 
+protocol ForumInformationService: Sendable {
+  func forumOverview(forumID: Int64) async throws -> BrowseForumOverview
+  func forumModeratorRoles(forumID: Int64) async throws -> [BrowseForumModeratorRole]
+  func forumRules(forumID: Int64) async throws -> BrowseForumRules
+}
+
 enum BrowseError: LocalizedError, Sendable {
   case invalidForumName
   case unavailable(String)

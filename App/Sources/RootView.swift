@@ -3,7 +3,8 @@ import Foundation
 import SwiftUI
 
 struct RootView: View {
-  let service: any BrowseService & SearchService & UserProfileService
+  let service:
+    any BrowseService & SearchService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
 
@@ -12,7 +13,7 @@ struct RootView: View {
   @StateObject private var favoritesViewModel: LocalFavoritesViewModel
 
   init(
-    service: any BrowseService & SearchService & UserProfileService,
+    service: any BrowseService & SearchService & UserProfileService & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository
   ) {

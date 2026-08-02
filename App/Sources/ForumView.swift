@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ForumView: View {
-  let service: any BrowseService & UserProfileService
+  let service: any BrowseService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
 
@@ -9,7 +9,7 @@ struct ForumView: View {
 
   init(
     forumName: String,
-    service: any BrowseService & UserProfileService,
+    service: any BrowseService & UserProfileService & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository
   ) {
@@ -127,8 +127,18 @@ struct ForumView: View {
 
   private var threadList: some View {
     List {
-      ForumHeaderView(forum: viewModel.forum)
-        .listRowSeparator(.hidden)
+      NavigationLink {
+        ForumInformationView(
+          forum: viewModel.forum,
+          service: service,
+          historyRepository: historyRepository,
+          favoritesRepository: favoritesRepository
+        )
+      } label: {
+        ForumHeaderView(forum: viewModel.forum)
+      }
+      .disabled(viewModel.forum.id <= 0)
+      .listRowSeparator(.hidden)
 
       ForEach(viewModel.threads) { thread in
         NavigationLink {

@@ -1,12 +1,21 @@
 # Protocol definition attribution
 
-The Protocol Buffer definitions under `Protos/` are copied from
+Most Protocol Buffer definitions under `Protos/`, including the base anonymous
+forum-detail and moderator-list schemas, are copied from
 [aiotieba](https://github.com/lumina37/aiotieba) at commit
 `bae68256fd250d5178e1447899ffa155c77eda38`.
 
 aiotieba is authored by lumina37 and contributors and is released under the
 Unlicense. A copy of that license is included in `LICENSE.aiotieba`.
 
-Only the dependency closure needed by the anonymous forum, post, and nested
-comment endpoints is included here. The schemas document an unofficial Baidu
-Tieba wire protocol and do not imply endorsement by or affiliation with Baidu.
+The forum-detail response's rich `content` field and the minimal forum-rule
+request and response schemas are adapted from
+[TiebaLite](https://github.com/zzc10086/TiebaLite) at commit
+`5545326b2a8e0d784b2f3dfbcb219c7b121e61c2`, specifically its
+`RecommendForumInfo.proto`, `ForumRule.proto`, and `ForumRuleDetail/` schema
+closure. TiebaLite is authored by zzc10086 and contributors and is released
+under GPL-3.0; this project is distributed under the same license.
+
+Only the dependency closure needed by the implemented anonymous endpoints is
+included here. The schemas document an unofficial Baidu Tieba wire protocol and
+do not imply endorsement by or affiliation with Baidu.

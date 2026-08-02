@@ -1,0 +1,38 @@
+// Minimal schema adapted from TiebaLite's ForumRuleDetail response closure.
+syntax = "proto3";
+
+import "Error.proto";
+import "PbContent.proto";
+
+message ForumRuleDetailResIdl {
+    Error error = 1;
+    message DataRes {
+        message ForumInfo {
+            uint32 forum_id = 1;
+            string forum_name = 2;
+            string avatar = 3;
+            string post_num = 4;
+            string concern_num = 5;
+        }
+        ForumInfo forum = 2;
+        string title = 3;
+        string preface = 4;
+        message ForumRule {
+            string title = 1;
+            repeated PbContent content = 2;
+            int32 status = 3;
+        }
+        repeated ForumRule rules = 5;
+        string publish_time = 10;
+        message Moderator {
+            int64 user_id = 2;
+            string role_name = 4;
+            string portrait = 5;
+            int32 user_level = 6;
+            string user_name = 8;
+            string name_show = 9;
+        }
+        Moderator bazhu = 11;
+    }
+    DataRes data = 2;
+}

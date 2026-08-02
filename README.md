@@ -1,15 +1,18 @@
 # Tieba++ for iOS
 
-An independent, native SwiftUI client for browsing Baidu Tieba. The project is
-implemented from public protocol research and does not include code or assets
-from TiebaLite.
+An independent, native SwiftUI client for browsing Baidu Tieba. The application
+code and assets are implemented independently from public protocol research;
+the minimal attributed protobuf schemas used for interoperability are documented
+in `Packages/TiebaCore/Sources/TiebaProto/NOTICE.md`.
 
 ## Status
 
 Development is in progress. Anonymous mode supports forum and thread search,
 forum, post, and nested-reply browsing, remote media, forum metadata and
-featured classifications, post sorting, page jumps, and an only-thread-author
-filter. Post and nested-reply authors now open credential-free public user
+featured classifications, complete public forum introductions, forum rules,
+and moderator teams, plus post sorting, page jumps, and an only-thread-author
+filter. Moderator rows, post authors, and nested-reply authors open
+credential-free public user
 profiles with profile statistics and paginated public threads. Local browsing
 history records the last visible post ID for stable post orders and restores it
 with the active sort/filter options; the changing hot ranking reopens at its

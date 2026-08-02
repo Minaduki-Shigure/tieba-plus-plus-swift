@@ -190,6 +190,62 @@ final class TiebaClientTests: XCTestCase {
     XCTAssertTrue(lastPage.threads.isEmpty)
   }
 
+  func testMapsAnonymousForumOverviewModeratorsAndRules() async throws {
+    let overviewClient = TiebaClient(
+      transport: StubTransport(body: try ProtoFixtures.forumOverview().serializedData())
+    )
+    let overview = try await overviewClient.getForumOverview(forumID: 42)
+    XCTAssertEqual(overview.forum.id, 42)
+    XCTAssertEqual(overview.forum.name, "swift")
+    XCTAssertEqual(overview.forum.category, "technology")
+    XCTAssertEqual(overview.forum.memberCount, 1_000)
+    XCTAssertEqual(overview.forum.postCount, 3_000)
+    XCTAssertEqual(overview.introduction, "A public forum introduction")
+    XCTAssertEqual(overview.originalAvatar, "https://img.example/forum-original.png")
+    XCTAssertTrue(overview.forum.hasModerators)
+
+    let moderatorsClient = TiebaClient(
+      transport: StubTransport(body: try ProtoFixtures.forumModerators().serializedData())
+    )
+    let moderatorRoles = try await moderatorsClient.getForumModerators(forumID: 42)
+    let ownerRole = try XCTUnwrap(moderatorRoles.first)
+    XCTAssertEqual(ownerRole.name, "吧主")
+    let owner = try XCTUnwrap(ownerRole.moderators.first)
+    XCTAssertEqual(owner.id, 7)
+    XCTAssertEqual(owner.preferredName, "Forum Owner")
+    XCTAssertEqual(owner.portrait, "moderator-portrait")
+    XCTAssertEqual(owner.level, 16)
+    XCTAssertEqual(owner.roleName, ownerRole.name)
+
+    let rulesClient = TiebaClient(
+      transport: StubTransport(body: try ProtoFixtures.forumRules().serializedData())
+    )
+    let rules = try await rulesClient.getForumRules(forumID: 42)
+    XCTAssertEqual(rules.forum.id, 42)
+    XCTAssertEqual(rules.forum.name, "swift")
+    XCTAssertEqual(rules.title, "Swift 吧规")
+    XCTAssertEqual(rules.preface, "Welcome")
+    XCTAssertEqual(rules.publishTime, "2026-08-02")
+    XCTAssertEqual(rules.rules.first?.title, "Be constructive")
+    XCTAssertEqual(
+      rules.rules.first?.content.plainText,
+      "Read before posting and respect other members"
+    )
+    XCTAssertEqual(rules.author?.id, 7)
+    XCTAssertEqual(rules.author?.roleName, "吧主")
+  }
+
+  func testMapsModeratorEndpointServerErrorFromItsSecondResponseField() async throws {
+    var response = GetBawuInfoResIdl()
+    response.error.errorno = 4
+    response.error.errmsg = "forum unavailable"
+    let client = TiebaClient(transport: StubTransport(body: try response.serializedData()))
+
+    await assertClientError(.server(code: 4, message: "forum unavailable")) {
+      _ = try await client.getForumModerators(forumID: 42)
+    }
+  }
+
   func testMapsServerHTTPDecodeAndNetworkErrors() async throws {
     let serverTransport = StubTransport(
       body: try ProtoFixtures.serverError(code: 4, message: "not found").serializedData()

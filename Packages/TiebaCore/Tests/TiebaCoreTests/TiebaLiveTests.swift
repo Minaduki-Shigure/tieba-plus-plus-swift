@@ -10,7 +10,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.5 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.6 integration-test")
     )
     let threads = try await client.getThreads(forumName: "starry", pageSize: 10)
     XCTAssertFalse(threads.threads.isEmpty)
@@ -119,7 +119,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.5 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.6 integration-test")
     )
     let forums = try await client.searchForums(query: "swift")
     XCTAssertFalse(forums.isLoggedIn)
@@ -138,7 +138,7 @@ final class TiebaLiveTests: XCTestCase {
 
     let userID: Int64 = 957_339_815
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.5 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.6 integration-test")
     )
 
     let profile = try await client.getUserProfile(userID: userID)
@@ -152,5 +152,32 @@ final class TiebaLiveTests: XCTestCase {
     XCTAssertFalse(activity.isHidden)
     XCTAssertFalse(activity.threads.isEmpty)
     XCTAssertTrue(activity.threads.allSatisfy { $0.id > 0 && $0.forumID > 0 })
+  }
+
+  func testAnonymousPublicForumOverviewModeratorsAndRules() async throws {
+    guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
+      throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
+    }
+
+    let client = TiebaClient(
+      configuration: .init(userAgent: "TiebaPlusPlus/0.6 integration-test")
+    )
+    let forumID: Int64 = 2_432_903
+
+    let overview = try await client.getForumOverview(forumID: forumID)
+    XCTAssertEqual(overview.forum.id, forumID)
+    XCTAssertEqual(overview.forum.name.lowercased(), "minecraft")
+    XCTAssertFalse(overview.introduction.isEmpty)
+    XCTAssertGreaterThan(overview.forum.memberCount, 0)
+
+    let moderatorRoles = try await client.getForumModerators(forumID: forumID)
+    XCTAssertFalse(moderatorRoles.isEmpty)
+    XCTAssertTrue(moderatorRoles.contains { !$0.moderators.isEmpty })
+
+    let rules = try await client.getForumRules(forumID: forumID)
+    XCTAssertEqual(rules.forum.id, forumID)
+    XCTAssertFalse(rules.title.isEmpty)
+    XCTAssertFalse(rules.rules.isEmpty)
+    XCTAssertTrue(rules.rules.contains { !$0.content.fragments.isEmpty })
   }
 }

@@ -363,6 +363,98 @@ public struct TiebaForum: Identifiable, Sendable, Hashable {
   }
 }
 
+public struct TiebaForumOverview: Sendable, Hashable {
+  public let forum: TiebaForum
+  public let introduction: String
+  public let originalAvatar: String
+
+  public init(
+    forum: TiebaForum,
+    introduction: String,
+    originalAvatar: String
+  ) {
+    self.forum = forum
+    self.introduction = introduction
+    self.originalAvatar = originalAvatar
+  }
+}
+
+public struct TiebaForumModerator: Identifiable, Sendable, Hashable {
+  public let id: Int64
+  public let username: String
+  public let displayName: String
+  public let portrait: String
+  public let level: Int
+  public let roleName: String
+
+  public init(
+    id: Int64,
+    username: String,
+    displayName: String,
+    portrait: String,
+    level: Int,
+    roleName: String
+  ) {
+    self.id = id
+    self.username = username
+    self.displayName = displayName
+    self.portrait = portrait
+    self.level = level
+    self.roleName = roleName
+  }
+
+  public var preferredName: String {
+    displayName.isEmpty ? username : displayName
+  }
+}
+
+public struct TiebaForumModeratorRole: Sendable, Hashable {
+  public let name: String
+  public let moderators: [TiebaForumModerator]
+
+  public init(name: String, moderators: [TiebaForumModerator]) {
+    self.name = name
+    self.moderators = moderators
+  }
+}
+
+public struct TiebaForumRule: Sendable, Hashable {
+  public let title: String
+  public let content: TiebaContent
+  public let status: Int
+
+  public init(title: String, content: TiebaContent, status: Int) {
+    self.title = title
+    self.content = content
+    self.status = status
+  }
+}
+
+public struct TiebaForumRules: Sendable, Hashable {
+  public let forum: TiebaForum
+  public let title: String
+  public let preface: String
+  public let rules: [TiebaForumRule]
+  public let publishTime: String
+  public let author: TiebaForumModerator?
+
+  public init(
+    forum: TiebaForum,
+    title: String,
+    preface: String,
+    rules: [TiebaForumRule],
+    publishTime: String,
+    author: TiebaForumModerator?
+  ) {
+    self.forum = forum
+    self.title = title
+    self.preface = preface
+    self.rules = rules
+    self.publishTime = publishTime
+    self.author = author
+  }
+}
+
 public struct TiebaThread: Identifiable, Sendable, Hashable {
   public let id: Int64
   public let firstPostID: Int64

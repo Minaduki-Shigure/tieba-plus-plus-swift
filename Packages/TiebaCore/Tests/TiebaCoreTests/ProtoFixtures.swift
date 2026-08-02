@@ -341,6 +341,83 @@ enum ProtoFixtures {
     return response
   }
 
+  static func forumOverview() -> GetForumDetailResIdl {
+    var forum = GetForumDetailResIdl.DataRes.RecommendForumInfo()
+    forum.forumID = 42
+    forum.forumName = "swift"
+    forum.avatar = "https://img.example/forum-small.png"
+    forum.avatarOrigin = "https://img.example/forum-original.png"
+    forum.memberCount = 1_000
+    forum.threadCount = 3_000
+    forum.slogan = "A short forum slogan"
+    forum.content = [text("A public forum introduction")]
+    forum.lv1Name = "technology"
+
+    var data = GetForumDetailResIdl.DataRes()
+    data.forumInfo = forum
+    data.electionTab.newStrategyText = "已有吧主"
+
+    var response = GetForumDetailResIdl()
+    response.data = data
+    return response
+  }
+
+  static func forumModerators() -> GetBawuInfoResIdl {
+    var moderator =
+      GetBawuInfoResIdl.DataRes.BawuTeam.BawuRoleDes.BawuRoleInfoPub()
+    moderator.userID = 7
+    moderator.userName = "forum-owner"
+    moderator.nameShow = "Forum Owner"
+    moderator.portrait = "moderator-portrait?t=1234567890"
+    moderator.userLevel = 16
+
+    var role = GetBawuInfoResIdl.DataRes.BawuTeam.BawuRoleDes()
+    role.roleName = "吧主"
+    role.roleInfo = [moderator]
+
+    var data = GetBawuInfoResIdl.DataRes()
+    data.bawuTeamInfo.totalNum = 1
+    data.bawuTeamInfo.bawuTeamList = [role]
+
+    var response = GetBawuInfoResIdl()
+    response.data = data
+    return response
+  }
+
+  static func forumRules() -> ForumRuleDetailResIdl {
+    var forum = ForumRuleDetailResIdl.DataRes.ForumInfo()
+    forum.forumID = 42
+    forum.forumName = "swift"
+    forum.avatar = "https://img.example/forum.png"
+    forum.postNum = "3000"
+    forum.concernNum = "1000"
+
+    var rule = ForumRuleDetailResIdl.DataRes.ForumRule()
+    rule.title = "Be constructive"
+    rule.content = [text("Read before posting"), text(" and respect other members")]
+    rule.status = 1
+
+    var author = ForumRuleDetailResIdl.DataRes.Moderator()
+    author.userID = 7
+    author.roleName = "吧主"
+    author.userName = "forum-owner"
+    author.nameShow = "Forum Owner"
+    author.portrait = "moderator-portrait?t=1234567890"
+    author.userLevel = 16
+
+    var data = ForumRuleDetailResIdl.DataRes()
+    data.forum = forum
+    data.title = "Swift 吧规"
+    data.preface = "Welcome"
+    data.rules = [rule]
+    data.publishTime = "2026-08-02"
+    data.bazhu = author
+
+    var response = ForumRuleDetailResIdl()
+    response.data = data
+    return response
+  }
+
   static func serverError(code: Int32, message: String) -> FrsPageResIdl {
     var response = FrsPageResIdl()
     response.error.errorno = code

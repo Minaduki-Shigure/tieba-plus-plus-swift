@@ -1,0 +1,12 @@
+// Minimal schema adapted from TiebaLite's ForumRuleDetail request.
+syntax = "proto3";
+
+import "CommonReq.proto";
+
+message ForumRuleDetailReqIdl {
+    message DataReq {
+        int64 forum_id = 1;
+        CommonReq common = 2;
+    }
+    DataReq data = 1;
+}

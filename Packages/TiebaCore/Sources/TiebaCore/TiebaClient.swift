@@ -13,7 +13,7 @@ public struct TiebaClientConfiguration: Sendable, Hashable {
 
   public init(
     clientVersion: String = "12.64.1.1",
-    userAgent: String = "TiebaPlusPlus/0.5 (iOS)",
+    userAgent: String = "TiebaPlusPlus/0.6 (iOS)",
     requestTimeout: TimeInterval = 30
   ) {
     self.clientVersion = clientVersion
@@ -179,6 +179,35 @@ public actor TiebaClient {
       requestedPage: page,
       pageSize: pageSize
     )
+  }
+
+  public func getForumOverview(forumID: Int64) async throws -> TiebaForumOverview {
+    let request = try requestFactory.forumOverview(forumID: forumID)
+    let body = try await send(request)
+    let response: GetForumDetailResIdl = try decode(body)
+    try checkServerError(code: response.error.errorno, message: response.error.errmsg)
+    guard let overview = TiebaProtoMapper.forumOverview(response.data) else {
+      throw TiebaClientError.invalidProtobuf
+    }
+    return overview
+  }
+
+  public func getForumModerators(
+    forumID: Int64
+  ) async throws -> [TiebaForumModeratorRole] {
+    let request = try requestFactory.forumModerators(forumID: forumID)
+    let body = try await send(request)
+    let response: GetBawuInfoResIdl = try decode(body)
+    try checkServerError(code: response.error.errorno, message: response.error.errmsg)
+    return TiebaProtoMapper.forumModeratorRoles(response.data)
+  }
+
+  public func getForumRules(forumID: Int64) async throws -> TiebaForumRules {
+    let request = try requestFactory.forumRules(forumID: forumID)
+    let body = try await send(request)
+    let response: ForumRuleDetailResIdl = try decode(body)
+    try checkServerError(code: response.error.errorno, message: response.error.errmsg)
+    return TiebaProtoMapper.forumRules(response.data, requestedForumID: forumID)
   }
 
   public func searchForums(query: String) async throws -> TiebaForumSearchResults {

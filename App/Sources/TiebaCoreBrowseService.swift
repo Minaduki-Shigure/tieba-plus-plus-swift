@@ -1,7 +1,9 @@
 import Foundation
 import TiebaCore
 
-struct TiebaCoreBrowseService: BrowseService, SearchService, UserProfileService {
+struct TiebaCoreBrowseService: BrowseService, SearchService, UserProfileService,
+  ForumInformationService
+{
   private let client: TiebaClient
 
   init(client: TiebaClient = TiebaClient()) {
@@ -184,6 +186,64 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, UserProfileService 
     )
   }
 
+  func forumOverview(forumID: Int64) async throws -> BrowseForumOverview {
+    let response: TiebaForumOverview
+    do {
+      response = try await client.getForumOverview(forumID: forumID)
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    return BrowseForumOverview(
+      forum: Self.mapForum(response.forum, fallbackName: response.forum.name),
+      introduction: response.introduction,
+      originalAvatarURL: SecureTiebaURL.media(response.originalAvatar)
+    )
+  }
+
+  func forumModeratorRoles(forumID: Int64) async throws -> [BrowseForumModeratorRole] {
+    let response: [TiebaForumModeratorRole]
+    do {
+      response = try await client.getForumModerators(forumID: forumID)
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    return response.enumerated().map { index, role in
+      BrowseForumModeratorRole(
+        id: index,
+        name: role.name,
+        moderators: role.moderators.map(Self.mapForumModerator)
+      )
+    }
+  }
+
+  func forumRules(forumID: Int64) async throws -> BrowseForumRules {
+    let response: TiebaForumRules
+    do {
+      response = try await client.getForumRules(forumID: forumID)
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    return BrowseForumRules(
+      title: response.title,
+      preface: response.preface,
+      rules: response.rules.enumerated().map { index, rule in
+        BrowseForumRule(
+          id: index,
+          title: rule.title,
+          contents: Self.mapContent(rule.content)
+        )
+      },
+      publishTime: response.publishTime,
+      author: response.author.map(Self.mapForumModerator)
+    )
+  }
+
   private static func mapThread(_ thread: TiebaThread) -> BrowseThread {
     BrowseThread(
       id: thread.id,
@@ -216,6 +276,19 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, UserProfileService 
       featuredClassifications: forum.featuredClassifications.map {
         BrowseForumClassification(id: $0.id, name: $0.name)
       }
+    )
+  }
+
+  private static func mapForumModerator(
+    _ moderator: TiebaForumModerator
+  ) -> BrowseForumModerator {
+    BrowseForumModerator(
+      id: moderator.id,
+      username: moderator.username,
+      displayName: moderator.displayName,
+      portraitURL: SecureTiebaURL.portrait(moderator.portrait),
+      level: moderator.level,
+      roleName: moderator.roleName
     )
   }
 

@@ -235,18 +235,25 @@ final class TiebaRequestFactoryTests: XCTestCase {
       try factory.comments(threadID: 1, anchorID: 2, page: 1, anchorIsComment: false),
       try factory.userProfile(userID: 957_339_815),
       try factory.userThreads(userID: 957_339_815, page: 1, pageSize: 20),
+      try factory.forumOverview(forumID: 42),
+      try factory.forumModerators(forumID: 42),
+      try factory.forumRules(forumID: 42),
     ]
 
     XCTAssertEqual(
       requests.map(\.url?.path),
       [
         "/c/f/frs/page", "/c/f/pb/page", "/c/f/pb/floor", "/c/u/user/profile",
-        "/c/u/feed/userpost",
+        "/c/u/feed/userpost", "/c/f/forum/getforumdetail", "/c/f/forum/getBawuInfo",
+        "/c/f/forum/forumRuleDetail",
       ]
     )
     XCTAssertEqual(
       requests.map(\.url?.query),
-      ["cmd=301001", "cmd=302001", "cmd=302002", "cmd=303012", "cmd=303002"]
+      [
+        "cmd=301001", "cmd=302001", "cmd=302002", "cmd=303012", "cmd=303002",
+        "cmd=303021", "cmd=301007", "cmd=309690",
+      ]
     )
     for request in requests {
       XCTAssertEqual(request.url?.scheme, "https")
@@ -297,6 +304,45 @@ final class TiebaRequestFactoryTests: XCTestCase {
     XCTAssertEqual(threads.data.isViewCard, 1)
     XCTAssertEqual(threads.data.common.bduss, "")
     XCTAssertEqual(threads.data.common.stoken, "")
+  }
+
+  func testPublicForumMetadataRequestsMatchWireFixtures() throws {
+    let overviewRequest = try factory.forumOverview(forumID: 42)
+    let overviewPayload = try protobufPayload(from: overviewRequest)
+    let overviewFixture = try XCTUnwrap(
+      Data(hexString: "0a11082a120d0802120931322e36342e312e31")
+    )
+    let overview = try GetForumDetailReqIdl(serializedBytes: overviewPayload)
+    XCTAssertEqual(overview, try GetForumDetailReqIdl(serializedBytes: overviewFixture))
+    XCTAssertEqual(overview.data.forumID, 42)
+    XCTAssertEqual(overview.data.common.clientType, 2)
+    XCTAssertEqual(overview.data.common.clientVersion, "12.64.1.1")
+    XCTAssertEqual(overview.data.common.bduss, "")
+    XCTAssertEqual(overview.data.common.stoken, "")
+
+    let moderatorsRequest = try factory.forumModerators(forumID: 42)
+    let moderatorsPayload = try protobufPayload(from: moderatorsRequest)
+    let moderatorsFixture = try XCTUnwrap(
+      Data(hexString: "0a110a0d0802120931322e36342e312e31102a")
+    )
+    let moderators = try GetBawuInfoReqIdl(serializedBytes: moderatorsPayload)
+    XCTAssertEqual(moderators, try GetBawuInfoReqIdl(serializedBytes: moderatorsFixture))
+    XCTAssertEqual(moderators.data.fid, 42)
+    XCTAssertEqual(moderators.data.common.clientType, 2)
+    XCTAssertEqual(moderators.data.common.bduss, "")
+    XCTAssertEqual(moderators.data.common.stoken, "")
+
+    let rulesRequest = try factory.forumRules(forumID: 42)
+    let rulesPayload = try protobufPayload(from: rulesRequest)
+    let rulesFixture = try XCTUnwrap(
+      Data(hexString: "0a11082a120d0802120931322e36342e312e31")
+    )
+    let rules = try ForumRuleDetailReqIdl(serializedBytes: rulesPayload)
+    XCTAssertEqual(rules, try ForumRuleDetailReqIdl(serializedBytes: rulesFixture))
+    XCTAssertEqual(rules.data.forumID, 42)
+    XCTAssertEqual(rules.data.common.clientType, 2)
+    XCTAssertEqual(rules.data.common.bduss, "")
+    XCTAssertEqual(rules.data.common.stoken, "")
   }
 
   func testRejectsInvalidArgumentsAndHeaderInjection() throws {
@@ -358,6 +404,9 @@ final class TiebaRequestFactoryTests: XCTestCase {
     XCTAssertThrowsError(try factory.userProfile(userID: 0))
     XCTAssertThrowsError(try factory.userThreads(userID: 1, page: 0, pageSize: 20))
     XCTAssertThrowsError(try factory.userThreads(userID: 1, page: 1, pageSize: 101))
+    XCTAssertThrowsError(try factory.forumOverview(forumID: 0))
+    XCTAssertThrowsError(try factory.forumModerators(forumID: -1))
+    XCTAssertThrowsError(try factory.forumRules(forumID: 0))
     XCTAssertThrowsError(try injected.searchForums(query: "swift"))
   }
 
