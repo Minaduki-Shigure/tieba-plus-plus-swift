@@ -423,7 +423,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     )
   }
 
-  private static func mapThread(_ thread: TiebaThread) -> BrowseThread {
+  static func mapThread(_ thread: TiebaThread) -> BrowseThread {
     BrowseThread(
       id: thread.id,
       forumID: thread.forumID,
@@ -436,11 +436,51 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       createdAt: thread.createdAt,
       lastReplyAt: thread.lastReplyAt,
       contents: mapContent(thread.content),
-      authorID: thread.author?.id ?? 0
+      authorID: thread.author?.id ?? 0,
+      firstPostID: thread.firstPostID,
+      shareCount: max(thread.shareCount, 0),
+      agreeCount: max(thread.agreeCount, 0),
+      disagreeCount: max(thread.disagreeCount, 0),
+      kind: mapThreadKind(thread.kind),
+      tabID: thread.tabID,
+      isPinned: thread.isPinned,
+      isFeatured: thread.isFeatured,
+      isShared: thread.isShared,
+      isServerHidden: thread.isHidden,
+      isLive: thread.isLive
     )
   }
 
-  private static func mapOriginThread(_ thread: TiebaOriginThread) -> BrowseThread {
+  private static func mapThreadKind(_ kind: TiebaThreadKind) -> BrowseThreadKind {
+    switch kind {
+    case .article:
+      .article
+    case .album:
+      .album
+    case .externalShare:
+      .externalShare
+    case .voice:
+      .voice
+    case .cloudDrive:
+      .cloudDrive
+    case .story:
+      .story
+    case .video:
+      .video
+    case .live:
+      .live
+    case .help:
+      .help
+    case .vote:
+      .vote
+    case .lottery:
+      .lottery
+    case .unknown(let rawValue):
+      .unknown(rawValue)
+    }
+  }
+
+  static func mapOriginThread(_ thread: TiebaOriginThread) -> BrowseThread {
     BrowseThread(
       id: thread.id,
       forumID: thread.forumID,
@@ -452,7 +492,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       viewCount: 0,
       createdAt: nil,
       lastReplyAt: nil,
-      contents: mapContent(thread.content)
+      contents: mapContent(thread.content),
+      firstPostID: thread.firstPostID
     )
   }
 
@@ -551,10 +592,10 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     )
   }
 
-  private static func mapThreadSearchResult(_ result: TiebaThreadSearchResult) -> BrowseThread {
+  static func mapThreadSearchResult(_ result: TiebaThreadSearchResult) -> BrowseThread {
     let images: [BrowseContent] = result.images.compactMap { image in
       guard
-        let thumbnail = SecureTiebaURL.media(image.thumbnailURL ?? image.fullSizeURL)
+        let thumbnail = firstSecureMediaURL(image.thumbnailURL, image.fullSizeURL)
       else { return nil }
       return .image(
         thumbnail: thumbnail,
@@ -575,7 +616,10 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       createdAt: result.createdAt,
       lastReplyAt: nil,
       contents: [.text(result.excerpt)] + images,
-      authorID: result.authorID
+      authorID: result.authorID,
+      firstPostID: result.firstPostID,
+      shareCount: max(result.shareCount, 0),
+      agreeCount: max(result.likeCount, 0)
     )
   }
 
@@ -651,7 +695,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
   private static func mapSearchImages(_ images: [TiebaSearchImage]) -> [BrowseContent] {
     images.compactMap { image in
       guard
-        let thumbnail = SecureTiebaURL.media(image.thumbnailURL ?? image.fullSizeURL)
+        let thumbnail = firstSecureMediaURL(image.thumbnailURL, image.fullSizeURL)
       else { return nil }
       return .image(
         thumbnail: thumbnail,
@@ -879,15 +923,17 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
         return .emoticon(name: label, url: nil)
       case .image(let image):
         guard
-          let thumbnail = SecureTiebaURL.media(
-            image.thumbnailURL ?? image.fullSizeURL ?? image.originalURL
+          let thumbnail = firstSecureMediaURL(
+            image.thumbnailURL,
+            image.fullSizeURL,
+            image.originalURL
           )
         else {
           return .unsupported(label: "图片地址不可用")
         }
         return .image(
           thumbnail: thumbnail,
-          original: SecureTiebaURL.media(image.originalURL ?? image.fullSizeURL),
+          original: firstSecureMediaURL(image.originalURL, image.fullSizeURL),
           width: image.width,
           height: image.height
         )
@@ -925,6 +971,10 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
         return text.isEmpty ? .unsupported(label: "暂不支持的内容（类型 \(type)）") : .text(text)
       }
     }
+  }
+
+  private static func firstSecureMediaURL(_ candidates: URL?...) -> URL? {
+    candidates.lazy.compactMap { SecureTiebaURL.media($0) }.first
   }
 }
 

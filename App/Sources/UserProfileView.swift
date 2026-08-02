@@ -321,26 +321,6 @@ private struct UserActivityThreadRow: View {
   let thread: BrowseThread
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 7) {
-      Text(thread.title.isEmpty ? thread.excerpt : thread.title)
-        .font(.headline)
-        .lineLimit(2)
-      if !thread.title.isEmpty, !thread.excerpt.isEmpty {
-        Text(thread.excerpt)
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-          .lineLimit(3)
-      }
-      HStack(spacing: 12) {
-        Label(thread.forumName, systemImage: "text.bubble")
-          .lineLimit(1)
-        Spacer(minLength: 0)
-        Label(thread.replyCount.formatted(), systemImage: "bubble.left")
-        Label(thread.viewCount.formatted(), systemImage: "eye")
-      }
-      .font(.caption)
-      .foregroundStyle(.secondary)
-    }
-    .padding(.vertical, 3)
+    ThreadSummaryRow(thread: thread, showsForum: true, showsAuthor: false)
   }
 }

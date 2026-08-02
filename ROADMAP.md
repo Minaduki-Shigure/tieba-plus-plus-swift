@@ -16,7 +16,10 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Versioned, per-forum local search history with delete and clear controls
 - Forum thread list with pagination and pull to refresh
 - Reply-time and creation-time forum sorting
+- Global default sorting with normalized per-forum sort memory
 - Server-defined forum channels with independent sorting and cursor pagination
+- Shared rich thread cards across forum, channel, hot-topic, global-search, and public profiles
+- Compact pinned rows, topic-state badges, bounded image previews, and video covers
 - Forum header, statistics, rules state, and featured classifications
 - Public forum introductions with original avatars and server statistics
 - Full forum-rule documents with publisher and rich section content
@@ -26,6 +29,9 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Protocol-correct descending pagination with PID cursors
 - Page-number jump and last-visible-post restoration
 - Versioned local browsing history with delete, clear, and recording controls
+- Settings-level no-history mode using the existing browsing-history archive
+- Native system, light, and dark appearance selection
+- Transient pure-reading mode and full textual floor copying
 - Home-screen recent-forum history, expanded by default and independently hideable
 - Canonical forum/thread sharing and browse-mode-aware thread-link copying
 - Strict internal routing for supported Tieba HTTPS, pasted official-scheme, and app links
@@ -113,6 +119,28 @@ Forum channels are accepted only from FRS tabs marked as general type 15.
 Their `GeneralTabList` requests use a channel-specific sort type and advance
 with both the page number and the final valid thread ID. Missing, duplicate, or
 stalled cursors terminate pagination instead of repeatedly loading one page.
+
+Thread-list mapping preserves the public topic kind, first-post ID, server state
+flags, and available read-only counters through the application layer. One card
+renders this metadata across forum/channel lists, hot-topic details, global
+search, and public user themes without reordering or filtering the server result
+set. Pinned rows deliberately omit excerpts and media. Ordinary rows load at
+most three image thumbnails or one video cover; a cover is never an autoplaying
+player. Every preview still passes the existing HTTPS URL normalization,
+credential-free downloader, redirect policy, transfer-time byte limit, and pixel
+downsampling. Automatic 720-pixel previews stop at 16 MiB; higher-resolution
+explicit image views retain the 80 MiB ceiling.
+
+The global forum-sort preference applies when a forum has no remembered choice;
+changing a forum's picker stores a normalized, bounded per-forum override.
+Appearance and sort values are nonsecret local enums. No-history mode updates
+the recording flag inside the existing versioned history archive, so it does not
+create a competing source of truth or delete favorites. Pure-reading mode is
+transient and removes author chrome, filter placeholders, and nested-reply entry
+points without changing post data or the persisted sort. Full-floor copy uses
+the currently decoded public textual fragments plus fixed `[图片]`, `[视频]`, and
+`[语音]` boundary markers; media URLs and nested replies are not synthesized
+into the copied text.
 
 Local content filtering covers ordinary and channel forum thread lists, post
 floors, nested replies, and shared-thread origin cards. Keyword rules use

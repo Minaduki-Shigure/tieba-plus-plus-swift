@@ -22,7 +22,15 @@ struct ForumView: View {
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
-    _viewModel = StateObject(wrappedValue: ForumViewModel(forumName: forumName, service: service))
+    _viewModel = StateObject(
+      wrappedValue: ForumViewModel(
+        forumName: forumName,
+        service: service,
+        options: ForumBrowseOptions(
+          sort: ForumSortPreferences.resolvedSort(for: forumName)
+        )
+      )
+    )
   }
 
   var body: some View {
@@ -81,6 +89,9 @@ struct ForumView: View {
     .onDisappear(perform: viewModel.cancel)
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       Task { @MainActor in viewModel.reload() }
+    }
+    .onChange(of: viewModel.options.sort) { sort in
+      ForumSortPreferences.save(sort, for: viewModel.forumName)
     }
   }
 
@@ -314,26 +325,6 @@ private struct ThreadRow: View {
   let thread: BrowseThread
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 7) {
-      Text(thread.title.isEmpty ? thread.excerpt : thread.title)
-        .font(.headline)
-        .lineLimit(2)
-      if !thread.title.isEmpty, !thread.excerpt.isEmpty {
-        Text(thread.excerpt)
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-          .lineLimit(3)
-      }
-      HStack(spacing: 12) {
-        Label(thread.authorName, systemImage: "person")
-          .lineLimit(1)
-        Spacer(minLength: 0)
-        Label(thread.replyCount.formatted(), systemImage: "bubble.left")
-        Label(thread.viewCount.formatted(), systemImage: "eye")
-      }
-      .font(.caption)
-      .foregroundStyle(.secondary)
-    }
-    .padding(.vertical, 4)
+    ThreadSummaryRow(thread: thread)
   }
 }

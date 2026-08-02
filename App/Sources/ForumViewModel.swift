@@ -8,7 +8,7 @@ final class ForumViewModel: ObservableObject {
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
   @Published private(set) var loadMoreError: String?
-  @Published private(set) var options = ForumBrowseOptions()
+  @Published private(set) var options: ForumBrowseOptions
   @Published private(set) var channels: [BrowseForumChannel] = []
   @Published private(set) var selectedChannelID: Int?
 
@@ -21,10 +21,15 @@ final class ForumViewModel: ObservableObject {
   private var loadTask: Task<Void, Never>?
   private var loadGeneration = 0
 
-  init(forumName: String, service: any BrowseService) {
+  init(
+    forumName: String,
+    service: any BrowseService,
+    options: ForumBrowseOptions = ForumBrowseOptions()
+  ) {
     self.forumName = forumName
     self.forum = .placeholder(name: forumName)
     self.service = service
+    self.options = options
   }
 
   func loadIfNeeded() {

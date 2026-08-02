@@ -1,5 +1,6 @@
 import Combine
 import SwiftUI
+import UIKit
 
 struct ThreadView: View {
   let service:
@@ -16,6 +17,7 @@ struct ThreadView: View {
   @State private var linkedTarget: TiebaLinkTarget?
   @State private var restoredHistorySnapshot: ThreadHistorySnapshot?
   @State private var hasRecordedHistoryVisit = false
+  @State private var isPureReadingMode = false
   private let historySnapshot: ThreadHistorySnapshot?
   private let linkRoute: TiebaThreadRoute?
 
@@ -67,7 +69,9 @@ struct ThreadView: View {
     )
     .navigationBarTitleDisplayMode(.inline)
     .safeAreaInset(edge: .top, spacing: 0) {
-      optionsBar
+      if !isPureReadingMode {
+        optionsBar
+      }
     }
     .safeAreaInset(edge: .bottom, spacing: 0) {
       if let message = viewModel.jumpError {
@@ -112,6 +116,14 @@ struct ThreadView: View {
     }
     .toolbar {
       ToolbarItemGroup(placement: .navigationBarTrailing) {
+        Button {
+          withAnimation { isPureReadingMode.toggle() }
+        } label: {
+          Image(systemName: isPureReadingMode ? "book.closed.fill" : "book.closed")
+        }
+        .accessibilityLabel(isPureReadingMode ? "退出纯净阅读" : "纯净阅读")
+        .help(isPureReadingMode ? "退出纯净阅读" : "纯净阅读")
+
         if
           let shareURL = TiebaLink.canonicalURL(
             for: .thread(TiebaThreadRoute(threadID: viewModel.thread.id))
@@ -310,7 +322,7 @@ struct ThreadView: View {
           LazyVStack(spacing: 0) {
             ForEach(viewModel.posts) { post in
               LocallyFilteredContent(
-                visibility: post.localVisibility,
+                visibility: effectiveVisibility(for: post),
                 placeholder: post.floor > 0 ? "已屏蔽第 \(post.floor) 楼" : "已屏蔽此楼层"
               ) {
                 VStack(spacing: 0) {
@@ -322,12 +334,14 @@ struct ThreadView: View {
                     historyRepository: historyRepository,
                     favoritesRepository: favoritesRepository,
                     searchHistoryRepository: searchHistoryRepository,
+                    threadTitle: viewModel.thread.title,
+                    isPureReadingMode: isPureReadingMode,
                     openMentionedUser: openMentionedUser,
                     openTiebaLink: openTiebaLink,
                     openComments: { commentsPost = post }
                   )
                   Divider()
-                    .padding(.leading, 52)
+                    .padding(.leading, isPureReadingMode ? 0 : 52)
                 }
                 .background {
                   GeometryReader { geometry in
@@ -436,6 +450,13 @@ struct ThreadView: View {
     )
   }
 
+  private func effectiveVisibility(for post: BrowsePost) -> LocalContentVisibility {
+    guard isPureReadingMode, post.localVisibility != .visible else {
+      return post.localVisibility
+    }
+    return .hidden
+  }
+
   private var favoriteTarget: LocalFavoriteTarget {
     let progress = viewModel.options.sort == .hot ? nil : visiblePost
     let authorAvatarURL = viewModel.posts.first(where: { $0.isThreadAuthor })?.authorPortraitURL
@@ -468,13 +489,19 @@ private struct PostView: View {
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
+  let threadTitle: String
+  let isPureReadingMode: Bool
   let openMentionedUser: (Int64) -> Void
   let openTiebaLink: (TiebaLinkTarget) -> Void
   let openComments: () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      authorRow
+      if isPureReadingMode {
+        pureReadingContext
+      } else {
+        authorRow
+      }
 
       BrowseContentView(
         contents: post.contents,
@@ -484,7 +511,9 @@ private struct PostView: View {
 
       if let originThread {
         LocallyFilteredContent(
-          visibility: originThread.localVisibility,
+          visibility: isPureReadingMode && originThread.localVisibility != .visible
+            ? .hidden
+            : originThread.localVisibility,
           placeholder: "已屏蔽转发的原帖"
         ) {
           OriginThreadCard(
@@ -503,7 +532,7 @@ private struct PostView: View {
         PollResultsCard(poll: poll)
       }
 
-      if post.nestedReplyCount > 0 {
+      if !isPureReadingMode, post.nestedReplyCount > 0 {
         Button(action: openComments) {
           Label("\(post.nestedReplyCount)", systemImage: "bubble.left")
             .font(.subheadline)
@@ -514,6 +543,15 @@ private struct PostView: View {
     }
     .padding(.horizontal, 14)
     .padding(.vertical, 12)
+    .contextMenu {
+      if let copyText = PostCopyText.text(threadTitle: threadTitle, post: post) {
+        Button {
+          UIPasteboard.general.string = copyText
+        } label: {
+          Label("复制本楼内容", systemImage: "doc.on.doc")
+        }
+      }
+    }
   }
 
   private var authorRow: some View {
@@ -537,6 +575,54 @@ private struct PostView: View {
 
       ReadOnlyAgreeLabel(score: post.agreeScore)
         .padding(.top, 2)
+    }
+  }
+
+  private var pureReadingContext: some View {
+    ViewThatFits(in: .horizontal) {
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        Text(post.authorName)
+          .lineLimit(1)
+          .fixedSize(horizontal: true, vertical: false)
+        pureReadingAuthorBadge
+        Spacer(minLength: 0)
+        pureReadingPostMetadata
+      }
+
+      VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+          Text(post.authorName)
+            .lineLimit(1)
+          pureReadingAuthorBadge
+          Spacer(minLength: 0)
+        }
+        VStack(alignment: .leading, spacing: 4) {
+          pureReadingPostMetadata
+        }
+      }
+    }
+    .font(.caption)
+    .foregroundStyle(.secondary)
+  }
+
+  @ViewBuilder
+  private var pureReadingAuthorBadge: some View {
+    if post.isThreadAuthor {
+      Label("楼主", systemImage: "person.fill.checkmark")
+        .foregroundStyle(.tint)
+        .fixedSize()
+    }
+  }
+
+  @ViewBuilder
+  private var pureReadingPostMetadata: some View {
+    if post.floor > 0 {
+      Text("\(post.floor) 楼")
+        .fixedSize()
+    }
+    if let createdAt = post.createdAt {
+      Text(createdAt, style: .relative)
+        .fixedSize()
     }
   }
 

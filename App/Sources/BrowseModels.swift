@@ -415,6 +415,21 @@ struct HotTopicPageData: Sendable {
   let nextPageCursor: Int64?
 }
 
+enum BrowseThreadKind: Hashable, Sendable {
+  case article
+  case album
+  case externalShare
+  case voice
+  case cloudDrive
+  case story
+  case video
+  case live
+  case help
+  case vote
+  case lottery
+  case unknown(Int32)
+}
+
 enum LocalContentVisibility: String, Codable, Hashable, Sendable {
   case visible
   case placeholder
@@ -423,6 +438,7 @@ enum LocalContentVisibility: String, Codable, Hashable, Sendable {
 
 struct BrowseThread: Identifiable, Hashable, Sendable {
   let id: Int64
+  let firstPostID: Int64
   let forumID: Int64
   let forumName: String
   let title: String
@@ -431,9 +447,19 @@ struct BrowseThread: Identifiable, Hashable, Sendable {
   let authorID: Int64
   let replyCount: Int
   let viewCount: Int
+  let shareCount: Int
+  let agreeCount: Int
+  let disagreeCount: Int
   let createdAt: Date?
   let lastReplyAt: Date?
   let contents: [BrowseContent]
+  let kind: BrowseThreadKind
+  let tabID: Int
+  let isPinned: Bool
+  let isFeatured: Bool
+  let isShared: Bool
+  let isServerHidden: Bool
+  let isLive: Bool
   let localVisibility: LocalContentVisibility
 
   init(
@@ -449,9 +475,21 @@ struct BrowseThread: Identifiable, Hashable, Sendable {
     lastReplyAt: Date?,
     contents: [BrowseContent],
     authorID: Int64 = 0,
+    firstPostID: Int64 = 0,
+    shareCount: Int = 0,
+    agreeCount: Int = 0,
+    disagreeCount: Int = 0,
+    kind: BrowseThreadKind = .article,
+    tabID: Int = 0,
+    isPinned: Bool = false,
+    isFeatured: Bool = false,
+    isShared: Bool = false,
+    isServerHidden: Bool = false,
+    isLive: Bool = false,
     localVisibility: LocalContentVisibility = .visible
   ) {
     self.id = id
+    self.firstPostID = firstPostID
     self.forumID = forumID
     self.forumName = forumName
     self.title = title
@@ -460,10 +498,26 @@ struct BrowseThread: Identifiable, Hashable, Sendable {
     self.authorID = authorID
     self.replyCount = replyCount
     self.viewCount = viewCount
+    self.shareCount = shareCount
+    self.agreeCount = agreeCount
+    self.disagreeCount = disagreeCount
     self.createdAt = createdAt
     self.lastReplyAt = lastReplyAt
     self.contents = contents
+    self.kind = kind
+    self.tabID = tabID
+    self.isPinned = isPinned
+    self.isFeatured = isFeatured
+    self.isShared = isShared
+    self.isServerHidden = isServerHidden
+    self.isLive = isLive
     self.localVisibility = localVisibility
+  }
+
+  var agreeScore: Int {
+    let (score, overflow) = agreeCount.subtractingReportingOverflow(disagreeCount)
+    guard !overflow else { return agreeCount >= 0 ? Int.max : 0 }
+    return max(score, 0)
   }
 
   func withLocalVisibility(_ visibility: LocalContentVisibility) -> Self {
@@ -480,6 +534,17 @@ struct BrowseThread: Identifiable, Hashable, Sendable {
       lastReplyAt: lastReplyAt,
       contents: contents,
       authorID: authorID,
+      firstPostID: firstPostID,
+      shareCount: shareCount,
+      agreeCount: agreeCount,
+      disagreeCount: disagreeCount,
+      kind: kind,
+      tabID: tabID,
+      isPinned: isPinned,
+      isFeatured: isFeatured,
+      isShared: isShared,
+      isServerHidden: isServerHidden,
+      isLive: isLive,
       localVisibility: visibility
     )
   }

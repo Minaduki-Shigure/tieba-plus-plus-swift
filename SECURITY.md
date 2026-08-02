@@ -143,6 +143,26 @@ requests or redirect destinations, and is decoded through ImageIO with a
 bounded pixel size and memory cache. Original image dimensions are never
 decoded directly into the browsing UI.
 
+Thread-list previews reuse that same media pipeline. Metadata badges and
+read-only counters come only from existing anonymous responses; rendering a
+card must not introduce a personalized request, autoplay video, or broaden the
+media host policy. Pinned cards intentionally make no preview request, and an
+invalid media URL remains an unsupported fragment rather than a fallback
+cleartext load. Automatic previews have a 16 MiB transfer-time limit; the task
+delegate cancels a response as soon as either its declared or observed byte
+count exceeds that bound. Explicit higher-resolution image views retain the
+80 MiB transfer limit. Deduplicated downloads track active view waiters and are
+canceled when the final waiter disappears, so scrolling cannot leave orphaned
+preview transfers running in the background.
+
+Appearance and forum-sort preferences may store only bounded, nonsecret local
+values in UserDefaults. The no-history control must update the recording flag in
+the existing browsing-history archive and must never duplicate that state in a
+second store. Full-floor copying is initiated by an explicit user gesture and
+may include decoded public textual fragments and fixed non-URL media boundary
+markers only; it must not add media URLs, credentials, account responses, or
+hidden nested replies to the pasteboard.
+
 Automated tests use synthetic fixed-length placeholders only. Real `BDUSS`,
 `STOKEN`, `tbs`, cookies, passwords, or private account responses must never be
 placed in GitHub Actions secrets or exercised by CI. Authenticated releases need

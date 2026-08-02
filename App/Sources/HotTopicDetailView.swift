@@ -187,29 +187,6 @@ private struct HotTopicThreadRow: View {
   let thread: BrowseThread
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 7) {
-      Text(thread.title.isEmpty ? thread.excerpt : thread.title)
-        .font(.headline)
-        .lineLimit(2)
-      if !thread.excerpt.isEmpty, thread.excerpt != thread.title {
-        Text(thread.excerpt)
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-          .lineLimit(3)
-      }
-      HStack(spacing: 12) {
-        if !thread.forumName.isEmpty {
-          Label("\(thread.forumName)\u{5427}", systemImage: "text.bubble")
-        }
-        if !thread.authorName.isEmpty {
-          Label(thread.authorName, systemImage: "person")
-        }
-        Label(thread.replyCount.formatted(), systemImage: "arrowshape.turn.up.left")
-      }
-      .font(.caption)
-      .foregroundStyle(.secondary)
-      .lineLimit(1)
-    }
-    .padding(.vertical, 3)
+    ThreadSummaryRow(thread: thread, showsForum: true)
   }
 }

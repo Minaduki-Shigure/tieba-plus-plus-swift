@@ -5,6 +5,170 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class BrowseViewModelTests: XCTestCase {
+  func testThreadMappingPreservesFeedMetadataAndSanitizesMedia() throws {
+    let validImage = TiebaImage(
+      thumbnailURL: try XCTUnwrap(URL(string: "https://img.example/thumb.jpg")),
+      fullSizeURL: try XCTUnwrap(URL(string: "https://img.example/full.jpg")),
+      originalURL: nil,
+      width: 640,
+      height: 480,
+      originalByteCount: 0
+    )
+    let unsafeImage = TiebaImage(
+      thumbnailURL: try XCTUnwrap(URL(string: "ftp://img.example/unsafe.jpg")),
+      fullSizeURL: nil,
+      originalURL: nil,
+      width: 100,
+      height: 100,
+      originalByteCount: 0
+    )
+    let fallbackImageURL = try XCTUnwrap(URL(string: "https://img.example/fallback.jpg"))
+    let recoverableImage = TiebaImage(
+      thumbnailURL: try XCTUnwrap(URL(string: "ftp://img.example/bad-thumb.jpg")),
+      fullSizeURL: fallbackImageURL,
+      originalURL: nil,
+      width: 320,
+      height: 240,
+      originalByteCount: 0
+    )
+    let video = TiebaVideo(
+      streamURL: try XCTUnwrap(URL(string: "https://video.example/stream.mp4")),
+      coverURL: try XCTUnwrap(URL(string: "https://img.example/video.jpg")),
+      duration: 12,
+      width: 1280,
+      height: 720,
+      viewCount: 30
+    )
+    let thread = TiebaThread(
+      id: 42,
+      firstPostID: 43,
+      forumID: 7,
+      forumName: "swift",
+      title: "Rich thread",
+      content: TiebaContent(fragments: [
+        .text("excerpt"),
+        .image(validImage),
+        .image(unsafeImage),
+        .image(recoverableImage),
+        .video(video),
+      ]),
+      author: nil,
+      kind: .video,
+      tabID: 9,
+      viewCount: 100,
+      replyCount: 20,
+      shareCount: 5,
+      agreeCount: 11,
+      disagreeCount: 4,
+      createdAt: nil,
+      lastReplyAt: nil,
+      isPinned: true,
+      isFeatured: true,
+      isShared: true,
+      isHidden: true,
+      isLive: false
+    )
+
+    let mapped = TiebaCoreBrowseService.mapThread(thread)
+
+    XCTAssertEqual(mapped.id, 42)
+    XCTAssertEqual(mapped.firstPostID, 43)
+    XCTAssertEqual(mapped.kind, .video)
+    XCTAssertEqual(mapped.tabID, 9)
+    XCTAssertEqual(mapped.shareCount, 5)
+    XCTAssertEqual(mapped.agreeCount, 11)
+    XCTAssertEqual(mapped.disagreeCount, 4)
+    XCTAssertEqual(mapped.agreeScore, 7)
+    XCTAssertTrue(mapped.isPinned)
+    XCTAssertTrue(mapped.isFeatured)
+    XCTAssertTrue(mapped.isShared)
+    XCTAssertTrue(mapped.isServerHidden)
+    XCTAssertFalse(mapped.isLive)
+    XCTAssertEqual(
+      mapped.contents.compactMap { content -> URL? in
+        guard case .image(let thumbnail, _, _, _) = content else { return nil }
+        return thumbnail
+      },
+      [
+        try XCTUnwrap(URL(string: "https://img.example/thumb.jpg")),
+        fallbackImageURL,
+      ]
+    )
+    XCTAssertTrue(
+      mapped.contents.contains { content in
+        guard case .unsupported(let label) = content else { return false }
+        return label == "图片地址不可用"
+      }
+    )
+    XCTAssertTrue(
+      mapped.contents.contains { content in
+        guard case .video(_, let cover, _, _) = content else { return false }
+        return cover?.absoluteString == "https://img.example/video.jpg"
+      }
+    )
+  }
+
+  func testSearchThreadMappingPreservesAvailableCountsAndImages() throws {
+    let thumbnailURL = try XCTUnwrap(URL(string: "https://img.example/search.jpg"))
+    let fallbackURL = try XCTUnwrap(URL(string: "https://img.example/fallback.jpg"))
+    let result = TiebaThreadSearchResult(
+      threadID: 50,
+      firstPostID: 51,
+      forumID: 7,
+      forumName: "swift",
+      title: "Search result",
+      excerpt: "Excerpt",
+      authorID: 9,
+      authorName: "Author",
+      authorPortraitURL: nil,
+      replyCount: 10,
+      likeCount: 8,
+      shareCount: 3,
+      createdAt: nil,
+      images: [
+        TiebaSearchImage(
+          thumbnailURL: thumbnailURL,
+          fullSizeURL: nil,
+          width: 640,
+          height: 480
+        ),
+        TiebaSearchImage(
+          thumbnailURL: try XCTUnwrap(URL(string: "ftp://img.example/unsafe.jpg")),
+          fullSizeURL: fallbackURL,
+          width: 640,
+          height: 480
+        ),
+      ]
+    )
+
+    let mapped = TiebaCoreBrowseService.mapThreadSearchResult(result)
+
+    XCTAssertEqual(mapped.firstPostID, 51)
+    XCTAssertEqual(mapped.agreeCount, 8)
+    XCTAssertEqual(mapped.shareCount, 3)
+    XCTAssertEqual(
+      ThreadSummaryPresentation.media(for: mapped),
+      .images([thumbnailURL, fallbackURL], totalCount: 2)
+    )
+  }
+
+  func testOriginThreadMappingPreservesFirstPostID() {
+    let origin = TiebaOriginThread(
+      id: 60,
+      firstPostID: 61,
+      forumID: 7,
+      forumName: "swift",
+      title: "Origin",
+      content: TiebaContent(fragments: [.text("Excerpt")])
+    )
+
+    let mapped = TiebaCoreBrowseService.mapOriginThread(origin)
+
+    XCTAssertEqual(mapped.id, 60)
+    XCTAssertEqual(mapped.firstPostID, 61)
+    XCTAssertEqual(mapped.contents, [.text("Excerpt")])
+  }
+
   func testPostCursorSelectionRejectsHotRankingPIDs() {
     let pagePostIDs: [Int64] = [10, 20, 30]
     let returnedPostIDs: Set<Int64> = [10, 20]
@@ -219,6 +383,37 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testForumInitialSortOptionIsUsedForFirstRequest() async throws {
+    let service = ScriptedBrowseService()
+    await service.enqueueThreads(
+      .value(
+        ThreadPageData(
+          forumName: "Swift",
+          threads: [Fixtures.thread(id: 13)],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let options = ForumBrowseOptions(sort: .creationTime)
+    let viewModel = ForumViewModel(
+      forumName: "Swift",
+      service: service,
+      options: options
+    )
+
+    viewModel.loadIfNeeded()
+
+    try await waitUntil { viewModel.state == .loaded }
+    XCTAssertEqual(viewModel.options, options)
+    let requests = await service.threadRequestSnapshot()
+    XCTAssertEqual(
+      requests,
+      [ThreadRequest(forumName: "Swift", page: 1, pageSize: 30, options: options)]
+    )
+  }
+
+  @MainActor
   func testForumInitialLoadReportsError() async throws {
     let service = ScriptedBrowseService()
     await service.enqueueThreads(.failure(StubFailure(message: "forum unavailable")))
@@ -347,7 +542,12 @@ final class BrowseViewModelTests: XCTestCase {
     let channel = BrowseForumChannel(id: 7, name: "教程", isDefault: false)
     let firstPage = [
       Fixtures.thread(id: 21, title: "first"),
-      Fixtures.thread(id: 22, title: "original duplicate"),
+      Fixtures.thread(
+        id: 22,
+        title: "original duplicate",
+        isPinned: true,
+        isFeatured: true
+      ),
     ]
     await service.enqueueThreads(
       .value(
@@ -383,6 +583,8 @@ final class BrowseViewModelTests: XCTestCase {
       viewModel.threads.map(\.id) == [21, 22, 23] && !viewModel.isLoadingMore
     }
     XCTAssertEqual(viewModel.threads[1].title, "original duplicate")
+    XCTAssertTrue(viewModel.threads[1].isPinned)
+    XCTAssertTrue(viewModel.threads[1].isFeatured)
     XCTAssertEqual(viewModel.channels, [channel])
     let requests = await service.threadRequestSnapshot()
     XCTAssertEqual(requests.map(\.page), [1, 2])
@@ -2325,7 +2527,9 @@ private enum Fixtures {
   static func thread(
     id: Int64,
     title: String? = nil,
-    forumName: String = "Swift"
+    forumName: String = "Swift",
+    isPinned: Bool = false,
+    isFeatured: Bool = false
   ) -> BrowseThread {
     BrowseThread(
       id: id,
@@ -2338,7 +2542,9 @@ private enum Fixtures {
       viewCount: 10,
       createdAt: Date(timeIntervalSince1970: 1_700_000_000),
       lastReplyAt: Date(timeIntervalSince1970: 1_700_000_100),
-      contents: [.text("thread content")]
+      contents: [.text("thread content")],
+      isPinned: isPinned,
+      isFeatured: isFeatured
     )
   }
 

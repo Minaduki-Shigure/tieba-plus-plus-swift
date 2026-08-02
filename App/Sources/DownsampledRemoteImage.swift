@@ -55,11 +55,16 @@ enum DownsampledImageError: Error {
 }
 
 actor DownsampledImageRepository {
+  private struct InFlightRequest {
+    let task: Task<DownsampledImageAsset, Error>
+    var waiters: Set<UUID>
+  }
+
   static let shared = DownsampledImageRepository()
 
   private let session: URLSession
   private let cache = NSCache<NSString, UIImage>()
-  private var inFlight: [String: Task<DownsampledImageAsset, Error>] = [:]
+  private var inFlight: [String: InFlightRequest] = [:]
 
   init() {
     let configuration = URLSessionConfiguration.ephemeral
@@ -69,8 +74,7 @@ actor DownsampledImageRepository {
     configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
     configuration.timeoutIntervalForRequest = 30
     configuration.timeoutIntervalForResource = 60
-    let delegate = HTTPSMediaSessionDelegate()
-    session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+    session = URLSession(configuration: configuration)
     cache.totalCostLimit = 96 * 1_024 * 1_024
     cache.countLimit = 80
   }
@@ -86,39 +90,84 @@ actor DownsampledImageRepository {
     if let cached = cache.object(forKey: key as NSString) {
       return DownsampledImageAsset(image: cached)
     }
-    if let task = inFlight[key] {
-      return try await task.value
-    }
+    let waiterID = UUID()
+    let task: Task<DownsampledImageAsset, Error>
+    if var request = inFlight[key] {
+      request.waiters.insert(waiterID)
+      inFlight[key] = request
+      task = request.task
+    } else {
+      let session = session
+      task = Task<DownsampledImageAsset, Error> {
+        let maximumResponseBytes = RemoteImageDownloadPolicy.maximumResponseBytes(
+          for: maxPixelSize
+        )
+        let delegate = BoundedHTTPSMediaTaskDelegate(
+          maximumResponseBytes: maximumResponseBytes
+        )
+        let (fileURL, response) = try await session.download(from: url, delegate: delegate)
+        guard
+          let response = response as? HTTPURLResponse,
+          (200..<300).contains(response.statusCode),
+          response.url?.scheme?.lowercased() == "https"
+        else { throw DownsampledImageError.invalidResponse }
 
-    let session = session
-    let task = Task<DownsampledImageAsset, Error> {
-      let (fileURL, response) = try await session.download(from: url)
-      guard
-        let response = response as? HTTPURLResponse,
-        (200..<300).contains(response.statusCode),
-        response.url?.scheme?.lowercased() == "https"
-      else { throw DownsampledImageError.invalidResponse }
-
-      let fileSize = try fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-      guard fileSize <= 80 * 1_024 * 1_024 else {
-        throw DownsampledImageError.responseTooLarge
+        let fileSize = try fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard Int64(fileSize) <= maximumResponseBytes else {
+          throw DownsampledImageError.responseTooLarge
+        }
+        return try await Task.detached(priority: .utility) {
+          try ImageDownsampler.image(at: fileURL, maxPixelSize: maxPixelSize)
+        }.value
       }
-      return try await Task.detached(priority: .utility) {
-        try ImageDownsampler.image(at: fileURL, maxPixelSize: maxPixelSize)
-      }.value
+      inFlight[key] = InFlightRequest(task: task, waiters: [waiterID])
     }
-    inFlight[key] = task
-    defer { inFlight[key] = nil }
 
-    let asset = try await task.value
-    let pixelWidth = asset.image.cgImage?.width ?? 0
-    let pixelHeight = asset.image.cgImage?.height ?? 0
-    cache.setObject(
-      asset.image,
-      forKey: key as NSString,
-      cost: pixelWidth * pixelHeight * 4
-    )
-    return asset
+    return try await withTaskCancellationHandler {
+      defer { removeWaiter(waiterID, forKey: key) }
+      let asset = try await task.value
+      try Task.checkCancellation()
+      let pixelWidth = asset.image.cgImage?.width ?? 0
+      let pixelHeight = asset.image.cgImage?.height ?? 0
+      cache.setObject(
+        asset.image,
+        forKey: key as NSString,
+        cost: pixelWidth * pixelHeight * 4
+      )
+      return asset
+    } onCancel: {
+      Task { await self.removeWaiter(waiterID, forKey: key) }
+    }
+  }
+
+  private func removeWaiter(_ waiterID: UUID, forKey key: String) {
+    guard var request = inFlight[key], request.waiters.remove(waiterID) != nil else {
+      return
+    }
+    if request.waiters.isEmpty {
+      request.task.cancel()
+      inFlight[key] = nil
+    } else {
+      inFlight[key] = request
+    }
+  }
+}
+
+enum RemoteImageDownloadPolicy {
+  static let previewMaximumResponseBytes: Int64 = 16 * 1_024 * 1_024
+  static let fullSizeMaximumResponseBytes: Int64 = 80 * 1_024 * 1_024
+
+  static func maximumResponseBytes(for maxPixelSize: Int) -> Int64 {
+    maxPixelSize <= 720 ? previewMaximumResponseBytes : fullSizeMaximumResponseBytes
+  }
+
+  static func exceedsLimit(
+    totalBytesWritten: Int64,
+    totalBytesExpected: Int64,
+    maximumResponseBytes: Int64
+  ) -> Bool {
+    totalBytesWritten > maximumResponseBytes
+      || (totalBytesExpected > 0 && totalBytesExpected > maximumResponseBytes)
   }
 }
 
@@ -142,9 +191,15 @@ enum ImageDownsampler {
   }
 }
 
-private final class HTTPSMediaSessionDelegate: NSObject, URLSessionTaskDelegate,
+private final class BoundedHTTPSMediaTaskDelegate: NSObject, URLSessionDownloadDelegate,
   @unchecked Sendable
 {
+  private let maximumResponseBytes: Int64
+
+  init(maximumResponseBytes: Int64) {
+    self.maximumResponseBytes = maximumResponseBytes
+  }
+
   func urlSession(
     _ session: URLSession,
     task: URLSessionTask,
@@ -154,4 +209,26 @@ private final class HTTPSMediaSessionDelegate: NSObject, URLSessionTaskDelegate,
   ) {
     completionHandler(request.url?.scheme?.lowercased() == "https" ? request : nil)
   }
+
+  func urlSession(
+    _ session: URLSession,
+    downloadTask: URLSessionDownloadTask,
+    didWriteData bytesWritten: Int64,
+    totalBytesWritten: Int64,
+    totalBytesExpectedToWrite: Int64
+  ) {
+    if RemoteImageDownloadPolicy.exceedsLimit(
+      totalBytesWritten: totalBytesWritten,
+      totalBytesExpected: totalBytesExpectedToWrite,
+      maximumResponseBytes: maximumResponseBytes
+    ) {
+      downloadTask.cancel()
+    }
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    downloadTask: URLSessionDownloadTask,
+    didFinishDownloadingTo location: URL
+  ) {}
 }

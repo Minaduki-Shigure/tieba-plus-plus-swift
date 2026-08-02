@@ -114,12 +114,35 @@ final class ContentFilterTests: XCTestCase {
       viewCount: 0,
       createdAt: nil,
       lastReplyAt: nil,
-      contents: [.video(url: nil, cover: nil, width: 0, height: 0)]
+      contents: [.video(url: nil, cover: nil, width: 0, height: 0)],
+      firstPostID: 11,
+      shareCount: 3,
+      agreeCount: 8,
+      disagreeCount: 2,
+      kind: .video,
+      tabID: 9,
+      isPinned: true,
+      isFeatured: true,
+      isShared: true,
+      isServerHidden: true,
+      isLive: true
     )
     let textThread = thread(title: "Text", excerpt: "ordinary")
 
     XCTAssertEqual(snapshot.visibility(for: videoThread), .placeholder)
     XCTAssertEqual(snapshot.visibility(for: textThread), .visible)
+    let filtered = snapshot.applying(to: videoThread)
+    XCTAssertEqual(filtered.firstPostID, videoThread.firstPostID)
+    XCTAssertEqual(filtered.contents, videoThread.contents)
+    XCTAssertEqual(filtered.kind, videoThread.kind)
+    XCTAssertEqual(filtered.shareCount, videoThread.shareCount)
+    XCTAssertEqual(filtered.agreeScore, videoThread.agreeScore)
+    XCTAssertEqual(filtered.tabID, videoThread.tabID)
+    XCTAssertEqual(filtered.isPinned, videoThread.isPinned)
+    XCTAssertEqual(filtered.isFeatured, videoThread.isFeatured)
+    XCTAssertEqual(filtered.isShared, videoThread.isShared)
+    XCTAssertEqual(filtered.isServerHidden, videoThread.isServerHidden)
+    XCTAssertEqual(filtered.isLive, videoThread.isLive)
   }
 
   func testFileStoreNormalizesPersistsAndRejectsDuplicates() async throws {

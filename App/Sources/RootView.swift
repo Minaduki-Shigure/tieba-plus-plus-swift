@@ -237,7 +237,7 @@ struct RootView: View {
             searchHistoryRepository: searchHistoryRepository
           )
         case .settings:
-          AppSettingsView()
+          AppSettingsView(historyRepository: historyRepository)
         case .thread(let thread):
           ThreadView(
             thread: thread.browseThread,

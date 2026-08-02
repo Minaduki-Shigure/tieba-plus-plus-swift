@@ -19,12 +19,21 @@ navigation, plus anonymous single- and multiple-choice poll results, post
 author forum levels, IP locations, read-only net approval counts, post sorting,
 page jumps, an only-thread-author filter, and in-app public-profile navigation
 from user mentions without dropping reply context.
+Forum, channel, hot-topic, global-search, and public-profile thread lists share
+a metadata-aware card that distinguishes pinned, featured, live, shared, and
+special-format topics. Ordinary cards can show one to three downsampled image
+previews or a nonplaying video cover together with reply, view, approval, share,
+and relative-time context; pinned rows stay compact and do not fetch previews.
 Topic threads, search results, moderator rows, post authors, and
 nested-reply authors open credential-free public user profiles with profile
 statistics, a limited public liked-forum preview, and paginated public threads.
 The home screen projects up to 100 recently visited forums from the existing
 versioned browsing-history archive, shows them expanded by default, and offers
-a persistent setting to hide the section. Forum and thread pages use the native
+a persistent setting to hide the section. Settings also provide native
+system/light/dark appearance, a global default plus remembered per-forum topic
+sorting, and a no-history mode backed by the same versioned archive rather than
+a second preference. Thread pages provide a transient pure-reading mode and a
+per-floor full-text copy action. Forum and thread pages use the native
 iOS share sheet with canonical HTTPS links; copied thread links retain the
 only-thread-author mode. A single strict router handles supported links in rich
 post content, explicit clipboard pastes, and the app-owned

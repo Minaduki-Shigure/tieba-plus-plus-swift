@@ -2,6 +2,8 @@ import SwiftUI
 
 @main
 struct TiebaPlusPlusApp: App {
+  @AppStorage(AppPreferenceKey.appearance)
+  private var appearance = AppAppearance.system.rawValue
   private let service:
     any BrowseService & SearchService & ForumPostSearchService & HotTopicService
       & UserProfileService & ForumInformationService
@@ -35,6 +37,7 @@ struct TiebaPlusPlusApp: App {
         accountService: accountService
       )
       .environment(\.contentFilterRepository, contentFilterRepository)
+      .preferredColorScheme(AppAppearance.resolved(appearance).colorScheme)
     }
   }
 }
