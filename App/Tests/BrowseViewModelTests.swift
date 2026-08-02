@@ -159,6 +159,7 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(TiebaCoreBrowseService.mapPost(negativeScorePost).agreeScore, 0)
   }
 
+  @MainActor
   func testMentionLinksUseOnlyExactPositiveInternalUserDestinations() throws {
     let url = try XCTUnwrap(BrowseContentView.mentionURL(for: 77))
 
