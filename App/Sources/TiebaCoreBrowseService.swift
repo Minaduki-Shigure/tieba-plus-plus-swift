@@ -637,7 +637,11 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
         in: .whitespacesAndNewlines
       ),
       agreeScore: max(comment.agreeScore, 0),
-      isThreadAuthor: comment.isThreadAuthor
+      isThreadAuthor: comment.isThreadAuthor,
+      replyToUserID: comment.replyToUserID.flatMap { $0 > 0 ? $0 : nil },
+      replyToUserName: comment.replyToUserName.trimmingCharacters(
+        in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "@"))
+      )
     )
   }
 
@@ -817,8 +821,11 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
           height: image.height
         )
       case .mention(let mention):
+        let name = mention.text.trimmingCharacters(
+          in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "@"))
+        )
         return .mention(
-          name: mention.text.trimmingCharacters(in: CharacterSet(charactersIn: "@")),
+          name: name.isEmpty ? String(mention.userID) : name,
           userID: mention.userID)
       case .link(let link):
         guard let url = SecureTiebaURL.web(link.url) else {

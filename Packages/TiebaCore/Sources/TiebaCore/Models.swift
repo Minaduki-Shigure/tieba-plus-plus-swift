@@ -595,6 +595,7 @@ public struct TiebaComment: Identifiable, Sendable, Hashable {
   public let floor: Int
   public let author: TiebaUser?
   public let replyToUserID: Int64?
+  public let replyToUserName: String
   public let content: TiebaContent
   public let agreeCount: Int
   public let disagreeCount: Int
@@ -614,7 +615,8 @@ public struct TiebaComment: Identifiable, Sendable, Hashable {
     disagreeCount: Int,
     createdAt: Date?,
     isThreadAuthor: Bool,
-    agreeScore: Int? = nil
+    agreeScore: Int? = nil,
+    replyToUserName: String = ""
   ) {
     self.id = id
     self.threadID = threadID
@@ -622,6 +624,7 @@ public struct TiebaComment: Identifiable, Sendable, Hashable {
     self.floor = floor
     self.author = author
     self.replyToUserID = replyToUserID
+    self.replyToUserName = replyToUserName
     self.content = content
     self.agreeCount = agreeCount
     self.disagreeCount = disagreeCount

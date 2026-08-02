@@ -647,36 +647,43 @@ enum TiebaProtoMapper {
   ) -> TiebaComment {
     let author = users[proto.authorID] ?? optionalUser(proto.author)
     let authorID = proto.authorID != 0 ? proto.authorID : author?.id ?? 0
-    var contentProtos = proto.content
-    var replyToUserID: Int64?
-    if contentProtos.count >= 2,
-      contentProtos[0].text == "回复 ",
-      contentProtos[1].uid != 0
-    {
-      replyToUserID = contentProtos[1].uid
-      contentProtos.removeFirst(2)
-      if !contentProtos.isEmpty {
-        contentProtos[0].text = contentProtos[0].text.replacingOccurrences(
-          of: "^\\s*:",
-          with: "",
-          options: .regularExpression
-        )
-      }
-    }
+    let replyTarget = replyTarget(in: proto.content)
     return TiebaComment(
       id: proto.id,
       threadID: threadID,
       parentPostID: parentPostID,
       floor: parentFloor,
       author: author,
-      replyToUserID: replyToUserID,
-      content: content(contentProtos),
+      replyToUserID: replyTarget?.id,
+      content: content(proto.content),
       agreeCount: Int(clamping: proto.agree.agreeNum),
       disagreeCount: Int(clamping: proto.agree.disagreeNum),
       createdAt: date(Int64(proto.time)),
       isThreadAuthor: threadAuthorID != 0 && authorID == threadAuthorID,
-      agreeScore: agreeScore(proto.agree)
+      agreeScore: agreeScore(proto.agree),
+      replyToUserName: replyTarget?.name ?? ""
     )
+  }
+
+  private static func replyTarget(in content: [PbContent]) -> (id: Int64, name: String)? {
+    let mention: PbContent?
+    if let first = content.first, first.type == 4, first.uid > 0 {
+      mention = first
+    } else if content.count >= 2,
+      content[0].text.trimmingCharacters(in: .whitespacesAndNewlines) == "回复",
+      content[1].type == 4,
+      content[1].uid > 0
+    {
+      mention = content[1]
+    } else {
+      mention = nil
+    }
+    guard let mention else { return nil }
+
+    let name = mention.text.trimmingCharacters(
+      in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "@"))
+    )
+    return (mention.uid, name)
   }
 
   private static func agreeScore(_ proto: Agree) -> Int {

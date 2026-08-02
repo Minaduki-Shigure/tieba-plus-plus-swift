@@ -90,6 +90,12 @@ context, not the device's current location; displaying it must never request
 Core Location permission. These values are not persisted in local history, and
 their static labels must not call an agree, disagree, or profile-write endpoint.
 
+User mentions may create only an internal `tieba-plus-plus://user/<positive-id>`
+navigation value. The URL handler must reject credentials, ports, queries,
+fragments, extra path components, nonpositive identifiers, and every other host
+or scheme. Valid mentions open the existing credential-free public profile
+workflow; non-mention HTTPS links continue through the normal system action.
+
 Browsing history, local favorites, global search history, and per-forum search
 history are separate versioned JSON archives in Application Support. They use
 atomic writes, enforce bounded archive sizes, refuse to overwrite malformed or

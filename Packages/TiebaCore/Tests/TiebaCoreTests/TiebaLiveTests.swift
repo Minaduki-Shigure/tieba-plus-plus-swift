@@ -10,7 +10,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.15 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.16 integration-test")
     )
     let threads = try await client.getThreads(forumName: "starry", pageSize: 10)
     XCTAssertFalse(threads.threads.isEmpty)
@@ -119,7 +119,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.15 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.16 integration-test")
     )
     let forums = try await client.searchForums(query: "swift")
     XCTAssertFalse(forums.isLoggedIn)
@@ -183,7 +183,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.15 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.16 integration-test")
     )
     let feed = try await client.getThreads(forumName: "steam", pageSize: 100)
     let candidates = feed.threads.filter(\.isShared)
@@ -209,7 +209,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.15 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.16 integration-test")
     )
     let page = try await client.getPosts(threadID: 8_211_419_000, pageSize: 2)
     let firstPost = try XCTUnwrap(page.posts.first(where: { $0.floor == 1 }))
@@ -221,13 +221,37 @@ final class TiebaLiveTests: XCTestCase {
     XCTAssertEqual(firstPost.agreeScore, firstPost.agreeCount - firstPost.disagreeCount)
   }
 
+  func testAnonymousDirectReplyMentionContextIsPreserved() async throws {
+    guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
+      throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
+    }
+
+    let client = TiebaClient(
+      configuration: .init(userAgent: "TiebaPlusPlus/0.16 integration-test")
+    )
+    let page = try await client.getComments(
+      threadID: 7_763_274_602,
+      postID: 143_493_604_437
+    )
+    let comment = try XCTUnwrap(page.comments.first)
+    let replyToUserID = try XCTUnwrap(comment.replyToUserID)
+
+    XCTAssertEqual(replyToUserID, 4_136_442_250)
+    XCTAssertEqual(comment.replyToUserName, "深水行军铲")
+    XCTAssertEqual(comment.content.plainText, "@深水行军铲 测试")
+    XCTAssertTrue(comment.content.fragments.contains { fragment in
+      guard case .mention(let mention) = fragment else { return false }
+      return mention.userID == replyToUserID
+    })
+  }
+
   func testAnonymousPollResultsAndSharedOriginOwnership() async throws {
     guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
       throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.15 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.16 integration-test")
     )
     let feed = try await client.getThreads(forumName: "starry", pageSize: 100)
     var candidateIDs = feed.threads.compactMap { thread -> Int64? in
@@ -267,7 +291,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.15 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.16 integration-test")
     )
     let topics = try await client.getHotTopics()
     let topic = try XCTUnwrap(topics.first)
@@ -305,7 +329,7 @@ final class TiebaLiveTests: XCTestCase {
 
     let userID: Int64 = 957_339_815
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.15 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.16 integration-test")
     )
 
     let profile = try await client.getUserProfile(userID: userID)
@@ -327,7 +351,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.15 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.16 integration-test")
     )
     let forumID: Int64 = 2_432_903
 

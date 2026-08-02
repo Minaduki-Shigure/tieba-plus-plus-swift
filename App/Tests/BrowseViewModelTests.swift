@@ -109,13 +109,17 @@ final class BrowseViewModelTests: XCTestCase {
       parentPostID: 101,
       floor: 2,
       author: author,
-      replyToUserID: nil,
-      content: TiebaContent(fragments: [.text("Comment")]),
+      replyToUserID: 77,
+      content: TiebaContent(fragments: [
+        .mention(TiebaMention(text: " @Target User ", userID: 77)),
+        .text(" hello"),
+      ]),
       agreeCount: 4,
       disagreeCount: 1,
       createdAt: nil,
       isThreadAuthor: true,
-      agreeScore: 3
+      agreeScore: 3,
+      replyToUserName: " @Target User "
     )
 
     let mappedPost = TiebaCoreBrowseService.mapPost(post)
@@ -129,6 +133,12 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(mappedComment.authorIPLocation, "Shanghai")
     XCTAssertEqual(mappedComment.agreeScore, 3)
     XCTAssertTrue(mappedComment.isThreadAuthor)
+    XCTAssertEqual(mappedComment.replyToUserID, 77)
+    XCTAssertEqual(mappedComment.replyToUserName, "Target User")
+    XCTAssertEqual(
+      mappedComment.contents,
+      [.mention(name: "Target User", userID: 77), .text(" hello")]
+    )
 
     let negativeScorePost = TiebaPost(
       id: 103,
@@ -147,6 +157,35 @@ final class BrowseViewModelTests: XCTestCase {
       agreeScore: -2
     )
     XCTAssertEqual(TiebaCoreBrowseService.mapPost(negativeScorePost).agreeScore, 0)
+  }
+
+  func testMentionLinksUseOnlyExactPositiveInternalUserDestinations() throws {
+    let url = try XCTUnwrap(BrowseContentView.mentionURL(for: 77))
+
+    XCTAssertEqual(url.absoluteString, "tieba-plus-plus://user/77")
+    XCTAssertEqual(BrowseContentView.mentionUserID(from: url), 77)
+    XCTAssertNil(BrowseContentView.mentionURL(for: 0))
+    XCTAssertNil(BrowseContentView.mentionURL(for: -1))
+
+    for invalidURL in [
+      "https://tieba.baidu.com/home/main?id=77",
+      "tieba-plus-plus://other/77",
+      "tieba-plus-plus://reader@user/77",
+      "tieba-plus-plus://user:8080/77",
+      "tieba-plus-plus://user/77/88",
+      "tieba-plus-plus://user/77?next=88",
+      "tieba-plus-plus://user/77#profile",
+      "tieba-plus-plus://user/-1",
+    ] {
+      XCTAssertNil(BrowseContentView.mentionUserID(from: try XCTUnwrap(URL(string: invalidURL))))
+    }
+
+    let linkedText = BrowseContentView.inlineText(
+      [.mention(name: "reader", userID: 77), .text(" hello")],
+      linksUserMentions: true
+    )
+    XCTAssertEqual(String(linkedText.characters), "@reader hello")
+    XCTAssertEqual(linkedText.runs.compactMap { $0.link }, [url])
   }
 
   @MainActor

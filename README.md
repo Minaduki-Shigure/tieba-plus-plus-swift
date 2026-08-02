@@ -16,7 +16,8 @@ featured classifications, complete public forum introductions, forum rules,
 moderator teams, and shared-thread origin cards with original media and
 navigation, plus anonymous single- and multiple-choice poll results, post
 author forum levels, IP locations, read-only net approval counts, post sorting,
-page jumps, and an only-thread-author filter.
+page jumps, an only-thread-author filter, and in-app public-profile navigation
+from user mentions without dropping reply context.
 Topic threads, search results, moderator rows, post authors, and
 nested-reply authors open credential-free public user profiles with profile
 statistics and paginated public threads. Local browsing

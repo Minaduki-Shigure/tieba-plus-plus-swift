@@ -35,6 +35,26 @@ final class TiebaProtoMapperTests: XCTestCase {
     XCTAssertEqual(try XCTUnwrap(TiebaProtoMapper.postPage(fixture).posts.first).agreeScore, 3)
   }
 
+  func testDirectLeadingReplyMentionKeepsContentAndMapsTarget() throws {
+    var fixture = ProtoFixtures.postPage().data
+    var mention = PbContent()
+    mention.type = 4
+    mention.text = "@direct-target"
+    mention.uid = 77
+    var body = PbContent()
+    body.type = 0
+    body.text = " hello"
+    fixture.postList[0].subPostList.subPostList[0].content = [mention, body]
+
+    let post = try XCTUnwrap(TiebaProtoMapper.postPage(fixture).posts.first)
+    let comment = try XCTUnwrap(post.comments.first)
+
+    XCTAssertEqual(comment.replyToUserID, 77)
+    XCTAssertEqual(comment.replyToUserName, "direct-target")
+    XCTAssertEqual(comment.content.plainText, "@direct-target hello")
+    XCTAssertEqual(comment.content.fragments.count, 2)
+  }
+
   func testPostPageMapsDistinctValidOriginOnlyForSharedThread() throws {
     var fixture = ProtoFixtures.postPage().data
     fixture.thread.isShareThread = 1

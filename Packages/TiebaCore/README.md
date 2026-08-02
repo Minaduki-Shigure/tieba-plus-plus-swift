@@ -79,6 +79,9 @@ let followed = try await authenticatedClient.getFollowedForums(
   falling back to the difference between raw agree and disagree counts for
   older responses. Author forum levels and IP locations come from the same
   anonymous response and do not require a separate profile request.
+- Nested-reply content is lossless. Reply-target metadata recognizes both a
+  direct leading mention and the legacy `reply + mention` prefix without
+  removing the corresponding content fragments.
 - Browsing bodies use the endpoint's multipart `data` part and Protocol Buffer
   payload. Search requests use percent-encoded GET query items and JSON.
 - Anonymous requests contain no Cookie, Authorization, BDUSS, STOKEN, device

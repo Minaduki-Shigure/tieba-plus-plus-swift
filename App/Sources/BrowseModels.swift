@@ -461,6 +461,8 @@ struct BrowseComment: Identifiable, Hashable, Sendable {
   let createdAt: Date?
   let agreeScore: Int
   let isThreadAuthor: Bool
+  let replyToUserID: Int64?
+  let replyToUserName: String
   let contents: [BrowseContent]
 
   init(
@@ -473,7 +475,9 @@ struct BrowseComment: Identifiable, Hashable, Sendable {
     authorLevel: Int = 0,
     authorIPLocation: String = "",
     agreeScore: Int = 0,
-    isThreadAuthor: Bool = false
+    isThreadAuthor: Bool = false,
+    replyToUserID: Int64? = nil,
+    replyToUserName: String = ""
   ) {
     self.id = id
     self.authorID = authorID
@@ -484,6 +488,8 @@ struct BrowseComment: Identifiable, Hashable, Sendable {
     self.createdAt = createdAt
     self.agreeScore = agreeScore
     self.isThreadAuthor = isThreadAuthor
+    self.replyToUserID = replyToUserID
+    self.replyToUserName = replyToUserName
     self.contents = contents
   }
 }

@@ -81,6 +81,9 @@ final class TiebaClientTests: XCTestCase {
     XCTAssertEqual(comment.author?.ipLocation, "Guangdong")
     XCTAssertEqual(comment.parentPostID, post.id)
     XCTAssertEqual(comment.agreeScore, 3)
+    XCTAssertEqual(comment.replyToUserID, 9)
+    XCTAssertEqual(comment.replyToUserName, "target-user")
+    XCTAssertEqual(comment.content.plainText, "回复 @target-user: Nested reply")
   }
 
   func testPostCursorIsForwardedToTheWireRequest() async throws {
@@ -145,7 +148,8 @@ final class TiebaClientTests: XCTestCase {
     let comment = try XCTUnwrap(result.comments.first)
     XCTAssertEqual(comment.parentPostID, 201)
     XCTAssertEqual(comment.replyToUserID, 7)
-    XCTAssertEqual(comment.content.plainText, "Nested reply")
+    XCTAssertEqual(comment.replyToUserName, "thread-author")
+    XCTAssertEqual(comment.content.plainText, "回复 @thread-author :Nested reply")
     XCTAssertEqual(comment.floor, 2)
   }
 

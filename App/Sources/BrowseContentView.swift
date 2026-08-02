@@ -3,6 +3,12 @@ import SwiftUI
 
 struct BrowseContentView: View {
   let contents: [BrowseContent]
+  let onUserMention: ((Int64) -> Void)?
+
+  init(contents: [BrowseContent], onUserMention: ((Int64) -> Void)? = nil) {
+    self.contents = contents
+    self.onUserMention = onUserMention
+  }
 
   private var blocks: [BrowseContentBlock] {
     var result = [BrowseContentBlock]()
@@ -32,15 +38,27 @@ struct BrowseContentView: View {
       ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
         switch block {
         case .inline(let contents):
-          Text(Self.inlineText(contents))
+          Text(Self.inlineText(contents, linksUserMentions: onUserMention != nil))
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
+            .environment(\.openURL, mentionOpenURLAction)
         case .standalone(let content):
           standalone(content)
         }
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  private var mentionOpenURLAction: OpenURLAction {
+    OpenURLAction { url in
+      guard
+        let userID = Self.mentionUserID(from: url),
+        let onUserMention
+      else { return .systemAction }
+      onUserMention(userID)
+      return .handled
+    }
   }
 
   @ViewBuilder
@@ -62,16 +80,22 @@ struct BrowseContentView: View {
     }
   }
 
-  private static func inlineText(_ contents: [BrowseContent]) -> AttributedString {
+  static func inlineText(
+    _ contents: [BrowseContent],
+    linksUserMentions: Bool = false
+  ) -> AttributedString {
     var result = AttributedString()
     for content in contents {
       var fragment: AttributedString
       switch content {
       case .text(let text):
         fragment = AttributedString(text)
-      case .mention(let name, _):
+      case .mention(let name, let userID):
         fragment = AttributedString("@\(name)")
         fragment.foregroundColor = .accentColor
+        if linksUserMentions, let url = mentionURL(for: userID) {
+          fragment.link = url
+        }
       case .link(let label, let url):
         fragment = AttributedString(label.isEmpty ? url.host ?? url.absoluteString : label)
         fragment.link = url
@@ -86,6 +110,36 @@ struct BrowseContentView: View {
       result.append(fragment)
     }
     return result
+  }
+
+  static func mentionURL(for userID: Int64) -> URL? {
+    guard userID > 0 else { return nil }
+    var components = URLComponents()
+    components.scheme = "tieba-plus-plus"
+    components.host = "user"
+    components.path = "/\(userID)"
+    return components.url
+  }
+
+  static func mentionUserID(from url: URL) -> Int64? {
+    guard
+      let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+      components.scheme?.lowercased() == "tieba-plus-plus",
+      components.host?.lowercased() == "user",
+      components.user == nil,
+      components.password == nil,
+      components.port == nil,
+      components.query == nil,
+      components.fragment == nil
+    else { return nil }
+
+    let pathComponents = components.path.split(separator: "/", omittingEmptySubsequences: true)
+    guard
+      pathComponents.count == 1,
+      let userID = Int64(pathComponents[0]),
+      userID > 0
+    else { return nil }
+    return userID
   }
 }
 

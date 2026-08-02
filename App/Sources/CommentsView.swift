@@ -3,6 +3,7 @@ import SwiftUI
 struct CommentsView: View {
   @Environment(\.dismiss) private var dismiss
   @StateObject private var viewModel: CommentsViewModel
+  @State private var mentionedUserID: Int64?
   let service: any BrowseService & UserProfileService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
@@ -72,7 +73,10 @@ struct CommentsView: View {
                 ReadOnlyAgreeLabel(score: comment.agreeScore)
                   .padding(.top, 2)
               }
-              BrowseContentView(contents: comment.contents)
+              BrowseContentView(
+                contents: comment.contents,
+                onUserMention: openMentionedUser
+              )
             }
             .padding(.vertical, 4)
             .onAppear {
@@ -102,6 +106,16 @@ struct CommentsView: View {
     }
     .navigationTitle("楼中楼")
     .navigationBarTitleDisplayMode(.inline)
+    .navigationDestination(isPresented: mentionProfilePresented) {
+      if let userID = mentionedUserID {
+        UserProfileView(
+          userID: userID,
+          service: service,
+          historyRepository: historyRepository,
+          favoritesRepository: favoritesRepository
+        )
+      }
+    }
     .toolbar {
       ToolbarItem(placement: .confirmationAction) {
         Button("完成") { dismiss() }
@@ -109,6 +123,20 @@ struct CommentsView: View {
     }
     .task { viewModel.loadIfNeeded() }
     .onDisappear(perform: viewModel.cancel)
+  }
+
+  private var mentionProfilePresented: Binding<Bool> {
+    Binding(
+      get: { mentionedUserID != nil },
+      set: { isPresented in
+        if !isPresented { mentionedUserID = nil }
+      }
+    )
+  }
+
+  private func openMentionedUser(_ userID: Int64) {
+    guard userID > 0 else { return }
+    mentionedUserID = userID
   }
 
   private func commentAuthorIdentity(_ comment: BrowseComment) -> some View {

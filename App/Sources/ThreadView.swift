@@ -10,6 +10,7 @@ struct ThreadView: View {
   @State private var showsPageJump = false
   @State private var pageInput = ""
   @State private var visiblePost: BrowsePost?
+  @State private var mentionedUserID: Int64?
   private let historySnapshot: ThreadHistorySnapshot?
 
   init(
@@ -156,6 +157,16 @@ struct ThreadView: View {
       }
       viewModel.cancel()
     }
+    .navigationDestination(isPresented: mentionProfilePresented) {
+      if let userID = mentionedUserID {
+        UserProfileView(
+          userID: userID,
+          service: service,
+          historyRepository: historyRepository,
+          favoritesRepository: favoritesRepository
+        )
+      }
+    }
     .sheet(item: $commentsPost) { post in
       NavigationStack {
         CommentsView(
@@ -168,6 +179,20 @@ struct ThreadView: View {
       }
       .presentationDetents([.medium, .large])
     }
+  }
+
+  private var mentionProfilePresented: Binding<Bool> {
+    Binding(
+      get: { mentionedUserID != nil },
+      set: { isPresented in
+        if !isPresented { mentionedUserID = nil }
+      }
+    )
+  }
+
+  private func openMentionedUser(_ userID: Int64) {
+    guard userID > 0 else { return }
+    mentionedUserID = userID
   }
 
   private var optionsBar: some View {
@@ -222,6 +247,7 @@ struct ThreadView: View {
                 service: service,
                 historyRepository: historyRepository,
                 favoritesRepository: favoritesRepository,
+                openMentionedUser: openMentionedUser,
                 openComments: { commentsPost = post }
               )
               .id(post.id)
@@ -356,20 +382,22 @@ private struct PostView: View {
   let service: any BrowseService & UserProfileService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
+  let openMentionedUser: (Int64) -> Void
   let openComments: () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       authorRow
 
-      BrowseContentView(contents: post.contents)
+      BrowseContentView(contents: post.contents, onUserMention: openMentionedUser)
 
       if let originThread {
         OriginThreadCard(
           thread: originThread,
           service: service,
           historyRepository: historyRepository,
-          favoritesRepository: favoritesRepository
+          favoritesRepository: favoritesRepository,
+          openMentionedUser: openMentionedUser
         )
       }
 
@@ -536,6 +564,7 @@ private struct OriginThreadCard: View {
   let service: any BrowseService & UserProfileService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
+  let openMentionedUser: (Int64) -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
@@ -581,7 +610,7 @@ private struct OriginThreadCard: View {
 
       if !thread.contents.isEmpty {
         Divider()
-        BrowseContentView(contents: thread.contents)
+        BrowseContentView(contents: thread.contents, onUserMention: openMentionedUser)
       }
     }
     .padding(12)

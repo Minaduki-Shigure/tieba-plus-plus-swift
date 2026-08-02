@@ -154,7 +154,11 @@ enum ProtoFixtures {
     var nested = SubPostList()
     nested.id = 202
     nested.authorID = commenter.id
-    nested.content = [text("Nested reply")]
+    var replyMention = PbContent()
+    replyMention.type = 4
+    replyMention.text = "@target-user"
+    replyMention.uid = 9
+    nested.content = [text("回复 "), replyMention, text(": Nested reply")]
     nested.time = 1_700_000_200
     nested.agree.agreeNum = 4
     nested.agree.disagreeNum = 1
