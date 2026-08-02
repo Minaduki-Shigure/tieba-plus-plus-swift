@@ -4,7 +4,8 @@ import SwiftUI
 
 struct RootView: View {
   let service:
-    any BrowseService & SearchService & UserProfileService & ForumInformationService
+    any BrowseService & SearchService & HotTopicService & UserProfileService
+      & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
   let accountVault: any AccountVault
@@ -15,7 +16,8 @@ struct RootView: View {
   @StateObject private var favoritesViewModel: LocalFavoritesViewModel
 
   init(
-    service: any BrowseService & SearchService & UserProfileService & ForumInformationService,
+    service: any BrowseService & SearchService & HotTopicService & UserProfileService
+      & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     accountVault: any AccountVault,
@@ -57,6 +59,12 @@ struct RootView: View {
             .disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             .accessibilityLabel("直接打开贴吧")
             .help("直接打开贴吧")
+          }
+        }
+
+        Section("\u{53d1}\u{73b0}") {
+          NavigationLink(value: RootDestination.hotTopics) {
+            Label("\u{70ed}\u{95e8}\u{8bdd}\u{9898}", systemImage: "flame.fill")
           }
         }
 
@@ -136,6 +144,12 @@ struct RootView: View {
             historyRepository: historyRepository,
             favoritesRepository: favoritesRepository
           )
+        case .hotTopics:
+          HotTopicListView(
+            service: service,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository
+          )
         case .history:
           HistoryView(repository: historyRepository) { target in
             switch target {
@@ -201,6 +215,7 @@ struct RootView: View {
 private enum RootDestination: Hashable {
   case forum(String)
   case search(String)
+  case hotTopics
   case history
   case favorites
   case account

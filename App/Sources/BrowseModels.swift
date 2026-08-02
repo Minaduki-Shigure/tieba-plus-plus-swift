@@ -224,6 +224,25 @@ struct ThreadSearchPageData: Sendable {
   let hasMore: Bool
 }
 
+struct HotTopicItem: Identifiable, Hashable, Sendable {
+  let id: Int64
+  let name: String
+  let summary: String
+  let imageURL: URL?
+  let discussionCount: Int64
+  let rank: Int
+  let tag: Int
+}
+
+struct HotTopicPageData: Sendable {
+  let topic: HotTopicItem
+  let relatedForums: [ForumSearchItem]
+  let threads: [BrowseThread]
+  let currentPage: Int
+  let hasMore: Bool
+  let nextPageCursor: Int64?
+}
+
 struct BrowseThread: Identifiable, Hashable, Sendable {
   let id: Int64
   let forumID: Int64

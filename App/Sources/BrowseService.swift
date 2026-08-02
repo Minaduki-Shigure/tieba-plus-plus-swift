@@ -91,6 +91,17 @@ protocol SearchService: Sendable {
     -> ThreadSearchPageData
 }
 
+protocol HotTopicService: Sendable {
+  func hotTopics() async throws -> [HotTopicItem]
+  func hotTopic(
+    id: Int64,
+    name: String,
+    page: Int,
+    pageSize: Int,
+    lastID: Int64?
+  ) async throws -> HotTopicPageData
+}
+
 protocol UserProfileService: Sendable {
   func userProfile(userID: Int64) async throws -> BrowseUserProfile
   func userThreads(userID: Int64, page: Int, pageSize: Int) async throws

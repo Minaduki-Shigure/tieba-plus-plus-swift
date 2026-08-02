@@ -10,7 +10,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.8 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.9 integration-test")
     )
     let threads = try await client.getThreads(forumName: "starry", pageSize: 10)
     XCTAssertFalse(threads.threads.isEmpty)
@@ -119,7 +119,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.8 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.9 integration-test")
     )
     let forums = try await client.searchForums(query: "swift")
     XCTAssertFalse(forums.isLoggedIn)
@@ -135,6 +135,43 @@ final class TiebaLiveTests: XCTestCase {
     XCTAssertTrue(users.fuzzyMatches.allSatisfy { $0.id > 0 && !$0.preferredName.isEmpty })
   }
 
+  func testAnonymousHotTopicListDetailAndPagination() async throws {
+    guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
+      throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
+    }
+
+    let client = TiebaClient(
+      configuration: .init(userAgent: "TiebaPlusPlus/0.9 integration-test")
+    )
+    let topics = try await client.getHotTopics()
+    let topic = try XCTUnwrap(topics.first)
+    XCTAssertGreaterThan(topic.id, 0)
+    XCTAssertFalse(topic.name.isEmpty)
+    XCTAssertGreaterThan(topic.rank, 0)
+
+    let firstPage = try await client.getHotTopic(
+      topicID: topic.id,
+      topicName: topic.name,
+      pageSize: 10
+    )
+    XCTAssertEqual(firstPage.topic.id, topic.id)
+    XCTAssertFalse(firstPage.topic.name.isEmpty)
+    XCTAssertFalse(firstPage.threads.isEmpty && firstPage.relatedForums.isEmpty)
+    XCTAssertTrue(firstPage.threads.allSatisfy { $0.id > 0 })
+
+    if firstPage.pagination.hasMore, let cursor = firstPage.nextPageCursor {
+      let secondPage = try await client.getHotTopic(
+        topicID: topic.id,
+        topicName: topic.name,
+        page: 2,
+        pageSize: 10,
+        lastID: cursor
+      )
+      XCTAssertEqual(secondPage.pagination.currentPage, 2)
+      XCTAssertTrue(secondPage.threads.allSatisfy { $0.id > 0 })
+    }
+  }
+
   func testAnonymousPublicUserProfileAndThreads() async throws {
     guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
       throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
@@ -142,7 +179,7 @@ final class TiebaLiveTests: XCTestCase {
 
     let userID: Int64 = 957_339_815
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.8 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.9 integration-test")
     )
 
     let profile = try await client.getUserProfile(userID: userID)
@@ -164,7 +201,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.8 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.9 integration-test")
     )
     let forumID: Int64 = 2_432_903
 

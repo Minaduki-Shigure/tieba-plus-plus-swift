@@ -1,7 +1,7 @@
 import Foundation
 import TiebaCore
 
-struct TiebaCoreBrowseService: BrowseService, SearchService, UserProfileService,
+struct TiebaCoreBrowseService: BrowseService, SearchService, HotTopicService, UserProfileService,
   ForumInformationService
 {
   private let client: TiebaClient
@@ -141,6 +141,49 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, UserProfileService,
       threads: response.results.map(Self.mapThreadSearchResult),
       currentPage: response.pagination.currentPage,
       hasMore: response.pagination.hasMore
+    )
+  }
+
+  func hotTopics() async throws -> [HotTopicItem] {
+    let response: [TiebaHotTopic]
+    do {
+      response = try await client.getHotTopics()
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    return response.map(Self.mapHotTopic)
+  }
+
+  func hotTopic(
+    id: Int64,
+    name: String,
+    page: Int,
+    pageSize: Int,
+    lastID: Int64?
+  ) async throws -> HotTopicPageData {
+    let response: TiebaHotTopicPage
+    do {
+      response = try await client.getHotTopic(
+        topicID: id,
+        topicName: name,
+        page: page,
+        pageSize: pageSize,
+        lastID: lastID
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    return HotTopicPageData(
+      topic: Self.mapHotTopic(response.topic),
+      relatedForums: response.relatedForums.map(Self.mapHotTopicForum),
+      threads: response.threads.map(Self.mapThreadSearchResult),
+      currentPage: response.pagination.currentPage,
+      hasMore: response.pagination.hasMore,
+      nextPageCursor: response.nextPageCursor
     )
   }
 
@@ -327,6 +370,30 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, UserProfileService,
       displayName: result.displayName,
       portraitURL: SecureTiebaURL.portrait(result.portrait),
       introduction: result.introduction
+    )
+  }
+
+  private static func mapHotTopic(_ topic: TiebaHotTopic) -> HotTopicItem {
+    HotTopicItem(
+      id: topic.id,
+      name: topic.name,
+      summary: topic.description,
+      imageURL: SecureTiebaURL.media(topic.imageURL),
+      discussionCount: topic.discussionCount,
+      rank: topic.rank,
+      tag: topic.tag
+    )
+  }
+
+  private static func mapHotTopicForum(_ forum: TiebaHotTopicForum) -> ForumSearchItem {
+    ForumSearchItem(
+      id: forum.id,
+      name: forum.name,
+      displayName: forum.name,
+      avatarURL: SecureTiebaURL.media(forum.avatarURL),
+      postCount: forum.postCount,
+      memberCount: forum.memberCount,
+      summary: forum.description
     )
   }
 

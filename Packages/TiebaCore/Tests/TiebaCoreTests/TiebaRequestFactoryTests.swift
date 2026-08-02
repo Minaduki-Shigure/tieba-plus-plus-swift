@@ -403,6 +403,33 @@ final class TiebaRequestFactoryTests: XCTestCase {
     XCTAssertThrowsError(try factory.searchUsers(query: String(repeating: "a", count: 101)))
     XCTAssertThrowsError(try factory.searchThreads(query: "swift", page: 0, pageSize: 20))
     XCTAssertThrowsError(try factory.searchThreads(query: "swift", page: 1, pageSize: 51))
+    XCTAssertThrowsError(
+      try factory.hotTopic(topicID: 0, topicName: "topic", page: 1, pageSize: 10, lastID: nil)
+    )
+    XCTAssertThrowsError(
+      try factory.hotTopic(topicID: 1, topicName: "  ", page: 1, pageSize: 10, lastID: nil)
+    )
+    XCTAssertThrowsError(
+      try factory.hotTopic(
+        topicID: 1,
+        topicName: String(repeating: "a", count: 201),
+        page: 1,
+        pageSize: 10,
+        lastID: nil
+      )
+    )
+    XCTAssertThrowsError(
+      try factory.hotTopic(topicID: 1, topicName: "topic", page: 0, pageSize: 10, lastID: nil)
+    )
+    XCTAssertThrowsError(
+      try factory.hotTopic(topicID: 1, topicName: "topic", page: 1, pageSize: 31, lastID: nil)
+    )
+    XCTAssertThrowsError(
+      try factory.hotTopic(topicID: 1, topicName: "topic", page: 2, pageSize: 10, lastID: nil)
+    )
+    XCTAssertThrowsError(
+      try factory.hotTopic(topicID: 1, topicName: "topic", page: 2, pageSize: 10, lastID: 0)
+    )
     XCTAssertThrowsError(try factory.userProfile(userID: 0))
     XCTAssertThrowsError(try factory.userThreads(userID: 1, page: 0, pageSize: 20))
     XCTAssertThrowsError(try factory.userThreads(userID: 1, page: 1, pageSize: 101))
@@ -411,6 +438,59 @@ final class TiebaRequestFactoryTests: XCTestCase {
     XCTAssertThrowsError(try factory.forumRules(forumID: 0))
     XCTAssertThrowsError(try injected.searchForums(query: "swift"))
     XCTAssertThrowsError(try injected.searchUsers(query: "swift"))
+    XCTAssertThrowsError(try injected.hotTopics())
+    XCTAssertThrowsError(
+      try injected.hotTopic(
+        topicID: 1,
+        topicName: "topic",
+        page: 1,
+        pageSize: 10,
+        lastID: nil
+      )
+    )
+  }
+
+  func testHotTopicRequestsUseCredentialFreeHTTPSWebEndpoints() throws {
+    let listRequest = try factory.hotTopics()
+    let detailRequest = try factory.hotTopic(
+      topicID: 28_356_723,
+      topicName: " \u{4e3b}\u{6301}\u{4eba}\u{8bdd}\u{9898} & iOS ",
+      page: 2,
+      pageSize: 10,
+      lastID: 10_913_428_976
+    )
+
+    XCTAssertEqual(listRequest.url?.scheme, "https")
+    XCTAssertEqual(listRequest.url?.host, "tieba.baidu.com")
+    XCTAssertEqual(listRequest.url?.path, "/mo/q/hotMessage/list")
+    XCTAssertEqual(queryItems(listRequest), ["fr": "newwise"])
+
+    XCTAssertEqual(detailRequest.url?.scheme, "https")
+    XCTAssertEqual(detailRequest.url?.host, "tieba.baidu.com")
+    XCTAssertEqual(detailRequest.url?.path, "/mo/q/newtopic/topicDetail")
+    XCTAssertEqual(
+      queryItems(detailRequest),
+      [
+        "topic_id": "28356723",
+        "topic_name": "\u{4e3b}\u{6301}\u{4eba}\u{8bdd}\u{9898} & iOS",
+        "is_new": "1",
+        "is_share": "1",
+        "pn": "2",
+        "rn": "10",
+        "offset": "10",
+        "last_id": "10913428976",
+        "derivative_to_pic_id": "",
+      ]
+    )
+
+    for request in [listRequest, detailRequest] {
+      XCTAssertEqual(request.httpMethod, "GET")
+      XCTAssertFalse(request.httpShouldHandleCookies)
+      XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+      XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+      XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+      XCTAssertNil(request.httpBody)
+    }
   }
 
   func testSearchRequestsUseEncodedCredentialFreeHTTPSWebEndpoint() throws {

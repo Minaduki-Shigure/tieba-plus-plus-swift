@@ -55,6 +55,13 @@ an account is active. Search requests may contain only the submitted public
 keyword and endpoint-specific pagination or sorting fields; they must never
 attach Cookie, Authorization, BDUSS, STOKEN, or a device identifier.
 
+Hot-topic list and detail requests follow the same anonymous boundary. They may
+send only the public topic identifier/name and pagination fields documented by
+the endpoint. The detail response can include `tbs`, `user`, and generated
+client metadata; these fields must not be persisted, promoted into an account
+session, or forwarded into later requests. Topic media must pass the same
+HTTPS URL normalization policy as all other remote media.
+
 Public forum introductions, rules, and moderator-team requests must remain
 credential-free. They may include only the forum identifier and anonymous
 client metadata; no future account Cookie, BDUSS, or STOKEN may be attached to

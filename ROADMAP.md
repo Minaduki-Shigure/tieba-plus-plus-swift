@@ -6,6 +6,8 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 
 ## Available
 
+- Ranked anonymous hot-topic discovery with images and discussion counts
+- Hot-topic details with related forums and cursor-aware thread pagination
 - Categorized anonymous forum, thread, and user search
 - Forum thread list with pagination and pull to refresh
 - Reply-time and creation-time forum sorting
@@ -72,3 +74,9 @@ Search categories load independently so one endpoint failure does not discard
 another category's results. User search uses the credential-free Web endpoint,
 accepts the server's object/array result variants and 64-bit user identifiers,
 and opens the same anonymous public profile workflow used by author rows.
+
+Hot-topic discovery uses credential-free Web endpoints and treats topic IDs,
+thread IDs, and pagination cursors as 64-bit values. Detail refresh preserves
+the prior page and cursor on failure; duplicate-only pages terminate pagination
+instead of repeatedly requesting the same feed. Login-related fields returned
+incidentally by the public detail response are ignored.

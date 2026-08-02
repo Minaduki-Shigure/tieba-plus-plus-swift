@@ -292,6 +292,57 @@ struct TiebaRequestFactory: Sendable {
     )
   }
 
+  func hotTopics() throws -> URLRequest {
+    try webRequest(
+      path: "/mo/q/hotMessage/list",
+      queryItems: [URLQueryItem(name: "fr", value: "newwise")]
+    )
+  }
+
+  func hotTopic(
+    topicID: Int64,
+    topicName rawTopicName: String,
+    page: Int,
+    pageSize: Int,
+    lastID: Int64?
+  ) throws -> URLRequest {
+    try validate(identifier: topicID, name: "Topic ID")
+    let topicName = rawTopicName.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !topicName.isEmpty, topicName.count <= 200 else {
+      throw TiebaClientError.invalidArgument(
+        "Topic name must contain between 1 and 200 characters."
+      )
+    }
+    try validate(page: page)
+    try validate(pageSize: pageSize, maximum: 30)
+    if let lastID {
+      try validate(identifier: lastID, name: "Topic page cursor")
+    }
+    guard page == 1 || lastID != nil else {
+      throw TiebaClientError.invalidArgument(
+        "Topic pages after the first page require a positive cursor."
+      )
+    }
+    let (offset, overflow) = (page - 1).multipliedReportingOverflow(by: pageSize)
+    guard !overflow else {
+      throw TiebaClientError.invalidArgument("Topic page offset is too large.")
+    }
+    return try webRequest(
+      path: "/mo/q/newtopic/topicDetail",
+      queryItems: [
+        URLQueryItem(name: "topic_id", value: String(topicID)),
+        URLQueryItem(name: "topic_name", value: topicName),
+        URLQueryItem(name: "is_new", value: "1"),
+        URLQueryItem(name: "is_share", value: "1"),
+        URLQueryItem(name: "pn", value: String(page)),
+        URLQueryItem(name: "rn", value: String(pageSize)),
+        URLQueryItem(name: "offset", value: String(offset)),
+        URLQueryItem(name: "last_id", value: lastID.map(String.init) ?? ""),
+        URLQueryItem(name: "derivative_to_pic_id", value: ""),
+      ]
+    )
+  }
+
   func searchUsers(query: String) throws -> URLRequest {
     let query = try validatedSearchQuery(query)
     return try webRequest(

@@ -7,6 +7,11 @@ values to the app.
 
 ```swift
 let client = TiebaClient()
+let topics = try await client.getHotTopics()
+let topic = try await client.getHotTopic(
+  topicID: topics[0].id,
+  topicName: topics[0].name
+)
 let search = try await client.searchThreads(query: "swift")
 let users = try await client.searchUsers(query: "swift")
 let threads = try await client.getThreads(forumName: "swift")
@@ -46,6 +51,9 @@ let followed = try await authenticatedClient.getFollowedForums(
 - Search supports `/mo/q/search/forum`, `/mo/q/search/thread`, and
   `/mo/q/search/user`; thread search is restricted to topic results and
   relevance sorting, while user search is a single nonpaginated request.
+- Hot-topic discovery uses the credential-free `/mo/q/hotMessage/list` and
+  `/mo/q/newtopic/topicDetail` Web endpoints. Detail pagination forwards both
+  the numeric page/offset and the previous page's final feed cursor.
 - Requests identify as client type `2` and version `12.64.1.1` by default.
 - Account validation and authenticated read requests use version `22.6.5.1`.
 - The first FRS page is encoded as `pn = 0`, matching aiotieba behavior.

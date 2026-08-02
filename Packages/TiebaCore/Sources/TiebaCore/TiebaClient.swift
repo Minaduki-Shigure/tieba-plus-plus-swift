@@ -15,7 +15,7 @@ public struct TiebaClientConfiguration: Sendable, Hashable {
   public init(
     clientVersion: String = "12.64.1.1",
     authenticatedClientVersion: String = "22.6.5.1",
-    userAgent: String = "TiebaPlusPlus/0.8 (iOS)",
+    userAgent: String = "TiebaPlusPlus/0.9 (iOS)",
     requestTimeout: TimeInterval = 30
   ) {
     self.clientVersion = clientVersion
@@ -237,6 +237,36 @@ public actor TiebaClient {
     let request = try requestFactory.searchForums(query: query)
     let body = try await send(request)
     return try TiebaSearchDecoder.forums(from: body)
+  }
+
+  public func getHotTopics() async throws -> [TiebaHotTopic] {
+    let request = try requestFactory.hotTopics()
+    let body = try await send(request)
+    return try TiebaHotTopicDecoder.topics(from: body)
+  }
+
+  public func getHotTopic(
+    topicID: Int64,
+    topicName: String,
+    page: Int = 1,
+    pageSize: Int = 10,
+    lastID: Int64? = nil
+  ) async throws -> TiebaHotTopicPage {
+    let request = try requestFactory.hotTopic(
+      topicID: topicID,
+      topicName: topicName,
+      page: page,
+      pageSize: pageSize,
+      lastID: lastID
+    )
+    let body = try await send(request)
+    return try TiebaHotTopicDecoder.page(
+      from: body,
+      requestedTopicID: topicID,
+      requestedTopicName: topicName.trimmingCharacters(in: .whitespacesAndNewlines),
+      requestedPage: page,
+      pageSize: pageSize
+    )
   }
 
   public func searchUsers(query: String) async throws -> TiebaUserSearchResults {
