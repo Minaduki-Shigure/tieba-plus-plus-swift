@@ -126,7 +126,13 @@ final class ContentFilterTests: XCTestCase {
     let fileURL = temporaryFileURL()
     defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
     let store = FileContentFilterStore(fileURL: fileURL, maximumRules: 3)
-    let saved = try await store.add(.keyword("  广告  ", list: .block))
+    let saved = try await store.add(
+      .keyword(
+        "  广告  ",
+        list: .block,
+        createdAt: Date(timeIntervalSince1970: 1)
+      )
+    )
 
     XCTAssertEqual(saved.keyword, "广告")
     try await store.setDisplayMode(.hidden)
@@ -143,7 +149,14 @@ final class ContentFilterTests: XCTestCase {
       XCTAssertEqual(error, .duplicateRule)
     }
 
-    let user = try await store.add(.user(id: 7, name: " User ", list: .allow))
+    let user = try await store.add(
+      .user(
+        id: 7,
+        name: " User ",
+        list: .allow,
+        createdAt: Date(timeIntervalSince1970: 2)
+      )
+    )
     XCTAssertEqual(user.username, "User")
     snapshot = try await store.snapshot()
     XCTAssertEqual(snapshot.rules.count, 2)
