@@ -468,10 +468,11 @@ private struct PollResultsCard: View {
         }
       }
 
-      Text("\(max(poll.participantCount, 0)) 人参与")
+      Text("\(compactCount(poll.participantCount)) 人参与")
         .font(.caption)
         .foregroundStyle(.secondary)
         .monospacedDigit()
+        .accessibilityLabel("\(max(poll.participantCount, 0).formatted()) 人参与")
     }
     .padding(12)
     .background(Color(uiColor: .secondarySystemGroupedBackground))
@@ -499,7 +500,7 @@ private struct PollResultsCard: View {
           .font(.subheadline)
           .fixedSize(horizontal: false, vertical: true)
           .frame(maxWidth: .infinity, alignment: .leading)
-        Text("\(voteCount) 票 · \(percentage)%")
+        Text("\(compactCount(voteCount)) 票 · \(percentage)%")
           .font(.caption)
           .foregroundStyle(.secondary)
           .monospacedDigit()
@@ -518,7 +519,11 @@ private struct PollResultsCard: View {
       .frame(height: 5)
     }
     .accessibilityElement(children: .ignore)
-    .accessibilityLabel("\(text)，\(voteCount) 票，\(percentage)%")
+    .accessibilityLabel("\(text)，\(voteCount.formatted()) 票，\(percentage)%")
+  }
+
+  private func compactCount(_ value: Int64) -> String {
+    max(value, 0).formatted(.number.notation(.compactName))
   }
 }
 
