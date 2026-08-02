@@ -12,7 +12,7 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     )
 
     let message = try XCTUnwrap(error.errorDescription)
-    XCTAssertEqual(message, "账户验证失败（错误码 1）。")
+    XCTAssertEqual(message, "账户请求失败（错误码 1）。")
     XCTAssertFalse(message.contains(secret))
     XCTAssertFalse(message.contains("bdusstoken"))
   }
@@ -28,7 +28,7 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
 
   func testAccountErrorUsesOnlyFixedMessagesAndNumericStatus() throws {
     let cases: [(TiebaClientError, String)] = [
-      (.invalidArgument("secret"), "账户凭据格式无效。"),
+      (.invalidArgument("secret"), "账户请求参数无效。"),
       (.invalidEndpoint, "无法建立安全的账户请求。"),
       (.network(code: -1009), "网络连接失败，请检查网络后重试。"),
       (.transportFailure, "网络响应异常，请稍后重试。"),

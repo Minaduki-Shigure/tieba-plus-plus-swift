@@ -66,7 +66,7 @@ struct TiebaCoreAccountService: AccountService {
     let message: String
     switch error {
     case .invalidArgument:
-      message = "账户凭据格式无效。"
+      message = "账户请求参数无效。"
     case .invalidEndpoint:
       message = "无法建立安全的账户请求。"
     case .network:
@@ -78,7 +78,7 @@ struct TiebaCoreAccountService: AccountService {
     case .invalidProtobuf, .invalidJSON:
       message = "贴吧返回了无法识别的数据，接口可能已经更新。"
     case .server(let code, _):
-      message = "账户验证失败（错误码 \(code)）。"
+      message = "账户请求失败（错误码 \(code)）。"
     @unknown default:
       message = "账户请求失败，请稍后重试。"
     }
