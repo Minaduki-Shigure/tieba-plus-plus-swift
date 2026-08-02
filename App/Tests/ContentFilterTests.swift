@@ -97,6 +97,54 @@ final class ContentFilterTests: XCTestCase {
     XCTAssertEqual(snapshot.applying(to: comment).id, comment.id)
   }
 
+  func testPostFilteringAnnotatesInlineCommentsWithoutChangingTheirOrderOrParent() {
+    let snapshot = ContentFilterSnapshot(
+      displayMode: .placeholder,
+      blockVideos: false,
+      rules: [.keyword("blocked child", list: .block)]
+    )
+    let blocked = BrowseComment(
+      id: 11,
+      authorID: 21,
+      authorName: "Blocked commenter",
+      authorPortraitURL: nil,
+      createdAt: nil,
+      contents: [.text("blocked child")]
+    )
+    let visible = BrowseComment(
+      id: 12,
+      authorID: 22,
+      authorName: "Visible commenter",
+      authorPortraitURL: nil,
+      createdAt: nil,
+      contents: [.text("ordinary child")]
+    )
+    let post = BrowsePost(
+      id: 10,
+      threadID: 2,
+      floor: 3,
+      authorID: 20,
+      authorName: "Parent author",
+      authorPortraitURL: nil,
+      createdAt: nil,
+      nestedReplyCount: 8,
+      isThreadAuthor: false,
+      contents: [.text("ordinary parent")],
+      inlineComments: [blocked, visible]
+    )
+
+    let filtered = snapshot.applying(to: post)
+
+    XCTAssertEqual(filtered.localVisibility, .visible)
+    XCTAssertEqual(filtered.nestedReplyCount, 8)
+    XCTAssertEqual(filtered.inlineComments.map(\.id), [11, 12])
+    XCTAssertEqual(filtered.inlineComments.map(\.localVisibility), [.placeholder, .visible])
+    XCTAssertEqual(
+      filtered.withLocalVisibility(.hidden).inlineComments,
+      filtered.inlineComments
+    )
+  }
+
   func testVideoSwitchBlocksOnlyThreadsContainingVideo() {
     let snapshot = ContentFilterSnapshot(
       displayMode: .placeholder,

@@ -12,6 +12,8 @@ final class CommentsViewModel: ObservableObject {
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
   @Published private(set) var loadMoreError: String?
+  @Published private(set) var scrollTargetCommentID: Int64?
+  @Published private(set) var totalCount = 0
 
   let threadID: Int64
   let anchor: CommentsAnchor
@@ -21,6 +23,7 @@ final class CommentsViewModel: ObservableObject {
   private var hasMore = true
   private var loadTask: Task<Void, Never>?
   private var loadGeneration = 0
+  private var resolvedPostID: Int64?
 
   init(threadID: Int64, postID: Int64, service: any BrowseService) {
     self.threadID = threadID
@@ -45,6 +48,9 @@ final class CommentsViewModel: ObservableObject {
     hasMore = true
     isLoadingMore = false
     loadMoreError = nil
+    scrollTargetCommentID = nil
+    totalCount = 0
+    resolvedPostID = nil
     comments = []
     state = .loading
     load(page: 1, replacing: true)
@@ -81,10 +87,15 @@ final class CommentsViewModel: ObservableObject {
     }
   }
 
+  func consumeScrollTarget() {
+    scrollTargetCommentID = nil
+  }
+
   private func load(page: Int, replacing: Bool) {
     let service = service
     let threadID = threadID
     let anchor = anchor
+    let resolvedPostID = resolvedPostID
     loadGeneration &+= 1
     let generation = loadGeneration
     if !replacing {
@@ -108,17 +119,34 @@ final class CommentsViewModel: ObservableObject {
             page: page
           )
         case .comment(let commentID):
-          response = try await service.comments(
-            threadID: threadID,
-            aroundCommentID: commentID,
-            page: page
-          )
+          if !replacing, let resolvedPostID {
+            response = try await service.comments(
+              threadID: threadID,
+              postID: resolvedPostID,
+              page: page
+            )
+          } else {
+            response = try await service.comments(
+              threadID: threadID,
+              aroundCommentID: commentID,
+              page: page
+            )
+          }
         }
         try Task.checkCancellation()
         guard generation == loadGeneration else { return }
         currentPage = response.currentPage
         hasMore = response.hasMore
         comments = replacing ? response.comments : merge(comments, response.comments)
+        if let parentPostID = response.parentPostID, parentPostID > 0 {
+          self.resolvedPostID = parentPostID
+        }
+        totalCount = max(max(totalCount, response.totalCount), comments.count)
+        if replacing, case .comment(let commentID) = anchor,
+          comments.contains(where: { $0.id == commentID })
+        {
+          scrollTargetCommentID = commentID
+        }
         state = .loaded
       } catch is CancellationError {
         return

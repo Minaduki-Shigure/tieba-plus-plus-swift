@@ -197,6 +197,22 @@ struct CommentPageData: Sendable {
   let comments: [BrowseComment]
   let currentPage: Int
   let hasMore: Bool
+  let parentPostID: Int64?
+  let totalCount: Int
+
+  init(
+    comments: [BrowseComment],
+    currentPage: Int,
+    hasMore: Bool,
+    parentPostID: Int64? = nil,
+    totalCount: Int = 0
+  ) {
+    self.comments = comments
+    self.currentPage = currentPage
+    self.hasMore = hasMore
+    self.parentPostID = parentPostID
+    self.totalCount = totalCount
+  }
 }
 
 enum BrowseGender: Sendable, Hashable {
@@ -564,6 +580,7 @@ struct BrowsePost: Identifiable, Hashable, Sendable {
   let agreeScore: Int
   let isThreadAuthor: Bool
   let contents: [BrowseContent]
+  let inlineComments: [BrowseComment]
   let localVisibility: LocalContentVisibility
 
   init(
@@ -580,6 +597,7 @@ struct BrowsePost: Identifiable, Hashable, Sendable {
     authorLevel: Int = 0,
     authorIPLocation: String = "",
     agreeScore: Int = 0,
+    inlineComments: [BrowseComment] = [],
     localVisibility: LocalContentVisibility = .visible
   ) {
     self.id = id
@@ -595,10 +613,18 @@ struct BrowsePost: Identifiable, Hashable, Sendable {
     self.agreeScore = agreeScore
     self.isThreadAuthor = isThreadAuthor
     self.contents = contents
+    self.inlineComments = inlineComments
     self.localVisibility = localVisibility
   }
 
   func withLocalVisibility(_ visibility: LocalContentVisibility) -> Self {
+    withLocalPresentation(visibility: visibility, inlineComments: inlineComments)
+  }
+
+  func withLocalPresentation(
+    visibility: LocalContentVisibility,
+    inlineComments: [BrowseComment]
+  ) -> Self {
     BrowsePost(
       id: id,
       threadID: threadID,
@@ -613,6 +639,7 @@ struct BrowsePost: Identifiable, Hashable, Sendable {
       authorLevel: authorLevel,
       authorIPLocation: authorIPLocation,
       agreeScore: agreeScore,
+      inlineComments: inlineComments,
       localVisibility: visibility
     )
   }

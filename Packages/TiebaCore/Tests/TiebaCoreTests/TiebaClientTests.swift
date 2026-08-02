@@ -149,6 +149,53 @@ final class TiebaClientTests: XCTestCase {
     XCTAssertEqual(decoded.data.r, TiebaPostSort.descending.rawValue)
   }
 
+  func testEmbeddedCommentOptionsAreForwardedToTheAnonymousPostRequest() async throws {
+    let transport = CapturingTransport(body: try ProtoFixtures.postPage().serializedData())
+    let client = TiebaClient(transport: transport)
+
+    _ = try await client.getPosts(
+      threadID: 100,
+      includeComments: true,
+      commentsSortedByAgree: true,
+      commentPageSize: 4
+    )
+
+    let capturedRequest = await transport.lastRequest()
+    let request = try XCTUnwrap(capturedRequest)
+    let body = try XCTUnwrap(request.httpBody)
+    let decoded = try PbPageReqIdl(serializedBytes: protobufPayload(from: body))
+    XCTAssertEqual(decoded.data.withFloor, 1)
+    XCTAssertEqual(decoded.data.floorSortType, 1)
+    XCTAssertEqual(decoded.data.floorRn, 4)
+    XCTAssertEqual(decoded.data.common.bduss, "")
+    XCTAssertEqual(decoded.data.common.stoken, "")
+  }
+
+  func testEmbeddedCommentsAreBoundedBeforeMapping() async throws {
+    var fixture = ProtoFixtures.postPage()
+    var data = fixture.data
+    var posts = data.postList
+    var post = try XCTUnwrap(posts.first)
+    let template = try XCTUnwrap(post.subPostList.subPostList.first)
+    post.subPostList.subPostList = (1...60).map { id in
+      var comment = template
+      comment.id = Int64(id)
+      return comment
+    }
+    posts[0] = post
+    data.postList = posts
+    fixture.data = data
+    let client = TiebaClient(
+      transport: StubTransport(body: try fixture.serializedData())
+    )
+
+    let result = try await client.getPosts(threadID: 100)
+
+    XCTAssertEqual(result.posts.first?.comments.count, 50)
+    XCTAssertEqual(result.posts.first?.comments.first?.id, 1)
+    XCTAssertEqual(result.posts.first?.comments.last?.id, 50)
+  }
+
   func testAuthorIDsPreserveThreadAuthorFlagsWithoutExpandedUsers() async throws {
     let transport = StubTransport(
       body: try ProtoFixtures.postPageWithoutExpandedUsers().serializedData()

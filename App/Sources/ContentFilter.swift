@@ -531,7 +531,10 @@ extension ContentFilterSnapshot {
   }
 
   func applying(to post: BrowsePost) -> BrowsePost {
-    post.withLocalVisibility(visibility(for: post))
+    post.withLocalPresentation(
+      visibility: visibility(for: post),
+      inlineComments: post.inlineComments.map { applying(to: $0) }
+    )
   }
 
   func applying(to comment: BrowseComment) -> BrowseComment {

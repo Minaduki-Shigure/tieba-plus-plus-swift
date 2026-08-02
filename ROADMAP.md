@@ -36,6 +36,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Canonical forum/thread sharing and browse-mode-aware thread-link copying
 - Strict internal routing for supported Tieba HTTPS, pasted official-scheme, and app links
 - Nested replies, images, video links, and voice playback
+- Server-ranked inline nested-reply previews with anchored opening and safe text copying
 - Shared-thread origin cards with original content, media, and navigation
 - Anonymous single- and multiple-choice poll result cards
 - Read-only post and nested-reply scores, author forum levels, and IP locations
@@ -214,3 +215,20 @@ leading mentions and the legacy `reply + mention + colon` form. Positive mention
 user IDs become strictly internal profile links in thread and nested-reply
 content; invalid IDs remain styled text, and ordinary HTTPS links retain their
 existing system behavior.
+
+Post pages opt into the same anonymous response's embedded nested replies with
+`with_floor=1`, `floor_sort_type=1`, and `floor_rn=4`. The app preserves the
+server's agree-ranked order, rejects nonpositive or mismatched identifiers,
+deduplicates by first occurrence, and renders at most four text-only previews per
+floor. Preview rows do not fetch avatars or media and do not carry active links;
+images, video, and voice use fixed textual markers. Each child receives its own
+local-filter annotation without changing the parent floor, raw count, or post
+pagination. Fully hidden children disappear, but the full-reply entry remains
+available whenever the server declares replies. Pure-reading mode hides the
+entire preview surface without triggering another request.
+
+Opening a preview first uses the comment-anchor field so the matching reply can
+be centered after load. Once that response resolves the enclosing parent post,
+later pages switch to ordinary parent-post pagination; refresh deliberately uses
+the comment anchor again. This avoids repeating an `spid` anchor for unrelated
+continuation pages while retaining deterministic entry from a preview.

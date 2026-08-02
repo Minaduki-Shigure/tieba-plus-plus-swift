@@ -10,7 +10,7 @@ struct ThreadView: View {
   let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @StateObject private var viewModel: ThreadViewModel
-  @State private var commentsPost: BrowsePost?
+  @State private var commentsRoute: CommentsRoute?
   @State private var showsPageJump = false
   @State private var pageInput = ""
   @State private var visiblePost: BrowsePost?
@@ -243,18 +243,31 @@ struct ThreadView: View {
         )
       }
     }
-    .sheet(item: $commentsPost) { post in
+    .sheet(item: $commentsRoute) { route in
       NavigationStack {
-        CommentsView(
-          threadID: post.threadID,
-          postID: post.id,
-          service: service,
-          historyRepository: historyRepository,
-          favoritesRepository: favoritesRepository,
-          searchHistoryRepository: searchHistoryRepository
-        )
+        switch route {
+        case .post(let threadID, let postID):
+          CommentsView(
+            threadID: threadID,
+            postID: postID,
+            service: service,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
+          )
+        case .comment(let threadID, let commentID):
+          CommentsView(
+            threadID: threadID,
+            aroundCommentID: commentID,
+            service: service,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
+          )
+        }
       }
       .presentationDetents([.medium, .large])
+      .presentationDragIndicator(.visible)
     }
   }
 
@@ -338,7 +351,13 @@ struct ThreadView: View {
                     isPureReadingMode: isPureReadingMode,
                     openMentionedUser: openMentionedUser,
                     openTiebaLink: openTiebaLink,
-                    openComments: { commentsPost = post }
+                    openComments: { commentID in
+                      commentsRoute = CommentsRoute(
+                        threadID: post.threadID,
+                        postID: post.id,
+                        commentID: commentID
+                      )
+                    }
                   )
                   Divider()
                     .padding(.leading, isPureReadingMode ? 0 : 52)
@@ -493,7 +512,7 @@ private struct PostView: View {
   let isPureReadingMode: Bool
   let openMentionedUser: (Int64) -> Void
   let openTiebaLink: (TiebaLinkTarget) -> Void
-  let openComments: () -> Void
+  let openComments: (Int64?) -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
@@ -532,13 +551,14 @@ private struct PostView: View {
         PollResultsCard(poll: poll)
       }
 
-      if !isPureReadingMode, post.nestedReplyCount > 0 {
-        Button(action: openComments) {
-          Label("\(post.nestedReplyCount)", systemImage: "bubble.left")
-            .font(.subheadline)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.tint)
+      if let presentation = InlineCommentPreviewPresentation(
+        post: post,
+        isPureReadingMode: isPureReadingMode
+      ) {
+        InlineCommentPreviewCard(
+          presentation: presentation,
+          openComments: openComments
+        )
       }
     }
     .padding(.horizontal, 14)

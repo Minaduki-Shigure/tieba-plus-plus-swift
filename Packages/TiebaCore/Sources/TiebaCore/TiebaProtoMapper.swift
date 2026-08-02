@@ -676,7 +676,7 @@ enum TiebaProtoMapper {
   ) -> TiebaPost {
     let author = users[proto.authorID] ?? optionalUser(proto.author)
     let authorID = proto.authorID != 0 ? proto.authorID : author?.id ?? 0
-    let comments = proto.subPostList.subPostList.map {
+    let comments = proto.subPostList.subPostList.prefix(50).map {
       comment(
         $0,
         threadID: threadID,

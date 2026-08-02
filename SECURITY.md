@@ -99,6 +99,16 @@ context, not the device's current location; displaying it must never request
 Core Location permission. These values are not persisted in local history, and
 their static labels must not call an agree, disagree, or profile-write endpoint.
 
+Inline nested-reply previews are decoded from the existing anonymous post
+response. Enabling them adds only the public `with_floor`, `floor_sort_type`, and
+bounded `floor_rn` fields to that credential-free request; it must not attach an
+account cookie, token, device identifier, or create a second network request.
+Preview routing accepts only positive enclosing thread, post, and comment IDs.
+The preview is a noninteractive text projection: it does not fetch avatars or
+media, expose active external links, or put resource URLs on the pasteboard.
+Every child is filtered independently, while filtering must not change the
+server reply count or remove access to the complete nested-reply page.
+
 Internal navigation uses one strict parser for exact `tieba.baidu.com` HTTP(S)
 forum/thread URLs, supported `com.baidu.tieba` forum/thread route text, and the
 app-owned `tieba-plus-plus` forum/thread/user scheme. It rejects URL

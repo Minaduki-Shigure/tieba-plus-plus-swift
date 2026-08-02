@@ -1,5 +1,6 @@
 import Combine
 import SwiftUI
+import UIKit
 
 struct CommentsView: View {
   @Environment(\.dismiss) private var dismiss
@@ -59,76 +60,95 @@ struct CommentsView: View {
       case .failed(let message):
         ErrorStateView(message: message, retry: viewModel.reload)
       case .loaded:
-        List {
-          ForEach(viewModel.comments) { comment in
-            LocallyFilteredContent(
-              visibility: comment.localVisibility,
-              placeholder: "已屏蔽此条回复"
-            ) {
-              VStack(alignment: .leading, spacing: 7) {
-                HStack(alignment: .top, spacing: 10) {
-                  if comment.authorID > 0 {
-                    NavigationLink {
-                      UserProfileView(
-                        userID: comment.authorID,
-                        service: service,
-                        historyRepository: historyRepository,
-                        favoritesRepository: favoritesRepository,
-                        searchHistoryRepository: searchHistoryRepository
-                      )
-                    } label: {
+        ScrollViewReader { proxy in
+          List {
+            ForEach(viewModel.comments) { comment in
+              LocallyFilteredContent(
+                visibility: comment.localVisibility,
+                placeholder: "已屏蔽此条回复"
+              ) {
+                VStack(alignment: .leading, spacing: 7) {
+                  HStack(alignment: .top, spacing: 10) {
+                    if comment.authorID > 0 {
+                      NavigationLink {
+                        UserProfileView(
+                          userID: comment.authorID,
+                          service: service,
+                          historyRepository: historyRepository,
+                          favoritesRepository: favoritesRepository,
+                          searchHistoryRepository: searchHistoryRepository
+                        )
+                      } label: {
+                        commentAuthorIdentity(comment)
+                      }
+                      .buttonStyle(.plain)
+                    } else {
                       commentAuthorIdentity(comment)
                     }
-                    .buttonStyle(.plain)
-                  } else {
-                    commentAuthorIdentity(comment)
-                  }
 
-                  ReadOnlyAgreeLabel(score: comment.agreeScore)
-                    .padding(.top, 2)
+                    ReadOnlyAgreeLabel(score: comment.agreeScore)
+                      .padding(.top, 2)
+                  }
+                  BrowseContentView(
+                    contents: comment.contents,
+                    onUserMention: openMentionedUser,
+                    onTiebaLink: openTiebaLink
+                  )
                 }
-                BrowseContentView(
-                  contents: comment.contents,
-                  onUserMention: openMentionedUser,
-                  onTiebaLink: openTiebaLink
-                )
+                .padding(.vertical, 4)
+                .contextMenu {
+                  if let copyText = BrowseContentCopyText.text(comment.contents) {
+                    Button {
+                      UIPasteboard.general.string = copyText
+                    } label: {
+                      Label("复制此条回复", systemImage: "doc.on.doc")
+                    }
+                  }
+                }
               }
-              .padding(.vertical, 4)
+              .id(comment.id)
+              .onAppear {
+                viewModel.loadMoreIfNeeded(current: comment)
+              }
             }
-            .onAppear {
-              viewModel.loadMoreIfNeeded(current: comment)
+            if let lastComment = viewModel.comments.last {
+              Color.clear
+                .frame(height: 1)
+                .listRowInsets(EdgeInsets())
+                .listRowSeparator(.hidden)
+                .accessibilityHidden(true)
+                .onAppear { viewModel.loadMoreIfNeeded(current: lastComment) }
             }
-          }
-          if let lastComment = viewModel.comments.last {
-            Color.clear
-              .frame(height: 1)
-              .listRowInsets(EdgeInsets())
+            if viewModel.isLoadingMore {
+              HStack {
+                Spacer()
+                ProgressView()
+                Spacer()
+              }
               .listRowSeparator(.hidden)
-              .accessibilityHidden(true)
-              .onAppear { viewModel.loadMoreIfNeeded(current: lastComment) }
-          }
-          if viewModel.isLoadingMore {
-            HStack {
-              Spacer()
-              ProgressView()
-              Spacer()
+            } else if let message = viewModel.loadMoreError {
+              LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
+                .listRowSeparator(.hidden)
             }
-            .listRowSeparator(.hidden)
-          } else if let message = viewModel.loadMoreError {
-            LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
-              .listRowSeparator(.hidden)
           }
-        }
-        .listStyle(.plain)
-        .overlay {
-          if viewModel.comments.isEmpty {
-            EmptyStateView(title: "暂无楼中楼回复", systemImage: "bubble.left")
+          .listStyle(.plain)
+          .overlay {
+            if viewModel.comments.isEmpty {
+              EmptyStateView(title: "暂无楼中楼回复", systemImage: "bubble.left")
+            }
           }
+          .task(id: viewModel.scrollTargetCommentID) {
+            guard let commentID = viewModel.scrollTargetCommentID else { return }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            proxy.scrollTo(commentID, anchor: .center)
+            viewModel.consumeScrollTarget()
+          }
+          .refreshable { await viewModel.refresh() }
         }
-        .refreshable { await viewModel.refresh() }
       }
     }
-    .navigationTitle("楼中楼")
+    .navigationTitle(viewModel.totalCount > 0 ? "\(viewModel.totalCount) 条回复" : "楼中楼")
     .navigationBarTitleDisplayMode(.inline)
     .navigationDestination(isPresented: linkedTargetPresented) {
       if let linkedTarget {

@@ -323,6 +323,64 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(TiebaCoreBrowseService.mapPost(negativeScorePost).agreeScore, 0)
   }
 
+  func testPostMappingBoundsAndValidatesInlineCommentsWithoutReordering() {
+    func comment(
+      id: Int64,
+      threadID: Int64 = 100,
+      parentPostID: Int64 = 101
+    ) -> TiebaComment {
+      TiebaComment(
+        id: id,
+        threadID: threadID,
+        parentPostID: parentPostID,
+        floor: 2,
+        author: nil,
+        replyToUserID: nil,
+        content: TiebaContent(fragments: [.text("comment-\(id)")]),
+        agreeCount: 0,
+        disagreeCount: 0,
+        createdAt: nil,
+        isThreadAuthor: false
+      )
+    }
+    let post = TiebaPost(
+      id: 101,
+      threadID: 100,
+      floor: 3,
+      author: nil,
+      content: TiebaContent(fragments: [.text("parent")]),
+      signature: "",
+      comments: [
+        comment(id: 5),
+        comment(id: 3),
+        comment(id: 5),
+        comment(id: 0),
+        comment(id: 7, threadID: 999),
+        comment(id: 8, parentPostID: 999),
+        comment(id: 4),
+        comment(id: 2),
+        comment(id: 1),
+      ],
+      commentCount: 2,
+      agreeCount: 0,
+      disagreeCount: 0,
+      createdAt: nil,
+      isThreadAuthor: false,
+      isAIMeme: false
+    )
+
+    let mapped = TiebaCoreBrowseService.mapPost(post)
+
+    XCTAssertEqual(mapped.inlineComments.map(\.id), [5, 3, 4, 2])
+    XCTAssertEqual(mapped.inlineComments.map(\.contents), [
+      [.text("comment-5")],
+      [.text("comment-3")],
+      [.text("comment-4")],
+      [.text("comment-2")],
+    ])
+    XCTAssertEqual(mapped.nestedReplyCount, 4)
+  }
+
   @MainActor
   func testMentionLinksUseOnlyExactPositiveInternalUserDestinations() throws {
     let url = try XCTUnwrap(BrowseContentView.mentionURL(for: 77))
@@ -2035,6 +2093,83 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(
       anchoredRequests,
       [CommentRequest(threadID: 8, postID: 8_002, page: 1)]
+    )
+    XCTAssertEqual(viewModel.scrollTargetCommentID, 8_002)
+    viewModel.consumeScrollTarget()
+    XCTAssertNil(viewModel.scrollTargetCommentID)
+  }
+
+  @MainActor
+  func testCommentsDoNotScrollWhenAnchoredReplyIsMissing() async throws {
+    let service = ScriptedBrowseService()
+    await service.enqueueComments(
+      .value(
+        CommentPageData(
+          comments: [Fixtures.comment(id: 8_001)],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = CommentsViewModel(
+      threadID: 8,
+      aroundCommentID: 8_002,
+      service: service
+    )
+
+    viewModel.loadIfNeeded()
+
+    try await waitUntil { viewModel.state == .loaded }
+    XCTAssertNil(viewModel.scrollTargetCommentID)
+  }
+
+  @MainActor
+  func testAnchoredCommentsUseResolvedParentPostForSubsequentPages() async throws {
+    let service = ScriptedBrowseService()
+    let firstPage = [Fixtures.comment(id: 8_001), Fixtures.comment(id: 8_002)]
+    await service.enqueueComments(
+      .value(
+        CommentPageData(
+          comments: firstPage,
+          currentPage: 3,
+          hasMore: true,
+          parentPostID: 800,
+          totalCount: 5
+        )
+      )
+    )
+    await service.enqueueComments(
+      .value(
+        CommentPageData(
+          comments: [Fixtures.comment(id: 8_003)],
+          currentPage: 4,
+          hasMore: false,
+          parentPostID: 800,
+          totalCount: 0
+        )
+      )
+    )
+    let viewModel = CommentsViewModel(
+      threadID: 8,
+      aroundCommentID: 8_002,
+      service: service
+    )
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadMoreIfNeeded(current: firstPage[1])
+
+    try await waitUntil { viewModel.comments.map(\.id) == [8_001, 8_002, 8_003] }
+    XCTAssertEqual(viewModel.totalCount, 5)
+    let anchoredRequests = await service.aroundCommentRequestSnapshot()
+    let normalRequests = await service.commentRequestSnapshot()
+    XCTAssertEqual(
+      anchoredRequests,
+      [CommentRequest(threadID: 8, postID: 8_002, page: 1)]
+    )
+    XCTAssertEqual(
+      normalRequests,
+      [CommentRequest(threadID: 8, postID: 800, page: 4)]
     )
   }
 

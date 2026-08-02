@@ -101,7 +101,10 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
         pageSize: pageSize,
         sort: Self.postSort(options.sort),
         onlyThreadAuthor: options.onlyThreadAuthor,
-        location: Self.postLocation(location)
+        location: Self.postLocation(location),
+        includeComments: true,
+        commentsSortedByAgree: true,
+        commentPageSize: 4
       )
     } catch is CancellationError {
       throw CancellationError()
@@ -145,7 +148,12 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     return CommentPageData(
       comments: response.comments.map { filter.applying(to: Self.mapComment($0)) },
       currentPage: response.pagination.currentPage,
-      hasMore: response.pagination.hasMore
+      hasMore: response.pagination.hasMore,
+      parentPostID: response.parentPost.id > 0 ? response.parentPost.id : nil,
+      totalCount: max(
+        max(response.pagination.totalCount, response.parentPost.commentCount),
+        response.comments.count
+      )
     )
   }
 
@@ -170,7 +178,12 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     return CommentPageData(
       comments: response.comments.map { filter.applying(to: Self.mapComment($0)) },
       currentPage: response.pagination.currentPage,
-      hasMore: response.pagination.hasMore
+      hasMore: response.pagination.hasMore,
+      parentPostID: response.parentPost.id > 0 ? response.parentPost.id : nil,
+      totalCount: max(
+        max(response.pagination.totalCount, response.parentPost.commentCount),
+        response.comments.count
+      )
     )
   }
 
@@ -707,7 +720,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
   }
 
   static func mapPost(_ post: TiebaPost) -> BrowsePost {
-    BrowsePost(
+    let inlineComments = mapInlineComments(post.comments, enclosingPost: post)
+    return BrowsePost(
       id: post.id,
       threadID: post.threadID,
       floor: post.floor,
@@ -715,15 +729,36 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       authorName: authorName(post.author),
       authorPortraitURL: SecureTiebaURL.portrait(post.author?.portrait),
       createdAt: post.createdAt,
-      nestedReplyCount: post.commentCount,
+      nestedReplyCount: max(max(post.commentCount, 0), inlineComments.count),
       isThreadAuthor: post.isThreadAuthor,
       contents: mapContent(post.content),
       authorLevel: max(post.author?.level ?? 0, 0),
       authorIPLocation: (post.author?.ipLocation ?? "").trimmingCharacters(
         in: .whitespacesAndNewlines
       ),
-      agreeScore: max(post.agreeScore, 0)
+      agreeScore: max(post.agreeScore, 0),
+      inlineComments: inlineComments
     )
+  }
+
+  private static func mapInlineComments(
+    _ comments: [TiebaComment],
+    enclosingPost post: TiebaPost
+  ) -> [BrowseComment] {
+    var seen = Set<Int64>()
+    var result: [BrowseComment] = []
+    result.reserveCapacity(min(comments.count, 4))
+    for comment in comments {
+      guard
+        comment.id > 0,
+        comment.threadID == post.threadID,
+        comment.parentPostID == post.id,
+        seen.insert(comment.id).inserted
+      else { continue }
+      result.append(mapComment(comment))
+      if result.count == 4 { break }
+    }
+    return result
   }
 
   static func mapComment(_ comment: TiebaComment) -> BrowseComment {
