@@ -15,9 +15,14 @@ struct RootView: View {
   @State private var query = ""
   @State private var path: [RootDestination] = []
   @State private var showsAllSearchHistory = false
+  @State private var showsRecentForums = true
   @State private var searchHistoryAction: GlobalSearchHistoryAction?
+  @State private var linkErrorMessage: String?
+  @AppStorage(AppPreferenceKey.homeShowsRecentForums)
+  private var homeShowsRecentForums = true
   @StateObject private var favoritesViewModel: LocalFavoritesViewModel
   @StateObject private var globalSearchHistoryViewModel: GlobalSearchHistoryViewModel
+  @StateObject private var recentForumsViewModel: BrowsingHistoryViewModel
 
   init(
     service: any BrowseService & SearchService & ForumPostSearchService & HotTopicService
@@ -40,6 +45,9 @@ struct RootView: View {
     )
     _globalSearchHistoryViewModel = StateObject(
       wrappedValue: GlobalSearchHistoryViewModel(repository: globalSearchHistoryRepository)
+    )
+    _recentForumsViewModel = StateObject(
+      wrappedValue: BrowsingHistoryViewModel(repository: historyRepository)
     )
   }
 
@@ -95,7 +103,17 @@ struct RootView: View {
           NavigationLink(value: RootDestination.hotTopics) {
             Label("\u{70ed}\u{95e8}\u{8bdd}\u{9898}", systemImage: "flame.fill")
           }
+
+          HStack(spacing: 12) {
+            Label("打开贴吧链接", systemImage: "link")
+            Spacer(minLength: 8)
+            PasteButton(payloadType: String.self, onPaste: openPastedLinks)
+              .accessibilityLabel("粘贴并打开贴吧链接")
+              .help("粘贴并打开贴吧链接")
+          }
         }
+
+        recentForumsSection
 
         if !favoritesViewModel.favoriteForums.isEmpty {
           Section("收藏的贴吧") {
@@ -140,12 +158,12 @@ struct RootView: View {
           .help("账户")
 
           Button {
-            path.append(.contentFilters)
+            path.append(.settings)
           } label: {
             Image(systemName: "gearshape")
           }
-          .accessibilityLabel("内容屏蔽设置")
-          .help("内容屏蔽设置")
+          .accessibilityLabel("设置")
+          .help("设置")
 
           Button {
             path.append(.favorites)
@@ -218,8 +236,8 @@ struct RootView: View {
             favoritesRepository: favoritesRepository,
             searchHistoryRepository: searchHistoryRepository
           )
-        case .contentFilters:
-          ContentFilterSettingsView()
+        case .settings:
+          AppSettingsView()
         case .thread(let thread):
           ThreadView(
             thread: thread.browseThread,
@@ -229,13 +247,49 @@ struct RootView: View {
             searchHistoryRepository: searchHistoryRepository,
             historySnapshot: thread
           )
+        case .linkedThread(let route):
+          ThreadView(
+            thread: route.placeholderThread,
+            service: service,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository,
+            linkRoute: route
+          )
+        case .user(let userID):
+          UserProfileView(
+            userID: userID,
+            service: service,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
+          )
         }
       }
     }
-    .onAppear { favoritesViewModel.reload() }
+    .onAppear {
+      favoritesViewModel.reload()
+      recentForumsViewModel.reload()
+    }
     .task { await globalSearchHistoryViewModel.loadIfNeeded() }
+    .onChange(of: path) { _ in recentForumsViewModel.reload() }
     .onReceive(NotificationCenter.default.publisher(for: .localFavoritesDidChange)) { _ in
       Task { @MainActor in favoritesViewModel.reload() }
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .forumBrowsingHistoryDidChange)) { _ in
+      Task { @MainActor in recentForumsViewModel.reload() }
+    }
+    .onOpenURL(perform: openTiebaURL)
+    .alert(
+      "无法打开贴吧链接",
+      isPresented: Binding(
+        get: { linkErrorMessage != nil },
+        set: { if !$0 { linkErrorMessage = nil } }
+      )
+    ) {
+      Button("好") { linkErrorMessage = nil }
+    } message: {
+      Text(linkErrorMessage ?? "链接格式不受支持。")
     }
     .confirmationDialog(
       searchHistoryActionTitle,
@@ -339,6 +393,59 @@ struct RootView: View {
     return Array(globalSearchHistoryViewModel.entries.prefix(6))
   }
 
+  @ViewBuilder
+  private var recentForumsSection: some View {
+    let entries = Array(recentForumsViewModel.forumEntries.prefix(100))
+    if homeShowsRecentForums, !entries.isEmpty {
+      Section {
+        if showsRecentForums {
+          ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(spacing: 8) {
+              ForEach(entries) { entry in
+                if case .forum(let forum) = entry.target {
+                  Button {
+                    path.append(.forum(forum.name))
+                  } label: {
+                    HStack(spacing: 7) {
+                      AvatarView(url: forum.avatarURL, name: forum.displayName, size: 28)
+                      Text(forum.displayName)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(Color.secondary.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .contentShape(Rectangle())
+                  }
+                  .buttonStyle(.plain)
+                  .accessibilityLabel("打开\(forum.displayName)吧")
+                }
+              }
+            }
+            .padding(.vertical, 2)
+          }
+          .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 8, trailing: 0))
+        }
+      } header: {
+        Button {
+          withAnimation { showsRecentForums.toggle() }
+        } label: {
+          HStack {
+            Text("最近访问的贴吧")
+            Spacer()
+            Image(systemName: showsRecentForums ? "chevron.down" : "chevron.right")
+              .font(.caption.weight(.semibold))
+          }
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(showsRecentForums ? "收起最近访问的贴吧" : "展开最近访问的贴吧")
+      }
+    }
+  }
+
   private func deleteSearchHistory(at offsets: IndexSet) {
     let visibleEntries = visibleSearchHistoryEntries
     let ids = offsets.compactMap { index in
@@ -408,6 +515,35 @@ struct RootView: View {
     query = ""
     path.append(.forum(forumName))
   }
+
+  private func openPastedLinks(_ values: [String]) {
+    let targets = Set(values.compactMap { TiebaLink.target(fromPastedText: $0) })
+    guard targets.count == 1, let target = targets.first else {
+      linkErrorMessage = "请确保剪贴板中只有一个受支持的贴吧链接。"
+      return
+    }
+    openTiebaTarget(target)
+  }
+
+  private func openTiebaURL(_ url: URL) {
+    guard let target = TiebaLink.target(from: url) else {
+      linkErrorMessage = "该链接不是受支持的贴吧、帖子或用户链接。"
+      return
+    }
+    openTiebaTarget(target)
+  }
+
+  private func openTiebaTarget(_ target: TiebaLinkTarget) {
+    switch target {
+    case .forum(let forumName):
+      path.append(.forum(forumName))
+    case .thread(let route):
+      path.append(.linkedThread(route))
+    case .user(let userID):
+      path.append(.user(userID))
+    }
+  }
+
 }
 
 private enum GlobalSearchHistoryAction {
@@ -422,6 +558,8 @@ private enum RootDestination: Hashable {
   case history
   case favorites
   case account
-  case contentFilters
+  case settings
   case thread(ThreadHistorySnapshot)
+  case linkedThread(TiebaThreadRoute)
+  case user(Int64)
 }

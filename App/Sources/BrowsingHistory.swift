@@ -1,5 +1,11 @@
 import Foundation
 
+extension Notification.Name {
+  static let forumBrowsingHistoryDidChange = Notification.Name(
+    "TiebaPlusPlus.forumBrowsingHistoryDidChange"
+  )
+}
+
 enum BrowsingHistoryKind: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
   case thread
   case forum
@@ -474,6 +480,9 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
     }
     candidate.entries = normalized(candidate.entries)
     try commit(candidate)
+    if target.kind == .forum {
+      notifyForumChange()
+    }
   }
 
   func record(forum: ForumHistorySnapshot, at date: Date = Date()) async throws {
@@ -586,10 +595,14 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
 
   func delete(id: String) async throws {
     var candidate = try loadArchive()
+    let removedForum = candidate.entries.contains { $0.id == id && $0.kind == .forum }
     let oldCount = candidate.entries.count
     candidate.entries.removeAll { $0.id == id }
     guard candidate.entries.count != oldCount else { return }
     try commit(candidate)
+    if removedForum {
+      notifyForumChange()
+    }
   }
 
   func deleteAll(kind: BrowsingHistoryKind?) async throws {
@@ -605,6 +618,9 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
     }
     guard candidate.entries.count != oldCount else { return }
     try commit(candidate)
+    if kind == nil || kind == .forum {
+      notifyForumChange()
+    }
   }
 
   private func loadArchive() throws -> Archive {
@@ -732,6 +748,10 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
       throw BrowsingHistoryStoreError.writeFailed
     }
     cachedArchive = candidate
+  }
+
+  private func notifyForumChange() {
+    NotificationCenter.default.post(name: .forumBrowsingHistoryDidChange, object: nil)
   }
 
   private func normalized(_ entries: [BrowsingHistoryEntry]) -> [BrowsingHistoryEntry] {

@@ -4,7 +4,7 @@ import SwiftUI
 struct CommentsView: View {
   @Environment(\.dismiss) private var dismiss
   @StateObject private var viewModel: CommentsViewModel
-  @State private var mentionedUserID: Int64?
+  @State private var linkedTarget: TiebaLinkTarget?
   let service:
     any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
@@ -89,7 +89,8 @@ struct CommentsView: View {
                 }
                 BrowseContentView(
                   contents: comment.contents,
-                  onUserMention: openMentionedUser
+                  onUserMention: openMentionedUser,
+                  onTiebaLink: openTiebaLink
                 )
               }
               .padding(.vertical, 4)
@@ -129,10 +130,10 @@ struct CommentsView: View {
     }
     .navigationTitle("楼中楼")
     .navigationBarTitleDisplayMode(.inline)
-    .navigationDestination(isPresented: mentionProfilePresented) {
-      if let userID = mentionedUserID {
-        UserProfileView(
-          userID: userID,
+    .navigationDestination(isPresented: linkedTargetPresented) {
+      if let linkedTarget {
+        TiebaLinkDestination(
+          target: linkedTarget,
           service: service,
           historyRepository: historyRepository,
           favoritesRepository: favoritesRepository,
@@ -152,18 +153,22 @@ struct CommentsView: View {
     }
   }
 
-  private var mentionProfilePresented: Binding<Bool> {
+  private var linkedTargetPresented: Binding<Bool> {
     Binding(
-      get: { mentionedUserID != nil },
+      get: { linkedTarget != nil },
       set: { isPresented in
-        if !isPresented { mentionedUserID = nil }
+        if !isPresented { linkedTarget = nil }
       }
     )
   }
 
   private func openMentionedUser(_ userID: Int64) {
     guard userID > 0 else { return }
-    mentionedUserID = userID
+    linkedTarget = .user(userID)
+  }
+
+  private func openTiebaLink(_ target: TiebaLinkTarget) {
+    linkedTarget = target
   }
 
   private func commentAuthorIdentity(_ comment: BrowseComment) -> some View {

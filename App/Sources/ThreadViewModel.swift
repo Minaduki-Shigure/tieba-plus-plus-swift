@@ -43,13 +43,15 @@ final class ThreadViewModel: ObservableObject {
 
   func loadIfNeeded() {
     guard state == .idle else { return }
-    let location = initialLocation
-    initialLocation = nil
-    reload(location: location)
+    reload(location: initialLocation)
+  }
+
+  func waitForCurrentLoad() async {
+    await loadTask?.value
   }
 
   func reload() {
-    reload(location: nil)
+    reload(location: initialLocation)
   }
 
   private func reload(location: ThreadPostLocation?) {
@@ -78,6 +80,9 @@ final class ThreadViewModel: ObservableObject {
   func setSort(_ sort: ThreadPostSort) {
     guard options.sort != sort else { return }
     options.sort = sort
+    if sort == .hot {
+      initialLocation = nil
+    }
     reload()
   }
 
@@ -106,6 +111,7 @@ final class ThreadViewModel: ObservableObject {
     loadMoreError = nil
     jumpError = nil
     failedJumpPage = nil
+    initialLocation = nil
     isJumping = true
     load(page: page, replacing: true, location: .pageNumber, jumping: true)
   }
@@ -296,6 +302,7 @@ final class ThreadViewModel: ObservableObject {
           positionNotice = didFallBackFromMissingPosition
             ? "上次阅读位置已失效或不符合当前筛选，已显示当前可用内容。"
             : nil
+          initialLocation = nil
         }
         jumpError = nil
         failedJumpPage = nil

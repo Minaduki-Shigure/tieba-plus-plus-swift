@@ -348,6 +348,7 @@ final class BrowsingHistoryTests: XCTestCase {
 
     XCTAssertEqual(sections.today.map(\.id), ["thread:2"])
     XCTAssertEqual(sections.earlier.map(\.id), ["thread:1"])
+    XCTAssertEqual(viewModel.forumEntries.map(\.id), ["forum:swift"])
   }
 }
 

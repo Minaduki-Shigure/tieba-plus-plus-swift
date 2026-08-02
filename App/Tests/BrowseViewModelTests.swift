@@ -718,6 +718,96 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testThreadLinkRouteForwardsAuthorFilterAndPostAnchor() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 42, title: "server title")
+    let targetPost = Fixtures.post(id: 99, threadID: 42)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [targetPost],
+          currentPage: 3,
+          hasMore: true
+        )
+      )
+    )
+    let route = TiebaThreadRoute(
+      threadID: 42,
+      onlyThreadAuthor: true,
+      postID: targetPost.id
+    )
+    let viewModel = ThreadViewModel(
+      thread: Fixtures.thread(id: 42, title: "placeholder"),
+      service: service,
+      options: route.options,
+      initialLocation: route.postID.map { ThreadPostLocation.postID($0) }
+    )
+
+    viewModel.loadIfNeeded()
+    await viewModel.waitForCurrentLoad()
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.options, ThreadBrowseOptions(onlyThreadAuthor: true))
+    XCTAssertEqual(viewModel.scrollTargetPostID, targetPost.id)
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(
+      requests,
+      [
+        PostRequest(
+          threadID: 42,
+          page: 1,
+          pageSize: 30,
+          options: ThreadBrowseOptions(onlyThreadAuthor: true),
+          location: .postID(targetPost.id)
+        )
+      ]
+    )
+  }
+
+  @MainActor
+  func testThreadLinkRouteRetryPreservesPostAnchorUntilSuccessfulLoad() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 43, title: "server title")
+    let targetPost = Fixtures.post(id: 199, threadID: 43)
+    await service.enqueuePosts(.failure(StubFailure(message: "thread unavailable")))
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [targetPost],
+          currentPage: 2,
+          hasMore: false
+        )
+      )
+    )
+    let location = ThreadPostLocation.postID(targetPost.id)
+    let viewModel = ThreadViewModel(
+      thread: Fixtures.thread(id: 43, title: "placeholder"),
+      service: service,
+      initialLocation: location
+    )
+
+    viewModel.loadIfNeeded()
+    await viewModel.waitForCurrentLoad()
+    XCTAssertEqual(viewModel.state, .failed("thread unavailable"))
+
+    viewModel.reload()
+    await viewModel.waitForCurrentLoad()
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.scrollTargetPostID, targetPost.id)
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(
+      requests,
+      [
+        PostRequest(threadID: 43, page: 1, pageSize: 30, location: location),
+        PostRequest(threadID: 43, page: 1, pageSize: 30, location: location),
+      ]
+    )
+  }
+
+  @MainActor
   func testThreadOriginContextLoadsAndSurvivesPaginationWithoutRepeat() async throws {
     let service = ScriptedBrowseService()
     let thread = Fixtures.thread(id: 42)

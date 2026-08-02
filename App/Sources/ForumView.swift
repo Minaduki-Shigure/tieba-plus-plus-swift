@@ -58,6 +58,10 @@ struct ForumView: View {
         .accessibilityLabel("吧内搜索")
         .help("吧内搜索")
 
+        if let url = TiebaLink.canonicalURL(for: .forum(viewModel.forumName)) {
+          TiebaShareMenu(url: url, title: "\(viewModel.forumName)吧")
+        }
+
         LocalFavoriteButton(
           target: .forum(ForumHistorySnapshot(forum: viewModel.forum)),
           repository: favoritesRepository

@@ -99,11 +99,22 @@ context, not the device's current location; displaying it must never request
 Core Location permission. These values are not persisted in local history, and
 their static labels must not call an agree, disagree, or profile-write endpoint.
 
-User mentions may create only an internal `tieba-plus-plus://user/<positive-id>`
-navigation value. The URL handler must reject credentials, ports, queries,
-fragments, extra path components, nonpositive identifiers, and every other host
-or scheme. Valid mentions open the existing credential-free public profile
-workflow; non-mention HTTPS links continue through the normal system action.
+Internal navigation uses one strict parser for exact `tieba.baidu.com` HTTP(S)
+forum/thread URLs, supported `com.baidu.tieba` forum/thread route text, and the
+app-owned `tieba-plus-plus` forum/thread/user scheme. It rejects URL
+credentials, nonstandard ports, fragments, extra or empty path components,
+ambiguous or valueless state, empty or malformed forum names, and nonpositive
+or overflowing identifiers. Supported cleartext HTTP input is converted only
+to an internal route and never causes a cleartext network request; all resulting
+content loads still use the credential-free HTTPS API client. Unknown HTTPS
+links continue through the normal system action.
+
+Only the app-owned scheme is registered. The app must not claim Baidu's scheme
+or `tieba.baidu.com` Universal Links without domain authorization. It must not
+read the clipboard automatically; the home-screen paste action uses the system
+paste control and an explicit user gesture. User mentions create only an
+app-owned positive-ID route and open the existing credential-free public
+profile workflow.
 
 Browsing history, local favorites, global search history, and per-forum search
 history are separate versioned JSON archives in Application Support. They use

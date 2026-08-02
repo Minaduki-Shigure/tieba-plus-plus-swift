@@ -26,6 +26,9 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Protocol-correct descending pagination with PID cursors
 - Page-number jump and last-visible-post restoration
 - Versioned local browsing history with delete, clear, and recording controls
+- Home-screen recent-forum history, expanded by default and independently hideable
+- Canonical forum/thread sharing and browse-mode-aware thread-link copying
+- Strict internal routing for supported Tieba HTTPS, pasted official-scheme, and app links
 - Nested replies, images, video links, and voice playback
 - Shared-thread origin cards with original content, media, and navigation
 - Anonymous single- and multiple-choice poll result cards
@@ -75,6 +78,30 @@ Tieba's account-backed collection service. Disabling or clearing history does
 not remove favorites, and the UI labels them as local rather than implying
 cross-device account sync. Hot-ranked threads retain the mode but not an
 unstable ranking position.
+
+The home-screen recent-forum row is a projection of the same browsing-history
+archive, not a second store. It shows at most the 100 newest forum records while
+the archive continues to retain its normal per-kind limit. The row is expanded
+for each new app session; whether the section is present is a persistent local
+preference. A forum is still recorded only after valid server metadata arrives,
+and history remains available without an account.
+
+Forum and thread share actions emit canonical `https://tieba.baidu.com` URLs
+through the system share sheet. Thread copying additionally carries an exact
+`see_lz=0` or `see_lz=1` value so the active author filter can round-trip. URL
+construction uses structured components rather than interpolating unescaped
+forum names.
+
+One parser handles in-app rich links, explicit clipboard pastes, and the
+registered app-owned `tieba-plus-plus` scheme. It requires the exact Tieba host,
+standard ports, exact paths, nonempty bounded forum names, positive 64-bit IDs,
+and unambiguous supported state. Valid `see_lz` and post anchors are preserved
+when opening a thread. Cleartext official links are accepted only as route text;
+the destination is loaded through the existing HTTPS-only API client. Unknown
+HTTPS links remain system actions instead of being swallowed. The app does not
+register Baidu's official scheme, automatically inspect the clipboard, claim
+Universal Links without Baidu's AASA authorization, or fabricate a browsing-
+history snapshot before the linked thread has loaded successfully.
 
 Forum introductions, rule documents, and moderator teams use independent
 credential-free protobuf endpoints. Moderator role names are treated as an

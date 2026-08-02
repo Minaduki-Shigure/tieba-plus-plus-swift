@@ -22,6 +22,13 @@ from user mentions without dropping reply context.
 Topic threads, search results, moderator rows, post authors, and
 nested-reply authors open credential-free public user profiles with profile
 statistics, a limited public liked-forum preview, and paginated public threads.
+The home screen projects up to 100 recently visited forums from the existing
+versioned browsing-history archive, shows them expanded by default, and offers
+a persistent setting to hide the section. Forum and thread pages use the native
+iOS share sheet with canonical HTTPS links; copied thread links retain the
+only-thread-author mode. A single strict router handles supported links in rich
+post content, explicit clipboard pastes, and the app-owned
+`tieba-plus-plus` URL scheme while preserving valid post anchors.
 Local content filtering provides case-sensitive literal-keyword and exact
 UID/name user block and allow lists, placeholder or fully hidden presentation,
 and an independent switch for video topics. It applies to forum and channel

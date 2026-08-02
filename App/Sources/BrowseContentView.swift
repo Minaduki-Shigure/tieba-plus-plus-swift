@@ -4,10 +4,16 @@ import SwiftUI
 struct BrowseContentView: View {
   let contents: [BrowseContent]
   let onUserMention: ((Int64) -> Void)?
+  let onTiebaLink: ((TiebaLinkTarget) -> Void)?
 
-  init(contents: [BrowseContent], onUserMention: ((Int64) -> Void)? = nil) {
+  init(
+    contents: [BrowseContent],
+    onUserMention: ((Int64) -> Void)? = nil,
+    onTiebaLink: ((TiebaLinkTarget) -> Void)? = nil
+  ) {
     self.contents = contents
     self.onUserMention = onUserMention
+    self.onTiebaLink = onTiebaLink
   }
 
   private var blocks: [BrowseContentBlock] {
@@ -38,7 +44,12 @@ struct BrowseContentView: View {
       ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
         switch block {
         case .inline(let contents):
-          Text(Self.inlineText(contents, linksUserMentions: onUserMention != nil))
+          Text(
+            Self.inlineText(
+              contents,
+              linksUserMentions: onUserMention != nil || onTiebaLink != nil
+            )
+          )
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
             .environment(\.openURL, mentionOpenURLAction)
@@ -52,11 +63,13 @@ struct BrowseContentView: View {
 
   private var mentionOpenURLAction: OpenURLAction {
     OpenURLAction { url in
-      guard
-        let userID = Self.mentionUserID(from: url),
-        let onUserMention
-      else { return .systemAction }
-      onUserMention(userID)
+      guard let target = TiebaLink.target(from: url) else { return .systemAction }
+      if case .user(let userID) = target, let onUserMention {
+        onUserMention(userID)
+        return .handled
+      }
+      guard let onTiebaLink else { return .systemAction }
+      onTiebaLink(target)
       return .handled
     }
   }
@@ -113,32 +126,11 @@ struct BrowseContentView: View {
   }
 
   static func mentionURL(for userID: Int64) -> URL? {
-    guard userID > 0 else { return nil }
-    var components = URLComponents()
-    components.scheme = "tieba-plus-plus"
-    components.host = "user"
-    components.path = "/\(userID)"
-    return components.url
+    TiebaLink.appURL(for: .user(userID))
   }
 
   static func mentionUserID(from url: URL) -> Int64? {
-    guard
-      let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-      components.scheme?.lowercased() == "tieba-plus-plus",
-      components.host?.lowercased() == "user",
-      components.user == nil,
-      components.password == nil,
-      components.port == nil,
-      components.query == nil,
-      components.fragment == nil
-    else { return nil }
-
-    let pathComponents = components.path.split(separator: "/", omittingEmptySubsequences: true)
-    guard
-      pathComponents.count == 1,
-      let userID = Int64(pathComponents[0]),
-      userID > 0
-    else { return nil }
+    guard case .user(let userID) = TiebaLink.target(from: url) else { return nil }
     return userID
   }
 }

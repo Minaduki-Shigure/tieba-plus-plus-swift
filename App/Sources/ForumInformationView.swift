@@ -12,6 +12,7 @@ struct ForumInformationView: View {
   @StateObject private var viewModel: ForumInformationViewModel
   @State private var selection = ForumInformationTab.overview
   @State private var retryToken = UUID()
+  @State private var linkedTarget: TiebaLinkTarget?
 
   init(
     forum: BrowseForum,
@@ -50,6 +51,17 @@ struct ForumInformationView: View {
     .navigationBarTitleDisplayMode(.inline)
     .task(id: LoadIdentity(tab: selection, retryToken: retryToken)) {
       await viewModel.load(selection)
+    }
+    .navigationDestination(isPresented: linkedTargetPresented) {
+      if let linkedTarget {
+        TiebaLinkDestination(
+          target: linkedTarget,
+          service: service,
+          historyRepository: historyRepository,
+          favoritesRepository: favoritesRepository,
+          searchHistoryRepository: searchHistoryRepository
+        )
+      }
     }
   }
 
@@ -150,7 +162,7 @@ struct ForumInformationView: View {
 
       ForEach(rules.rules) { rule in
         Section(rule.title.isEmpty ? "规则" : rule.title) {
-          BrowseContentView(contents: rule.contents)
+          BrowseContentView(contents: rule.contents, onTiebaLink: openTiebaLink)
         }
       }
     }
@@ -196,6 +208,19 @@ struct ForumInformationView: View {
 
   private func retry() {
     retryToken = UUID()
+  }
+
+  private var linkedTargetPresented: Binding<Bool> {
+    Binding(
+      get: { linkedTarget != nil },
+      set: { isPresented in
+        if !isPresented { linkedTarget = nil }
+      }
+    )
+  }
+
+  private func openTiebaLink(_ target: TiebaLinkTarget) {
+    linkedTarget = target
   }
 }
 

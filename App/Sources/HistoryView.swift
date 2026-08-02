@@ -21,6 +21,10 @@ final class BrowsingHistoryViewModel: ObservableObject {
     entries.filter { $0.kind == selectedKind }
   }
 
+  var forumEntries: [BrowsingHistoryEntry] {
+    entries.filter { $0.kind == .forum }
+  }
+
   func sections(
     now: Date = Date(),
     calendar: Calendar = .autoupdatingCurrent

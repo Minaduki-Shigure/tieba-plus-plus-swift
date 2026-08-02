@@ -13,8 +13,11 @@ struct ThreadView: View {
   @State private var showsPageJump = false
   @State private var pageInput = ""
   @State private var visiblePost: BrowsePost?
-  @State private var mentionedUserID: Int64?
+  @State private var linkedTarget: TiebaLinkTarget?
+  @State private var restoredHistorySnapshot: ThreadHistorySnapshot?
+  @State private var hasRecordedHistoryVisit = false
   private let historySnapshot: ThreadHistorySnapshot?
+  private let linkRoute: TiebaThreadRoute?
 
   init(
     thread: BrowseThread,
@@ -23,14 +26,25 @@ struct ThreadView: View {
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository,
-    historySnapshot: ThreadHistorySnapshot? = nil
+    historySnapshot: ThreadHistorySnapshot? = nil,
+    linkRoute: TiebaThreadRoute? = nil
   ) {
     self.service = service
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
     self.historySnapshot = historySnapshot
-    _viewModel = StateObject(wrappedValue: ThreadViewModel(thread: thread, service: service))
+    self.linkRoute = linkRoute
+    _viewModel = StateObject(
+      wrappedValue: ThreadViewModel(
+        thread: thread,
+        service: service,
+        options: linkRoute?.options ?? ThreadBrowseOptions(),
+        initialLocation: linkRoute.flatMap { route in
+          route.postID.map { ThreadPostLocation.postID($0) }
+        }
+      )
+    )
   }
 
   var body: some View {
@@ -98,6 +112,24 @@ struct ThreadView: View {
     }
     .toolbar {
       ToolbarItemGroup(placement: .navigationBarTrailing) {
+        if
+          let shareURL = TiebaLink.canonicalURL(
+            for: .thread(TiebaThreadRoute(threadID: viewModel.thread.id))
+          ),
+          let copyURL = TiebaLink.threadCopyURL(
+            threadID: viewModel.thread.id,
+            onlyThreadAuthor: viewModel.options.onlyThreadAuthor
+          )
+        {
+          TiebaShareMenu(
+            url: shareURL,
+            copyURL: copyURL,
+            title: viewModel.thread.title.isEmpty
+              ? "帖子 \(viewModel.thread.id)"
+              : viewModel.thread.title
+          )
+        }
+
         LocalFavoriteButton(target: favoriteTarget, repository: favoritesRepository)
 
         Button {
@@ -124,8 +156,14 @@ struct ThreadView: View {
       }
     }
     .task {
-      let snapshot = await resumeSnapshot()
+      let snapshot: ThreadHistorySnapshot?
+      if linkRoute == nil {
+        snapshot = await resumeSnapshot()
+      } else {
+        snapshot = nil
+      }
       guard !Task.isCancelled else { return }
+      restoredHistorySnapshot = snapshot
       if let snapshot {
         viewModel.prepareResume(
           options: snapshot.browseOptions,
@@ -133,13 +171,26 @@ struct ThreadView: View {
         )
       }
       viewModel.loadIfNeeded()
+    }
+    .task(id: viewModel.state) {
+      guard
+        !hasRecordedHistoryVisit,
+        !Task.isCancelled,
+        viewModel.state == .loaded,
+        !viewModel.thread.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      else { return }
+      hasRecordedHistoryVisit = true
+      let requestedPostID = restoredHistorySnapshot?.lastPostID ?? linkRoute?.postID
+      let resolvedPost = requestedPostID.flatMap { postID in
+        viewModel.posts.first(where: { $0.id == postID })
+      }
       try? await historyRepository.record(
         .thread(
           ThreadHistorySnapshot(
             thread: viewModel.thread,
             browseOptions: viewModel.options,
-            lastPostID: snapshot?.lastPostID,
-            lastFloor: snapshot?.lastFloor
+            lastPostID: resolvedPost?.id,
+            lastFloor: resolvedPost?.floor
           )
         )
       )
@@ -169,10 +220,10 @@ struct ThreadView: View {
         viewModel.reload()
       }
     }
-    .navigationDestination(isPresented: mentionProfilePresented) {
-      if let userID = mentionedUserID {
-        UserProfileView(
-          userID: userID,
+    .navigationDestination(isPresented: linkedTargetPresented) {
+      if let linkedTarget {
+        TiebaLinkDestination(
+          target: linkedTarget,
           service: service,
           historyRepository: historyRepository,
           favoritesRepository: favoritesRepository,
@@ -195,18 +246,22 @@ struct ThreadView: View {
     }
   }
 
-  private var mentionProfilePresented: Binding<Bool> {
+  private var linkedTargetPresented: Binding<Bool> {
     Binding(
-      get: { mentionedUserID != nil },
+      get: { linkedTarget != nil },
       set: { isPresented in
-        if !isPresented { mentionedUserID = nil }
+        if !isPresented { linkedTarget = nil }
       }
     )
   }
 
   private func openMentionedUser(_ userID: Int64) {
     guard userID > 0 else { return }
-    mentionedUserID = userID
+    linkedTarget = .user(userID)
+  }
+
+  private func openTiebaLink(_ target: TiebaLinkTarget) {
+    linkedTarget = target
   }
 
   private var optionsBar: some View {
@@ -268,6 +323,7 @@ struct ThreadView: View {
                     favoritesRepository: favoritesRepository,
                     searchHistoryRepository: searchHistoryRepository,
                     openMentionedUser: openMentionedUser,
+                    openTiebaLink: openTiebaLink,
                     openComments: { commentsPost = post }
                   )
                   Divider()
@@ -413,13 +469,18 @@ private struct PostView: View {
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
   let openMentionedUser: (Int64) -> Void
+  let openTiebaLink: (TiebaLinkTarget) -> Void
   let openComments: () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       authorRow
 
-      BrowseContentView(contents: post.contents, onUserMention: openMentionedUser)
+      BrowseContentView(
+        contents: post.contents,
+        onUserMention: openMentionedUser,
+        onTiebaLink: openTiebaLink
+      )
 
       if let originThread {
         LocallyFilteredContent(
@@ -432,7 +493,8 @@ private struct PostView: View {
             historyRepository: historyRepository,
             favoritesRepository: favoritesRepository,
             searchHistoryRepository: searchHistoryRepository,
-            openMentionedUser: openMentionedUser
+            openMentionedUser: openMentionedUser,
+            openTiebaLink: openTiebaLink
           )
         }
       }
@@ -604,6 +666,7 @@ private struct OriginThreadCard: View {
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
   let openMentionedUser: (Int64) -> Void
+  let openTiebaLink: (TiebaLinkTarget) -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
@@ -650,7 +713,11 @@ private struct OriginThreadCard: View {
 
       if !thread.contents.isEmpty {
         Divider()
-        BrowseContentView(contents: thread.contents, onUserMention: openMentionedUser)
+        BrowseContentView(
+          contents: thread.contents,
+          onUserMention: openMentionedUser,
+          onTiebaLink: openTiebaLink
+        )
       }
     }
     .padding(12)
