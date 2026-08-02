@@ -24,6 +24,7 @@ enum SearchScope: String, CaseIterable, Hashable, Identifiable, Sendable {
 final class SearchViewModel: ObservableObject {
   @Published private(set) var submittedQuery: String
   @Published private(set) var selectedScope: SearchScope
+  @Published private(set) var threadSort: GlobalThreadSearchSort
   @Published private(set) var exactForum: ForumSearchItem?
   @Published private(set) var relatedForums: [ForumSearchItem] = []
   @Published private(set) var threads: [BrowseThread] = []
@@ -45,11 +46,13 @@ final class SearchViewModel: ObservableObject {
   init(
     query: String,
     service: any SearchService,
-    selectedScope: SearchScope = .forums
+    selectedScope: SearchScope = .forums,
+    threadSort: GlobalThreadSearchSort = .newest
   ) {
     self.submittedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
     self.service = service
     self.selectedScope = selectedScope
+    self.threadSort = threadSort
   }
 
   var state: LoadState {
@@ -91,6 +94,19 @@ final class SearchViewModel: ObservableObject {
       return
     }
     loadIfNeeded(selectedScope)
+  }
+
+  func setThreadSort(_ sort: GlobalThreadSearchSort) {
+    guard threadSort != sort else { return }
+    threadSort = sort
+    invalidateLoad(.threads)
+    resetResults(for: .threads)
+    guard !submittedQuery.isEmpty else {
+      setState(.failed("请输入搜索关键词。"), for: .threads)
+      return
+    }
+    guard selectedScope == .threads else { return }
+    start(.threads, query: submittedQuery, preservingResults: false)
   }
 
   func retry() {
@@ -198,13 +214,19 @@ final class SearchViewModel: ObservableObject {
     loadMoreError = nil
     setState(.loading, for: .threads)
     let generation = nextGeneration(for: .threads)
+    let sort = threadSort
     let service = service
     tasks[.threads] = Task {
       defer { finishTask(for: .threads, generation: generation) }
       do {
-        let response = try await service.searchThreads(query: query, page: 1, pageSize: 20)
+        let response = try await service.searchThreads(
+          query: query,
+          page: 1,
+          pageSize: 20,
+          sort: sort
+        )
         try Task.checkCancellation()
-        guard isCurrent(.threads, generation: generation, query: query) else { return }
+        guard isCurrentThread(generation: generation, query: query, sort: sort) else { return }
         threads = merge([], response.threads)
         currentPage = max(1, response.currentPage)
         hasMoreThreads = response.hasMore && !threads.isEmpty
@@ -213,7 +235,7 @@ final class SearchViewModel: ObservableObject {
       } catch is CancellationError {
         return
       } catch {
-        guard isCurrent(.threads, generation: generation, query: query) else { return }
+        guard isCurrentThread(generation: generation, query: query, sort: sort) else { return }
         handleFailure(error, for: .threads, preservingResults: preservingResults)
       }
     }
@@ -245,6 +267,7 @@ final class SearchViewModel: ObservableObject {
   private func loadMoreThreads() {
     let page = currentPage + 1
     let query = submittedQuery
+    let sort = threadSort
     let generation = nextGeneration(for: .threads)
     let service = service
     loadMoreError = nil
@@ -257,9 +280,14 @@ final class SearchViewModel: ObservableObject {
         }
       }
       do {
-        let response = try await service.searchThreads(query: query, page: page, pageSize: 20)
+        let response = try await service.searchThreads(
+          query: query,
+          page: page,
+          pageSize: 20,
+          sort: sort
+        )
         try Task.checkCancellation()
-        guard isCurrent(.threads, generation: generation, query: query) else { return }
+        guard isCurrentThread(generation: generation, query: query, sort: sort) else { return }
         let merged = merge(threads, response.threads)
         let addedItems = merged.count - threads.count
         threads = merged
@@ -268,7 +296,7 @@ final class SearchViewModel: ObservableObject {
       } catch is CancellationError {
         return
       } catch {
-        guard isCurrent(.threads, generation: generation, query: query) else { return }
+        guard isCurrentThread(generation: generation, query: query, sort: sort) else { return }
         loadMoreError = error.localizedDescription
       }
     }
@@ -355,6 +383,14 @@ final class SearchViewModel: ObservableObject {
 
   private func isCurrent(_ scope: SearchScope, generation: Int, query: String) -> Bool {
     generations[scope] == generation && submittedQuery == query && !Task.isCancelled
+  }
+
+  private func isCurrentThread(
+    generation: Int,
+    query: String,
+    sort: GlobalThreadSearchSort
+  ) -> Bool {
+    isCurrent(.threads, generation: generation, query: query) && threadSort == sort
   }
 
   private func finishTask(for scope: SearchScope, generation: Int) {

@@ -10,7 +10,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.10 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.11 integration-test")
     )
     let threads = try await client.getThreads(forumName: "starry", pageSize: 10)
     XCTAssertFalse(threads.threads.isEmpty)
@@ -119,16 +119,19 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.10 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.11 integration-test")
     )
     let forums = try await client.searchForums(query: "swift")
     XCTAssertFalse(forums.isLoggedIn)
     XCTAssertTrue(forums.exactMatch != nil || !forums.fuzzyMatches.isEmpty)
 
-    let threads = try await client.searchThreads(query: "swift", pageSize: 5)
-    XCTAssertFalse(threads.isLoggedIn)
-    XCTAssertFalse(threads.results.isEmpty)
-    XCTAssertEqual(threads.pagination.currentPage, 1)
+    for sort in TiebaGlobalThreadSearchSort.allCases {
+      let threads = try await client.searchThreads(query: "swift", pageSize: 5, sort: sort)
+      XCTAssertFalse(threads.isLoggedIn)
+      XCTAssertFalse(threads.results.isEmpty, "Expected anonymous results for \(sort)")
+      XCTAssertEqual(threads.pagination.currentPage, 1)
+      XCTAssertTrue(threads.results.allSatisfy { $0.threadID > 0 })
+    }
 
     let scopedThreads = try await client.searchForumPosts(
       query: "游戏",
@@ -180,7 +183,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.10 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.11 integration-test")
     )
     let topics = try await client.getHotTopics()
     let topic = try XCTUnwrap(topics.first)
@@ -218,7 +221,7 @@ final class TiebaLiveTests: XCTestCase {
 
     let userID: Int64 = 957_339_815
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.10 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.11 integration-test")
     )
 
     let profile = try await client.getUserProfile(userID: userID)
@@ -240,7 +243,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.10 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.11 integration-test")
     )
     let forumID: Int64 = 2_432_903
 

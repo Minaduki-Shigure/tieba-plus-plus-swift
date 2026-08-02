@@ -12,7 +12,7 @@ let topic = try await client.getHotTopic(
   topicID: topics[0].id,
   topicName: topics[0].name
 )
-let search = try await client.searchThreads(query: "swift")
+let search = try await client.searchThreads(query: "swift", sort: .newest)
 let scopedSearch = try await client.searchForumPosts(
   query: "async",
   forumName: "swift",
@@ -56,9 +56,9 @@ let followed = try await authenticatedClient.getFollowedForums(
   threads use UserPost `303002` and terminate pagination on an empty page.
 - Search supports `/mo/q/search/forum`, `/mo/q/search/thread`, and
   `/mo/q/search/user`; global thread search is restricted to topic results and
-  relevance sorting, while per-forum search supports newest/relevance sorting,
-  topic-only/all-content filters, and numeric pagination. User search is a
-  single nonpaginated request.
+  supports newest/oldest/relevance sorting with endpoint-specific wire values,
+  while per-forum search supports newest/relevance sorting, topic-only/all-content
+  filters, and numeric pagination. User search is a single nonpaginated request.
 - Hot-topic discovery uses the credential-free `/mo/q/hotMessage/list` and
   `/mo/q/newtopic/topicDetail` Web endpoints. Detail pagination forwards both
   the numeric page/offset and the previous page's final feed cursor.

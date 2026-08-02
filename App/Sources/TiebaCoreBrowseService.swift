@@ -150,12 +150,22 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     )
   }
 
-  func searchThreads(query: String, page: Int, pageSize: Int) async throws
+  func searchThreads(
+    query: String,
+    page: Int,
+    pageSize: Int,
+    sort: GlobalThreadSearchSort
+  ) async throws
     -> ThreadSearchPageData
   {
     let response: TiebaThreadSearchPage
     do {
-      response = try await client.searchThreads(query: query, page: page, pageSize: pageSize)
+      response = try await client.searchThreads(
+        query: query,
+        page: page,
+        pageSize: pageSize,
+        sort: Self.mapGlobalThreadSearchSort(sort)
+      )
     } catch is CancellationError {
       throw CancellationError()
     } catch {
@@ -644,6 +654,19 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     switch sort {
     case .newest:
       .newest
+    case .relevance:
+      .relevance
+    }
+  }
+
+  private static func mapGlobalThreadSearchSort(
+    _ sort: GlobalThreadSearchSort
+  ) -> TiebaGlobalThreadSearchSort {
+    switch sort {
+    case .newest:
+      .newest
+    case .oldest:
+      .oldest
     case .relevance:
       .relevance
     }

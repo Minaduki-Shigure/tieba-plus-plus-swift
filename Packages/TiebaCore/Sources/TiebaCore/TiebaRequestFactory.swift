@@ -351,7 +351,12 @@ struct TiebaRequestFactory: Sendable {
     )
   }
 
-  func searchThreads(query: String, page: Int, pageSize: Int) throws -> URLRequest {
+  func searchThreads(
+    query: String,
+    page: Int,
+    pageSize: Int,
+    sort: TiebaGlobalThreadSearchSort = .newest
+  ) throws -> URLRequest {
     let query = try validatedSearchQuery(query)
     try validate(page: page)
     try validate(pageSize: pageSize, maximum: 50)
@@ -361,7 +366,7 @@ struct TiebaRequestFactory: Sendable {
         URLQueryItem(name: "word", value: query),
         URLQueryItem(name: "pn", value: String(page)),
         URLQueryItem(name: "rn", value: String(pageSize)),
-        URLQueryItem(name: "st", value: "2"),
+        URLQueryItem(name: "st", value: String(sort.rawValue)),
         URLQueryItem(name: "tt", value: "1"),
         URLQueryItem(name: "ct", value: "1"),
         URLQueryItem(name: "is_use_zonghe", value: "1"),

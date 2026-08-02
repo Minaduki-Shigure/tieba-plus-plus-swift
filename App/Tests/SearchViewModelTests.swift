@@ -89,7 +89,8 @@ final class SearchViewModelTests: XCTestCase {
     let viewModel = SearchViewModel(
       query: "swift",
       service: service,
-      selectedScope: .threads
+      selectedScope: .threads,
+      threadSort: .relevance
     )
     viewModel.loadIfNeeded()
     try await searchWaitUntil { viewModel.threadState == .loaded }
@@ -113,6 +114,7 @@ final class SearchViewModelTests: XCTestCase {
     XCTAssertNil(viewModel.loadMoreError)
     let requests = await service.threadRequestSnapshot()
     XCTAssertEqual(requests.map(\.page), [1, 2, 2])
+    XCTAssertEqual(requests.map(\.sort), [.relevance, .relevance, .relevance])
   }
 
   @MainActor
@@ -176,7 +178,8 @@ final class SearchViewModelTests: XCTestCase {
     let viewModel = SearchViewModel(
       query: "swift",
       service: service,
-      selectedScope: .threads
+      selectedScope: .threads,
+      threadSort: .oldest
     )
     viewModel.loadIfNeeded()
     try await searchWaitUntil { viewModel.threadState == .loaded }
@@ -193,6 +196,113 @@ final class SearchViewModelTests: XCTestCase {
     try await searchWaitUntil { viewModel.threads.map(\.id) == [31, 32] }
     let requests = await service.threadRequestSnapshot()
     XCTAssertEqual(requests.map(\.page), [1, 2, 1, 2])
+    XCTAssertEqual(requests.map(\.sort), [.oldest, .oldest, .oldest, .oldest])
+  }
+
+  @MainActor
+  func testThreadSortDefaultsToNewestAndReloadsOnlyThreadScope() async throws {
+    let service = ScriptedSearchService()
+    await service.enqueueThreads(
+      .value(
+        ThreadSearchPageData(
+          threads: [SearchFixtures.thread(id: 61)],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    await service.enqueueThreads(
+      .value(
+        ThreadSearchPageData(
+          threads: [SearchFixtures.thread(id: 62)],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = SearchViewModel(
+      query: "swift",
+      service: service,
+      selectedScope: .threads
+    )
+
+    viewModel.loadIfNeeded()
+    try await searchWaitUntil { viewModel.threads.map(\.id) == [61] }
+    XCTAssertEqual(viewModel.threadSort, .newest)
+
+    viewModel.setThreadSort(.oldest)
+    try await searchWaitUntil { viewModel.threads.map(\.id) == [62] }
+
+    XCTAssertEqual(viewModel.threadSort, .oldest)
+    let requests = await service.threadRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 1])
+    XCTAssertEqual(requests.map(\.sort), [.newest, .oldest])
+    let counts = await service.requestCounts()
+    XCTAssertEqual(counts, SearchRequestCounts(forums: 0, threads: 2, users: 0))
+  }
+
+  @MainActor
+  func testLateThreadResponseCannotOverwriteNewSort() async throws {
+    let service = ScriptedSearchService()
+    await service.enqueueThreads(.suspended(501))
+    await service.enqueueThreads(
+      .value(
+        ThreadSearchPageData(
+          threads: [SearchFixtures.thread(id: 72)],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = SearchViewModel(
+      query: "swift",
+      service: service,
+      selectedScope: .threads
+    )
+
+    viewModel.loadIfNeeded()
+    try await searchWaitUntil {
+      let requests = await service.threadRequestSnapshot()
+      return requests.count == 1
+    }
+    viewModel.setThreadSort(.relevance)
+    try await searchWaitUntil { viewModel.threads.map(\.id) == [72] }
+
+    let resumed = await service.resumeThreads(
+      id: 501,
+      returning: ThreadSearchPageData(
+        threads: [SearchFixtures.thread(id: 71)],
+        currentPage: 1,
+        hasMore: false
+      )
+    )
+    XCTAssertTrue(resumed)
+    await searchDrainMainActor()
+
+    XCTAssertEqual(viewModel.threadSort, .relevance)
+    XCTAssertEqual(viewModel.threads.map(\.id), [72])
+    XCTAssertEqual(viewModel.threadState, .loaded)
+    let requests = await service.threadRequestSnapshot()
+    XCTAssertEqual(requests.map(\.sort), [.newest, .relevance])
+  }
+
+  @MainActor
+  func testThreadSortChangeKeepsEmptyQueryFailureWithoutRequest() async {
+    let service = ScriptedSearchService()
+    let viewModel = SearchViewModel(
+      query: "",
+      service: service,
+      selectedScope: .threads
+    )
+
+    viewModel.submit("   ")
+    viewModel.setThreadSort(.oldest)
+
+    XCTAssertEqual(viewModel.threadSort, .oldest)
+    XCTAssertEqual(viewModel.threadState, .failed("请输入搜索关键词。"))
+    XCTAssertFalse(viewModel.hasResults)
+    let counts = await service.requestCounts()
+    XCTAssertEqual(counts, SearchRequestCounts(forums: 0, threads: 0, users: 0))
   }
 
   @MainActor
@@ -342,6 +452,7 @@ private struct SearchThreadRequest: Equatable, Sendable {
   let query: String
   let page: Int
   let pageSize: Int
+  let sort: GlobalThreadSearchSort
 }
 
 private struct SearchRequestCounts: Equatable, Sendable {
@@ -401,10 +512,17 @@ private actor ScriptedSearchService: SearchService {
     }
   }
 
-  func searchThreads(query: String, page: Int, pageSize: Int) async throws
+  func searchThreads(
+    query: String,
+    page: Int,
+    pageSize: Int,
+    sort: GlobalThreadSearchSort
+  ) async throws
     -> ThreadSearchPageData
   {
-    threadRequests.append(SearchThreadRequest(query: query, page: page, pageSize: pageSize))
+    threadRequests.append(
+      SearchThreadRequest(query: query, page: page, pageSize: pageSize, sort: sort)
+    )
     guard !threadStubs.isEmpty else {
       throw SearchStubFailure(message: "Unexpected thread search")
     }

@@ -46,6 +46,10 @@ struct SearchView: View {
       .background(.regularMaterial)
 
       Divider()
+      if viewModel.selectedScope == .threads {
+        threadSortPicker
+        Divider()
+      }
       selectedResults
     }
     .navigationTitle(viewModel.submittedQuery.isEmpty ? "搜索" : viewModel.submittedQuery)
@@ -65,6 +69,26 @@ struct SearchView: View {
     } message: {
       Text(viewModel.refreshError ?? "无法刷新搜索结果。")
     }
+  }
+
+  private var threadSortPicker: some View {
+    Picker(
+      "帖子排序",
+      selection: Binding(
+        get: { viewModel.threadSort },
+        set: { viewModel.setThreadSort($0) }
+      )
+    ) {
+      ForEach(GlobalThreadSearchSort.allCases) { sort in
+        Text(sort.title).tag(sort)
+      }
+    }
+    .pickerStyle(.segmented)
+    .frame(maxWidth: .infinity, minHeight: 32)
+    .padding(.horizontal, 16)
+    .padding(.vertical, 8)
+    .background(.regularMaterial)
+    .accessibilityIdentifier("global-thread-search-sort-picker")
   }
 
   @ViewBuilder

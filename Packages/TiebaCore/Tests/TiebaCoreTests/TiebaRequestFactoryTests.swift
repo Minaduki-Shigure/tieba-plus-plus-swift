@@ -557,7 +557,7 @@ final class TiebaRequestFactoryTests: XCTestCase {
         "word": "Swift 中文",
         "pn": "2",
         "rn": "15",
-        "st": "2",
+        "st": "5",
         "tt": "1",
         "ct": "1",
         "is_use_zonghe": "1",
@@ -572,6 +572,64 @@ final class TiebaRequestFactoryTests: XCTestCase {
       XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
       XCTAssertNil(request.httpBody)
     }
+  }
+
+  func testGlobalThreadSearchUsesDistinctSortContractAndExactCredentialFreeQueryItems() throws {
+    XCTAssertEqual(TiebaGlobalThreadSearchSort.newest.rawValue, 5)
+    XCTAssertEqual(TiebaGlobalThreadSearchSort.oldest.rawValue, 0)
+    XCTAssertEqual(TiebaGlobalThreadSearchSort.relevance.rawValue, 2)
+    XCTAssertEqual(TiebaThreadSearchSort.newest.rawValue, 1)
+
+    let sorts: [(TiebaGlobalThreadSearchSort, String)] = [
+      (.newest, "5"),
+      (.oldest, "0"),
+      (.relevance, "2"),
+    ]
+
+    for (sort, expectedValue) in sorts {
+      let request = try factory.searchThreads(
+        query: " Swift 中文 ",
+        page: 2,
+        pageSize: 15,
+        sort: sort
+      )
+      let components = try XCTUnwrap(
+        URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)
+      )
+
+      XCTAssertEqual(components.scheme, "https")
+      XCTAssertEqual(components.host, "tieba.baidu.com")
+      XCTAssertNil(components.port)
+      XCTAssertNil(components.user)
+      XCTAssertNil(components.password)
+      XCTAssertEqual(components.path, "/mo/q/search/thread")
+      XCTAssertEqual(
+        components.queryItems,
+        [
+          URLQueryItem(name: "word", value: "Swift 中文"),
+          URLQueryItem(name: "pn", value: "2"),
+          URLQueryItem(name: "rn", value: "15"),
+          URLQueryItem(name: "st", value: expectedValue),
+          URLQueryItem(name: "tt", value: "1"),
+          URLQueryItem(name: "ct", value: "1"),
+          URLQueryItem(name: "is_use_zonghe", value: "1"),
+          URLQueryItem(name: "cv", value: "99.9.101"),
+        ]
+      )
+      XCTAssertEqual(request.httpMethod, "GET")
+      XCTAssertFalse(request.httpShouldHandleCookies)
+      XCTAssertNil(request.httpBody)
+      XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+      XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+      XCTAssertNil(request.value(forHTTPHeaderField: "Referer"))
+      XCTAssertEqual(
+        Set(request.allHTTPHeaderFields?.keys.map { $0.lowercased() } ?? []),
+        Set(["accept", "accept-encoding", "user-agent"])
+      )
+    }
+
+    let defaultRequest = try factory.searchThreads(query: "swift", page: 1, pageSize: 20)
+    XCTAssertEqual(queryItems(defaultRequest)["st"], "5")
   }
 
   func testForumPostSearchUsesTiebaLiteCompatibleCredentialFreeRequest() throws {

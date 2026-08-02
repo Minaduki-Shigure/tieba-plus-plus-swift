@@ -9,6 +9,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Ranked anonymous hot-topic discovery with images and discussion counts
 - Hot-topic details with related forums and cursor-aware thread pagination
 - Categorized anonymous forum, thread, and user search
+- Global post search with newest, oldest, and relevance sorting
 - Anonymous per-forum post search with newest/relevance sorting
 - Topic-only and topic-plus-reply search filters with target-aware navigation
 - Versioned, per-forum local search history with delete and clear controls
@@ -77,6 +78,10 @@ Search categories load independently so one endpoint failure does not discard
 another category's results. User search uses the credential-free Web endpoint,
 accepts the server's object/array result variants and 64-bit user identifiers,
 and opens the same anonymous public profile workflow used by author rows.
+Global post search defaults to newest and keeps its newest/oldest/relevance
+selection across first-page retries, refreshes, and pagination. Its wire values
+are intentionally modeled separately from per-forum search because the two Web
+endpoints assign different values to the same user-facing sort names.
 
 Per-forum search uses the same credential-free Web transport but keeps its
 TiebaLite-compatible request contract separate from global topic search. Topic,

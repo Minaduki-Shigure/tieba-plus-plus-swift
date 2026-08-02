@@ -92,7 +92,12 @@ protocol BrowseService: Sendable {
 protocol SearchService: Sendable {
   func searchForums(query: String) async throws -> ForumSearchData
   func searchUsers(query: String) async throws -> UserSearchData
-  func searchThreads(query: String, page: Int, pageSize: Int) async throws
+  func searchThreads(
+    query: String,
+    page: Int,
+    pageSize: Int,
+    sort: GlobalThreadSearchSort
+  ) async throws
     -> ThreadSearchPageData
 }
 

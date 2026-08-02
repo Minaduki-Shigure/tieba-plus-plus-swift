@@ -224,6 +224,25 @@ struct ThreadSearchPageData: Sendable {
   let hasMore: Bool
 }
 
+enum GlobalThreadSearchSort: String, CaseIterable, Hashable, Identifiable, Sendable {
+  case newest
+  case oldest
+  case relevance
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .newest:
+      "最新"
+    case .oldest:
+      "最早"
+    case .relevance:
+      "相关"
+    }
+  }
+}
+
 enum ForumPostSearchSort: String, CaseIterable, Hashable, Identifiable, Sendable {
   case newest
   case relevance

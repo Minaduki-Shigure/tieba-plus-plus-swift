@@ -9,6 +9,7 @@ in `Packages/TiebaCore/Sources/TiebaProto/NOTICE.md`.
 
 Development is in progress. Anonymous mode supports a ranked hot-topic feed
 with paginated topic details, categorized forum, thread, and user search,
+global post search with newest, oldest, and relevance sorting,
 per-forum post search with newest/relevance and topic/all-content filters,
 forum, post, and nested-reply browsing, remote media, forum metadata and
 featured classifications, complete public forum introductions, forum rules,

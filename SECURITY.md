@@ -56,6 +56,9 @@ only the submitted public keyword, public forum name, and endpoint-specific
 pagination, sorting, or content-filter fields; they must never attach Cookie,
 Authorization, BDUSS, STOKEN, a Referer containing device metadata, or a device
 identifier.
+Global thread sorting and per-forum post sorting must remain separate protocol
+types: their user-facing modes overlap, but their wire values do not. Tests must
+assert the exact endpoint-specific value without broadening the allowed fields.
 
 Hot-topic list and detail requests follow the same anonymous boundary. They may
 send only the public topic identifier/name and pagination fields documented by

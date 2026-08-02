@@ -100,6 +100,12 @@ public struct TiebaSearchImage: Sendable, Hashable {
   }
 }
 
+public enum TiebaGlobalThreadSearchSort: Int, CaseIterable, Sendable, Hashable {
+  case newest = 5
+  case oldest = 0
+  case relevance = 2
+}
+
 public enum TiebaThreadSearchSort: Int, CaseIterable, Sendable, Hashable {
   case newest = 1
   case relevance = 2
