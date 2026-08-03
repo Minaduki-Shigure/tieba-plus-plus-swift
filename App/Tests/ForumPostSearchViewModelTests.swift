@@ -98,7 +98,7 @@ final class ForumPostSearchViewModelTests: XCTestCase {
       shareCount: 0,
       createdAt: nil,
       images: [],
-      target: .post(postID: 202),
+      target: .post(202),
       mainPost: mainPost
     )
 
