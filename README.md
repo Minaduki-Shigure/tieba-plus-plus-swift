@@ -26,6 +26,10 @@ but authenticated write operations remain intentionally unsupported.
   default. When explicitly enabled, they use a bounded, credential-free
   request after a short pause; failures silently leave the local history flow
   available.
+- Home-entry customization can hide the discovery section and choose a
+  next-launch destination from the home page, post ranking, hot topics, local
+  favorites, or browsing history. Defaults preserve the existing home page and
+  discovery section, while external links remain the topmost destination.
 - Per-forum post-search results preserve their matched topic or reply context.
   Per-forum history supports individual deletion and per-forum clearing; global
   history adds recent/all views, individual deletion, clearing, and explicit

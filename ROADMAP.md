@@ -12,6 +12,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Hot-topic details with related forums and cursor-aware thread pagination
 - Categorized anonymous forum, thread, and user search
 - Default-off anonymous online suggestions for the home search field
+- Local home-entry customization with a next-launch destination and optional discovery section
 - Global post search with newest, oldest, and relevance sorting
 - Local keyword, user, and video filtering for global post-search results
 - Versioned local global-search history with recent/all, delete, and clear controls
@@ -159,6 +160,16 @@ the archive continues to retain its normal per-kind limit. The row is expanded
 for each new app session; whether the section is present is a persistent local
 preference. A forum is still recorded only after valid server metadata arrives,
 and history remains available without an account.
+
+Home-entry customization is a closed local preference, not a new feed. The
+default remains the ordinary home page, with optional starts limited to the
+existing post ranking, hot topics, local favorites, and browsing history. The
+choice is snapshotted once at process launch, so changing it cannot redirect an
+active session; unknown stored values fall back to home. A cold-start forum,
+thread, or user link is appended above that initial page and remains the visible
+destination. The independent discovery switch defaults on and removes only the
+home section containing ranking, topic, and explicit paste-link shortcuts. It
+does not disable those destinations, the strict URL router, or any network path.
 
 Forum and thread share actions emit canonical `https://tieba.baidu.com` URLs
 through the system share sheet. Thread copying additionally carries an exact

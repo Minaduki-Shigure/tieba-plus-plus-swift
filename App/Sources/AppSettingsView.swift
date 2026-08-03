@@ -6,6 +6,10 @@ struct AppSettingsView: View {
   private var appearance = AppAppearance.system.rawValue
   @AppStorage(AppPreferenceKey.defaultForumSort)
   private var defaultForumSort = ForumThreadSort.replyTime.rawValue
+  @AppStorage(AppPreferenceKey.homeStartDestination)
+  private var homeStartDestination = AppStartDestination.defaultValue.rawValue
+  @AppStorage(AppPreferenceKey.homeShowsDiscovery)
+  private var homeShowsDiscovery = AppPreferenceDefaults.homeShowsDiscovery
   @AppStorage(AppPreferenceKey.homeShowsRecentForums)
   private var homeShowsRecentForums = true
   @AppStorage(AppPreferenceKey.searchSuggestionsEnabled)
@@ -76,8 +80,21 @@ struct AppSettingsView: View {
         }
       }
 
-      Section("首页") {
+      Section {
+        Picker("启动首选页", selection: homeStartDestinationSelection) {
+          ForEach(AppStartDestination.allCases) { destination in
+            Text(destination.title).tag(destination)
+          }
+        }
+        .pickerStyle(.menu)
+
+        Toggle("显示发现区", isOn: $homeShowsDiscovery)
+
         Toggle("显示最近访问的贴吧", isOn: $homeShowsRecentForums)
+      } header: {
+        Text("首页")
+      } footer: {
+        Text("启动首选页会在下次启动应用时生效。")
       }
 
       Section {
@@ -155,6 +172,13 @@ struct AppSettingsView: View {
     Binding(
       get: { ForumThreadSort(rawValue: defaultForumSort) ?? .replyTime },
       set: { defaultForumSort = $0.rawValue }
+    )
+  }
+
+  private var homeStartDestinationSelection: Binding<AppStartDestination> {
+    Binding(
+      get: { AppStartDestination.resolved(homeStartDestination) },
+      set: { homeStartDestination = $0.rawValue }
     )
   }
 

@@ -4,6 +4,8 @@ import SwiftUI
 enum AppPreferenceKey {
   static let appearance = "TiebaPlusPlus.appearance"
   static let defaultForumSort = "TiebaPlusPlus.defaultForumSort"
+  static let homeStartDestination = "TiebaPlusPlus.homeStartDestination"
+  static let homeShowsDiscovery = "TiebaPlusPlus.homeShowsDiscovery"
   static let homeShowsRecentForums = "TiebaPlusPlus.homeShowsRecentForums"
   static let searchSuggestionsEnabled = "TiebaPlusPlus.searchSuggestionsEnabled"
   static let contentMediaLoadPolicy = "TiebaPlusPlus.contentMediaLoadPolicy"
@@ -12,6 +14,41 @@ enum AppPreferenceKey {
     "TiebaPlusPlus.darkensContentThumbnailsInDarkMode"
   static let showsBothUsernameAndNickname =
     "TiebaPlusPlus.showsBothUsernameAndNickname"
+}
+
+enum AppPreferenceDefaults {
+  static let homeShowsDiscovery = true
+}
+
+enum AppStartDestination: String, CaseIterable, Hashable, Identifiable, Sendable {
+  case home
+  case hotThreads
+  case hotTopics
+  case favorites
+  case history
+
+  static let defaultValue: Self = .home
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .home:
+      "首页"
+    case .hotThreads:
+      "帖子热榜"
+    case .hotTopics:
+      "热门话题"
+    case .favorites:
+      "本地收藏"
+    case .history:
+      "浏览记录"
+    }
+  }
+
+  static func resolved(_ rawValue: String) -> Self {
+    Self(rawValue: rawValue) ?? defaultValue
+  }
 }
 
 private struct HidesThreadListMediaEnvironmentKey: EnvironmentKey {

@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 @main
@@ -24,8 +25,12 @@ struct TiebaPlusPlusApp: App {
     FileGlobalSearchHistoryStore.live()
   private let accountVault: any AccountVault = KeychainAccountVault()
   private let accountService: any AccountService = TiebaCoreAccountService()
+  private let startDestination: AppStartDestination
 
   init() {
+    startDestination = AppStartDestination.resolved(
+      UserDefaults.standard.string(forKey: AppPreferenceKey.homeStartDestination) ?? ""
+    )
     let contentFilterRepository = FileContentFilterStore.live()
     self.contentFilterRepository = contentFilterRepository
     self.service = TiebaCoreBrowseService(
@@ -42,7 +47,8 @@ struct TiebaPlusPlusApp: App {
         searchHistoryRepository: searchHistoryRepository,
         globalSearchHistoryRepository: globalSearchHistoryRepository,
         accountVault: accountVault,
-        accountService: accountService
+        accountService: accountService,
+        startDestination: startDestination
       )
       .environment(\.contentFilterRepository, contentFilterRepository)
       .environment(

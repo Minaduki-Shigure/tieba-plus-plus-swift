@@ -351,6 +351,18 @@ may include decoded public textual fragments and fixed non-URL media boundary
 markers only; it must not add media URLs, credentials, account responses, or
 hidden nested replies to the pasteboard.
 
+Home-entry preferences are also nonsecret UserDefaults values. The start target
+must resolve through the closed home, post-ranking, hot-topic, local-favorite,
+or browsing-history enum, with unknown values falling back to home; it must not
+store a URL, query, forum name, content identifier, or account destination. The
+resolved value is snapshotted once when the app process starts and must not
+redirect an active session. A supported external forum, thread, or user link is
+appended above the startup destination through the same strict router. Hiding
+the discovery section changes only local home presentation and must not broaden
+any destination, request, clipboard, or credential boundary. Its explicit paste
+control is not constructed while hidden, and no replacement clipboard read may
+be introduced elsewhere.
+
 Automated tests use synthetic fixed-length placeholders only. Real `BDUSS`,
 `STOKEN`, `tbs`, cookies, passwords, or private account responses must never be
 placed in GitHub Actions secrets or exercised by CI. Authenticated releases need

@@ -13,7 +13,7 @@ struct RootView: View {
   let accountService: any AccountService
 
   @State private var query = ""
-  @State private var path: [RootDestination] = []
+  @State private var path: [RootDestination]
   @State private var showsAllSearchHistory = false
   @State private var showsRecentForums = true
   @State private var searchHistoryAction: GlobalSearchHistoryAction?
@@ -21,6 +21,8 @@ struct RootView: View {
   @Environment(\.scenePhase) private var scenePhase
   @AppStorage(AppPreferenceKey.homeShowsRecentForums)
   private var homeShowsRecentForums = true
+  @AppStorage(AppPreferenceKey.homeShowsDiscovery)
+  private var homeShowsDiscovery = AppPreferenceDefaults.homeShowsDiscovery
   @AppStorage(AppPreferenceKey.searchSuggestionsEnabled)
   private var searchSuggestionsEnabled = false
   @StateObject private var favoritesViewModel: LocalFavoritesViewModel
@@ -37,7 +39,8 @@ struct RootView: View {
     searchHistoryRepository: any ForumSearchHistoryRepository,
     globalSearchHistoryRepository: any GlobalSearchHistoryRepository,
     accountVault: any AccountVault,
-    accountService: any AccountService
+    accountService: any AccountService,
+    startDestination: AppStartDestination
   ) {
     self.service = service
     self.historyRepository = historyRepository
@@ -45,6 +48,9 @@ struct RootView: View {
     self.searchHistoryRepository = searchHistoryRepository
     self.accountVault = accountVault
     self.accountService = accountService
+    _path = State(
+      initialValue: RootStartupNavigation.initialPath(startDestination: startDestination)
+    )
     _favoritesViewModel = StateObject(
       wrappedValue: LocalFavoritesViewModel(repository: favoritesRepository)
     )
@@ -109,21 +115,23 @@ struct RootView: View {
           }
         }
 
-        Section("\u{53d1}\u{73b0}") {
-          NavigationLink(value: RootDestination.hotThreads) {
-            Label("帖子热榜", systemImage: "chart.bar.fill")
-          }
+        if homeShowsDiscovery {
+          Section("\u{53d1}\u{73b0}") {
+            NavigationLink(value: RootDestination.hotThreads) {
+              Label("帖子热榜", systemImage: "chart.bar.fill")
+            }
 
-          NavigationLink(value: RootDestination.hotTopics) {
-            Label("\u{70ed}\u{95e8}\u{8bdd}\u{9898}", systemImage: "flame.fill")
-          }
+            NavigationLink(value: RootDestination.hotTopics) {
+              Label("\u{70ed}\u{95e8}\u{8bdd}\u{9898}", systemImage: "flame.fill")
+            }
 
-          HStack(spacing: 12) {
-            Label("打开贴吧链接", systemImage: "link")
-            Spacer(minLength: 8)
-            PasteButton(payloadType: String.self, onPaste: openPastedLinks)
-              .accessibilityLabel("粘贴并打开贴吧链接")
-              .help("粘贴并打开贴吧链接")
+            HStack(spacing: 12) {
+              Label("打开贴吧链接", systemImage: "link")
+              Spacer(minLength: 8)
+              PasteButton(payloadType: String.self, onPaste: openPastedLinks)
+                .accessibilityLabel("粘贴并打开贴吧链接")
+                .help("粘贴并打开贴吧链接")
+            }
           }
         }
 
@@ -599,14 +607,7 @@ struct RootView: View {
   }
 
   private func openTiebaTarget(_ target: TiebaLinkTarget) {
-    switch target {
-    case .forum(let forumName):
-      path.append(.forum(forumName))
-    case .thread(let route):
-      path.append(.linkedThread(route))
-    case .user(let userID):
-      path.append(.user(userID))
-    }
+    path = RootStartupNavigation.appending(target: target, to: path)
   }
 
 }
@@ -616,7 +617,7 @@ private enum GlobalSearchHistoryAction {
   case reset
 }
 
-private enum RootDestination: Hashable {
+enum RootDestination: Hashable {
   case forum(String)
   case search(String)
   case hotTopics
@@ -628,4 +629,37 @@ private enum RootDestination: Hashable {
   case thread(ThreadHistorySnapshot)
   case linkedThread(TiebaThreadRoute)
   case user(Int64)
+}
+
+enum RootStartupNavigation {
+  static func initialPath(startDestination: AppStartDestination) -> [RootDestination] {
+    switch startDestination {
+    case .home:
+      []
+    case .hotThreads:
+      [.hotThreads]
+    case .hotTopics:
+      [.hotTopics]
+    case .favorites:
+      [.favorites]
+    case .history:
+      [.history]
+    }
+  }
+
+  static func appending(
+    target: TiebaLinkTarget,
+    to path: [RootDestination]
+  ) -> [RootDestination] {
+    var result = path
+    switch target {
+    case .forum(let forumName):
+      result.append(.forum(forumName))
+    case .thread(let route):
+      result.append(.linkedThread(route))
+    case .user(let userID):
+      result.append(.user(userID))
+    }
+    return result
+  }
 }

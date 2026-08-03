@@ -5,6 +5,40 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class AppPreferencesTests: XCTestCase {
+  func testHomeCustomizationUsesStableKeysAndDefaults() {
+    XCTAssertEqual(
+      AppPreferenceKey.homeStartDestination,
+      "TiebaPlusPlus.homeStartDestination"
+    )
+    XCTAssertEqual(
+      AppPreferenceKey.homeShowsDiscovery,
+      "TiebaPlusPlus.homeShowsDiscovery"
+    )
+    XCTAssertEqual(AppStartDestination.defaultValue, .home)
+    XCTAssertTrue(AppPreferenceDefaults.homeShowsDiscovery)
+    XCTAssertEqual(AppStartDestination.resolved(""), .home)
+    XCTAssertEqual(AppStartDestination.resolved("future-value"), .home)
+  }
+
+  func testHomeStartDestinationUsesStableValuesTitlesAndOrdering() {
+    XCTAssertEqual(
+      AppStartDestination.allCases,
+      [.home, .hotThreads, .hotTopics, .favorites, .history]
+    )
+    XCTAssertEqual(
+      AppStartDestination.allCases.map(\.rawValue),
+      ["home", "hotThreads", "hotTopics", "favorites", "history"]
+    )
+    XCTAssertEqual(
+      AppStartDestination.allCases.map(\.title),
+      ["首页", "帖子热榜", "热门话题", "本地收藏", "浏览记录"]
+    )
+
+    for destination in AppStartDestination.allCases {
+      XCTAssertEqual(AppStartDestination.resolved(destination.rawValue), destination)
+    }
+  }
+
   func testAppearanceFallsBackToSystemForUnknownStoredValue() {
     XCTAssertEqual(AppAppearance.resolved("system"), .system)
     XCTAssertEqual(AppAppearance.resolved("light"), .light)
