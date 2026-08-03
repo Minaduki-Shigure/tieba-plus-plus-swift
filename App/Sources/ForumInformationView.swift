@@ -162,7 +162,11 @@ struct ForumInformationView: View {
 
       ForEach(rules.rules) { rule in
         Section(rule.title.isEmpty ? "规则" : rule.title) {
-          BrowseContentView(contents: rule.contents, onTiebaLink: openTiebaLink)
+          BrowseContentView(
+            contents: rule.contents,
+            imageLayout: .singleColumn,
+            onTiebaLink: openTiebaLink
+          )
         }
       }
     }

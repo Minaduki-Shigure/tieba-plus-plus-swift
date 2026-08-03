@@ -3,51 +3,36 @@ import SwiftUI
 
 struct BrowseContentView: View {
   let contents: [BrowseContent]
+  let imageLayout: BrowseContentImageLayout
   let onUserMention: ((Int64) -> Void)?
   let onTiebaLink: ((TiebaLinkTarget) -> Void)?
 
   @Environment(\.externalWebOpenMode) private var externalWebOpenMode
   @Environment(\.openExternalWeb) private var openExternalWeb
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @State private var imageGalleryPresentation: ImageGalleryPresentation?
 
   init(
     contents: [BrowseContent],
+    imageLayout: BrowseContentImageLayout = .responsive,
     onUserMention: ((Int64) -> Void)? = nil,
     onTiebaLink: ((TiebaLinkTarget) -> Void)? = nil
   ) {
     self.contents = contents
+    self.imageLayout = imageLayout
     self.onUserMention = onUserMention
     self.onTiebaLink = onTiebaLink
   }
 
   private var blocks: [BrowseContentBlock] {
-    var result = [BrowseContentBlock]()
-    var inline = [BrowseContent]()
-
-    func flushInline() {
-      guard !inline.isEmpty else { return }
-      result.append(.inline(inline))
-      inline.removeAll(keepingCapacity: true)
-    }
-
-    for (offset, content) in contents.enumerated() {
-      switch content {
-      case .text, .mention, .link, .emoticon, .unsupported:
-        inline.append(content)
-      case .image, .video, .voice:
-        flushInline()
-        result.append(.standalone(contentOffset: offset, content: content))
-      }
-    }
-    flushInline()
-    return result
+    BrowseContentBlock.makeBlocks(contents)
   }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 9) {
-      ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+      ForEach(blocks) { block in
         switch block {
-        case .inline(let contents):
+        case .inline(_, let contents):
           Text(
             Self.inlineText(
               contents,
@@ -57,6 +42,19 @@ struct BrowseContentView: View {
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
             .environment(\.openURL, contentOpenURLAction)
+        case .imageRun(let images):
+          BrowseImageMasonryLayout(
+            imageLayout: imageLayout,
+            forcesSingleColumn: dynamicTypeSize.isAccessibilitySize
+          ) {
+            ForEach(images) { image in
+              browseImage(image)
+                .layoutValue(
+                  key: BrowseImageAspectRatioLayoutValueKey.self,
+                  value: image.aspectRatio
+                )
+            }
+          }
         case .standalone(let contentOffset, let content):
           standalone(content, contentOffset: contentOffset)
         }
@@ -97,16 +95,13 @@ struct BrowseContentView: View {
   private func standalone(_ content: BrowseContent, contentOffset: Int) -> some View {
     switch content {
     case .image(let thumbnail, _, let width, let height):
-      BrowseImageView(
-        thumbnailURL: thumbnail,
-        width: width,
-        height: height,
-        onOpen: {
-          imageGalleryPresentation = ImageGalleryPresentation(
-            contents: contents,
-            selectedContentOffset: contentOffset
-          )
-        }
+      browseImage(
+        BrowseContentImageItem(
+          contentOffset: contentOffset,
+          thumbnailURL: thumbnail,
+          width: width,
+          height: height
+        )
       )
     case .video(let url, let cover, let width, let height):
       BrowseVideoView(url: url, coverURL: cover, width: width, height: height)
@@ -115,6 +110,20 @@ struct BrowseContentView: View {
     case .text, .mention, .link, .emoticon, .unsupported:
       EmptyView()
     }
+  }
+
+  private func browseImage(_ image: BrowseContentImageItem) -> some View {
+    BrowseImageView(
+      thumbnailURL: image.thumbnailURL,
+      width: image.width,
+      height: image.height,
+      onOpen: {
+        imageGalleryPresentation = ImageGalleryPresentation(
+          contents: contents,
+          selectedContentOffset: image.contentOffset
+        )
+      }
+    )
   }
 
   static func inlineText(
@@ -159,9 +168,318 @@ struct BrowseContentView: View {
   }
 }
 
-private enum BrowseContentBlock {
-  case inline([BrowseContent])
+enum BrowseContentImageLayout: Equatable, Sendable {
+  case responsive
+  case singleColumn
+}
+
+struct BrowseContentImageItem: Identifiable, Equatable, Sendable {
+  let contentOffset: Int
+  let thumbnailURL: URL
+  let width: Int
+  let height: Int
+
+  var id: Int { contentOffset }
+
+  var aspectRatio: CGFloat {
+    BrowseImageMasonryGeometry.sanitizedAspectRatio(width: width, height: height)
+  }
+}
+
+enum BrowseContentBlockID: Hashable, Sendable {
+  case inline(Int)
+  case imageRun(Int)
+  case standalone(Int)
+}
+
+enum BrowseContentBlock: Identifiable, Equatable, Sendable {
+  case inline(contentOffset: Int, contents: [BrowseContent])
+  case imageRun([BrowseContentImageItem])
   case standalone(contentOffset: Int, content: BrowseContent)
+
+  var id: BrowseContentBlockID {
+    switch self {
+    case .inline(let contentOffset, _):
+      .inline(contentOffset)
+    case .imageRun(let images):
+      .imageRun(images.first?.contentOffset ?? -1)
+    case .standalone(let contentOffset, _):
+      .standalone(contentOffset)
+    }
+  }
+
+  static func makeBlocks(_ contents: [BrowseContent]) -> [BrowseContentBlock] {
+    var result = [BrowseContentBlock]()
+    var inline = [BrowseContent]()
+    var inlineStartOffset: Int?
+    var images = [BrowseContentImageItem]()
+
+    func flushInline() {
+      guard !inline.isEmpty, let startOffset = inlineStartOffset else { return }
+      result.append(.inline(contentOffset: startOffset, contents: inline))
+      inline.removeAll(keepingCapacity: true)
+      inlineStartOffset = nil
+    }
+
+    func flushImages() {
+      guard !images.isEmpty else { return }
+      result.append(.imageRun(images))
+      images.removeAll(keepingCapacity: true)
+    }
+
+    for (offset, content) in contents.enumerated() {
+      switch content {
+      case .text, .mention, .link, .emoticon, .unsupported:
+        flushImages()
+        if inline.isEmpty {
+          inlineStartOffset = offset
+        }
+        inline.append(content)
+      case .image(let thumbnail, _, let width, let height):
+        flushInline()
+        images.append(
+          BrowseContentImageItem(
+            contentOffset: offset,
+            thumbnailURL: thumbnail,
+            width: width,
+            height: height
+          )
+        )
+      case .video, .voice:
+        flushInline()
+        flushImages()
+        result.append(.standalone(contentOffset: offset, content: content))
+      }
+    }
+
+    flushInline()
+    flushImages()
+    return result
+  }
+}
+
+struct BrowseImageMasonryPlan: Equatable {
+  let columnCount: Int
+  let assignments: [Int]
+  let frames: [CGRect]
+  let size: CGSize
+}
+
+enum BrowseImageMasonryGeometry {
+  static let mediumWidth: CGFloat = 600
+  static let expandedWidth: CGFloat = 840
+  static let maximumSingleColumnWidth: CGFloat = 560
+  static let fallbackAspectRatio: CGFloat = 4 / 3
+
+  static func sanitizedAspectRatio(width: Int, height: Int) -> CGFloat {
+    guard width > 0, height > 0 else { return fallbackAspectRatio }
+    return sanitizedAspectRatio(CGFloat(width) / CGFloat(height))
+  }
+
+  static func sanitizedAspectRatio(_ aspectRatio: CGFloat) -> CGFloat {
+    guard aspectRatio.isFinite, aspectRatio > 0 else { return fallbackAspectRatio }
+    return min(max(aspectRatio, 0.5), 2)
+  }
+
+  static func sanitizedSpacing(_ spacing: CGFloat) -> CGFloat {
+    guard spacing.isFinite, spacing > 0 else { return 0 }
+    return spacing
+  }
+
+  static func columnCount(
+    availableWidth: CGFloat,
+    itemCount: Int,
+    imageLayout: BrowseContentImageLayout,
+    forcesSingleColumn: Bool = false
+  ) -> Int {
+    guard itemCount > 0 else { return 0 }
+    if forcesSingleColumn {
+      return 1
+    }
+
+    let requestedColumnCount: Int
+    switch imageLayout {
+    case .singleColumn:
+      requestedColumnCount = 1
+    case .responsive:
+      guard availableWidth.isFinite, availableWidth >= 0 else {
+        return 1
+      }
+      if availableWidth < mediumWidth {
+        requestedColumnCount = 1
+      } else if availableWidth < expandedWidth {
+        requestedColumnCount = 2
+      } else {
+        requestedColumnCount = 3
+      }
+    }
+    return min(requestedColumnCount, itemCount)
+  }
+
+  static func resolvedWidth(
+    proposedWidth: CGFloat?,
+    idealWidths: [CGFloat] = []
+  ) -> CGFloat {
+    if let proposedWidth, proposedWidth.isFinite, proposedWidth >= 0 {
+      return proposedWidth
+    }
+    let idealWidth = idealWidths
+      .filter { $0.isFinite && $0 > 0 }
+      .max() ?? maximumSingleColumnWidth
+    return min(idealWidth, maximumSingleColumnWidth)
+  }
+
+  static func columnAssignments(
+    aspectRatios: [CGFloat],
+    columnCount: Int
+  ) -> [Int] {
+    guard !aspectRatios.isEmpty else { return [] }
+    let safeColumnCount = min(max(columnCount, 1), aspectRatios.count)
+    var columnHeights = Array(repeating: CGFloat.zero, count: safeColumnCount)
+    var assignments = [Int]()
+    assignments.reserveCapacity(aspectRatios.count)
+
+    for aspectRatio in aspectRatios {
+      var shortestColumn = 0
+      for column in 1..<safeColumnCount
+      where columnHeights[column] < columnHeights[shortestColumn] {
+        shortestColumn = column
+      }
+      assignments.append(shortestColumn)
+      columnHeights[shortestColumn] += 1 / sanitizedAspectRatio(aspectRatio)
+    }
+    return assignments
+  }
+
+  static func plan(
+    availableWidth: CGFloat,
+    aspectRatios: [CGFloat],
+    imageLayout: BrowseContentImageLayout,
+    forcesSingleColumn: Bool = false,
+    horizontalSpacing: CGFloat = 8,
+    verticalSpacing: CGFloat = 8
+  ) -> BrowseImageMasonryPlan {
+    let safeWidth = availableWidth.isFinite ? max(availableWidth, 0) : 0
+    let columnCount = columnCount(
+      availableWidth: availableWidth,
+      itemCount: aspectRatios.count,
+      imageLayout: imageLayout,
+      forcesSingleColumn: forcesSingleColumn
+    )
+    guard columnCount > 0 else {
+      return BrowseImageMasonryPlan(
+        columnCount: 0,
+        assignments: [],
+        frames: [],
+        size: CGSize(width: safeWidth, height: 0)
+      )
+    }
+
+    let horizontalSpacing = sanitizedSpacing(horizontalSpacing)
+    let verticalSpacing = sanitizedSpacing(verticalSpacing)
+    let spacingWidth = CGFloat(columnCount - 1) * horizontalSpacing
+    let availableColumnWidth = max((safeWidth - spacingWidth) / CGFloat(columnCount), 0)
+    let columnWidth = columnCount == 1
+      ? min(availableColumnWidth, maximumSingleColumnWidth)
+      : availableColumnWidth
+    let sanitizedAspectRatios = aspectRatios.map(sanitizedAspectRatio)
+    let assignments = columnAssignments(
+      aspectRatios: sanitizedAspectRatios,
+      columnCount: columnCount
+    )
+    var columnBottoms = Array(repeating: CGFloat.zero, count: columnCount)
+    var columnItemCounts = Array(repeating: 0, count: columnCount)
+    var frames = [CGRect]()
+    frames.reserveCapacity(aspectRatios.count)
+
+    for (aspectRatio, column) in zip(sanitizedAspectRatios, assignments) {
+      let y = columnBottoms[column]
+        + (columnItemCounts[column] == 0 ? 0 : verticalSpacing)
+      let height = columnWidth / aspectRatio
+      frames.append(
+        CGRect(
+          x: CGFloat(column) * (columnWidth + horizontalSpacing),
+          y: y,
+          width: columnWidth,
+          height: height
+        )
+      )
+      columnBottoms[column] = y + height
+      columnItemCounts[column] += 1
+    }
+
+    return BrowseImageMasonryPlan(
+      columnCount: columnCount,
+      assignments: assignments,
+      frames: frames,
+      size: CGSize(width: safeWidth, height: columnBottoms.max() ?? 0)
+    )
+  }
+}
+
+private struct BrowseImageAspectRatioLayoutValueKey: LayoutValueKey {
+  static let defaultValue = BrowseImageMasonryGeometry.fallbackAspectRatio
+}
+
+private struct BrowseImageMasonryLayout: Layout {
+  let imageLayout: BrowseContentImageLayout
+  let forcesSingleColumn: Bool
+  let horizontalSpacing: CGFloat
+  let verticalSpacing: CGFloat
+
+  init(
+    imageLayout: BrowseContentImageLayout,
+    forcesSingleColumn: Bool,
+    horizontalSpacing: CGFloat = 8,
+    verticalSpacing: CGFloat = 8
+  ) {
+    self.imageLayout = imageLayout
+    self.forcesSingleColumn = forcesSingleColumn
+    self.horizontalSpacing = horizontalSpacing
+    self.verticalSpacing = verticalSpacing
+  }
+
+  func sizeThatFits(
+    proposal: ProposedViewSize,
+    subviews: Subviews,
+    cache: inout ()
+  ) -> CGSize {
+    plan(width: resolvedWidth(proposal: proposal, subviews: subviews), subviews: subviews).size
+  }
+
+  func placeSubviews(
+    in bounds: CGRect,
+    proposal: ProposedViewSize,
+    subviews: Subviews,
+    cache: inout ()
+  ) {
+    let plan = plan(width: bounds.width, subviews: subviews)
+    for (subview, frame) in zip(subviews, plan.frames) {
+      subview.place(
+        at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+        anchor: .topLeading,
+        proposal: ProposedViewSize(width: frame.width, height: frame.height)
+      )
+    }
+  }
+
+  private func plan(width: CGFloat, subviews: Subviews) -> BrowseImageMasonryPlan {
+    BrowseImageMasonryGeometry.plan(
+      availableWidth: width,
+      aspectRatios: subviews.map { $0[BrowseImageAspectRatioLayoutValueKey.self] },
+      imageLayout: imageLayout,
+      forcesSingleColumn: forcesSingleColumn,
+      horizontalSpacing: horizontalSpacing,
+      verticalSpacing: verticalSpacing
+    )
+  }
+
+  private func resolvedWidth(proposal: ProposedViewSize, subviews: Subviews) -> CGFloat {
+    BrowseImageMasonryGeometry.resolvedWidth(
+      proposedWidth: proposal.width,
+      idealWidths: subviews.map { $0.sizeThatFits(.unspecified).width }
+    )
+  }
 }
 
 private struct BrowseImageView: View {
@@ -173,8 +491,7 @@ private struct BrowseImageView: View {
   @Environment(\.contentMediaLoadBehavior) private var contentMediaLoadBehavior
 
   private var aspectRatio: CGFloat {
-    guard width > 0, height > 0 else { return 4 / 3 }
-    return min(max(CGFloat(width) / CGFloat(height), 0.5), 2)
+    BrowseImageMasonryGeometry.sanitizedAspectRatio(width: width, height: height)
   }
 
   var body: some View {
@@ -233,7 +550,7 @@ private struct BrowseImageView: View {
     }
     .buttonStyle(.plain)
     .aspectRatio(aspectRatio, contentMode: .fit)
-    .frame(maxWidth: 560)
+    .frame(maxWidth: .infinity)
     .clipped()
   }
 

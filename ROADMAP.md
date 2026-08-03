@@ -49,6 +49,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Strict internal routing for supported Tieba HTTPS, pasted official-scheme, and app links
 - Default-system external HTTPS opening with an optional in-app Safari view
 - Nested replies, images, video links, and voice playback
+- Responsive one-to-three-column masonry for consecutive post-body image runs
 - Persistent automatic, data-saving, or tap-to-load policy for content media
 - Explicit eviction of the process-local decoded-image memory cache
 - Optional compact media summaries for thread lists and per-forum search, with no collapsed preview request
@@ -123,6 +124,19 @@ more pages. Descending and hot modes do not expose the control because their
 ordering does not provide the required chronological tail. The thread navigation
 bar also links its normalized public forum name directly to the existing forum
 view without issuing a preparatory request.
+
+Consecutive images in floors, nested replies, parent-post context, and shared
+origins form bounded image runs; text, unsupported fragments, video, and voice
+end the current run. A single SwiftUI `Layout` keeps every image as a direct
+child identified by its original content offset while selecting one, two, or
+three columns from the actual proposed width at 600- and 840-point boundaries.
+The count never exceeds the number of images, a one-column run retains the
+existing 560-point maximum width, and Accessibility Dynamic Type forces one
+column without changing child identity. Forum-rule documents explicitly remain
+single-column. Sanitized 0.5-through-2 aspect ratios feed a deterministic
+shortest-column assignment whose ties choose the lower column. Nonfinite
+proposals or spacing and invalid dimensions are normalized before frame
+calculation.
 
 Rich-content images open as one gallery scoped to the already filtered content
 array that produced the tapped image. Source offsets, rather than URLs, identify
