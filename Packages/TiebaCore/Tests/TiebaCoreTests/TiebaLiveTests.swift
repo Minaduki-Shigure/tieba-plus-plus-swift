@@ -91,9 +91,11 @@ final class TiebaLiveTests: XCTestCase {
       XCTAssertLessThan(earlierFloor, anchoredFloor)
     }
 
+    // Leave more than one reply page after the separately returned first floor.
+    let descendingPageSize = 5
     let descendingPosts = try await client.getPosts(
       threadID: thread.id,
-      pageSize: 10,
+      pageSize: descendingPageSize,
       sort: .descending
     )
     XCTAssertFalse(descendingPosts.posts.isEmpty)
@@ -118,7 +120,7 @@ final class TiebaLiveTests: XCTestCase {
     let continuedPosts = try await client.getPosts(
       threadID: thread.id,
       page: continuationPage,
-      pageSize: 10,
+      pageSize: descendingPageSize,
       sort: .descending,
       location: .pageCursor(cursor)
     )
