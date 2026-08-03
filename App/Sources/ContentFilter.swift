@@ -503,9 +503,13 @@ actor FileContentFilterStore: ContentFilterRepository {
 }
 
 extension ContentFilterSnapshot {
-  func visibility(for thread: BrowseThread) -> LocalContentVisibility {
-    visibility(
-      isBlocked: (blockVideos && thread.contents.contains(where: Self.isVideo))
+  func visibility(
+    for thread: BrowseThread,
+    hasKnownVideo: Bool = false
+  ) -> LocalContentVisibility {
+    let containsVideo = hasKnownVideo || thread.contents.contains(where: Self.isVideo)
+    return visibility(
+      isBlocked: (blockVideos && containsVideo)
         || blocksKeyword(thread.title)
         || blocksKeyword(thread.excerpt)
         || blocksUser(id: thread.authorID, name: thread.authorName)
@@ -533,8 +537,13 @@ extension ContentFilterSnapshot {
     )
   }
 
-  func applying(to thread: BrowseThread) -> BrowseThread {
-    thread.withLocalVisibility(visibility(for: thread))
+  func applying(
+    to thread: BrowseThread,
+    hasKnownVideo: Bool = false
+  ) -> BrowseThread {
+    thread.withLocalVisibility(
+      visibility(for: thread, hasKnownVideo: hasKnownVideo)
+    )
   }
 
   func applying(to post: BrowsePost) -> BrowsePost {

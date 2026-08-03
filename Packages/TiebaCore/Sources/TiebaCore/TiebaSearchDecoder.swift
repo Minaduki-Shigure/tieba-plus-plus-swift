@@ -85,6 +85,10 @@ enum TiebaSearchDecoder {
   private static func mapThread(_ payload: ThreadPayload) -> TiebaThreadSearchResult? {
     let threadID = payload.threadID.value
     guard threadID > 0 else { return nil }
+    let hasVideo = payload.media.contains {
+      let type = $0.type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+      return type == "flash" || type == "video"
+    }
     let authorName = payload.user?.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
     let username = payload.user?.username.trimmingCharacters(in: .whitespacesAndNewlines)
     let mainPost = payload.mainPost.map { mapPostContext($0, fallbackThreadID: threadID) }
@@ -126,6 +130,7 @@ enum TiebaSearchDecoder {
       shareCount: clampedInt(max(payload.shareCount.value, 0)),
       createdAt: date(seconds: payload.createdAt.value),
       images: payload.media.compactMap(mapImage),
+      hasVideo: hasVideo,
       target: target,
       mainPost: mainPost,
       postInfo: postInfo

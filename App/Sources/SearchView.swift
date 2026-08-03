@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 struct SearchView: View {
@@ -61,6 +62,9 @@ struct SearchView: View {
     .onSubmit(of: .search, submitSearch)
     .task { viewModel.loadIfNeeded() }
     .onDisappear(perform: viewModel.cancel)
+    .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
+      Task { @MainActor in viewModel.reloadThreadsAfterContentFilterChange() }
+    }
     .alert(
       "刷新失败",
       isPresented: Binding(
@@ -148,19 +152,47 @@ struct SearchView: View {
   private var threadResults: some View {
     List {
       Section("帖子") {
-        ForEach(viewModel.threads) { thread in
-          NavigationLink {
-            ThreadView(
-              thread: thread,
-              service: browseService,
-              historyRepository: historyRepository,
-              favoritesRepository: favoritesRepository,
-              searchHistoryRepository: searchHistoryRepository
-            )
-          } label: {
-            SearchThreadRow(thread: thread)
+        ForEach(viewModel.displayableThreads) { thread in
+          LocallyFilteredContent(
+            visibility: thread.localVisibility,
+            placeholder: "已屏蔽此搜索结果"
+          ) {
+            NavigationLink {
+              ThreadView(
+                thread: thread,
+                service: browseService,
+                historyRepository: historyRepository,
+                favoritesRepository: favoritesRepository,
+                searchHistoryRepository: searchHistoryRepository
+              )
+            } label: {
+              SearchThreadRow(thread: thread)
+            }
           }
+          .frame(minHeight: 44)
           .onAppear { viewModel.loadMoreIfNeeded(current: thread) }
+        }
+
+        if !viewModel.threads.isEmpty && !viewModel.hasDisplayableThreads {
+          Label("暂无可显示的帖子", systemImage: "eye.slash")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
+            .padding(.vertical, 8)
+            .listRowSeparator(.hidden)
+            .accessibilityElement(children: .combine)
+        }
+
+        if let lastThread = viewModel.threads.last {
+          Color.clear
+            .frame(height: 1)
+            .id(
+              "search-thread-pagination-\(lastThread.id)-\(viewModel.threads.count)-\(viewModel.threadPaginationEpoch)"
+            )
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .accessibilityHidden(true)
+            .onAppear { viewModel.loadMoreIfNeeded(current: lastThread) }
         }
 
         if viewModel.isLoadingMore {
@@ -169,13 +201,16 @@ struct SearchView: View {
             ProgressView()
             Spacer()
           }
+          .frame(minHeight: 44)
           .listRowSeparator(.hidden)
         } else if let message = viewModel.loadMoreError {
           LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
+            .frame(minHeight: 44)
             .listRowSeparator(.hidden)
         }
       }
     }
+    .environment(\.defaultMinListRowHeight, 1)
     .listStyle(.insetGrouped)
     .refreshable { await viewModel.refresh() }
   }

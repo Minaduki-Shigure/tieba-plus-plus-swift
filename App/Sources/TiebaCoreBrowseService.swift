@@ -250,11 +250,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     } catch {
       throw Self.browseError(error)
     }
-    return ThreadSearchPageData(
-      threads: response.results.map(Self.mapThreadSearchResult),
-      currentPage: response.pagination.currentPage,
-      hasMore: response.pagination.hasMore
-    )
+    let filter = await contentFilterSnapshot()
+    return Self.mapGlobalThreadSearchPage(response, applying: filter)
   }
 
   func searchForumPosts(
@@ -695,6 +692,29 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     )
   }
 
+  static func mapGlobalThreadSearchPage(
+    _ response: TiebaThreadSearchPage,
+    applying filter: ContentFilterSnapshot = .empty
+  ) -> ThreadSearchPageData {
+    ThreadSearchPageData(
+      threads: response.results.map {
+        mapGlobalThreadSearchResult($0, applying: filter)
+      },
+      currentPage: response.pagination.currentPage,
+      hasMore: response.pagination.hasMore
+    )
+  }
+
+  static func mapGlobalThreadSearchResult(
+    _ result: TiebaThreadSearchResult,
+    applying filter: ContentFilterSnapshot = .empty
+  ) -> BrowseThread {
+    filter.applying(
+      to: mapThreadSearchResult(result),
+      hasKnownVideo: result.hasVideo
+    )
+  }
+
   static func mapForumPostSearchResult(
     _ result: TiebaThreadSearchResult
   ) -> ForumPostSearchItem {
@@ -918,7 +938,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     return name.isEmpty ? "匿名用户" : name
   }
 
-  private func contentFilterSnapshot() async -> ContentFilterSnapshot {
+  func contentFilterSnapshot() async -> ContentFilterSnapshot {
     (try? await contentFilterRepository.snapshot()) ?? .empty
   }
 

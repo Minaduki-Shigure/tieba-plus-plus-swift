@@ -35,6 +35,7 @@ final class SearchViewModel: ObservableObject {
   @Published private(set) var userState: LoadState = .idle
   @Published private(set) var isLoadingMore = false
   @Published private(set) var loadMoreError: String?
+  @Published private(set) var threadPaginationEpoch = 0
   @Published private var refreshErrors: [SearchScope: String] = [:]
 
   private let service: any SearchService
@@ -65,6 +66,14 @@ final class SearchViewModel: ObservableObject {
 
   var refreshError: String? {
     refreshErrors[selectedScope]
+  }
+
+  var displayableThreads: [BrowseThread] {
+    threads.filter { $0.localVisibility != .hidden }
+  }
+
+  var hasDisplayableThreads: Bool {
+    !displayableThreads.isEmpty
   }
 
   func loadIfNeeded() {
@@ -123,6 +132,17 @@ final class SearchViewModel: ObservableObject {
     refreshErrors[selectedScope] = nil
   }
 
+  func reloadThreadsAfterContentFilterChange() {
+    invalidateLoad(.threads)
+    resetResults(for: .threads)
+    guard !submittedQuery.isEmpty else {
+      setState(.failed("请输入搜索关键词。"), for: .threads)
+      return
+    }
+    guard selectedScope == .threads else { return }
+    start(.threads, query: submittedQuery, preservingResults: false)
+  }
+
   func loadMoreIfNeeded(current thread: BrowseThread) {
     guard
       selectedScope == .threads,
@@ -146,10 +166,15 @@ final class SearchViewModel: ObservableObject {
   }
 
   func cancel() {
+    let shouldAdvanceThreadPaginationEpoch =
+      !threads.isEmpty && (threadState == .loading || isLoadingMore)
     invalidateAllLoads()
     isLoadingMore = false
     for scope in SearchScope.allCases where state(for: scope) == .loading {
       setState(hasResults(for: scope) ? .loaded : .idle, for: scope)
+    }
+    if shouldAdvanceThreadPaginationEpoch {
+      threadPaginationEpoch &+= 1
     }
   }
 
@@ -232,11 +257,15 @@ final class SearchViewModel: ObservableObject {
         hasMoreThreads = response.hasMore && !threads.isEmpty
         refreshErrors[.threads] = nil
         threadState = .loaded
+        threadPaginationEpoch &+= 1
       } catch is CancellationError {
         return
       } catch {
         guard isCurrentThread(generation: generation, query: query, sort: sort) else { return }
         handleFailure(error, for: .threads, preservingResults: preservingResults)
+        if threadState == .loaded, !threads.isEmpty {
+          threadPaginationEpoch &+= 1
+        }
       }
     }
   }

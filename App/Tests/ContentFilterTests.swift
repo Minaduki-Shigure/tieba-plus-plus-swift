@@ -193,6 +193,55 @@ final class ContentFilterTests: XCTestCase {
     XCTAssertEqual(filtered.isLive, videoThread.isLive)
   }
 
+  func testKnownVideoBlocksSearchResultWithoutSyntheticVideoContent() {
+    let snapshot = ContentFilterSnapshot(
+      displayMode: .placeholder,
+      blockVideos: true,
+      rules: [
+        .keyword("Trusted video", list: .allow),
+        .user(id: 7, name: "Trusted author", list: .allow),
+      ]
+    )
+    let result = thread(
+      title: "Trusted video",
+      excerpt: "ordinary",
+      authorID: 7,
+      authorName: "Trusted author"
+    )
+
+    XCTAssertFalse(
+      result.contents.contains { content in
+        guard case .video = content else { return false }
+        return true
+      }
+    )
+    XCTAssertEqual(snapshot.visibility(for: result), .visible)
+    XCTAssertEqual(
+      snapshot.visibility(for: result, hasKnownVideo: true),
+      .placeholder
+    )
+    XCTAssertEqual(
+      snapshot.applying(to: result, hasKnownVideo: true).localVisibility,
+      .placeholder
+    )
+  }
+
+  func testKnownVideoUsesHiddenDisplayMode() {
+    let snapshot = ContentFilterSnapshot(
+      displayMode: .hidden,
+      blockVideos: true,
+      rules: []
+    )
+
+    XCTAssertEqual(
+      snapshot.visibility(
+        for: thread(title: "Video search result", excerpt: "ordinary"),
+        hasKnownVideo: true
+      ),
+      .hidden
+    )
+  }
+
   func testFileStoreNormalizesPersistsAndRejectsDuplicates() async throws {
     let fileURL = temporaryFileURL()
     defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }

@@ -78,7 +78,9 @@ let followed = try await authenticatedClient.getFollowedForums(
   `/mo/q/search/user`; global thread search is restricted to topic results and
   supports newest/oldest/relevance sorting with endpoint-specific wire values,
   while per-forum search supports newest/relevance sorting, topic-only/all-content
-  filters, and numeric pagination. User search is a single nonpaginated request.
+  filters, and numeric pagination. Global results preserve the public `flash`
+  or `video` media marker independently from cover URL validation so clients can
+  apply a local video policy. User search is a single nonpaginated request.
 - Search suggestions use protobuf command `309438`. Their minimal anonymous
   request contains only a 2-to-100-character public keyword and fixed
   `isforum = "0"`; it omits `CommonReq`, credentials, cookies, and device

@@ -127,10 +127,10 @@ final class TiebaSearchTests: XCTestCase {
                   "small_pic": "file:///private/image.jpg"
                 },
                 {
-                  "type": "video",
+                  "type": "  FlAsH\n",
                   "width": "1920",
                   "height": "1080",
-                  "small_pic": "https://example.com/cover.jpg"
+                  "small_pic": "file:///private/cover.jpg"
                 }
               ],
               "unknown_future_field": {"value": true}
@@ -162,9 +162,29 @@ final class TiebaSearchTests: XCTestCase {
     XCTAssertEqual(result.images.count, 1)
     XCTAssertEqual(result.images.first?.width, 560)
     XCTAssertEqual(result.images.first?.height, 746)
+    XCTAssertTrue(result.hasVideo)
     XCTAssertEqual(result.target, .thread)
     XCTAssertNil(result.mainPost)
     XCTAssertNil(result.postInfo)
+  }
+
+  func testThreadSearchAcceptsVideoMediaTypeForCompatibility() throws {
+    let body = Data(
+      #"""
+      {
+        "no": 0,
+        "error": "success",
+        "data": {
+          "post_list": [
+            {"tid": 1, "pid": 2, "media": [{"type": "video"}]}
+          ]
+        }
+      }
+      """#.utf8)
+
+    let page = try TiebaSearchDecoder.threads(from: body, requestedPage: 1, pageSize: 20)
+
+    XCTAssertTrue(try XCTUnwrap(page.results.first).hasVideo)
   }
 
   func testThreadSearchAcceptsNullMediaAndMissingOptionalFields() throws {
@@ -177,7 +197,8 @@ final class TiebaSearchTests: XCTestCase {
           "is_login": 0,
           "has_more": 0,
           "post_list": [
-            {"tid": 1, "pid": "2", "title": "Minimal", "media": null}
+            {"tid": 1, "pid": "2", "title": "Null media", "media": null},
+            {"tid": 2, "pid": "3", "title": "Missing media"}
           ]
         }
       }
@@ -187,7 +208,8 @@ final class TiebaSearchTests: XCTestCase {
 
     XCTAssertEqual(page.pagination.currentPage, 3)
     XCTAssertFalse(page.pagination.hasMore)
-    XCTAssertEqual(page.results.first?.images, [])
+    XCTAssertEqual(page.results.map(\.images), [[], []])
+    XCTAssertEqual(page.results.map(\.hasVideo), [false, false])
   }
 
   func testForumPostSearchPreservesThreadReplyAndCommentUnionShapes() throws {
@@ -284,6 +306,7 @@ final class TiebaSearchTests: XCTestCase {
       page.results.map(\.id),
       ["thread:42", "post:42:201", "comment:42:202:301"]
     )
+    XCTAssertEqual(page.results.map(\.hasVideo), [false, false, false])
     XCTAssertEqual(Set(page.results.map(\.id)).count, page.results.count)
     XCTAssertEqual(page.results[0].target, .thread)
     XCTAssertNil(page.results[0].mainPost)

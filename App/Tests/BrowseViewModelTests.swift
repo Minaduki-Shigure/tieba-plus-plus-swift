@@ -178,6 +178,148 @@ final class BrowseViewModelTests: XCTestCase {
     )
   }
 
+  func testGlobalThreadSearchFilteringPreservesOrderIdentityAndPagination() {
+    func result(
+      id: Int64,
+      title: String,
+      authorID: Int64,
+      authorName: String,
+      hasVideo: Bool = false
+    ) -> TiebaThreadSearchResult {
+      TiebaThreadSearchResult(
+        threadID: id,
+        firstPostID: id + 1_000,
+        forumID: 7,
+        forumName: "swift",
+        title: title,
+        excerpt: "excerpt-\(id)",
+        authorID: authorID,
+        authorName: authorName,
+        authorPortraitURL: nil,
+        replyCount: Int(id),
+        likeCount: Int(id + 1),
+        shareCount: Int(id + 2),
+        createdAt: nil,
+        images: [],
+        hasVideo: hasVideo
+      )
+    }
+    let response = TiebaThreadSearchPage(
+      results: [
+        result(id: 101, title: "普通广告", authorID: 1, authorName: "First"),
+        result(id: 102, title: "可信广告", authorID: 2, authorName: "Second"),
+        result(id: 103, title: "普通主题", authorID: 7, authorName: "Blocked"),
+        result(
+          id: 104,
+          title: "可信视频",
+          authorID: 8,
+          authorName: "Trusted",
+          hasVideo: true
+        ),
+        result(id: 105, title: "白名单用户", authorID: 8, authorName: "Trusted"),
+      ],
+      pagination: TiebaPagination(
+        pageSize: 5,
+        currentPage: 4,
+        totalPages: 9,
+        totalCount: 45,
+        hasMore: true,
+        hasPrevious: true
+      ),
+      isLoggedIn: false
+    )
+    let filter = ContentFilterSnapshot(
+      displayMode: .placeholder,
+      blockVideos: true,
+      rules: [
+        .keyword("广告", list: .block),
+        .keyword("可信广告", list: .allow),
+        .keyword("可信视频", list: .allow),
+        .user(id: 7, name: "Blocked", list: .block),
+        .user(id: 8, name: "Trusted", list: .block),
+        .user(id: 8, name: "Trusted", list: .allow),
+      ]
+    )
+
+    let mapped = TiebaCoreBrowseService.mapGlobalThreadSearchPage(
+      response,
+      applying: filter
+    )
+
+    XCTAssertEqual(mapped.threads.map(\.id), [101, 102, 103, 104, 105])
+    XCTAssertEqual(
+      mapped.threads.map(\.firstPostID),
+      [1_101, 1_102, 1_103, 1_104, 1_105]
+    )
+    XCTAssertEqual(
+      mapped.threads.map(\.localVisibility),
+      [.placeholder, .visible, .placeholder, .placeholder, .visible]
+    )
+    XCTAssertFalse(
+      mapped.threads[3].contents.contains { content in
+        guard case .video = content else { return false }
+        return true
+      }
+    )
+    XCTAssertEqual(mapped.currentPage, 4)
+    XCTAssertTrue(mapped.hasMore)
+  }
+
+  func testForumPostSearchMappingRemainsOutsideGlobalContentFilter() {
+    let result = TiebaThreadSearchResult(
+      threadID: 201,
+      firstPostID: 202,
+      forumID: 7,
+      forumName: "swift",
+      title: "广告视频",
+      excerpt: "blocked excerpt",
+      authorID: 9,
+      authorName: "Blocked author",
+      authorPortraitURL: nil,
+      replyCount: 3,
+      likeCount: 4,
+      shareCount: 5,
+      createdAt: nil,
+      images: [],
+      hasVideo: true
+    )
+    let filter = ContentFilterSnapshot(
+      displayMode: .hidden,
+      blockVideos: true,
+      rules: [
+        .keyword("广告", list: .block),
+        .user(id: 9, name: "Blocked author", list: .block),
+      ]
+    )
+
+    let globalResult = TiebaCoreBrowseService.mapGlobalThreadSearchResult(
+      result,
+      applying: filter
+    )
+    let forumResult = TiebaCoreBrowseService.mapForumPostSearchResult(result)
+
+    XCTAssertEqual(globalResult.localVisibility, .hidden)
+    XCTAssertEqual(forumResult.thread.id, 201)
+    XCTAssertEqual(forumResult.thread.localVisibility, .visible)
+  }
+
+  func testContentFilterSnapshotReadFailureFailsOpen() async {
+    let service = TiebaCoreBrowseService(
+      contentFilterRepository: FailingContentFilterRepository()
+    )
+
+    let snapshot = await service.contentFilterSnapshot()
+
+    XCTAssertEqual(snapshot, .empty)
+    XCTAssertEqual(
+      snapshot.visibility(
+        for: Fixtures.thread(id: 301, title: "known video"),
+        hasKnownVideo: true
+      ),
+      .visible
+    )
+  }
+
   func testOriginThreadMappingPreservesFirstPostID() {
     let origin = TiebaOriginThread(
       id: 60,
@@ -5124,6 +5266,36 @@ private actor ScriptedBrowseService: BrowseService {
   func completedThreadRequestCount() -> Int { completedThreadRequests }
   func completedPostRequestCount() -> Int { completedPostRequests }
   func completedCommentRequestCount() -> Int { completedCommentRequests }
+}
+
+private struct FailingContentFilterRepository: ContentFilterRepository {
+  func snapshot() async throws -> ContentFilterSnapshot {
+    throw ContentFilterStoreError.readFailed
+  }
+
+  func add(_ rule: ContentFilterRule) async throws -> ContentFilterRule {
+    throw ContentFilterStoreError.unavailable
+  }
+
+  func delete(id: UUID) async throws {
+    throw ContentFilterStoreError.unavailable
+  }
+
+  func deleteAll(in list: ContentFilterList) async throws {
+    throw ContentFilterStoreError.unavailable
+  }
+
+  func setDisplayMode(_ mode: ContentFilterDisplayMode) async throws {
+    throw ContentFilterStoreError.unavailable
+  }
+
+  func setBlockVideos(_ blockVideos: Bool) async throws {
+    throw ContentFilterStoreError.unavailable
+  }
+
+  func reset() async throws {
+    throw ContentFilterStoreError.unavailable
+  }
 }
 
 private enum Fixtures {

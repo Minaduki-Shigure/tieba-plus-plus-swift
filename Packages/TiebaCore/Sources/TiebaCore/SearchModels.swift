@@ -186,6 +186,7 @@ public struct TiebaThreadSearchResult: Identifiable, Sendable, Hashable {
   public let shareCount: Int
   public let createdAt: Date?
   public let images: [TiebaSearchImage]
+  public let hasVideo: Bool
   public let target: TiebaThreadSearchTarget
   public let mainPost: TiebaSearchPostContext?
   public let postInfo: TiebaSearchPostContext?
@@ -206,6 +207,7 @@ public struct TiebaThreadSearchResult: Identifiable, Sendable, Hashable {
     shareCount: Int,
     createdAt: Date?,
     images: [TiebaSearchImage],
+    hasVideo: Bool = false,
     target: TiebaThreadSearchTarget = .thread,
     mainPost: TiebaSearchPostContext? = nil,
     postInfo: TiebaSearchPostContext? = nil
@@ -225,6 +227,7 @@ public struct TiebaThreadSearchResult: Identifiable, Sendable, Hashable {
     self.shareCount = shareCount
     self.createdAt = createdAt
     self.images = images
+    self.hasVideo = hasVideo
     self.target = target
     self.mainPost = mainPost
     self.postInfo = postInfo

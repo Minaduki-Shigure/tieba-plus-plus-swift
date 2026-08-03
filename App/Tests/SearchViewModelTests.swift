@@ -155,6 +155,116 @@ final class SearchViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testHiddenRawTailCanTriggerNextThreadPage() async throws {
+    let service = ScriptedSearchService()
+    let visible = SearchFixtures.thread(id: 33)
+    let hiddenTail = SearchFixtures.thread(id: 34, localVisibility: .hidden)
+    let next = SearchFixtures.thread(id: 35)
+    await service.enqueueThreads(
+      .value(
+        ThreadSearchPageData(
+          threads: [visible, hiddenTail],
+          currentPage: 1,
+          hasMore: true
+        )
+      )
+    )
+    await service.enqueueThreads(
+      .value(ThreadSearchPageData(threads: [next], currentPage: 2, hasMore: false))
+    )
+    let viewModel = SearchViewModel(
+      query: "swift",
+      service: service,
+      selectedScope: .threads
+    )
+
+    viewModel.loadIfNeeded()
+    try await searchWaitUntil { viewModel.threadState == .loaded }
+    viewModel.loadMoreIfNeeded(current: hiddenTail)
+
+    try await searchWaitUntil { viewModel.threads.map(\.id) == [33, 34, 35] }
+    let requests = await service.threadRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2])
+  }
+
+  @MainActor
+  func testAllHiddenThreadPagesCanAdvanceUntilDisplayableResult() async throws {
+    let service = ScriptedSearchService()
+    let first = SearchFixtures.thread(id: 41, localVisibility: .hidden)
+    let second = SearchFixtures.thread(id: 42, localVisibility: .hidden)
+    let visible = SearchFixtures.thread(id: 43)
+    await service.enqueueThreads(
+      .value(ThreadSearchPageData(threads: [first], currentPage: 1, hasMore: true))
+    )
+    await service.enqueueThreads(
+      .value(ThreadSearchPageData(threads: [second], currentPage: 2, hasMore: true))
+    )
+    await service.enqueueThreads(
+      .value(ThreadSearchPageData(threads: [visible], currentPage: 3, hasMore: false))
+    )
+    let viewModel = SearchViewModel(
+      query: "swift",
+      service: service,
+      selectedScope: .threads
+    )
+
+    viewModel.loadIfNeeded()
+    try await searchWaitUntil { viewModel.threadState == .loaded }
+    XCTAssertFalse(viewModel.hasDisplayableThreads)
+
+    viewModel.loadMoreIfNeeded(current: try XCTUnwrap(viewModel.threads.last))
+    try await searchWaitUntil { viewModel.threads.map(\.id) == [41, 42] }
+    XCTAssertFalse(viewModel.hasDisplayableThreads)
+
+    viewModel.loadMoreIfNeeded(current: try XCTUnwrap(viewModel.threads.last))
+    try await searchWaitUntil { viewModel.threads.map(\.id) == [41, 42, 43] }
+    XCTAssertTrue(viewModel.hasDisplayableThreads)
+    let requests = await service.threadRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2, 3])
+  }
+
+  @MainActor
+  func testSameHiddenTailRefreshAdvancesPaginationEpoch() async throws {
+    let service = ScriptedSearchService()
+    let visible = SearchFixtures.thread(id: 51)
+    let hiddenTail = SearchFixtures.thread(id: 52, localVisibility: .hidden)
+    let firstPage = ThreadSearchPageData(
+      threads: [visible, hiddenTail],
+      currentPage: 1,
+      hasMore: true
+    )
+    await service.enqueueThreads(.value(firstPage))
+    await service.enqueueThreads(.value(firstPage))
+    await service.enqueueThreads(
+      .value(
+        ThreadSearchPageData(
+          threads: [SearchFixtures.thread(id: 53)],
+          currentPage: 2,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = SearchViewModel(
+      query: "swift",
+      service: service,
+      selectedScope: .threads
+    )
+
+    viewModel.loadIfNeeded()
+    try await searchWaitUntil { viewModel.threadState == .loaded }
+    let firstEpoch = viewModel.threadPaginationEpoch
+
+    await viewModel.refresh()
+
+    XCTAssertEqual(viewModel.threads.map(\.id), [51, 52])
+    XCTAssertGreaterThan(viewModel.threadPaginationEpoch, firstEpoch)
+    viewModel.loadMoreIfNeeded(current: hiddenTail)
+    try await searchWaitUntil { viewModel.threads.map(\.id) == [51, 52, 53] }
+    let requests = await service.threadRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 1, 2])
+  }
+
+  @MainActor
   func testThreadRefreshClearsPreviousPaginationFailure() async throws {
     let service = ScriptedSearchService()
     let initial = [SearchFixtures.thread(id: 21), SearchFixtures.thread(id: 22)]
@@ -348,6 +458,145 @@ final class SearchViewModelTests: XCTestCase {
     await searchDrainMainActor()
     XCTAssertEqual(viewModel.threads.map(\.id), [51])
     XCTAssertFalse(viewModel.isLoadingMore)
+  }
+
+  @MainActor
+  func testContentFilterChangeOutsideThreadScopeResetsOnlyThreadResults() async throws {
+    let service = ScriptedSearchService()
+    let forum = SearchFixtures.forum(id: 81, name: "swift")
+    let thread = SearchFixtures.thread(id: 82)
+    let user = SearchFixtures.user(id: 83, username: "swift-user")
+    await service.enqueueForums(.value(ForumSearchData(exactMatch: forum, related: [])))
+    await service.enqueueThreads(
+      .value(ThreadSearchPageData(threads: [thread], currentPage: 1, hasMore: false))
+    )
+    await service.enqueueUsers(.value(UserSearchData(exactMatch: user, related: [])))
+    let viewModel = SearchViewModel(query: "swift", service: service)
+
+    viewModel.loadIfNeeded()
+    try await searchWaitUntil { viewModel.forumState == .loaded }
+    viewModel.selectScope(.threads)
+    try await searchWaitUntil { viewModel.threadState == .loaded }
+    viewModel.selectScope(.users)
+    try await searchWaitUntil { viewModel.userState == .loaded }
+
+    viewModel.reloadThreadsAfterContentFilterChange()
+
+    XCTAssertEqual(viewModel.selectedScope, .users)
+    XCTAssertEqual(viewModel.exactForum, forum)
+    XCTAssertEqual(viewModel.forumState, .loaded)
+    XCTAssertEqual(viewModel.exactUser, user)
+    XCTAssertEqual(viewModel.userState, .loaded)
+    XCTAssertTrue(viewModel.threads.isEmpty)
+    XCTAssertEqual(viewModel.threadState, .idle)
+    let counts = await service.requestCounts()
+    XCTAssertEqual(counts, SearchRequestCounts(forums: 1, threads: 1, users: 1))
+  }
+
+  @MainActor
+  func testContentFilterChangeReloadsCurrentThreadScopeFromFirstPage() async throws {
+    let service = ScriptedSearchService()
+    await service.enqueueThreads(
+      .value(
+        ThreadSearchPageData(
+          threads: [SearchFixtures.thread(id: 91)],
+          currentPage: 4,
+          hasMore: true
+        )
+      )
+    )
+    await service.enqueueThreads(
+      .value(
+        ThreadSearchPageData(
+          threads: [SearchFixtures.thread(id: 92, localVisibility: .placeholder)],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = SearchViewModel(
+      query: "swift",
+      service: service,
+      selectedScope: .threads,
+      threadSort: .relevance
+    )
+    viewModel.loadIfNeeded()
+    try await searchWaitUntil { viewModel.threads.map(\.id) == [91] }
+
+    viewModel.reloadThreadsAfterContentFilterChange()
+
+    try await searchWaitUntil { viewModel.threads.map(\.id) == [92] }
+    XCTAssertEqual(viewModel.threadState, .loaded)
+    XCTAssertTrue(viewModel.hasDisplayableThreads)
+    let requests = await service.threadRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 1])
+    XCTAssertEqual(requests.map(\.sort), [.relevance, .relevance])
+  }
+
+  @MainActor
+  func testContentFilterChangeSupersedesRefreshAndIgnoresItsLateResponse() async throws {
+    let service = ScriptedSearchService()
+    let initial = SearchFixtures.thread(id: 101)
+    let filtered = SearchFixtures.thread(id: 102, localVisibility: .hidden)
+    await service.enqueueThreads(
+      .value(ThreadSearchPageData(threads: [initial], currentPage: 1, hasMore: false))
+    )
+    await service.enqueueThreads(.suspended(601))
+    await service.enqueueThreads(
+      .value(ThreadSearchPageData(threads: [filtered], currentPage: 1, hasMore: false))
+    )
+    let viewModel = SearchViewModel(
+      query: "swift",
+      service: service,
+      selectedScope: .threads
+    )
+    viewModel.loadIfNeeded()
+    try await searchWaitUntil { viewModel.threads == [initial] }
+
+    let refreshTask = Task { @MainActor in await viewModel.refresh() }
+    try await searchWaitUntil {
+      let requests = await service.threadRequestSnapshot()
+      return requests.count == 2 && viewModel.threadState == .loading
+    }
+    XCTAssertEqual(viewModel.threads, [initial])
+
+    viewModel.reloadThreadsAfterContentFilterChange()
+    XCTAssertTrue(viewModel.threads.isEmpty)
+    try await searchWaitUntil { viewModel.threads == [filtered] }
+    XCTAssertFalse(viewModel.hasDisplayableThreads)
+
+    let resumed = await service.resumeThreads(
+      id: 601,
+      returning: ThreadSearchPageData(
+        threads: [SearchFixtures.thread(id: 103)],
+        currentPage: 1,
+        hasMore: false
+      )
+    )
+    XCTAssertTrue(resumed)
+    await refreshTask.value
+    await searchDrainMainActor()
+
+    XCTAssertEqual(viewModel.threads, [filtered])
+    XCTAssertEqual(viewModel.threadState, .loaded)
+    XCTAssertNil(viewModel.refreshError)
+    let requests = await service.threadRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 1, 1])
+  }
+
+  @MainActor
+  func testContentFilterChangeKeepsEmptyThreadQueryFailureWithoutRequest() async {
+    let service = ScriptedSearchService()
+    let viewModel = SearchViewModel(query: "", service: service)
+    viewModel.submit("   ")
+    viewModel.selectScope(.users)
+
+    viewModel.reloadThreadsAfterContentFilterChange()
+
+    XCTAssertEqual(viewModel.threadState, .failed("请输入搜索关键词。"))
+    XCTAssertEqual(viewModel.userState, .failed("请输入搜索关键词。"))
+    let counts = await service.requestCounts()
+    XCTAssertEqual(counts, SearchRequestCounts(forums: 0, threads: 0, users: 0))
   }
 
   @MainActor
@@ -598,7 +847,11 @@ private enum SearchFixtures {
     )
   }
 
-  static func thread(id: Int64, title: String? = nil) -> BrowseThread {
+  static func thread(
+    id: Int64,
+    title: String? = nil,
+    localVisibility: LocalContentVisibility = .visible
+  ) -> BrowseThread {
     BrowseThread(
       id: id,
       forumID: 100,
@@ -610,7 +863,8 @@ private enum SearchFixtures {
       viewCount: 0,
       createdAt: Date(timeIntervalSince1970: 1_700_000_000),
       lastReplyAt: nil,
-      contents: [.text("content")]
+      contents: [.text("content")],
+      localVisibility: localVisibility
     )
   }
 

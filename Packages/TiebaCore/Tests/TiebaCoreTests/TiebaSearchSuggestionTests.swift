@@ -240,7 +240,7 @@ final class TiebaLiveTestsSearchSuggestions: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.31 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.32 integration-test")
     )
     let suggestions = try await client.searchSuggestions(query: "原神")
 
