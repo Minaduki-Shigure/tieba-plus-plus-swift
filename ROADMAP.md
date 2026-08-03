@@ -84,9 +84,11 @@ semantics require separate live validation.
 Post responses can carry the first floor independently from the current reply
 page. The app accepts that topic context only when it has a positive ID, floor
 one, a matching thread owner, and, when declared, the thread's exact first-post
-ID. A valid first floor is rendered once above the reply window and owns the
-outer thread's shared-origin card and poll. It is filtered like any other floor,
-is retained when later or earlier reply pages omit it, and is replaced or
+ID. The PB thread object's `post_id` may identify the current anchor and is never
+used as a first-post fallback on post pages. A valid first floor is rendered
+once above the reply window and owns the outer thread's shared-origin card and
+poll. It is filtered like any other floor, is retained when later or earlier
+reply pages omit it, and is replaced or
 cleared by a new snapshot. It never participates in reply deduplication,
 physical-page progression, prepend restoration, or the tail PID cursor. An
 absent or invalid first floor is not synthesized from the thread-list excerpt.

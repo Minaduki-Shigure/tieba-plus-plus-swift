@@ -145,9 +145,11 @@ outside the current physical reply page; loading it adds no request fields or
 second request. Before presentation, it must have a positive post ID, floor one,
 the same thread owner, and the exact declared first-post ID when that ID is
 available. A valid in-page first floor takes precedence over the independent
-field; malformed candidates are ignored and never enter the reply array. The
-accepted first floor is filtered independently and kept outside reply pagination,
-deduplication, prepend anchors, and PID cursor selection. Origin-thread and poll
+field; malformed candidates are ignored and never enter the reply array. The PB
+thread object's `post_id` may be an anchor PID and must not be treated as a
+first-post identity fallback. The accepted first floor is filtered independently
+and kept outside reply pagination, deduplication, prepend anchors, and PID cursor
+selection. Origin-thread and poll
 context may be attached only to this validated topic section. The app must not
 reconstruct a missing first floor from a thread-list excerpt, persist its
 response copy, or use it to expose filtered content or authenticated actions.

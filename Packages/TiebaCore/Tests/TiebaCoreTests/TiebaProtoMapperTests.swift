@@ -192,6 +192,33 @@ final class TiebaProtoMapperTests: XCTestCase {
     XCTAssertEqual(firstPost.threadID, fixture.thread.id)
   }
 
+  func testPostPageDerivesFirstPostIDWithoutTreatingAnchorAsFirstPost() throws {
+    var fixture = ProtoFixtures.postPage().data
+    fixture.thread.firstPostID = 0
+    fixture.thread.postID = fixture.postList[0].id
+
+    let result = TiebaProtoMapper.postPage(fixture)
+    let firstPost = try XCTUnwrap(result.firstPost)
+
+    XCTAssertNotEqual(fixture.thread.postID, firstPost.id)
+    XCTAssertEqual(firstPost.id, fixture.firstFloorPost.id)
+    XCTAssertEqual(result.thread.firstPostID, firstPost.id)
+    XCTAssertEqual(result.posts.map(\.id), [fixture.thread.postID])
+  }
+
+  func testPostPageDoesNotPromoteAnchorWhenFirstFloorIsMissing() {
+    var fixture = ProtoFixtures.postPage().data
+    fixture.thread.firstPostID = 0
+    fixture.thread.postID = fixture.postList[0].id
+    fixture.firstFloorPost = Post()
+
+    let result = TiebaProtoMapper.postPage(fixture)
+
+    XCTAssertNil(result.firstPost)
+    XCTAssertEqual(result.thread.firstPostID, 0)
+    XCTAssertEqual(result.posts.map(\.id), [fixture.thread.postID])
+  }
+
   func testPostPagePeelsFirstFloorWithoutDeduplicatingOrdinaryReplies() throws {
     var fixture = ProtoFixtures.postPage().data
     let reply = try XCTUnwrap(fixture.postList.first)

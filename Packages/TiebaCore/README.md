@@ -84,7 +84,8 @@ let followed = try await authenticatedClient.getFollowedForums(
 - PB post responses expose a validated first floor independently from the
   current physical reply page. It must have a positive ID, floor one, matching
   thread ownership, and the declared first-post ID when present; it is removed
-  from the reply array so pagination cannot duplicate it.
+  from the reply array so pagination cannot duplicate it. A PB page's `post_id`
+  may be the current anchor and is never used as a fallback first-post identity.
 - Post pages expose a shared-thread origin only when the explicit share flag is
   set and the origin TID is positive and distinct from the outer thread. The
   origin reuses the normal rich-content and media mapping path.

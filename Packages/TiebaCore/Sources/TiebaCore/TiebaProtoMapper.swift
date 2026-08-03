@@ -109,28 +109,32 @@ enum TiebaProtoMapper {
   static func postPage(_ data: PbPageResIdl.DataRes) -> TiebaPostPage {
     let forum = forum(data.forum)
     let threadAuthor = optionalUser(data.thread.author)
+    let wireThreadID = data.thread.id
+    let declaredFirstPostID = data.thread.firstPostID > 0 ? data.thread.firstPostID : 0
+    let firstPostProto = data.postList.first(where: {
+      validFirstPost(
+        $0,
+        threadID: wireThreadID,
+        firstPostID: declaredFirstPostID
+      )
+    }) ?? (validFirstPost(
+      data.firstFloorPost,
+      threadID: wireThreadID,
+      firstPostID: declaredFirstPostID
+    ) ? data.firstFloorPost : nil)
+    let resolvedFirstPostID = firstPostProto?.id ?? declaredFirstPostID
     let mappedThread = thread(
       data.thread,
       forum: forum,
       author: threadAuthor,
       viewCountOverride: data.threadFreqNum > 0 ? Int(data.threadFreqNum) : nil,
-      usesPostPageLayout: true
+      usesPostPageLayout: true,
+      firstPostIDOverride: resolvedFirstPostID
     )
     let users = userLookup(data.userList)
     let threadAuthorID =
       data.thread.authorID != 0 ? data.thread.authorID : mappedThread.author?.id ?? 0
 
-    let firstPostProto = data.postList.first(where: {
-      validFirstPost(
-        $0,
-        threadID: mappedThread.id,
-        firstPostID: mappedThread.firstPostID
-      )
-    }) ?? (validFirstPost(
-      data.firstFloorPost,
-      threadID: mappedThread.id,
-      firstPostID: mappedThread.firstPostID
-    ) ? data.firstFloorPost : nil)
     let firstPost = firstPostProto.map {
       post(
         $0,
@@ -498,7 +502,8 @@ enum TiebaProtoMapper {
     forum: TiebaForum,
     author: TiebaUser?,
     viewCountOverride: Int? = nil,
-    usesPostPageLayout: Bool = false
+    usesPostPageLayout: Bool = false,
+    firstPostIDOverride: Int64? = nil
   ) -> TiebaThread {
     let origin = proto.originThreadInfo
     var contentProtos: [PbContent]
@@ -527,7 +532,8 @@ enum TiebaProtoMapper {
 
     return TiebaThread(
       id: proto.id,
-      firstPostID: proto.firstPostID == 0 ? proto.postID : proto.firstPostID,
+      firstPostID: firstPostIDOverride
+        ?? (proto.firstPostID == 0 ? proto.postID : proto.firstPostID),
       forumID: forum.id,
       forumName: forum.name,
       title: proto.title,
