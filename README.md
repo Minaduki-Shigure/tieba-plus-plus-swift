@@ -21,10 +21,12 @@ moderator teams, and shared-thread origin cards with original media and
 navigation, plus anonymous single- and multiple-choice poll results, post
 author forum levels, bounded forum-moderator roles, IP locations, read-only net
 approval counts, post sorting, position-preserving earlier-floor loading for
-anchored ascending threads, page jumps, an only-thread-author filter, and a
-validated first-floor topic section that remains available when an anchored or
-page-number request opens in the middle of a thread. User mentions provide
-in-app public-profile navigation without dropping reply context.
+anchored ascending threads, explicit incremental checks for replies added after
+the loaded ascending tail, direct owning-forum navigation, page jumps, an
+only-thread-author filter, and a validated first-floor topic section that
+remains available when an anchored or page-number request opens in the middle
+of a thread. User mentions provide in-app public-profile navigation without
+dropping reply context.
 Forum, channel, hot-topic, global-search, and public-profile thread lists share
 a metadata-aware card that distinguishes pinned, featured, live, shared, and
 special-format topics. Ordinary cards can show one to three downsampled image

@@ -165,6 +165,11 @@ struct TiebaRequestFactory: Sendable {
       try validate(identifier: postID, name: "Post cursor ID")
       data.pid = postID
       data.pn = Int32(page)
+    case .latestReplies(let postID):
+      try validate(identifier: postID, name: "Last post ID")
+      data.pid = postID
+      data.pn = 0
+      data.lastPid = postID
     case nil:
       data.pn = sort == .descending && page == 1 ? 0 : Int32(page)
     }

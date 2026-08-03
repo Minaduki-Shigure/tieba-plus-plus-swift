@@ -3203,6 +3203,462 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testLatestRepliesUsesHiddenTailCursorAppendsInOrderAndResumesPagination() async throws {
+    let service = ScriptedBrowseService()
+    let initialThread = Fixtures.thread(id: 63, title: "initial")
+    let updatedThread = Fixtures.thread(id: 63, title: "updated")
+    let visiblePost = Fixtures.post(id: 6_301, threadID: 63)
+    let hiddenTail = Fixtures.post(id: 6_302, threadID: 63)
+      .withLocalVisibility(.hidden)
+    let duplicateTail = Fixtures.post(
+      id: hiddenTail.id,
+      threadID: 63,
+      authorName: "server duplicate"
+    )
+    let laterPost = Fixtures.post(id: 6_304, threadID: 63)
+    let duplicateLaterPost = Fixtures.post(
+      id: laterPost.id,
+      threadID: 63,
+      authorName: "later duplicate"
+    )
+    let earlierPost = Fixtures.post(id: 6_303, threadID: 63)
+    let continuationPost = Fixtures.post(id: 6_305, threadID: 63)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: initialThread,
+          posts: [visiblePost, hiddenTail],
+          currentPage: 2,
+          hasMore: false,
+          totalPages: 2
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: updatedThread,
+          posts: [duplicateTail, laterPost, duplicateLaterPost, earlierPost],
+          currentPage: 3,
+          hasMore: true,
+          totalPages: 4,
+          nextPagePostID: 6_399
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: updatedThread,
+          posts: [continuationPost],
+          currentPage: 4,
+          hasMore: false,
+          totalPages: 4
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: initialThread, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    XCTAssertTrue(viewModel.canCheckLatestReplies)
+    viewModel.checkLatestReplies()
+
+    try await waitUntil {
+      viewModel.posts.map(\.id) == [6_301, 6_302, 6_304, 6_303]
+        && !viewModel.isCheckingLatestReplies
+    }
+    XCTAssertEqual(viewModel.thread, updatedThread)
+    XCTAssertEqual(viewModel.currentPage, 3)
+    XCTAssertEqual(viewModel.totalPages, 4)
+    XCTAssertEqual(viewModel.posts[1].localVisibility, .hidden)
+    XCTAssertNotEqual(viewModel.posts[1].authorName, "server duplicate")
+    XCTAssertEqual(viewModel.posts[2].authorName, laterPost.authorName)
+    XCTAssertFalse(viewModel.canCheckLatestReplies)
+    var requests = await service.postRequestSnapshot()
+    XCTAssertEqual(
+      requests,
+      [
+        PostRequest(threadID: 63, page: 1, pageSize: 30),
+        PostRequest(
+          threadID: 63,
+          page: 1,
+          pageSize: 15,
+          location: .latestReplies(after: hiddenTail.id)
+        ),
+      ]
+    )
+
+    viewModel.loadMoreIfNeeded(current: earlierPost)
+
+    try await waitUntil { viewModel.posts.last?.id == continuationPost.id }
+    requests = await service.postRequestSnapshot()
+    XCTAssertEqual(
+      requests.last,
+      PostRequest(
+        threadID: 63,
+        page: 4,
+        pageSize: 30,
+        location: .pageCursor(6_399)
+      )
+    )
+  }
+
+  @MainActor
+  func testEmptyLatestRepliesResponsePreservesLoadedSnapshot() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 64, title: "preserved")
+    let changedThread = Fixtures.thread(id: 640_000, title: "must not replace")
+    let origin = Fixtures.thread(id: 6_400, title: "origin")
+    let poll = Fixtures.poll()
+    let post = Fixtures.post(id: 6_401, threadID: 64)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [post],
+          currentPage: 2,
+          hasMore: false,
+          totalPages: 2,
+          nextPagePostID: 6_499,
+          originThread: origin,
+          poll: poll
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: changedThread,
+          posts: [],
+          currentPage: 99,
+          hasMore: true,
+          totalPages: 99,
+          nextPagePostID: 9_999,
+          originThread: Fixtures.thread(id: 6_401, title: "changed origin"),
+          firstPost: Fixtures.post(id: 640_001, threadID: changedThread.id, floor: 1)
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.checkLatestReplies()
+    try await waitUntil { !viewModel.isCheckingLatestReplies }
+
+    XCTAssertEqual(viewModel.thread, thread)
+    XCTAssertEqual(viewModel.posts, [post])
+    XCTAssertEqual(viewModel.currentPage, 2)
+    XCTAssertEqual(viewModel.totalPages, 2)
+    XCTAssertEqual(viewModel.originThread, origin)
+    XCTAssertEqual(viewModel.poll, poll)
+    XCTAssertTrue(viewModel.canCheckLatestReplies)
+    XCTAssertNil(viewModel.latestRepliesError)
+  }
+
+  @MainActor
+  func testDuplicateOnlyLatestRepliesResponsePreservesLoadedSnapshot() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 65, title: "preserved")
+    let changedThread = Fixtures.thread(id: 65, title: "must not replace")
+    let post = Fixtures.post(id: 6_501, threadID: 65, authorName: "original")
+    let duplicate = Fixtures.post(id: post.id, threadID: 65, authorName: "duplicate")
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [post],
+          currentPage: 4,
+          hasMore: false,
+          totalPages: 4
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: changedThread,
+          posts: [duplicate],
+          currentPage: 5,
+          hasMore: true,
+          totalPages: 6,
+          nextPagePostID: 6_599
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.checkLatestReplies()
+    try await waitUntil { !viewModel.isCheckingLatestReplies }
+
+    XCTAssertEqual(viewModel.thread, thread)
+    XCTAssertEqual(viewModel.posts, [post])
+    XCTAssertEqual(viewModel.currentPage, 4)
+    XCTAssertEqual(viewModel.totalPages, 4)
+    XCTAssertTrue(viewModel.canCheckLatestReplies)
+  }
+
+  @MainActor
+  func testLatestRepliesFailurePreservesSnapshotAndRetriesSameCursor() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 66)
+    let existing = Fixtures.post(id: 6_601, threadID: 66)
+    let fresh = Fixtures.post(id: 6_602, threadID: 66)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [existing],
+          currentPage: 1,
+          hasMore: false,
+          totalPages: 1
+        )
+      )
+    )
+    await service.enqueuePosts(.failure(StubFailure(message: "latest replies failed")))
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [fresh],
+          currentPage: 2,
+          hasMore: false,
+          totalPages: 2
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.checkLatestReplies()
+    try await waitUntil {
+      viewModel.latestRepliesError == "latest replies failed"
+        && !viewModel.isCheckingLatestReplies
+    }
+    XCTAssertFalse(viewModel.isLoadingMore)
+    XCTAssertNil(viewModel.loadMoreError)
+    XCTAssertEqual(viewModel.posts, [existing])
+    XCTAssertEqual(viewModel.currentPage, 1)
+
+    viewModel.retryLatestReplies()
+    try await waitUntil { viewModel.posts == [existing, fresh] }
+
+    XCTAssertNil(viewModel.latestRepliesError)
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(requests.count, 3)
+    XCTAssertEqual(requests[1].page, 1)
+    XCTAssertEqual(requests[1].pageSize, 15)
+    XCTAssertEqual(requests[1].location, .latestReplies(after: existing.id))
+    XCTAssertEqual(requests[2], requests[1])
+  }
+
+  @MainActor
+  func testLatestRepliesCheckRequiresAscendingExhaustedNonemptySnapshot() async throws {
+    let cases: [(ThreadBrowseOptions, [BrowsePost], Bool)] = [
+      (ThreadBrowseOptions(sort: .descending), [Fixtures.post(id: 6_701, threadID: 67)], false),
+      (ThreadBrowseOptions(sort: .hot), [Fixtures.post(id: 6_702, threadID: 67)], false),
+      (ThreadBrowseOptions(sort: .ascending), [Fixtures.post(id: 6_703, threadID: 67)], true),
+      (ThreadBrowseOptions(sort: .ascending), [], false),
+    ]
+
+    for (options, posts, hasMore) in cases {
+      let service = ScriptedBrowseService()
+      let thread = Fixtures.thread(id: 67)
+      await service.enqueuePosts(
+        .value(
+          PostPageData(
+            thread: thread,
+            posts: posts,
+            currentPage: 1,
+            hasMore: hasMore,
+            totalPages: hasMore ? 2 : 1
+          )
+        )
+      )
+      let viewModel = ThreadViewModel(thread: thread, service: service, options: options)
+      viewModel.loadIfNeeded()
+      try await waitUntil { viewModel.state == .loaded }
+
+      XCTAssertFalse(viewModel.canCheckLatestReplies)
+      viewModel.checkLatestReplies()
+      await drainMainActor()
+      let requestCount = await service.postRequestCount()
+      XCTAssertEqual(requestCount, 1)
+    }
+  }
+
+  @MainActor
+  func testLatestRepliesCheckBlocksOtherPaginationAndJumpLoads() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 68)
+    let post = Fixtures.post(id: 6_801, threadID: 68)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [post],
+          currentPage: 3,
+          hasMore: false,
+          hasPrevious: true,
+          totalPages: 3
+        )
+      )
+    )
+    await service.enqueuePosts(.suspended(501))
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.checkLatestReplies()
+    try await waitUntil {
+      let requestCount = await service.postRequestCount()
+      return viewModel.isCheckingLatestReplies && requestCount == 2
+    }
+    XCTAssertFalse(viewModel.isLoadingMore)
+    XCTAssertFalse(viewModel.isLoadingPrevious)
+    viewModel.loadPrevious(anchorPostID: post.id)
+    viewModel.loadMoreIfNeeded()
+    viewModel.jump(toPage: 2)
+    viewModel.checkLatestReplies()
+    viewModel.retryLatestReplies()
+    await drainMainActor()
+
+    let requestCount = await service.postRequestCount()
+    XCTAssertEqual(requestCount, 2)
+    XCTAssertEqual(viewModel.currentPage, 3)
+    XCTAssertFalse(viewModel.isJumping)
+    let resumed = await service.resumePosts(
+      id: 501,
+      returning: PostPageData(
+        thread: thread,
+        posts: [],
+        currentPage: 3,
+        hasMore: false,
+        totalPages: 3
+      )
+    )
+    XCTAssertTrue(resumed)
+    try await waitUntil { !viewModel.isCheckingLatestReplies }
+  }
+
+  @MainActor
+  func testReloadCancelsStaleLatestRepliesAndClearsLatestState() async throws {
+    let service = ScriptedBrowseService()
+    let initialThread = Fixtures.thread(id: 69, title: "initial")
+    let freshThread = Fixtures.thread(id: 69, title: "fresh")
+    let staleThread = Fixtures.thread(id: 69, title: "stale")
+    let initialPost = Fixtures.post(id: 6_901, threadID: 69)
+    let freshPost = Fixtures.post(id: 6_902, threadID: 69)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: initialThread,
+          posts: [initialPost],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    await service.enqueuePosts(.suspended(502))
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: freshThread,
+          posts: [freshPost],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: initialThread, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+    viewModel.checkLatestReplies()
+    try await waitUntil {
+      let requestCount = await service.postRequestCount()
+      return viewModel.isCheckingLatestReplies && requestCount == 2
+    }
+
+    viewModel.reload()
+    try await waitUntil { viewModel.thread == freshThread && viewModel.state == .loaded }
+    let resumed = await service.resumePosts(
+      id: 502,
+      returning: PostPageData(
+        thread: staleThread,
+        posts: [Fixtures.post(id: 6_903, threadID: 69)],
+        currentPage: 2,
+        hasMore: false
+      )
+    )
+    XCTAssertTrue(resumed)
+    try await waitUntil { await service.completedPostRequestCount() == 3 }
+    await drainMainActor()
+
+    XCTAssertEqual(viewModel.thread, freshThread)
+    XCTAssertEqual(viewModel.posts, [freshPost])
+    XCTAssertFalse(viewModel.isCheckingLatestReplies)
+    XCTAssertNil(viewModel.latestRepliesError)
+  }
+
+  @MainActor
+  func testCancelClearsLatestRepliesActivityAndError() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 70)
+    let post = Fixtures.post(id: 7_001, threadID: 70)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [post],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    await service.enqueuePosts(.failure(StubFailure(message: "latest failed")))
+    await service.enqueuePosts(.suspended(503))
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+    viewModel.checkLatestReplies()
+    try await waitUntil { viewModel.latestRepliesError == "latest failed" }
+
+    viewModel.cancel()
+
+    XCTAssertFalse(viewModel.isCheckingLatestReplies)
+    XCTAssertNil(viewModel.latestRepliesError)
+    XCTAssertEqual(viewModel.posts, [post])
+    viewModel.checkLatestReplies()
+    try await waitUntil {
+      let requestCount = await service.postRequestCount()
+      return viewModel.isCheckingLatestReplies && requestCount == 3
+    }
+
+    viewModel.cancel()
+
+    XCTAssertFalse(viewModel.isCheckingLatestReplies)
+    XCTAssertNil(viewModel.latestRepliesError)
+    XCTAssertEqual(viewModel.posts, [post])
+    let resumed = await service.resumePosts(
+      id: 503,
+      returning: PostPageData(
+        thread: thread,
+        posts: [Fixtures.post(id: 7_002, threadID: 70)],
+        currentPage: 2,
+        hasMore: false
+      )
+    )
+    XCTAssertTrue(resumed)
+    try await waitUntil { await service.completedPostRequestCount() == 3 }
+    await drainMainActor()
+    XCTAssertEqual(viewModel.posts, [post])
+  }
+
+  @MainActor
   func testThreadReloadDoesNotAllowCancelledResponseToOverwriteFreshData() async throws {
     let service = ScriptedBrowseService()
     let initialThread = Fixtures.thread(id: 71, title: "initial")

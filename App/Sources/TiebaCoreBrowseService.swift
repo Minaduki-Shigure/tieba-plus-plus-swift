@@ -929,6 +929,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       .pageNumber
     case .pageCursor(let postID):
       .pageCursor(postID)
+    case .latestReplies(after: let postID):
+      .latestReplies(after: postID)
     case nil:
       nil
     }

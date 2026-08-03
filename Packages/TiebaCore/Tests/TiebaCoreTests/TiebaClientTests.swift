@@ -160,6 +160,34 @@ final class TiebaClientTests: XCTestCase {
     XCTAssertEqual(decoded.data.r, TiebaPostSort.descending.rawValue)
   }
 
+  func testLatestReplyLocationIsForwardedToTheAnonymousWireRequest() async throws {
+    let transport = CapturingTransport(body: try ProtoFixtures.postPage().serializedData())
+    let client = TiebaClient(transport: transport)
+
+    _ = try await client.getPosts(
+      threadID: 100,
+      page: 7,
+      sort: .descending,
+      onlyThreadAuthor: true,
+      location: .latestReplies(after: 201)
+    )
+
+    let capturedRequest = await transport.lastRequest()
+    let request = try XCTUnwrap(capturedRequest)
+    let body = try XCTUnwrap(request.httpBody)
+    let payload = try protobufPayload(from: body)
+    let decoded = try PbPageReqIdl(serializedBytes: payload)
+    XCTAssertEqual(decoded.data.pid, 201)
+    XCTAssertEqual(decoded.data.pn, 0)
+    XCTAssertEqual(decoded.data.lastPid, 201)
+    XCTAssertTrue(decoded.data.hasLastPid)
+    XCTAssertEqual(decoded.data.r, TiebaPostSort.descending.rawValue)
+    XCTAssertEqual(decoded.data.lz, 1)
+    XCTAssertEqual(decoded.data.common.bduss, "")
+    XCTAssertEqual(decoded.data.common.stoken, "")
+    XCTAssertNotNil(payload.range(of: Data([0x88, 0x05])))
+  }
+
   func testEmbeddedCommentOptionsAreForwardedToTheAnonymousPostRequest() async throws {
     let transport = CapturingTransport(body: try ProtoFixtures.postPage().serializedData())
     let client = TiebaClient(transport: transport)

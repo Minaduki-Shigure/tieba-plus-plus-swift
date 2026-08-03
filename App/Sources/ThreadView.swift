@@ -65,9 +65,7 @@ struct ThreadView: View {
         postList
       }
     }
-    .navigationTitle(
-      viewModel.thread.title.isEmpty ? viewModel.thread.forumName : viewModel.thread.title
-    )
+    .navigationTitle(threadNavigationTitle)
     .navigationBarTitleDisplayMode(.inline)
     .safeAreaInset(edge: .top, spacing: 0) {
       if !isPureReadingMode {
@@ -116,6 +114,10 @@ struct ThreadView: View {
       }
     }
     .toolbar {
+      ToolbarItem(placement: .principal) {
+        navigationPrincipal
+      }
+
       ToolbarItemGroup(placement: .navigationBarTrailing) {
         Button {
           withAnimation { isPureReadingMode.toggle() }
@@ -151,7 +153,11 @@ struct ThreadView: View {
         } label: {
           Image(systemName: "number.square")
         }
-        .disabled(viewModel.totalPages <= 1 || viewModel.isJumping)
+        .disabled(
+          viewModel.totalPages <= 1
+            || viewModel.isJumping
+            || viewModel.isCheckingLatestReplies
+        )
         .accessibilityLabel("跳转页码")
         .help("跳转页码")
       }
@@ -390,7 +396,11 @@ struct ThreadView: View {
                 .padding(.vertical, 14)
             } else if let message = viewModel.loadPreviousError {
               LoadMoreErrorView(message: message, retry: viewModel.retryLoadPrevious)
-                .disabled(viewModel.isLoadingMore || viewModel.isJumping)
+                .disabled(
+                  viewModel.isLoadingMore
+                    || viewModel.isJumping
+                    || viewModel.isCheckingLatestReplies
+                )
             } else if viewModel.canLoadPrevious, !viewModel.isJumping {
               Button {
                 viewModel.loadPrevious(anchorPostID: prependAnchorPostID)
@@ -402,7 +412,11 @@ struct ThreadView: View {
               }
               .buttonStyle(.plain)
               .foregroundStyle(.tint)
-              .disabled(viewModel.isLoadingMore || viewModel.isAdjustingPrependPosition)
+              .disabled(
+                viewModel.isLoadingMore
+                  || viewModel.isAdjustingPrependPosition
+                  || viewModel.isCheckingLatestReplies
+              )
               .accessibilityIdentifier("thread-load-previous")
             }
 
@@ -470,6 +484,22 @@ struct ThreadView: View {
                 .padding(20)
             } else if let message = viewModel.loadMoreError {
               LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
+            } else if viewModel.isCheckingLatestReplies {
+              ProgressView()
+                .padding(20)
+                .accessibilityLabel("正在检查新回复")
+            } else if let message = viewModel.latestRepliesError {
+              LoadMoreErrorView(message: message, retry: viewModel.retryLatestReplies)
+            } else if viewModel.canCheckLatestReplies {
+              Button(action: viewModel.checkLatestReplies) {
+                Label("检查新回复", systemImage: "arrow.clockwise")
+                  .font(.subheadline)
+                  .frame(maxWidth: .infinity)
+                  .padding(.vertical, 12)
+              }
+              .buttonStyle(.plain)
+              .foregroundStyle(.tint)
+              .accessibilityIdentifier("thread-check-latest-replies")
             }
           }
         }
@@ -514,6 +544,42 @@ struct ThreadView: View {
         .refreshable { await viewModel.refresh() }
       }
     }
+  }
+
+  @ViewBuilder
+  private var navigationPrincipal: some View {
+    if let forumName = forumNavigationName {
+      NavigationLink {
+        ForumView(
+          forumName: forumName,
+          service: service,
+          historyRepository: historyRepository,
+          favoritesRepository: favoritesRepository,
+          searchHistoryRepository: searchHistoryRepository
+        )
+      } label: {
+        Label("\(forumName)吧", systemImage: "text.bubble")
+          .font(.headline)
+          .lineLimit(1)
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("进入\(forumName)吧")
+    } else {
+      Text(threadNavigationTitle)
+        .font(.headline)
+        .lineLimit(1)
+    }
+  }
+
+  private var forumNavigationName: String? {
+    let name = viewModel.thread.forumName.trimmingCharacters(
+      in: .whitespacesAndNewlines
+    )
+    return name.isEmpty ? nil : name
+  }
+
+  private var threadNavigationTitle: String {
+    viewModel.thread.title.isEmpty ? viewModel.thread.forumName : viewModel.thread.title
   }
 
   private func resumeSnapshot() async -> ThreadHistorySnapshot? {

@@ -65,6 +65,7 @@ enum ThreadPostLocation: Equatable, Sendable {
   case postID(Int64)
   case pageNumber
   case pageCursor(Int64)
+  case latestReplies(after: Int64)
 }
 
 protocol BrowseService: Sendable {

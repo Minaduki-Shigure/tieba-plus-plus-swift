@@ -11,6 +11,8 @@ final class ThreadViewModel: ObservableObject {
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
   @Published private(set) var loadMoreError: String?
+  @Published private(set) var isCheckingLatestReplies = false
+  @Published private(set) var latestRepliesError: String?
   @Published private(set) var canLoadPrevious = false
   @Published private(set) var isLoadingPrevious = false
   @Published private(set) var loadPreviousError: String?
@@ -74,6 +76,8 @@ final class ThreadViewModel: ObservableObject {
     isLoadingMore = false
     isLoadingPrevious = false
     loadMoreError = nil
+    isCheckingLatestReplies = false
+    latestRepliesError = nil
     loadPreviousError = nil
     prependRestorePostID = nil
     isRestoringPrependPosition = false
@@ -119,6 +123,7 @@ final class ThreadViewModel: ObservableObject {
   }
 
   func jump(toPage page: Int) {
+    guard !isCheckingLatestReplies else { return }
     guard page > 0, totalPages == 0 || page <= totalPages else {
       failedJumpPage = nil
       jumpError = totalPages > 0 ? "请输入 1 到 \(totalPages) 之间的页码。" : "页码必须大于 0。"
@@ -128,6 +133,7 @@ final class ThreadViewModel: ObservableObject {
     isLoadingMore = false
     isLoadingPrevious = false
     loadMoreError = nil
+    latestRepliesError = nil
     loadPreviousError = nil
     prependRestorePostID = nil
     isRestoringPrependPosition = false
@@ -169,6 +175,8 @@ final class ThreadViewModel: ObservableObject {
     invalidateCurrentLoad()
     isLoadingMore = false
     isLoadingPrevious = false
+    isCheckingLatestReplies = false
+    latestRepliesError = nil
     isJumping = false
     prependRestorePostID = nil
     isRestoringPrependPosition = false
@@ -187,6 +195,7 @@ final class ThreadViewModel: ObservableObject {
     guard
       hasMore,
       !isLoadingMore,
+      !isCheckingLatestReplies,
       !isAdjustingPrependPosition,
       !isJumping,
       loadMoreError == nil,
@@ -208,6 +217,7 @@ final class ThreadViewModel: ObservableObject {
       loadMoreError != nil,
       hasMore,
       !isLoadingMore,
+      !isCheckingLatestReplies,
       !isAdjustingPrependPosition,
       !isJumping,
       state == .loaded
@@ -221,12 +231,96 @@ final class ThreadViewModel: ObservableObject {
     )
   }
 
+  var canCheckLatestReplies: Bool {
+    options.sort == .ascending
+      && !hasMore
+      && !posts.isEmpty
+      && state == .loaded
+      && loadTask == nil
+      && !isLoadingMore
+      && !isCheckingLatestReplies
+      && !isAdjustingPrependPosition
+      && !isJumping
+      && loadMoreError == nil
+  }
+
+  func checkLatestReplies() {
+    guard latestRepliesError == nil, canCheckLatestReplies else { return }
+    startLatestRepliesCheck()
+  }
+
+  func retryLatestReplies() {
+    guard latestRepliesError != nil, canCheckLatestReplies else { return }
+    startLatestRepliesCheck()
+  }
+
+  private func startLatestRepliesCheck() {
+    guard let tailPostID = posts.last?.id, tailPostID > 0 else { return }
+    let threadID = thread.id
+    let service = service
+    let options = options
+    loadGeneration &+= 1
+    let generation = loadGeneration
+    latestRepliesError = nil
+    isCheckingLatestReplies = true
+    loadTask = Task {
+      defer {
+        if generation == loadGeneration {
+          isCheckingLatestReplies = false
+          loadTask = nil
+        }
+      }
+      do {
+        let response = try await service.posts(
+          threadID: threadID,
+          page: 1,
+          pageSize: 15,
+          options: options,
+          location: .latestReplies(after: tailPostID)
+        )
+        try Task.checkCancellation()
+        guard generation == loadGeneration else { return }
+        guard !response.posts.isEmpty else { return }
+        let normalized = try normalizedPostPage(
+          response,
+          threadID: threadID,
+          deduplicatingReplies: true
+        )
+        try validateRetainedFirstPostIdentity(
+          normalized.firstPost,
+          responseThread: response.thread,
+          replacing: false
+        )
+        let newReplies = uniqueValidPosts(
+          normalized.replies,
+          excluding: posts,
+          threadID: threadID
+        )
+        guard !newReplies.isEmpty else { return }
+
+        thread = response.thread
+        posts.append(contentsOf: newReplies)
+        currentPage = response.currentPage
+        totalPages = response.totalPages
+        hasMore = response.hasMore
+        nextPagePostID = response.nextPagePostID
+        descendingFallbackPage = nil
+      } catch is CancellationError {
+        return
+      } catch {
+        guard generation == loadGeneration, !Task.isCancelled else { return }
+        latestRepliesError = error.localizedDescription
+      }
+    }
+  }
+
   func loadPrevious(anchorPostID: Int64? = nil) {
     guard
       canLoadPrevious,
       lowestLoadedPage > 1,
       !isAdjustingPrependPosition,
       !isLoadingMore,
+      !isCheckingLatestReplies,
       !isJumping,
       loadPreviousError == nil,
       state == .loaded,
@@ -251,6 +345,7 @@ final class ThreadViewModel: ObservableObject {
       lowestLoadedPage > 1,
       !isAdjustingPrependPosition,
       !isLoadingMore,
+      !isCheckingLatestReplies,
       !isJumping,
       state == .loaded,
       options.sort == .ascending
@@ -439,7 +534,7 @@ final class ThreadViewModel: ObservableObject {
             guard didAdvanceCursorPage else {
               throw BrowseError.unavailable("贴吧返回的分页游标未前进，未合并该响应。")
             }
-          case .postID(_), nil:
+          case .postID(_), .latestReplies(after: _), nil:
             break
           }
         }
@@ -552,6 +647,7 @@ final class ThreadViewModel: ObservableObject {
     loadGeneration &+= 1
     loadTask?.cancel()
     loadTask = nil
+    isCheckingLatestReplies = false
   }
 
   private func nextLoadMoreRequest() -> (page: Int, location: ThreadPostLocation) {
@@ -593,7 +689,7 @@ final class ThreadViewModel: ObservableObject {
         descendingFallbackPage = totalPages > 1 ? totalPages - 1 : nil
       case .pageNumber:
         descendingFallbackPage = requestedPage > 1 ? requestedPage - 1 : nil
-      case .postID(_), .pageCursor(_):
+      case .postID(_), .pageCursor(_), .latestReplies(after: _):
         descendingFallbackPage = currentPage > 1 ? currentPage - 1 : nil
       }
     } else if location == .pageNumber {
@@ -619,7 +715,8 @@ final class ThreadViewModel: ObservableObject {
 
   private func normalizedPostPage(
     _ page: PostPageData,
-    threadID: Int64
+    threadID: Int64,
+    deduplicatingReplies: Bool = false
   ) throws -> NormalizedPostPage {
     guard page.thread.id == threadID else {
       throw BrowseError.unavailable("贴吧返回的主题归属异常，未显示该响应。")
@@ -671,10 +768,17 @@ final class ThreadViewModel: ObservableObject {
       replies = page.posts
     }
 
+    guard replies.allSatisfy({ $0.id > 0 && $0.threadID == threadID }) else {
+      throw BrowseError.unavailable("贴吧返回的楼层标识或归属异常，未显示该响应。")
+    }
     var seen = Set<Int64>()
-    guard replies.allSatisfy({ post in
-      post.id > 0 && post.threadID == threadID && seen.insert(post.id).inserted
-    }) else {
+    if deduplicatingReplies {
+      return NormalizedPostPage(
+        firstPost: resolvedFirstPost,
+        replies: replies.filter { seen.insert($0.id).inserted }
+      )
+    }
+    guard replies.allSatisfy({ seen.insert($0.id).inserted }) else {
       throw BrowseError.unavailable("贴吧返回的楼层标识或归属异常，未显示该响应。")
     }
     return NormalizedPostPage(firstPost: resolvedFirstPost, replies: replies)

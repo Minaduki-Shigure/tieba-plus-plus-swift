@@ -186,6 +186,8 @@ final class TiebaRequestFactoryTests: XCTestCase {
     XCTAssertEqual(descendingInitial.data.pid, 0)
     XCTAssertEqual(descendingInitial.data.pn, 0)
     XCTAssertEqual(descendingInitial.data.r, TiebaPostSort.descending.rawValue)
+    XCTAssertEqual(descendingInitial.data.lastPid, 0)
+    XCTAssertFalse(descendingInitial.data.hasLastPid)
 
     let explicitPageRequest = try factory.posts(
       threadID: 123_456,
@@ -203,6 +205,8 @@ final class TiebaRequestFactoryTests: XCTestCase {
     )
     XCTAssertEqual(explicitPage.data.pid, 0)
     XCTAssertEqual(explicitPage.data.pn, 1)
+    XCTAssertEqual(explicitPage.data.lastPid, 0)
+    XCTAssertFalse(explicitPage.data.hasLastPid)
 
     let locatedRequest = try factory.posts(
       threadID: 123_456,
@@ -218,6 +222,8 @@ final class TiebaRequestFactoryTests: XCTestCase {
     let located = try PbPageReqIdl(serializedBytes: protobufPayload(from: locatedRequest))
     XCTAssertEqual(located.data.pid, 654_321)
     XCTAssertEqual(located.data.pn, 0)
+    XCTAssertEqual(located.data.lastPid, 0)
+    XCTAssertFalse(located.data.hasLastPid)
 
     let cursorRequest = try factory.posts(
       threadID: 123_456,
@@ -234,6 +240,8 @@ final class TiebaRequestFactoryTests: XCTestCase {
     XCTAssertEqual(cursor.data.pid, 654_321)
     XCTAssertEqual(cursor.data.pn, 4)
     XCTAssertEqual(cursor.data.r, TiebaPostSort.descending.rawValue)
+    XCTAssertEqual(cursor.data.lastPid, 0)
+    XCTAssertFalse(cursor.data.hasLastPid)
 
     let zeroHintRequest = try factory.posts(
       threadID: 123_456,
@@ -249,6 +257,29 @@ final class TiebaRequestFactoryTests: XCTestCase {
     let zeroHint = try PbPageReqIdl(serializedBytes: protobufPayload(from: zeroHintRequest))
     XCTAssertEqual(zeroHint.data.pid, 654_321)
     XCTAssertEqual(zeroHint.data.pn, 0)
+    XCTAssertEqual(zeroHint.data.lastPid, 0)
+    XCTAssertFalse(zeroHint.data.hasLastPid)
+
+    let latestRequest = try factory.posts(
+      threadID: 123_456,
+      page: 7,
+      pageSize: 30,
+      sort: .descending,
+      onlyThreadAuthor: true,
+      location: .latestReplies(after: 654_321),
+      includeComments: false,
+      commentsSortedByAgree: true,
+      commentPageSize: 4
+    )
+    let latestPayload = try protobufPayload(from: latestRequest)
+    let latest = try PbPageReqIdl(serializedBytes: latestPayload)
+    XCTAssertEqual(latest.data.pid, 654_321)
+    XCTAssertEqual(latest.data.pn, 0)
+    XCTAssertEqual(latest.data.lastPid, 654_321)
+    XCTAssertTrue(latest.data.hasLastPid)
+    XCTAssertEqual(latest.data.r, TiebaPostSort.descending.rawValue)
+    XCTAssertEqual(latest.data.lz, 1)
+    XCTAssertNotNil(latestPayload.range(of: Data([0x88, 0x05])))
   }
 
   func testEveryEndpointIsHTTPSAndCredentialFree() throws {
@@ -420,6 +451,21 @@ final class TiebaRequestFactoryTests: XCTestCase {
         commentPageSize: 4
       )
     )
+    for invalidPostID: Int64 in [0, -1] {
+      XCTAssertThrowsError(
+        try factory.posts(
+          threadID: 1,
+          page: 1,
+          pageSize: 30,
+          sort: .ascending,
+          onlyThreadAuthor: false,
+          location: .latestReplies(after: invalidPostID),
+          includeComments: false,
+          commentsSortedByAgree: true,
+          commentPageSize: 4
+        )
+      )
+    }
     XCTAssertThrowsError(
       try factory.posts(
         threadID: 1,

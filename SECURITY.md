@@ -238,6 +238,15 @@ validated local original file, not a credential-bearing URL or a downsampled
 re-encoding. Gallery export must not add cookies, URL credentials, analytics,
 background transfers, or authenticated Tieba fields.
 
+Latest-reply checks are explicit, credential-free requests to the same public
+thread endpoint. They use the raw final post ID as pagination state even when
+that post is locally hidden, because local filtering must not alter the server
+cursor; only the server-issued public ID is sent back, never the hidden content
+or local filter rule. The response passes through the existing ownership, ID,
+deduplication, and local-filter checks before display. Empty or duplicate-only
+responses must not replace the loaded snapshot, and automatic polling remains
+unsupported.
+
 Appearance and forum-sort preferences may store only bounded, nonsecret local
 values in UserDefaults. The no-history control must update the recording flag in
 the existing browsing-history archive and must never duplicate that state in a

@@ -335,6 +335,7 @@ public enum TiebaPostLocation: Sendable, Hashable {
   case postID(Int64)
   case pageNumber
   case pageCursor(Int64)
+  case latestReplies(after: Int64)
 }
 
 public struct TiebaForumClassification: Identifiable, Sendable, Hashable {

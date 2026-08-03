@@ -30,6 +30,8 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Page-number jump and last-visible-post restoration
 - Adjacent earlier-page loading for anchored ascending threads with leading-floor restoration
 - Independently preserved first-floor topic context on anchored and middle-page windows
+- Explicit incremental latest-reply checks after ascending pagination is exhausted
+- Direct owning-forum navigation from the thread navigation bar
 - Versioned local browsing history with delete, clear, and recording controls
 - Settings-level no-history mode using the existing browsing-history archive
 - Native system, light, and dark appearance selection
@@ -93,6 +95,18 @@ reply pages omit it, and is replaced or
 cleared by a new snapshot. It never participates in reply deduplication,
 physical-page progression, prepend restoration, or the tail PID cursor. An
 absent or invalid first floor is not synthesized from the thread-list excerpt.
+
+After ordinary ascending pagination is exhausted, a user can explicitly check
+for replies added after the raw final post ID. The request sends that same
+server-issued ID as both the anchor and protobuf `last_pid` field, keeps the
+active only-author mode, and never runs as a background poll. New replies retain
+server order and are deduplicated by positive post ID before being appended. An
+empty or duplicate-only response preserves the complete loaded snapshot; a
+nonempty response can resume ordinary cursor pagination when the server reports
+more pages. Descending and hot modes do not expose the control because their
+ordering does not provide the required chronological tail. The thread navigation
+bar also links its normalized public forum name directly to the existing forum
+view without issuing a preparatory request.
 
 Rich-content images open as one gallery scoped to the already filtered content
 array that produced the tapped image. Source offsets, rather than URLs, identify
