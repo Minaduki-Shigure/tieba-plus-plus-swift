@@ -23,7 +23,8 @@ struct ImageGalleryPresentation: Identifiable, Equatable, Sendable {
   var id: Int { items[initialIndex].contentOffset }
 
   init?(contents: [BrowseContent], selectedContentOffset: Int) {
-    let items = contents.enumerated().compactMap { offset, content in
+    let items: [ImageGalleryItem] = contents.enumerated().compactMap { pair -> ImageGalleryItem? in
+      let (offset, content) = pair
       guard case .image(let thumbnail, let original, let width, let height) = content else {
         return nil
       }
