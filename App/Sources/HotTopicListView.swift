@@ -100,7 +100,9 @@ private struct HotTopicRow: View {
         HotTopicRemoteImage(url: topic.imageURL, maxPixelSize: 1_200)
           .aspectRatio(2.39, contentMode: .fit)
           .clipShape(RoundedRectangle(cornerRadius: 6))
-          .overlay(alignment: .topLeading) { rankBadge }
+          .overlay(alignment: .topLeading) {
+            rankBadge.allowsHitTesting(false)
+          }
         topicBody(summaryLines: 3)
       }
       .padding(.vertical, 6)
@@ -109,7 +111,9 @@ private struct HotTopicRow: View {
         HotTopicRemoteImage(url: topic.imageURL, maxPixelSize: 320)
           .frame(width: 76, height: 76)
           .clipShape(RoundedRectangle(cornerRadius: 6))
-          .overlay(alignment: .topLeading) { rankBadge }
+          .overlay(alignment: .topLeading) {
+            rankBadge.allowsHitTesting(false)
+          }
         topicBody(summaryLines: 2)
       }
       .padding(.vertical, 4)
@@ -188,27 +192,50 @@ struct HotTopicRemoteImage: View {
   let url: URL?
   let maxPixelSize: Int
 
+  @Environment(\.contentMediaLoadPolicy) private var contentMediaLoadPolicy
+
   var body: some View {
-    DownsampledRemoteImage(url: url, maxPixelSize: maxPixelSize) { phase in
+    ContentRemoteImage(
+      url: url,
+      maxPixelSize: maxPixelSize,
+      loadAccessibilityLabel: "加载话题图片"
+    ) { phase in
       switch phase {
       case .success(let image, _):
         image
           .resizable()
           .scaledToFill()
+          .accessibilityHidden(true)
       case .empty:
         ZStack {
           Color(uiColor: .secondarySystemFill)
           ProgressView()
         }
+        .accessibilityHidden(true)
+      case .loadRequired:
+        imageActionPlaceholder(systemImage: "arrow.down.circle")
       case .failure:
-        ZStack {
-          Color(uiColor: .secondarySystemFill)
-          Image(systemName: "photo")
-            .foregroundStyle(.secondary)
-        }
+        imageActionPlaceholder(systemImage: failureSystemImage)
       }
     }
+    .buttonStyle(.borderless)
     .clipped()
-    .accessibilityHidden(true)
+  }
+
+  private func imageActionPlaceholder(systemImage: String) -> some View {
+    Image(systemName: systemImage)
+      .font(.title3)
+      .foregroundStyle(.secondary)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .background(Color(uiColor: .secondarySystemFill))
+      .contentShape(Rectangle())
+      .accessibilityHidden(true)
+  }
+
+  private var failureSystemImage: String {
+    contentMediaLoadPolicy == .tapToLoad
+      && url.map(RemoteImageURLPolicy.allows) == true
+      ? "arrow.clockwise.circle"
+      : "photo.badge.exclamationmark"
   }
 }

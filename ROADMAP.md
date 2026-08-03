@@ -44,6 +44,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Canonical forum/thread sharing and browse-mode-aware thread-link copying
 - Strict internal routing for supported Tieba HTTPS, pasted official-scheme, and app links
 - Nested replies, images, video links, and voice playback
+- Persistent automatic or tap-to-load policy for content images and video covers
 - Same-content multi-image gallery with paging, zoom, original-file sharing, and Photos saving
 - Server-ranked inline nested-reply previews with anchored opening and safe text copying
 - Full nested-reply pages with parent-floor context and bidirectional anchored pagination

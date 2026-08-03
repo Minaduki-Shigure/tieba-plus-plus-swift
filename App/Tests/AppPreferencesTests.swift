@@ -15,6 +15,19 @@ final class AppPreferencesTests: XCTestCase {
     XCTAssertEqual(AppAppearance.dark.colorScheme, .dark)
   }
 
+  func testContentMediaLoadPolicyUsesStableValuesAndFallsBackToAutomatic() {
+    XCTAssertEqual(
+      AppPreferenceKey.contentMediaLoadPolicy,
+      "TiebaPlusPlus.contentMediaLoadPolicy"
+    )
+    XCTAssertEqual(ContentMediaLoadPolicy.resolved("automatic"), .automatic)
+    XCTAssertEqual(ContentMediaLoadPolicy.resolved("tapToLoad"), .tapToLoad)
+    XCTAssertEqual(ContentMediaLoadPolicy.resolved("future-value"), .automatic)
+    XCTAssertEqual(ContentMediaLoadPolicy.resolved(""), .automatic)
+    XCTAssertEqual(ContentMediaLoadPolicy.automatic.title, "自动加载")
+    XCTAssertEqual(ContentMediaLoadPolicy.tapToLoad.title, "点按加载")
+  }
+
   func testForumSortUsesPerForumOverrideBeforeGlobalDefault() throws {
     let suiteName = "AppPreferencesTests.\(UUID().uuidString)"
     let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

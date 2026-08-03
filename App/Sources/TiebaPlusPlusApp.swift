@@ -4,6 +4,8 @@ import SwiftUI
 struct TiebaPlusPlusApp: App {
   @AppStorage(AppPreferenceKey.appearance)
   private var appearance = AppAppearance.system.rawValue
+  @AppStorage(AppPreferenceKey.contentMediaLoadPolicy)
+  private var contentMediaLoadPolicy = ContentMediaLoadPolicy.automatic.rawValue
   private let service:
     any BrowseService & SearchService & ForumPostSearchService & HotTopicService & HotThreadService
       & UserProfileService & ForumInformationService & SearchSuggestionService
@@ -37,6 +39,10 @@ struct TiebaPlusPlusApp: App {
         accountService: accountService
       )
       .environment(\.contentFilterRepository, contentFilterRepository)
+      .environment(
+        \.contentMediaLoadPolicy,
+        ContentMediaLoadPolicy.resolved(contentMediaLoadPolicy)
+      )
       .preferredColorScheme(AppAppearance.resolved(appearance).colorScheme)
     }
   }

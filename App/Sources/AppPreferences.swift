@@ -6,6 +6,7 @@ enum AppPreferenceKey {
   static let defaultForumSort = "TiebaPlusPlus.defaultForumSort"
   static let homeShowsRecentForums = "TiebaPlusPlus.homeShowsRecentForums"
   static let searchSuggestionsEnabled = "TiebaPlusPlus.searchSuggestionsEnabled"
+  static let contentMediaLoadPolicy = "TiebaPlusPlus.contentMediaLoadPolicy"
 }
 
 enum AppAppearance: String, CaseIterable, Hashable, Identifiable, Sendable {
@@ -39,6 +40,26 @@ enum AppAppearance: String, CaseIterable, Hashable, Identifiable, Sendable {
 
   static func resolved(_ rawValue: String) -> Self {
     Self(rawValue: rawValue) ?? .system
+  }
+}
+
+enum ContentMediaLoadPolicy: String, CaseIterable, Identifiable, Sendable {
+  case automatic
+  case tapToLoad
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .automatic:
+      "自动加载"
+    case .tapToLoad:
+      "点按加载"
+    }
+  }
+
+  static func resolved(_ rawValue: String) -> Self {
+    Self(rawValue: rawValue) ?? .automatic
   }
 }
 

@@ -481,6 +481,8 @@ private struct ForumPostSearchResultRow: View {
 private struct ForumPostSearchMediaStrip: View {
   let contents: [BrowseContent]
 
+  @Environment(\.contentMediaLoadPolicy) private var contentMediaLoadPolicy
+
   private var imageURLs: [URL] {
     contents.compactMap { content in
       guard case .image(let thumbnail, _, _, _) = content else { return nil }
@@ -492,18 +494,31 @@ private struct ForumPostSearchMediaStrip: View {
   var body: some View {
     if !imageURLs.isEmpty {
       HStack(spacing: 6) {
-        ForEach(Array(imageURLs.prefix(3).enumerated()), id: \.offset) { _, imageURL in
-          DownsampledRemoteImage(url: imageURL, maxPixelSize: 512) { phase in
+        ForEach(Array(imageURLs.prefix(3).enumerated()), id: \.offset) { index, imageURL in
+          ContentRemoteImage(
+            url: imageURL,
+            maxPixelSize: 512,
+            loadAccessibilityLabel: "加载搜索结果图片 \(index + 1)"
+          ) { phase in
             switch phase {
             case .success(let renderedImage, _):
-              renderedImage.resizable().scaledToFill()
-            case .empty, .failure:
-              Image(systemName: "photo")
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(uiColor: .secondarySystemFill))
+              renderedImage
+                .resizable()
+                .scaledToFill()
+                .accessibilityHidden(true)
+            case .empty:
+              ZStack {
+                Color(uiColor: .secondarySystemFill)
+                ProgressView()
+              }
+              .accessibilityHidden(true)
+            case .loadRequired:
+              mediaActionPlaceholder(systemImage: "arrow.down.circle")
+            case .failure:
+              mediaActionPlaceholder(systemImage: failureSystemImage(for: imageURL))
             }
           }
+          .buttonStyle(.borderless)
           .frame(maxWidth: .infinity)
           .frame(height: 88)
           .clipped()
@@ -512,5 +527,21 @@ private struct ForumPostSearchMediaStrip: View {
       }
       .frame(height: 88)
     }
+  }
+
+  private func mediaActionPlaceholder(systemImage: String) -> some View {
+    Image(systemName: systemImage)
+      .font(.title3)
+      .foregroundStyle(.secondary)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .background(Color(uiColor: .secondarySystemFill))
+      .contentShape(Rectangle())
+      .accessibilityHidden(true)
+  }
+
+  private func failureSystemImage(for imageURL: URL) -> String {
+    contentMediaLoadPolicy == .tapToLoad && RemoteImageURLPolicy.allows(imageURL)
+      ? "arrow.clockwise.circle"
+      : "photo.badge.exclamationmark"
   }
 }

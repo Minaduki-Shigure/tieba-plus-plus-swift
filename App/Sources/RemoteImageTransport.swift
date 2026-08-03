@@ -1,6 +1,6 @@
 import Foundation
 
-enum RemoteImageDownloadKind: Equatable, Sendable {
+enum RemoteImageDownloadKind: Hashable, Sendable {
   case preview
   case original
 }

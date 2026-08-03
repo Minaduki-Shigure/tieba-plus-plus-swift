@@ -28,6 +28,8 @@ struct ThreadSummaryRow: View {
   let showsForum: Bool
   let showsAuthor: Bool
 
+  @Environment(\.contentMediaLoadPolicy) private var contentMediaLoadPolicy
+
   init(
     thread: BrowseThread,
     showsForum: Bool = false,
@@ -106,54 +108,86 @@ struct ThreadSummaryRow: View {
   private var mediaPreview: some View {
     switch ThreadSummaryPresentation.media(for: thread) {
     case .some(.video(let coverURL)):
-      ZStack {
-        ThreadPreviewImage(url: coverURL)
-        Image(systemName: "play.circle.fill")
-          .font(.system(size: 38))
-          .symbolRenderingMode(.palette)
-          .foregroundStyle(.white, .black.opacity(0.55))
+      mediaAccessibility(label: "视频预览") {
+        ZStack {
+          ThreadPreviewImage(
+            url: coverURL,
+            loadAccessibilityLabel: "加载视频封面",
+            successAccessibilityLabel: "视频预览"
+          )
+          Image(systemName: "play.circle.fill")
+            .font(.system(size: 38))
+            .symbolRenderingMode(.palette)
+            .foregroundStyle(.white, .black.opacity(0.55))
+            .accessibilityHidden(true)
+            .allowsHitTesting(false)
+        }
+        .frame(maxWidth: 360)
+        .frame(height: 150)
+        .background(Color.black.opacity(0.88))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
-      .frame(maxWidth: 360)
-      .frame(height: 150)
-      .background(Color.black.opacity(0.88))
-      .clipShape(RoundedRectangle(cornerRadius: 6))
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .accessibilityElement(children: .ignore)
-      .accessibilityLabel("视频预览")
     case .some(.images(let imageURLs, let totalCount)):
       if imageURLs.count == 1, let imageURL = imageURLs.first {
-        ThreadPreviewImage(url: imageURL)
+        mediaAccessibility(label: "图片预览") {
+          ThreadPreviewImage(
+            url: imageURL,
+            loadAccessibilityLabel: "加载帖子图片",
+            successAccessibilityLabel: "图片预览"
+          )
           .frame(maxWidth: 360)
           .frame(height: 150)
           .clipShape(RoundedRectangle(cornerRadius: 6))
           .frame(maxWidth: .infinity, alignment: .leading)
-          .accessibilityLabel("图片预览")
+        }
       } else {
-        HStack(spacing: 5) {
-          ForEach(Array(imageURLs.prefix(3).enumerated()), id: \.offset) { index, url in
-            ZStack(alignment: .bottomTrailing) {
-              ThreadPreviewImage(url: url)
-              if index == 2, totalCount > imageURLs.count {
-                Label(totalCount.formatted(), systemImage: "photo")
-                  .font(.caption2.weight(.semibold))
-                  .foregroundStyle(.white)
-                  .padding(.horizontal, 6)
-                  .padding(.vertical, 3)
-                  .background(Color.black.opacity(0.7))
-                  .clipShape(RoundedRectangle(cornerRadius: 4))
-                  .padding(5)
+        mediaAccessibility(label: "\(totalCount) 张图片预览") {
+          HStack(spacing: 5) {
+            ForEach(Array(imageURLs.prefix(3).enumerated()), id: \.offset) { index, url in
+              ZStack(alignment: .bottomTrailing) {
+                ThreadPreviewImage(
+                  url: url,
+                  loadAccessibilityLabel: "加载帖子图片 \(index + 1)",
+                  successAccessibilityLabel: "图片预览 \(index + 1)，共 \(totalCount) 张"
+                )
+                if index == 2, totalCount > imageURLs.count {
+                  Label(totalCount.formatted(), systemImage: "photo")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Color.black.opacity(0.7))
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .padding(5)
+                    .accessibilityHidden(true)
+                    .allowsHitTesting(false)
+                }
               }
+              .frame(maxWidth: .infinity)
+              .frame(height: 94)
+              .clipShape(RoundedRectangle(cornerRadius: 4))
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: 94)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
           }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(totalCount) 张图片预览")
       }
     case .none:
       EmptyView()
+    }
+  }
+
+  @ViewBuilder
+  private func mediaAccessibility<Content: View>(
+    label: String,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    switch contentMediaLoadPolicy {
+    case .automatic:
+      content()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+    case .tapToLoad:
+      content()
     }
   }
 
@@ -340,25 +374,52 @@ struct ThreadSummaryRow: View {
 
 private struct ThreadPreviewImage: View {
   let url: URL
+  let loadAccessibilityLabel: String
+  let successAccessibilityLabel: String
+
+  @Environment(\.contentMediaLoadPolicy) private var contentMediaLoadPolicy
 
   var body: some View {
-    DownsampledRemoteImage(url: url, maxPixelSize: 720) { phase in
+    ContentRemoteImage(
+      url: url,
+      maxPixelSize: 720,
+      loadAccessibilityLabel: loadAccessibilityLabel
+    ) { phase in
       switch phase {
       case .success(let image, _):
         image
           .resizable()
           .scaledToFill()
+          .accessibilityLabel(successAccessibilityLabel)
       case .failure:
-        Image(systemName: "photo.badge.exclamationmark")
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-          .background(Color(uiColor: .secondarySystemFill))
+        previewPlaceholder(systemImage: failureSystemImage)
       case .empty:
-        ProgressView()
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-          .background(Color(uiColor: .secondarySystemFill))
+        ZStack {
+          Color(uiColor: .secondarySystemFill)
+          ProgressView()
+        }
+        .accessibilityHidden(true)
+      case .loadRequired:
+        previewPlaceholder(systemImage: "arrow.down.circle")
       }
     }
+    .buttonStyle(.borderless)
     .clipped()
+  }
+
+  private var failureSystemImage: String {
+    contentMediaLoadPolicy == .tapToLoad && RemoteImageURLPolicy.allows(url)
+      ? "arrow.clockwise.circle"
+      : "photo.badge.exclamationmark"
+  }
+
+  private func previewPlaceholder(systemImage: String) -> some View {
+    Image(systemName: systemImage)
+      .font(.title3)
+      .foregroundStyle(.secondary)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .background(Color(uiColor: .secondarySystemFill))
+      .contentShape(Rectangle())
   }
 }
 

@@ -251,12 +251,31 @@ requests or redirect destinations, and is decoded through ImageIO with a
 bounded pixel size and memory cache. Original image dimensions are never
 decoded directly into the browsing UI.
 
+The content-media preference applies only to thread previews, rich-content
+images, video covers, per-forum search media, and hot-topic images. In
+tap-to-load mode, a cold image performs an exact in-memory cache lookup and
+must not create or join a network request until the user presses its load
+control. That authorization is bound to the current HTTPS URL and requested
+pixel size; changing either value or changing the policy revokes it. A failed
+manual request is retried only by another explicit tap. The cache is
+process-local and ephemeral, so this setting does not claim persistent offline
+media or suppress the page-data requests needed to browse.
+
+Avatars remain outside that content-media policy. Gallery originals, video and
+voice playback, sharing, and saving already require a separate explicit user
+action and retain those user-initiated paths. Rendering a video cover must not
+construct an `AVPlayer` or start playback. Switching from automatic to
+tap-to-load cancels the content view's waiter; a deduplicated transfer may
+continue only when another active, independently authorized waiter still owns
+it.
+
 Thread-list previews reuse that same media pipeline. Metadata badges and
 read-only counters come only from existing anonymous responses; rendering a
 card must not introduce a personalized request, autoplay video, or broaden the
 media host policy. Pinned cards intentionally make no preview request, and an
 invalid media URL remains an unsupported fragment rather than a fallback
-cleartext load. Automatic previews have a 16 MiB transfer-time limit; the task
+cleartext load. Automatic and explicitly requested content previews have a
+16 MiB transfer-time limit; the task
 delegate cancels a response as soon as either its declared or observed byte
 count exceeds that bound. Explicit higher-resolution image views retain the
 80 MiB transfer limit. Deduplicated downloads track active view waiters and are

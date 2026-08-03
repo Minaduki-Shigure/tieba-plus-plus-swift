@@ -73,6 +73,10 @@ but authenticated write operations remain intentionally unsupported.
   origin media. Images open in a same-content gallery with paging and zoom;
   explicit actions can share the original file or save it through add-only
   Photos access.
+- Content media can either load automatically or wait for an explicit tap.
+  Tap-to-load covers thread previews, post images, video covers, per-forum
+  search media, and hot-topic images while leaving avatars, opened gallery
+  originals, sharing, and saving on their existing user-initiated paths.
 - Forum and thread pages use the native share sheet with canonical HTTPS links.
   Copied thread links retain browse mode, including only-author state.
 - A strict in-app router handles supported rich-content links, explicit

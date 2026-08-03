@@ -10,6 +10,8 @@ struct AppSettingsView: View {
   private var homeShowsRecentForums = true
   @AppStorage(AppPreferenceKey.searchSuggestionsEnabled)
   private var searchSuggestionsEnabled = false
+  @AppStorage(AppPreferenceKey.contentMediaLoadPolicy)
+  private var contentMediaLoadPolicy = ContentMediaLoadPolicy.automatic.rawValue
 
   init(historyRepository: any BrowsingHistoryRepository) {
     _historyViewModel = StateObject(
@@ -80,12 +82,26 @@ struct AppSettingsView: View {
         Text("开启后，会在您提交搜索前向百度发送输入关键词，以获取在线联想建议。")
       }
 
-      Section("内容") {
+      Section {
+        Picker("媒体加载", selection: contentMediaLoadPolicySelection) {
+          ForEach(ContentMediaLoadPolicy.allCases) { policy in
+            Text(policy.title).tag(policy)
+          }
+        }
+        .pickerStyle(.segmented)
+
         NavigationLink {
           ContentFilterSettingsView()
         } label: {
           Label("内容屏蔽", systemImage: "hand.raised")
         }
+      } header: {
+        Text("内容")
+      } footer: {
+        Text(
+          "\u{201c}点按加载\u{201d}仅控制帖子预览、正文与话题图片及视频封面的自动下载；头像不受影响。"
+            + "本次运行内存中已经缓存的图片会直接显示，页面数据等其他网络请求仍会正常进行。"
+        )
       }
     }
     .listStyle(.insetGrouped)
@@ -116,6 +132,13 @@ struct AppSettingsView: View {
     Binding(
       get: { ForumThreadSort(rawValue: defaultForumSort) ?? .replyTime },
       set: { defaultForumSort = $0.rawValue }
+    )
+  }
+
+  private var contentMediaLoadPolicySelection: Binding<ContentMediaLoadPolicy> {
+    Binding(
+      get: { ContentMediaLoadPolicy.resolved(contentMediaLoadPolicy) },
+      set: { contentMediaLoadPolicy = $0.rawValue }
     )
   }
 }

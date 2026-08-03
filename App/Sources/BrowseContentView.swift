@@ -159,35 +159,91 @@ private struct BrowseImageView: View {
   let height: Int
   let onOpen: () -> Void
 
+  @Environment(\.contentMediaLoadPolicy) private var contentMediaLoadPolicy
+
   private var aspectRatio: CGFloat {
     guard width > 0, height > 0 else { return 4 / 3 }
     return min(max(CGFloat(width) / CGFloat(height), 0.5), 2)
   }
 
   var body: some View {
-    Button {
-      onOpen()
-    } label: {
-      DownsampledRemoteImage(url: thumbnailURL, maxPixelSize: 1_600) { phase in
-        switch phase {
-        case .success(let image, _):
-          image.resizable().scaledToFill()
-        case .failure:
-          Image(systemName: "photo.badge.exclamationmark")
+    ContentRemoteImage(
+      url: thumbnailURL,
+      maxPixelSize: 1_600,
+      loadAccessibilityLabel: "加载正文图片"
+    ) { phase in
+      switch phase {
+      case .success(let image, _):
+        Button {
+          onOpen()
+        } label: {
+          image
+            .resizable()
+            .scaledToFill()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(uiColor: .secondarySystemFill))
-        default:
-          ProgressView()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(uiColor: .secondarySystemFill))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("查看大图")
+      case .empty:
+        if contentMediaLoadPolicy == .automatic {
+          Button(action: onOpen) {
+            imageLoadingPlaceholder
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("查看大图")
+        } else {
+          imageLoadingPlaceholder
+        }
+      case .loadRequired:
+        imageActionPlaceholder(title: "加载图片", systemImage: "arrow.down.circle")
+      case .failure:
+        if contentMediaLoadPolicy == .automatic {
+          Button(action: onOpen) {
+            imageActionPlaceholder(
+              title: "图片加载失败",
+              systemImage: "photo.badge.exclamationmark"
+            )
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("查看大图")
+        } else if canRetryImageLoad {
+          imageActionPlaceholder(
+            title: "重新加载",
+            systemImage: "arrow.clockwise.circle"
+          )
+        } else {
+          imageActionPlaceholder(
+            title: "图片加载失败",
+            systemImage: "photo.badge.exclamationmark"
+          )
         }
       }
-      .aspectRatio(aspectRatio, contentMode: .fit)
-      .frame(maxWidth: 560)
-      .clipped()
     }
     .buttonStyle(.plain)
-    .accessibilityLabel("查看大图")
+    .aspectRatio(aspectRatio, contentMode: .fit)
+    .frame(maxWidth: 560)
+    .clipped()
+  }
+
+  private var imageLoadingPlaceholder: some View {
+    ZStack {
+      Color(uiColor: .secondarySystemFill)
+      ProgressView()
+    }
+    .accessibilityHidden(true)
+  }
+
+  private func imageActionPlaceholder(title: String, systemImage: String) -> some View {
+    Label(title, systemImage: systemImage)
+      .font(.callout.weight(.medium))
+      .foregroundStyle(.secondary)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .background(Color(uiColor: .secondarySystemFill))
+      .contentShape(Rectangle())
+  }
+
+  private var canRetryImageLoad: Bool {
+    contentMediaLoadPolicy == .tapToLoad && RemoteImageURLPolicy.allows(thumbnailURL)
   }
 }
 
@@ -198,6 +254,7 @@ private struct BrowseVideoView: View {
   let height: Int
 
   @State private var player: AVPlayer?
+  @Environment(\.contentMediaLoadPolicy) private var contentMediaLoadPolicy
 
   private var aspectRatio: CGFloat {
     guard width > 0, height > 0 else { return 16 / 9 }
@@ -210,13 +267,48 @@ private struct BrowseVideoView: View {
         VideoPlayer(player: player)
       } else {
         ZStack {
-          DownsampledRemoteImage(url: coverURL, maxPixelSize: 1_600) { phase in
-            switch phase {
-            case .success(let image, _):
-              image.resizable().scaledToFill()
-            case .empty, .failure:
-              Color.black.opacity(0.88)
+          if let coverURL {
+            ContentRemoteImage(
+              url: coverURL,
+              maxPixelSize: 1_600,
+              loadAccessibilityLabel: "加载视频封面"
+            ) { phase in
+              switch phase {
+              case .success(let image, _):
+                image
+                  .resizable()
+                  .scaledToFill()
+                  .accessibilityHidden(true)
+              case .empty:
+                ZStack {
+                  Color.black.opacity(0.88)
+                  ProgressView()
+                    .tint(.white)
+                }
+                .accessibilityHidden(true)
+              case .loadRequired:
+                videoCoverActionPlaceholder(
+                  title: "加载封面",
+                  systemImage: "arrow.down.circle"
+                )
+              case .failure:
+                if canRetryCoverLoad(coverURL) {
+                  videoCoverActionPlaceholder(
+                    title: "重新加载封面",
+                    systemImage: "arrow.clockwise.circle"
+                  )
+                } else {
+                  videoCoverActionPlaceholder(
+                    title: "封面加载失败",
+                    systemImage: "photo.badge.exclamationmark"
+                  )
+                }
+              }
             }
+            .buttonStyle(.plain)
+          } else {
+            Color.black.opacity(0.88)
+              .accessibilityHidden(true)
           }
           if let url {
             Button {
@@ -240,5 +332,24 @@ private struct BrowseVideoView: View {
     .onDisappear {
       player?.pause()
     }
+  }
+
+  private func videoCoverActionPlaceholder(
+    title: String,
+    systemImage: String
+  ) -> some View {
+    ZStack(alignment: .bottomTrailing) {
+      Color.black.opacity(0.88)
+      Label(title, systemImage: systemImage)
+        .font(.caption.weight(.medium))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+    }
+    .contentShape(Rectangle())
+  }
+
+  private func canRetryCoverLoad(_ coverURL: URL) -> Bool {
+    contentMediaLoadPolicy == .tapToLoad && RemoteImageURLPolicy.allows(coverURL)
   }
 }
