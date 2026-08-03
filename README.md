@@ -7,75 +7,98 @@ in `Packages/TiebaCore/Sources/TiebaProto/NOTICE.md`.
 
 ## Status
 
-Development is in progress. Anonymous mode supports a ranked hot-topic feed
-with paginated topic details, categorized forum, thread, and user search,
-global post search with newest, oldest, and relevance sorting,
-per-forum post search with newest/relevance and topic/all-content filters,
-forum, post, and nested-reply browsing with server-ranked inline previews,
-parent-floor context, bidirectional pagination, and anchored opening, remote
-media with a same-content multi-image gallery, original-file system sharing,
-and add-only Photos saving, forum metadata and
-featured classifications, server-defined forum channels with bounded
-server-provided sorting menus and cursor pagination, complete public forum
-introductions, forum rules,
-moderator teams, and shared-thread origin cards with original media and
-navigation, plus anonymous single- and multiple-choice poll results, post
-author forum levels, bounded forum-moderator roles, IP locations, read-only net
-approval counts, post sorting, position-preserving earlier-floor loading for
-anchored ascending threads, explicit incremental checks for replies added after
-the loaded ascending tail, direct owning-forum navigation, page jumps, an
-only-thread-author filter, and a validated first-floor topic section that
-remains available when an anchored or page-number request opens in the middle
-of a thread. User mentions provide in-app public-profile navigation without
-dropping reply context.
-Forum, channel, hot-topic, global-search, and public-profile thread lists share
-a metadata-aware card that distinguishes pinned, featured, live, shared, and
-special-format topics. Ordinary cards can show one to three downsampled image
-previews or a nonplaying video cover together with reply, view, approval, share,
-and relative-time context; pinned rows stay compact and do not fetch previews.
-Topic threads, search results, moderator rows, post authors, and
-nested-reply authors open credential-free public user profiles with profile
-statistics, a limited public liked-forum preview, and paginated public threads.
-The home screen projects up to 100 recently visited forums from the existing
-versioned browsing-history archive, shows them expanded by default, and offers
-a persistent setting to hide the section. Settings also provide native
-system/light/dark appearance, a global default plus remembered per-forum topic
-sorting, and a no-history mode backed by the same versioned archive rather than
-a second preference. Thread pages provide up to four text-only nested-reply
-previews per floor plus full-reply pages with parent-floor context, earlier and
-later pagination, anchored target highlighting, and safe copy actions. They also
-provide a transient pure-reading mode and full-floor copying. Forum and
-thread pages use the native iOS share sheet with canonical HTTPS links; copied
-thread links retain the
-only-thread-author mode. A single strict router handles supported links in rich
-post content, explicit clipboard pastes, and the app-owned
-`tieba-plus-plus` URL scheme while preserving valid post anchors.
-Local content filtering provides case-sensitive literal-keyword and exact
-UID/name user block and allow lists, placeholder or fully hidden presentation,
-and an independent switch for video topics. It applies to forum and channel
-thread lists, post floors, nested replies, and shared-thread origin cards;
-public profiles can add a user directly to either list. Filtering leaves the
-raw paginated result set intact and does not currently apply to search results.
-Local browsing
-history records the last visible post ID for stable post orders and restores it
-with the active sort/filter options; the changing hot ranking reopens at its
-first page. Prepending an adjacent earlier thread page restores the leading
-rendered floor before reading progress can be updated and leaves the existing
-tail cursor intact. The first floor is kept outside that reply window, so it
-cannot alter the physical page or PID cursor and is not duplicated when earlier
-or later replies are merged. Forums and threads can also be saved in an
-independent local favorites list; saved threads retain their reading position
-and browsing mode, while saved forums appear as home-screen shortcuts. History
-and favorites can be cleared independently. Per-forum search terms are kept in
-a separate, versioned local history and can be deleted individually or cleared
-for that forum. Global search terms use their own versioned local history on the
-home screen, with recent/all views, individual deletion, clear, and explicit
-corruption recovery. The first authenticated milestone adds an ephemeral
-Baidu login flow with an exact host allowlist, device-only Keychain storage,
-local multi-account switching, and the current account's followed-forum list.
-Authenticated write operations
-remain intentionally unsupported while this read-only path is validated on real
-devices.
+Development is in progress. Current builds prioritize anonymous, read-only
+browsing. The first authenticated milestone is available for device testing,
+but authenticated write operations remain intentionally unsupported.
+
+### Discovery and search
+
+- Ranked hot-topic discovery includes images and discussion counts. Topic
+  details provide related forums and cursor-aware thread pagination.
+- Forum, thread, and user search are categorized. Global post search supports
+  newest, oldest, and relevance sorting; per-forum search supports
+  newest/relevance sorting and topic-only or all-content filters.
+- Per-forum post-search results preserve their matched topic or reply context.
+  Per-forum history supports individual deletion and per-forum clearing; global
+  history adds recent/all views, individual deletion, clearing, and explicit
+  corruption recovery.
+- Credential-free public profiles are available from topic threads, search
+  results, moderator lists, posts, nested replies, and user mentions. They
+  include public statistics, a bounded liked-forum preview, and paginated public
+  threads.
+
+### Forums and threads
+
+- Forum pages provide pagination, pull to refresh, reply-time and creation-time
+  sorting, featured classifications, and server-defined channels. Channel sort
+  menus are bounded server data with independent cursor pagination and
+  screen-lifetime sort memory.
+- Public forum information includes statistics, introductions, original
+  avatars, rules, and moderator teams grouped by server-provided role names.
+- Thread reading supports ascending, descending, and hot order, page jumps,
+  only-thread-author filtering, anchored opening, direct forum navigation, and
+  an independently validated first-floor topic section. That section remains
+  available when an anchor or page number opens in the middle of a thread and
+  stays outside reply deduplication, physical-page progress, and the PID cursor.
+- Anchored ascending threads can prepend the exact adjacent page while
+  preserving reading position and the existing tail cursor. After the loaded
+  ascending tail is exhausted, users can explicitly check for newly added
+  replies without background polling.
+- Each floor can show up to four text-only, server-ranked nested-reply previews.
+  Full reply pages add parent-floor context, earlier/later pagination, anchored
+  highlighting, and safe copy actions.
+- Thread pages provide a transient pure-reading mode and full-floor text copy.
+  They also preserve anonymous single- and multiple-choice poll results, author
+  forum levels, bounded moderator roles, IP locations, and read-only approval
+  scores where the server exposes them. Shared-thread origins retain original
+  content, media, and navigation.
+
+### Content, media, and navigation
+
+- Forum, channel, hot-topic, global-search, and public-profile lists share one
+  metadata-aware thread card. It distinguishes pinned, featured, live, shared,
+  and special-format topics. Ordinary rows can show one to three downsampled
+  image previews or a nonplaying video cover together with reply, view,
+  approval, share, and relative-time context; pinned rows stay compact and do
+  not request preview media.
+- Rich content supports images, video links, voice playback, and shared-thread
+  origin media. Images open in a same-content gallery with paging and zoom;
+  explicit actions can share the original file or save it through add-only
+  Photos access.
+- Forum and thread pages use the native share sheet with canonical HTTPS links.
+  Copied thread links retain browse mode, including only-author state.
+- A strict in-app router handles supported rich-content links, explicit
+  clipboard pastes, and the app-owned `tieba-plus-plus` scheme while preserving
+  valid post anchors and reply context.
+
+### Local data and controls
+
+- Versioned browsing history restores the last visible post for stable orders
+  together with active sort and filter options. Hot order deliberately reopens
+  at its first page because its ranking changes over time.
+- Forums and threads have an independent local favorites archive. Saved threads
+  retain reading position and browse mode, while saved forums appear as home
+  shortcuts. Favorites and browsing history can be cleared independently.
+- The home screen projects up to 100 recently visited forums from browsing
+  history. The section starts expanded and can be persistently hidden without
+  changing the underlying archive.
+- Settings provide system, light, and dark appearance, a global forum-sort
+  default with normalized per-forum memory, and a no-history mode backed by the
+  same versioned browsing-history archive.
+- Local filtering supports case-sensitive literal keywords, exact UID/name
+  block and allow lists, placeholder or hidden presentation, and independent
+  video-topic blocking. It covers forum/channel lists, floors, nested replies,
+  and shared origins without changing raw pagination. Search results are not yet
+  filtered, and public profiles can add a user directly to either user list.
+
+### Accounts and current limits
+
+- Login uses an ephemeral Baidu Web flow with an exact host allowlist. Account
+  records stay in device-only Keychain storage and support local switching and
+  logout.
+- The authenticated read-only surface currently exposes the active account's
+  paginated followed-forum list. Server-side following, favoriting, liking,
+  posting, replying, notifications, and moderation remain future milestones.
 
 See [`ROADMAP.md`](ROADMAP.md) for the current TiebaLite parity matrix and the
 next implementation milestones.
