@@ -5,18 +5,21 @@ import Foundation
 final class HotThreadListViewModel: ObservableObject {
   @Published private(set) var categories: [HotThreadCategory] = [.all]
   @Published private(set) var selectedCategory: HotThreadCategory = .all
+  @Published private(set) var topics: [HotTopicItem] = []
   @Published private(set) var items: [HotThreadRankItem] = []
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var hasLoadedInitialSnapshot = false
   @Published private(set) var refreshError: String?
 
   private static let maximumServerCategories = 20
+  private static let maximumTopics = 20
   private static let maximumItems = 100
   private static let maximumCategoryCodeCharacters = 64
   private static let maximumCategoryTitleCharacters = 40
 
   private let service: any HotThreadService
   private var loadTask: Task<Void, Never>?
+  private var activeRequestKind: RequestKind?
   private var generation = 0
 
   init(service: any HotThreadService) {
@@ -50,7 +53,10 @@ final class HotThreadListViewModel: ObservableObject {
   }
 
   func cancel() {
-    let canPreserveSnapshot = hasLoadedInitialSnapshot && !items.isEmpty
+    let canPreserveSnapshot =
+      activeRequestKind == .refresh
+      && hasLoadedInitialSnapshot
+      && (!topics.isEmpty || !items.isEmpty)
     invalidateCurrentLoad()
     if state == .loading {
       state = canPreserveSnapshot ? .loaded : .idle
@@ -59,6 +65,7 @@ final class HotThreadListViewModel: ObservableObject {
 
   private func startRequest(kind: RequestKind) {
     invalidateCurrentLoad()
+    activeRequestKind = kind
     if kind == .replacement {
       items = []
     }
@@ -79,6 +86,7 @@ final class HotThreadListViewModel: ObservableObject {
         else { return }
 
         if requestedCategoryCode == HotThreadCategory.all.code {
+          topics = uniqueTopics(response.topics)
           categories = normalizedCategories(response.categories)
           selectedCategory = .all
         }
@@ -145,15 +153,29 @@ final class HotThreadListViewModel: ObservableObject {
     return result
   }
 
+  private func uniqueTopics(_ responseTopics: [HotTopicItem]) -> [HotTopicItem] {
+    var seen = Set<Int64>()
+    var result: [HotTopicItem] = []
+    result.reserveCapacity(min(responseTopics.count, Self.maximumTopics))
+    for topic in responseTopics {
+      guard result.count < Self.maximumTopics else { break }
+      guard topic.id > 0, seen.insert(topic.id).inserted else { continue }
+      result.append(topic)
+    }
+    return result
+  }
+
   private func finishRequest(generation requestGeneration: Int) {
     guard generation == requestGeneration else { return }
     loadTask = nil
+    activeRequestKind = nil
   }
 
   private func invalidateCurrentLoad() {
     generation &+= 1
     loadTask?.cancel()
     loadTask = nil
+    activeRequestKind = nil
   }
 }
 

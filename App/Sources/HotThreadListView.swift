@@ -2,17 +2,18 @@ import SwiftUI
 
 struct HotThreadListView: View {
   let service:
-    any BrowseService & ForumPostSearchService & HotThreadService & UserProfileService
-      & ForumInformationService
+    any BrowseService & ForumPostSearchService & HotTopicService & HotThreadService
+      & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @StateObject private var viewModel: HotThreadListViewModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
   init(
-    service: any BrowseService & ForumPostSearchService & HotThreadService & UserProfileService
-      & ForumInformationService,
+    service: any BrowseService & ForumPostSearchService & HotTopicService & HotThreadService
+      & UserProfileService & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository
@@ -68,6 +69,11 @@ struct HotThreadListView: View {
 
   private var rankingList: some View {
     List {
+      if !viewModel.topics.isEmpty {
+        hotTopicRanking
+          .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+      }
+
       if viewModel.items.isEmpty {
         emptyContentRow
       } else {
@@ -93,6 +99,95 @@ struct HotThreadListView: View {
     }
     .listStyle(.plain)
     .refreshable { await viewModel.refresh() }
+  }
+
+  private var hotTopicRanking: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      hotTopicHeader
+
+      LazyVGrid(columns: hotTopicColumns, alignment: .leading, spacing: 8) {
+        ForEach(Array(viewModel.topics.enumerated()), id: \.element.id) { entry in
+          NavigationLink {
+            HotTopicDetailView(
+              topic: entry.element,
+              service: service,
+              historyRepository: historyRepository,
+              favoritesRepository: favoritesRepository,
+              searchHistoryRepository: searchHistoryRepository
+            )
+          } label: {
+            HotThreadTopicRankRow(topic: entry.element, position: entry.offset + 1)
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel(
+            hotTopicAccessibilityLabel(topic: entry.element, position: entry.offset + 1)
+          )
+          .accessibilityIdentifier("hot-thread-topic-\(entry.element.id)")
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var hotTopicHeader: some View {
+    if dynamicTypeSize.isAccessibilitySize {
+      VStack(alignment: .leading, spacing: 0) {
+        hotTopicTitle
+        allHotTopicsLink
+      }
+    } else {
+      HStack(spacing: 12) {
+        hotTopicTitle
+        Spacer(minLength: 8)
+        allHotTopicsLink
+      }
+    }
+  }
+
+  private var hotTopicTitle: some View {
+    Label("热门话题", systemImage: "flame.fill")
+      .font(.headline)
+      .accessibilityAddTraits(.isHeader)
+  }
+
+  private var allHotTopicsLink: some View {
+    NavigationLink {
+      HotTopicListView(
+        service: service,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository
+      )
+    } label: {
+      HStack(spacing: 3) {
+        Text("全部")
+        Image(systemName: "chevron.right")
+          .font(.caption.weight(.semibold))
+      }
+      .font(.subheadline.weight(.semibold))
+      .frame(minWidth: 44, minHeight: 44)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel("查看全部热门话题")
+    .accessibilityIdentifier("hot-thread-all-topics")
+  }
+
+  private var hotTopicColumns: [GridItem] {
+    let column = GridItem(.flexible(), spacing: 16, alignment: .leading)
+    return Array(repeating: column, count: dynamicTypeSize.isAccessibilitySize ? 1 : 2)
+  }
+
+  private func hotTopicAccessibilityLabel(topic: HotTopicItem, position: Int) -> String {
+    let base = "第 \(position) 名，\(topic.name)"
+    switch topic.tag {
+    case 1:
+      return "\(base)，新话题"
+    case 2:
+      return "\(base)，热门话题"
+    default:
+      return base
+    }
   }
 
   @ViewBuilder
@@ -146,6 +241,48 @@ struct HotThreadListView: View {
     }
     .background(.regularMaterial)
     .overlay(alignment: .bottom) { Divider() }
+  }
+}
+
+private struct HotThreadTopicRankRow: View {
+  let topic: HotTopicItem
+  let position: Int
+
+  var body: some View {
+    HStack(alignment: .firstTextBaseline, spacing: 7) {
+      Text("\(position)")
+        .font(.caption.weight(.bold))
+        .foregroundStyle(position <= 3 ? Color.red : Color.secondary)
+        .frame(minWidth: 16, alignment: .trailing)
+      Text(topic.name)
+        .font(.subheadline)
+        .foregroundStyle(.primary)
+        .lineLimit(2)
+      topicTag
+      Spacer(minLength: 0)
+    }
+    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+    .contentShape(Rectangle())
+  }
+
+  @ViewBuilder
+  private var topicTag: some View {
+    switch topic.tag {
+    case 1:
+      Text("新")
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(.orange)
+        .fixedSize()
+        .accessibilityHidden(true)
+    case 2:
+      Text("热")
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(.red)
+        .fixedSize()
+        .accessibilityHidden(true)
+    default:
+      EmptyView()
+    }
   }
 }
 

@@ -13,9 +13,10 @@ but authenticated write operations remain intentionally unsupported.
 
 ### Discovery and search
 
-- Anonymous post rankings provide a total list plus bounded server-defined
-  categories. Category changes and refreshes replace the complete ranking
-  snapshot because the endpoint has no pagination contract.
+- Anonymous post rankings pair a bounded hot-topic preview with a total list
+  and bounded server-defined categories. Preview topics open the existing topic
+  detail flow, while category changes and refreshes replace the complete post
+  ranking snapshot because the endpoint has no pagination contract.
 - Ranked hot-topic discovery includes images and discussion counts. Topic
   details provide related forums and cursor-aware thread pagination.
 - Forum, thread, and user search are categorized. Global post search supports

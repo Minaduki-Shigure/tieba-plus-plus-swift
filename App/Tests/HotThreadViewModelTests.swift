@@ -6,15 +6,21 @@ import XCTest
 
 final class HotThreadViewModelTests: XCTestCase {
   @MainActor
-  func testInitialAllLoadsOnceAndBoundsServerCategoriesWithFirstCodeWinning() async throws {
+  func testInitialAllLoadsOnceAndBoundsServerDataWithFirstIdentifierWinning() async throws {
     let service = ScriptedHotThreadService()
     let future = HotThreadFixtures.category(serverID: 37, code: "future-37", title: " Future ")
+    let firstTopic = HotThreadFixtures.topic(id: 1, name: "首个话题")
     let boundedCategories = (0..<25).map {
       HotThreadFixtures.category(serverID: Int32($0), code: "category-\($0)", title: "分类 \($0)")
     }
     await service.enqueue(
       .value(
         HotThreadFixtures.feed(
+          topics: [
+            HotThreadFixtures.topic(id: 0, name: "无效话题"),
+            firstTopic,
+            HotThreadFixtures.topic(id: 1, name: "重复话题"),
+          ] + (2...25).map { HotThreadFixtures.topic(id: Int64($0)) },
           categories: [
             HotThreadFixtures.category(serverID: 99, code: "all", title: "服务端总榜"),
             future,
@@ -51,6 +57,9 @@ final class HotThreadViewModelTests: XCTestCase {
       title: "Future"
     ))
     XCTAssertEqual(viewModel.categories.last?.code, "category-18")
+    XCTAssertEqual(viewModel.topics.count, 20)
+    XCTAssertEqual(viewModel.topics.first, firstTopic)
+    XCTAssertEqual(viewModel.topics.last?.id, 20)
     XCTAssertEqual(viewModel.items.count, 100)
     XCTAssertEqual(viewModel.items.first?.id, 1)
     XCTAssertEqual(viewModel.items.last?.id, 100)
@@ -62,9 +71,11 @@ final class HotThreadViewModelTests: XCTestCase {
   func testUnknownAdvertisedCategoryIsForwardedAndReplacesTheRanking() async throws {
     let service = ScriptedHotThreadService()
     let unknown = HotThreadFixtures.category(serverID: 37, code: "future-37", title: "未知分类")
+    let originalTopic = HotThreadFixtures.topic(id: 1, name: "总榜话题")
     await service.enqueue(
       .value(
         HotThreadFixtures.feed(
+          topics: [originalTopic],
           categories: [unknown],
           items: [HotThreadFixtures.item(id: 1, rank: 1)]
         )
@@ -72,7 +83,10 @@ final class HotThreadViewModelTests: XCTestCase {
     )
     await service.enqueue(
       .value(
-        HotThreadFixtures.feed(items: [HotThreadFixtures.item(id: 2, rank: 9)])
+        HotThreadFixtures.feed(
+          topics: [HotThreadFixtures.topic(id: 2, name: "分类响应不得覆盖")],
+          items: [HotThreadFixtures.item(id: 2, rank: 9)]
+        )
       )
     )
     let viewModel = HotThreadListViewModel(service: service)
@@ -84,6 +98,7 @@ final class HotThreadViewModelTests: XCTestCase {
     try await hotThreadWaitUntil { viewModel.items.map(\.id) == [2] }
 
     XCTAssertEqual(viewModel.selectedCategory, unknown)
+    XCTAssertEqual(viewModel.topics, [originalTopic])
     XCTAssertEqual(viewModel.items.map(\.rank), [9])
     let requests = await service.requestSnapshot()
     XCTAssertEqual(requests, ["all", "future-37"])
@@ -171,10 +186,18 @@ final class HotThreadViewModelTests: XCTestCase {
     let service = ScriptedHotThreadService()
     let first = HotThreadFixtures.category(serverID: 1, code: "first", title: "第一类")
     let second = HotThreadFixtures.category(serverID: 2, code: "second", title: "第二类")
-    await service.enqueue(.value(HotThreadFixtures.feed(categories: [first, second])))
+    let originalTopic = HotThreadFixtures.topic(id: 1, name: "总榜话题")
+    await service.enqueue(
+      .value(HotThreadFixtures.feed(topics: [originalTopic], categories: [first, second]))
+    )
     await service.enqueue(.suspended(101))
     await service.enqueue(
-      .value(HotThreadFixtures.feed(items: [HotThreadFixtures.item(id: 20)]))
+      .value(
+        HotThreadFixtures.feed(
+          topics: [HotThreadFixtures.topic(id: 20, name: "第二分类话题")],
+          items: [HotThreadFixtures.item(id: 20)]
+        )
+      )
     )
     let viewModel = HotThreadListViewModel(service: service)
     viewModel.loadIfNeeded()
@@ -187,22 +210,87 @@ final class HotThreadViewModelTests: XCTestCase {
 
     let resumed = await service.resume(
       id: 101,
-      returning: HotThreadFixtures.feed(items: [HotThreadFixtures.item(id: 10)])
+      returning: HotThreadFixtures.feed(
+        topics: [HotThreadFixtures.topic(id: 10, name: "迟到分类话题")],
+        items: [HotThreadFixtures.item(id: 10)]
+      )
     )
     XCTAssertTrue(resumed)
     await hotThreadDrainMainActor()
 
     XCTAssertEqual(viewModel.selectedCategory, second)
+    XCTAssertEqual(viewModel.topics, [originalTopic])
     XCTAssertEqual(viewModel.items.map(\.id), [20])
     let requests = await service.requestSnapshot()
     XCTAssertEqual(requests, ["all", "first", "second"])
   }
 
   @MainActor
+  func testCancelingCategoryReplacementReturnsIdleAndReloadsThatCategory() async throws {
+    let service = ScriptedHotThreadService()
+    let sports = HotThreadFixtures.category(serverID: 2, code: "sports", title: "体育")
+    let originalTopic = HotThreadFixtures.topic(id: 1, name: "总榜话题")
+    await service.enqueue(
+      .value(
+        HotThreadFixtures.feed(
+          topics: [originalTopic],
+          categories: [sports],
+          items: [HotThreadFixtures.item(id: 1)]
+        )
+      )
+    )
+    await service.enqueue(.suspended(102))
+    let viewModel = HotThreadListViewModel(service: service)
+    viewModel.loadIfNeeded()
+    try await hotThreadWaitUntil { viewModel.state == .loaded }
+
+    viewModel.selectCategory(sports)
+    try await hotThreadWaitUntil { await service.requestCount() == 2 }
+    viewModel.cancel()
+
+    XCTAssertEqual(viewModel.state, .idle)
+    XCTAssertTrue(viewModel.items.isEmpty)
+    XCTAssertEqual(viewModel.topics, [originalTopic])
+    let resumed = await service.resume(
+      id: 102,
+      returning: HotThreadFixtures.feed(
+        topics: [HotThreadFixtures.topic(id: 10, name: "取消后迟到话题")],
+        items: [HotThreadFixtures.item(id: 10)]
+      )
+    )
+    XCTAssertTrue(resumed)
+    await hotThreadDrainMainActor()
+
+    XCTAssertEqual(viewModel.state, .idle)
+    XCTAssertTrue(viewModel.items.isEmpty)
+    XCTAssertEqual(viewModel.topics, [originalTopic])
+
+    await service.enqueue(
+      .value(
+        HotThreadFixtures.feed(
+          topics: [HotThreadFixtures.topic(id: 20, name: "分类响应话题")],
+          items: [HotThreadFixtures.item(id: 20)]
+        )
+      )
+    )
+    viewModel.loadIfNeeded()
+    try await hotThreadWaitUntil { viewModel.items.map(\.id) == [20] }
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.selectedCategory, sports)
+    XCTAssertEqual(viewModel.topics, [originalTopic])
+    let requests = await service.requestSnapshot()
+    XCTAssertEqual(requests, ["all", "sports", "sports"])
+  }
+
+  @MainActor
   func testCategoryFailureKeepsTabsAndRetriesThatCategory() async throws {
     let service = ScriptedHotThreadService()
     let sports = HotThreadFixtures.category(serverID: 2, code: "sports", title: "体育")
-    await service.enqueue(.value(HotThreadFixtures.feed(categories: [sports])))
+    let originalTopic = HotThreadFixtures.topic(id: 1, name: "总榜话题")
+    await service.enqueue(
+      .value(HotThreadFixtures.feed(topics: [originalTopic], categories: [sports]))
+    )
     await service.enqueue(.failure(HotThreadStubFailure(message: "category failed")))
     await service.enqueue(
       .value(HotThreadFixtures.feed(items: [HotThreadFixtures.item(id: 2)]))
@@ -217,11 +305,13 @@ final class HotThreadViewModelTests: XCTestCase {
 
     XCTAssertEqual(viewModel.categories, originalCategories)
     XCTAssertEqual(viewModel.selectedCategory, sports)
+    XCTAssertEqual(viewModel.topics, [originalTopic])
     XCTAssertTrue(viewModel.items.isEmpty)
     viewModel.retry()
     try await hotThreadWaitUntil { viewModel.items.map(\.id) == [2] }
 
     XCTAssertEqual(viewModel.categories, originalCategories)
+    XCTAssertEqual(viewModel.topics, [originalTopic])
     let requests = await service.requestSnapshot()
     XCTAssertEqual(requests, ["all", "sports", "sports"])
   }
@@ -231,9 +321,11 @@ final class HotThreadViewModelTests: XCTestCase {
     let service = ScriptedHotThreadService()
     let sports = HotThreadFixtures.category(serverID: 2, code: "sports", title: "体育")
     let ignored = HotThreadFixtures.category(serverID: 3, code: "ignored", title: "不得覆盖")
+    let originalTopic = HotThreadFixtures.topic(id: 1, name: "总榜话题")
     await service.enqueue(
       .value(
         HotThreadFixtures.feed(
+          topics: [originalTopic],
           categories: [sports],
           items: [HotThreadFixtures.item(id: 1)]
         )
@@ -242,6 +334,7 @@ final class HotThreadViewModelTests: XCTestCase {
     await service.enqueue(
       .value(
         HotThreadFixtures.feed(
+          topics: [HotThreadFixtures.topic(id: 2, name: "分类话题")],
           categories: [ignored],
           items: [HotThreadFixtures.item(id: 2)]
         )
@@ -250,6 +343,7 @@ final class HotThreadViewModelTests: XCTestCase {
     await service.enqueue(
       .value(
         HotThreadFixtures.feed(
+          topics: [HotThreadFixtures.topic(id: 3, name: "分类刷新话题")],
           categories: [ignored],
           items: [HotThreadFixtures.item(id: 3)]
         )
@@ -264,15 +358,18 @@ final class HotThreadViewModelTests: XCTestCase {
     viewModel.selectCategory(sports)
     try await hotThreadWaitUntil { viewModel.items.map(\.id) == [2] }
     XCTAssertEqual(viewModel.categories, originalCategories)
+    XCTAssertEqual(viewModel.topics, [originalTopic])
 
     await viewModel.refresh()
     XCTAssertEqual(viewModel.items.map(\.id), [3])
     XCTAssertEqual(viewModel.categories, originalCategories)
+    XCTAssertEqual(viewModel.topics, [originalTopic])
 
     await viewModel.refresh()
 
     XCTAssertEqual(viewModel.items.map(\.id), [3])
     XCTAssertEqual(viewModel.categories, originalCategories)
+    XCTAssertEqual(viewModel.topics, [originalTopic])
     XCTAssertEqual(viewModel.state, .loaded)
     XCTAssertEqual(viewModel.refreshError, "refresh failed")
     viewModel.clearRefreshError()
@@ -286,8 +383,14 @@ final class HotThreadViewModelTests: XCTestCase {
     let service = ScriptedHotThreadService()
     let old = HotThreadFixtures.category(serverID: 1, code: "old", title: "旧分类")
     let fresh = HotThreadFixtures.category(serverID: 2, code: "fresh", title: "新分类")
-    await service.enqueue(.value(HotThreadFixtures.feed(categories: [old])))
-    await service.enqueue(.value(HotThreadFixtures.feed(categories: [fresh])))
+    let oldTopic = HotThreadFixtures.topic(id: 1, name: "旧话题")
+    let freshTopic = HotThreadFixtures.topic(id: 2, name: "新话题")
+    await service.enqueue(
+      .value(HotThreadFixtures.feed(topics: [oldTopic], categories: [old]))
+    )
+    await service.enqueue(
+      .value(HotThreadFixtures.feed(topics: [freshTopic], categories: [fresh]))
+    )
     let viewModel = HotThreadListViewModel(service: service)
     viewModel.loadIfNeeded()
     try await hotThreadWaitUntil { viewModel.state == .loaded }
@@ -296,6 +399,74 @@ final class HotThreadViewModelTests: XCTestCase {
 
     XCTAssertEqual(viewModel.categories, [.all, fresh])
     XCTAssertEqual(viewModel.selectedCategory, .all)
+    XCTAssertEqual(viewModel.topics, [freshTopic])
+  }
+
+  @MainActor
+  func testFailedAllRefreshPreservesTopics() async throws {
+    let service = ScriptedHotThreadService()
+    let originalTopic = HotThreadFixtures.topic(id: 1, name: "原话题")
+    await service.enqueue(.value(HotThreadFixtures.feed(topics: [originalTopic])))
+    await service.enqueue(.failure(HotThreadStubFailure(message: "all refresh failed")))
+    let viewModel = HotThreadListViewModel(service: service)
+    viewModel.loadIfNeeded()
+    try await hotThreadWaitUntil { viewModel.state == .loaded }
+
+    await viewModel.refresh()
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.topics, [originalTopic])
+    XCTAssertEqual(viewModel.refreshError, "all refresh failed")
+  }
+
+  @MainActor
+  func testSuccessfulEmptyAllRefreshClearsTopics() async throws {
+    let service = ScriptedHotThreadService()
+    let originalTopic = HotThreadFixtures.topic(id: 1, name: "原话题")
+    await service.enqueue(.value(HotThreadFixtures.feed(topics: [originalTopic])))
+    await service.enqueue(.value(HotThreadFixtures.feed()))
+    let viewModel = HotThreadListViewModel(service: service)
+    viewModel.loadIfNeeded()
+    try await hotThreadWaitUntil { viewModel.state == .loaded }
+
+    await viewModel.refresh()
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertTrue(viewModel.topics.isEmpty)
+    XCTAssertNil(viewModel.refreshError)
+  }
+
+  @MainActor
+  func testCancelPreservesTopicOnlySnapshotAndRejectsLateAllResponse() async throws {
+    let service = ScriptedHotThreadService()
+    let originalTopic = HotThreadFixtures.topic(id: 1, name: "已加载话题")
+    await service.enqueue(.value(HotThreadFixtures.feed(topics: [originalTopic])))
+    await service.enqueue(.suspended(202))
+    let viewModel = HotThreadListViewModel(service: service)
+
+    viewModel.loadIfNeeded()
+    try await hotThreadWaitUntil { viewModel.state == .loaded }
+    XCTAssertTrue(viewModel.items.isEmpty)
+
+    let refreshTask = Task { await viewModel.refresh() }
+    try await hotThreadWaitUntil { await service.requestCount() == 2 }
+    viewModel.cancel()
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.topics, [originalTopic])
+    let resumed = await service.resume(
+      id: 202,
+      returning: HotThreadFixtures.feed(
+        topics: [HotThreadFixtures.topic(id: 2, name: "取消后迟到话题")]
+      )
+    )
+    XCTAssertTrue(resumed)
+    await refreshTask.value
+    await hotThreadDrainMainActor()
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.topics, [originalTopic])
+    XCTAssertNil(viewModel.refreshError)
   }
 
   @MainActor
@@ -328,6 +499,25 @@ final class HotThreadViewModelTests: XCTestCase {
   }
 
   func testCoreAdapterPreservesUnknownCategoryRankAndAppliesBoundsAndFilter() {
+    let mappedTopic = TiebaCoreBrowseService.mapHotTopic(
+      TiebaHotTopic(
+        id: 8,
+        name: "热门话题",
+        description: "话题摘要",
+        imageURL: URL(string: "http://imgsrc.baidu.com/forum/topic.jpg"),
+        discussionCount: 123,
+        rank: 4,
+        tag: 2
+      )
+    )
+    XCTAssertEqual(mappedTopic.id, 8)
+    XCTAssertEqual(mappedTopic.name, "热门话题")
+    XCTAssertEqual(mappedTopic.summary, "话题摘要")
+    XCTAssertEqual(mappedTopic.imageURL?.absoluteString, "https://imgsrc.baidu.com/forum/topic.jpg")
+    XCTAssertEqual(mappedTopic.discussionCount, 123)
+    XCTAssertEqual(mappedTopic.rank, 4)
+    XCTAssertEqual(mappedTopic.tag, 2)
+
     let category = TiebaHotThreadCategory(serverID: 37, code: "future-37", title: "未知分类")
     let mappedCategory = TiebaCoreBrowseService.mapHotThreadCategory(category)
     XCTAssertEqual(
@@ -429,10 +619,27 @@ private enum HotThreadFixtures {
   }
 
   static func feed(
+    topics: [HotTopicItem] = [],
     categories: [HotThreadCategory] = [],
     items: [HotThreadRankItem] = []
   ) -> HotThreadFeedData {
-    HotThreadFeedData(categories: categories, items: items)
+    HotThreadFeedData(topics: topics, categories: categories, items: items)
+  }
+
+  static func topic(
+    id: Int64,
+    name: String? = nil,
+    rank: Int = 1
+  ) -> HotTopicItem {
+    HotTopicItem(
+      id: id,
+      name: name ?? "Topic \(id)",
+      summary: "Summary \(id)",
+      imageURL: nil,
+      discussionCount: 100,
+      rank: rank,
+      tag: 0
+    )
   }
 
   static func item(

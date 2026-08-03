@@ -330,6 +330,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     }
     let filter = await contentFilterSnapshot()
     return HotThreadFeedData(
+      topics: response.topics.map(Self.mapHotTopic),
       categories: response.categories.map(Self.mapHotThreadCategory),
       items: response.items.map { Self.mapHotThreadRankItem($0, applying: filter) }
     )
@@ -628,7 +629,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     )
   }
 
-  private static func mapHotTopic(_ topic: TiebaHotTopic) -> HotTopicItem {
+  static func mapHotTopic(_ topic: TiebaHotTopic) -> HotTopicItem {
     HotTopicItem(
       id: topic.id,
       name: topic.name,

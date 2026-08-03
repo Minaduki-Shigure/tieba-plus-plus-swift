@@ -91,7 +91,10 @@ each server title/code pair without inference. Mapped collections are bounded
 and deduplicated before display. Any response `Set-Cookie` remains unused
 because the anonymous transport does not store or handle cookies. The ranking
 is read only and must not expose the reference client's agree or other reaction
-writes.
+writes. Its mapped topic preview comes only from a successful `all` response;
+category responses must not replace that snapshot. Rendering the preview must
+not eagerly request topic details. The existing anonymous hot-topic boundary is
+used only after the user explicitly opens a topic or the complete topic list.
 
 Public forum introductions, rules, and moderator-team requests must remain
 credential-free. They may include only the forum identifier and anonymous

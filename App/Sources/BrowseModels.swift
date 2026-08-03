@@ -484,6 +484,7 @@ struct HotThreadRankItem: Identifiable, Hashable, Sendable {
 }
 
 struct HotThreadFeedData: Hashable, Sendable {
+  let topics: [HotTopicItem]
   let categories: [HotThreadCategory]
   let items: [HotThreadRankItem]
 }
