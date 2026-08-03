@@ -46,6 +46,9 @@ but authenticated write operations remain intentionally unsupported.
   sorting, featured classifications, and server-defined channels. Channel sort
   menus are bounded server data with independent cursor pagination and
   screen-lifetime sort memory.
+- Forum toolbars provide explicit refresh and return-to-top actions without
+  replacing native pull-to-refresh or iOS status-bar tap-to-top behavior.
+  Sharing stays available from the same bounded toolbar menu.
 - Public forum information includes statistics, introductions, original
   avatars, rules, and moderator teams grouped by server-provided role names.
 - Thread reading supports ascending, descending, and hot order, page jumps,

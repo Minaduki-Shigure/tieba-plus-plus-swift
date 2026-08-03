@@ -1,6 +1,10 @@
 import Combine
 import SwiftUI
 
+private enum ForumScrollTarget: Hashable {
+  case top
+}
+
 struct ForumView: View {
   let service:
     any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
@@ -35,65 +39,97 @@ struct ForumView: View {
   }
 
   var body: some View {
-    Group {
-      if viewModel.threads.isEmpty {
-        switch viewModel.state {
-        case .idle, .loading:
-          ProgressView()
-        case .failed(let message):
-          ErrorStateView(message: message, retry: viewModel.reload)
-        case .loaded:
-          EmptyStateView(title: "暂无帖子", systemImage: "text.bubble")
+    ScrollViewReader { proxy in
+      Group {
+        if viewModel.threads.isEmpty {
+          switch viewModel.state {
+          case .idle, .loading:
+            ProgressView()
+          case .failed(let message):
+            ErrorStateView(message: message, retry: viewModel.reload)
+          case .loaded:
+            EmptyStateView(title: "暂无帖子", systemImage: "text.bubble")
+          }
+        } else {
+          threadList
         }
-      } else {
-        threadList
       }
-    }
-    .navigationTitle(viewModel.forumName)
-    .navigationBarTitleDisplayMode(.inline)
-    .toolbar {
-      ToolbarItemGroup(placement: .navigationBarTrailing) {
-        NavigationLink {
-          ForumPostSearchView(
-            forumName: viewModel.forumName,
-            service: service,
-            historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository
+      .navigationTitle(viewModel.forumName)
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
+          NavigationLink {
+            ForumPostSearchView(
+              forumName: viewModel.forumName,
+              service: service,
+              historyRepository: historyRepository,
+              favoritesRepository: favoritesRepository,
+              searchHistoryRepository: searchHistoryRepository
+            )
+          } label: {
+            Image(systemName: "magnifyingglass")
+          }
+          .accessibilityLabel("吧内搜索")
+          .help("吧内搜索")
+
+          LocalFavoriteButton(
+            target: .forum(ForumHistorySnapshot(forum: viewModel.forum)),
+            repository: favoritesRepository
           )
-        } label: {
-          Image(systemName: "magnifyingglass")
-        }
-        .accessibilityLabel("吧内搜索")
-        .help("吧内搜索")
 
-        if let url = TiebaLink.canonicalURL(for: .forum(viewModel.forumName)) {
-          TiebaShareMenu(url: url, title: "\(viewModel.forumName)吧")
+          forumActionsMenu(proxy: proxy)
         }
-
-        LocalFavoriteButton(
-          target: .forum(ForumHistorySnapshot(forum: viewModel.forum)),
-          repository: favoritesRepository
+      }
+      .safeAreaInset(edge: .top, spacing: 0) {
+        optionsBar
+      }
+      .task { viewModel.loadIfNeeded() }
+      .task(id: viewModel.forum.id) {
+        guard viewModel.forum.id > 0 else { return }
+        try? await historyRepository.record(
+          .forum(ForumHistorySnapshot(forum: viewModel.forum))
         )
       }
+      .onDisappear(perform: viewModel.cancel)
+      .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
+        Task { @MainActor in viewModel.reload() }
+      }
+      .onChange(of: viewModel.options.sort) { sort in
+        ForumSortPreferences.save(sort, for: viewModel.forumName)
+      }
     }
-    .safeAreaInset(edge: .top, spacing: 0) {
-      optionsBar
+  }
+
+  private func forumActionsMenu(proxy: ScrollViewProxy) -> some View {
+    Menu {
+      Button {
+        Task { @MainActor in await viewModel.refresh() }
+      } label: {
+        Label("刷新", systemImage: "arrow.clockwise")
+      }
+      .disabled(viewModel.state == .loading)
+
+      Button {
+        proxy.scrollTo(ForumScrollTarget.top, anchor: .top)
+      } label: {
+        Label("回到顶部", systemImage: "arrow.up.to.line")
+      }
+      .disabled(viewModel.threads.isEmpty)
+
+      if let url = TiebaLink.canonicalURL(for: .forum(viewModel.forumName)) {
+        Divider()
+        ShareLink(
+          item: TiebaLink.shareText(url: url, title: "\(viewModel.forumName)吧"),
+          subject: Text("\(viewModel.forumName)吧")
+        ) {
+          Label("分享链接", systemImage: "square.and.arrow.up")
+        }
+      }
+    } label: {
+      Image(systemName: "ellipsis.circle")
     }
-    .task { viewModel.loadIfNeeded() }
-    .task(id: viewModel.forum.id) {
-      guard viewModel.forum.id > 0 else { return }
-      try? await historyRepository.record(
-        .forum(ForumHistorySnapshot(forum: viewModel.forum))
-      )
-    }
-    .onDisappear(perform: viewModel.cancel)
-    .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
-      Task { @MainActor in viewModel.reload() }
-    }
-    .onChange(of: viewModel.options.sort) { sort in
-      ForumSortPreferences.save(sort, for: viewModel.forumName)
-    }
+    .accessibilityLabel("更多贴吧操作")
+    .help("更多贴吧操作")
   }
 
   private var optionsBar: some View {
@@ -244,6 +280,7 @@ struct ForumView: View {
         ForumHeaderView(forum: viewModel.forum)
       }
       .disabled(viewModel.forum.id <= 0)
+      .id(ForumScrollTarget.top)
       .listRowSeparator(.hidden)
 
       ForEach(viewModel.threads) { thread in

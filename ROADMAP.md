@@ -21,6 +21,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Topic-only and topic-plus-reply search filters with target-aware navigation
 - Versioned, per-forum local search history with delete and clear controls
 - Forum thread list with pagination and pull to refresh
+- Forum toolbar quick actions adapting TiebaLite's configurable forum FAB
 - Reply-time and creation-time forum sorting
 - Global default sorting with normalized per-forum sort memory
 - Server-defined forum channels with bounded server-provided sorting menus and cursor pagination
@@ -278,6 +279,16 @@ changing a forum's picker stores a normalized, bounded per-forum override.
 Channel-menu choices are remembered separately only while the current forum
 screen is alive, are revalidated when a menu changes, and never overwrite the
 global or per-forum topic-sort preference.
+
+Forum toolbar quick actions reuse the existing refresh transaction and a stable
+header anchor. Returning to the top does not reload, mutate pagination, or
+install a global scroll event; explicit refresh retains generation checks that
+reject stale pagination responses. TiebaLite exposes one configured forum FAB
+action at a time, including refresh or return to top. The iOS adaptation keeps
+both read-only actions in one fixed native menu instead of adding a persistent
+FAB preference. Sharing in that menu is the existing canonical share action,
+not an additional TiebaLite parity claim.
+
 TiebaLite implements text sizing as a fixed app-wide Android font-scale
 override. Tieba++ instead stores a relative adjustment from two steps smaller
 through three steps larger, with following the system as the default. It shifts

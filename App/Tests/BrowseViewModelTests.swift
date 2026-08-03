@@ -1719,6 +1719,66 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testForumRefreshRejectsLatePaginationResponse() async throws {
+    let service = ScriptedBrowseService()
+    addTeardownBlock {
+      _ = await service.cancelThreads(id: 104)
+    }
+    let initialThreads = [Fixtures.thread(id: 34), Fixtures.thread(id: 35)]
+    await service.enqueueThreads(
+      .value(
+        ThreadPageData(
+          forumName: "Swift",
+          threads: initialThreads,
+          currentPage: 1,
+          hasMore: true
+        )
+      )
+    )
+    await service.enqueueThreads(.suspended(104))
+    await service.enqueueThreads(
+      .value(
+        ThreadPageData(
+          forumName: "Swift",
+          threads: [Fixtures.thread(id: 36, title: "refreshed")],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ForumViewModel(forumName: "Swift", service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadMoreIfNeeded(current: initialThreads[1])
+    try await waitUntil { await service.threadRequestCount() == 2 }
+    XCTAssertTrue(viewModel.isLoadingMore)
+
+    await viewModel.refresh()
+    XCTAssertEqual(viewModel.threads.map(\.id), [36])
+
+    let resumed = await service.resumeThreads(
+      id: 104,
+      returning: ThreadPageData(
+        forumName: "Swift",
+        threads: [Fixtures.thread(id: 37, title: "stale page")],
+        currentPage: 2,
+        hasMore: false
+      )
+    )
+    XCTAssertTrue(resumed)
+    try await waitUntil { await service.completedThreadRequestCount() == 3 }
+    await drainMainActor()
+
+    XCTAssertEqual(viewModel.threads.map(\.id), [36])
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertFalse(viewModel.isLoadingMore)
+    XCTAssertNil(viewModel.loadMoreError)
+    let requests = await service.threadRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2, 1])
+  }
+
+  @MainActor
   func testForumReloadIgnoresCancelledURLErrorFromStaleRequest() async throws {
     let service = ScriptedBrowseService()
     await service.enqueueThreads(.suspended(102))
