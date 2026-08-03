@@ -3,6 +3,7 @@ import SwiftUI
 
 @main
 struct TiebaPlusPlusApp: App {
+  @StateObject private var externalWebPresentation = ExternalWebPresentationModel()
   @AppStorage(AppPreferenceKey.appearance)
   private var appearance = AppAppearance.system.rawValue
   @AppStorage(AppPreferenceKey.contentMediaLoadPolicy)
@@ -13,6 +14,8 @@ struct TiebaPlusPlusApp: App {
   private var darkensContentThumbnailsInDarkMode = true
   @AppStorage(AppPreferenceKey.showsBothUsernameAndNickname)
   private var showsBothUsernameAndNickname = false
+  @AppStorage(AppPreferenceKey.externalWebOpenMode)
+  private var externalWebOpenMode = ExternalWebOpenMode.defaultValue.rawValue
   private let service:
     any BrowseService & SearchService & ForumPostSearchService & HotTopicService & HotThreadService
       & UserProfileService & ForumInformationService & SearchSuggestionService
@@ -64,6 +67,24 @@ struct TiebaPlusPlusApp: App {
         \.showsBothUsernameAndNickname,
         showsBothUsernameAndNickname
       )
+      .environment(
+        \.externalWebOpenMode,
+        ExternalWebOpenMode.resolved(externalWebOpenMode)
+      )
+      .environment(
+        \.openExternalWeb,
+        ExternalWebOpenAction { url in
+          externalWebPresentation.requestPresentation(for: url)
+        }
+      )
+      .background {
+        ExternalWebBrowserPresenter(page: externalWebPresentation.page) { pageID in
+          externalWebPresentation.dismiss(id: pageID)
+        }
+        .frame(width: 0, height: 0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+      }
       .preferredColorScheme(AppAppearance.resolved(appearance).colorScheme)
     }
   }

@@ -25,21 +25,53 @@ final class SecureTiebaURLTests: XCTestCase {
 
   func testLegacyPortraitHostIsRewrittenForHTTPAndHTTPS() throws {
     for scheme in ["http", "https"] {
-      let legacy = try XCTUnwrap(
-        URL(string: "\(scheme)://tb.himg.baidu.com/sys/portrait/item/token"))
+      let rawValue =
+        "\(scheme)://tb.himg.baidu.com/sys/portrait/item/a%2Fb?next=%2F%2f&empty=#part%2F"
+      let legacy = try XCTUnwrap(URL(string: rawValue))
       let normalized = try XCTUnwrap(SecureTiebaURL.media(legacy))
 
-      XCTAssertEqual(normalized.scheme, "https")
-      XCTAssertEqual(normalized.host, "himg.bdimg.com")
+      XCTAssertEqual(
+        normalized.absoluteString,
+        "https://himg.bdimg.com/sys/portrait/item/a%2Fb?next=%2F%2f&empty=#part%2F"
+      )
     }
   }
 
   func testMediaOnlyUpgradesKnownBaiduHosts() throws {
-    let baidu = try XCTUnwrap(URL(string: "http://imgsrc.baidu.com/forum/pic.jpg"))
-    XCTAssertEqual(SecureTiebaURL.media(baidu)?.scheme, "https")
+    let baidu = try XCTUnwrap(
+      URL(string: "http://imgsrc.baidu.com/forum/a%2Fb.jpg?next=%2F%2f&empty=#part%2F")
+    )
+    XCTAssertEqual(
+      SecureTiebaURL.media(baidu)?.absoluteString,
+      "https://imgsrc.baidu.com/forum/a%2Fb.jpg?next=%2F%2f&empty=#part%2F"
+    )
 
     let unrelated = try XCTUnwrap(URL(string: "http://example.com/pic.jpg"))
     XCTAssertNil(SecureTiebaURL.media(unrelated))
+  }
+
+  func testWebPreservesUnmodifiedHTTPAndHTTPSURLsVerbatim() throws {
+    for rawValue in [
+      "https://example.com/a%2Fb?next=%2F%2f&empty=#part%2F",
+      "http://example.com/a%2Fb?next=%2F%2f&empty=#part%2F",
+    ] {
+      let url = try XCTUnwrap(URL(string: rawValue))
+
+      XCTAssertEqual(SecureTiebaURL.web(url)?.absoluteString, rawValue)
+    }
+  }
+
+  func testRejectsURLsContainingCredentials() throws {
+    for rawValue in [
+      "https://user@example.com/path",
+      "https://user:password@example.com/path",
+      "http://user@example.com/path",
+    ] {
+      let url = try XCTUnwrap(URL(string: rawValue))
+
+      XCTAssertNil(SecureTiebaURL.media(url))
+      XCTAssertNil(SecureTiebaURL.web(url))
+    }
   }
 
   func testRejectsNonWebSchemes() throws {

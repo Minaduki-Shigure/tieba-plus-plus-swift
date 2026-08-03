@@ -8,6 +8,7 @@ enum AppPreferenceKey {
   static let homeShowsDiscovery = "TiebaPlusPlus.homeShowsDiscovery"
   static let homeShowsRecentForums = "TiebaPlusPlus.homeShowsRecentForums"
   static let searchSuggestionsEnabled = "TiebaPlusPlus.searchSuggestionsEnabled"
+  static let externalWebOpenMode = "TiebaPlusPlus.externalWebOpenMode"
   static let contentMediaLoadPolicy = "TiebaPlusPlus.contentMediaLoadPolicy"
   static let hidesThreadListMedia = "TiebaPlusPlus.hidesThreadListMedia"
   static let darkensContentThumbnailsInDarkMode =
@@ -101,6 +102,28 @@ enum AppStartDestination: String, CaseIterable, Hashable, Identifiable, Sendable
   }
 }
 
+enum ExternalWebOpenMode: String, CaseIterable, Hashable, Identifiable, Sendable {
+  case systemBrowser
+  case inAppSafari
+
+  static let defaultValue: Self = .systemBrowser
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .systemBrowser:
+      "系统默认浏览器"
+    case .inAppSafari:
+      "应用内 Safari"
+    }
+  }
+
+  static func resolved(_ rawValue: String) -> Self {
+    Self(rawValue: rawValue) ?? defaultValue
+  }
+}
+
 private struct HidesThreadListMediaEnvironmentKey: EnvironmentKey {
   static let defaultValue = false
 }
@@ -111,6 +134,10 @@ private struct DarkensContentThumbnailsInDarkModeEnvironmentKey: EnvironmentKey 
 
 private struct ShowsBothUsernameAndNicknameEnvironmentKey: EnvironmentKey {
   static let defaultValue = false
+}
+
+private struct ExternalWebOpenModeEnvironmentKey: EnvironmentKey {
+  static let defaultValue = ExternalWebOpenMode.defaultValue
 }
 
 extension EnvironmentValues {
@@ -127,6 +154,11 @@ extension EnvironmentValues {
   var showsBothUsernameAndNickname: Bool {
     get { self[ShowsBothUsernameAndNicknameEnvironmentKey.self] }
     set { self[ShowsBothUsernameAndNicknameEnvironmentKey.self] = newValue }
+  }
+
+  var externalWebOpenMode: ExternalWebOpenMode {
+    get { self[ExternalWebOpenModeEnvironmentKey.self] }
+    set { self[ExternalWebOpenModeEnvironmentKey.self] = newValue }
   }
 }
 

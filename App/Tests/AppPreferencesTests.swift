@@ -63,6 +63,33 @@ final class AppPreferencesTests: XCTestCase {
   }
 
   @MainActor
+  func testExternalWebOpenModeUsesStableValuesAndDefaultsToSystemBrowser() {
+    XCTAssertEqual(
+      AppPreferenceKey.externalWebOpenMode,
+      "TiebaPlusPlus.externalWebOpenMode"
+    )
+    XCTAssertEqual(ExternalWebOpenMode.allCases, [.systemBrowser, .inAppSafari])
+    XCTAssertEqual(
+      ExternalWebOpenMode.allCases.map(\.rawValue),
+      ["systemBrowser", "inAppSafari"]
+    )
+    XCTAssertEqual(
+      ExternalWebOpenMode.allCases.map(\.title),
+      ["系统默认浏览器", "应用内 Safari"]
+    )
+    XCTAssertEqual(ExternalWebOpenMode.defaultValue, .systemBrowser)
+    XCTAssertEqual(ExternalWebOpenMode.resolved("systemBrowser"), .systemBrowser)
+    XCTAssertEqual(ExternalWebOpenMode.resolved("inAppSafari"), .inAppSafari)
+    XCTAssertEqual(ExternalWebOpenMode.resolved(""), .systemBrowser)
+    XCTAssertEqual(ExternalWebOpenMode.resolved("future-value"), .systemBrowser)
+    XCTAssertEqual(EnvironmentValues().externalWebOpenMode, .systemBrowser)
+
+    var environment = EnvironmentValues()
+    environment.externalWebOpenMode = .inAppSafari
+    XCTAssertEqual(environment.externalWebOpenMode, .inAppSafari)
+  }
+
+  @MainActor
   func testThreadListMediaCollapseUsesStableKeyAndDefaultsToExpanded() {
     XCTAssertEqual(
       AppPreferenceKey.hidesThreadListMedia,

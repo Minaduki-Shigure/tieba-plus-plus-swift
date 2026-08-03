@@ -20,6 +20,8 @@ struct AppSettingsView: View {
     AppPreferenceDefaults.favoriteThreadsOpenDescending
   @AppStorage(AppPreferenceKey.searchSuggestionsEnabled)
   private var searchSuggestionsEnabled = false
+  @AppStorage(AppPreferenceKey.externalWebOpenMode)
+  private var externalWebOpenMode = ExternalWebOpenMode.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.contentMediaLoadPolicy)
   private var contentMediaLoadPolicy = ContentMediaLoadPolicy.automatic.rawValue
   @AppStorage(AppPreferenceKey.hidesThreadListMedia)
@@ -125,6 +127,22 @@ struct AppSettingsView: View {
       }
 
       Section {
+        Picker("外部 HTTPS 链接", selection: externalWebOpenModeSelection) {
+          ForEach(ExternalWebOpenMode.allCases) { mode in
+            Text(mode.title).tag(mode)
+          }
+        }
+        .pickerStyle(.menu)
+      } header: {
+        Text("链接")
+      } footer: {
+        Text(
+          "可识别的贴吧、帖子和用户链接始终优先在应用内打开。HTTP 链接始终交由系统处理；"
+            + "应用内 Safari 使用 Safari 网站会话打开其他 HTTPS 链接。"
+        )
+      }
+
+      Section {
         Toggle("同时显示用户名和昵称", isOn: $showsBothUsernameAndNickname)
       } header: {
         Text("用户名称")
@@ -205,6 +223,13 @@ struct AppSettingsView: View {
     Binding(
       get: { ContentMediaLoadPolicy.resolved(contentMediaLoadPolicy) },
       set: { contentMediaLoadPolicy = $0.rawValue }
+    )
+  }
+
+  private var externalWebOpenModeSelection: Binding<ExternalWebOpenMode> {
+    Binding(
+      get: { ExternalWebOpenMode.resolved(externalWebOpenMode) },
+      set: { externalWebOpenMode = $0.rawValue }
     )
   }
 }

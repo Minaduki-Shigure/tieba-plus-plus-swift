@@ -1293,12 +1293,16 @@ enum SecureTiebaURL {
     guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
       return nil
     }
+    guard components.user == nil, components.password == nil else { return nil }
+
     let scheme = components.scheme?.lowercased()
     let host = components.host?.lowercased()
     guard let host, !host.isEmpty else { return nil }
 
+    var requiresRebuild = false
     if host == "tb.himg.baidu.com" {
       components.host = "himg.bdimg.com"
+      requiresRebuild = true
     }
 
     switch scheme {
@@ -1306,12 +1310,13 @@ enum SecureTiebaURL {
       break
     case "http" where isUpgradeable(host):
       components.scheme = "https"
+      requiresRebuild = true
     case "http" where !allowHTTPUpgradeOnly:
-      return url
+      break
     default:
       return nil
     }
-    return components.url
+    return requiresRebuild ? components.url : url
   }
 
   private static func isUpgradeable(_ host: String) -> Bool {

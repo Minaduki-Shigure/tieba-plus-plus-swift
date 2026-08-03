@@ -45,6 +45,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Home-screen recent-forum history, expanded by default and independently hideable
 - Canonical forum/thread sharing and browse-mode-aware thread-link copying
 - Strict internal routing for supported Tieba HTTPS, pasted official-scheme, and app links
+- Default-system external HTTPS opening with an optional in-app Safari view
 - Nested replies, images, video links, and voice playback
 - Persistent automatic or tap-to-load policy for content images and video covers
 - Optional compact media summaries for thread lists and per-forum search, with no collapsed preview request
@@ -209,11 +210,16 @@ registered app-owned `tieba-plus-plus` scheme. It requires the exact Tieba host,
 standard ports, exact paths, nonempty bounded forum names, positive 64-bit IDs,
 and unambiguous supported state. Valid `see_lz` and post anchors are preserved
 when opening a thread. Cleartext official links are accepted only as route text;
-the destination is loaded through the existing HTTPS-only API client. Unknown
-HTTPS links remain system actions instead of being swallowed. The app does not
-register Baidu's official scheme, automatically inspect the clipboard, claim
-Universal Links without Baidu's AASA authorization, or fabricate a browsing-
-history snapshot before the linked thread has loaded successfully.
+the destination is loaded through the existing HTTPS-only API client. External
+HTTPS links default to the user's system browser and can instead use a
+system-managed in-app Safari view; external HTTP links remain system actions in
+both modes. Link credentials are rejected, and unchanged external URLs retain
+their input query and fragment rather than being rebuilt. The Safari view does
+not reuse the login Web view or expose its page, Cookie state, or navigation
+history to the app. The app does not register Baidu's official scheme,
+automatically inspect the clipboard, claim Universal Links without Baidu's AASA
+authorization, or fabricate a browsing-history snapshot before the linked
+thread has loaded successfully.
 
 Forum introductions, rule documents, and moderator teams use independent
 credential-free protobuf endpoints. Moderator role names are treated as an

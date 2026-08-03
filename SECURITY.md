@@ -11,7 +11,7 @@ API traffic is restricted to the exact HTTPS hosts `tiebac.baidu.com` and
 `tieba.baidu.com`. Redirects between those hosts are rejected even though both
 are individually allowed.
 
-The login view is the only embedded browser. It uses
+The login view contains the only app-controlled `WKWebView`. It uses
 `WKWebsiteDataStore.nonPersistent()`, accepts main-frame navigation only on an
 exact first-party host allowlist over HTTPS on the standard port, and captures
 only a structurally valid `BDUSS` Secure cookie after the expected Tieba
@@ -205,8 +205,23 @@ credentials, nonstandard ports, fragments, extra or empty path components,
 ambiguous or valueless state, empty or malformed forum names, and nonpositive
 or overflowing identifiers. Supported cleartext HTTP input is converted only
 to an internal route and never causes a cleartext network request; all resulting
-content loads still use the credential-free HTTPS API client. Unknown HTTPS
-links continue through the normal system action.
+content loads still use the credential-free HTTPS API client. Unrecognized
+links fall through to the external-web policy below.
+
+The external-web preference is evaluated only after that strict internal
+router. It defaults to the system browser; the optional in-app path accepts only
+an external HTTPS URL with a nonempty host and no URL user or password. External
+HTTP links and other system-handled schemes are never passed to SafariServices.
+Rich-content URL normalization also rejects embedded credentials and non-Web
+schemes before rendering, and returns unchanged HTTP(S) URLs without rebuilding
+their query or fragment unless a known host or scheme upgrade is required.
+`SFSafariViewController` uses opaque, system-managed SafariServices website data.
+It is presented directly with UIKit's default modal presentation and is never
+embedded as a child view controller.
+The app must not read its page, Cookie state, or navigation history; inject BDUSS,
+headers, or scripts; persist the opened URL; or reuse the login Web view. After
+presentation, redirects and website interaction are controlled by SafariServices,
+not the app's API-host allowlist.
 
 Only the app-owned scheme is registered. The app must not claim Baidu's scheme
 or `tieba.baidu.com` Universal Links without domain authorization. It must not

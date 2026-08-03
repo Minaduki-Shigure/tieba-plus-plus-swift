@@ -6,6 +6,8 @@ struct BrowseContentView: View {
   let onUserMention: ((Int64) -> Void)?
   let onTiebaLink: ((TiebaLinkTarget) -> Void)?
 
+  @Environment(\.externalWebOpenMode) private var externalWebOpenMode
+  @Environment(\.openExternalWeb) private var openExternalWeb
   @State private var imageGalleryPresentation: ImageGalleryPresentation?
 
   init(
@@ -54,7 +56,7 @@ struct BrowseContentView: View {
           )
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
-            .environment(\.openURL, mentionOpenURLAction)
+            .environment(\.openURL, contentOpenURLAction)
         case .standalone(let contentOffset, let content):
           standalone(content, contentOffset: contentOffset)
         }
@@ -69,16 +71,25 @@ struct BrowseContentView: View {
     }
   }
 
-  private var mentionOpenURLAction: OpenURLAction {
+  private var contentOpenURLAction: OpenURLAction {
     OpenURLAction { url in
-      guard let target = TiebaLink.target(from: url) else { return .systemAction }
-      if case .user(let userID) = target, let onUserMention {
-        onUserMention(userID)
+      switch BrowseContentLinkRouter.disposition(for: url, mode: externalWebOpenMode) {
+      case .tieba(let target):
+        if case .user(let userID) = target, let onUserMention {
+          onUserMention(userID)
+          return .handled
+        }
+        guard let onTiebaLink else { return .systemAction }
+        onTiebaLink(target)
         return .handled
+      case .system:
+        return .systemAction
+      case .inAppSafari(let url):
+        imageGalleryPresentation = nil
+        return openExternalWeb(url) ? .handled : .systemAction
+      case .rejected:
+        return .discarded
       }
-      guard let onTiebaLink else { return .systemAction }
-      onTiebaLink(target)
-      return .handled
     }
   }
 
