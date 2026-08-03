@@ -476,6 +476,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       lastReplyAt: thread.lastReplyAt,
       contents: mapContent(thread.content),
       authorID: thread.author?.id ?? 0,
+      authorUsername: authorUsername(thread.author),
       firstPostID: thread.firstPostID,
       shareCount: max(thread.shareCount, 0),
       agreeCount: max(thread.agreeCount, 0),
@@ -686,6 +687,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       lastReplyAt: nil,
       contents: [.text(result.excerpt)] + images,
       authorID: result.authorID,
+      authorUsername: result.authorUsername,
       firstPostID: result.firstPostID,
       shareCount: max(result.shareCount, 0),
       agreeCount: max(result.likeCount, 0)
@@ -724,9 +726,23 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     let contextExcerpt = threadContext?.excerpt.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     let threadTitle = contextTitle.isEmpty ? result.title : contextTitle
     let threadExcerpt = contextExcerpt.isEmpty ? result.excerpt : contextExcerpt
-    let contextAuthorName =
-      threadContext?.authorName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    let threadAuthorName = contextAuthorName.isEmpty ? result.authorName : contextAuthorName
+    let threadAuthorName: String
+    let threadAuthorUsername: String
+    if let threadContext {
+      let contextAuthorName = threadContext.authorName.trimmingCharacters(
+        in: .whitespacesAndNewlines
+      )
+      let contextAuthorUsername = threadContext.authorUsername.trimmingCharacters(
+        in: .whitespacesAndNewlines
+      )
+      threadAuthorName = contextAuthorName.isEmpty
+        ? (contextAuthorUsername.isEmpty ? "匿名用户" : contextAuthorUsername)
+        : contextAuthorName
+      threadAuthorUsername = contextAuthorUsername
+    } else {
+      threadAuthorName = result.authorName.trimmingCharacters(in: .whitespacesAndNewlines)
+      threadAuthorUsername = result.authorUsername.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
     let matchedContents = mapSearchImages(result.images)
     let target = mapForumPostSearchTarget(result.target)
     let threadReplyCount = target == .thread ? result.replyCount : threadContext?.replyCount ?? 0
@@ -744,7 +760,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
         createdAt: target == .thread ? result.createdAt : nil,
         lastReplyAt: nil,
         contents: threadExcerpt.isEmpty ? [] : [.text(threadExcerpt)],
-        authorID: threadContext?.authorID ?? result.authorID
+        authorID: threadContext?.authorID ?? result.authorID,
+        authorUsername: threadAuthorUsername
       ),
       target: target,
       matchedTitle: result.title,
@@ -763,9 +780,11 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
           title: $0.title,
           excerpt: $0.excerpt,
           authorID: $0.authorID,
-          authorName: $0.authorName
+          authorName: $0.authorName,
+          authorUsername: $0.authorUsername
         )
-      }
+      },
+      matchedAuthorUsername: result.authorUsername
     )
   }
 
@@ -811,6 +830,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       nestedReplyCount: max(max(post.commentCount, 0), inlineComments.count),
       isThreadAuthor: post.isThreadAuthor,
       contents: mapContent(post.content),
+      authorUsername: authorUsername(post.author),
       authorLevel: max(post.author?.level ?? 0, 0),
       authorIPLocation: (post.author?.ipLocation ?? "").trimmingCharacters(
         in: .whitespacesAndNewlines
@@ -881,6 +901,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       createdAt: post.createdAt,
       isThreadAuthor: post.isThreadAuthor,
       contents: mapContent(post.content),
+      authorUsername: authorUsername(post.author),
       authorLevel: max(post.author?.level ?? 0, 0),
       authorIPLocation: (post.author?.ipLocation ?? "").trimmingCharacters(
         in: .whitespacesAndNewlines
@@ -918,6 +939,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       authorPortraitURL: SecureTiebaURL.portrait(comment.author?.portrait),
       createdAt: comment.createdAt,
       contents: mapContent(comment.content),
+      authorUsername: authorUsername(comment.author),
       authorLevel: max(comment.author?.level ?? 0, 0),
       authorIPLocation: (comment.author?.ipLocation ?? "").trimmingCharacters(
         in: .whitespacesAndNewlines
@@ -934,8 +956,14 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
 
   private static func authorName(_ author: TiebaUser?) -> String {
     guard let author else { return "匿名用户" }
-    let name = author.preferredName.trimmingCharacters(in: .whitespacesAndNewlines)
-    return name.isEmpty ? "匿名用户" : name
+    let displayName = author.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !displayName.isEmpty { return displayName }
+    let username = author.username.trimmingCharacters(in: .whitespacesAndNewlines)
+    return username.isEmpty ? "匿名用户" : username
+  }
+
+  private static func authorUsername(_ author: TiebaUser?) -> String {
+    (author?.username ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
   func contentFilterSnapshot() async -> ContentFilterSnapshot {

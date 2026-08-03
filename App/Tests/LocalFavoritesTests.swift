@@ -41,7 +41,13 @@ final class LocalFavoritesTests: XCTestCase {
     defer { location.remove() }
     let store = FileLocalFavoritesStore(fileURL: location.fileURL)
     try await store.save(
-      .thread(ThreadHistorySnapshot(threadID: 42, title: "收藏帖子")),
+      .thread(
+        ThreadHistorySnapshot(
+          threadID: 42,
+          title: "收藏帖子",
+          authorUsername: "author-account"
+        )
+      ),
       at: Date(timeIntervalSince1970: 10)
     )
 
@@ -71,6 +77,7 @@ final class LocalFavoritesTests: XCTestCase {
     XCTAssertEqual(thread.lastPostID, 420)
     XCTAssertEqual(thread.lastFloor, 18)
     XCTAssertEqual(thread.browseOptions, newestOptions)
+    XCTAssertEqual(thread.authorUsername, "author-account")
 
     try await store.updateThreadOptions(
       threadID: 42,
@@ -85,6 +92,8 @@ final class LocalFavoritesTests: XCTestCase {
     XCTAssertEqual(updatedThread.browseOptions.sort, .hot)
     XCTAssertNil(updatedThread.lastPostID)
     XCTAssertNil(updatedThread.lastFloor)
+    XCTAssertEqual(updatedThread.authorUsername, "author-account")
+    XCTAssertEqual(updatedThread.browseThread.authorUsername, "author-account")
   }
 
   func testDeleteClearAndPerKindLimits() async throws {

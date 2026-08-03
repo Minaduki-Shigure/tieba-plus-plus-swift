@@ -64,6 +64,36 @@ final class ContentFilterTests: XCTestCase {
     )
   }
 
+  func testUserRulesMatchPreferredNameOrRealUsernameAndPreserveUsername() {
+    let blockedByUsername = ContentFilterSnapshot(
+      displayMode: .placeholder,
+      blockVideos: false,
+      rules: [.user(id: 0, name: "real_username", list: .block)]
+    )
+    let author = thread(
+      title: "ordinary",
+      excerpt: "ordinary",
+      authorName: "Display Name",
+      authorUsername: "real_username"
+    )
+
+    XCTAssertEqual(blockedByUsername.visibility(for: author), .placeholder)
+    XCTAssertEqual(
+      blockedByUsername.applying(to: author).authorUsername,
+      "real_username"
+    )
+
+    let allowedByUsername = ContentFilterSnapshot(
+      displayMode: .placeholder,
+      blockVideos: false,
+      rules: [
+        .user(id: 0, name: "Display Name", list: .block),
+        .user(id: 0, name: "real_username", list: .allow),
+      ]
+    )
+    XCTAssertEqual(allowedByUsername.visibility(for: author), .visible)
+  }
+
   func testPostAndCommentUseLosslessVisiblePlainText() {
     let snapshot = ContentFilterSnapshot(
       displayMode: .hidden,
@@ -369,7 +399,8 @@ final class ContentFilterTests: XCTestCase {
     title: String,
     excerpt: String,
     authorID: Int64 = 0,
-    authorName: String = "Author"
+    authorName: String = "Author",
+    authorUsername: String = ""
   ) -> BrowseThread {
     BrowseThread(
       id: 1,
@@ -383,7 +414,8 @@ final class ContentFilterTests: XCTestCase {
       createdAt: nil,
       lastReplyAt: nil,
       contents: [],
-      authorID: authorID
+      authorID: authorID,
+      authorUsername: authorUsername
     )
   }
 

@@ -18,7 +18,8 @@ final class BrowsingHistoryTests: XCTestCase {
           forumName: "swift",
           title: "A persisted thread",
           excerpt: "excerpt",
-          authorName: "author"
+          authorName: "author",
+          authorUsername: "author-account"
         )
       ),
       at: visitedAt
@@ -40,9 +41,23 @@ final class BrowsingHistoryTests: XCTestCase {
     }
     XCTAssertEqual(snapshot.browseThread.id, 42)
     XCTAssertEqual(snapshot.browseThread.forumName, "swift")
+    XCTAssertEqual(snapshot.authorUsername, "author-account")
+    XCTAssertEqual(snapshot.browseThread.authorUsername, "author-account")
 
     let archive = try String(contentsOf: location.fileURL, encoding: .utf8)
     XCTAssertTrue(archive.contains("\"schemaVersion\":1"))
+  }
+
+  func testLegacyThreadSnapshotWithoutUsernameStillDecodes() throws {
+    let data = Data(
+      #"{"threadID":42,"title":"legacy","authorName":"legacy author"}"#.utf8
+    )
+
+    let snapshot = try JSONDecoder().decode(ThreadHistorySnapshot.self, from: data)
+
+    XCTAssertEqual(snapshot.authorName, "legacy author")
+    XCTAssertEqual(snapshot.authorUsername, "")
+    XCTAssertEqual(snapshot.browseThread.authorUsername, "")
   }
 
   func testMigratesAndRemovesLegacyRecentForumsBeforeClear() async throws {
@@ -228,7 +243,13 @@ final class BrowsingHistoryTests: XCTestCase {
     defer { location.remove() }
     let store = FileBrowsingHistoryStore(fileURL: location.fileURL)
     try await store.record(
-      .thread(ThreadHistorySnapshot(threadID: 12, title: "thread")),
+      .thread(
+        ThreadHistorySnapshot(
+          threadID: 12,
+          title: "thread",
+          authorUsername: "author-account"
+        )
+      ),
       at: Date(timeIntervalSince1970: 10)
     )
 
@@ -251,6 +272,7 @@ final class BrowsingHistoryTests: XCTestCase {
     XCTAssertEqual(thread.lastFloor, 18)
     XCTAssertEqual(thread.browseOptions.sort, .descending)
     XCTAssertTrue(thread.browseOptions.onlyThreadAuthor)
+    XCTAssertEqual(thread.authorUsername, "author-account")
   }
 
   func testHotProgressPersistsModeWithoutAnUnstableResumePosition() async throws {

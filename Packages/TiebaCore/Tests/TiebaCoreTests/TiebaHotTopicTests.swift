@@ -186,6 +186,7 @@ final class TiebaHotTopicTests: XCTestCase {
     XCTAssertEqual(first.firstPostID, 153_784_661_519)
     XCTAssertEqual(first.authorID, 407_101_876)
     XCTAssertEqual(first.authorName, "Display name")
+    XCTAssertEqual(first.authorUsername, "fallback")
     XCTAssertNil(first.authorPortraitURL)
     XCTAssertEqual(first.replyCount, 412)
     XCTAssertEqual(first.likeCount, 2_957)
@@ -195,6 +196,7 @@ final class TiebaHotTopicTests: XCTestCase {
     XCTAssertEqual(first.images.first?.width, 560)
     XCTAssertEqual(first.images.first?.height, 1_084)
     XCTAssertEqual(page.threads.last?.authorName, "Alternate author")
+    XCTAssertEqual(page.threads.last?.authorUsername, "")
   }
 
   func testDetailFallsBackToRequestedTopicAndStopsOnEmptyPage() throws {

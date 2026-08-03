@@ -311,14 +311,25 @@ private struct ForumOverviewList: View {
 private struct ModeratorRow: View {
   let moderator: BrowseForumModerator
   let detail: String?
+  @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
+
+  private var displayedName: String {
+    UserNameFormatter.displayName(
+      preferredName: moderator.displayName,
+      username: moderator.username,
+      showsBoth: showsBothNames
+    )
+  }
 
   var body: some View {
     HStack(spacing: 12) {
-      AvatarView(url: moderator.portraitURL, name: moderator.preferredName, size: 42)
+      AvatarView(url: moderator.portraitURL, name: displayedName, size: 42)
       VStack(alignment: .leading, spacing: 3) {
-        Text(moderator.preferredName)
+        Text(displayedName)
           .foregroundStyle(.primary)
-          .lineLimit(2)
+          .lineLimit(showsBothNames ? 3 : 2)
+          .minimumScaleFactor(0.75)
+          .accessibilityLabel(displayedName)
         let metadata = [
           moderator.roleName,
           moderator.level > 0 ? "等级 \(moderator.level)" : "",

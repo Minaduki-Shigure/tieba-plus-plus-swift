@@ -10,6 +10,8 @@ struct TiebaPlusPlusApp: App {
   private var hidesThreadListMedia = false
   @AppStorage(AppPreferenceKey.darkensContentThumbnailsInDarkMode)
   private var darkensContentThumbnailsInDarkMode = true
+  @AppStorage(AppPreferenceKey.showsBothUsernameAndNickname)
+  private var showsBothUsernameAndNickname = false
   private let service:
     any BrowseService & SearchService & ForumPostSearchService & HotTopicService & HotThreadService
       & UserProfileService & ForumInformationService & SearchSuggestionService
@@ -51,6 +53,10 @@ struct TiebaPlusPlusApp: App {
       .environment(
         \.darkensContentThumbnailsInDarkMode,
         darkensContentThumbnailsInDarkMode
+      )
+      .environment(
+        \.showsBothUsernameAndNickname,
+        showsBothUsernameAndNickname
       )
       .preferredColorScheme(AppAppearance.resolved(appearance).colorScheme)
     }

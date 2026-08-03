@@ -512,28 +512,44 @@ extension ContentFilterSnapshot {
       isBlocked: (blockVideos && containsVideo)
         || blocksKeyword(thread.title)
         || blocksKeyword(thread.excerpt)
-        || blocksUser(id: thread.authorID, name: thread.authorName)
+        || blocksUser(
+          id: thread.authorID,
+          preferredName: thread.authorName,
+          username: thread.authorUsername
+        )
     )
   }
 
   func visibility(for post: BrowsePost) -> LocalContentVisibility {
     visibility(
       isBlocked: blocksKeyword(Self.plainText(post.contents))
-        || blocksUser(id: post.authorID, name: post.authorName)
+        || blocksUser(
+          id: post.authorID,
+          preferredName: post.authorName,
+          username: post.authorUsername
+        )
     )
   }
 
   func visibility(for comment: BrowseComment) -> LocalContentVisibility {
     visibility(
       isBlocked: blocksKeyword(Self.plainText(comment.contents))
-        || blocksUser(id: comment.authorID, name: comment.authorName)
+        || blocksUser(
+          id: comment.authorID,
+          preferredName: comment.authorName,
+          username: comment.authorUsername
+        )
     )
   }
 
   func visibility(for parentPost: CommentParentPostContext) -> LocalContentVisibility {
     visibility(
       isBlocked: blocksKeyword(Self.plainText(parentPost.contents))
-        || blocksUser(id: parentPost.authorID, name: parentPost.authorName)
+        || blocksUser(
+          id: parentPost.authorID,
+          preferredName: parentPost.authorName,
+          username: parentPost.authorUsername
+        )
     )
   }
 
@@ -580,21 +596,31 @@ extension ContentFilterSnapshot {
     return keywordRules.contains { $0.list == .block && text.contains($0.keyword) }
   }
 
-  private func blocksUser(id: Int64, name: String) -> Bool {
+  private func blocksUser(
+    id: Int64,
+    preferredName: String,
+    username: String
+  ) -> Bool {
     let userRules = rules.filter { $0.kind == .user }
-    if userRules.contains(where: { $0.list == .allow && Self.matchesUser($0, id, name) }) {
+    if userRules.contains(where: {
+      $0.list == .allow && Self.matchesUser($0, id, preferredName, username)
+    }) {
       return false
     }
-    return userRules.contains { $0.list == .block && Self.matchesUser($0, id, name) }
+    return userRules.contains {
+      $0.list == .block && Self.matchesUser($0, id, preferredName, username)
+    }
   }
 
   private static func matchesUser(
     _ rule: ContentFilterRule,
     _ userID: Int64,
+    _ preferredName: String,
     _ username: String
   ) -> Bool {
     let matchesID = rule.userID.map { userID > 0 && $0 == userID } ?? false
-    let matchesName = !rule.username.isEmpty && rule.username == username
+    let matchesName = !rule.username.isEmpty
+      && (rule.username == preferredName || rule.username == username)
     return matchesID || matchesName
   }
 

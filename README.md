@@ -105,6 +105,10 @@ but authenticated write operations remain intentionally unsupported.
 - Settings provide system, light, and dark appearance, a global forum-sort
   default with normalized per-forum memory, and a no-history mode backed by the
   same versioned browsing-history archive.
+- A default-off author-name option can combine each returned public nickname
+  and username as `nickname(username)` across live content, search, profiles,
+  forum staff, browsing history, and local favorites. It uses existing response
+  fields and does not add a network request.
 - Local filtering supports case-sensitive literal keywords, exact UID/name
   block and allow lists, placeholder or hidden presentation, and independent
   video-topic blocking. It covers forum/channel, hot-thread, and global

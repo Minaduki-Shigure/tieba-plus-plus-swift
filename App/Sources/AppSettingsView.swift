@@ -16,6 +16,8 @@ struct AppSettingsView: View {
   private var hidesThreadListMedia = false
   @AppStorage(AppPreferenceKey.darkensContentThumbnailsInDarkMode)
   private var darkensContentThumbnailsInDarkMode = true
+  @AppStorage(AppPreferenceKey.showsBothUsernameAndNickname)
+  private var showsBothUsernameAndNickname = false
 
   init(historyRepository: any BrowsingHistoryRepository) {
     _historyViewModel = StateObject(
@@ -84,6 +86,14 @@ struct AppSettingsView: View {
         Text("搜索与隐私")
       } footer: {
         Text("开启后，会在您提交搜索前向百度发送输入关键词，以获取在线联想建议。")
+      }
+
+      Section {
+        Toggle("同时显示用户名和昵称", isOn: $showsBothUsernameAndNickname)
+      } header: {
+        Text("用户名称")
+      } footer: {
+        Text("开启后，会在公开昵称后同时显示公开用户名；仅使用页面已经返回的公开资料，不会发起额外请求。")
       }
 
       Section {

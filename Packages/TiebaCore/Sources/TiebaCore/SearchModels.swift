@@ -129,6 +129,7 @@ public struct TiebaSearchPostContext: Sendable, Hashable {
   public let excerpt: String
   public let authorID: Int64
   public let authorName: String
+  public let authorUsername: String
   public let authorPortraitURL: URL?
   public let replyCount: Int
   public let likeCount: Int
@@ -141,6 +142,7 @@ public struct TiebaSearchPostContext: Sendable, Hashable {
     excerpt: String,
     authorID: Int64,
     authorName: String,
+    authorUsername: String = "",
     authorPortraitURL: URL?,
     replyCount: Int = 0,
     likeCount: Int = 0,
@@ -152,6 +154,7 @@ public struct TiebaSearchPostContext: Sendable, Hashable {
     self.excerpt = excerpt
     self.authorID = authorID
     self.authorName = authorName
+    self.authorUsername = authorUsername
     self.authorPortraitURL = authorPortraitURL
     self.replyCount = replyCount
     self.likeCount = likeCount
@@ -180,6 +183,7 @@ public struct TiebaThreadSearchResult: Identifiable, Sendable, Hashable {
   public let excerpt: String
   public let authorID: Int64
   public let authorName: String
+  public let authorUsername: String
   public let authorPortraitURL: URL?
   public let replyCount: Int
   public let likeCount: Int
@@ -201,6 +205,7 @@ public struct TiebaThreadSearchResult: Identifiable, Sendable, Hashable {
     excerpt: String,
     authorID: Int64,
     authorName: String,
+    authorUsername: String = "",
     authorPortraitURL: URL?,
     replyCount: Int,
     likeCount: Int,
@@ -221,6 +226,7 @@ public struct TiebaThreadSearchResult: Identifiable, Sendable, Hashable {
     self.excerpt = excerpt
     self.authorID = authorID
     self.authorName = authorName
+    self.authorUsername = authorUsername
     self.authorPortraitURL = authorPortraitURL
     self.replyCount = replyCount
     self.likeCount = likeCount

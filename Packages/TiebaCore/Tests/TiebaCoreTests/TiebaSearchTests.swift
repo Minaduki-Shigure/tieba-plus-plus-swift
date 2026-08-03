@@ -154,6 +154,7 @@ final class TiebaSearchTests: XCTestCase {
     XCTAssertEqual(result.matchedPostID, 153_721_418_012)
     XCTAssertEqual(result.forumID, 216)
     XCTAssertEqual(result.authorName, "Display name")
+    XCTAssertEqual(result.authorUsername, "fallback")
     XCTAssertNil(result.authorPortraitURL)
     XCTAssertEqual(result.replyCount, 158)
     XCTAssertEqual(result.likeCount, 285)
@@ -187,6 +188,34 @@ final class TiebaSearchTests: XCTestCase {
     XCTAssertTrue(try XCTUnwrap(page.results.first).hasVideo)
   }
 
+  func testThreadSearchKeepsUsernameWhenDisplayNameIsEmpty() throws {
+    let body = Data(
+      #"""
+      {
+        "no": 0,
+        "data": {
+          "post_list": [
+            {
+              "tid": 1,
+              "pid": 2,
+              "user": {
+                "user_name": "  fallback-only  ",
+                "show_nickname": "  "
+              }
+            }
+          ]
+        }
+      }
+      """#.utf8
+    )
+
+    let page = try TiebaSearchDecoder.threads(from: body, requestedPage: 1, pageSize: 20)
+    let result = try XCTUnwrap(page.results.first)
+
+    XCTAssertEqual(result.authorName, "fallback-only")
+    XCTAssertEqual(result.authorUsername, "fallback-only")
+  }
+
   func testThreadSearchAcceptsNullMediaAndMissingOptionalFields() throws {
     let body = Data(
       #"""
@@ -210,6 +239,7 @@ final class TiebaSearchTests: XCTestCase {
     XCTAssertFalse(page.pagination.hasMore)
     XCTAssertEqual(page.results.map(\.images), [[], []])
     XCTAssertEqual(page.results.map(\.hasVideo), [false, false])
+    XCTAssertEqual(page.results.map(\.authorUsername), ["", ""])
   }
 
   func testForumPostSearchPreservesThreadReplyAndCommentUnionShapes() throws {
@@ -309,16 +339,19 @@ final class TiebaSearchTests: XCTestCase {
     XCTAssertEqual(page.results.map(\.hasVideo), [false, false, false])
     XCTAssertEqual(Set(page.results.map(\.id)).count, page.results.count)
     XCTAssertEqual(page.results[0].target, .thread)
+    XCTAssertEqual(page.results[0].authorUsername, "thread-author")
     XCTAssertNil(page.results[0].mainPost)
     XCTAssertNil(page.results[0].postInfo)
 
     XCTAssertEqual(page.results[1].target, .post(201))
+    XCTAssertEqual(page.results[1].authorUsername, "reply-author")
     XCTAssertEqual(page.results[1].firstPostID, 0)
     XCTAssertEqual(page.results[1].matchedPostID, 201)
     XCTAssertEqual(page.results[1].mainPost?.threadID, 42)
     XCTAssertNil(page.results[1].mainPost?.postID)
     XCTAssertEqual(page.results[1].mainPost?.title, "Thread match")
     XCTAssertEqual(page.results[1].mainPost?.authorName, "Thread Author")
+    XCTAssertEqual(page.results[1].mainPost?.authorUsername, "thread-author")
     XCTAssertEqual(page.results[1].mainPost?.replyCount, 89)
     XCTAssertEqual(page.results[1].mainPost?.likeCount, 12)
     XCTAssertEqual(page.results[1].mainPost?.shareCount, 3)
@@ -328,11 +361,14 @@ final class TiebaSearchTests: XCTestCase {
     )
 
     XCTAssertEqual(page.results[2].target, .comment(postID: 202, commentID: 301))
+    XCTAssertEqual(page.results[2].authorUsername, "comment-author")
     XCTAssertEqual(page.results[2].firstPostID, 0)
     XCTAssertEqual(page.results[2].matchedPostID, 202)
     XCTAssertEqual(page.results[2].postInfo?.postID, 202)
     XCTAssertEqual(page.results[2].postInfo?.excerpt, "Parent floor content")
     XCTAssertEqual(page.results[2].postInfo?.authorID, 4)
+    XCTAssertEqual(page.results[2].postInfo?.authorUsername, "parent-author")
+    XCTAssertEqual(page.results[2].mainPost?.authorUsername, "")
     XCTAssertNil(page.results[2].postInfo?.authorPortraitURL)
   }
 

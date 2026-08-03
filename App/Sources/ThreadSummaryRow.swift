@@ -50,6 +50,7 @@ struct ThreadSummaryRow: View {
 
   @Environment(\.contentMediaLoadPolicy) private var contentMediaLoadPolicy
   @Environment(\.hidesThreadListMedia) private var hidesThreadListMedia
+  @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
 
   init(
     thread: BrowseThread,
@@ -231,7 +232,7 @@ struct ThreadSummaryRow: View {
   @ViewBuilder
   private var contextLine: some View {
     let hasForum = showsForum && !thread.forumName.isEmpty
-    let hasAuthor = showsAuthor && !thread.authorName.isEmpty
+    let hasAuthor = showsAuthor && !displayedAuthorName.isEmpty
     let date = thread.lastReplyAt ?? thread.createdAt
     if hasForum || hasAuthor || date != nil {
       ViewThatFits(in: .horizontal) {
@@ -242,10 +243,7 @@ struct ThreadSummaryRow: View {
         }
 
         VStack(alignment: .leading, spacing: 4) {
-          HStack(spacing: 12) {
-            contextLabels(hasForum: hasForum, hasAuthor: hasAuthor)
-            Spacer(minLength: 0)
-          }
+          contextLabels(hasForum: hasForum, hasAuthor: hasAuthor)
           dateLabel(date)
         }
       }
@@ -286,9 +284,19 @@ struct ThreadSummaryRow: View {
         .lineLimit(1)
     }
     if hasAuthor {
-      Label(thread.authorName, systemImage: "person")
-        .lineLimit(1)
+      Label(displayedAuthorName, systemImage: "person")
+        .lineLimit(showsBothNames ? 2 : 1)
+        .minimumScaleFactor(0.75)
+        .accessibilityLabel(displayedAuthorName)
     }
+  }
+
+  private var displayedAuthorName: String {
+    UserNameFormatter.displayName(
+      preferredName: thread.authorName,
+      username: thread.authorUsername,
+      showsBoth: showsBothNames
+    )
   }
 
   @ViewBuilder

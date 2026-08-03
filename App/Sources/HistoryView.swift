@@ -309,6 +309,8 @@ struct HistoryView: View {
 private struct HistoryRow: View {
   let entry: BrowsingHistoryEntry
 
+  @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
+
   var body: some View {
     HStack(alignment: .top, spacing: 12) {
       AvatarView(url: avatarURL, name: avatarName, size: 40)
@@ -319,7 +321,15 @@ private struct HistoryRow: View {
           .foregroundStyle(.primary)
           .lineLimit(2)
 
-        if !subtitle.isEmpty {
+        if let expandedThreadMetadata {
+          ForEach(expandedThreadMetadata.indices, id: \.self) { index in
+            Text(expandedThreadMetadata[index])
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+              .lineLimit(3)
+              .minimumScaleFactor(0.75)
+          }
+        } else if !subtitle.isEmpty {
           Text(subtitle)
             .font(.subheadline)
             .foregroundStyle(.secondary)
@@ -359,7 +369,7 @@ private struct HistoryRow: View {
       return forum.name == forum.displayName ? "" : forum.name
     case .thread(let thread):
       let readingProgress = thread.lastFloor.map { "读至 \($0) 楼" } ?? ""
-      return [thread.forumName, thread.authorName, readingProgress]
+      return [thread.forumName, displayedAuthorName(thread), readingProgress]
         .filter { !$0.isEmpty }
         .joined(separator: " · ")
     }
@@ -374,12 +384,34 @@ private struct HistoryRow: View {
     }
   }
 
+  private var expandedThreadMetadata: [String]? {
+    guard case .thread(let thread) = entry.target else { return nil }
+    let singleName = UserNameFormatter.displayName(
+      preferredName: thread.authorName,
+      username: thread.authorUsername,
+      showsBoth: false
+    )
+    let combinedName = displayedAuthorName(thread)
+    guard showsBothNames, combinedName != singleName else { return nil }
+    let readingProgress = thread.lastFloor.map { "读至 \($0) 楼" } ?? ""
+    return [thread.forumName, combinedName, readingProgress].filter { !$0.isEmpty }
+  }
+
   private var avatarName: String {
     switch entry.target {
     case .forum(let forum):
       return forum.displayName
     case .thread(let thread):
-      return thread.authorName.isEmpty ? title : thread.authorName
+      let authorName = displayedAuthorName(thread)
+      return authorName.isEmpty ? title : authorName
     }
+  }
+
+  private func displayedAuthorName(_ thread: ThreadHistorySnapshot) -> String {
+    UserNameFormatter.displayName(
+      preferredName: thread.authorName,
+      username: thread.authorUsername,
+      showsBoth: showsBothNames
+    )
   }
 }

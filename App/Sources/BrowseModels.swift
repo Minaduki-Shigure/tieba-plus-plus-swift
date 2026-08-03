@@ -420,6 +420,23 @@ struct ForumPostSearchSummary: Hashable, Sendable {
   let excerpt: String
   let authorID: Int64
   let authorName: String
+  let authorUsername: String
+
+  init(
+    postID: Int64,
+    title: String,
+    excerpt: String,
+    authorID: Int64,
+    authorName: String,
+    authorUsername: String = ""
+  ) {
+    self.postID = postID
+    self.title = title
+    self.excerpt = excerpt
+    self.authorID = authorID
+    self.authorName = authorName
+    self.authorUsername = authorUsername
+  }
 }
 
 struct ForumPostSearchItem: Identifiable, Hashable, Sendable {
@@ -431,6 +448,7 @@ struct ForumPostSearchItem: Identifiable, Hashable, Sendable {
   let matchedExcerpt: String
   let matchedAuthorID: Int64
   let matchedAuthorName: String
+  let matchedAuthorUsername: String
   let matchedAuthorPortraitURL: URL?
   let matchedAt: Date?
   let replyCount: Int
@@ -438,6 +456,38 @@ struct ForumPostSearchItem: Identifiable, Hashable, Sendable {
   let shareCount: Int
   let matchedContents: [BrowseContent]
   let context: ForumPostSearchSummary?
+
+  init(
+    thread: BrowseThread,
+    target: ForumPostSearchTarget,
+    matchedTitle: String,
+    matchedExcerpt: String,
+    matchedAuthorID: Int64,
+    matchedAuthorName: String,
+    matchedAuthorPortraitURL: URL?,
+    matchedAt: Date?,
+    replyCount: Int,
+    likeCount: Int,
+    shareCount: Int,
+    matchedContents: [BrowseContent],
+    context: ForumPostSearchSummary?,
+    matchedAuthorUsername: String = ""
+  ) {
+    self.thread = thread
+    self.target = target
+    self.matchedTitle = matchedTitle
+    self.matchedExcerpt = matchedExcerpt
+    self.matchedAuthorID = matchedAuthorID
+    self.matchedAuthorName = matchedAuthorName
+    self.matchedAuthorUsername = matchedAuthorUsername
+    self.matchedAuthorPortraitURL = matchedAuthorPortraitURL
+    self.matchedAt = matchedAt
+    self.replyCount = replyCount
+    self.likeCount = likeCount
+    self.shareCount = shareCount
+    self.matchedContents = matchedContents
+    self.context = context
+  }
 }
 
 struct ForumPostSearchPageData: Sendable {
@@ -518,6 +568,7 @@ struct BrowseThread: Identifiable, Hashable, Sendable {
   let title: String
   let excerpt: String
   let authorName: String
+  let authorUsername: String
   let authorID: Int64
   let replyCount: Int
   let viewCount: Int
@@ -549,6 +600,7 @@ struct BrowseThread: Identifiable, Hashable, Sendable {
     lastReplyAt: Date?,
     contents: [BrowseContent],
     authorID: Int64 = 0,
+    authorUsername: String = "",
     firstPostID: Int64 = 0,
     shareCount: Int = 0,
     agreeCount: Int = 0,
@@ -569,6 +621,7 @@ struct BrowseThread: Identifiable, Hashable, Sendable {
     self.title = title
     self.excerpt = excerpt
     self.authorName = authorName
+    self.authorUsername = authorUsername
     self.authorID = authorID
     self.replyCount = replyCount
     self.viewCount = viewCount
@@ -608,6 +661,7 @@ struct BrowseThread: Identifiable, Hashable, Sendable {
       lastReplyAt: lastReplyAt,
       contents: contents,
       authorID: authorID,
+      authorUsername: authorUsername,
       firstPostID: firstPostID,
       shareCount: shareCount,
       agreeCount: agreeCount,
@@ -630,6 +684,7 @@ struct BrowsePost: Identifiable, Hashable, Sendable {
   let floor: Int
   let authorID: Int64
   let authorName: String
+  let authorUsername: String
   let authorPortraitURL: URL?
   let authorLevel: Int
   let authorIPLocation: String
@@ -653,6 +708,7 @@ struct BrowsePost: Identifiable, Hashable, Sendable {
     nestedReplyCount: Int,
     isThreadAuthor: Bool,
     contents: [BrowseContent],
+    authorUsername: String = "",
     authorLevel: Int = 0,
     authorIPLocation: String = "",
     moderatorRole: BrowseModeratorRole? = nil,
@@ -665,6 +721,7 @@ struct BrowsePost: Identifiable, Hashable, Sendable {
     self.floor = floor
     self.authorID = authorID
     self.authorName = authorName
+    self.authorUsername = authorUsername
     self.authorPortraitURL = authorPortraitURL
     self.authorLevel = authorLevel
     self.authorIPLocation = authorIPLocation
@@ -697,6 +754,7 @@ struct BrowsePost: Identifiable, Hashable, Sendable {
       nestedReplyCount: nestedReplyCount,
       isThreadAuthor: isThreadAuthor,
       contents: contents,
+      authorUsername: authorUsername,
       authorLevel: authorLevel,
       authorIPLocation: authorIPLocation,
       moderatorRole: moderatorRole,
@@ -730,6 +788,7 @@ struct CommentParentPostContext: Identifiable, Hashable, Sendable {
   let floor: Int
   let authorID: Int64
   let authorName: String
+  let authorUsername: String
   let authorPortraitURL: URL?
   let authorLevel: Int
   let authorIPLocation: String
@@ -750,6 +809,7 @@ struct CommentParentPostContext: Identifiable, Hashable, Sendable {
     createdAt: Date?,
     isThreadAuthor: Bool,
     contents: [BrowseContent],
+    authorUsername: String = "",
     authorLevel: Int = 0,
     authorIPLocation: String = "",
     moderatorRole: BrowseModeratorRole? = nil,
@@ -761,6 +821,7 @@ struct CommentParentPostContext: Identifiable, Hashable, Sendable {
     self.floor = floor
     self.authorID = authorID
     self.authorName = authorName
+    self.authorUsername = authorUsername
     self.authorPortraitURL = authorPortraitURL
     self.authorLevel = authorLevel
     self.authorIPLocation = authorIPLocation
@@ -783,6 +844,7 @@ struct CommentParentPostContext: Identifiable, Hashable, Sendable {
       createdAt: createdAt,
       isThreadAuthor: isThreadAuthor,
       contents: contents,
+      authorUsername: authorUsername,
       authorLevel: authorLevel,
       authorIPLocation: authorIPLocation,
       moderatorRole: moderatorRole,
@@ -796,6 +858,7 @@ struct BrowseComment: Identifiable, Hashable, Sendable {
   let id: Int64
   let authorID: Int64
   let authorName: String
+  let authorUsername: String
   let authorPortraitURL: URL?
   let authorLevel: Int
   let authorIPLocation: String
@@ -815,6 +878,7 @@ struct BrowseComment: Identifiable, Hashable, Sendable {
     authorPortraitURL: URL?,
     createdAt: Date?,
     contents: [BrowseContent],
+    authorUsername: String = "",
     authorLevel: Int = 0,
     authorIPLocation: String = "",
     moderatorRole: BrowseModeratorRole? = nil,
@@ -827,6 +891,7 @@ struct BrowseComment: Identifiable, Hashable, Sendable {
     self.id = id
     self.authorID = authorID
     self.authorName = authorName
+    self.authorUsername = authorUsername
     self.authorPortraitURL = authorPortraitURL
     self.authorLevel = authorLevel
     self.authorIPLocation = authorIPLocation
@@ -848,6 +913,7 @@ struct BrowseComment: Identifiable, Hashable, Sendable {
       authorPortraitURL: authorPortraitURL,
       createdAt: createdAt,
       contents: contents,
+      authorUsername: authorUsername,
       authorLevel: authorLevel,
       authorIPLocation: authorIPLocation,
       moderatorRole: moderatorRole,

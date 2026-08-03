@@ -89,6 +89,7 @@ struct ThreadHistorySnapshot: Codable, Hashable, Sendable {
   let title: String
   let excerpt: String
   let authorName: String
+  let authorUsername: String
   let replyCount: Int
   let viewCount: Int
   let createdAt: Date?
@@ -105,6 +106,7 @@ struct ThreadHistorySnapshot: Codable, Hashable, Sendable {
     title: String,
     excerpt: String = "",
     authorName: String = "",
+    authorUsername: String = "",
     replyCount: Int = 0,
     viewCount: Int = 0,
     createdAt: Date? = nil,
@@ -120,6 +122,7 @@ struct ThreadHistorySnapshot: Codable, Hashable, Sendable {
     self.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
     self.excerpt = excerpt.trimmingCharacters(in: .whitespacesAndNewlines)
     self.authorName = authorName.trimmingCharacters(in: .whitespacesAndNewlines)
+    self.authorUsername = authorUsername.trimmingCharacters(in: .whitespacesAndNewlines)
     self.replyCount = max(replyCount, 0)
     self.viewCount = max(viewCount, 0)
     self.createdAt = createdAt
@@ -144,6 +147,7 @@ struct ThreadHistorySnapshot: Codable, Hashable, Sendable {
       title: thread.title,
       excerpt: thread.excerpt,
       authorName: thread.authorName,
+      authorUsername: thread.authorUsername,
       replyCount: thread.replyCount,
       viewCount: thread.viewCount,
       createdAt: thread.createdAt,
@@ -167,7 +171,8 @@ struct ThreadHistorySnapshot: Codable, Hashable, Sendable {
       viewCount: viewCount,
       createdAt: createdAt,
       lastReplyAt: lastReplyAt,
-      contents: excerpt.isEmpty ? [] : [.text(excerpt)]
+      contents: excerpt.isEmpty ? [] : [.text(excerpt)],
+      authorUsername: authorUsername
     )
   }
 
@@ -183,6 +188,7 @@ struct ThreadHistorySnapshot: Codable, Hashable, Sendable {
     hasher.combine(title)
     hasher.combine(excerpt)
     hasher.combine(authorName)
+    hasher.combine(authorUsername)
     hasher.combine(replyCount)
     hasher.combine(viewCount)
     hasher.combine(createdAt)
@@ -201,6 +207,7 @@ struct ThreadHistorySnapshot: Codable, Hashable, Sendable {
     case title
     case excerpt
     case authorName
+    case authorUsername
     case replyCount
     case viewCount
     case createdAt
@@ -220,6 +227,7 @@ struct ThreadHistorySnapshot: Codable, Hashable, Sendable {
       title: try container.decode(String.self, forKey: .title),
       excerpt: try container.decodeIfPresent(String.self, forKey: .excerpt) ?? "",
       authorName: try container.decodeIfPresent(String.self, forKey: .authorName) ?? "",
+      authorUsername: try container.decodeIfPresent(String.self, forKey: .authorUsername) ?? "",
       replyCount: try container.decodeIfPresent(Int.self, forKey: .replyCount) ?? 0,
       viewCount: try container.decodeIfPresent(Int.self, forKey: .viewCount) ?? 0,
       createdAt: try container.decodeIfPresent(Date.self, forKey: .createdAt),
@@ -536,6 +544,7 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
       title: thread.title,
       excerpt: thread.excerpt,
       authorName: thread.authorName,
+      authorUsername: thread.authorUsername,
       replyCount: thread.replyCount,
       viewCount: thread.viewCount,
       createdAt: thread.createdAt,
@@ -575,6 +584,7 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
       title: thread.title,
       excerpt: thread.excerpt,
       authorName: thread.authorName,
+      authorUsername: thread.authorUsername,
       replyCount: thread.replyCount,
       viewCount: thread.viewCount,
       createdAt: thread.createdAt,

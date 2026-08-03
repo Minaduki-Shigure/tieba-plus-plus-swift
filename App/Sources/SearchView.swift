@@ -346,16 +346,34 @@ private struct SearchThreadRow: View {
 
 private struct UserSearchRow: View {
   let user: UserSearchItem
+  @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
+
+  private var displayedName: String {
+    UserNameFormatter.displayName(
+      preferredName: user.displayName,
+      username: user.username,
+      showsBoth: showsBothNames
+    )
+  }
+
+  private var legacyUsername: String? {
+    guard !showsBothNames else { return nil }
+    let username = user.username.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !username.isEmpty, username != displayedName else { return nil }
+    return username
+  }
 
   var body: some View {
     HStack(alignment: .top, spacing: 12) {
-      AvatarView(url: user.portraitURL, name: user.preferredName, size: 48)
+      AvatarView(url: user.portraitURL, name: displayedName, size: 48)
       VStack(alignment: .leading, spacing: 4) {
-        Text(user.preferredName)
+        Text(displayedName)
           .font(.headline)
-          .lineLimit(2)
-        if !user.username.isEmpty, user.username != user.preferredName {
-          Text(user.username)
+          .lineLimit(showsBothNames ? 3 : 2)
+          .minimumScaleFactor(0.75)
+          .accessibilityLabel(displayedName)
+        if let legacyUsername {
+          Text(legacyUsername)
             .font(.subheadline)
             .foregroundStyle(.secondary)
             .lineLimit(1)

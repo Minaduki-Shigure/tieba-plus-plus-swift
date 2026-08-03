@@ -46,6 +46,15 @@ final class AppPreferencesTests: XCTestCase {
     XCTAssertTrue(EnvironmentValues().darkensContentThumbnailsInDarkMode)
   }
 
+  @MainActor
+  func testUsernameAndNicknamePresentationUsesStableKeyAndDefaultsToSingleName() {
+    XCTAssertEqual(
+      AppPreferenceKey.showsBothUsernameAndNickname,
+      "TiebaPlusPlus.showsBothUsernameAndNickname"
+    )
+    XCTAssertFalse(EnvironmentValues().showsBothUsernameAndNickname)
+  }
+
   func testForumSortUsesPerForumOverrideBeforeGlobalDefault() throws {
     let suiteName = "AppPreferencesTests.\(UUID().uuidString)"
     let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

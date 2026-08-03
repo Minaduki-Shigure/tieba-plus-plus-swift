@@ -13,6 +13,7 @@ final class ForumPostSearchViewModelTests: XCTestCase {
       excerpt: "Opening content",
       authorID: 1,
       authorName: "topic author",
+      authorUsername: "topic-account",
       authorPortraitURL: nil,
       replyCount: 89,
       likeCount: 12,
@@ -25,6 +26,7 @@ final class ForumPostSearchViewModelTests: XCTestCase {
       excerpt: "Parent content",
       authorID: 2,
       authorName: "parent author",
+      authorUsername: "parent-account",
       authorPortraitURL: nil
     )
     let coreResult = TiebaThreadSearchResult(
@@ -36,6 +38,7 @@ final class ForumPostSearchViewModelTests: XCTestCase {
       excerpt: "Matched comment",
       authorID: 3,
       authorName: "matched author",
+      authorUsername: "matched-account",
       authorPortraitURL: URL(string: "https://himg.bdimg.com/avatar.png"),
       replyCount: 8,
       likeCount: 4,
@@ -54,16 +57,56 @@ final class ForumPostSearchViewModelTests: XCTestCase {
     XCTAssertEqual(mapped.thread.title, "Opening topic")
     XCTAssertEqual(mapped.thread.excerpt, "Opening content")
     XCTAssertEqual(mapped.thread.authorName, "topic author")
+    XCTAssertEqual(mapped.thread.authorUsername, "topic-account")
     XCTAssertEqual(mapped.thread.authorID, 1)
     XCTAssertEqual(mapped.thread.replyCount, 89)
     XCTAssertEqual(mapped.replyCount, 8)
     XCTAssertEqual(mapped.context?.postID, 202)
     XCTAssertEqual(mapped.context?.title, "Parent floor")
+    XCTAssertEqual(mapped.context?.authorUsername, "parent-account")
     XCTAssertEqual(mapped.matchedTitle, "Nested match")
+    XCTAssertEqual(mapped.matchedAuthorUsername, "matched-account")
     XCTAssertEqual(
       mapped.matchedAuthorPortraitURL?.absoluteString,
       "https://himg.bdimg.com/avatar.png"
     )
+  }
+
+  func testCoreMapperDoesNotPairMatchedUsernameWithContextAuthorName() {
+    let mainPost = TiebaSearchPostContext(
+      threadID: 42,
+      postID: 100,
+      title: "Opening topic",
+      excerpt: "Opening content",
+      authorID: 1,
+      authorName: "topic author",
+      authorPortraitURL: nil
+    )
+    let coreResult = TiebaThreadSearchResult(
+      threadID: 42,
+      firstPostID: 202,
+      forumID: 7,
+      forumName: "swift",
+      title: "Reply match",
+      excerpt: "Matched reply",
+      authorID: 2,
+      authorName: "reply author",
+      authorUsername: "reply-account",
+      authorPortraitURL: nil,
+      replyCount: 1,
+      likeCount: 0,
+      shareCount: 0,
+      createdAt: nil,
+      images: [],
+      target: .post(postID: 202),
+      mainPost: mainPost
+    )
+
+    let mapped = TiebaCoreBrowseService.mapForumPostSearchResult(coreResult)
+
+    XCTAssertEqual(mapped.thread.authorName, "topic author")
+    XCTAssertEqual(mapped.thread.authorUsername, "")
+    XCTAssertEqual(mapped.matchedAuthorUsername, "reply-account")
   }
 
   @MainActor

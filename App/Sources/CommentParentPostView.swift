@@ -57,6 +57,7 @@ struct CommentParentPostView: View {
   private var authorIdentity: some View {
     PostAuthorIdentityView(
       name: post.authorName,
+      username: post.authorUsername,
       portraitURL: post.authorPortraitURL,
       level: post.authorLevel,
       isThreadAuthor: post.isThreadAuthor,

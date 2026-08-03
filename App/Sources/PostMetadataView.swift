@@ -2,6 +2,7 @@ import SwiftUI
 
 struct PostAuthorIdentityView: View {
   let name: String
+  let username: String
   let portraitURL: URL?
   let level: Int
   let isThreadAuthor: Bool
@@ -12,8 +13,11 @@ struct PostAuthorIdentityView: View {
   let avatarSize: CGFloat
   let showsDisclosureIndicator: Bool
 
+  @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
+
   init(
     name: String,
+    username: String = "",
     portraitURL: URL?,
     level: Int,
     isThreadAuthor: Bool,
@@ -25,6 +29,7 @@ struct PostAuthorIdentityView: View {
     showsDisclosureIndicator: Bool = false
   ) {
     self.name = name
+    self.username = username
     self.portraitURL = portraitURL
     self.level = level
     self.isThreadAuthor = isThreadAuthor
@@ -38,10 +43,11 @@ struct PostAuthorIdentityView: View {
 
   var body: some View {
     HStack(alignment: .top, spacing: 10) {
-      AvatarView(url: portraitURL, name: name, size: avatarSize)
+      AvatarView(url: portraitURL, name: displayedName, size: avatarSize)
       VStack(alignment: .leading, spacing: 2) {
         PostAuthorNameLine(
           name: name,
+          username: username,
           level: level,
           isThreadAuthor: isThreadAuthor,
           moderatorRole: moderatorRole
@@ -58,6 +64,14 @@ struct PostAuthorIdentityView: View {
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .contentShape(Rectangle())
+  }
+
+  private var displayedName: String {
+    UserNameFormatter.displayName(
+      preferredName: name,
+      username: username,
+      showsBoth: showsBothNames
+    )
   }
 }
 
@@ -91,9 +105,26 @@ enum PostAuthorBadge: Hashable, Sendable {
 
 struct PostAuthorNameLine: View {
   let name: String
+  let username: String
   let level: Int
   let isThreadAuthor: Bool
   let moderatorRole: BrowseModeratorRole?
+
+  @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
+
+  init(
+    name: String,
+    username: String = "",
+    level: Int,
+    isThreadAuthor: Bool,
+    moderatorRole: BrowseModeratorRole?
+  ) {
+    self.name = name
+    self.username = username
+    self.level = level
+    self.isThreadAuthor = isThreadAuthor
+    self.moderatorRole = moderatorRole
+  }
 
   var body: some View {
     if badges.isEmpty {
@@ -135,11 +166,20 @@ struct PostAuthorNameLine: View {
   }
 
   private var authorName: some View {
-    Text(name)
+    Text(displayedName)
       .font(.subheadline.weight(.semibold))
-      .lineLimit(1)
-      .minimumScaleFactor(0.8)
+      .lineLimit(showsBothNames ? 3 : 1)
+      .minimumScaleFactor(0.75)
       .layoutPriority(1)
+      .accessibilityLabel(displayedName)
+  }
+
+  private var displayedName: String {
+    UserNameFormatter.displayName(
+      preferredName: name,
+      username: username,
+      showsBoth: showsBothNames
+    )
   }
 
   private var badgeRow: some View {

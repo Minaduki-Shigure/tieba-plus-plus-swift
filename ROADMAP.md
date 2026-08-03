@@ -57,6 +57,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Public user profiles opened from post and nested-reply authors
 - Limited public liked-forum previews with direct forum navigation
 - Paginated public threads on user profiles
+- Default-off combined public nickname and username presentation
 - Local case-sensitive literal-keyword and exact UID/name user block/allow lists
 - Placeholder or fully hidden presentation for locally blocked content
 - Local video-topic blocking and user-profile block/allow shortcuts
@@ -136,6 +137,15 @@ The profile response may include a small public liked-forum preview. It is
 presented as a preview alongside the server's declared total, never as a full
 list, and an empty preview remains a valid privacy state. The authenticated
 full-list endpoint is not called from a public profile.
+
+A default-off local preference combines a returned public nickname and username
+as `nickname(username)` across thread cards, floors, nested replies, search,
+profiles, forum staff, browsing history, and local favorites. Empty or identical
+values collapse to one name, and user search plus profile headers retain their
+pre-existing secondary username while the option is off. Both fields come from
+the response that already loads each surface; presentation creates no request.
+Thread history and favorite schema v1 records store the username as an optional
+additive field, so older records remain readable and simply render one name.
 
 Local favorites are deliberately separate from browsing history and from
 Tieba's account-backed collection service. Disabling or clearing history does

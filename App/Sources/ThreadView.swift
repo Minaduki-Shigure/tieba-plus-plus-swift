@@ -706,6 +706,8 @@ private struct PostView: View {
   let openTiebaLink: (TiebaLinkTarget) -> Void
   let openComments: (Int64?) -> Void
 
+  @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
+
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       if isPureReadingMode {
@@ -793,21 +795,22 @@ private struct PostView: View {
   private var pureReadingContext: some View {
     ViewThatFits(in: .horizontal) {
       HStack(alignment: .firstTextBaseline, spacing: 8) {
-        Text(post.authorName)
-          .lineLimit(1)
+        Text(displayedAuthorName)
+          .lineLimit(showsBothNames ? 2 : 1)
+          .minimumScaleFactor(0.75)
           .fixedSize(horizontal: true, vertical: false)
+          .accessibilityLabel(displayedAuthorName)
         pureReadingAuthorBadge
         Spacer(minLength: 0)
         pureReadingPostMetadata
       }
 
       VStack(alignment: .leading, spacing: 4) {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-          Text(post.authorName)
-            .lineLimit(1)
-          pureReadingAuthorBadge
-          Spacer(minLength: 0)
-        }
+        Text(displayedAuthorName)
+          .lineLimit(showsBothNames ? 3 : 1)
+          .minimumScaleFactor(0.75)
+          .accessibilityLabel(displayedAuthorName)
+        pureReadingAuthorBadge
         VStack(alignment: .leading, spacing: 4) {
           pureReadingPostMetadata
         }
@@ -841,6 +844,7 @@ private struct PostView: View {
   private var authorIdentity: some View {
     PostAuthorIdentityView(
       name: post.authorName,
+      username: post.authorUsername,
       portraitURL: post.authorPortraitURL,
       level: post.authorLevel,
       isThreadAuthor: post.isThreadAuthor,
@@ -849,6 +853,14 @@ private struct PostView: View {
       date: post.createdAt,
       ipLocation: post.authorIPLocation,
       showsDisclosureIndicator: post.authorID > 0
+    )
+  }
+
+  private var displayedAuthorName: String {
+    UserNameFormatter.displayName(
+      preferredName: post.authorName,
+      username: post.authorUsername,
+      showsBoth: showsBothNames
     )
   }
 }

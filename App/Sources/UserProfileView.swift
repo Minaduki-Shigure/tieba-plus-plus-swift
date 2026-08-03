@@ -3,6 +3,7 @@ import UIKit
 
 struct UserProfileView: View {
   @Environment(\.contentFilterRepository) private var contentFilterRepository
+  @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
   let service:
     any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
@@ -40,7 +41,7 @@ struct UserProfileView: View {
         profileList
       }
     }
-    .navigationTitle(viewModel.profile?.preferredName ?? "用户主页")
+    .navigationTitle(navigationTitle)
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
       if let profile = viewModel.profile, profile.id > 0 {
@@ -77,6 +78,15 @@ struct UserProfileView: View {
     }
     .task { viewModel.loadIfNeeded() }
     .onDisappear(perform: viewModel.cancel)
+  }
+
+  private var navigationTitle: String {
+    guard let profile = viewModel.profile else { return "用户主页" }
+    return UserNameFormatter.displayName(
+      preferredName: profile.displayName,
+      username: profile.username,
+      showsBoth: showsBothNames
+    )
   }
 
   private var profileList: some View {
@@ -194,24 +204,43 @@ struct UserProfileView: View {
 
 private struct UserProfileHeader: View {
   let profile: BrowseUserProfile
+  @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
+
+  private var displayedName: String {
+    UserNameFormatter.displayName(
+      preferredName: profile.displayName,
+      username: profile.username,
+      showsBoth: showsBothNames
+    )
+  }
+
+  private var legacyUsername: String? {
+    guard !showsBothNames else { return nil }
+    let username = profile.username.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !username.isEmpty, username != displayedName else { return nil }
+    return username
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack(alignment: .center, spacing: 14) {
-        AvatarView(url: profile.portraitURL, name: profile.preferredName, size: 82)
+        AvatarView(url: profile.portraitURL, name: displayedName, size: 82)
         VStack(alignment: .leading, spacing: 5) {
           HStack(spacing: 6) {
-            Text(profile.preferredName)
+            Text(displayedName)
               .font(.title3.weight(.bold))
-              .lineLimit(2)
+              .lineLimit(showsBothNames ? 3 : 2)
+              .minimumScaleFactor(0.75)
+              .layoutPriority(1)
+              .accessibilityLabel(displayedName)
             if profile.isVerifiedCreator {
               Image(systemName: "checkmark.seal.fill")
                 .foregroundStyle(.tint)
                 .accessibilityLabel("创作者认证")
             }
           }
-          if !profile.username.isEmpty, profile.username != profile.displayName {
-            Text(profile.username)
+          if let legacyUsername {
+            Text(legacyUsername)
               .font(.subheadline)
               .foregroundStyle(.secondary)
               .lineLimit(1)

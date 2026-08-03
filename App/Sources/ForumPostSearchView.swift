@@ -12,6 +12,7 @@ struct ForumPostSearchView: View {
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
 
+  @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
   @StateObject private var viewModel: ForumPostSearchViewModel
   @State private var query = ""
   @State private var historyAction: ForumSearchHistoryAction?
@@ -322,19 +323,27 @@ struct ForumPostSearchView: View {
       } label: {
         AvatarView(
           url: result.matchedAuthorPortraitURL,
-          name: result.matchedAuthorName,
+          name: displayedAuthorName(for: result),
           size: 36
         )
       }
       .buttonStyle(.plain)
-      .accessibilityLabel("查看\(result.matchedAuthorName)的资料")
+      .accessibilityLabel("查看\(displayedAuthorName(for: result))的资料")
     } else {
       AvatarView(
         url: result.matchedAuthorPortraitURL,
-        name: result.matchedAuthorName,
+        name: displayedAuthorName(for: result),
         size: 36
       )
     }
+  }
+
+  private func displayedAuthorName(for result: ForumPostSearchItem) -> String {
+    UserNameFormatter.displayName(
+      preferredName: result.matchedAuthorName,
+      username: result.matchedAuthorUsername,
+      showsBoth: showsBothNames
+    )
   }
 
   @ViewBuilder
@@ -377,13 +386,17 @@ struct ForumPostSearchView: View {
 private struct ForumPostSearchResultRow: View {
   let result: ForumPostSearchItem
 
+  @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
+
   var body: some View {
     VStack(alignment: .leading, spacing: 9) {
       HStack(spacing: 9) {
         VStack(alignment: .leading, spacing: 2) {
-          Text(result.matchedAuthorName)
+          Text(displayedAuthorName)
             .font(.subheadline.weight(.semibold))
-            .lineLimit(1)
+            .lineLimit(showsBothNames ? 3 : 1)
+            .minimumScaleFactor(0.75)
+            .accessibilityLabel(displayedAuthorName)
           if let matchedAt = result.matchedAt {
             Text(matchedAt, style: .relative)
               .font(.caption)
@@ -464,6 +477,14 @@ private struct ForumPostSearchResultRow: View {
     case .comment:
       "bubble.left.and.bubble.right"
     }
+  }
+
+  private var displayedAuthorName: String {
+    UserNameFormatter.displayName(
+      preferredName: result.matchedAuthorName,
+      username: result.matchedAuthorUsername,
+      showsBoth: showsBothNames
+    )
   }
 
   private var contextLabel: String {

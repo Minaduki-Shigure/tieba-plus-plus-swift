@@ -78,6 +78,8 @@ private struct InlineCommentPreviewRow: View {
   let comment: BrowseComment
   let action: () -> Void
 
+  @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
+
   private var bodyText: String {
     BrowseContentCopyText.text(comment.contents) ?? "（无可显示内容）"
   }
@@ -87,14 +89,15 @@ private struct InlineCommentPreviewRow: View {
       previewText
         .font(.subheadline)
         .foregroundStyle(.primary)
-        .lineLimit(4)
+        .lineLimit(showsBothNames ? 5 : 4)
+        .minimumScaleFactor(0.75)
         .multilineTextAlignment(.leading)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 9)
         .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
-    .accessibilityLabel("\(comment.authorName)：\(bodyText)")
+    .accessibilityLabel(accessibilityText)
     .contextMenu {
       if let copyText = BrowseContentCopyText.text(comment.contents) {
         Button {
@@ -107,7 +110,7 @@ private struct InlineCommentPreviewRow: View {
   }
 
   private var previewText: Text {
-    var result = Text(comment.authorName)
+    var result = Text(displayedAuthorName)
       .foregroundColor(.accentColor)
       .bold()
     if comment.isThreadAuthor {
@@ -116,5 +119,20 @@ private struct InlineCommentPreviewRow: View {
         .fontWeight(.semibold)
     }
     return result + Text("：\(bodyText)")
+  }
+
+  private var displayedAuthorName: String {
+    UserNameFormatter.displayName(
+      preferredName: comment.authorName,
+      username: comment.authorUsername,
+      showsBoth: showsBothNames
+    )
+  }
+
+  private var accessibilityText: String {
+    let authorContext = comment.isThreadAuthor
+      ? "\(displayedAuthorName)，楼主"
+      : displayedAuthorName
+    return "\(authorContext)：\(bodyText)"
   }
 }

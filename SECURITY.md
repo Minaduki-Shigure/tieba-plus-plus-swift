@@ -225,6 +225,17 @@ An unreadable search-history archive may be deleted only through the explicit,
 user-confirmed recovery action for that archive; ordinary reads and writes must
 preserve it and must not delete the other search-history domain.
 
+The default-off username presentation preference is a local UserDefaults value.
+It may display only the public nickname and username already returned by the
+current anonymous or public-profile response and must not expose `tiebaUID`,
+reply-target identities, account credentials, or add a lookup request. Live
+models keep the two identity fields paired; search context fallback must never
+combine one author's nickname with another author's username. Thread history
+and local-favorite schema v1 records may add the trimmed public username as an
+optional field; older records decode it as empty without migration or deletion.
+User filter rules may match either exact returned name for the same author, with
+user allow rules retaining precedence over user block rules only in that domain.
+
 Local content-filter rules use their own bounded, versioned JSON archive in
 Application Support with atomic writes and backup exclusion. It may contain
 only user-entered literal keywords, public UID/name identities, display mode,

@@ -10,6 +10,8 @@ enum AppPreferenceKey {
   static let hidesThreadListMedia = "TiebaPlusPlus.hidesThreadListMedia"
   static let darkensContentThumbnailsInDarkMode =
     "TiebaPlusPlus.darkensContentThumbnailsInDarkMode"
+  static let showsBothUsernameAndNickname =
+    "TiebaPlusPlus.showsBothUsernameAndNickname"
 }
 
 private struct HidesThreadListMediaEnvironmentKey: EnvironmentKey {
@@ -18,6 +20,10 @@ private struct HidesThreadListMediaEnvironmentKey: EnvironmentKey {
 
 private struct DarkensContentThumbnailsInDarkModeEnvironmentKey: EnvironmentKey {
   static let defaultValue = true
+}
+
+private struct ShowsBothUsernameAndNicknameEnvironmentKey: EnvironmentKey {
+  static let defaultValue = false
 }
 
 extension EnvironmentValues {
@@ -29,6 +35,11 @@ extension EnvironmentValues {
   var darkensContentThumbnailsInDarkMode: Bool {
     get { self[DarkensContentThumbnailsInDarkModeEnvironmentKey.self] }
     set { self[DarkensContentThumbnailsInDarkModeEnvironmentKey.self] = newValue }
+  }
+
+  var showsBothUsernameAndNickname: Bool {
+    get { self[ShowsBothUsernameAndNicknameEnvironmentKey.self] }
+    set { self[ShowsBothUsernameAndNicknameEnvironmentKey.self] = newValue }
   }
 }
 

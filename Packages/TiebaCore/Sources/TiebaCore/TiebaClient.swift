@@ -15,7 +15,7 @@ public struct TiebaClientConfiguration: Sendable, Hashable {
   public init(
     clientVersion: String = "12.64.1.1",
     authenticatedClientVersion: String = "22.6.5.1",
-    userAgent: String = "TiebaPlusPlus/0.35 (iOS)",
+    userAgent: String = "TiebaPlusPlus/0.36 (iOS)",
     requestTimeout: TimeInterval = 30
   ) {
     self.clientVersion = clientVersion

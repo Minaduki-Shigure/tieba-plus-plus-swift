@@ -65,6 +65,20 @@ final class BrowseViewModelTests: XCTestCase {
       height: 720,
       viewCount: 30
     )
+    let author = TiebaUser(
+      id: 8,
+      username: "author-account",
+      displayName: " \n ",
+      portrait: "",
+      level: 0,
+      growthLevel: 0,
+      gender: .unknown,
+      ipLocation: "",
+      badges: [],
+      isModerator: false,
+      isVIP: false,
+      isVerifiedCreator: false
+    )
     let thread = TiebaThread(
       id: 42,
       firstPostID: 43,
@@ -78,7 +92,7 @@ final class BrowseViewModelTests: XCTestCase {
         .image(recoverableImage),
         .video(video),
       ]),
-      author: nil,
+      author: author,
       kind: .video,
       tabID: 9,
       viewCount: 100,
@@ -99,6 +113,8 @@ final class BrowseViewModelTests: XCTestCase {
 
     XCTAssertEqual(mapped.id, 42)
     XCTAssertEqual(mapped.firstPostID, 43)
+    XCTAssertEqual(mapped.authorName, "author-account")
+    XCTAssertEqual(mapped.authorUsername, "author-account")
     XCTAssertEqual(mapped.kind, .video)
     XCTAssertEqual(mapped.tabID, 9)
     XCTAssertEqual(mapped.shareCount, 5)
@@ -146,6 +162,7 @@ final class BrowseViewModelTests: XCTestCase {
       excerpt: "Excerpt",
       authorID: 9,
       authorName: "Author",
+      authorUsername: "author-account",
       authorPortraitURL: nil,
       replyCount: 10,
       likeCount: 8,
@@ -170,6 +187,7 @@ final class BrowseViewModelTests: XCTestCase {
     let mapped = TiebaCoreBrowseService.mapThreadSearchResult(result)
 
     XCTAssertEqual(mapped.firstPostID, 51)
+    XCTAssertEqual(mapped.authorUsername, "author-account")
     XCTAssertEqual(mapped.agreeCount, 8)
     XCTAssertEqual(mapped.shareCount, 3)
     XCTAssertEqual(
@@ -490,12 +508,15 @@ final class BrowseViewModelTests: XCTestCase {
     let mappedPost = TiebaCoreBrowseService.mapPost(post)
     let mappedComment = TiebaCoreBrowseService.mapComment(comment)
 
+    XCTAssertEqual(mappedPost.authorName, "Author")
     XCTAssertEqual(mappedPost.authorLevel, 12)
+    XCTAssertEqual(mappedPost.authorUsername, "author")
     XCTAssertEqual(mappedPost.authorIPLocation, "Shanghai")
     XCTAssertEqual(mappedPost.moderatorRole, .manager)
     XCTAssertEqual(mappedPost.agreeScore, 5)
     XCTAssertTrue(mappedPost.isThreadAuthor)
     XCTAssertEqual(mappedComment.authorLevel, 12)
+    XCTAssertEqual(mappedComment.authorUsername, "author")
     XCTAssertEqual(mappedComment.authorIPLocation, "Shanghai")
     XCTAssertEqual(mappedComment.moderatorRole, .manager)
     XCTAssertEqual(mappedComment.agreeScore, 3)
@@ -508,6 +529,8 @@ final class BrowseViewModelTests: XCTestCase {
     )
     XCTAssertEqual(mappedPost.withLocalVisibility(.hidden).moderatorRole, .manager)
     XCTAssertEqual(mappedComment.withLocalVisibility(.placeholder).moderatorRole, .manager)
+    XCTAssertEqual(mappedPost.withLocalVisibility(.hidden).authorUsername, "author")
+    XCTAssertEqual(mappedComment.withLocalVisibility(.placeholder).authorUsername, "author")
 
     let negativeScorePost = TiebaPost(
       id: 103,
@@ -737,11 +760,16 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(mapped.parentPost.id, 201)
     XCTAssertEqual(mapped.parentPost.floor, 2)
     XCTAssertEqual(mapped.parentPost.authorLevel, 9)
+    XCTAssertEqual(mapped.parentPost.authorUsername, "author")
     XCTAssertEqual(mapped.parentPost.authorIPLocation, "Shanghai")
     XCTAssertEqual(mapped.parentPost.moderatorRole, .assistant)
     XCTAssertEqual(
       mapped.parentPost.withLocalVisibility(.hidden).moderatorRole,
       .assistant
+    )
+    XCTAssertEqual(
+      mapped.parentPost.withLocalVisibility(.hidden).authorUsername,
+      "author"
     )
     XCTAssertEqual(mapped.parentPost.agreeScore, 4)
     XCTAssertEqual(mapped.parentPost.localVisibility, .placeholder)

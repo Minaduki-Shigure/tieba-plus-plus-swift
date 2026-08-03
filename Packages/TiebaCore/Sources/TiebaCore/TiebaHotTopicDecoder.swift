@@ -138,6 +138,7 @@ enum TiebaHotTopicDecoder {
         excerpt: info.abstract,
         authorID: max(info.author.userID.value, 0),
         authorName: authorName,
+        authorUsername: nonempty(username) ?? "",
         authorPortraitURL: remoteURL(info.author.portrait),
         replyCount: clampedInt(max(info.replyCount.value, 0)),
         likeCount: clampedInt(max(info.likeCount.value, 0)),

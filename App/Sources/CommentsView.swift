@@ -322,6 +322,7 @@ struct CommentsView: View {
   private func commentAuthorIdentity(_ comment: BrowseComment) -> some View {
     PostAuthorIdentityView(
       name: comment.authorName,
+      username: comment.authorUsername,
       portraitURL: comment.authorPortraitURL,
       level: comment.authorLevel,
       isThreadAuthor: comment.isThreadAuthor,
