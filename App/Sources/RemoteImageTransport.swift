@@ -5,6 +5,20 @@ enum RemoteImageDownloadKind: Hashable, Sendable {
   case original
 }
 
+enum RemoteImageNetworkAccess: Hashable, Sendable {
+  case unrestricted
+  case economicalOnly
+
+  func applying(to request: URLRequest) -> URLRequest {
+    var request = request
+    let allowsRestrictedNetworks = self == .unrestricted
+    request.allowsCellularAccess = allowsRestrictedNetworks
+    request.allowsExpensiveNetworkAccess = allowsRestrictedNetworks
+    request.allowsConstrainedNetworkAccess = allowsRestrictedNetworks
+    return request
+  }
+}
+
 struct RemoteImageDownloadLimits: Equatable, Sendable {
   static let standard = RemoteImageDownloadLimits(
     previewMaximumResponseBytes: RemoteImageDownloadPolicy.previewMaximumResponseBytes,
@@ -71,14 +85,17 @@ enum RemoteImageURLPolicy {
     return true
   }
 
-  static func sanitizedRedirectRequest(_ request: URLRequest) -> URLRequest? {
+  static func sanitizedRedirectRequest(
+    _ request: URLRequest,
+    networkAccess: RemoteImageNetworkAccess
+  ) -> URLRequest? {
     guard let url = request.url, allows(url) else { return nil }
     var request = request
     request.cachePolicy = .reloadIgnoringLocalCacheData
     request.setValue(nil, forHTTPHeaderField: "Authorization")
     request.setValue(nil, forHTTPHeaderField: "Cookie")
     request.setValue(nil, forHTTPHeaderField: "Proxy-Authorization")
-    return request
+    return networkAccess.applying(to: request)
   }
 }
 
@@ -90,8 +107,19 @@ enum RemoteImageDownloadError: Error, Equatable {
 }
 
 protocol RemoteImageDownloading: Sendable {
+  func download(
+    from url: URL,
+    kind: RemoteImageDownloadKind,
+    networkAccess: RemoteImageNetworkAccess
+  ) async throws -> RemoteImageFileLease
+}
+
+extension RemoteImageDownloading {
   func download(from url: URL, kind: RemoteImageDownloadKind) async throws
     -> RemoteImageFileLease
+  {
+    try await download(from: url, kind: kind, networkAccess: .unrestricted)
+  }
 }
 
 final class RemoteImageFileLease: @unchecked Sendable {
@@ -141,8 +169,11 @@ final class BoundedHTTPSRemoteImageTransport: RemoteImageDownloading, @unchecked
     self.temporaryDirectory = temporaryDirectory
   }
 
-  func download(from url: URL, kind: RemoteImageDownloadKind) async throws
-    -> RemoteImageFileLease
+  func download(
+    from url: URL,
+    kind: RemoteImageDownloadKind,
+    networkAccess: RemoteImageNetworkAccess
+  ) async throws -> RemoteImageFileLease
   {
     guard RemoteImageURLPolicy.allows(url) else {
       throw RemoteImageDownloadError.invalidURL
@@ -150,13 +181,14 @@ final class BoundedHTTPSRemoteImageTransport: RemoteImageDownloading, @unchecked
 
     let maximumResponseBytes = limits.maximumResponseBytes(for: kind)
     let delegate = BoundedHTTPSRemoteImageTaskDelegate(
-      maximumResponseBytes: maximumResponseBytes
+      maximumResponseBytes: maximumResponseBytes,
+      networkAccess: networkAccess
     )
     let temporaryDownloadURL: URL
     let urlResponse: URLResponse
     do {
       (temporaryDownloadURL, urlResponse) = try await session.download(
-        from: url,
+        for: Self.request(from: url, networkAccess: networkAccess),
         delegate: delegate
       )
     } catch {
@@ -247,6 +279,15 @@ final class BoundedHTTPSRemoteImageTransport: RemoteImageDownloading, @unchecked
     hardened.timeoutIntervalForResource = 60
     return hardened
   }
+
+  static func request(
+    from url: URL,
+    networkAccess: RemoteImageNetworkAccess
+  ) -> URLRequest {
+    var request = URLRequest(url: url)
+    request.cachePolicy = .reloadIgnoringLocalCacheData
+    return networkAccess.applying(to: request)
+  }
 }
 
 private final class BoundedHTTPSRemoteImageTaskDelegate: NSObject,
@@ -270,14 +311,19 @@ private final class BoundedHTTPSRemoteImageTaskDelegate: NSObject,
   }
 
   private let maximumResponseBytes: Int64
+  private let networkAccess: RemoteImageNetworkAccess
   private let state = State()
 
   var exceededResponseLimit: Bool {
     state.readResponseLimitExceeded()
   }
 
-  init(maximumResponseBytes: Int64) {
+  init(
+    maximumResponseBytes: Int64,
+    networkAccess: RemoteImageNetworkAccess
+  ) {
     self.maximumResponseBytes = maximumResponseBytes
+    self.networkAccess = networkAccess
   }
 
   func urlSession(
@@ -287,7 +333,12 @@ private final class BoundedHTTPSRemoteImageTaskDelegate: NSObject,
     newRequest request: URLRequest,
     completionHandler: @escaping @Sendable (URLRequest?) -> Void
   ) {
-    completionHandler(RemoteImageURLPolicy.sanitizedRedirectRequest(request))
+    completionHandler(
+      RemoteImageURLPolicy.sanitizedRedirectRequest(
+        request,
+        networkAccess: networkAccess
+      )
+    )
   }
 
   func urlSession(

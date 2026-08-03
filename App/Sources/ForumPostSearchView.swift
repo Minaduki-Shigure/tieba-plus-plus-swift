@@ -566,7 +566,7 @@ enum ForumPostSearchMediaPresentation: Equatable, Sendable {
 private struct ForumPostSearchMediaStrip: View {
   let contents: [BrowseContent]
 
-  @Environment(\.contentMediaLoadPolicy) private var contentMediaLoadPolicy
+  @Environment(\.contentMediaLoadBehavior) private var contentMediaLoadBehavior
   @Environment(\.hidesThreadListMedia) private var hidesThreadListMedia
 
   @ViewBuilder
@@ -606,7 +606,7 @@ private struct ForumPostSearchMediaStrip: View {
               .accessibilityLabel(
                 "图片预览 \(index + 1)，共 \(max(totalCount, 0).formatted()) 张"
               )
-              .accessibilityHidden(contentMediaLoadPolicy == .automatic)
+              .accessibilityHidden(contentMediaLoadBehavior != .userInitiated)
           case .empty:
             ZStack {
               Color(uiColor: .secondarySystemFill)
@@ -634,12 +634,12 @@ private struct ForumPostSearchMediaStrip: View {
     totalCount: Int,
     @ViewBuilder content: () -> Content
   ) -> some View {
-    switch contentMediaLoadPolicy {
-    case .automatic:
+    switch contentMediaLoadBehavior {
+    case .automatic, .economicalNetworkOnly:
       content()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(max(totalCount, 0).formatted()) 张图片预览")
-    case .tapToLoad:
+    case .userInitiated:
       content()
     }
   }
@@ -655,7 +655,7 @@ private struct ForumPostSearchMediaStrip: View {
   }
 
   private func failureSystemImage(for imageURL: URL) -> String {
-    contentMediaLoadPolicy == .tapToLoad && RemoteImageURLPolicy.allows(imageURL)
+    contentMediaLoadBehavior == .userInitiated && RemoteImageURLPolicy.allows(imageURL)
       ? "arrow.clockwise.circle"
       : "photo.badge.exclamationmark"
   }

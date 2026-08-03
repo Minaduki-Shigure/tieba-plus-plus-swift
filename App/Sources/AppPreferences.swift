@@ -198,6 +198,7 @@ enum AppAppearance: String, CaseIterable, Hashable, Identifiable, Sendable {
 
 enum ContentMediaLoadPolicy: String, CaseIterable, Identifiable, Sendable {
   case automatic
+  case networkAware
   case tapToLoad
 
   var id: Self { self }
@@ -206,6 +207,8 @@ enum ContentMediaLoadPolicy: String, CaseIterable, Identifiable, Sendable {
     switch self {
     case .automatic:
       "自动加载"
+    case .networkAware:
+      "节省流量"
     case .tapToLoad:
       "点按加载"
     }

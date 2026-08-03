@@ -47,7 +47,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Strict internal routing for supported Tieba HTTPS, pasted official-scheme, and app links
 - Default-system external HTTPS opening with an optional in-app Safari view
 - Nested replies, images, video links, and voice playback
-- Persistent automatic or tap-to-load policy for content images and video covers
+- Persistent automatic, data-saving, or tap-to-load policy for content media
 - Optional compact media summaries for thread lists and per-forum search, with no collapsed preview request
 - Default-on dark-appearance dimming for successfully rendered static content thumbnails
 - Same-content multi-image gallery with paging, zoom, original-file sharing, and Photos saving
@@ -247,12 +247,24 @@ player. Every preview still passes the existing HTTPS URL normalization,
 credential-free downloader, redirect policy, transfer-time byte limit, and pixel
 downsampling. Automatic 720-pixel previews stop at 16 MiB; higher-resolution
 explicit image views retain the 80 MiB ceiling.
+A third, opt-in data-saving policy carries TiebaLite's smart no-image workflow
+into iOS without changing the existing automatic default. One app-level path
+monitor classifies only transient availability, cost, and Low Data Mode state.
+An available, non-expensive, non-constrained path can start an automatic
+preview with request-level cellular, expensive, and constrained access denied;
+all other states read the memory cache and expose the existing exact-request
+load control. An explicit tap remains unrestricted and stays authorized across
+later path changes. Avatars, galleries, media playback, export, page data, and
+all nonmedia requests remain outside this policy. Unlike TiebaLite, this version
+does not select between multiple remote thumbnail qualities because the current
+response model does not retain an ordered quality set.
 An independent persistent compact mode replaces those thread-list previews and
 per-forum search image strips with noninteractive media summaries. Its collapsed
 presentation retains only a media type or full image count and never constructs
 a remote preview view, so it creates no preview request. It does not alter post
 bodies, hot-topic images, avatars, gallery/export paths, playback, page data, or
-the separate automatic versus tap-to-load policy used when previews are expanded.
+the separate automatic, data-saving, or tap-to-load policy used when previews
+are expanded.
 A separate default-on dark-appearance control applies a 0.4 color multiplier
 only to successfully rendered static content images in thread cards, post
 bodies, per-forum search, and hot topics. Video covers, avatars, galleries,

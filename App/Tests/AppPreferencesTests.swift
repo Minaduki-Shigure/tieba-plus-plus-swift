@@ -54,12 +54,23 @@ final class AppPreferencesTests: XCTestCase {
       AppPreferenceKey.contentMediaLoadPolicy,
       "TiebaPlusPlus.contentMediaLoadPolicy"
     )
+    XCTAssertEqual(
+      ContentMediaLoadPolicy.allCases,
+      [.automatic, .networkAware, .tapToLoad]
+    )
+    XCTAssertEqual(
+      ContentMediaLoadPolicy.allCases.map(\.rawValue),
+      ["automatic", "networkAware", "tapToLoad"]
+    )
     XCTAssertEqual(ContentMediaLoadPolicy.resolved("automatic"), .automatic)
+    XCTAssertEqual(ContentMediaLoadPolicy.resolved("networkAware"), .networkAware)
     XCTAssertEqual(ContentMediaLoadPolicy.resolved("tapToLoad"), .tapToLoad)
     XCTAssertEqual(ContentMediaLoadPolicy.resolved("future-value"), .automatic)
     XCTAssertEqual(ContentMediaLoadPolicy.resolved(""), .automatic)
-    XCTAssertEqual(ContentMediaLoadPolicy.automatic.title, "自动加载")
-    XCTAssertEqual(ContentMediaLoadPolicy.tapToLoad.title, "点按加载")
+    XCTAssertEqual(
+      ContentMediaLoadPolicy.allCases.map(\.title),
+      ["自动加载", "节省流量", "点按加载"]
+    )
   }
 
   @MainActor

@@ -4,6 +4,7 @@ import SwiftUI
 @main
 struct TiebaPlusPlusApp: App {
   @StateObject private var externalWebPresentation = ExternalWebPresentationModel()
+  @StateObject private var contentMediaNetworkMonitor = ContentMediaNetworkMonitor()
   @AppStorage(AppPreferenceKey.appearance)
   private var appearance = AppAppearance.system.rawValue
   @AppStorage(AppPreferenceKey.contentMediaLoadPolicy)
@@ -42,6 +43,12 @@ struct TiebaPlusPlusApp: App {
   }
 
   var body: some Scene {
+    let resolvedContentMediaLoadPolicy = ContentMediaLoadPolicy.resolved(contentMediaLoadPolicy)
+    let contentMediaLoadBehavior = ContentMediaLoadBehavior.resolved(
+      policy: resolvedContentMediaLoadPolicy,
+      networkSnapshot: contentMediaNetworkMonitor.snapshot
+    )
+
     WindowGroup {
       RootView(
         service: service,
@@ -56,8 +63,9 @@ struct TiebaPlusPlusApp: App {
       .environment(\.contentFilterRepository, contentFilterRepository)
       .environment(
         \.contentMediaLoadPolicy,
-        ContentMediaLoadPolicy.resolved(contentMediaLoadPolicy)
+        resolvedContentMediaLoadPolicy
       )
+      .environment(\.contentMediaLoadBehavior, contentMediaLoadBehavior)
       .environment(\.hidesThreadListMedia, hidesThreadListMedia)
       .environment(
         \.darkensContentThumbnailsInDarkMode,

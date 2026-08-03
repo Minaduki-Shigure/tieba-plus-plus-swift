@@ -48,7 +48,7 @@ struct ThreadSummaryRow: View {
   let showsForum: Bool
   let showsAuthor: Bool
 
-  @Environment(\.contentMediaLoadPolicy) private var contentMediaLoadPolicy
+  @Environment(\.contentMediaLoadBehavior) private var contentMediaLoadBehavior
   @Environment(\.hidesThreadListMedia) private var hidesThreadListMedia
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
 
@@ -219,12 +219,12 @@ struct ThreadSummaryRow: View {
     label: String,
     @ViewBuilder content: () -> Content
   ) -> some View {
-    switch contentMediaLoadPolicy {
-    case .automatic:
+    switch contentMediaLoadBehavior {
+    case .automatic, .economicalNetworkOnly:
       content()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
-    case .tapToLoad:
+    case .userInitiated:
       content()
     }
   }
@@ -432,7 +432,7 @@ private struct ThreadPreviewImage: View {
   let loadAccessibilityLabel: String
   let successAccessibilityLabel: String
 
-  @Environment(\.contentMediaLoadPolicy) private var contentMediaLoadPolicy
+  @Environment(\.contentMediaLoadBehavior) private var contentMediaLoadBehavior
 
   var body: some View {
     ContentRemoteImage(
@@ -464,7 +464,7 @@ private struct ThreadPreviewImage: View {
   }
 
   private var failureSystemImage: String {
-    contentMediaLoadPolicy == .tapToLoad && RemoteImageURLPolicy.allows(url)
+    contentMediaLoadBehavior == .userInitiated && RemoteImageURLPolicy.allows(url)
       ? "arrow.clockwise.circle"
       : "photo.badge.exclamationmark"
   }

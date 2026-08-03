@@ -52,10 +52,11 @@ struct ContentRemoteImageLoadState: Equatable, Sendable {
 
   mutating func authorize(
     request: ContentRemoteImageRequestIdentity,
-    policy: ContentMediaLoadPolicy
+    policy: ContentMediaLoadPolicy,
+    behavior: ContentMediaLoadBehavior
   ) {
     guard ContentRemoteImageLoadDecision.permitsManualAction(
-      policy: policy,
+      behavior: behavior,
       request: request
     ) else { return }
     lastObservedPolicy = policy
@@ -93,41 +94,61 @@ enum ContentRemoteImageLoadDecision {
 
   static func fetchPolicy(
     policy: ContentMediaLoadPolicy,
+    behavior: ContentMediaLoadBehavior,
     lastObservedPolicy: ContentMediaLoadPolicy?,
     request: ContentRemoteImageRequestIdentity,
     authorizedRequest: ContentRemoteImageRequestIdentity?
   ) -> DownsampledImageFetchPolicy {
-    if policy == .automatic {
+    if lastObservedPolicy == policy, authorizedRequest == request {
       return .allowNetwork(.preview)
     }
-    guard
-      lastObservedPolicy == policy,
-      authorizedRequest == request
-    else { return .cacheOnly }
-    return .allowNetwork(.preview)
+
+    switch behavior {
+    case .automatic:
+      return .allowNetwork(.preview)
+    case .economicalNetworkOnly:
+      return .allowEconomicalNetwork(.preview)
+    case .userInitiated:
+      return .cacheOnly
+    }
   }
 
   static func permitsManualAction(
-    policy: ContentMediaLoadPolicy,
+    behavior: ContentMediaLoadBehavior,
     request: ContentRemoteImageRequestIdentity
   ) -> Bool {
-    policy == .tapToLoad
+    behavior == .userInitiated
       && request.url.map(RemoteImageURLPolicy.allows) == true
   }
 
   static func reloadID(
     attempt: Int,
-    policy: ContentMediaLoadPolicy
+    behavior: ContentMediaLoadBehavior,
+    hasCurrentAuthorization: Bool
   ) -> Int {
-    (attempt &* 2) &+ (policy == .automatic ? 0 : 1)
+    let variant: Int
+    if hasCurrentAuthorization {
+      variant = 3
+    } else {
+      switch behavior {
+      case .automatic:
+        variant = 0
+      case .economicalNetworkOnly:
+        variant = 1
+      case .userInitiated:
+        variant = 2
+      }
+    }
+    return (attempt &* 4) &+ variant
   }
 
   static func storedFailurePresentation(
     policy: ContentMediaLoadPolicy,
+    behavior: ContentMediaLoadBehavior,
     request: ContentRemoteImageRequestIdentity,
     state: ContentRemoteImageLoadState
   ) -> StoredFailurePresentation {
-    guard permitsManualAction(policy: policy, request: request) else {
+    guard permitsManualAction(behavior: behavior, request: request) else {
       return .failure
     }
     if state.failedRequest == request {
@@ -142,6 +163,7 @@ enum ContentRemoteImageLoadDecision {
 
 struct ContentRemoteImage<Content: View>: View {
   @Environment(\.contentMediaLoadPolicy) private var policy
+  @Environment(\.contentMediaLoadBehavior) private var behavior
 
   let url: URL?
   let maxPixelSize: Int
@@ -169,6 +191,7 @@ struct ContentRemoteImage<Content: View>: View {
   private var fetchPolicy: DownsampledImageFetchPolicy {
     ContentRemoteImageLoadDecision.fetchPolicy(
       policy: policy,
+      behavior: behavior,
       lastObservedPolicy: loadState.lastObservedPolicy,
       request: request,
       authorizedRequest: loadState.authorizedRequest
@@ -178,7 +201,9 @@ struct ContentRemoteImage<Content: View>: View {
   private var effectiveReloadID: Int {
     ContentRemoteImageLoadDecision.reloadID(
       attempt: loadState.reloadAttempt,
-      policy: policy
+      behavior: behavior,
+      hasCurrentAuthorization: loadState.lastObservedPolicy == policy
+        && loadState.authorizedRequest == request
     )
   }
 
@@ -229,6 +254,7 @@ struct ContentRemoteImage<Content: View>: View {
     case .empty:
       if ContentRemoteImageLoadDecision.storedFailurePresentation(
         policy: policy,
+        behavior: behavior,
         request: request,
         state: loadState
       ) == .retry {
@@ -240,6 +266,7 @@ struct ContentRemoteImage<Content: View>: View {
     case .failure:
       switch ContentRemoteImageLoadDecision.storedFailurePresentation(
         policy: policy,
+        behavior: behavior,
         request: request,
         state: loadState
       ) {
@@ -256,7 +283,7 @@ struct ContentRemoteImage<Content: View>: View {
   private func presentsManualAction(for phase: ContentRemoteImagePhase) -> Bool {
     guard
       ContentRemoteImageLoadDecision.permitsManualAction(
-        policy: policy,
+        behavior: behavior,
         request: request
       )
     else { return false }
@@ -280,10 +307,10 @@ struct ContentRemoteImage<Content: View>: View {
   private func authorizeAndReload() {
     guard
       ContentRemoteImageLoadDecision.permitsManualAction(
-        policy: policy,
+        behavior: behavior,
         request: request
       )
     else { return }
-    loadState.authorize(request: request, policy: policy)
+    loadState.authorize(request: request, policy: policy, behavior: behavior)
   }
 }

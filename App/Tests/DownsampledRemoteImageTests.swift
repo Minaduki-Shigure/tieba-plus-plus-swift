@@ -82,6 +82,25 @@ final class DownsampledRemoteImageTests: XCTestCase {
 
     let recordedKinds = await downloader.recordedKinds()
     XCTAssertEqual(recordedKinds, [.preview])
+    let recordedNetworkAccesses = await downloader.recordedNetworkAccesses()
+    XCTAssertEqual(recordedNetworkAccesses, [.unrestricted])
+  }
+
+  func testEconomicalPolicyUsesEconomicalNetworkAccess() async throws {
+    let downloader = RecordingRemoteImageDownloader(imageData: try makeJPEGData())
+    let repository = DownsampledImageRepository(downloader: downloader)
+    let url = try XCTUnwrap(URL(string: "https://img.example/economical.jpg"))
+
+    _ = try await repository.image(
+      at: url,
+      maxPixelSize: 1_600,
+      fetchPolicy: .allowEconomicalNetwork(.preview)
+    )
+
+    let recordedKinds = await downloader.recordedKinds()
+    XCTAssertEqual(recordedKinds, [.preview])
+    let recordedNetworkAccesses = await downloader.recordedNetworkAccesses()
+    XCTAssertEqual(recordedNetworkAccesses, [.economicalOnly])
   }
 
   func testColdCacheOnlyMissDoesNotStartDownload() async throws {
@@ -113,6 +132,28 @@ final class DownsampledRemoteImageTests: XCTestCase {
 
     let recordedKinds = await downloader.recordedKinds()
     XCTAssertEqual(recordedKinds, [.preview])
+  }
+
+  func testCacheIsSharedAcrossNetworkAccessPolicies() async throws {
+    let downloader = RecordingRemoteImageDownloader(imageData: try makeJPEGData())
+    let repository = DownsampledImageRepository(downloader: downloader)
+    let url = try XCTUnwrap(URL(string: "https://img.example/access-cached.jpg"))
+
+    _ = try await repository.image(
+      at: url,
+      maxPixelSize: 320,
+      fetchPolicy: .allowEconomicalNetwork(.preview)
+    )
+    _ = try await repository.image(
+      at: url,
+      maxPixelSize: 320,
+      fetchPolicy: .allowNetwork(.preview)
+    )
+
+    let recordedKinds = await downloader.recordedKinds()
+    XCTAssertEqual(recordedKinds, [.preview])
+    let recordedNetworkAccesses = await downloader.recordedNetworkAccesses()
+    XCTAssertEqual(recordedNetworkAccesses, [.economicalOnly])
   }
 
   func testCacheKeyUsesNormalizedPixelSize() async throws {
@@ -238,6 +279,8 @@ final class DownsampledRemoteImageTests: XCTestCase {
     XCTAssertEqual(lease.sourceURL, url)
     let recordedKinds = await downloader.recordedKinds()
     XCTAssertEqual(recordedKinds, [.preview])
+    let recordedNetworkAccesses = await downloader.recordedNetworkAccesses()
+    XCTAssertEqual(recordedNetworkAccesses, [.unrestricted])
   }
 
   func testDifferentDownloadKindsDoNotShareInFlightRequest() async throws {
@@ -273,6 +316,84 @@ final class DownsampledRemoteImageTests: XCTestCase {
     await downloader.releaseAll()
     _ = await previewTask.result
     _ = await originalTask.result
+  }
+
+  func testDifferentNetworkAccessesDoNotShareInFlightRequest() async throws {
+    let downloader = SuspendedRemoteImageDownloader(imageData: try makeJPEGData())
+    let repository = DownsampledImageRepository(downloader: downloader)
+    let url = try XCTUnwrap(URL(string: "https://img.example/network-access.jpg"))
+    let unrestrictedTask = Task {
+      try await repository.image(
+        at: url,
+        maxPixelSize: 320,
+        fetchPolicy: .allowNetwork(.preview)
+      )
+    }
+    let unrestrictedDidStart = await downloader.waitUntilRequestCount(1)
+    XCTAssertTrue(unrestrictedDidStart)
+    let economicalTask = Task {
+      try await repository.image(
+        at: url,
+        maxPixelSize: 320,
+        fetchPolicy: .allowEconomicalNetwork(.preview)
+      )
+    }
+    let economicalDidStart = await downloader.waitUntilRequestCount(2)
+    XCTAssertTrue(economicalDidStart)
+
+    let recordedKinds = await downloader.recordedKinds()
+    XCTAssertEqual(recordedKinds, [.preview, .preview])
+    let recordedNetworkAccesses = await downloader.recordedNetworkAccesses()
+    XCTAssertEqual(recordedNetworkAccesses, [.unrestricted, .economicalOnly])
+
+    unrestrictedTask.cancel()
+    economicalTask.cancel()
+    let didCancelBoth = await downloader.waitUntilCancellationCount(2)
+    XCTAssertTrue(didCancelBoth)
+    await downloader.releaseAll()
+    _ = await unrestrictedTask.result
+    _ = await economicalTask.result
+  }
+
+  func testCancellingEconomicalTransferDoesNotCancelUnrestrictedTransfer() async throws {
+    let downloader = SuspendedRemoteImageDownloader(imageData: try makeJPEGData())
+    let repository = DownsampledImageRepository(downloader: downloader)
+    let url = try XCTUnwrap(URL(string: "https://img.example/access-cancellation.jpg"))
+    let unrestrictedTask = Task {
+      try await repository.image(
+        at: url,
+        maxPixelSize: 320,
+        fetchPolicy: .allowNetwork(.preview)
+      )
+    }
+    let unrestrictedDidStart = await downloader.waitUntilRequestCount(1)
+    XCTAssertTrue(unrestrictedDidStart)
+    let economicalTask = Task {
+      try await repository.image(
+        at: url,
+        maxPixelSize: 320,
+        fetchPolicy: .allowEconomicalNetwork(.preview)
+      )
+    }
+    let economicalDidStart = await downloader.waitUntilRequestCount(2)
+    XCTAssertTrue(economicalDidStart)
+
+    economicalTask.cancel()
+    let economicalDidCancel = await downloader.waitUntilCancellationCount(1)
+    let cancellationCountBeforeRelease = await downloader.cancelledRequestCount()
+    XCTAssertTrue(economicalDidCancel)
+    XCTAssertEqual(cancellationCountBeforeRelease, 1)
+
+    await downloader.releaseAll()
+    _ = try await unrestrictedTask.value
+    switch await economicalTask.result {
+    case .success:
+      XCTFail("The cancelled economical transfer must not succeed")
+    case .failure(let error):
+      XCTAssertTrue(error is CancellationError)
+    }
+    let finalCancellationCount = await downloader.cancelledRequestCount()
+    XCTAssertEqual(finalCancellationCount, 1)
   }
 
   func testCancellingOneOfTwoIdenticalWaitersKeepsSharedTransferAlive() async throws {
@@ -408,15 +529,20 @@ final class DownsampledRemoteImageTests: XCTestCase {
 private actor RecordingRemoteImageDownloader: RemoteImageDownloading {
   private let imageData: Data
   private var kinds: [RemoteImageDownloadKind] = []
+  private var networkAccesses: [RemoteImageNetworkAccess] = []
 
   init(imageData: Data) {
     self.imageData = imageData
   }
 
-  func download(from url: URL, kind: RemoteImageDownloadKind) async throws
-    -> RemoteImageFileLease
+  func download(
+    from url: URL,
+    kind: RemoteImageDownloadKind,
+    networkAccess: RemoteImageNetworkAccess
+  ) async throws -> RemoteImageFileLease
   {
     kinds.append(kind)
+    networkAccesses.append(networkAccess)
     let directory = FileManager.default.temporaryDirectory
       .appendingPathComponent("RecordingRemoteImageDownloader", isDirectory: true)
       .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -436,11 +562,16 @@ private actor RecordingRemoteImageDownloader: RemoteImageDownloading {
   func recordedKinds() -> [RemoteImageDownloadKind] {
     kinds
   }
+
+  func recordedNetworkAccesses() -> [RemoteImageNetworkAccess] {
+    networkAccesses
+  }
 }
 
 private actor SuspendedRemoteImageDownloader: RemoteImageDownloading {
   private let imageData: Data
   private var kinds: [RemoteImageDownloadKind] = []
+  private var networkAccesses: [RemoteImageNetworkAccess] = []
   private var pending: [CheckedContinuation<Void, Never>] = []
   private var cancelledRequests = 0
   private var isReleased = false
@@ -449,10 +580,14 @@ private actor SuspendedRemoteImageDownloader: RemoteImageDownloading {
     self.imageData = imageData
   }
 
-  func download(from url: URL, kind: RemoteImageDownloadKind) async throws
-    -> RemoteImageFileLease
+  func download(
+    from url: URL,
+    kind: RemoteImageDownloadKind,
+    networkAccess: RemoteImageNetworkAccess
+  ) async throws -> RemoteImageFileLease
   {
     kinds.append(kind)
+    networkAccesses.append(networkAccess)
     await withTaskCancellationHandler {
       await waitForRelease()
     } onCancel: {
@@ -506,6 +641,10 @@ private actor SuspendedRemoteImageDownloader: RemoteImageDownloading {
 
   func recordedKinds() -> [RemoteImageDownloadKind] {
     kinds
+  }
+
+  func recordedNetworkAccesses() -> [RemoteImageNetworkAccess] {
+    networkAccesses
   }
 
   func cancelledRequestCount() -> Int {
@@ -586,8 +725,11 @@ private actor GatedRemoteImageDownloader: RemoteImageDownloading {
     self.cancellationProbe = cancellationProbe
   }
 
-  func download(from url: URL, kind: RemoteImageDownloadKind) async throws
-    -> RemoteImageFileLease
+  func download(
+    from url: URL,
+    kind: RemoteImageDownloadKind,
+    networkAccess: RemoteImageNetworkAccess
+  ) async throws -> RemoteImageFileLease
   {
     kinds.append(kind)
     let cancellationProbe = cancellationProbe

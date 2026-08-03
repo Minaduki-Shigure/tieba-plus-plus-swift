@@ -453,9 +453,15 @@ private actor RemoteImageDownloaderSpy: RemoteImageDownloading {
     self.recorder = recorder
   }
 
-  func download(from url: URL, kind: RemoteImageDownloadKind) async throws
-    -> RemoteImageFileLease
+  func download(
+    from url: URL,
+    kind: RemoteImageDownloadKind,
+    networkAccess: RemoteImageNetworkAccess
+  ) async throws -> RemoteImageFileLease
   {
+    guard networkAccess == .unrestricted else {
+      throw ExportTestError(message: "expected unrestricted network access")
+    }
     downloads += 1
     switch kind {
     case .original:

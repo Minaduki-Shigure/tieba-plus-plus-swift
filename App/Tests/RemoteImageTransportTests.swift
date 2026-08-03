@@ -27,20 +27,81 @@ final class RemoteImageTransportTests: XCTestCase {
     allowed.setValue("session=secret", forHTTPHeaderField: "Cookie")
     allowed.setValue("Basic secret", forHTTPHeaderField: "Proxy-Authorization")
     allowed.cachePolicy = .returnCacheDataElseLoad
+    allowed.allowsCellularAccess = true
+    allowed.allowsExpensiveNetworkAccess = true
+    allowed.allowsConstrainedNetworkAccess = true
 
-    let sanitized = try XCTUnwrap(RemoteImageURLPolicy.sanitizedRedirectRequest(allowed))
+    let sanitized = try XCTUnwrap(
+      RemoteImageURLPolicy.sanitizedRedirectRequest(
+        allowed,
+        networkAccess: .economicalOnly
+      )
+    )
     XCTAssertNil(sanitized.value(forHTTPHeaderField: "Authorization"))
     XCTAssertNil(sanitized.value(forHTTPHeaderField: "Cookie"))
     XCTAssertNil(sanitized.value(forHTTPHeaderField: "Proxy-Authorization"))
     XCTAssertEqual(sanitized.cachePolicy, .reloadIgnoringLocalCacheData)
+    XCTAssertFalse(sanitized.allowsCellularAccess)
+    XCTAssertFalse(sanitized.allowsExpensiveNetworkAccess)
+    XCTAssertFalse(sanitized.allowsConstrainedNetworkAccess)
 
     let cleartext = URLRequest(url: try XCTUnwrap(URL(string: "http://cdn.example/image")))
-    XCTAssertNil(RemoteImageURLPolicy.sanitizedRedirectRequest(cleartext))
+    XCTAssertNil(
+      RemoteImageURLPolicy.sanitizedRedirectRequest(
+        cleartext,
+        networkAccess: .economicalOnly
+      )
+    )
 
     let credentialed = URLRequest(
       url: try XCTUnwrap(URL(string: "https://user@cdn.example/image"))
     )
-    XCTAssertNil(RemoteImageURLPolicy.sanitizedRedirectRequest(credentialed))
+    XCTAssertNil(
+      RemoteImageURLPolicy.sanitizedRedirectRequest(
+        credentialed,
+        networkAccess: .economicalOnly
+      )
+    )
+  }
+
+  func testInitialRequestAppliesNetworkAccessFlags() throws {
+    let url = try XCTUnwrap(URL(string: "https://img.example/image"))
+
+    let unrestricted = BoundedHTTPSRemoteImageTransport.request(
+      from: url,
+      networkAccess: .unrestricted
+    )
+    XCTAssertEqual(unrestricted.cachePolicy, .reloadIgnoringLocalCacheData)
+    XCTAssertTrue(unrestricted.allowsCellularAccess)
+    XCTAssertTrue(unrestricted.allowsExpensiveNetworkAccess)
+    XCTAssertTrue(unrestricted.allowsConstrainedNetworkAccess)
+
+    let economical = BoundedHTTPSRemoteImageTransport.request(
+      from: url,
+      networkAccess: .economicalOnly
+    )
+    XCTAssertEqual(economical.cachePolicy, .reloadIgnoringLocalCacheData)
+    XCTAssertFalse(economical.allowsCellularAccess)
+    XCTAssertFalse(economical.allowsExpensiveNetworkAccess)
+    XCTAssertFalse(economical.allowsConstrainedNetworkAccess)
+  }
+
+  func testUnrestrictedRedirectSanitizationRestoresUnrestrictedAccess() throws {
+    var request = URLRequest(url: try XCTUnwrap(URL(string: "https://cdn.example/image")))
+    request.allowsCellularAccess = false
+    request.allowsExpensiveNetworkAccess = false
+    request.allowsConstrainedNetworkAccess = false
+
+    let sanitized = try XCTUnwrap(
+      RemoteImageURLPolicy.sanitizedRedirectRequest(
+        request,
+        networkAccess: .unrestricted
+      )
+    )
+
+    XCTAssertTrue(sanitized.allowsCellularAccess)
+    XCTAssertTrue(sanitized.allowsExpensiveNetworkAccess)
+    XCTAssertTrue(sanitized.allowsConstrainedNetworkAccess)
   }
 
   func testHardenedConfigurationDisablesAmbientStateAndCaching() {
@@ -89,6 +150,29 @@ final class RemoteImageTransportTests: XCTestCase {
     lease = nil
 
     XCTAssertFalse(FileManager.default.fileExists(atPath: leaseDirectory.path))
+  }
+
+  func testEconomicalDownloadCarriesRestrictionsIntoURLSession() async throws {
+    let root = makeTemporaryDirectoryURL()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let transport = makeTransport(temporaryDirectory: root)
+    let requestedURL = try XCTUnwrap(
+      URL(string: "https://remote-image.test/economical-flags")
+    )
+
+    let lease = try await transport.download(
+      from: requestedURL,
+      kind: .preview,
+      networkAccess: .economicalOnly
+    )
+    let recordedRequest = try XCTUnwrap(
+      RemoteImageURLProtocol.recordedRequest(forPath: requestedURL.path)
+    )
+
+    XCTAssertFalse(recordedRequest.allowsCellularAccess)
+    XCTAssertFalse(recordedRequest.allowsExpensiveNetworkAccess)
+    XCTAssertFalse(recordedRequest.allowsConstrainedNetworkAccess)
+    withExtendedLifetime(lease) {}
   }
 
   func testDownloadRejectsNonSuccessHTTPResponse() async throws {
@@ -170,6 +254,12 @@ final class RemoteImageTransportTests: XCTestCase {
 }
 
 private final class RemoteImageURLProtocol: URLProtocol, @unchecked Sendable {
+  private static let requestRecorder = RemoteImageRequestRecorder()
+
+  static func recordedRequest(forPath path: String) -> URLRequest? {
+    requestRecorder.request(forPath: path)
+  }
+
   override class func canInit(with request: URLRequest) -> Bool {
     request.url?.host == "remote-image.test"
   }
@@ -179,6 +269,7 @@ private final class RemoteImageURLProtocol: URLProtocol, @unchecked Sendable {
   }
 
   override func startLoading() {
+    Self.requestRecorder.record(request)
     guard let url = request.url else {
       client?.urlProtocol(self, didFailWithError: URLError(.badURL))
       return
@@ -211,4 +302,22 @@ private final class RemoteImageURLProtocol: URLProtocol, @unchecked Sendable {
   }
 
   override func stopLoading() {}
+}
+
+private final class RemoteImageRequestRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var requestsByPath = [String: URLRequest]()
+
+  func record(_ request: URLRequest) {
+    guard let path = request.url?.path else { return }
+    lock.lock()
+    requestsByPath[path] = request
+    lock.unlock()
+  }
+
+  func request(forPath path: String) -> URLRequest? {
+    lock.lock()
+    defer { lock.unlock() }
+    return requestsByPath[path]
+  }
 }

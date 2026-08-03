@@ -314,14 +314,35 @@ bounded pixel size and memory cache. Original image dimensions are never
 decoded directly into the browsing UI.
 
 The content-media preference applies only to thread previews, rich-content
-images, video covers, per-forum search media, and hot-topic images. In
-tap-to-load mode, a cold image performs an exact in-memory cache lookup and
-must not create or join a network request until the user presses its load
-control. That authorization is bound to the current HTTPS URL and requested
-pixel size; changing either value or changing the policy revokes it. A failed
-manual request is retried only by another explicit tap. The cache is
+images, video covers, per-forum search media, and hot-topic images. Automatic
+mode preserves unrestricted preview loading. Data-saving mode automatically
+loads only while the observed path is available, non-expensive, and
+non-constrained; unknown, unavailable, expensive, and Low Data Mode paths are
+cache-first and require an explicit tap. Tap-to-load mode always uses that
+cache-first behavior. The app uses one process-level path monitor and stores
+only a transient availability/cost snapshot; it never reads an SSID, BSSID,
+carrier identity, or local-network peer and does not probe a URL to classify
+the network.
+
+A cold manually gated image performs an exact in-memory cache lookup and must
+not create or join a network request until the user presses its load control.
+That authorization is bound to the current HTTPS URL and requested pixel size;
+changing either value or changing the persistent policy revokes it. A path
+change alone must not revoke or restart an already authorized request. Once
+that request reaches a terminal state, the effective policy is evaluated again:
+a path that has become economical may start one restricted automatic attempt,
+while a still-gated failure requires another explicit tap. The cache is
 process-local and ephemeral, so this setting does not claim persistent offline
 media or suppress the page-data requests needed to browse.
+
+Automatic data-saving requests deny cellular, expensive, and constrained
+network access on the `URLRequest` itself as well as in the path decision. The
+same flags are reapplied after an accepted HTTPS redirect. Explicitly tapped
+requests remain unrestricted, and restricted and unrestricted transfers for
+the same URL and pixel size use different in-flight keys; the decoded memory
+cache remains shared. This prevents a restricted waiter from silently joining
+an already unrestricted transfer without fragmenting cached images by network
+state.
 
 The independent list-media collapse preference applies only to shared thread
 cards and per-forum search media. A collapsed presentation retains only the
@@ -332,7 +353,7 @@ The underlying deduplicated transfer is canceled when its final waiter leaves,
 but may continue for another active view that requested the same resource.
 Post bodies, hot-topic images, avatars, gallery and export paths, playback, and
 page-data requests remain outside this preference. Expanded previews continue
-to follow the separate automatic or tap-to-load policy.
+to follow the separate automatic, data-saving, or tap-to-load policy.
 
 Dark-appearance thumbnail dimming is a post-decode visual modifier only. When
 enabled, successfully rendered static content images use a fixed 0.4 color
@@ -346,10 +367,11 @@ badges, and playback controls remain outside this modifier.
 Avatars remain outside that content-media policy. Gallery originals, video and
 voice playback, sharing, and saving already require a separate explicit user
 action and retain those user-initiated paths. Rendering a video cover must not
-construct an `AVPlayer` or start playback. Switching from automatic to
-tap-to-load cancels the content view's waiter; a deduplicated transfer may
-continue only when another active, independently authorized waiter still owns
-it.
+construct an `AVPlayer` or start playback. When an automatic preview without a
+manual authorization becomes gated, its content-view waiter is canceled; an
+already authorized request keeps that authorization until it finishes. A
+deduplicated transfer may continue only when another active, independently
+authorized waiter still owns it.
 
 Thread-list previews reuse that same media pipeline. Metadata badges and
 read-only counters come only from existing anonymous responses; rendering a

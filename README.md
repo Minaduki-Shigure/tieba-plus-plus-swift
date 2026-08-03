@@ -78,10 +78,13 @@ but authenticated write operations remain intentionally unsupported.
   origin media. Images open in a same-content gallery with paging and zoom;
   explicit actions can share the original file or save it through add-only
   Photos access.
-- Content media can either load automatically or wait for an explicit tap.
-  Tap-to-load covers thread previews, post images, video covers, per-forum
-  search media, and hot-topic images while leaving avatars, opened gallery
-  originals, sharing, and saving on their existing user-initiated paths.
+- Content media can load automatically, conserve data, or wait for every
+  explicit tap. Data-saving mode loads automatically only on an available
+  network that iOS does not mark expensive or constrained; otherwise it reads
+  the memory cache first and offers a load control. These modes cover thread previews,
+  post images, video covers, per-forum search media, and hot-topic images while
+  leaving avatars, opened gallery originals, sharing, and saving on their
+  existing user-initiated paths.
 - An optional compact mode replaces media previews in thread lists and
   per-forum search with noninteractive type or image-count summaries. Collapsed
   rows create no preview view or request; post bodies, hot-topic images,

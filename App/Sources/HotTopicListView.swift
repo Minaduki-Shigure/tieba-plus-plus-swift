@@ -192,7 +192,7 @@ struct HotTopicRemoteImage: View {
   let url: URL?
   let maxPixelSize: Int
 
-  @Environment(\.contentMediaLoadPolicy) private var contentMediaLoadPolicy
+  @Environment(\.contentMediaLoadBehavior) private var contentMediaLoadBehavior
 
   var body: some View {
     ContentRemoteImage(
@@ -234,7 +234,7 @@ struct HotTopicRemoteImage: View {
   }
 
   private var failureSystemImage: String {
-    contentMediaLoadPolicy == .tapToLoad
+    contentMediaLoadBehavior == .userInitiated
       && url.map(RemoteImageURLPolicy.allows) == true
       ? "arrow.clockwise.circle"
       : "photo.badge.exclamationmark"

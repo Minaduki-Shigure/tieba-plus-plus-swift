@@ -18,6 +18,7 @@ enum DownsampledRemoteImageAttemptOutcome: Equatable, Sendable {
 enum DownsampledImageFetchPolicy: Hashable, Sendable {
   case cacheOnly
   case allowNetwork(RemoteImageDownloadKind)
+  case allowEconomicalNetwork(RemoteImageDownloadKind)
 }
 
 struct DownsampledRemoteImageResourceID: Hashable, Sendable {
@@ -178,6 +179,7 @@ actor DownsampledImageRepository {
   private struct InFlightKey: Hashable, Sendable {
     let cacheKey: CacheKey
     let downloadKind: RemoteImageDownloadKind
+    let networkAccess: RemoteImageNetworkAccess
   }
 
   private struct InFlightRequest {
@@ -234,11 +236,24 @@ actor DownsampledImageRepository {
     if let cached = cache.object(forKey: cacheKey.storageKey) {
       return DownsampledImageAsset(image: cached)
     }
-    guard case .allowNetwork(let downloadKind) = fetchPolicy else {
+    let downloadKind: RemoteImageDownloadKind
+    let networkAccess: RemoteImageNetworkAccess
+    switch fetchPolicy {
+    case .cacheOnly:
       throw DownsampledImageError.cacheMiss
+    case .allowNetwork(let kind):
+      downloadKind = kind
+      networkAccess = .unrestricted
+    case .allowEconomicalNetwork(let kind):
+      downloadKind = kind
+      networkAccess = .economicalOnly
     }
 
-    let inFlightKey = InFlightKey(cacheKey: cacheKey, downloadKind: downloadKind)
+    let inFlightKey = InFlightKey(
+      cacheKey: cacheKey,
+      downloadKind: downloadKind,
+      networkAccess: networkAccess
+    )
     let waiterID = UUID()
     let task: Task<DownsampledImageAsset, Error>
     if var request = inFlight[inFlightKey] {
@@ -257,7 +272,8 @@ actor DownsampledImageRepository {
         do {
           lease = try await downloader.download(
             from: url,
-            kind: downloadKind
+            kind: downloadKind,
+            networkAccess: networkAccess
           )
         } catch let error as RemoteImageDownloadError {
           switch error {

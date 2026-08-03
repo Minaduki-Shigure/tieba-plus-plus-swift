@@ -170,7 +170,7 @@ private struct BrowseImageView: View {
   let height: Int
   let onOpen: () -> Void
 
-  @Environment(\.contentMediaLoadPolicy) private var contentMediaLoadPolicy
+  @Environment(\.contentMediaLoadBehavior) private var contentMediaLoadBehavior
 
   private var aspectRatio: CGFloat {
     guard width > 0, height > 0 else { return 4 / 3 }
@@ -197,7 +197,7 @@ private struct BrowseImageView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("查看大图")
       case .empty:
-        if contentMediaLoadPolicy == .automatic {
+        if contentMediaLoadBehavior != .userInitiated {
           Button(action: onOpen) {
             imageLoadingPlaceholder
           }
@@ -209,7 +209,7 @@ private struct BrowseImageView: View {
       case .loadRequired:
         imageActionPlaceholder(title: "加载图片", systemImage: "arrow.down.circle")
       case .failure:
-        if contentMediaLoadPolicy == .automatic {
+        if contentMediaLoadBehavior != .userInitiated {
           Button(action: onOpen) {
             imageActionPlaceholder(
               title: "图片加载失败",
@@ -255,7 +255,8 @@ private struct BrowseImageView: View {
   }
 
   private var canRetryImageLoad: Bool {
-    contentMediaLoadPolicy == .tapToLoad && RemoteImageURLPolicy.allows(thumbnailURL)
+    contentMediaLoadBehavior == .userInitiated
+      && RemoteImageURLPolicy.allows(thumbnailURL)
   }
 }
 
@@ -266,7 +267,7 @@ private struct BrowseVideoView: View {
   let height: Int
 
   @State private var player: AVPlayer?
-  @Environment(\.contentMediaLoadPolicy) private var contentMediaLoadPolicy
+  @Environment(\.contentMediaLoadBehavior) private var contentMediaLoadBehavior
 
   private var aspectRatio: CGFloat {
     guard width > 0, height > 0 else { return 16 / 9 }
@@ -362,6 +363,6 @@ private struct BrowseVideoView: View {
   }
 
   private func canRetryCoverLoad(_ coverURL: URL) -> Bool {
-    contentMediaLoadPolicy == .tapToLoad && RemoteImageURLPolicy.allows(coverURL)
+    contentMediaLoadBehavior == .userInitiated && RemoteImageURLPolicy.allows(coverURL)
   }
 }
