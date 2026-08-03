@@ -138,6 +138,10 @@ protocol SearchService: Sendable {
     -> ThreadSearchPageData
 }
 
+protocol SearchSuggestionService: Sendable {
+  func searchSuggestions(query: String) async throws -> [String]
+}
+
 protocol ForumPostSearchService: Sendable {
   func searchForumPosts(
     query: String,

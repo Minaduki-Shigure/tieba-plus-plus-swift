@@ -17,6 +17,7 @@ let topic = try await client.getHotTopic(
   topicName: topics[0].name
 )
 let search = try await client.searchThreads(query: "swift", sort: .newest)
+let suggestions = try await client.searchSuggestions(query: "swift")
 let scopedSearch = try await client.searchForumPosts(
   query: "async",
   forumName: "swift",
@@ -78,6 +79,11 @@ let followed = try await authenticatedClient.getFollowedForums(
   supports newest/oldest/relevance sorting with endpoint-specific wire values,
   while per-forum search supports newest/relevance sorting, topic-only/all-content
   filters, and numeric pagination. User search is a single nonpaginated request.
+- Search suggestions use protobuf command `309438`. Their minimal anonymous
+  request contains only a 2-to-100-character public keyword and fixed
+  `isforum = "0"`; it omits `CommonReq`, credentials, cookies, and device
+  metadata. Responses are limited to 64 KiB before decoding, normalized, and
+  bounded to 10 unique values.
 - Hot-topic discovery uses the credential-free `/mo/q/hotMessage/list` and
   `/mo/q/newtopic/topicDetail` Web endpoints. Detail pagination forwards both
   the numeric page/offset and the previous page's final feed cursor.

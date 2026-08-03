@@ -31,6 +31,8 @@
         "ProfileReqIdl.proto",
         "ProfileResIdl.proto",
         "RecommendTopicList.proto",
+        "SearchSugReqIdl.proto",
+        "SearchSugResIdl.proto",
         "SimpleForum.proto",
         "SortButton.proto",
         "SubPostList.proto",

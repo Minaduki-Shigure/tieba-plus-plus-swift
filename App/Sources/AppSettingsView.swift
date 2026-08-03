@@ -8,6 +8,8 @@ struct AppSettingsView: View {
   private var defaultForumSort = ForumThreadSort.replyTime.rawValue
   @AppStorage(AppPreferenceKey.homeShowsRecentForums)
   private var homeShowsRecentForums = true
+  @AppStorage(AppPreferenceKey.searchSuggestionsEnabled)
+  private var searchSuggestionsEnabled = false
 
   init(historyRepository: any BrowsingHistoryRepository) {
     _historyViewModel = StateObject(
@@ -68,6 +70,14 @@ struct AppSettingsView: View {
 
       Section("首页") {
         Toggle("显示最近访问的贴吧", isOn: $homeShowsRecentForums)
+      }
+
+      Section {
+        Toggle("在线搜索联想", isOn: $searchSuggestionsEnabled)
+      } header: {
+        Text("搜索与隐私")
+      } footer: {
+        Text("开启后，会在您提交搜索前向百度发送输入关键词，以获取在线联想建议。")
       }
 
       Section("内容") {

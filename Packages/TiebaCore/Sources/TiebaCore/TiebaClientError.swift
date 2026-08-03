@@ -7,6 +7,7 @@ public enum TiebaClientError: Error, Sendable, Equatable {
   case transportFailure
   case invalidHTTPResponse
   case httpStatus(Int)
+  case responseTooLarge(maximumBytes: Int)
   case invalidProtobuf
   case invalidJSON
   case server(code: Int32, message: String)
@@ -27,6 +28,8 @@ extension TiebaClientError: LocalizedError {
       "The Tieba server returned an invalid HTTP response."
     case .httpStatus(let status):
       "The Tieba server returned HTTP \(status)."
+    case .responseTooLarge(let maximumBytes):
+      "The Tieba server response exceeded the \(maximumBytes)-byte limit."
     case .invalidProtobuf:
       "The Tieba server returned an unreadable Protocol Buffer response."
     case .invalidJSON:

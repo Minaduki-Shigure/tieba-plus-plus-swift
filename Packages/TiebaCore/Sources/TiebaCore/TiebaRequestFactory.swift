@@ -395,6 +395,22 @@ struct TiebaRequestFactory: Sendable {
     )
   }
 
+  func searchSuggestions(query rawQuery: String) throws -> URLRequest {
+    let query = try TiebaSearchSuggestionPolicy.validatedQuery(rawQuery)
+
+    var data = SearchSugReqIdl.DataReq()
+    data.word = query
+    data.isforum = "0"
+
+    var message = SearchSugReqIdl()
+    message.data = data
+    return try request(
+      path: "/c/s/searchSug",
+      command: 309_438,
+      protobuf: message.serializedData()
+    )
+  }
+
   func hotTopic(
     topicID: Int64,
     topicName rawTopicName: String,

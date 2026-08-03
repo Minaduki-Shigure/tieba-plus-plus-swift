@@ -11,6 +11,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Ranked anonymous hot-topic discovery with images and discussion counts
 - Hot-topic details with related forums and cursor-aware thread pagination
 - Categorized anonymous forum, thread, and user search
+- Default-off anonymous online suggestions for the home search field
 - Global post search with newest, oldest, and relevance sorting
 - Versioned local global-search history with recent/all, delete, and clear controls
 - Anonymous per-forum post search with newest/relevance sorting
@@ -227,6 +228,16 @@ Search categories load independently so one endpoint failure does not discard
 another category's results. User search uses the credential-free Web endpoint,
 accepts the server's object/array result variants and 64-bit user identifiers,
 and opens the same anonymous public profile workflow used by author rows.
+Online suggestions are a separate, explicitly enabled pre-submission path. The
+switch defaults off and enabling it does not send text already in the field;
+only a later edit that remains valid for 500 milliseconds can issue a request.
+That minimal protobuf request contains the bounded public keyword and fixed
+global-search discriminator, but no `CommonReq`, account credential, cookie, or
+device identifier. Suggestions are never cached, logged, or added to local
+history; only an explicit suggestion tap or ordinary search submission records
+the final term. Leaving the home flow, backgrounding the app, or disabling the
+setting cancels and clears the current suggestion state, although cancellation
+cannot retract a request that has already reached the server.
 Global post search defaults to newest and keeps its newest/oldest/relevance
 selection across first-page retries, refreshes, and pagination. Its wire values
 are intentionally modeled separately from per-forum search because the two Web

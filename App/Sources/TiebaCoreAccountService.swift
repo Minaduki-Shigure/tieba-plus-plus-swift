@@ -75,6 +75,8 @@ struct TiebaCoreAccountService: AccountService {
       message = "网络响应异常，请稍后重试。"
     case .httpStatus(let status):
       message = "贴吧服务暂时不可用（HTTP \(status)）。"
+    case .responseTooLarge:
+      message = "贴吧返回的数据过大，请稍后重试。"
     case .invalidProtobuf, .invalidJSON:
       message = "贴吧返回了无法识别的数据，接口可能已经更新。"
     case .server(let code, _):

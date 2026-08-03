@@ -75,6 +75,23 @@ Global thread sorting and per-forum post sorting must remain separate protocol
 types: their user-facing modes overlap, but their wire values do not. Tests must
 assert the exact endpoint-specific value without broadening the allowed fields.
 
+Online search suggestions are a distinct opt-in network behavior and must
+remain disabled by default. Enabling the setting must not send text already in
+the search field; only a subsequent edit that remains valid through the 500 ms
+debounce may start a request. The protobuf payload may contain only a trimmed
+2-to-100-character, at-most-400-byte public keyword and the fixed string
+`isforum = "0"`; it deliberately omits `CommonReq`, account credentials,
+cookies, device identifiers, and personalized metadata. The anonymous
+ephemeral transport must continue to ignore any response `Set-Cookie`.
+Responses are limited to 64 KiB before protobuf decoding, then trimmed,
+validated, exactly deduplicated, and bounded to 10 Core results and eight
+visible rows. Suggestions and partial queries must not be cached, logged, or
+written to search history. Failure is silent and must not retry; only an
+explicit suggestion tap or ordinary submission records the final query once.
+Disabling the setting, leaving the home flow, or backgrounding the app cancels
+and clears local suggestion state. Cancellation cannot retract a request that
+has already reached the server.
+
 Hot-topic list and detail requests follow the same anonymous boundary. They may
 send only the public topic identifier/name and pagination fields documented by
 the endpoint. The detail response can include `tbs`, `user`, and generated

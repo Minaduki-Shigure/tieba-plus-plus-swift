@@ -15,7 +15,7 @@ public struct TiebaClientConfiguration: Sendable, Hashable {
   public init(
     clientVersion: String = "12.64.1.1",
     authenticatedClientVersion: String = "22.6.5.1",
-    userAgent: String = "TiebaPlusPlus/0.30 (iOS)",
+    userAgent: String = "TiebaPlusPlus/0.31 (iOS)",
     requestTimeout: TimeInterval = 30
   ) {
     self.clientVersion = clientVersion
@@ -276,6 +276,17 @@ public actor TiebaClient {
     return try TiebaSearchDecoder.forums(from: body)
   }
 
+  public func searchSuggestions(query: String) async throws -> [String] {
+    let request = try requestFactory.searchSuggestions(query: query)
+    let body = try await send(
+      request,
+      maximumBodyBytes: TiebaSearchSuggestionPolicy.maximumResponseBodyBytes
+    )
+    let response: SearchSugResIdl = try decode(body)
+    try checkServerError(code: response.error.errorno, message: response.error.errmsg)
+    return TiebaProtoMapper.searchSuggestions(response.data)
+  }
+
   public func getHotTopics() async throws -> [TiebaHotTopic] {
     let request = try requestFactory.hotTopics()
     let body = try await send(request)
@@ -398,7 +409,10 @@ public actor TiebaClient {
     return TiebaProtoMapper.commentPage(response.data)
   }
 
-  private func send(_ request: URLRequest) async throws -> Data {
+  private func send(
+    _ request: URLRequest,
+    maximumBodyBytes: Int? = nil
+  ) async throws -> Data {
     let response: TiebaHTTPResponse
     do {
       response = try await transport.send(request)
@@ -416,6 +430,9 @@ public actor TiebaClient {
 
     guard (200..<300).contains(response.statusCode) else {
       throw TiebaClientError.httpStatus(response.statusCode)
+    }
+    if let maximumBodyBytes, response.body.count > maximumBodyBytes {
+      throw TiebaClientError.responseTooLarge(maximumBytes: maximumBodyBytes)
     }
     return response.body
   }

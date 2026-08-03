@@ -22,6 +22,10 @@ but authenticated write operations remain intentionally unsupported.
 - Forum, thread, and user search are categorized. Global post search supports
   newest, oldest, and relevance sorting; per-forum search supports
   newest/relevance sorting and topic-only or all-content filters.
+- Optional online suggestions for the home search field are disabled by
+  default. When explicitly enabled, they use a bounded, credential-free
+  request after a short pause; failures silently leave the local history flow
+  available.
 - Per-forum post-search results preserve their matched topic or reply context.
   Per-forum history supports individual deletion and per-forum clearing; global
   history adds recent/all views, individual deletion, clearing, and explicit

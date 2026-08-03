@@ -22,6 +22,11 @@ The minimal `HotThreadList` request/response and `RecommendTopicList` schemas,
 together with the `FrsTabInfo.tab_code`, `ThreadInfo.thread_id`, and
 `ThreadInfo.hot_num` fields used for the anonymous server-defined hot ranking,
 are adapted from the same TiebaLite commit.
+The minimal `SearchSug` request/response schemas used for anonymous search
+suggestions are also adapted from the same TiebaLite commit. The request's
+`CommonReq` field is deliberately omitted because this endpoint accepts the
+minimal anonymous contract. Account, device, forum-card, live-card, and
+ranking-card fields are intentionally omitted.
 The additional `FrsTabInfo` discriminator and `SortButton` menu fields, the
 minimal `GeneralTabList` request/response closure used for anonymous forum
 channels, the `PbPageResIdl.DataRes.first_floor_post` field used to preserve

@@ -1,0 +1,12 @@
+// tbclient.SearchSug.SearchSugResponse
+syntax = "proto3";
+
+import "Error.proto";
+
+message SearchSugResIdl {
+    Error error = 1;
+    message DataRes {
+        repeated string list = 2;
+    }
+    DataRes data = 2;
+}

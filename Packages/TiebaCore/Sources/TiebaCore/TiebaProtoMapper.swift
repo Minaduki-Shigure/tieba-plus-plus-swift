@@ -2,6 +2,24 @@ import Foundation
 import TiebaProto
 
 enum TiebaProtoMapper {
+  static func searchSuggestions(_ data: SearchSugResIdl.DataRes) -> [String] {
+    var seen = Set<String>()
+    var suggestions: [String] = []
+    suggestions.reserveCapacity(
+      min(data.list.count, TiebaSearchSuggestionPolicy.maximumResultCount)
+    )
+
+    for rawValue in data.list {
+      guard suggestions.count < TiebaSearchSuggestionPolicy.maximumResultCount else { break }
+      guard
+        let suggestion = TiebaSearchSuggestionPolicy.normalizedSuggestion(rawValue),
+        seen.insert(suggestion).inserted
+      else { continue }
+      suggestions.append(suggestion)
+    }
+    return suggestions
+  }
+
   static func hotThreadRanking(
     _ data: HotThreadListResIdl.DataRes
   ) -> TiebaHotThreadRanking {

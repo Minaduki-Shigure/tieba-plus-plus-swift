@@ -6,7 +6,7 @@ struct TiebaPlusPlusApp: App {
   private var appearance = AppAppearance.system.rawValue
   private let service:
     any BrowseService & SearchService & ForumPostSearchService & HotTopicService & HotThreadService
-      & UserProfileService & ForumInformationService
+      & UserProfileService & ForumInformationService & SearchSuggestionService
   private let contentFilterRepository: any ContentFilterRepository
   private let historyRepository: any BrowsingHistoryRepository = FileBrowsingHistoryStore.live()
   private let favoritesRepository: any LocalFavoritesRepository = FileLocalFavoritesStore.live()

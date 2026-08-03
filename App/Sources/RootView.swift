@@ -5,7 +5,7 @@ import SwiftUI
 struct RootView: View {
   let service:
     any BrowseService & SearchService & ForumPostSearchService & HotTopicService & HotThreadService
-      & UserProfileService & ForumInformationService
+      & UserProfileService & ForumInformationService & SearchSuggestionService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
@@ -18,15 +18,20 @@ struct RootView: View {
   @State private var showsRecentForums = true
   @State private var searchHistoryAction: GlobalSearchHistoryAction?
   @State private var linkErrorMessage: String?
+  @Environment(\.scenePhase) private var scenePhase
   @AppStorage(AppPreferenceKey.homeShowsRecentForums)
   private var homeShowsRecentForums = true
+  @AppStorage(AppPreferenceKey.searchSuggestionsEnabled)
+  private var searchSuggestionsEnabled = false
   @StateObject private var favoritesViewModel: LocalFavoritesViewModel
   @StateObject private var globalSearchHistoryViewModel: GlobalSearchHistoryViewModel
   @StateObject private var recentForumsViewModel: BrowsingHistoryViewModel
+  @StateObject private var searchSuggestionViewModel: SearchSuggestionViewModel
 
   init(
     service: any BrowseService & SearchService & ForumPostSearchService & HotTopicService
-      & HotThreadService & UserProfileService & ForumInformationService,
+      & HotThreadService & UserProfileService & ForumInformationService
+      & SearchSuggestionService,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository,
@@ -48,6 +53,9 @@ struct RootView: View {
     )
     _recentForumsViewModel = StateObject(
       wrappedValue: BrowsingHistoryViewModel(repository: historyRepository)
+    )
+    _searchSuggestionViewModel = StateObject(
+      wrappedValue: SearchSuggestionViewModel(service: service)
     )
   }
 
@@ -79,6 +87,8 @@ struct RootView: View {
             .help("直接打开贴吧")
           }
         }
+
+        searchSuggestionSection
 
         searchHistorySection
 
@@ -281,9 +291,23 @@ struct RootView: View {
     .onAppear {
       favoritesViewModel.reload()
       recentForumsViewModel.reload()
+      searchSuggestionViewModel.setEnabled(searchSuggestionsEnabled)
     }
     .task { await globalSearchHistoryViewModel.loadIfNeeded() }
-    .onChange(of: path) { _ in recentForumsViewModel.reload() }
+    .onChange(of: query) { searchSuggestionViewModel.inputChanged($0) }
+    .onChange(of: searchSuggestionsEnabled) {
+      searchSuggestionViewModel.setEnabled($0)
+    }
+    .onChange(of: scenePhase) {
+      if $0 != .active {
+        searchSuggestionViewModel.cancelAndClear()
+      }
+    }
+    .onChange(of: path) { _ in
+      searchSuggestionViewModel.cancelAndClear()
+      recentForumsViewModel.reload()
+    }
+    .onDisappear { searchSuggestionViewModel.cancelAndClear() }
     .onReceive(NotificationCenter.default.publisher(for: .localFavoritesDidChange)) { _ in
       Task { @MainActor in favoritesViewModel.reload() }
     }
@@ -327,6 +351,34 @@ struct RootView: View {
       Button("取消", role: .cancel) { searchHistoryAction = nil }
     } message: {
       Text(searchHistoryActionMessage)
+    }
+  }
+
+  @ViewBuilder
+  private var searchSuggestionSection: some View {
+    if searchSuggestionsEnabled, !searchSuggestionViewModel.suggestions.isEmpty {
+      Section("搜索建议") {
+        ForEach(Array(searchSuggestionViewModel.suggestions.enumerated()), id: \.offset) {
+          _, suggestion in
+          Button {
+            search(for: suggestion)
+          } label: {
+            HStack(spacing: 10) {
+              Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+              Text(suggestion)
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+              Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("搜索建议：\(suggestion)")
+        }
+      }
     }
   }
 
@@ -515,6 +567,7 @@ struct RootView: View {
   private func search(for rawQuery: String) {
     let searchQuery = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !searchQuery.isEmpty else { return }
+    searchSuggestionViewModel.cancelAndClear()
     globalSearchHistoryViewModel.record(searchQuery)
     query = ""
     path.append(.search(searchQuery))
@@ -523,6 +576,7 @@ struct RootView: View {
   private func openForum(named rawName: String) {
     let forumName = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !forumName.isEmpty else { return }
+    searchSuggestionViewModel.cancelAndClear()
     query = ""
     path.append(.forum(forumName))
   }

@@ -34,6 +34,7 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
       (.transportFailure, "网络响应异常，请稍后重试。"),
       (.invalidHTTPResponse, "网络响应异常，请稍后重试。"),
       (.httpStatus(503), "贴吧服务暂时不可用（HTTP 503）。"),
+      (.responseTooLarge(maximumBytes: 65_536), "贴吧返回的数据过大，请稍后重试。"),
       (.invalidProtobuf, "贴吧返回了无法识别的数据，接口可能已经更新。"),
       (.invalidJSON, "贴吧返回了无法识别的数据，接口可能已经更新。"),
     ]

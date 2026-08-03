@@ -1,0 +1,10 @@
+// tbclient.SearchSug.SearchSugRequest
+syntax = "proto3";
+
+message SearchSugReqIdl {
+    message DataReq {
+        string word = 2;
+        string isforum = 3;
+    }
+    DataReq data = 1;
+}

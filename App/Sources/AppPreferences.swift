@@ -5,6 +5,7 @@ enum AppPreferenceKey {
   static let appearance = "TiebaPlusPlus.appearance"
   static let defaultForumSort = "TiebaPlusPlus.defaultForumSort"
   static let homeShowsRecentForums = "TiebaPlusPlus.homeShowsRecentForums"
+  static let searchSuggestionsEnabled = "TiebaPlusPlus.searchSuggestionsEnabled"
 }
 
 enum AppAppearance: String, CaseIterable, Hashable, Identifiable, Sendable {

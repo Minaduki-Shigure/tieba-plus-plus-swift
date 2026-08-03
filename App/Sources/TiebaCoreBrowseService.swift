@@ -2,7 +2,8 @@ import Foundation
 import TiebaCore
 
 struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchService,
-  HotTopicService, HotThreadService, UserProfileService, ForumInformationService
+  SearchSuggestionService, HotTopicService, HotThreadService, UserProfileService,
+  ForumInformationService
 {
   private let client: TiebaClient
   private let contentFilterRepository: any ContentFilterRepository
@@ -216,6 +217,16 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       exactMatch: response.exactMatch.map(Self.mapUserSearchResult),
       related: response.fuzzyMatches.map(Self.mapUserSearchResult)
     )
+  }
+
+  func searchSuggestions(query: String) async throws -> [String] {
+    do {
+      return try await client.searchSuggestions(query: query)
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
   }
 
   func searchThreads(
@@ -1049,6 +1060,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       message = "网络响应异常，请稍后重试。"
     case .httpStatus(let status):
       message = "贴吧服务暂时不可用（HTTP \(status)）。"
+    case .responseTooLarge:
+      message = "贴吧返回的数据过大，请稍后重试。"
     case .invalidProtobuf:
       message = "贴吧返回了无法识别的数据，协议可能已经更新。"
     case .invalidJSON:
