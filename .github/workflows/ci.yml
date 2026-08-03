@@ -46,12 +46,30 @@ jobs:
         if: ${{ always() && steps.core_tests.outcome == 'failure' }}
         run: exit 1
       - name: Run anonymous integration test for release or opt-in dispatch
+        id: live_tests
+        continue-on-error: true
         if: >-
           ${{ startsWith(github.ref, 'refs/tags/v') ||
           (github.event_name == 'workflow_dispatch' && inputs.run_live_tests) }}
         env:
           TIEBA_LIVE_TESTS: "1"
-        run: swift test --package-path Packages/TiebaCore --filter TiebaLiveTests
+        run: >-
+          set -o pipefail;
+          swift test --package-path Packages/TiebaCore --filter TiebaLiveTests
+          2>&1 | tee live-test.log
+      - name: Report live-test diagnostics
+        if: ${{ always() && steps.live_tests.outcome == 'failure' }}
+        run: ruby Scripts/report_xcode_errors.rb live-test.log
+      - name: Upload live-test failure log
+        if: ${{ always() && steps.live_tests.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-test-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: live-test.log
+          retention-days: 7
+      - name: Fail when live tests fail
+        if: ${{ always() && steps.live_tests.outcome == 'failure' }}
+        run: exit 1
 
   app-tests:
     name: iOS app tests
