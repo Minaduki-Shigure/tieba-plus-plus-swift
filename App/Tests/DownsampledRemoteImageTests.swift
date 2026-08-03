@@ -134,6 +134,201 @@ final class DownsampledRemoteImageTests: XCTestCase {
     XCTAssertEqual(recordedKinds, [.preview])
   }
 
+  func testClearMemoryCacheEvictsCompletedEntryWithoutStartingDownload() async throws {
+    let downloader = RecordingRemoteImageDownloader(imageData: try makeJPEGData())
+    let repository = DownsampledImageRepository(downloader: downloader)
+    let url = try XCTUnwrap(URL(string: "https://img.example/clear-completed.jpg"))
+
+    _ = try await repository.image(
+      at: url,
+      maxPixelSize: 320,
+      fetchPolicy: .allowNetwork(.preview)
+    )
+    _ = try await repository.image(
+      at: url,
+      maxPixelSize: 320,
+      fetchPolicy: .cacheOnly
+    )
+
+    await repository.clearMemoryCache()
+
+    await expectCacheMiss(repository, url: url, maxPixelSize: 320)
+    let recordedKinds = await downloader.recordedKinds()
+    XCTAssertEqual(recordedKinds, [.preview])
+  }
+
+  func testClearMemoryCacheIsIdempotentAndDoesNotStartDownload() async throws {
+    let downloader = RecordingRemoteImageDownloader(imageData: Data())
+    let repository = DownsampledImageRepository(downloader: downloader)
+    let url = try XCTUnwrap(URL(string: "https://img.example/clear-cold.jpg"))
+
+    await repository.clearMemoryCache()
+    await repository.clearMemoryCache()
+
+    await expectCacheMiss(repository, url: url, maxPixelSize: 320)
+    let recordedKinds = await downloader.recordedKinds()
+    XCTAssertTrue(recordedKinds.isEmpty)
+  }
+
+  func testClearDuringInFlightRequestDoesNotCancelOrRepopulateCache() async throws {
+    let cancellationProbe = RemoteImageCancellationProbe()
+    let downloader = GatedRemoteImageDownloader(
+      imageData: try makeJPEGData(),
+      cancellationProbe: cancellationProbe
+    )
+    addTeardownBlock { await downloader.releaseAll() }
+    let repository = DownsampledImageRepository(downloader: downloader)
+    let url = try XCTUnwrap(URL(string: "https://img.example/clear-in-flight.jpg"))
+    let request = Task {
+      try await repository.image(
+        at: url,
+        maxPixelSize: 320,
+        fetchPolicy: .allowNetwork(.preview)
+      )
+    }
+    let didStart = await downloader.waitUntilRequestCount(1)
+    XCTAssertTrue(didStart)
+
+    await repository.clearMemoryCache()
+    await downloader.releaseAll()
+    _ = try await request.value
+
+    await expectCacheMiss(repository, url: url, maxPixelSize: 320)
+    let requestCount = await downloader.requestCount()
+    XCTAssertEqual(requestCount, 1)
+    XCTAssertEqual(cancellationProbe.count, 0)
+  }
+
+  func testPostClearWaiterCanShareInFlightTransferAndPopulateNewGeneration() async throws {
+    let cancellationProbe = RemoteImageCancellationProbe()
+    let waiterCountProbe = InFlightWaiterCountProbe()
+    let downloader = GatedRemoteImageDownloader(
+      imageData: try makeJPEGData(),
+      cancellationProbe: cancellationProbe
+    )
+    addTeardownBlock { await downloader.releaseAll() }
+    let repository = DownsampledImageRepository(
+      downloader: downloader,
+      inFlightWaiterCountDidChange: { count in waiterCountProbe.record(count) }
+    )
+    let url = try XCTUnwrap(URL(string: "https://img.example/clear-joined.jpg"))
+    let oldGenerationRequest = Task {
+      try await repository.image(
+        at: url,
+        maxPixelSize: 320,
+        fetchPolicy: .allowNetwork(.preview)
+      )
+    }
+    let didRegisterOldWaiter = await waiterCountProbe.waitUntilCounts([1])
+    let didStart = await downloader.waitUntilRequestCount(1)
+    XCTAssertTrue(didRegisterOldWaiter)
+    XCTAssertTrue(didStart)
+
+    await repository.clearMemoryCache()
+    let newGenerationRequest = Task {
+      try await repository.image(
+        at: url,
+        maxPixelSize: 320,
+        fetchPolicy: .allowNetwork(.preview)
+      )
+    }
+    let didJoinNewWaiter = await waiterCountProbe.waitUntilCounts([1, 2])
+    XCTAssertTrue(didJoinNewWaiter)
+
+    await downloader.releaseAll()
+    _ = try await oldGenerationRequest.value
+    _ = try await newGenerationRequest.value
+    _ = try await repository.image(
+      at: url,
+      maxPixelSize: 320,
+      fetchPolicy: .cacheOnly
+    )
+
+    let requestCount = await downloader.requestCount()
+    XCTAssertEqual(requestCount, 1)
+    XCTAssertEqual(cancellationProbe.count, 0)
+  }
+
+  func testCancellingPostClearWaiterLeavesOldGenerationUnableToPopulateCache() async throws {
+    let cancellationProbe = RemoteImageCancellationProbe()
+    let waiterCountProbe = InFlightWaiterCountProbe()
+    let downloader = GatedRemoteImageDownloader(
+      imageData: try makeJPEGData(),
+      cancellationProbe: cancellationProbe
+    )
+    addTeardownBlock { await downloader.releaseAll() }
+    let repository = DownsampledImageRepository(
+      downloader: downloader,
+      inFlightWaiterCountDidChange: { count in waiterCountProbe.record(count) }
+    )
+    let url = try XCTUnwrap(URL(string: "https://img.example/clear-cancel-joined.jpg"))
+    let oldGenerationRequest = Task {
+      try await repository.image(
+        at: url,
+        maxPixelSize: 320,
+        fetchPolicy: .allowNetwork(.preview)
+      )
+    }
+    let didRegisterOldWaiter = await waiterCountProbe.waitUntilCounts([1])
+    let didStart = await downloader.waitUntilRequestCount(1)
+    XCTAssertTrue(didRegisterOldWaiter)
+    XCTAssertTrue(didStart)
+
+    await repository.clearMemoryCache()
+    let newGenerationRequest = Task {
+      try await repository.image(
+        at: url,
+        maxPixelSize: 320,
+        fetchPolicy: .allowNetwork(.preview)
+      )
+    }
+    let didJoinNewWaiter = await waiterCountProbe.waitUntilCounts([1, 2])
+    XCTAssertTrue(didJoinNewWaiter)
+
+    newGenerationRequest.cancel()
+    let didRemoveNewWaiter = await waiterCountProbe.waitUntilCounts([1, 2, 1])
+    XCTAssertTrue(didRemoveNewWaiter)
+    await downloader.releaseAll()
+    _ = try await oldGenerationRequest.value
+    switch await newGenerationRequest.result {
+    case .success:
+      XCTFail("The cancelled new-generation waiter must not succeed")
+    case .failure(let error):
+      XCTAssertTrue(error is CancellationError)
+    }
+
+    await expectCacheMiss(repository, url: url, maxPixelSize: 320)
+    let requestCount = await downloader.requestCount()
+    XCTAssertEqual(requestCount, 1)
+    XCTAssertEqual(cancellationProbe.count, 0)
+  }
+
+  func testNetworkFetchAfterClearDownloadsAgainAndPopulatesCache() async throws {
+    let downloader = RecordingRemoteImageDownloader(imageData: try makeJPEGData())
+    let repository = DownsampledImageRepository(downloader: downloader)
+    let url = try XCTUnwrap(URL(string: "https://img.example/refetch-after-clear.jpg"))
+
+    _ = try await repository.image(
+      at: url,
+      maxPixelSize: 320,
+      fetchPolicy: .allowNetwork(.preview)
+    )
+    await repository.clearMemoryCache()
+    _ = try await repository.image(
+      at: url,
+      maxPixelSize: 320,
+      fetchPolicy: .allowNetwork(.preview)
+    )
+    _ = try await repository.image(
+      at: url,
+      maxPixelSize: 320,
+      fetchPolicy: .cacheOnly
+    )
+
+    let recordedKinds = await downloader.recordedKinds()
+    XCTAssertEqual(recordedKinds, [.preview, .preview])
+  }
+
   func testCacheIsSharedAcrossNetworkAccessPolicies() async throws {
     let downloader = RecordingRemoteImageDownloader(imageData: try makeJPEGData())
     let repository = DownsampledImageRepository(downloader: downloader)

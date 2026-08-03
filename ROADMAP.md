@@ -50,6 +50,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Default-system external HTTPS opening with an optional in-app Safari view
 - Nested replies, images, video links, and voice playback
 - Persistent automatic, data-saving, or tap-to-load policy for content media
+- Explicit eviction of the process-local decoded-image memory cache
 - Optional compact media summaries for thread lists and per-forum search, with no collapsed preview request
 - Default-on dark-appearance dimming for successfully rendered static content thumbnails
 - Same-content multi-image gallery with paging, zoom, original-file sharing, and Photos saving
@@ -273,6 +274,15 @@ bodies, per-forum search, and hot topics. Video covers, avatars, galleries,
 placeholders, and compact summaries remain unchanged. The control is a pure
 rendering decision and does not enter URL normalization, fetch policy, reload
 identity, transfer deduplication, decoding, or cache keys.
+
+TiebaLite clears both memory and persistent image caches. Tieba++ deliberately
+offers only process-local decoded-image eviction because its hardened ephemeral
+transport disables URL caching and download leases remove their own temporary
+files. Clearing increments a cache generation and evicts `NSCache` entries
+without cancelling active transfers or blanking displayed images. A waiter that
+started before the clear can still receive its image but cannot repopulate the
+old generation; a waiter that starts afterward may share that same transfer and
+cache the result for the new generation.
 
 The global forum-sort preference applies when a forum has no remembered choice;
 changing a forum's picker stores a normalized, bounded per-forum override.

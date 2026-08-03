@@ -124,6 +124,10 @@ but authenticated write operations remain intentionally unsupported.
 - Settings provide system, light, and dark appearance, a global forum-sort
   default with normalized per-forum memory, and a no-history mode backed by the
   same versioned browsing-history archive.
+- Settings can explicitly evict the process-local decoded-image cache without
+  cancelling active transfers or removing currently displayed images. The app
+  has no persistent image cache, so this action does not claim disk-space
+  recovery and later image views may download again.
 - A persistent six-position app text-size adjustment moves the SwiftUI
   interface from two steps smaller through three steps larger relative to the
   current iOS Dynamic Type category. Following the system is the default;

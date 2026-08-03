@@ -193,6 +193,7 @@ actor DownsampledImageRepository {
   private let beforeDownload: @Sendable () async -> Void
   private let inFlightWaiterCountDidChange: @Sendable (Int) -> Void
   private let cache = NSCache<NSString, UIImage>()
+  private var cacheGeneration: UInt64 = 0
   private var inFlight: [InFlightKey: InFlightRequest] = [:]
 
   init(
@@ -205,6 +206,11 @@ actor DownsampledImageRepository {
     self.inFlightWaiterCountDidChange = inFlightWaiterCountDidChange
     cache.totalCostLimit = 96 * 1_024 * 1_024
     cache.countLimit = 80
+  }
+
+  func clearMemoryCache() {
+    cacheGeneration &+= 1
+    cache.removeAllObjects()
   }
 
   func image(at url: URL, maxPixelSize requestedSize: Int) async throws
@@ -248,6 +254,7 @@ actor DownsampledImageRepository {
       downloadKind = kind
       networkAccess = .economicalOnly
     }
+    let waiterCacheGeneration = cacheGeneration
 
     let inFlightKey = InFlightKey(
       cacheKey: cacheKey,
@@ -300,13 +307,15 @@ actor DownsampledImageRepository {
       defer { removeWaiter(waiterID, forKey: inFlightKey) }
       let asset = try await task.value
       try Task.checkCancellation()
-      let pixelWidth = asset.image.cgImage?.width ?? 0
-      let pixelHeight = asset.image.cgImage?.height ?? 0
-      cache.setObject(
-        asset.image,
-        forKey: cacheKey.storageKey,
-        cost: pixelWidth * pixelHeight * 4
-      )
+      if waiterCacheGeneration == cacheGeneration {
+        let pixelWidth = asset.image.cgImage?.width ?? 0
+        let pixelHeight = asset.image.cgImage?.height ?? 0
+        cache.setObject(
+          asset.image,
+          forKey: cacheKey.storageKey,
+          cost: pixelWidth * pixelHeight * 4
+        )
+      }
       return asset
     } onCancel: {
       Task { await self.removeWaiter(waiterID, forKey: inFlightKey) }

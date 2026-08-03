@@ -364,6 +364,14 @@ can redraw an existing image without creating or canceling a request. Video
 covers, avatars, galleries, loading and failure placeholders, compact summaries,
 badges, and playback controls remain outside this modifier.
 
+Manual image-cache clearing may evict only the process-local decoded-image
+`NSCache`. It must advance a generation barrier so a transfer started before the
+clear cannot later repopulate that old cache state. It must not cancel active
+transfers, delete temporary download or export leases, clear system photo data,
+or touch account, history, favorite, filter, or search archives. Currently
+displayed images may remain retained by their views, and a later explicit or
+policy-allowed image request may download again.
+
 Avatars remain outside that content-media policy. Gallery originals, video and
 voice playback, sharing, and saving already require a separate explicit user
 action and retain those user-initiated paths. Rendering a video cover must not

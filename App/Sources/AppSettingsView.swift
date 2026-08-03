@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AppSettingsView: View {
   @StateObject private var historyViewModel: BrowsingHistoryViewModel
+  @State private var showsImageCacheCleared = false
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @AppStorage(AppPreferenceKey.appearance)
   private var appearance = AppAppearance.system.rawValue
@@ -194,6 +195,24 @@ struct AppSettingsView: View {
             + "图库和加载占位不受影响。"
         )
       }
+
+      Section {
+        Button {
+          Task { @MainActor in
+            await DownsampledImageRepository.shared.clearMemoryCache()
+            showsImageCacheCleared = true
+          }
+        } label: {
+          Label("清理图片内存缓存", systemImage: "trash")
+        }
+      } header: {
+        Text("缓存")
+      } footer: {
+        Text(
+          "只清理本次运行中已解码的图片，不清理磁盘文件或照片，也不提供可释放存储空间的大小。"
+            + "当前显示的图片会保留；之后再次打开时可能重新下载。"
+        )
+      }
     }
     .listStyle(.insetGrouped)
     .navigationTitle("设置")
@@ -209,6 +228,11 @@ struct AppSettingsView: View {
       Button("好", action: historyViewModel.dismissOperationError)
     } message: {
       Text(historyViewModel.operationError ?? "未知错误")
+    }
+    .alert("图片内存缓存已清理", isPresented: $showsImageCacheCleared) {
+      Button("好", role: .cancel) {}
+    } message: {
+      Text("当前显示的图片不会消失，之后再次打开时可能重新下载。")
     }
   }
 
