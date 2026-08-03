@@ -15,7 +15,7 @@ public struct TiebaClientConfiguration: Sendable, Hashable {
   public init(
     clientVersion: String = "12.64.1.1",
     authenticatedClientVersion: String = "22.6.5.1",
-    userAgent: String = "TiebaPlusPlus/0.27 (iOS)",
+    userAgent: String = "TiebaPlusPlus/0.28 (iOS)",
     requestTimeout: TimeInterval = 30
   ) {
     self.clientVersion = clientVersion
@@ -137,19 +137,22 @@ public actor TiebaClient {
     channel: TiebaForumChannel,
     page: Int = 1,
     pageSize: Int = 30,
-    sort: TiebaForumChannelSort = .replyTime,
+    sort: TiebaForumChannelSort? = nil,
     lastThreadID: Int64? = nil
   ) async throws -> TiebaForumChannelPage {
     let normalizedForumName = forumName.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !normalizedForumName.isEmpty else {
       throw TiebaClientError.invalidArgument("Forum name must not be empty.")
     }
+    let resolvedSort = sort
+      ?? channel.sortOptions.first.map { TiebaForumChannelSort(rawValue: $0.id) }
+      ?? .unspecified
     let request = try requestFactory.forumChannelThreads(
       forumID: forumID,
       channel: channel,
       page: page,
       pageSize: pageSize,
-      sort: sort,
+      sort: resolvedSort,
       lastThreadID: lastThreadID
     )
     let body = try await send(request)

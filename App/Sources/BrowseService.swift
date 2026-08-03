@@ -16,6 +16,18 @@ enum ForumThreadSort: String, CaseIterable, Codable, Hashable, Identifiable, Sen
   }
 }
 
+struct ForumChannelSort: RawRepresentable, Hashable, Sendable {
+  let rawValue: Int32
+
+  init(rawValue: Int32) {
+    self.rawValue = rawValue
+  }
+
+  static let unspecified = ForumChannelSort(rawValue: -1)
+  static let replyTime = ForumChannelSort(rawValue: 0)
+  static let creationTime = ForumChannelSort(rawValue: 1)
+}
+
 struct ForumBrowseOptions: Codable, Equatable, Sendable {
   var sort: ForumThreadSort
   var featuredOnly: Bool
@@ -81,7 +93,7 @@ protocol BrowseService: Sendable {
     channel: BrowseForumChannel,
     page: Int,
     pageSize: Int,
-    sort: ForumThreadSort,
+    sort: ForumChannelSort,
     lastThreadID: Int64?
   ) async throws -> ForumChannelPageData
   func posts(
@@ -107,7 +119,7 @@ extension BrowseService {
     channel: BrowseForumChannel,
     page: Int,
     pageSize: Int,
-    sort: ForumThreadSort,
+    sort: ForumChannelSort,
     lastThreadID: Int64?
   ) async throws -> ForumChannelPageData {
     throw BrowseError.unavailable("当前浏览服务不支持贴吧频道。")

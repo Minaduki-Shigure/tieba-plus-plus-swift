@@ -76,6 +76,29 @@ enum ProtoFixtures {
     channel.tabName = " Help "
     channel.isGeneralTab = 1
     channel.isDefault = 1
+    var customSort = SortButton()
+    customSort.text = " Custom "
+    customSort.sourceID = 37
+    var duplicateSort = SortButton()
+    duplicateSort.text = "Duplicate"
+    duplicateSort.sourceID = customSort.sourceID
+    var negativeSort = SortButton()
+    negativeSort.text = "Negative"
+    negativeSort.sourceID = -1
+    var emptySort = SortButton()
+    emptySort.text = " \n "
+    emptySort.sourceID = 38
+    var longSort = SortButton()
+    longSort.text = "  \(String(repeating: "e\u{301}", count: 45))\n"
+    longSort.sourceID = 39
+    let overflowSorts = (40...51).map { id -> SortButton in
+      var sort = SortButton()
+      sort.text = "Sort \(id)"
+      sort.sourceID = Int32(id)
+      return sort
+    }
+    channel.sortMenu = [customSort, duplicateSort, negativeSort, emptySort, longSort]
+      + overflowSorts
     var videoChannel = FrsTabInfo()
     videoChannel.tabID = 452_782
     videoChannel.tabType = 100

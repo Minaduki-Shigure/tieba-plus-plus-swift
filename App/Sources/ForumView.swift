@@ -118,27 +118,27 @@ struct ForumView: View {
         }
         .font(.subheadline)
         .padding(.horizontal, 12)
-        .padding(.top, 8)
+        .padding(.vertical, 8)
         .background(.regularMaterial)
       }
 
-      HStack(spacing: 12) {
-        Picker(
-          "主题排序",
-          selection: Binding(
-            get: { viewModel.options.sort },
-            set: { sort in viewModel.setSort(sort) }
-          )
-        ) {
-          ForEach(ForumThreadSort.allCases) { sort in
-            Text(sort.title).tag(sort)
+      if viewModel.selectedChannelID == nil {
+        HStack(spacing: 12) {
+          Picker(
+            "主题排序",
+            selection: Binding(
+              get: { viewModel.options.sort },
+              set: { sort in viewModel.setSort(sort) }
+            )
+          ) {
+            ForEach(ForumThreadSort.allCases) { sort in
+              Text(sort.title).tag(sort)
+            }
           }
-        }
-        .pickerStyle(.segmented)
-        .frame(maxWidth: .infinity, minHeight: 32)
-        .accessibilityIdentifier("forum-sort-picker")
+          .pickerStyle(.segmented)
+          .frame(maxWidth: .infinity, minHeight: 32)
+          .accessibilityIdentifier("forum-sort-picker")
 
-        if viewModel.selectedChannelID == nil {
           Toggle(
             "精华",
             isOn: Binding(
@@ -151,11 +151,33 @@ struct ForumView: View {
           .fixedSize()
           .accessibilityIdentifier("forum-featured-toggle")
         }
+        .font(.subheadline)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.regularMaterial)
+      } else if viewModel.selectedChannelSortOptions.count > 1 {
+        HStack(spacing: 10) {
+          Label("频道排序", systemImage: "arrow.up.arrow.down")
+          Spacer(minLength: 0)
+          Picker(
+            "频道排序",
+            selection: Binding(
+              get: { viewModel.selectedChannelSort },
+              set: { sort in viewModel.setChannelSort(sort) }
+            )
+          ) {
+            ForEach(viewModel.selectedChannelSortOptions) { option in
+              Text(option.title).tag(option.sort)
+            }
+          }
+          .pickerStyle(.menu)
+          .accessibilityIdentifier("forum-channel-sort-picker")
+        }
+        .font(.subheadline)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+        .background(.regularMaterial)
       }
-      .font(.subheadline)
-      .padding(.horizontal, 12)
-      .padding(.vertical, 8)
-      .background(.regularMaterial)
 
       if viewModel.selectedChannelID == nil,
         viewModel.options.featuredOnly,

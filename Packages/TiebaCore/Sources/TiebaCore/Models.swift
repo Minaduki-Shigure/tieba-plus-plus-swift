@@ -320,9 +320,16 @@ public enum TiebaThreadSort: Int32, Sendable, Hashable {
   case followedUsers = 2
 }
 
-public enum TiebaForumChannelSort: Int32, Sendable, Hashable {
-  case replyTime = 0
-  case creationTime = 1
+public struct TiebaForumChannelSort: RawRepresentable, Sendable, Hashable {
+  public let rawValue: Int32
+
+  public init(rawValue: Int32) {
+    self.rawValue = rawValue
+  }
+
+  public static let unspecified = TiebaForumChannelSort(rawValue: -1)
+  public static let replyTime = TiebaForumChannelSort(rawValue: 0)
+  public static let creationTime = TiebaForumChannelSort(rawValue: 1)
 }
 
 public enum TiebaPostSort: Int32, Sendable, Hashable {
@@ -348,15 +355,32 @@ public struct TiebaForumClassification: Identifiable, Sendable, Hashable {
   }
 }
 
+public struct TiebaForumChannelSortOption: Identifiable, Sendable, Hashable {
+  public let id: Int32
+  public let title: String
+
+  public init(id: Int32, title: String) {
+    self.id = id
+    self.title = title
+  }
+}
+
 public struct TiebaForumChannel: Identifiable, Sendable, Hashable {
   public let id: Int
   public let name: String
   public let isDefault: Bool
+  public let sortOptions: [TiebaForumChannelSortOption]
 
-  public init(id: Int, name: String, isDefault: Bool = false) {
+  public init(
+    id: Int,
+    name: String,
+    isDefault: Bool = false,
+    sortOptions: [TiebaForumChannelSortOption] = []
+  ) {
     self.id = id
     self.name = name
     self.isDefault = isDefault
+    self.sortOptions = sortOptions
   }
 }
 

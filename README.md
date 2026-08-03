@@ -15,8 +15,9 @@ forum, post, and nested-reply browsing with server-ranked inline previews,
 parent-floor context, bidirectional pagination, and anchored opening, remote
 media with a same-content multi-image gallery, original-file system sharing,
 and add-only Photos saving, forum metadata and
-featured classifications, server-defined forum channels with independent
-sorting and cursor pagination, complete public forum introductions, forum rules,
+featured classifications, server-defined forum channels with bounded
+server-provided sorting menus and cursor pagination, complete public forum
+introductions, forum rules,
 moderator teams, and shared-thread origin cards with original media and
 navigation, plus anonymous single- and multiple-choice poll results, post
 author forum levels, bounded forum-moderator roles, IP locations, read-only net

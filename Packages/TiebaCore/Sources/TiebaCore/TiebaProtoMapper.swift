@@ -52,7 +52,12 @@ enum TiebaProtoMapper {
         !name.isEmpty,
         seenChannelIDs.insert(id).inserted
       else { return nil }
-      return TiebaForumChannel(id: id, name: name, isDefault: tab.isDefault == 1)
+      return TiebaForumChannel(
+        id: id,
+        name: name,
+        isDefault: tab.isDefault == 1,
+        sortOptions: forumChannelSortOptions(tab.sortMenu)
+      )
     }
     return TiebaThreadPage(
       forum: forum,
@@ -61,6 +66,25 @@ enum TiebaProtoMapper {
       tabs: tabs,
       channels: channels
     )
+  }
+
+  private static func forumChannelSortOptions(
+    _ menu: [SortButton]
+  ) -> [TiebaForumChannelSortOption] {
+    var seenIDs = Set<Int32>()
+    var options: [TiebaForumChannelSortOption] = []
+    options.reserveCapacity(min(menu.count, 12))
+
+    for item in menu {
+      guard options.count < 12 else { break }
+      let id = item.sourceID
+      let title = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard id >= 0, !title.isEmpty, seenIDs.insert(id).inserted else { continue }
+      options.append(
+        TiebaForumChannelSortOption(id: id, title: String(title.prefix(40)))
+      )
+    }
+    return options
   }
 
   static func forumChannelPage(

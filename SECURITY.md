@@ -55,9 +55,15 @@ or describe an empty or partial preview as the user's complete forum list.
 
 Anonymous forum-channel requests may contain only the public forum ID, a
 type-15 general channel's ID/name/default flag, page size and number, independent
-sort value, and the previous page's last thread ID. They must not attach account
-cookies, STOKEN, device identifiers, or personalized metadata. A rejected
-minimal request must remain unsupported rather than broadening that boundary.
+sort value, and the previous page's last thread ID. Server-provided sort menus
+must be bounded to 12 entries, reject negative IDs and empty titles, keep only
+the first occurrence of an ID, and limit titles to 40 characters. Requests may
+send the `-1` no-menu sentinel or an advertised nonnegative raw ID; unknown
+nonnegative values must not cause credential or device metadata to be added.
+Channel choices remain transient and must not overwrite persistent whole-forum
+sort preferences. Requests must not attach account cookies, STOKEN, device
+identifiers, or personalized metadata. A rejected minimal request must remain
+unsupported rather than broadening that boundary.
 
 Forum, global thread, per-forum post, and user search must use the anonymous
 request factory even when an account is active. Search requests may contain

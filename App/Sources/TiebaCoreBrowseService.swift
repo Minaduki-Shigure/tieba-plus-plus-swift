@@ -42,9 +42,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       threads: response.threads.map { filter.applying(to: Self.mapThread($0)) },
       currentPage: response.pagination.currentPage,
       hasMore: response.pagination.hasMore,
-      channels: response.channels.map {
-        BrowseForumChannel(id: $0.id, name: $0.name, isDefault: $0.isDefault)
-      }
+      channels: response.channels.map(Self.mapForumChannel)
     )
   }
 
@@ -54,7 +52,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     channel: BrowseForumChannel,
     page: Int,
     pageSize: Int,
-    sort: ForumThreadSort,
+    sort: ForumChannelSort,
     lastThreadID: Int64?
   ) async throws -> ForumChannelPageData {
     let response: TiebaForumChannelPage
@@ -65,11 +63,14 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
         channel: TiebaForumChannel(
           id: channel.id,
           name: channel.name,
-          isDefault: channel.isDefault
+          isDefault: channel.isDefault,
+          sortOptions: channel.sortOptions.map {
+            TiebaForumChannelSortOption(id: $0.id, title: $0.title)
+          }
         ),
         page: page,
         pageSize: pageSize,
-        sort: Self.channelSort(sort),
+        sort: TiebaForumChannelSort(rawValue: sort.rawValue),
         lastThreadID: lastThreadID
       )
     } catch is CancellationError {
@@ -461,6 +462,17 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       isShared: thread.isShared,
       isServerHidden: thread.isHidden,
       isLive: thread.isLive
+    )
+  }
+
+  static func mapForumChannel(_ channel: TiebaForumChannel) -> BrowseForumChannel {
+    BrowseForumChannel(
+      id: channel.id,
+      name: channel.name,
+      isDefault: channel.isDefault,
+      sortOptions: channel.sortOptions.map {
+        BrowseForumChannelSortOption(id: $0.id, title: $0.title)
+      }
     )
   }
 
@@ -893,15 +905,6 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
   }
 
   private static func threadSort(_ sort: ForumThreadSort) -> TiebaThreadSort {
-    switch sort {
-    case .replyTime:
-      .replyTime
-    case .creationTime:
-      .creationTime
-    }
-  }
-
-  private static func channelSort(_ sort: ForumThreadSort) -> TiebaForumChannelSort {
     switch sort {
     case .replyTime:
       .replyTime

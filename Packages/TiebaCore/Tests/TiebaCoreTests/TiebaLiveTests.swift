@@ -10,7 +10,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.27 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.28 integration-test")
     )
     let threads = try await client.getThreads(forumName: "starry", pageSize: 10)
     XCTAssertFalse(threads.threads.isEmpty)
@@ -166,7 +166,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.27 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.28 integration-test")
     )
     let forumPage = try await client.getThreads(forumName: "minecraft", pageSize: 10)
     let channel = try XCTUnwrap(
@@ -175,8 +175,18 @@ final class TiebaLiveTests: XCTestCase {
     )
     XCTAssertGreaterThan(channel.id, 0)
     XCTAssertFalse(channel.name.isEmpty)
+    XCTAssertLessThanOrEqual(channel.sortOptions.count, 12)
+    XCTAssertTrue(channel.sortOptions.allSatisfy {
+      $0.id >= 0 && !$0.title.isEmpty && $0.title.count <= 40
+    })
 
-    for sort in [TiebaForumChannelSort.replyTime, .creationTime] {
+    let advertisedSorts = channel.sortOptions.prefix(3).map {
+      TiebaForumChannelSort(rawValue: $0.id)
+    }
+    let sorts = advertisedSorts.isEmpty
+      ? [TiebaForumChannelSort.unspecified]
+      : advertisedSorts
+    for (sortIndex, sort) in sorts.enumerated() {
       let firstPage = try await client.getForumChannelThreads(
         forumID: forumPage.forum.id,
         forumName: forumPage.forum.name,
@@ -192,7 +202,7 @@ final class TiebaLiveTests: XCTestCase {
         $0.id > 0 && $0.forumID == forumPage.forum.id && !$0.forumName.isEmpty
       })
 
-      guard sort == .replyTime, firstPage.pagination.hasMore else { continue }
+      guard sortIndex == 0, firstPage.pagination.hasMore else { continue }
       let cursor = try XCTUnwrap(firstPage.nextPageCursor)
       let secondPage = try await client.getForumChannelThreads(
         forumID: forumPage.forum.id,
@@ -216,7 +226,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.27 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.28 integration-test")
     )
     let forums = try await client.searchForums(query: "swift")
     XCTAssertFalse(forums.isLoggedIn)
@@ -280,7 +290,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.27 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.28 integration-test")
     )
     let feed = try await client.getThreads(forumName: "steam", pageSize: 100)
     let candidates = feed.threads.filter(\.isShared)
@@ -306,7 +316,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.27 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.28 integration-test")
     )
     let page = try await client.getPosts(threadID: 8_211_419_000, pageSize: 2)
     let firstPost = try XCTUnwrap(page.firstPost)
@@ -360,7 +370,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.27 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.28 integration-test")
     )
     let page = try await client.getComments(
       threadID: 7_763_274_602,
@@ -392,7 +402,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.27 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.28 integration-test")
     )
     let threadID: Int64 = 7_763_274_602
     let postID: Int64 = 143_493_604_437
@@ -423,7 +433,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.27 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.28 integration-test")
     )
     let feed = try await client.getThreads(forumName: "starry", pageSize: 100)
     var candidateIDs = feed.threads.compactMap { thread -> Int64? in
@@ -463,7 +473,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.27 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.28 integration-test")
     )
     let topics = try await client.getHotTopics()
     let topic = try XCTUnwrap(topics.first)
@@ -501,7 +511,7 @@ final class TiebaLiveTests: XCTestCase {
 
     let userID: Int64 = 957_339_815
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.27 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.28 integration-test")
     )
 
     let profile = try await client.getUserProfile(userID: userID)
@@ -527,7 +537,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.27 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.28 integration-test")
     )
     let forumID: Int64 = 2_432_903
 

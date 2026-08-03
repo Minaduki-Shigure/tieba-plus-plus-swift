@@ -96,6 +96,17 @@ struct TiebaRequestFactory: Sendable {
     }
     try validate(page: page)
     try validate(pageSize: pageSize, maximum: 100)
+    guard sort.rawValue >= TiebaForumChannelSort.unspecified.rawValue else {
+      throw TiebaClientError.invalidArgument(
+        "Channel sort must be unspecified or nonnegative."
+      )
+    }
+    let isAdvertisedSort = channel.sortOptions.contains { $0.id == sort.rawValue }
+    guard channel.sortOptions.isEmpty ? sort == .unspecified : isAdvertisedSort else {
+      throw TiebaClientError.invalidArgument(
+        "Channel sort must match the advertised menu, or be unspecified when it is empty."
+      )
+    }
     if let lastThreadID {
       try validate(identifier: lastThreadID, name: "Last thread ID")
     }

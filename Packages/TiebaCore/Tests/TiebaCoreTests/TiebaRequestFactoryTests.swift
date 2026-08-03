@@ -133,19 +133,25 @@ final class TiebaRequestFactoryTests: XCTestCase {
   }
 
   func testForumChannelRequestUsesIndependentSortAndMinimalAnonymousFields() throws {
-    let channel = TiebaForumChannel(id: 3_631_832, name: " Help ", isDefault: true)
+    let channel = TiebaForumChannel(
+      id: 3_631_832,
+      name: " Help ",
+      isDefault: true,
+      sortOptions: [TiebaForumChannelSortOption(id: 37, title: "Custom")]
+    )
     let request = try factory.forumChannelThreads(
       forumID: 2_432_903,
       channel: channel,
       page: 2,
       pageSize: 30,
-      sort: .creationTime,
+      sort: TiebaForumChannelSort(rawValue: 37),
       lastThreadID: 10_911_529_130
     )
     let decoded = try GeneralTabListReqIdl(
       serializedBytes: protobufPayload(from: request)
     )
 
+    XCTAssertEqual(TiebaForumChannelSort.unspecified.rawValue, -1)
     XCTAssertEqual(TiebaForumChannelSort.replyTime.rawValue, 0)
     XCTAssertEqual(TiebaForumChannelSort.creationTime.rawValue, 1)
     XCTAssertEqual(request.url?.path, "/c/f/frs/generalTabList")
@@ -164,9 +170,54 @@ final class TiebaRequestFactoryTests: XCTestCase {
     XCTAssertEqual(decoded.data.isDefaultNavtab, 1)
     XCTAssertEqual(decoded.data.tabName, "Help")
     XCTAssertEqual(decoded.data.isGeneralTab, 1)
-    XCTAssertEqual(decoded.data.sortType, 1)
+    XCTAssertEqual(decoded.data.sortType, 37)
     XCTAssertEqual(decoded.data.tabType, 15)
     XCTAssertEqual(decoded.data.isNewfrs, 1)
+
+    let noMenuChannel = TiebaForumChannel(id: 3_631_833, name: "No menu")
+    let unspecifiedRequest = try factory.forumChannelThreads(
+      forumID: 2_432_903,
+      channel: noMenuChannel,
+      page: 1,
+      pageSize: 30,
+      sort: .unspecified,
+      lastThreadID: nil
+    )
+    let unspecified = try GeneralTabListReqIdl(
+      serializedBytes: protobufPayload(from: unspecifiedRequest)
+    )
+    XCTAssertEqual(unspecified.data.sortType, -1)
+
+    XCTAssertThrowsError(
+      try factory.forumChannelThreads(
+        forumID: 2_432_903,
+        channel: channel,
+        page: 1,
+        pageSize: 30,
+        sort: .unspecified,
+        lastThreadID: nil
+      )
+    )
+    XCTAssertThrowsError(
+      try factory.forumChannelThreads(
+        forumID: 2_432_903,
+        channel: channel,
+        page: 1,
+        pageSize: 30,
+        sort: TiebaForumChannelSort(rawValue: 38),
+        lastThreadID: nil
+      )
+    )
+    XCTAssertThrowsError(
+      try factory.forumChannelThreads(
+        forumID: 2_432_903,
+        channel: noMenuChannel,
+        page: 1,
+        pageSize: 30,
+        sort: .replyTime,
+        lastThreadID: nil
+      )
+    )
   }
 
   func testPostLocationWireSemantics() throws {
@@ -293,7 +344,11 @@ final class TiebaRequestFactoryTests: XCTestCase {
       ),
       try factory.forumChannelThreads(
         forumID: 42,
-        channel: TiebaForumChannel(id: 9, name: "Help"),
+        channel: TiebaForumChannel(
+          id: 9,
+          name: "Help",
+          sortOptions: [TiebaForumChannelSortOption(id: 0, title: "Reply")]
+        ),
         page: 1,
         pageSize: 30,
         sort: .replyTime,
@@ -578,6 +633,16 @@ final class TiebaRequestFactoryTests: XCTestCase {
         page: 1,
         pageSize: 30,
         sort: .replyTime,
+        lastThreadID: nil
+      )
+    )
+    XCTAssertThrowsError(
+      try factory.forumChannelThreads(
+        forumID: 1,
+        channel: TiebaForumChannel(id: 1, name: "Help"),
+        page: 1,
+        pageSize: 30,
+        sort: TiebaForumChannelSort(rawValue: -2),
         lastThreadID: nil
       )
     )

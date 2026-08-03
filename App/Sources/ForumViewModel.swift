@@ -11,6 +11,7 @@ final class ForumViewModel: ObservableObject {
   @Published private(set) var options: ForumBrowseOptions
   @Published private(set) var channels: [BrowseForumChannel] = []
   @Published private(set) var selectedChannelID: Int?
+  @Published private(set) var selectedChannelSort: ForumChannelSort = .unspecified
 
   let forumName: String
 
@@ -18,6 +19,7 @@ final class ForumViewModel: ObservableObject {
   private var currentPage = 0
   private var hasMore = true
   private var channelCursor: Int64?
+  private var channelSortMemory: [Int: ForumChannelSort] = [:]
   private var loadTask: Task<Void, Never>?
   private var loadGeneration = 0
 
@@ -55,22 +57,44 @@ final class ForumViewModel: ObservableObject {
   }
 
   func setSort(_ sort: ForumThreadSort) {
+    guard selectedChannelID == nil else { return }
     guard options.sort != sort else { return }
     options.sort = sort
     reload()
   }
 
   func setChannelID(_ channelID: Int?) {
-    if let channelID, !channels.contains(where: { $0.id == channelID }) {
-      return
+    let channel = channelID.flatMap { requestedID in
+      channels.first { $0.id == requestedID }
     }
+    if channelID != nil, channel == nil { return }
     guard selectedChannelID != channelID else { return }
     selectedChannelID = channelID
-    if channelID != nil {
+    if let channel {
+      let sort = resolvedSort(for: channel)
+      selectedChannelSort = sort
+      channelSortMemory[channel.id] = sort
       options.featuredOnly = false
       options.featuredClassificationID = nil
+    } else {
+      selectedChannelSort = .unspecified
     }
     reload()
+  }
+
+  func setChannelSort(_ sort: ForumChannelSort) {
+    guard
+      let channel = selectedChannel,
+      channel.sortOptions.contains(where: { $0.id == sort.rawValue })
+    else { return }
+    guard selectedChannelSort != sort else { return }
+    selectedChannelSort = sort
+    channelSortMemory[channel.id] = sort
+    reload()
+  }
+
+  var selectedChannelSortOptions: [BrowseForumChannelSortOption] {
+    selectedChannel?.sortOptions ?? []
   }
 
   func setFeaturedOnly(_ featuredOnly: Bool) {
@@ -122,7 +146,8 @@ final class ForumViewModel: ObservableObject {
     let service = service
     let options = options
     let forum = forum
-    let selectedChannel = channels.first { $0.id == selectedChannelID }
+    let selectedChannel = self.selectedChannel
+    let selectedChannelSort = self.selectedChannelSort
     let requestedChannelCursor = replacing ? nil : channelCursor
     loadGeneration &+= 1
     let generation = loadGeneration
@@ -145,7 +170,7 @@ final class ForumViewModel: ObservableObject {
             channel: selectedChannel,
             page: page,
             pageSize: 30,
-            sort: options.sort,
+            sort: selectedChannelSort,
             lastThreadID: requestedChannelCursor
           )
           try Task.checkCancellation()
@@ -171,7 +196,7 @@ final class ForumViewModel: ObservableObject {
           guard generation == loadGeneration else { return }
           self.forum = response.forum
           if replacing || !response.channels.isEmpty {
-            channels = response.channels
+            applyChannels(response.channels)
           }
           currentPage = response.currentPage
           hasMore = response.hasMore
@@ -196,6 +221,41 @@ final class ForumViewModel: ObservableObject {
     loadGeneration &+= 1
     loadTask?.cancel()
     loadTask = nil
+  }
+
+  private var selectedChannel: BrowseForumChannel? {
+    guard let selectedChannelID else { return nil }
+    return channels.first { $0.id == selectedChannelID }
+  }
+
+  private func resolvedSort(for channel: BrowseForumChannel) -> ForumChannelSort {
+    if let remembered = channelSortMemory[channel.id],
+      channel.sortOptions.contains(where: { $0.id == remembered.rawValue })
+    {
+      return remembered
+    }
+    return channel.sortOptions.first?.sort ?? .unspecified
+  }
+
+  private func applyChannels(_ newChannels: [BrowseForumChannel]) {
+    let channelIDs = Set(newChannels.map(\.id))
+    channelSortMemory = channelSortMemory.filter { channelIDs.contains($0.key) }
+    for channel in newChannels {
+      channelSortMemory[channel.id] = resolvedSort(for: channel)
+    }
+    channels = newChannels
+
+    guard let selectedChannelID else {
+      selectedChannelSort = .unspecified
+      return
+    }
+    guard let channel = newChannels.first(where: { $0.id == selectedChannelID }) else {
+      self.selectedChannelID = nil
+      selectedChannelSort = .unspecified
+      channelCursor = nil
+      return
+    }
+    selectedChannelSort = resolvedSort(for: channel)
   }
 
   private func merge(_ existing: [BrowseThread], _ newItems: [BrowseThread]) -> [BrowseThread] {

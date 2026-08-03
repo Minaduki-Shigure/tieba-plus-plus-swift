@@ -5,10 +5,30 @@ struct BrowseForumClassification: Identifiable, Hashable, Sendable {
   let name: String
 }
 
+struct BrowseForumChannelSortOption: Identifiable, Hashable, Sendable {
+  let id: Int32
+  let title: String
+
+  var sort: ForumChannelSort { ForumChannelSort(rawValue: id) }
+}
+
 struct BrowseForumChannel: Identifiable, Hashable, Sendable {
   let id: Int
   let name: String
   let isDefault: Bool
+  let sortOptions: [BrowseForumChannelSortOption]
+
+  init(
+    id: Int,
+    name: String,
+    isDefault: Bool,
+    sortOptions: [BrowseForumChannelSortOption] = []
+  ) {
+    self.id = id
+    self.name = name
+    self.isDefault = isDefault
+    self.sortOptions = sortOptions
+  }
 }
 
 struct BrowseForum: Identifiable, Hashable, Sendable {

@@ -29,6 +29,7 @@
         "ProfileReqIdl.proto",
         "ProfileResIdl.proto",
         "SimpleForum.proto",
+        "SortButton.proto",
         "SubPostList.proto",
         "ThreadInfo.proto",
         "User.proto",

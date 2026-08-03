@@ -5,6 +5,32 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class BrowseViewModelTests: XCTestCase {
+  func testForumChannelMappingPreservesServerSortMenuAndUnknownRawValue() {
+    let mapped = TiebaCoreBrowseService.mapForumChannel(
+      TiebaForumChannel(
+        id: 81,
+        name: "服务端频道",
+        isDefault: true,
+        sortOptions: [
+          TiebaForumChannelSortOption(id: 37, title: "服务器综合排序"),
+          TiebaForumChannelSortOption(id: 0, title: "按回复"),
+        ]
+      )
+    )
+
+    XCTAssertEqual(mapped.id, 81)
+    XCTAssertEqual(mapped.name, "服务端频道")
+    XCTAssertTrue(mapped.isDefault)
+    XCTAssertEqual(
+      mapped.sortOptions,
+      [
+        BrowseForumChannelSortOption(id: 37, title: "服务器综合排序"),
+        BrowseForumChannelSortOption(id: 0, title: "按回复"),
+      ]
+    )
+    XCTAssertEqual(mapped.sortOptions.first?.sort.rawValue, 37)
+  }
+
   func testThreadMappingPreservesFeedMetadataAndSanitizesMedia() throws {
     let validImage = TiebaImage(
       thumbnailURL: try XCTUnwrap(URL(string: "https://img.example/thumb.jpg")),
@@ -909,9 +935,274 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
-  func testForumChannelSelectionUsesCursorAndSortReloadClearsIt() async throws {
+  func testForumChannelUsesFirstServerSortAndUnspecifiedWithoutMenu() async throws {
     let service = ScriptedBrowseService()
-    let channel = BrowseForumChannel(id: 8, name: "问答", isDefault: true)
+    let unknownSortChannel = BrowseForumChannel(
+      id: 70,
+      name: "综合",
+      isDefault: true,
+      sortOptions: [
+        BrowseForumChannelSortOption(id: 37, title: "服务器综合"),
+        BrowseForumChannelSortOption(id: 0, title: "回复"),
+      ]
+    )
+    let noMenuChannel = BrowseForumChannel(id: 71, name: "无排序菜单", isDefault: false)
+    let forum = Fixtures.forum(name: "Swift")
+    for threadID in [700, 701] {
+      await service.enqueueThreads(
+        .value(
+          ThreadPageData(
+            forum: forum,
+            threads: [Fixtures.thread(id: Int64(threadID))],
+            currentPage: 1,
+            hasMore: false,
+            channels: [unknownSortChannel, noMenuChannel]
+          )
+        )
+      )
+    }
+    for threadID in [702, 703] {
+      await service.enqueueForumChannelThreads(
+        .value(
+          ForumChannelPageData(
+            threads: [Fixtures.thread(id: Int64(threadID))],
+            currentPage: 1,
+            hasMore: false,
+            nextPageCursor: Int64(threadID)
+          )
+        )
+      )
+    }
+    let viewModel = ForumViewModel(forumName: "Swift", service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.threads.first?.id == 700 }
+
+    viewModel.setChannelID(unknownSortChannel.id)
+    try await waitUntil { viewModel.threads.first?.id == 702 }
+    XCTAssertEqual(viewModel.selectedChannelSort.rawValue, 37)
+
+    viewModel.setChannelID(nil)
+    try await waitUntil { viewModel.threads.first?.id == 701 }
+    viewModel.setChannelID(noMenuChannel.id)
+    try await waitUntil { viewModel.threads.first?.id == 703 }
+
+    XCTAssertEqual(viewModel.selectedChannelSort, .unspecified)
+    let requests = await service.forumChannelRequestSnapshot()
+    XCTAssertEqual(requests.map(\.sort.rawValue), [37, -1])
+  }
+
+  @MainActor
+  func testForumChannelSortMemoryIsIndependentPerChannelAndMainSort() async throws {
+    let service = ScriptedBrowseService()
+    let first = BrowseForumChannel(
+      id: 72,
+      name: "第一频道",
+      isDefault: true,
+      sortOptions: [
+        BrowseForumChannelSortOption(id: 0, title: "回复"),
+        BrowseForumChannelSortOption(id: 1, title: "发布"),
+      ]
+    )
+    let second = BrowseForumChannel(
+      id: 73,
+      name: "第二频道",
+      isDefault: false,
+      sortOptions: [
+        BrowseForumChannelSortOption(id: 1, title: "发布"),
+        BrowseForumChannelSortOption(id: 0, title: "回复"),
+      ]
+    )
+    await service.enqueueThreads(
+      .value(
+        ThreadPageData(
+          forum: Fixtures.forum(name: "Swift"),
+          threads: [Fixtures.thread(id: 710)],
+          currentPage: 1,
+          hasMore: false,
+          channels: [first, second]
+        )
+      )
+    )
+    for threadID in 711...716 {
+      await service.enqueueForumChannelThreads(
+        .value(
+          ForumChannelPageData(
+            threads: [Fixtures.thread(id: Int64(threadID))],
+            currentPage: 1,
+            hasMore: false,
+            nextPageCursor: Int64(threadID)
+          )
+        )
+      )
+    }
+    let initialOptions = ForumBrowseOptions(sort: .creationTime)
+    let viewModel = ForumViewModel(
+      forumName: "Swift",
+      service: service,
+      options: initialOptions
+    )
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.threads.first?.id == 710 }
+
+    viewModel.setChannelID(first.id)
+    try await waitUntil { viewModel.threads.first?.id == 711 }
+    viewModel.setChannelSort(.creationTime)
+    try await waitUntil { viewModel.threads.first?.id == 712 }
+    viewModel.setChannelID(second.id)
+    try await waitUntil { viewModel.threads.first?.id == 713 }
+    viewModel.setChannelSort(.replyTime)
+    try await waitUntil { viewModel.threads.first?.id == 714 }
+    viewModel.setChannelID(first.id)
+    try await waitUntil { viewModel.threads.first?.id == 715 }
+    viewModel.setChannelID(second.id)
+    try await waitUntil { viewModel.threads.first?.id == 716 }
+
+    viewModel.setSort(.replyTime)
+    await drainMainActor()
+
+    XCTAssertEqual(viewModel.selectedChannelSort, .replyTime)
+    XCTAssertEqual(viewModel.options, initialOptions)
+    let requests = await service.forumChannelRequestSnapshot()
+    XCTAssertEqual(
+      requests.map(\.sort),
+      [.replyTime, .creationTime, .creationTime, .replyTime, .creationTime, .replyTime]
+    )
+  }
+
+  @MainActor
+  func testForumChannelMenuChangeInvalidatesRememberedSortAndUsesNewFirstOption() async throws {
+    let service = ScriptedBrowseService()
+    let original = BrowseForumChannel(
+      id: 74,
+      name: "动态菜单",
+      isDefault: true,
+      sortOptions: [
+        BrowseForumChannelSortOption(id: 0, title: "回复"),
+        BrowseForumChannelSortOption(id: 1, title: "发布"),
+      ]
+    )
+    let updated = BrowseForumChannel(
+      id: 74,
+      name: "动态菜单",
+      isDefault: true,
+      sortOptions: [
+        BrowseForumChannelSortOption(id: 37, title: "新综合"),
+        BrowseForumChannelSortOption(id: 0, title: "回复"),
+      ]
+    )
+    let forum = Fixtures.forum(name: "Swift")
+    await service.enqueueThreads(
+      .value(
+        ThreadPageData(
+          forum: forum,
+          threads: [Fixtures.thread(id: 720)],
+          currentPage: 1,
+          hasMore: false,
+          channels: [original]
+        )
+      )
+    )
+    await service.enqueueThreads(
+      .value(
+        ThreadPageData(
+          forum: forum,
+          threads: [Fixtures.thread(id: 723)],
+          currentPage: 1,
+          hasMore: false,
+          channels: [updated]
+        )
+      )
+    )
+    for threadID in [721, 722, 724] {
+      await service.enqueueForumChannelThreads(
+        .value(
+          ForumChannelPageData(
+            threads: [Fixtures.thread(id: Int64(threadID))],
+            currentPage: 1,
+            hasMore: false,
+            nextPageCursor: Int64(threadID)
+          )
+        )
+      )
+    }
+    let viewModel = ForumViewModel(forumName: "Swift", service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.threads.first?.id == 720 }
+    viewModel.setChannelID(original.id)
+    try await waitUntil { viewModel.threads.first?.id == 721 }
+    viewModel.setChannelSort(.creationTime)
+    try await waitUntil { viewModel.threads.first?.id == 722 }
+
+    viewModel.setChannelID(nil)
+    try await waitUntil { viewModel.threads.first?.id == 723 }
+    XCTAssertEqual(viewModel.channels, [updated])
+    viewModel.setChannelID(updated.id)
+    try await waitUntil { viewModel.threads.first?.id == 724 }
+
+    XCTAssertEqual(viewModel.selectedChannelSort.rawValue, 37)
+    let requests = await service.forumChannelRequestSnapshot()
+    XCTAssertEqual(requests.map(\.sort.rawValue), [0, 1, 37])
+  }
+
+  @MainActor
+  func testForumReplacingResponseFallsBackToAllTopicsWhenChannelDisappears() async throws {
+    let service = ScriptedBrowseService()
+    let channel = BrowseForumChannel(
+      id: 75,
+      name: "即将移除",
+      isDefault: true,
+      sortOptions: [BrowseForumChannelSortOption(id: 37, title: "综合")]
+    )
+    await service.enqueueThreads(
+      .value(
+        ThreadPageData(
+          forumName: "Swift",
+          threads: [Fixtures.thread(id: 730)],
+          currentPage: 1,
+          hasMore: false,
+          channels: [channel]
+        )
+      )
+    )
+    await service.enqueueThreads(
+      .value(
+        ThreadPageData(
+          forum: Fixtures.forum(name: "Swift"),
+          threads: [Fixtures.thread(id: 731)],
+          currentPage: 1,
+          hasMore: false,
+          channels: []
+        )
+      )
+    )
+    let viewModel = ForumViewModel(forumName: "Swift", service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.threads.first?.id == 730 }
+
+    viewModel.setChannelID(channel.id)
+    try await waitUntil { viewModel.threads.first?.id == 731 }
+
+    XCTAssertTrue(viewModel.channels.isEmpty)
+    XCTAssertNil(viewModel.selectedChannelID)
+    XCTAssertEqual(viewModel.selectedChannelSort, .unspecified)
+    let channelRequestCount = await service.forumChannelRequestCount()
+    let threadRequestCount = await service.threadRequestCount()
+    XCTAssertEqual(channelRequestCount, 0)
+    XCTAssertEqual(threadRequestCount, 2)
+  }
+
+  @MainActor
+  func testForumChannelSortChangeClearsCursorAndRejectsStaleResponse() async throws {
+    let service = ScriptedBrowseService()
+    let channel = BrowseForumChannel(
+      id: 8,
+      name: "问答",
+      isDefault: true,
+      sortOptions: [
+        BrowseForumChannelSortOption(id: ForumChannelSort.replyTime.rawValue, title: "热门回复"),
+        BrowseForumChannelSortOption(id: ForumChannelSort.creationTime.rawValue, title: "最新发布"),
+      ]
+    )
     let forum = Fixtures.forum(name: "Swift")
     await service.enqueueThreads(
       .value(
@@ -935,14 +1226,7 @@ final class BrowseViewModelTests: XCTestCase {
       )
     )
     await service.enqueueForumChannelThreads(
-      .value(
-        ForumChannelPageData(
-          threads: [Fixtures.thread(id: 32), Fixtures.thread(id: 33)],
-          currentPage: 2,
-          hasMore: true,
-          nextPageCursor: 33
-        )
-      )
+      .suspended(108)
     )
     await service.enqueueForumChannelThreads(
       .value(
@@ -961,15 +1245,33 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.channels, [channel])
     viewModel.setChannelID(channel.id)
     try await waitUntil { viewModel.threads.map(\.id) == [31, 32] }
+    XCTAssertEqual(viewModel.selectedChannelSort, .replyTime)
 
     viewModel.loadMoreIfNeeded(current: viewModel.threads[1])
-    try await waitUntil { viewModel.threads.map(\.id) == [31, 32, 33] }
+    try await waitUntil { await service.forumChannelRequestCount() == 2 }
 
-    viewModel.setSort(.creationTime)
+    viewModel.setChannelSort(.creationTime)
     try await waitUntil { viewModel.threads.map(\.id) == [34] }
 
+    let resumed = await service.resumeForumChannel(
+      id: 108,
+      returning: ForumChannelPageData(
+        threads: [Fixtures.thread(id: 33, title: "过期频道回复")],
+        currentPage: 2,
+        hasMore: false,
+        nextPageCursor: 33
+      )
+    )
+    XCTAssertTrue(resumed)
+    await drainMainActor()
+
+    viewModel.setSort(.creationTime)
+    await drainMainActor()
+
     XCTAssertEqual(viewModel.selectedChannelID, channel.id)
-    XCTAssertEqual(viewModel.options, ForumBrowseOptions(sort: .creationTime))
+    XCTAssertEqual(viewModel.selectedChannelSort, .creationTime)
+    XCTAssertEqual(viewModel.options, ForumBrowseOptions())
+    XCTAssertEqual(viewModel.threads.map(\.id), [34])
     let requests = await service.forumChannelRequestSnapshot()
     XCTAssertEqual(
       requests,
@@ -980,7 +1282,7 @@ final class BrowseViewModelTests: XCTestCase {
           channel: channel,
           page: 1,
           pageSize: 30,
-          sort: .replyTime,
+          sort: ForumChannelSort.replyTime,
           lastThreadID: nil
         ),
         ForumChannelRequest(
@@ -989,7 +1291,7 @@ final class BrowseViewModelTests: XCTestCase {
           channel: channel,
           page: 2,
           pageSize: 30,
-          sort: .replyTime,
+          sort: ForumChannelSort.replyTime,
           lastThreadID: 32
         ),
         ForumChannelRequest(
@@ -998,7 +1300,7 @@ final class BrowseViewModelTests: XCTestCase {
           channel: channel,
           page: 1,
           pageSize: 30,
-          sort: .creationTime,
+          sort: ForumChannelSort.creationTime,
           lastThreadID: nil
         ),
       ]
@@ -1055,6 +1357,8 @@ final class BrowseViewModelTests: XCTestCase {
     let requestCount = await service.forumChannelRequestCount()
     XCTAssertEqual(requestCount, 2)
     XCTAssertEqual(viewModel.threads.map(\.id), [41])
+    let requests = await service.forumChannelRequestSnapshot()
+    XCTAssertEqual(requests.map(\.sort), [.unspecified, .unspecified])
   }
 
   @MainActor
@@ -4523,7 +4827,7 @@ private struct ForumChannelRequest: Equatable, Sendable {
   let channel: BrowseForumChannel
   let page: Int
   let pageSize: Int
-  let sort: ForumThreadSort
+  let sort: ForumChannelSort
   let lastThreadID: Int64?
 }
 
@@ -4651,7 +4955,7 @@ private actor ScriptedBrowseService: BrowseService {
     channel: BrowseForumChannel,
     page: Int,
     pageSize: Int,
-    sort: ForumThreadSort,
+    sort: ForumChannelSort,
     lastThreadID: Int64?
   ) async throws -> ForumChannelPageData {
     forumChannelRequests.append(
@@ -4773,6 +5077,12 @@ private actor ScriptedBrowseService: BrowseService {
   func cancelThreads(id: Int) -> Bool {
     guard let continuation = pendingThreads.removeValue(forKey: id) else { return false }
     continuation.resume(throwing: URLError(.cancelled))
+    return true
+  }
+
+  func resumeForumChannel(id: Int, returning value: ForumChannelPageData) -> Bool {
+    guard let continuation = pendingForumChannels.removeValue(forKey: id) else { return false }
+    continuation.resume(returning: value)
     return true
   }
 

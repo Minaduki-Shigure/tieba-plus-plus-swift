@@ -17,7 +17,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Forum thread list with pagination and pull to refresh
 - Reply-time and creation-time forum sorting
 - Global default sorting with normalized per-forum sort memory
-- Server-defined forum channels with independent sorting and cursor pagination
+- Server-defined forum channels with bounded server-provided sorting menus and cursor pagination
 - Shared rich thread cards across forum, channel, hot-topic, global-search, and public profiles
 - Compact pinned rows, topic-state badges, bounded image previews, and video covers
 - Forum header, statistics, rules state, and featured classifications
@@ -167,7 +167,12 @@ moderators. A forum without published rules is a normal empty state rather than
 an API failure.
 
 Forum channels are accepted only from FRS tabs marked as general type 15.
-Their `GeneralTabList` requests use a channel-specific sort type and advance
+Each channel exposes at most 12 valid entries from its server-provided sort
+menu, preserving the first occurrence of every nonnegative raw ID and trimming
+titles to 40 characters. Unknown nonnegative IDs remain usable instead of being
+collapsed into the two currently observed values. A channel defaults to its
+first advertised entry; a missing menu sends the protocol's `-1` sentinel.
+`GeneralTabList` requests use that channel-specific raw sort value and advance
 with both the page number and the final valid thread ID. Missing, duplicate, or
 stalled cursors terminate pagination instead of repeatedly loading one page.
 
@@ -184,6 +189,9 @@ explicit image views retain the 80 MiB ceiling.
 
 The global forum-sort preference applies when a forum has no remembered choice;
 changing a forum's picker stores a normalized, bounded per-forum override.
+Channel-menu choices are remembered separately only while the current forum
+screen is alive, are revalidated when a menu changes, and never overwrite the
+global or per-forum topic-sort preference.
 Appearance and sort values are nonsecret local enums. No-history mode updates
 the recording flag inside the existing versioned history archive, so it does not
 create a competing source of truth or delete favorites. Pure-reading mode is

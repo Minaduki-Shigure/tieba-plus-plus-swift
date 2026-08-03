@@ -26,10 +26,27 @@ final class TiebaClientTests: XCTestCase {
     )
     XCTAssertEqual(result.pagination.nextPage, 2)
     XCTAssertEqual(result.tabs["Latest"], 3)
+    let expectedSortOptions = [
+      TiebaForumChannelSortOption(id: 37, title: "Custom"),
+      TiebaForumChannelSortOption(
+        id: 39,
+        title: String(repeating: "e\u{301}", count: 40)
+      ),
+    ] + (40...49).map {
+      TiebaForumChannelSortOption(id: Int32($0), title: "Sort \($0)")
+    }
     XCTAssertEqual(
       result.channels,
-      [TiebaForumChannel(id: 3_631_832, name: "Help", isDefault: true)]
+      [
+        TiebaForumChannel(
+          id: 3_631_832,
+          name: "Help",
+          isDefault: true,
+          sortOptions: expectedSortOptions
+        )
+      ]
     )
+    XCTAssertEqual(result.channels.first?.sortOptions.count, 12)
 
     let thread = try XCTUnwrap(result.threads.first)
     XCTAssertEqual(thread.id, 100)
@@ -48,7 +65,11 @@ final class TiebaClientTests: XCTestCase {
       body: try ProtoFixtures.forumChannelPage().serializedData()
     )
     let client = TiebaClient(transport: transport)
-    let channel = TiebaForumChannel(id: 3_631_832, name: "Help")
+    let channel = TiebaForumChannel(
+      id: 3_631_832,
+      name: "Help",
+      sortOptions: [TiebaForumChannelSortOption(id: 37, title: "Custom")]
+    )
 
     let result = try await client.getForumChannelThreads(
       forumID: 42,
@@ -56,7 +77,6 @@ final class TiebaClientTests: XCTestCase {
       channel: channel,
       page: 2,
       pageSize: 30,
-      sort: .creationTime,
       lastThreadID: 950
     )
 
@@ -78,7 +98,20 @@ final class TiebaClientTests: XCTestCase {
     )
     XCTAssertEqual(decoded.data.pn, 2)
     XCTAssertEqual(decoded.data.lastThreadID, 950)
-    XCTAssertEqual(decoded.data.sortType, 1)
+    XCTAssertEqual(decoded.data.sortType, 37)
+
+    let noMenuChannel = TiebaForumChannel(id: 3_631_833, name: "No menu")
+    _ = try await client.getForumChannelThreads(
+      forumID: 42,
+      forumName: "swift",
+      channel: noMenuChannel
+    )
+    let capturedNoMenuRequest = await transport.lastRequest()
+    let noMenuRequest = try XCTUnwrap(capturedNoMenuRequest)
+    let noMenuDecoded = try GeneralTabListReqIdl(
+      serializedBytes: protobufPayload(from: try XCTUnwrap(noMenuRequest.httpBody))
+    )
+    XCTAssertEqual(noMenuDecoded.data.sortType, -1)
   }
 
   func testMapsPostsAndEmbeddedComments() async throws {

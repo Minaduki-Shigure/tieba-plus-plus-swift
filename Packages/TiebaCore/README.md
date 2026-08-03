@@ -60,7 +60,11 @@ let followed = try await authenticatedClient.getFollowedForums(
   original HTTPS host.
 - Forum and post browsing use FRS `301001`, GeneralTab `309622`, PB `302001`,
   and floor `302002`. GeneralTab receives only a public forum ID, a validated
-  type-15 channel, its independent sort value, and pagination cursor.
+  type-15 channel, its independent server-advertised sort value, and pagination
+  cursor. FRS sort menus are bounded to 12 unique nonnegative IDs with 40-character
+  titles; GeneralTab sends an advertised raw ID or `-1` when no menu is present.
+  Omitting the public client argument selects the first advertised entry, then
+  falls back to `-1` only for an empty menu.
 - Public profiles use Profile `303012` with explicit guest fields; public user
   threads use UserPost `303002` and terminate pagination on an empty page. A
   profile's liked-forum array is a limited public preview rather than a complete
