@@ -77,6 +77,10 @@ but authenticated write operations remain intentionally unsupported.
   Tap-to-load covers thread previews, post images, video covers, per-forum
   search media, and hot-topic images while leaving avatars, opened gallery
   originals, sharing, and saving on their existing user-initiated paths.
+- An optional compact mode replaces media previews in thread lists and
+  per-forum search with noninteractive type or image-count summaries. Collapsed
+  rows create no preview view or request; post bodies, hot-topic images,
+  avatars, galleries, sharing, and saving remain unchanged.
 - Forum and thread pages use the native share sheet with canonical HTTPS links.
   Copied thread links retain browse mode, including only-author state.
 - A strict in-app router handles supported rich-content links, explicit

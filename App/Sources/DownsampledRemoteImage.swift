@@ -189,15 +189,18 @@ actor DownsampledImageRepository {
 
   private let downloader: any RemoteImageDownloading
   private let beforeDownload: @Sendable () async -> Void
+  private let inFlightWaiterCountDidChange: @Sendable (Int) -> Void
   private let cache = NSCache<NSString, UIImage>()
   private var inFlight: [InFlightKey: InFlightRequest] = [:]
 
   init(
     downloader: any RemoteImageDownloading = BoundedHTTPSRemoteImageTransport.shared,
-    beforeDownload: @escaping @Sendable () async -> Void = {}
+    beforeDownload: @escaping @Sendable () async -> Void = {},
+    inFlightWaiterCountDidChange: @escaping @Sendable (Int) -> Void = { _ in }
   ) {
     self.downloader = downloader
     self.beforeDownload = beforeDownload
+    self.inFlightWaiterCountDidChange = inFlightWaiterCountDidChange
     cache.totalCostLimit = 96 * 1_024 * 1_024
     cache.countLimit = 80
   }
@@ -241,6 +244,7 @@ actor DownsampledImageRepository {
     if var request = inFlight[inFlightKey] {
       request.waiters.insert(waiterID)
       inFlight[inFlightKey] = request
+      inFlightWaiterCountDidChange(request.waiters.count)
       task = request.task
     } else {
       let downloader = downloader
@@ -273,6 +277,7 @@ actor DownsampledImageRepository {
         return asset
       }
       inFlight[inFlightKey] = InFlightRequest(task: task, waiters: [waiterID])
+      inFlightWaiterCountDidChange(1)
     }
 
     return try await withTaskCancellationHandler {
@@ -299,8 +304,10 @@ actor DownsampledImageRepository {
     if request.waiters.isEmpty {
       request.task.cancel()
       inFlight[key] = nil
+      inFlightWaiterCountDidChange(0)
     } else {
       inFlight[key] = request
+      inFlightWaiterCountDidChange(request.waiters.count)
     }
   }
 }

@@ -275,9 +275,81 @@ final class DownsampledRemoteImageTests: XCTestCase {
     _ = await originalTask.result
   }
 
+  func testCancellingOneOfTwoIdenticalWaitersKeepsSharedTransferAlive() async throws {
+    let cancellationProbe = RemoteImageCancellationProbe()
+    let waiterCountProbe = InFlightWaiterCountProbe()
+    let downloader = GatedRemoteImageDownloader(
+      imageData: try makeJPEGData(),
+      cancellationProbe: cancellationProbe
+    )
+    let repository = DownsampledImageRepository(
+      downloader: downloader,
+      inFlightWaiterCountDidChange: { count in
+        waiterCountProbe.record(count)
+      }
+    )
+    let url = try XCTUnwrap(URL(string: "https://img.example/shared-waiters.jpg"))
+
+    let firstTask = Task {
+      try await repository.image(
+        at: url,
+        maxPixelSize: 320,
+        fetchPolicy: .allowNetwork(.preview)
+      )
+    }
+    let didRegisterFirstWaiter = await waiterCountProbe.waitUntilCounts([1])
+    let didStartRequest = await downloader.waitUntilRequestCount(1)
+    XCTAssertTrue(didRegisterFirstWaiter)
+    XCTAssertTrue(didStartRequest)
+
+    let secondTask = Task {
+      try await repository.image(
+        at: url,
+        maxPixelSize: 320,
+        fetchPolicy: .allowNetwork(.preview)
+      )
+    }
+    let didJoinSecondWaiter = await waiterCountProbe.waitUntilCounts([1, 2])
+    let joinedRequestCount = await downloader.requestCount()
+    XCTAssertTrue(didJoinSecondWaiter)
+    XCTAssertEqual(joinedRequestCount, 1)
+
+    firstTask.cancel()
+    let didRemoveOnlyFirstWaiter = await waiterCountProbe.waitUntilCounts([1, 2, 1])
+    XCTAssertTrue(didRemoveOnlyFirstWaiter)
+    XCTAssertEqual(cancellationProbe.count, 0)
+
+    await downloader.releaseAll()
+    _ = try await secondTask.value
+    let didRemoveCompletedWaiter = await waiterCountProbe.waitUntilCounts([1, 2, 1, 0])
+    XCTAssertTrue(didRemoveCompletedWaiter)
+
+    do {
+      _ = try await firstTask.value
+      XCTFail("Expected the cancelled waiter to throw")
+    } catch is CancellationError {
+      // Expected.
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+    let completedRequestCount = await downloader.requestCount()
+    XCTAssertEqual(completedRequestCount, 1)
+    XCTAssertEqual(cancellationProbe.count, 0)
+  }
+
   func testFinalWaiterCancellationCancelsTransferAndDoesNotPopulateCache() async throws {
-    let downloader = SuspendedRemoteImageDownloader(imageData: try makeJPEGData())
-    let repository = DownsampledImageRepository(downloader: downloader)
+    let cancellationProbe = RemoteImageCancellationProbe()
+    let waiterCountProbe = InFlightWaiterCountProbe()
+    let downloader = GatedRemoteImageDownloader(
+      imageData: try makeJPEGData(),
+      cancellationProbe: cancellationProbe
+    )
+    let repository = DownsampledImageRepository(
+      downloader: downloader,
+      inFlightWaiterCountDidChange: { count in
+        waiterCountProbe.record(count)
+      }
+    )
     let url = try XCTUnwrap(URL(string: "https://img.example/cancelled.jpg"))
     let networkTask = Task {
       try await repository.image(
@@ -286,17 +358,21 @@ final class DownsampledRemoteImageTests: XCTestCase {
         fetchPolicy: .allowNetwork(.preview)
       )
     }
+    let didRegisterWaiter = await waiterCountProbe.waitUntilCounts([1])
     let didStart = await downloader.waitUntilRequestCount(1)
+    XCTAssertTrue(didRegisterWaiter)
     XCTAssertTrue(didStart)
 
     networkTask.cancel()
-    let didCancel = await downloader.waitUntilCancellationCount(1)
-    XCTAssertTrue(didCancel)
+    let didRemoveFinalWaiter = await waiterCountProbe.waitUntilCounts([1, 0])
+    XCTAssertTrue(didRemoveFinalWaiter)
+    XCTAssertEqual(cancellationProbe.count, 1)
     await downloader.releaseAll()
     _ = await networkTask.result
 
-    let cancellationCount = await downloader.cancelledRequestCount()
-    XCTAssertEqual(cancellationCount, 1)
+    let requestCount = await downloader.requestCount()
+    XCTAssertEqual(requestCount, 1)
+    XCTAssertEqual(cancellationProbe.count, 1)
     await expectCacheMiss(repository, url: url, maxPixelSize: 320)
   }
 
@@ -446,6 +522,117 @@ private actor SuspendedRemoteImageDownloader: RemoteImageDownloading {
   private func recordCancellation() {
     cancelledRequests += 1
   }
+}
+
+private final class RemoteImageCancellationProbe: @unchecked Sendable {
+  private let lock = NSLock()
+  private var cancellationCount = 0
+
+  var count: Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return cancellationCount
+  }
+
+  func recordCancellation() {
+    lock.lock()
+    cancellationCount += 1
+    lock.unlock()
+  }
+}
+
+private final class InFlightWaiterCountProbe: @unchecked Sendable {
+  private let lock = NSLock()
+  private var counts: [Int] = []
+
+  func record(_ count: Int) {
+    lock.lock()
+    counts.append(count)
+    lock.unlock()
+  }
+
+  func waitUntilCounts(
+    _ expectedCounts: [Int],
+    timeout: Duration = .seconds(2)
+  ) async -> Bool {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: timeout)
+    while snapshot() != expectedCounts, clock.now < deadline {
+      do {
+        try await Task.sleep(for: .milliseconds(1))
+      } catch {
+        return false
+      }
+    }
+    return snapshot() == expectedCounts
+  }
+
+  private func snapshot() -> [Int] {
+    lock.lock()
+    defer { lock.unlock() }
+    return counts
+  }
+}
+
+private actor GatedRemoteImageDownloader: RemoteImageDownloading {
+  private let imageData: Data
+  private let cancellationProbe: RemoteImageCancellationProbe
+  private var kinds: [RemoteImageDownloadKind] = []
+  private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+  private var isReleased = false
+
+  init(imageData: Data, cancellationProbe: RemoteImageCancellationProbe) {
+    self.imageData = imageData
+    self.cancellationProbe = cancellationProbe
+  }
+
+  func download(from url: URL, kind: RemoteImageDownloadKind) async throws
+    -> RemoteImageFileLease
+  {
+    kinds.append(kind)
+    let cancellationProbe = cancellationProbe
+    await withTaskCancellationHandler {
+      await waitForRelease()
+    } onCancel: {
+      cancellationProbe.recordCancellation()
+    }
+    return try makeLease(imageData: imageData, sourceURL: url)
+  }
+
+  func waitUntilRequestCount(
+    _ expectedCount: Int,
+    timeout: Duration = .seconds(2)
+  ) async -> Bool {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: timeout)
+    while kinds.count < expectedCount, clock.now < deadline {
+      do {
+        try await Task.sleep(for: .milliseconds(1))
+      } catch {
+        return false
+      }
+    }
+    return kinds.count >= expectedCount
+  }
+
+  func releaseAll() {
+    isReleased = true
+    let continuations = releaseWaiters
+    releaseWaiters.removeAll()
+    continuations.forEach { $0.resume() }
+  }
+
+  func requestCount() -> Int {
+    kinds.count
+  }
+
+  private func waitForRelease() async {
+    guard !isReleased else { return }
+    await withCheckedContinuation { continuation in
+      releaseWaiters.append(continuation)
+    }
+  }
+
 }
 
 private actor SuspendedAsyncGate {

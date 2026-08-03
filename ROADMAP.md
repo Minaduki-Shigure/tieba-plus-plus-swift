@@ -45,6 +45,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Strict internal routing for supported Tieba HTTPS, pasted official-scheme, and app links
 - Nested replies, images, video links, and voice playback
 - Persistent automatic or tap-to-load policy for content images and video covers
+- Optional compact media summaries for thread lists and per-forum search, with no collapsed preview request
 - Same-content multi-image gallery with paging, zoom, original-file sharing, and Photos saving
 - Server-ranked inline nested-reply previews with anchored opening and safe text copying
 - Full nested-reply pages with parent-floor context and bidirectional anchored pagination
@@ -191,6 +192,12 @@ player. Every preview still passes the existing HTTPS URL normalization,
 credential-free downloader, redirect policy, transfer-time byte limit, and pixel
 downsampling. Automatic 720-pixel previews stop at 16 MiB; higher-resolution
 explicit image views retain the 80 MiB ceiling.
+An independent persistent compact mode replaces those thread-list previews and
+per-forum search image strips with noninteractive media summaries. Its collapsed
+presentation retains only a media type or full image count and never constructs
+a remote preview view, so it creates no preview request. It does not alter post
+bodies, hot-topic images, avatars, gallery/export paths, playback, page data, or
+the separate automatic versus tap-to-load policy used when previews are expanded.
 
 The global forum-sort preference applies when a forum has no remembered choice;
 changing a forum's picker stores a normalized, bounded per-forum override.

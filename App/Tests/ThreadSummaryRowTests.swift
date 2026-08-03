@@ -15,6 +15,14 @@ final class ThreadSummaryRowTests: XCTestCase {
     )
 
     XCTAssertEqual(ThreadSummaryPresentation.media(for: thread), .video(coverURL))
+    XCTAssertEqual(
+      ThreadSummaryPresentation.mediaPresentation(for: thread, hidesMedia: false),
+      .expanded(.video(coverURL))
+    )
+    XCTAssertEqual(
+      ThreadSummaryPresentation.mediaPresentation(for: thread, hidesMedia: true),
+      .collapsed(.video)
+    )
   }
 
   func testImagePreviewIsBoundedToFirstThreeImages() throws {
@@ -31,6 +39,63 @@ final class ThreadSummaryRowTests: XCTestCase {
       ThreadSummaryPresentation.media(for: thread),
       .images(Array(urls.prefix(3)), totalCount: 4)
     )
+    XCTAssertEqual(
+      ThreadSummaryPresentation.mediaPresentation(for: thread, hidesMedia: false),
+      .expanded(.images(Array(urls.prefix(3)), totalCount: 4))
+    )
+    XCTAssertEqual(
+      ThreadSummaryPresentation.mediaPresentation(for: thread, hidesMedia: true),
+      .collapsed(.images(count: 4))
+    )
+  }
+
+  func testCollapsedImageCountPreservesDuplicateURLs() throws {
+    let repeatedURL = try XCTUnwrap(URL(string: "https://example.com/repeated.jpg"))
+    let thread = makeThread(
+      contents: (0..<4).map { _ in
+        .image(thumbnail: repeatedURL, original: nil, width: 100, height: 100)
+      }
+    )
+
+    XCTAssertEqual(
+      ThreadSummaryPresentation.mediaPresentation(for: thread, hidesMedia: true),
+      .collapsed(.images(count: 4))
+    )
+    XCTAssertEqual(
+      ThreadSummaryPresentation.mediaPresentation(for: thread, hidesMedia: false),
+      .expanded(.images([repeatedURL, repeatedURL, repeatedURL], totalCount: 4))
+    )
+  }
+
+  func testVideoWithoutCoverDoesNotCreateNewMediaSemantics() throws {
+    let videoURL = try XCTUnwrap(URL(string: "https://example.com/video.mp4"))
+    let videoOnlyThread = makeThread(
+      contents: [.video(url: videoURL, cover: nil, width: 1280, height: 720)]
+    )
+
+    XCTAssertNil(
+      ThreadSummaryPresentation.mediaPresentation(for: videoOnlyThread, hidesMedia: false)
+    )
+    XCTAssertNil(
+      ThreadSummaryPresentation.mediaPresentation(for: videoOnlyThread, hidesMedia: true)
+    )
+
+    let imageURL = try XCTUnwrap(URL(string: "https://example.com/image.jpg"))
+    let threadWithImage = makeThread(
+      contents: [
+        .video(url: videoURL, cover: nil, width: 1280, height: 720),
+        .image(thumbnail: imageURL, original: nil, width: 100, height: 100),
+      ]
+    )
+
+    XCTAssertEqual(
+      ThreadSummaryPresentation.mediaPresentation(for: threadWithImage, hidesMedia: false),
+      .expanded(.images([imageURL], totalCount: 1))
+    )
+    XCTAssertEqual(
+      ThreadSummaryPresentation.mediaPresentation(for: threadWithImage, hidesMedia: true),
+      .collapsed(.images(count: 1))
+    )
   }
 
   func testPinnedThreadNeverLoadsInlineMedia() throws {
@@ -41,6 +106,23 @@ final class ThreadSummaryRowTests: XCTestCase {
     )
 
     XCTAssertNil(ThreadSummaryPresentation.media(for: thread))
+    XCTAssertNil(
+      ThreadSummaryPresentation.mediaPresentation(for: thread, hidesMedia: false)
+    )
+    XCTAssertNil(
+      ThreadSummaryPresentation.mediaPresentation(for: thread, hidesMedia: true)
+    )
+  }
+
+  func testThreadWithoutMediaHasNoPresentationInEitherMode() {
+    let thread = makeThread(contents: [.text("Text only")])
+
+    XCTAssertNil(
+      ThreadSummaryPresentation.mediaPresentation(for: thread, hidesMedia: false)
+    )
+    XCTAssertNil(
+      ThreadSummaryPresentation.mediaPresentation(for: thread, hidesMedia: true)
+    )
   }
 
   private func makeThread(

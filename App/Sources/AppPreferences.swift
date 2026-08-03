@@ -7,6 +7,18 @@ enum AppPreferenceKey {
   static let homeShowsRecentForums = "TiebaPlusPlus.homeShowsRecentForums"
   static let searchSuggestionsEnabled = "TiebaPlusPlus.searchSuggestionsEnabled"
   static let contentMediaLoadPolicy = "TiebaPlusPlus.contentMediaLoadPolicy"
+  static let hidesThreadListMedia = "TiebaPlusPlus.hidesThreadListMedia"
+}
+
+private struct HidesThreadListMediaEnvironmentKey: EnvironmentKey {
+  static let defaultValue = false
+}
+
+extension EnvironmentValues {
+  var hidesThreadListMedia: Bool {
+    get { self[HidesThreadListMediaEnvironmentKey.self] }
+    set { self[HidesThreadListMediaEnvironmentKey.self] = newValue }
+  }
 }
 
 enum AppAppearance: String, CaseIterable, Hashable, Identifiable, Sendable {

@@ -12,6 +12,8 @@ struct AppSettingsView: View {
   private var searchSuggestionsEnabled = false
   @AppStorage(AppPreferenceKey.contentMediaLoadPolicy)
   private var contentMediaLoadPolicy = ContentMediaLoadPolicy.automatic.rawValue
+  @AppStorage(AppPreferenceKey.hidesThreadListMedia)
+  private var hidesThreadListMedia = false
 
   init(historyRepository: any BrowsingHistoryRepository) {
     _historyViewModel = StateObject(
@@ -90,6 +92,8 @@ struct AppSettingsView: View {
         }
         .pickerStyle(.segmented)
 
+        Toggle("收起帖子列表的图片和视频", isOn: $hidesThreadListMedia)
+
         NavigationLink {
           ContentFilterSettingsView()
         } label: {
@@ -99,8 +103,11 @@ struct AppSettingsView: View {
         Text("内容")
       } footer: {
         Text(
-          "\u{201c}点按加载\u{201d}仅控制帖子预览、正文与话题图片及视频封面的自动下载；头像不受影响。"
-            + "本次运行内存中已经缓存的图片会直接显示，页面数据等其他网络请求仍会正常进行。"
+          "\u{201c}收起帖子列表的图片和视频\u{201d}仅影响帖子列表和吧内搜索；"
+            + "收起时不会创建列表媒体预览请求。\u{201c}点按加载\u{201d}控制展开后的列表媒体、"
+            + "帖子正文、话题图片和视频封面的自动下载，头像和图库不受影响。"
+            + "在\u{201c}点按加载\u{201d}模式下，进程内已经缓存的图片会直接显示，"
+            + "页面数据等其他网络请求仍会正常进行。"
         )
       }
     }

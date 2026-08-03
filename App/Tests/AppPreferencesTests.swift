@@ -28,6 +28,15 @@ final class AppPreferencesTests: XCTestCase {
     XCTAssertEqual(ContentMediaLoadPolicy.tapToLoad.title, "点按加载")
   }
 
+  @MainActor
+  func testThreadListMediaCollapseUsesStableKeyAndDefaultsToExpanded() {
+    XCTAssertEqual(
+      AppPreferenceKey.hidesThreadListMedia,
+      "TiebaPlusPlus.hidesThreadListMedia"
+    )
+    XCTAssertFalse(EnvironmentValues().hidesThreadListMedia)
+  }
+
   func testForumSortUsesPerForumOverrideBeforeGlobalDefault() throws {
     let suiteName = "AppPreferencesTests.\(UUID().uuidString)"
     let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

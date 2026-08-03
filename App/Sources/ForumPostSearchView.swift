@@ -478,54 +478,109 @@ private struct ForumPostSearchResultRow: View {
   }
 }
 
+enum ForumPostSearchMediaPresentation: Equatable, Sendable {
+  case expanded(imageURLs: [URL], totalCount: Int)
+  case collapsed(ThreadListMediaSummary)
+  case none
+
+  static func resolve(
+    contents: [BrowseContent],
+    hidesMedia: Bool
+  ) -> Self {
+    var imageURLs: [URL] = []
+    var totalCount = 0
+    for content in contents {
+      guard case .image(let thumbnail, _, _, _) = content else { continue }
+      totalCount += 1
+      if !hidesMedia, imageURLs.count < 3 {
+        imageURLs.append(thumbnail)
+      }
+    }
+    guard totalCount > 0 else { return .none }
+    if hidesMedia {
+      return .collapsed(.images(count: totalCount))
+    }
+    return .expanded(imageURLs: imageURLs, totalCount: totalCount)
+  }
+}
+
 private struct ForumPostSearchMediaStrip: View {
   let contents: [BrowseContent]
 
   @Environment(\.contentMediaLoadPolicy) private var contentMediaLoadPolicy
-
-  private var imageURLs: [URL] {
-    contents.compactMap { content in
-      guard case .image(let thumbnail, _, _, _) = content else { return nil }
-      return thumbnail
-    }
-  }
+  @Environment(\.hidesThreadListMedia) private var hidesThreadListMedia
 
   @ViewBuilder
   var body: some View {
-    if !imageURLs.isEmpty {
-      HStack(spacing: 6) {
-        ForEach(Array(imageURLs.prefix(3).enumerated()), id: \.offset) { index, imageURL in
-          ContentRemoteImage(
-            url: imageURL,
-            maxPixelSize: 512,
-            loadAccessibilityLabel: "加载搜索结果图片 \(index + 1)"
-          ) { phase in
-            switch phase {
-            case .success(let renderedImage, _):
-              renderedImage
-                .resizable()
-                .scaledToFill()
-                .accessibilityHidden(true)
-            case .empty:
-              ZStack {
-                Color(uiColor: .secondarySystemFill)
-                ProgressView()
-              }
-              .accessibilityHidden(true)
-            case .loadRequired:
-              mediaActionPlaceholder(systemImage: "arrow.down.circle")
-            case .failure:
-              mediaActionPlaceholder(systemImage: failureSystemImage(for: imageURL))
-            }
-          }
-          .buttonStyle(.borderless)
-          .frame(maxWidth: .infinity)
-          .frame(height: 88)
-          .clipped()
-          .clipShape(RoundedRectangle(cornerRadius: 6))
-        }
+    switch ForumPostSearchMediaPresentation.resolve(
+      contents: contents,
+      hidesMedia: hidesThreadListMedia
+    ) {
+    case .expanded(let imageURLs, let totalCount):
+      expandedAccessibility(totalCount: totalCount) {
+        expandedImages(imageURLs, totalCount: totalCount)
       }
-      .frame(height: 88)
+    case .collapsed(let summary):
+      CompactListMediaView(summary: summary)
+    case .none:
+      EmptyView()
+    }
+  }
+
+  private func expandedImages(
+    _ imageURLs: [URL],
+    totalCount: Int
+  ) -> some View {
+    HStack(spacing: 6) {
+      ForEach(Array(imageURLs.enumerated()), id: \.offset) { index, imageURL in
+        ContentRemoteImage(
+          url: imageURL,
+          maxPixelSize: 512,
+          loadAccessibilityLabel: "加载搜索结果图片 \(index + 1)"
+        ) { phase in
+          switch phase {
+          case .success(let renderedImage, _):
+            renderedImage
+              .resizable()
+              .scaledToFill()
+              .accessibilityLabel(
+                "图片预览 \(index + 1)，共 \(max(totalCount, 0).formatted()) 张"
+              )
+              .accessibilityHidden(contentMediaLoadPolicy == .automatic)
+          case .empty:
+            ZStack {
+              Color(uiColor: .secondarySystemFill)
+              ProgressView()
+            }
+            .accessibilityHidden(true)
+          case .loadRequired:
+            mediaActionPlaceholder(systemImage: "arrow.down.circle")
+          case .failure:
+            mediaActionPlaceholder(systemImage: failureSystemImage(for: imageURL))
+          }
+        }
+        .buttonStyle(.borderless)
+        .frame(maxWidth: .infinity)
+        .frame(height: 88)
+        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+      }
+    }
+    .frame(height: 88)
+  }
+
+  @ViewBuilder
+  private func expandedAccessibility<Content: View>(
+    totalCount: Int,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    switch contentMediaLoadPolicy {
+    case .automatic:
+      content()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(max(totalCount, 0).formatted()) 张图片预览")
+    case .tapToLoad:
+      content()
     }
   }
 

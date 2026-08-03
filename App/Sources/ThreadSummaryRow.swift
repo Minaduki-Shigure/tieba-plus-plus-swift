@@ -5,6 +5,11 @@ enum ThreadSummaryMedia: Equatable, Sendable {
   case images([URL], totalCount: Int)
 }
 
+enum ThreadSummaryMediaPresentation: Equatable, Sendable {
+  case expanded(ThreadSummaryMedia)
+  case collapsed(ThreadListMediaSummary)
+}
+
 enum ThreadSummaryPresentation {
   static func media(for thread: BrowseThread) -> ThreadSummaryMedia? {
     guard !thread.isPinned else { return nil }
@@ -21,6 +26,21 @@ enum ThreadSummaryPresentation {
     guard !images.isEmpty else { return nil }
     return .images(Array(images.prefix(3)), totalCount: images.count)
   }
+
+  static func mediaPresentation(
+    for thread: BrowseThread,
+    hidesMedia: Bool
+  ) -> ThreadSummaryMediaPresentation? {
+    guard let media = media(for: thread) else { return nil }
+    guard hidesMedia else { return .expanded(media) }
+
+    switch media {
+    case .video:
+      return .collapsed(.video)
+    case .images(_, let totalCount):
+      return .collapsed(.images(count: totalCount))
+    }
+  }
 }
 
 struct ThreadSummaryRow: View {
@@ -29,6 +49,7 @@ struct ThreadSummaryRow: View {
   let showsAuthor: Bool
 
   @Environment(\.contentMediaLoadPolicy) private var contentMediaLoadPolicy
+  @Environment(\.hidesThreadListMedia) private var hidesThreadListMedia
 
   init(
     thread: BrowseThread,
@@ -106,8 +127,23 @@ struct ThreadSummaryRow: View {
 
   @ViewBuilder
   private var mediaPreview: some View {
-    switch ThreadSummaryPresentation.media(for: thread) {
-    case .some(.video(let coverURL)):
+    switch ThreadSummaryPresentation.mediaPresentation(
+      for: thread,
+      hidesMedia: hidesThreadListMedia
+    ) {
+    case .some(.collapsed(let summary)):
+      CompactListMediaView(summary: summary)
+    case .some(.expanded(let media)):
+      expandedMediaPreview(media)
+    case .none:
+      EmptyView()
+    }
+  }
+
+  @ViewBuilder
+  private func expandedMediaPreview(_ media: ThreadSummaryMedia) -> some View {
+    switch media {
+    case .video(let coverURL):
       mediaAccessibility(label: "视频预览") {
         ZStack {
           ThreadPreviewImage(
@@ -128,7 +164,7 @@ struct ThreadSummaryRow: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .frame(maxWidth: .infinity, alignment: .leading)
       }
-    case .some(.images(let imageURLs, let totalCount)):
+    case .images(let imageURLs, let totalCount):
       if imageURLs.count == 1, let imageURL = imageURLs.first {
         mediaAccessibility(label: "图片预览") {
           ThreadPreviewImage(
@@ -171,8 +207,6 @@ struct ThreadSummaryRow: View {
           }
         }
       }
-    case .none:
-      EmptyView()
     }
   }
 

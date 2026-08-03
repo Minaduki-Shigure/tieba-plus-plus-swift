@@ -261,6 +261,17 @@ manual request is retried only by another explicit tap. The cache is
 process-local and ephemeral, so this setting does not claim persistent offline
 media or suppress the page-data requests needed to browse.
 
+The independent list-media collapse preference applies only to shared thread
+cards and per-forum search media. A collapsed presentation retains only the
+media type or full image count, contains no URL, and is selected before any
+remote-image view is constructed; it therefore creates no list-preview request.
+Collapsing an already rendered row removes that view and its download waiter.
+The underlying deduplicated transfer is canceled when its final waiter leaves,
+but may continue for another active view that requested the same resource.
+Post bodies, hot-topic images, avatars, gallery and export paths, playback, and
+page-data requests remain outside this preference. Expanded previews continue
+to follow the separate automatic or tap-to-load policy.
+
 Avatars remain outside that content-media policy. Gallery originals, video and
 voice playback, sharing, and saving already require a separate explicit user
 action and retain those user-initiated paths. Rendering a video cover must not
