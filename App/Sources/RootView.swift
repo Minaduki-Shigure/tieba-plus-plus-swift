@@ -137,31 +137,42 @@ struct RootView: View {
 
         recentForumsSection
 
-        if !favoritesViewModel.favoriteForums.isEmpty {
+        if !favoritesViewModel.favoriteForumEntries.isEmpty {
           Section("收藏的贴吧") {
-            ForEach(Array(favoritesViewModel.favoriteForums.prefix(6)), id: \.name) { forum in
-              Button {
-                path.append(.forum(forum.name))
-              } label: {
-                HStack(spacing: 12) {
-                  AvatarView(url: forum.avatarURL, name: forum.displayName, size: 36)
-                  VStack(alignment: .leading, spacing: 2) {
-                    Text(forum.displayName)
-                      .foregroundStyle(.primary)
-                    if forum.name != forum.displayName {
-                      Text(forum.name)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            ForEach(Array(favoritesViewModel.favoriteForumEntries.prefix(6))) { entry in
+              if case .forum(let forum) = entry.target {
+                Button {
+                  path.append(.forum(forum.name))
+                } label: {
+                  HStack(spacing: 12) {
+                    AvatarView(url: forum.avatarURL, name: forum.displayName, size: 36)
+                    VStack(alignment: .leading, spacing: 2) {
+                      Text(forum.displayName)
+                        .foregroundStyle(.primary)
+                      if forum.name != forum.displayName {
+                        Text(forum.name)
+                          .font(.caption)
+                          .foregroundStyle(.secondary)
+                      }
                     }
+                    Spacer(minLength: 0)
+                    if entry.isPinned {
+                      LocalFavoritePinIndicator()
+                    }
+                    Image(systemName: "chevron.right")
+                      .font(.caption.weight(.semibold))
+                      .foregroundStyle(.tertiary)
+                      .accessibilityHidden(true)
                   }
-                  Spacer(minLength: 0)
-                  Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                  .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .forumFavoriteContextMenu(
+                  entry: entry,
+                  setPinned: { favoritesViewModel.setForumPinned(entry, isPinned: $0) },
+                  delete: { favoritesViewModel.delete(entry) }
+                )
               }
-              .buttonStyle(.plain)
             }
           }
         }
@@ -294,6 +305,17 @@ struct RootView: View {
             searchHistoryRepository: searchHistoryRepository
           )
         }
+      }
+      .alert(
+        "无法更新本地收藏",
+        isPresented: Binding(
+          get: { favoritesViewModel.operationError != nil },
+          set: { if !$0 { favoritesViewModel.dismissOperationError() } }
+        )
+      ) {
+        Button("好", action: favoritesViewModel.dismissOperationError)
+      } message: {
+        Text(favoritesViewModel.operationError ?? "未知错误")
       }
     }
     .onAppear {

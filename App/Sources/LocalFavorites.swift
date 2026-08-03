@@ -85,9 +85,40 @@ struct LocalFavoriteEntry: Codable, Hashable, Identifiable, Sendable {
   let target: LocalFavoriteTarget
   let savedAt: Date
   let updatedAt: Date
+  let pinnedAt: Date?
+
+  init(
+    target: LocalFavoriteTarget,
+    savedAt: Date,
+    updatedAt: Date,
+    pinnedAt: Date? = nil
+  ) {
+    self.target = target
+    self.savedAt = savedAt
+    self.updatedAt = updatedAt
+    self.pinnedAt = target.kind == .forum ? pinnedAt : nil
+  }
 
   var id: String { target.storageKey }
   var kind: LocalFavoriteKind { target.kind }
+  var isPinned: Bool { kind == .forum && pinnedAt != nil }
+
+  private enum CodingKeys: String, CodingKey {
+    case target
+    case savedAt
+    case updatedAt
+    case pinnedAt
+  }
+
+  init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.init(
+      target: try container.decode(LocalFavoriteTarget.self, forKey: .target),
+      savedAt: try container.decode(Date.self, forKey: .savedAt),
+      updatedAt: try container.decode(Date.self, forKey: .updatedAt),
+      pinnedAt: try container.decodeIfPresent(Date.self, forKey: .pinnedAt)
+    )
+  }
 }
 
 enum LocalFavoritesStoreError: LocalizedError, Equatable, Sendable {
@@ -120,6 +151,7 @@ protocol LocalFavoritesRepository: Sendable {
   func entries(kind: LocalFavoriteKind?) async throws -> [LocalFavoriteEntry]
   func contains(id: String) async throws -> Bool
   func save(_ target: LocalFavoriteTarget, at date: Date) async throws
+  func setForumPinned(id: String, isPinned: Bool, at date: Date) async throws
   func updateThreadProgress(
     threadID: Int64,
     postID: Int64,
@@ -143,6 +175,10 @@ extension LocalFavoritesRepository {
 
   func save(_ target: LocalFavoriteTarget) async throws {
     try await save(target, at: Date())
+  }
+
+  func setForumPinned(id: String, isPinned: Bool) async throws {
+    try await setForumPinned(id: id, isPinned: isPinned, at: Date())
   }
 
   func updateThreadProgress(
@@ -227,7 +263,7 @@ actor FileLocalFavoritesStore: LocalFavoritesRepository {
     let archive = try loadArchive()
     return archive.entries
       .filter { kind == nil || $0.kind == kind }
-      .sorted(by: Self.wasSavedMoreRecently)
+      .sorted(by: Self.appearsEarlierInFavorites)
   }
 
   func contains(id: String) async throws -> Bool {
@@ -243,14 +279,40 @@ actor FileLocalFavoritesStore: LocalFavoritesRepository {
       candidate.entries[index] = LocalFavoriteEntry(
         target: target,
         savedAt: current.savedAt,
-        updatedAt: date
+        updatedAt: date,
+        pinnedAt: current.pinnedAt
       )
     } else {
       candidate.entries.append(
-        LocalFavoriteEntry(target: target, savedAt: date, updatedAt: date)
+        LocalFavoriteEntry(
+          target: target,
+          savedAt: date,
+          updatedAt: date,
+          pinnedAt: nil
+        )
       )
     }
     candidate.entries = normalized(candidate.entries)
+    try commit(candidate)
+    notifyChange()
+  }
+
+  func setForumPinned(id: String, isPinned: Bool, at date: Date) async throws {
+    var candidate = try loadArchive()
+    guard
+      let index = candidate.entries.firstIndex(where: { $0.id == id }),
+      case .forum = candidate.entries[index].target,
+      candidate.entries[index].isPinned != isPinned,
+      date >= candidate.entries[index].updatedAt
+    else { return }
+
+    let current = candidate.entries[index]
+    candidate.entries[index] = LocalFavoriteEntry(
+      target: current.target,
+      savedAt: current.savedAt,
+      updatedAt: date,
+      pinnedAt: isPinned ? date : nil
+    )
     try commit(candidate)
     notifyChange()
   }
@@ -293,7 +355,8 @@ actor FileLocalFavoritesStore: LocalFavoritesRepository {
     candidate.entries[index] = LocalFavoriteEntry(
       target: .thread(updatedThread),
       savedAt: current.savedAt,
-      updatedAt: date
+      updatedAt: date,
+      pinnedAt: current.pinnedAt
     )
     try commit(candidate)
   }
@@ -332,7 +395,8 @@ actor FileLocalFavoritesStore: LocalFavoritesRepository {
     candidate.entries[index] = LocalFavoriteEntry(
       target: .thread(updatedThread),
       savedAt: current.savedAt,
-      updatedAt: date
+      updatedAt: date,
+      pinnedAt: current.pinnedAt
     )
     try commit(candidate)
   }
@@ -465,6 +529,22 @@ actor FileLocalFavoritesStore: LocalFavoritesRepository {
   ) -> Bool {
     if lhs.savedAt != rhs.savedAt { return lhs.savedAt > rhs.savedAt }
     return lhs.id < rhs.id
+  }
+
+  private static func appearsEarlierInFavorites(
+    _ lhs: LocalFavoriteEntry,
+    _ rhs: LocalFavoriteEntry
+  ) -> Bool {
+    if lhs.isPinned != rhs.isPinned { return lhs.isPinned }
+    if
+      lhs.isPinned,
+      let lhsPinnedAt = lhs.pinnedAt,
+      let rhsPinnedAt = rhs.pinnedAt,
+      lhsPinnedAt != rhsPinnedAt
+    {
+      return lhsPinnedAt > rhsPinnedAt
+    }
+    return wasSavedMoreRecently(lhs, rhs)
   }
 
   private static func wasUpdatedMoreRecently(

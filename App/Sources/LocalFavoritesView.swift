@@ -1,5 +1,6 @@
 import Combine
 import SwiftUI
+import UIKit
 
 @MainActor
 final class LocalFavoritesViewModel: ObservableObject {
@@ -20,11 +21,8 @@ final class LocalFavoritesViewModel: ObservableObject {
     entries.filter { $0.kind == selectedKind }
   }
 
-  var favoriteForums: [ForumHistorySnapshot] {
-    entries.compactMap { entry in
-      guard case .forum(let forum) = entry.target else { return nil }
-      return forum
-    }
+  var favoriteForumEntries: [LocalFavoriteEntry] {
+    entries.filter { $0.kind == .forum }
   }
 
   func loadIfNeeded() {
@@ -44,6 +42,12 @@ final class LocalFavoritesViewModel: ObservableObject {
   func delete(_ entry: LocalFavoriteEntry) {
     mutate { repository in
       try await repository.delete(id: entry.id)
+    }
+  }
+
+  func setForumPinned(_ entry: LocalFavoriteEntry, isPinned: Bool) {
+    mutate { repository in
+      try await repository.setForumPinned(id: entry.id, isPinned: isPinned)
     }
   }
 
@@ -227,6 +231,11 @@ struct LocalFavoritesView: View {
           LocalFavoriteRow(entry: entry)
         }
         .buttonStyle(.plain)
+        .forumFavoriteContextMenu(
+          entry: entry,
+          setPinned: { viewModel.setForumPinned(entry, isPinned: $0) },
+          delete: { viewModel.delete(entry) }
+        )
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
           Button(role: .destructive) {
             viewModel.delete(entry)
@@ -273,6 +282,9 @@ private struct LocalFavoriteRow: View {
           .foregroundStyle(.secondary)
       }
       Spacer(minLength: 0)
+      if entry.isPinned {
+        LocalFavoritePinIndicator()
+      }
     }
     .padding(.vertical, 3)
     .contentShape(Rectangle())
@@ -338,6 +350,66 @@ private struct LocalFavoriteRow: View {
       preferredName: thread.authorName,
       username: thread.authorUsername,
       showsBoth: showsBothNames
+    )
+  }
+}
+
+struct LocalFavoritePinIndicator: View {
+  var body: some View {
+    Image(systemName: "pin.fill")
+      .font(.caption.weight(.semibold))
+      .foregroundStyle(.tint)
+      .accessibilityLabel("已置顶")
+  }
+}
+
+private struct ForumFavoriteContextMenuModifier: ViewModifier {
+  let entry: LocalFavoriteEntry
+  let setPinned: (Bool) -> Void
+  let delete: () -> Void
+
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    switch entry.target {
+    case .forum(let forum):
+      content.contextMenu {
+        Button {
+          setPinned(!entry.isPinned)
+        } label: {
+          Label(
+            entry.isPinned ? "取消置顶" : "置顶",
+            systemImage: entry.isPinned ? "pin.slash" : "pin"
+          )
+        }
+
+        Button {
+          UIPasteboard.general.string = forum.name
+        } label: {
+          Label("复制吧名", systemImage: "doc.on.doc")
+        }
+
+        Button(role: .destructive, action: delete) {
+          Label("移除本地收藏", systemImage: "bookmark.slash")
+        }
+      }
+    case .thread:
+      content
+    }
+  }
+}
+
+extension View {
+  func forumFavoriteContextMenu(
+    entry: LocalFavoriteEntry,
+    setPinned: @escaping (Bool) -> Void,
+    delete: @escaping () -> Void
+  ) -> some View {
+    modifier(
+      ForumFavoriteContextMenuModifier(
+        entry: entry,
+        setPinned: setPinned,
+        delete: delete
+      )
     )
   }
 }

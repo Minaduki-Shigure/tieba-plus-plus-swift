@@ -63,6 +63,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Placeholder or fully hidden presentation for locally blocked content
 - Local video-topic blocking and user-profile block/allow shortcuts
 - Independent local forum and thread favorites
+- Local pinned-forum ordering and explicit forum-favorite context actions
 - Saved-thread reading-position and browse-mode restoration
 - Home-screen shortcuts for locally saved forums
 - HTTPS-only, credential-free anonymous requests
@@ -153,6 +154,18 @@ Tieba's account-backed collection service. Disabling or clearing history does
 not remove favorites, and the UI labels them as local rather than implying
 cross-device account sync. Hot-ranked threads retain the mode but not an
 unstable ranking position.
+
+Saved forums can be pinned locally from an explicit context menu in either the
+favorites list or its home-screen projection. Pinned forums appear first, with
+the most recently pinned first; the same menu can copy the canonical public
+forum name or remove the local favorite. Pinning is presentation metadata, not
+a retention lock: the bounded archive still evicts by original save time, so an
+old pinned forum can be displaced when the per-kind limit is reached. The
+optional `pinnedAt` field remains additive within favorite schema v1, allowing
+new builds to read existing archives without migration. Older builds that
+support favorite schema v1 ignore the field while reading, but any successful
+favorite write from such a build re-encodes schema v1 without pin metadata and
+therefore clears all pins.
 
 The home-screen recent-forum row is a projection of the same browsing-history
 archive, not a second store. It shows at most the 100 newest forum records while

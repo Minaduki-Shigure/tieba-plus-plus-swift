@@ -102,7 +102,9 @@ but authenticated write operations remain intentionally unsupported.
   at its first page because its ranking changes over time.
 - Forums and threads have an independent local favorites archive. Saved threads
   retain reading position and browse mode, while saved forums appear as home
-  shortcuts. Favorites and browsing history can be cleared independently.
+  shortcuts and can be pinned above other favorites. An explicit context menu
+  can pin or unpin a forum, copy its canonical name, or remove it locally.
+  Favorites and browsing history can be cleared independently.
 - The home screen projects up to 100 recently visited forums from browsing
   history. The section starts expanded and can be persistently hidden without
   changing the underlying archive.

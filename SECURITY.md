@@ -225,6 +225,15 @@ An unreadable search-history archive may be deleted only through the explicit,
 user-confirmed recovery action for that archive; ordinary reads and writes must
 preserve it and must not delete the other search-history domain.
 
+Local favorite pins add only an optional local timestamp to favorite schema v1.
+They change presentation order but do not protect an entry from the existing
+save-time capacity limit. Older builds that support favorite schema v1 can read
+the archive but erase all pin timestamps if they later rewrite it, so downgrade
+compatibility must not be described as metadata-preserving. Copying a saved
+forum name requires an explicit context-menu action and writes only the
+normalized public forum name; this feature must never read the clipboard or
+copy account data.
+
 The default-off username presentation preference is a local UserDefaults value.
 It may display only the public nickname and username already returned by the
 current anonymous or public-profile response and must not expose `tiebaUID`,
