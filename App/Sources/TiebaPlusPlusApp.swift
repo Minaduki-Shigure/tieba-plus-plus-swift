@@ -8,6 +8,8 @@ struct TiebaPlusPlusApp: App {
   private var contentMediaLoadPolicy = ContentMediaLoadPolicy.automatic.rawValue
   @AppStorage(AppPreferenceKey.hidesThreadListMedia)
   private var hidesThreadListMedia = false
+  @AppStorage(AppPreferenceKey.darkensContentThumbnailsInDarkMode)
+  private var darkensContentThumbnailsInDarkMode = true
   private let service:
     any BrowseService & SearchService & ForumPostSearchService & HotTopicService & HotThreadService
       & UserProfileService & ForumInformationService & SearchSuggestionService
@@ -46,6 +48,10 @@ struct TiebaPlusPlusApp: App {
         ContentMediaLoadPolicy.resolved(contentMediaLoadPolicy)
       )
       .environment(\.hidesThreadListMedia, hidesThreadListMedia)
+      .environment(
+        \.darkensContentThumbnailsInDarkMode,
+        darkensContentThumbnailsInDarkMode
+      )
       .preferredColorScheme(AppAppearance.resolved(appearance).colorScheme)
     }
   }

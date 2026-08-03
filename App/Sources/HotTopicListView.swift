@@ -205,6 +205,7 @@ struct HotTopicRemoteImage: View {
         image
           .resizable()
           .scaledToFill()
+          .contentThumbnailDimming()
           .accessibilityHidden(true)
       case .empty:
         ZStack {

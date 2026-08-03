@@ -46,6 +46,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Nested replies, images, video links, and voice playback
 - Persistent automatic or tap-to-load policy for content images and video covers
 - Optional compact media summaries for thread lists and per-forum search, with no collapsed preview request
+- Default-on dark-appearance dimming for successfully rendered static content thumbnails
 - Same-content multi-image gallery with paging, zoom, original-file sharing, and Photos saving
 - Server-ranked inline nested-reply previews with anchored opening and safe text copying
 - Full nested-reply pages with parent-floor context and bidirectional anchored pagination
@@ -198,6 +199,12 @@ presentation retains only a media type or full image count and never constructs
 a remote preview view, so it creates no preview request. It does not alter post
 bodies, hot-topic images, avatars, gallery/export paths, playback, page data, or
 the separate automatic versus tap-to-load policy used when previews are expanded.
+A separate default-on dark-appearance control applies a 0.4 color multiplier
+only to successfully rendered static content images in thread cards, post
+bodies, per-forum search, and hot topics. Video covers, avatars, galleries,
+placeholders, and compact summaries remain unchanged. The control is a pure
+rendering decision and does not enter URL normalization, fetch policy, reload
+identity, transfer deduplication, decoding, or cache keys.
 
 The global forum-sort preference applies when a forum has no remembered choice;
 changing a forum's picker stores a normalized, bounded per-forum override.

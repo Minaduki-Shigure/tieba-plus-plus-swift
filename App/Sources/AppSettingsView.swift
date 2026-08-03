@@ -14,6 +14,8 @@ struct AppSettingsView: View {
   private var contentMediaLoadPolicy = ContentMediaLoadPolicy.automatic.rawValue
   @AppStorage(AppPreferenceKey.hidesThreadListMedia)
   private var hidesThreadListMedia = false
+  @AppStorage(AppPreferenceKey.darkensContentThumbnailsInDarkMode)
+  private var darkensContentThumbnailsInDarkMode = true
 
   init(historyRepository: any BrowsingHistoryRepository) {
     _historyViewModel = StateObject(
@@ -94,6 +96,8 @@ struct AppSettingsView: View {
 
         Toggle("收起帖子列表的图片和视频", isOn: $hidesThreadListMedia)
 
+        Toggle("深色模式压暗缩略图", isOn: $darkensContentThumbnailsInDarkMode)
+
         NavigationLink {
           ContentFilterSettingsView()
         } label: {
@@ -107,7 +111,9 @@ struct AppSettingsView: View {
             + "收起时不会创建列表媒体预览请求。\u{201c}点按加载\u{201d}控制展开后的列表媒体、"
             + "帖子正文、话题图片和视频封面的自动下载，头像和图库不受影响。"
             + "在\u{201c}点按加载\u{201d}模式下，进程内已经缓存的图片会直接显示，"
-            + "页面数据等其他网络请求仍会正常进行。"
+            + "页面数据等其他网络请求仍会正常进行。\u{201c}深色模式压暗缩略图\u{201d}仅对已加载成功的"
+            + "帖子列表、吧内搜索、正文和话题静态图片应用视觉效果，不影响下载、缓存或任何网络请求；"
+            + "视频封面、头像、图库和加载占位不受影响。"
         )
       }
     }

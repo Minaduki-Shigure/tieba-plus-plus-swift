@@ -180,6 +180,7 @@ private struct BrowseImageView: View {
           image
             .resizable()
             .scaledToFill()
+            .contentThumbnailDimming()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .buttonStyle(.plain)

@@ -148,6 +148,7 @@ struct ThreadSummaryRow: View {
         ZStack {
           ThreadPreviewImage(
             url: coverURL,
+            role: .videoCover,
             loadAccessibilityLabel: "加载视频封面",
             successAccessibilityLabel: "视频预览"
           )
@@ -169,6 +170,7 @@ struct ThreadSummaryRow: View {
         mediaAccessibility(label: "图片预览") {
           ThreadPreviewImage(
             url: imageURL,
+            role: .staticImage,
             loadAccessibilityLabel: "加载帖子图片",
             successAccessibilityLabel: "图片预览"
           )
@@ -184,6 +186,7 @@ struct ThreadSummaryRow: View {
               ZStack(alignment: .bottomTrailing) {
                 ThreadPreviewImage(
                   url: url,
+                  role: .staticImage,
                   loadAccessibilityLabel: "加载帖子图片 \(index + 1)",
                   successAccessibilityLabel: "图片预览 \(index + 1)，共 \(totalCount) 张"
                 )
@@ -406,8 +409,18 @@ struct ThreadSummaryRow: View {
   }
 }
 
+enum ThreadPreviewImageRole: Equatable, Sendable {
+  case staticImage
+  case videoCover
+
+  var appliesContentThumbnailDimming: Bool {
+    self == .staticImage
+  }
+}
+
 private struct ThreadPreviewImage: View {
   let url: URL
+  let role: ThreadPreviewImageRole
   let loadAccessibilityLabel: String
   let successAccessibilityLabel: String
 
@@ -424,6 +437,7 @@ private struct ThreadPreviewImage: View {
         image
           .resizable()
           .scaledToFill()
+          .contentThumbnailDimming(applies: role.appliesContentThumbnailDimming)
           .accessibilityLabel(successAccessibilityLabel)
       case .failure:
         previewPlaceholder(systemImage: failureSystemImage)

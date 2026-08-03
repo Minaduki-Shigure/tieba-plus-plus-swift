@@ -543,6 +543,7 @@ private struct ForumPostSearchMediaStrip: View {
             renderedImage
               .resizable()
               .scaledToFill()
+              .contentThumbnailDimming()
               .accessibilityLabel(
                 "图片预览 \(index + 1)，共 \(max(totalCount, 0).formatted()) 张"
               )

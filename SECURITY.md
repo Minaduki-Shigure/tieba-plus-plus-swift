@@ -272,6 +272,15 @@ Post bodies, hot-topic images, avatars, gallery and export paths, playback, and
 page-data requests remain outside this preference. Expanded previews continue
 to follow the separate automatic or tap-to-load policy.
 
+Dark-appearance thumbnail dimming is a post-decode visual modifier only. When
+enabled, successfully rendered static content images use a fixed 0.4 color
+multiplier in dark appearance; light appearance and a disabled setting use the
+identity multiplier. The preference must not enter a media URL, fetch policy,
+reload ID, transfer key, decoder, or cache key, so changing it or the appearance
+can redraw an existing image without creating or canceling a request. Video
+covers, avatars, galleries, loading and failure placeholders, compact summaries,
+badges, and playback controls remain outside this modifier.
+
 Avatars remain outside that content-media policy. Gallery originals, video and
 voice playback, sharing, and saving already require a separate explicit user
 action and retain those user-initiated paths. Rendering a video cover must not

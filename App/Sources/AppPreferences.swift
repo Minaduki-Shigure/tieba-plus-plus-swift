@@ -8,16 +8,27 @@ enum AppPreferenceKey {
   static let searchSuggestionsEnabled = "TiebaPlusPlus.searchSuggestionsEnabled"
   static let contentMediaLoadPolicy = "TiebaPlusPlus.contentMediaLoadPolicy"
   static let hidesThreadListMedia = "TiebaPlusPlus.hidesThreadListMedia"
+  static let darkensContentThumbnailsInDarkMode =
+    "TiebaPlusPlus.darkensContentThumbnailsInDarkMode"
 }
 
 private struct HidesThreadListMediaEnvironmentKey: EnvironmentKey {
   static let defaultValue = false
 }
 
+private struct DarkensContentThumbnailsInDarkModeEnvironmentKey: EnvironmentKey {
+  static let defaultValue = true
+}
+
 extension EnvironmentValues {
   var hidesThreadListMedia: Bool {
     get { self[HidesThreadListMediaEnvironmentKey.self] }
     set { self[HidesThreadListMediaEnvironmentKey.self] = newValue }
+  }
+
+  var darkensContentThumbnailsInDarkMode: Bool {
+    get { self[DarkensContentThumbnailsInDarkModeEnvironmentKey.self] }
+    set { self[DarkensContentThumbnailsInDarkModeEnvironmentKey.self] = newValue }
   }
 }
 

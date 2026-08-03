@@ -81,6 +81,10 @@ but authenticated write operations remain intentionally unsupported.
   per-forum search with noninteractive type or image-count summaries. Collapsed
   rows create no preview view or request; post bodies, hot-topic images,
   avatars, galleries, sharing, and saving remain unchanged.
+- A default-on dark-appearance option reduces successfully rendered static
+  content thumbnails to 40% brightness. It is a visual-only treatment for
+  thread images, post bodies, per-forum search, and hot topics; video covers,
+  avatars, galleries, placeholders, downloads, and caches remain unchanged.
 - Forum and thread pages use the native share sheet with canonical HTTPS links.
   Copied thread links retain browse mode, including only-author state.
 - A strict in-app router handles supported rich-content links, explicit

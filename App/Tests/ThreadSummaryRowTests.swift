@@ -4,6 +4,11 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class ThreadSummaryRowTests: XCTestCase {
+  func testThreadPreviewImageRoleOnlyDarkensStaticImages() {
+    XCTAssertTrue(ThreadPreviewImageRole.staticImage.appliesContentThumbnailDimming)
+    XCTAssertFalse(ThreadPreviewImageRole.videoCover.appliesContentThumbnailDimming)
+  }
+
   func testVideoCoverTakesPriorityOverImages() throws {
     let imageURL = try XCTUnwrap(URL(string: "https://example.com/image.jpg"))
     let coverURL = try XCTUnwrap(URL(string: "https://example.com/video.jpg"))

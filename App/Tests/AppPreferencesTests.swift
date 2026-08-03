@@ -37,6 +37,15 @@ final class AppPreferencesTests: XCTestCase {
     XCTAssertFalse(EnvironmentValues().hidesThreadListMedia)
   }
 
+  @MainActor
+  func testContentThumbnailDimmingUsesStableKeyAndDefaultsToEnabled() {
+    XCTAssertEqual(
+      AppPreferenceKey.darkensContentThumbnailsInDarkMode,
+      "TiebaPlusPlus.darkensContentThumbnailsInDarkMode"
+    )
+    XCTAssertTrue(EnvironmentValues().darkensContentThumbnailsInDarkMode)
+  }
+
   func testForumSortUsesPerForumOverrideBeforeGlobalDefault() throws {
     let suiteName = "AppPreferencesTests.\(UUID().uuidString)"
     let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
