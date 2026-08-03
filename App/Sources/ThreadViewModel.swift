@@ -10,6 +10,12 @@ final class ThreadViewModel: ObservableObject {
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
   @Published private(set) var loadMoreError: String?
+  @Published private(set) var canLoadPrevious = false
+  @Published private(set) var isLoadingPrevious = false
+  @Published private(set) var loadPreviousError: String?
+  @Published private(set) var prependRestorePostID: Int64?
+  @Published private(set) var prependRestoreSequence = 0
+  @Published private(set) var isRestoringPrependPosition = false
   @Published private(set) var options = ThreadBrowseOptions()
   @Published private(set) var currentPage = 0
   @Published private(set) var totalPages = 0
@@ -24,6 +30,8 @@ final class ThreadViewModel: ObservableObject {
   private var loadGeneration = 0
   private var initialLocation: ThreadPostLocation?
   private var failedJumpPage: Int?
+  private var lowestLoadedPage = 0
+  private var previousLoadAnchorPostID: Int64?
   private var nextPagePostID: Int64?
   private var descendingFallbackPage: Int?
 
@@ -59,8 +67,15 @@ final class ThreadViewModel: ObservableObject {
     currentPage = 0
     totalPages = 0
     hasMore = true
+    lowestLoadedPage = 0
+    canLoadPrevious = false
     isLoadingMore = false
+    isLoadingPrevious = false
     loadMoreError = nil
+    loadPreviousError = nil
+    prependRestorePostID = nil
+    isRestoringPrependPosition = false
+    previousLoadAnchorPostID = nil
     jumpError = nil
     positionNotice = nil
     failedJumpPage = nil
@@ -108,7 +123,12 @@ final class ThreadViewModel: ObservableObject {
     }
     invalidateCurrentLoad()
     isLoadingMore = false
+    isLoadingPrevious = false
     loadMoreError = nil
+    loadPreviousError = nil
+    prependRestorePostID = nil
+    isRestoringPrependPosition = false
+    previousLoadAnchorPostID = nil
     jumpError = nil
     failedJumpPage = nil
     initialLocation = nil
@@ -136,10 +156,20 @@ final class ThreadViewModel: ObservableObject {
     scrollTargetPostID = nil
   }
 
+  func consumePrependRestoreTarget() {
+    prependRestorePostID = nil
+    isRestoringPrependPosition = false
+    previousLoadAnchorPostID = nil
+  }
+
   func cancel() {
     invalidateCurrentLoad()
     isLoadingMore = false
+    isLoadingPrevious = false
     isJumping = false
+    prependRestorePostID = nil
+    isRestoringPrependPosition = false
+    previousLoadAnchorPostID = nil
     if state == .loading {
       state = posts.isEmpty ? .idle : .loaded
     }
@@ -150,6 +180,8 @@ final class ThreadViewModel: ObservableObject {
       post.id == posts.last?.id,
       hasMore,
       !isLoadingMore,
+      !isAdjustingPrependPosition,
+      !isJumping,
       loadMoreError == nil,
       state == .loaded
     else {
@@ -165,7 +197,14 @@ final class ThreadViewModel: ObservableObject {
   }
 
   func retryLoadMore() {
-    guard loadMoreError != nil, hasMore, !isLoadingMore, state == .loaded else { return }
+    guard
+      loadMoreError != nil,
+      hasMore,
+      !isLoadingMore,
+      !isAdjustingPrependPosition,
+      !isJumping,
+      state == .loaded
+    else { return }
     let request = nextLoadMoreRequest()
     load(
       page: request.page,
@@ -175,18 +214,69 @@ final class ThreadViewModel: ObservableObject {
     )
   }
 
+  func loadPrevious(anchorPostID: Int64? = nil) {
+    guard
+      canLoadPrevious,
+      lowestLoadedPage > 1,
+      !isAdjustingPrependPosition,
+      !isLoadingMore,
+      !isJumping,
+      loadPreviousError == nil,
+      state == .loaded,
+      options.sort == .ascending
+    else { return }
+    previousLoadAnchorPostID = anchorPostID.flatMap { candidate in
+      posts.first(where: { $0.id == candidate && $0.localVisibility != .hidden })?.id
+    }
+    load(
+      page: lowestLoadedPage - 1,
+      replacing: false,
+      location: .pageNumber,
+      jumping: false,
+      prepending: true
+    )
+  }
+
+  func retryLoadPrevious() {
+    guard
+      loadPreviousError != nil,
+      canLoadPrevious,
+      lowestLoadedPage > 1,
+      !isAdjustingPrependPosition,
+      !isLoadingMore,
+      !isJumping,
+      state == .loaded,
+      options.sort == .ascending
+    else { return }
+    load(
+      page: lowestLoadedPage - 1,
+      replacing: false,
+      location: .pageNumber,
+      jumping: false,
+      prepending: true
+    )
+  }
+
+  var isAdjustingPrependPosition: Bool {
+    isLoadingPrevious || isRestoringPrependPosition
+  }
+
   private func load(
     page: Int,
     replacing: Bool,
     location: ThreadPostLocation?,
-    jumping: Bool
+    jumping: Bool,
+    prepending: Bool = false
   ) {
     let threadID = thread.id
     let service = service
     let options = options
     loadGeneration &+= 1
     let generation = loadGeneration
-    if !replacing {
+    if prepending {
+      loadPreviousError = nil
+      isLoadingPrevious = true
+    } else if !replacing {
       loadMoreError = nil
       isLoadingMore = true
     }
@@ -194,6 +284,7 @@ final class ThreadViewModel: ObservableObject {
       defer {
         if generation == loadGeneration {
           isLoadingMore = false
+          isLoadingPrevious = false
           isJumping = false
           loadTask = nil
         }
@@ -208,13 +299,19 @@ final class ThreadViewModel: ObservableObject {
         )
         try Task.checkCancellation()
         guard generation == loadGeneration else { return }
+        try validatePostPage(response, threadID: threadID)
 
         var resolvedScrollTarget: Int64?
         var effectiveLocation = location
         var didFallBackFromMissingPosition = false
+        var didHideRequestedPosition = false
         if case .postID(let postID) = location {
-          if response.posts.contains(where: { $0.id == postID }) {
-            resolvedScrollTarget = postID
+          if let target = response.posts.first(where: { $0.id == postID }) {
+            if target.localVisibility == .hidden {
+              didHideRequestedPosition = true
+            } else {
+              resolvedScrollTarget = postID
+            }
           } else {
             didFallBackFromMissingPosition = true
             let locationResponse = response
@@ -234,10 +331,49 @@ final class ThreadViewModel: ObservableObject {
             }
             try Task.checkCancellation()
             guard generation == loadGeneration else { return }
-            resolvedScrollTarget = response.posts.first?.id
+            try validatePostPage(response, threadID: threadID)
+            resolvedScrollTarget = response.posts.first(where: {
+              $0.localVisibility != .hidden
+            })?.id
           }
         } else if replacing && jumping {
-          resolvedScrollTarget = response.posts.first?.id
+          resolvedScrollTarget = response.posts.first(where: {
+            $0.localVisibility != .hidden
+          })?.id
+        }
+
+        if prepending {
+          guard
+            options.sort == .ascending,
+            response.currentPage == page,
+            page == lowestLoadedPage - 1
+          else {
+            throw BrowseError.unavailable("贴吧返回的上一页页码异常，未合并该响应。")
+          }
+          let newItems = uniqueValidPosts(response.posts, excluding: posts, threadID: threadID)
+          guard !newItems.isEmpty else {
+            canLoadPrevious = false
+            previousLoadAnchorPostID = nil
+            state = .loaded
+            return
+          }
+          let restorePostID = previousLoadAnchorPostID
+          isRestoringPrependPosition = true
+          thread = response.thread
+          if let responseOriginThread = response.originThread {
+            originThread = responseOriginThread
+          }
+          if let responsePoll = response.poll {
+            poll = responsePoll
+          }
+          posts = newItems + posts
+          lowestLoadedPage = response.currentPage
+          totalPages = max(totalPages, response.totalPages)
+          canLoadPrevious = response.hasPrevious && lowestLoadedPage > 1
+          prependRestorePostID = restorePostID
+          prependRestoreSequence &+= 1
+          state = .loaded
+          return
         }
 
         let previousPosts = posts
@@ -249,6 +385,31 @@ final class ThreadViewModel: ObservableObject {
           requestedCursor = nil
         }
         let mergedPosts = replacing ? response.posts : merge(previousPosts, response.posts)
+        if replacing, jumping, effectiveLocation == .pageNumber, response.currentPage != page {
+          throw BrowseError.unavailable("贴吧返回的跳转页码异常，未显示该响应。")
+        }
+        if !replacing {
+          switch effectiveLocation {
+          case .pageNumber:
+            guard response.currentPage == page else {
+              throw BrowseError.unavailable("贴吧返回的下一页页码异常，未合并该响应。")
+            }
+          case .pageCursor(let cursor):
+            let didAdvanceCursorPage: Bool
+            if options.sort == .ascending {
+              didAdvanceCursorPage = response.currentPage > previousPage
+                || (response.currentPage == previousPage && response.nextPagePostID != cursor)
+            } else {
+              didAdvanceCursorPage = response.currentPage != previousPage
+                || response.nextPagePostID != cursor
+            }
+            guard didAdvanceCursorPage else {
+              throw BrowseError.unavailable("贴吧返回的分页游标未前进，未合并该响应。")
+            }
+          case .postID(_), nil:
+            break
+          }
+        }
         thread = response.thread
         if replacing {
           originThread = response.originThread
@@ -295,13 +456,25 @@ final class ThreadViewModel: ObservableObject {
           && !stalledAscendingPage
           && !stalledHotPage
         posts = mergedPosts
+        if replacing {
+          lowestLoadedPage = max(response.currentPage, 1)
+          canLoadPrevious = options.sort == .ascending
+            && response.currentPage > 1
+            && response.hasPrevious
+          loadPreviousError = nil
+          prependRestorePostID = nil
+        }
         if replacing, let resolvedScrollTarget {
           scrollTargetPostID = resolvedScrollTarget
         }
         if replacing {
-          positionNotice = didFallBackFromMissingPosition
-            ? "上次阅读位置已失效或不符合当前筛选，已显示当前可用内容。"
-            : nil
+          if didHideRequestedPosition {
+            positionNotice = "目标楼层已按本地规则隐藏。"
+          } else if didFallBackFromMissingPosition {
+            positionNotice = "上次阅读位置已失效或不符合当前筛选，已显示当前可用内容。"
+          } else {
+            positionNotice = nil
+          }
           initialLocation = nil
         }
         jumpError = nil
@@ -320,7 +493,9 @@ final class ThreadViewModel: ObservableObject {
         return
       } catch {
         guard generation == loadGeneration, !Task.isCancelled else { return }
-        if jumping {
+        if prepending {
+          loadPreviousError = error.localizedDescription
+        } else if jumping {
           failedJumpPage = page
           jumpError = error.localizedDescription
           state = posts.isEmpty ? .failed(error.localizedDescription) : .loaded
@@ -391,5 +566,28 @@ final class ThreadViewModel: ObservableObject {
   private func merge(_ existing: [BrowsePost], _ newItems: [BrowsePost]) -> [BrowsePost] {
     var seen = Set(existing.map(\.id))
     return existing + newItems.filter { seen.insert($0.id).inserted }
+  }
+
+  private func validatePostPage(_ page: PostPageData, threadID: Int64) throws {
+    guard page.thread.id == threadID else {
+      throw BrowseError.unavailable("贴吧返回的主题归属异常，未显示该响应。")
+    }
+    var seen = Set<Int64>()
+    guard page.posts.allSatisfy({ post in
+      post.id > 0 && post.threadID == threadID && seen.insert(post.id).inserted
+    }) else {
+      throw BrowseError.unavailable("贴吧返回的楼层标识或归属异常，未显示该响应。")
+    }
+  }
+
+  private func uniqueValidPosts(
+    _ newItems: [BrowsePost],
+    excluding existing: [BrowsePost],
+    threadID: Int64
+  ) -> [BrowsePost] {
+    var seen = Set(existing.map(\.id))
+    return newItems.filter {
+      $0.id > 0 && $0.threadID == threadID && seen.insert($0.id).inserted
+    }
   }
 }

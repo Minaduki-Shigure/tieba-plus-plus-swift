@@ -117,6 +117,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       posts: response.posts.map { filter.applying(to: Self.mapPost($0)) },
       currentPage: response.pagination.currentPage,
       hasMore: response.pagination.hasMore,
+      hasPrevious: response.pagination.hasPrevious,
       totalPages: response.pagination.totalPages,
       totalCount: response.pagination.totalCount,
       nextPagePostID: Self.nextPagePostID(

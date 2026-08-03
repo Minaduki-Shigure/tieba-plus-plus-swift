@@ -166,6 +166,7 @@ struct PostPageData: Sendable {
   let posts: [BrowsePost]
   let currentPage: Int
   let hasMore: Bool
+  let hasPrevious: Bool
   let totalPages: Int
   let totalCount: Int
   let nextPagePostID: Int64?
@@ -175,6 +176,7 @@ struct PostPageData: Sendable {
     posts: [BrowsePost],
     currentPage: Int,
     hasMore: Bool,
+    hasPrevious: Bool = false,
     totalPages: Int = 0,
     totalCount: Int = 0,
     nextPagePostID: Int64? = nil,
@@ -187,6 +189,7 @@ struct PostPageData: Sendable {
     self.posts = posts
     self.currentPage = currentPage
     self.hasMore = hasMore
+    self.hasPrevious = hasPrevious
     self.totalPages = totalPages
     self.totalCount = totalCount
     self.nextPagePostID = nextPagePostID

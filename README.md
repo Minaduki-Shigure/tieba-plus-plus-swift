@@ -19,7 +19,8 @@ sorting and cursor pagination, complete public forum introductions, forum rules,
 moderator teams, and shared-thread origin cards with original media and
 navigation, plus anonymous single- and multiple-choice poll results, post
 author forum levels, bounded forum-moderator roles, IP locations, read-only net
-approval counts, post sorting, page jumps, an only-thread-author filter, and in-app public-profile navigation
+approval counts, post sorting, position-preserving earlier-floor loading for
+anchored ascending threads, page jumps, an only-thread-author filter, and in-app public-profile navigation
 from user mentions without dropping reply context.
 Forum, channel, hot-topic, global-search, and public-profile thread lists share
 a metadata-aware card that distinguishes pinned, featured, live, shared, and
@@ -52,7 +53,9 @@ raw paginated result set intact and does not currently apply to search results.
 Local browsing
 history records the last visible post ID for stable post orders and restores it
 with the active sort/filter options; the changing hot ranking reopens at its
-first page. Forums and threads can also be saved in an independent local
+first page. Prepending an adjacent earlier thread page restores the leading
+rendered floor before reading progress can be updated and leaves the existing
+tail cursor intact. Forums and threads can also be saved in an independent local
 favorites list; saved threads retain their reading position and browsing mode,
 while saved forums appear as home-screen shortcuts. History and favorites can
 be cleared independently. Per-forum search terms are kept in a separate,

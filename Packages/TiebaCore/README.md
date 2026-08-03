@@ -78,6 +78,9 @@ let followed = try await authenticatedClient.getFollowedForums(
 - The first FRS page is encoded as `pn = 0`, matching aiotieba behavior.
 - PB asks for at least two posts because the upstream endpoint does not honor a
   request size of one consistently.
+- PB pagination exposes the server's previous-page flag. The app uses it only
+  for an exact adjacent numeric page in ascending anchored windows; descending
+  and hot response directions are not inferred from that flag.
 - Post pages expose a shared-thread origin only when the explicit share flag is
   set and the origin TID is positive and distinct from the outer thread. The
   origin reuses the normal rich-content and media mapping path.

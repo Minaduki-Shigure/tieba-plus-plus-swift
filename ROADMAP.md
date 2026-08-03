@@ -28,6 +28,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Only-thread-author filtering
 - Protocol-correct descending pagination with PID cursors
 - Page-number jump and last-visible-post restoration
+- Adjacent earlier-page loading for anchored ascending threads with leading-floor restoration
 - Versioned local browsing history with delete, clear, and recording controls
 - Settings-level no-history mode using the existing browsing-history archive
 - Native system, light, and dark appearance selection
@@ -69,6 +70,15 @@ floor-jump fields. The app therefore restores a stable post ID and offers page
 jumps instead of presenting an unreliable arbitrary-floor jump as supported.
 Hot ranking responses expose physical-page PIDs unrelated to the ranking, so a
 hot history entry restores the mode but deliberately reopens its first page.
+
+An ascending thread opened around a stable post can prepend only the exact
+adjacent physical page reported by the anonymous endpoint. The app restores the
+leading rendered floor, keeps the existing tail page and PID cursor unchanged,
+and isolates previous-page loading and retry state from tail pagination. A
+wrong-thread, skipped-page, duplicate-only, invalid-ID, or stalled response is
+rejected before it can mutate the loaded window. Descending and hot windows do
+not expose this control because their physical-page direction and ranking
+semantics require separate live validation.
 
 Public profiles use the protocol's guest fields instead of impersonating the
 target user as the current account. The public-theme endpoint ignores its

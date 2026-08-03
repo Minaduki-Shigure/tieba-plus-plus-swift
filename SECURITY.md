@@ -127,6 +127,19 @@ direction, and an invalid or stalled response must not mutate the loaded snapsho
 The parent floor is projected into a dedicated model without embedded reply
 previews, preventing duplicate storage and recursive entry points.
 
+Earlier-floor thread loading reuses the existing credential-free anonymous PB
+request and sends only the public thread ID, adjacent numeric page, active sort,
+and only-thread-author flag. It is exposed only for ascending pages whose server
+metadata reports a previous page. Before mutation, the app requires the exact
+requested page, a matching thread ID, and positive, unique floor IDs owned by
+that thread. Malformed, skipped, or nonadvancing responses must not alter the
+loaded content, page state, or cursors; a duplicate-only adjacent page may only
+close that pagination direction. Prepending must preserve the established tail
+page and PID cursor, freeze both pagination directions until leading-floor
+restoration is consumed, and suppress history progress writes only during that layout change.
+This read-only path must not attach account fields, persist response metadata,
+or synthesize TiebaLite's separate backward-PID request semantics.
+
 Parent-floor links, media, profiles, and copying reuse the same strict routing,
 credential-free media, and text-projection policies as ordinary post content.
 Parent and child filtering use one immutable rule snapshot; hiding the parent or

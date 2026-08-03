@@ -14,6 +14,7 @@ struct ThreadView: View {
   @State private var showsPageJump = false
   @State private var pageInput = ""
   @State private var visiblePost: BrowsePost?
+  @State private var leadingVisiblePostID: Int64?
   @State private var linkedTarget: TiebaLinkTarget?
   @State private var restoredHistorySnapshot: ThreadHistorySnapshot?
   @State private var hasRecordedHistoryVisit = false
@@ -194,7 +195,7 @@ struct ThreadView: View {
       hasRecordedHistoryVisit = true
       let requestedPostID = restoredHistorySnapshot?.lastPostID ?? linkRoute?.postID
       let resolvedPost = requestedPostID.flatMap { postID in
-        viewModel.posts.first(where: { $0.id == postID })
+        viewModel.posts.first(where: { $0.id == postID && $0.localVisibility != .hidden })
       }
       try? await historyRepository.record(
         .thread(
@@ -207,18 +208,24 @@ struct ThreadView: View {
         )
       )
     }
-    .task(id: visiblePost?.id) {
-      guard let visiblePost else { return }
+    .task(
+      id: ThreadProgressTaskID(
+        postID: visiblePost?.id,
+        isRestoringPrependPosition: viewModel.isRestoringPrependPosition
+      )
+    ) {
+      guard let visiblePost, !viewModel.isRestoringPrependPosition else { return }
       try? await Task.sleep(nanoseconds: 600_000_000)
-      guard !Task.isCancelled else { return }
+      guard !Task.isCancelled, !viewModel.isRestoringPrependPosition else { return }
       await persistProgress(visiblePost, options: viewModel.options)
     }
     .onChange(of: viewModel.options) { options in
       visiblePost = nil
+      leadingVisiblePostID = nil
       persistBrowseOptions(options)
     }
     .onDisappear {
-      if let visiblePost {
+      if let visiblePost, !viewModel.isRestoringPrependPosition {
         let options = viewModel.options
         Task { await persistProgress(visiblePost, options: options) }
       } else {
@@ -334,6 +341,28 @@ struct ThreadView: View {
       ScrollViewReader { proxy in
         ScrollView {
           LazyVStack(spacing: 0) {
+            if viewModel.isLoadingPrevious {
+              ProgressView()
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+            } else if let message = viewModel.loadPreviousError {
+              LoadMoreErrorView(message: message, retry: viewModel.retryLoadPrevious)
+                .disabled(viewModel.isLoadingMore || viewModel.isJumping)
+            } else if viewModel.canLoadPrevious, !viewModel.isJumping {
+              Button {
+                viewModel.loadPrevious(anchorPostID: prependAnchorPostID)
+              } label: {
+                Label("加载更早楼层", systemImage: "arrow.up")
+                  .font(.subheadline)
+                  .frame(maxWidth: .infinity)
+                  .padding(.vertical, 12)
+              }
+              .buttonStyle(.plain)
+              .foregroundStyle(.tint)
+              .disabled(viewModel.isLoadingMore || viewModel.isAdjustingPrependPosition)
+              .accessibilityIdentifier("thread-load-previous")
+            }
+
             ForEach(viewModel.posts) { post in
               LocallyFilteredContent(
                 visibility: effectiveVisibility(for: post),
@@ -372,6 +401,14 @@ struct ThreadView: View {
                   }
                 }
               }
+              .background {
+                GeometryReader { geometry in
+                  Color.clear.preference(
+                    key: PrependAnchorFramePreferenceKey.self,
+                    value: [post.id: geometry.frame(in: .named("thread-scroll"))]
+                  )
+                }
+              }
               .id(post.id)
               .onAppear {
                 viewModel.loadMoreIfNeeded(current: post)
@@ -404,12 +441,30 @@ struct ThreadView: View {
             viewModel.posts.first(where: { $0.id == postID })
           }
         }
+        .onPreferenceChange(PrependAnchorFramePreferenceKey.self) { frames in
+          leadingVisiblePostID =
+            frames
+            .filter { _, frame in
+              frame.height > 0 && frame.maxY > 0 && frame.minY < viewport.size.height
+            }
+            .min { lhs, rhs in lhs.value.minY < rhs.value.minY }?
+            .key
+        }
         .task(id: viewModel.scrollTargetPostID) {
           guard let postID = viewModel.scrollTargetPostID else { return }
           await Task.yield()
           guard !Task.isCancelled else { return }
           proxy.scrollTo(postID, anchor: .top)
           viewModel.consumeScrollTarget()
+        }
+        .task(id: viewModel.prependRestoreSequence) {
+          guard viewModel.isRestoringPrependPosition else { return }
+          await Task.yield()
+          guard !Task.isCancelled else { return }
+          if let postID = viewModel.prependRestorePostID {
+            proxy.scrollTo(postID, anchor: .top)
+          }
+          viewModel.consumePrependRestoreTarget()
         }
         .refreshable { await viewModel.refresh() }
       }
@@ -477,6 +532,17 @@ struct ThreadView: View {
     return .hidden
   }
 
+  private var prependAnchorPostID: Int64? {
+    if
+      let leadingVisiblePostID,
+      let leadingPost = viewModel.posts.first(where: { $0.id == leadingVisiblePostID }),
+      effectiveVisibility(for: leadingPost) != .hidden
+    {
+      return leadingVisiblePostID
+    }
+    return viewModel.posts.first(where: { effectiveVisibility(for: $0) != .hidden })?.id
+  }
+
   private var favoriteTarget: LocalFavoriteTarget {
     let progress = viewModel.options.sort == .hot ? nil : visiblePost
     let authorAvatarURL = viewModel.posts.first(where: { $0.isThreadAuthor })?.authorPortraitURL
@@ -498,6 +564,19 @@ private struct PostFramePreferenceKey: PreferenceKey {
   static func reduce(value: inout [Int64: CGRect], nextValue: () -> [Int64: CGRect]) {
     value.merge(nextValue(), uniquingKeysWith: { _, newValue in newValue })
   }
+}
+
+private struct PrependAnchorFramePreferenceKey: PreferenceKey {
+  static let defaultValue: [Int64: CGRect] = [:]
+
+  static func reduce(value: inout [Int64: CGRect], nextValue: () -> [Int64: CGRect]) {
+    value.merge(nextValue(), uniquingKeysWith: { _, newValue in newValue })
+  }
+}
+
+private struct ThreadProgressTaskID: Hashable {
+  let postID: Int64?
+  let isRestoringPrependPosition: Bool
 }
 
 private struct PostView: View {

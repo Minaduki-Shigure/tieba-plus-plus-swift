@@ -1753,6 +1753,562 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testAscendingAnchorPrependsEarlierPageWithoutChangingTailCursor() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 58)
+    let origin = Fixtures.thread(id: 5_800, title: "original", forumName: "Origin")
+    let anchoredPosts = [
+      Fixtures.post(id: 301, threadID: 58).withLocalVisibility(.placeholder),
+      Fixtures.post(id: 302, threadID: 58),
+    ]
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: anchoredPosts,
+          currentPage: 3,
+          hasMore: true,
+          hasPrevious: true,
+          totalPages: 5,
+          nextPagePostID: 390
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 201, threadID: 58), anchoredPosts[0]],
+          currentPage: 2,
+          hasMore: true,
+          hasPrevious: true,
+          totalPages: 5,
+          nextPagePostID: 999,
+          originThread: origin
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 401, threadID: 58)],
+          currentPage: 4,
+          hasMore: false,
+          hasPrevious: true,
+          totalPages: 5
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(
+      thread: thread,
+      service: service,
+      initialLocation: .postID(302)
+    )
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+    viewModel.consumeScrollTarget()
+
+    viewModel.loadPrevious(anchorPostID: anchoredPosts[0].id)
+    XCTAssertTrue(viewModel.isAdjustingPrependPosition)
+
+    try await waitUntil { viewModel.posts.map(\.id) == [201, 301, 302] }
+    XCTAssertEqual(viewModel.currentPage, 3)
+    XCTAssertEqual(viewModel.prependRestorePostID, 301)
+    XCTAssertEqual(viewModel.originThread, origin)
+    XCTAssertTrue(viewModel.canLoadPrevious)
+    XCTAssertTrue(viewModel.isAdjustingPrependPosition)
+    viewModel.loadPrevious(anchorPostID: anchoredPosts[0].id)
+    viewModel.loadMoreIfNeeded(current: anchoredPosts[1])
+    await drainMainActor()
+    var requestCount = await service.postRequestCount()
+    XCTAssertEqual(requestCount, 2)
+    viewModel.consumePrependRestoreTarget()
+    XCTAssertFalse(viewModel.isAdjustingPrependPosition)
+
+    viewModel.loadMoreIfNeeded(current: anchoredPosts[1])
+
+    try await waitUntil { viewModel.posts.map(\.id) == [201, 301, 302, 401] }
+    let requests = await service.postRequestSnapshot()
+    requestCount = requests.count
+    XCTAssertEqual(requestCount, 3)
+    XCTAssertEqual(requests.map(\.page), [1, 2, 4])
+    XCTAssertEqual(requests[0].location, .postID(302))
+    XCTAssertEqual(requests[1].location, .pageNumber)
+    XCTAssertEqual(requests[2].location, .pageCursor(390))
+  }
+
+  @MainActor
+  func testAscendingPreviousPageFailureRetriesWithoutChangingLoadedWindow() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 581)
+    let currentPosts = [
+      Fixtures.post(id: 201, threadID: 581),
+      Fixtures.post(id: 202, threadID: 581),
+    ]
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: currentPosts,
+          currentPage: 2,
+          hasMore: false,
+          hasPrevious: true,
+          totalPages: 2
+        )
+      )
+    )
+    await service.enqueuePosts(.failure(StubFailure(message: "previous post page failed")))
+    let viewModel = ThreadViewModel(
+      thread: thread,
+      service: service,
+      initialLocation: .postID(202)
+    )
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadPrevious(anchorPostID: currentPosts[1].id)
+
+    try await waitUntil {
+      viewModel.loadPreviousError == "previous post page failed"
+        && !viewModel.isLoadingPrevious
+    }
+    XCTAssertEqual(viewModel.posts, currentPosts)
+    XCTAssertEqual(viewModel.currentPage, 2)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 101, threadID: 581)],
+          currentPage: 1,
+          hasMore: true,
+          hasPrevious: false,
+          totalPages: 2
+        )
+      )
+    )
+
+    viewModel.retryLoadPrevious()
+
+    try await waitUntil { viewModel.posts.map(\.id) == [101, 201, 202] }
+    XCTAssertNil(viewModel.loadPreviousError)
+    XCTAssertFalse(viewModel.canLoadPrevious)
+    XCTAssertEqual(viewModel.prependRestorePostID, currentPosts[1].id)
+    viewModel.consumePrependRestoreTarget()
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 1, 1])
+    XCTAssertEqual(requests.dropFirst().map(\.location), [.pageNumber, .pageNumber])
+  }
+
+  @MainActor
+  func testAscendingPreviousPageRejectsSkippedPageBeforeMerging() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 582)
+    let currentPosts = [Fixtures.post(id: 301, threadID: 582)]
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: currentPosts,
+          currentPage: 3,
+          hasMore: false,
+          hasPrevious: true,
+          totalPages: 3
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 999, threadID: 582)],
+          currentPage: 1,
+          hasMore: true,
+          hasPrevious: true,
+          totalPages: 99
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(
+      thread: thread,
+      service: service,
+      initialLocation: .postID(301)
+    )
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadPrevious()
+
+    try await waitUntil { !viewModel.isLoadingPrevious }
+    XCTAssertEqual(viewModel.posts, currentPosts)
+    XCTAssertEqual(viewModel.totalPages, 3)
+    XCTAssertTrue(viewModel.canLoadPrevious)
+    XCTAssertNil(viewModel.prependRestorePostID)
+    XCTAssertNotNil(viewModel.loadPreviousError)
+  }
+
+  @MainActor
+  func testAscendingPreviousPageRejectsCrossThreadPostBeforeMerging() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 592)
+    let currentPost = Fixtures.post(id: 301, threadID: 592)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [currentPost],
+          currentPage: 3,
+          hasMore: false,
+          hasPrevious: true,
+          totalPages: 3
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 201, threadID: 999)],
+          currentPage: 2,
+          hasMore: true,
+          hasPrevious: true,
+          totalPages: 3
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadPrevious(anchorPostID: currentPost.id)
+
+    try await waitUntil { viewModel.loadPreviousError != nil && !viewModel.isLoadingPrevious }
+    XCTAssertEqual(viewModel.posts, [currentPost])
+    XCTAssertEqual(viewModel.currentPage, 3)
+    XCTAssertTrue(viewModel.canLoadPrevious)
+    XCTAssertFalse(viewModel.isRestoringPrependPosition)
+  }
+
+  @MainActor
+  func testAscendingPreviousPageStopsWhenExactPageContainsOnlyDuplicates() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 584)
+    let currentPost = Fixtures.post(id: 301, threadID: 584)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [currentPost],
+          currentPage: 3,
+          hasMore: false,
+          hasPrevious: true,
+          totalPages: 3
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [currentPost],
+          currentPage: 2,
+          hasMore: true,
+          hasPrevious: true,
+          totalPages: 3
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadPrevious(anchorPostID: currentPost.id)
+
+    try await waitUntil { !viewModel.isLoadingPrevious }
+    XCTAssertEqual(viewModel.posts, [currentPost])
+    XCTAssertFalse(viewModel.canLoadPrevious)
+    XCTAssertFalse(viewModel.isRestoringPrependPosition)
+    XCTAssertNil(viewModel.loadPreviousError)
+  }
+
+  @MainActor
+  func testPreviousPageWithoutRenderedAnchorStillHasExplicitRestorationCycle() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 585)
+    let hiddenPost = Fixtures.post(id: 201, threadID: 585).withLocalVisibility(.hidden)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [hiddenPost],
+          currentPage: 2,
+          hasMore: false,
+          hasPrevious: true,
+          totalPages: 2
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 101, threadID: 585)],
+          currentPage: 1,
+          hasMore: true,
+          hasPrevious: false,
+          totalPages: 2
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadPrevious(anchorPostID: hiddenPost.id)
+
+    try await waitUntil { viewModel.posts.count == 2 }
+    XCTAssertNil(viewModel.prependRestorePostID)
+    XCTAssertEqual(viewModel.prependRestoreSequence, 1)
+    XCTAssertTrue(viewModel.isRestoringPrependPosition)
+    viewModel.cancel()
+    XCTAssertFalse(viewModel.isAdjustingPrependPosition)
+    XCTAssertEqual(viewModel.posts.map(\.id), [101, 201])
+  }
+
+  @MainActor
+  func testPreviousPageIsUnavailableOutsideAscendingSort() async throws {
+    for sort in [ThreadPostSort.descending, .hot] {
+      let service = ScriptedBrowseService()
+      let thread = Fixtures.thread(id: sort == .descending ? 586 : 587)
+      await service.enqueuePosts(
+        .value(
+          PostPageData(
+            thread: thread,
+            posts: [Fixtures.post(id: 301, threadID: thread.id)],
+            currentPage: 3,
+            hasMore: true,
+            hasPrevious: true,
+            totalPages: 5
+          )
+        )
+      )
+      let viewModel = ThreadViewModel(
+        thread: thread,
+        service: service,
+        options: ThreadBrowseOptions(sort: sort)
+      )
+      viewModel.loadIfNeeded()
+      try await waitUntil { viewModel.state == .loaded }
+
+      XCTAssertFalse(viewModel.canLoadPrevious)
+      viewModel.loadPrevious(anchorPostID: viewModel.posts.first?.id)
+      await drainMainActor()
+      let requestCount = await service.postRequestCount()
+      XCTAssertEqual(requestCount, 1)
+    }
+  }
+
+  @MainActor
+  func testThreadDoesNotExposeHiddenAnchoredPostAsScrollTarget() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 588)
+    let hiddenPost = Fixtures.post(id: 201, threadID: 588).withLocalVisibility(.hidden)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [hiddenPost],
+          currentPage: 2,
+          hasMore: false,
+          hasPrevious: true,
+          totalPages: 2
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(
+      thread: thread,
+      service: service,
+      initialLocation: .postID(hiddenPost.id)
+    )
+
+    viewModel.loadIfNeeded()
+
+    try await waitUntil { viewModel.state == .loaded }
+    XCTAssertNil(viewModel.scrollTargetPostID)
+    XCTAssertEqual(viewModel.positionNotice, "目标楼层已按本地规则隐藏。")
+    XCTAssertTrue(viewModel.canLoadPrevious)
+  }
+
+  @MainActor
+  func testTailCursorResponseMustAdvanceBeforeMerging() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 589)
+    let currentPost = Fixtures.post(id: 201, threadID: 589)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [currentPost],
+          currentPage: 2,
+          hasMore: true,
+          totalPages: 4,
+          nextPagePostID: 290
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 299, threadID: 589)],
+          currentPage: 2,
+          hasMore: true,
+          totalPages: 4,
+          nextPagePostID: 290
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 298, threadID: 589)],
+          currentPage: 1,
+          hasMore: true,
+          totalPages: 4,
+          nextPagePostID: 291
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadMoreIfNeeded(current: currentPost)
+
+    try await waitUntil { viewModel.loadMoreError != nil && !viewModel.isLoadingMore }
+    XCTAssertEqual(viewModel.posts, [currentPost])
+    XCTAssertEqual(viewModel.currentPage, 2)
+    viewModel.retryLoadMore()
+    try await waitUntil {
+      await service.postRequestCount() == 3
+        && viewModel.loadMoreError != nil && !viewModel.isLoadingMore
+    }
+    XCTAssertEqual(viewModel.posts, [currentPost])
+    XCTAssertEqual(viewModel.currentPage, 2)
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(requests.map(\.location), [nil, .pageCursor(290), .pageCursor(290)])
+  }
+
+  @MainActor
+  func testReloadInvalidatesSuspendedPreviousPageResponse() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 590)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 301, threadID: 590)],
+          currentPage: 3,
+          hasMore: false,
+          hasPrevious: true,
+          totalPages: 3
+        )
+      )
+    )
+    await service.enqueuePosts(.suspended(211))
+    let replacementPost = Fixtures.post(id: 101, threadID: 590)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [replacementPost],
+          currentPage: 1,
+          hasMore: false,
+          totalPages: 3
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadPrevious(anchorPostID: viewModel.posts.first?.id)
+    try await waitUntil { await service.postRequestCount() == 2 }
+    viewModel.reload()
+    try await waitUntil { viewModel.posts == [replacementPost] }
+    let resumed = await service.resumePosts(
+      id: 211,
+      returning: PostPageData(
+        thread: thread,
+        posts: [Fixtures.post(id: 201, threadID: 590)],
+        currentPage: 2,
+        hasMore: true,
+        hasPrevious: true,
+        totalPages: 3
+      )
+    )
+    XCTAssertTrue(resumed)
+    await drainMainActor()
+    XCTAssertEqual(viewModel.posts, [replacementPost])
+    XCTAssertFalse(viewModel.isAdjustingPrependPosition)
+  }
+
+  @MainActor
+  func testAscendingPreviousAndTailLoadsCannotOverlap() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 583)
+    let currentPost = Fixtures.post(id: 301, threadID: 583)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [currentPost],
+          currentPage: 3,
+          hasMore: true,
+          hasPrevious: true,
+          totalPages: 5,
+          nextPagePostID: 390
+        )
+      )
+    )
+    await service.enqueuePosts(.suspended(210))
+    let viewModel = ThreadViewModel(
+      thread: thread,
+      service: service,
+      initialLocation: .postID(currentPost.id)
+    )
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadMoreIfNeeded(current: currentPost)
+    try await waitUntil { await service.postRequestCount() == 2 }
+    viewModel.loadPrevious()
+    await drainMainActor()
+
+    var requestCount = await service.postRequestCount()
+    XCTAssertEqual(requestCount, 2)
+    XCTAssertTrue(viewModel.isLoadingMore)
+    let resumed = await service.resumePosts(
+      id: 210,
+      returning: PostPageData(
+        thread: thread,
+        posts: [Fixtures.post(id: 401, threadID: 583)],
+        currentPage: 4,
+        hasMore: false,
+        hasPrevious: true,
+        totalPages: 5
+      )
+    )
+    XCTAssertTrue(resumed)
+    try await waitUntil { !viewModel.isLoadingMore }
+    requestCount = await service.postRequestCount()
+    XCTAssertEqual(requestCount, 2)
+    XCTAssertEqual(viewModel.posts.map(\.id), [301, 401])
+    XCTAssertTrue(viewModel.canLoadPrevious)
+  }
+
+  @MainActor
   func testDescendingThreadPaginationUsesCursorAndDeduplicatesPosts() async throws {
     let service = ScriptedBrowseService()
     let thread = Fixtures.thread(id: 57)
