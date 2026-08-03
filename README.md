@@ -13,6 +13,9 @@ but authenticated write operations remain intentionally unsupported.
 
 ### Discovery and search
 
+- Anonymous post rankings provide a total list plus bounded server-defined
+  categories. Category changes and refreshes replace the complete ranking
+  snapshot because the endpoint has no pagination contract.
 - Ranked hot-topic discovery includes images and discussion counts. Topic
   details provide related forums and cursor-aware thread pagination.
 - Forum, thread, and user search are categorized. Global post search supports
@@ -55,12 +58,12 @@ but authenticated write operations remain intentionally unsupported.
 
 ### Content, media, and navigation
 
-- Forum, channel, hot-topic, global-search, and public-profile lists share one
-  metadata-aware thread card. It distinguishes pinned, featured, live, shared,
-  and special-format topics. Ordinary rows can show one to three downsampled
-  image previews or a nonplaying video cover together with reply, view,
-  approval, share, and relative-time context; pinned rows stay compact and do
-  not request preview media.
+- Forum, channel, hot-thread ranking, hot-topic, global-search, and
+  public-profile lists share one metadata-aware thread card. It distinguishes
+  pinned, featured, live, shared, and special-format topics. Ordinary rows can
+  show one to three downsampled image previews or a nonplaying video cover
+  together with reply, view, approval, share, and relative-time context; pinned
+  rows stay compact and do not request preview media.
 - Rich content supports images, video links, voice playback, and shared-thread
   origin media. Images open in a same-content gallery with paging and zoom;
   explicit actions can share the original file or save it through add-only
@@ -87,9 +90,10 @@ but authenticated write operations remain intentionally unsupported.
   same versioned browsing-history archive.
 - Local filtering supports case-sensitive literal keywords, exact UID/name
   block and allow lists, placeholder or hidden presentation, and independent
-  video-topic blocking. It covers forum/channel lists, floors, nested replies,
-  and shared origins without changing raw pagination. Search results are not yet
-  filtered, and public profiles can add a user directly to either user list.
+  video-topic blocking. It covers forum/channel and hot-thread lists, floors,
+  nested replies, and shared origins without changing raw pagination. Search
+  results are not yet filtered, and public profiles can add a user directly to
+  either user list.
 
 ### Accounts and current limits
 

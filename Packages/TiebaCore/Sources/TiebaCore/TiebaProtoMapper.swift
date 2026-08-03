@@ -2,6 +2,102 @@ import Foundation
 import TiebaProto
 
 enum TiebaProtoMapper {
+  static func hotThreadRanking(
+    _ data: HotThreadListResIdl.DataRes
+  ) -> TiebaHotThreadRanking {
+    var seenTopicIDs = Set<Int64>()
+    var topics: [TiebaHotTopic] = []
+    topics.reserveCapacity(min(data.topicList.count, 20))
+    for proto in data.topicList {
+      guard topics.count < 20 else { break }
+      guard
+        let id = Int64(exactly: proto.topicID),
+        id > 0,
+        !seenTopicIDs.contains(id)
+      else { continue }
+      let name = proto.topicName.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !name.isEmpty else { continue }
+
+      seenTopicIDs.insert(id)
+      topics.append(
+        TiebaHotTopic(
+          id: id,
+          name: name,
+          description: proto.topicDesc.trimmingCharacters(in: .whitespacesAndNewlines),
+          imageURL: remoteURL(proto.topicPic),
+          discussionCount: Int64(clamping: proto.discussNum),
+          rank: topics.count + 1,
+          tag: Int(proto.tag)
+        )
+      )
+    }
+
+    var seenCategoryCodes = Set<String>()
+    var categories: [TiebaHotThreadCategory] = []
+    categories.reserveCapacity(min(data.hotThreadTabInfo.count, 20))
+    for proto in data.hotThreadTabInfo {
+      guard categories.count < 20 else { break }
+      let code = proto.tabCode.trimmingCharacters(in: .whitespacesAndNewlines)
+      let title = proto.tabName.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard
+        !code.isEmpty,
+        code.count <= 64,
+        !code.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
+        !title.isEmpty,
+        seenCategoryCodes.insert(code).inserted
+      else { continue }
+      categories.append(
+        TiebaHotThreadCategory(
+          serverID: proto.tabID,
+          code: code,
+          title: String(title.prefix(40))
+        )
+      )
+    }
+
+    var seenThreadIDs = Set<Int64>()
+    var items: [TiebaHotThreadRankItem] = []
+    items.reserveCapacity(min(data.threadInfo.count, 100))
+    for rawProto in data.threadInfo {
+      guard items.count < 100 else { break }
+      let id = rawProto.id
+      let threadID = rawProto.threadID
+      guard id > 0 || threadID > 0 else { continue }
+      guard id <= 0 || threadID <= 0 || id == threadID else { continue }
+      let resolvedID = id > 0 ? id : threadID
+      guard !seenThreadIDs.contains(resolvedID) else { continue }
+
+      let forumName = rawProto.fname.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard rawProto.fid > 0, !forumName.isEmpty else { continue }
+      let forum = TiebaForum(
+        id: rawProto.fid,
+        name: forumName,
+        category: "",
+        subcategory: "",
+        memberCount: 0,
+        threadCount: 0,
+        postCount: 0,
+        hasModerators: false,
+        hasRules: false
+      )
+      var proto = rawProto
+      proto.id = resolvedID
+      proto.threadID = resolvedID
+      let mappedThread = thread(proto, forum: forum, author: optionalUser(proto.author))
+
+      seenThreadIDs.insert(resolvedID)
+      items.append(
+        TiebaHotThreadRankItem(
+          rank: items.count + 1,
+          hotScore: max(Int(proto.hotNum), 0),
+          thread: mappedThread
+        )
+      )
+    }
+
+    return TiebaHotThreadRanking(topics: topics, categories: categories, items: items)
+  }
+
   static func threadPage(_ data: FrsPageResIdl.DataRes) -> TiebaThreadPage {
     let forumProto = data.forum
     let forum = TiebaForum(

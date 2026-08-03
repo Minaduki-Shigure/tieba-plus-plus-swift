@@ -4,6 +4,73 @@ import XCTest
 @testable import TiebaCore
 
 final class TiebaProtoMapperTests: XCTestCase {
+  func testHotThreadRankingMapsServerCategoriesAndRejectsMalformedDuplicates() throws {
+    let ranking = TiebaProtoMapper.hotThreadRanking(ProtoFixtures.hotThreadRanking().data)
+
+    XCTAssertEqual(ranking.topics.map(\.id), [101, 103])
+    XCTAssertEqual(ranking.topics.map(\.rank), [1, 2])
+    XCTAssertEqual(ranking.topics.first?.name, "First topic")
+    XCTAssertEqual(ranking.topics.first?.description, "Topic description")
+    XCTAssertEqual(ranking.topics.first?.discussionCount, Int64.max)
+    XCTAssertEqual(ranking.topics.first?.tag, 2)
+    XCTAssertEqual(ranking.topics.first?.imageURL?.absoluteString, "https://img.example/topic.png")
+
+    XCTAssertEqual(
+      ranking.categories,
+      [
+        TiebaHotThreadCategory(serverID: 0, code: "changgeng", title: "视频"),
+        TiebaHotThreadCategory(serverID: 37, code: "server-37", title: "未知分类"),
+        TiebaHotThreadCategory(
+          serverID: 8,
+          code: "youxi",
+          title: String(repeating: "e\u{301}", count: 40)
+        ),
+      ]
+    )
+    XCTAssertEqual(ranking.categories.map(\.id), ["changgeng", "server-37", "youxi"])
+
+    XCTAssertEqual(ranking.items.map(\.id), [1_001, 1_002, 1_007])
+    XCTAssertEqual(ranking.items.map(\.rank), [1, 2, 3])
+    XCTAssertEqual(ranking.items.map(\.hotScore), [900, 0, 700])
+    XCTAssertEqual(ranking.items.map(\.thread.forumID), [10, 20, 70])
+    XCTAssertEqual(ranking.items.map(\.thread.forumName), ["Forum A", "Forum B", "Forum D"])
+    XCTAssertEqual(ranking.items[1].thread.content.plainText, "Fallback content")
+    XCTAssertEqual(ranking.items[1].thread.firstPostID, 11_002)
+  }
+
+  func testHotThreadRankingBoundsEachServerCollectionAfterFiltering() {
+    var data = HotThreadListResIdl.DataRes()
+    for index in 1...25 {
+      var topic = RecommendTopicList()
+      topic.topicID = UInt64(index)
+      topic.topicName = "Topic \(index)"
+      data.topicList.append(topic)
+
+      var category = FrsTabInfo()
+      category.tabID = Int32(index)
+      category.tabName = "Category \(index)"
+      category.tabCode = "category-\(index)"
+      data.hotThreadTabInfo.append(category)
+    }
+    for index in 1...105 {
+      var thread = ThreadInfo()
+      thread.id = Int64(index)
+      thread.threadID = Int64(index)
+      thread.fid = Int64(index + 1_000)
+      thread.fname = "Forum \(index)"
+      data.threadInfo.append(thread)
+    }
+
+    let ranking = TiebaProtoMapper.hotThreadRanking(data)
+
+    XCTAssertEqual(ranking.topics.count, 20)
+    XCTAssertEqual(ranking.categories.count, 20)
+    XCTAssertEqual(ranking.items.count, 100)
+    XCTAssertEqual(ranking.topics.map(\.rank), Array(1...20))
+    XCTAssertEqual(ranking.items.map(\.rank), Array(1...100))
+    XCTAssertEqual(ranking.items.last?.id, 100)
+  }
+
   func testModeratorRoleNormalizationIsBoundedAndRequiresModeratorFlag() {
     XCTAssertNil(TiebaProtoMapper.moderatorRole(isModerator: false, rawValue: "manager"))
     XCTAssertEqual(

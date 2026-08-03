@@ -2,7 +2,7 @@ import Foundation
 import TiebaCore
 
 struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchService,
-  HotTopicService, UserProfileService, ForumInformationService
+  HotTopicService, HotThreadService, UserProfileService, ForumInformationService
 {
   private let client: TiebaClient
   private let contentFilterRepository: any ContentFilterRepository
@@ -319,6 +319,22 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     )
   }
 
+  func hotThreads(categoryCode: String) async throws -> HotThreadFeedData {
+    let response: TiebaHotThreadRanking
+    do {
+      response = try await client.getHotThreadRanking(categoryCode: categoryCode)
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    let filter = await contentFilterSnapshot()
+    return HotThreadFeedData(
+      categories: response.categories.map(Self.mapHotThreadCategory),
+      items: response.items.map { Self.mapHotThreadRankItem($0, applying: filter) }
+    )
+  }
+
   func userProfile(userID: Int64) async throws -> BrowseUserProfile {
     let response: TiebaUserProfile
     do {
@@ -473,6 +489,25 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       sortOptions: channel.sortOptions.map {
         BrowseForumChannelSortOption(id: $0.id, title: $0.title)
       }
+    )
+  }
+
+  static func mapHotThreadCategory(_ category: TiebaHotThreadCategory) -> HotThreadCategory {
+    HotThreadCategory(
+      serverID: category.serverID,
+      code: category.code,
+      title: category.title
+    )
+  }
+
+  static func mapHotThreadRankItem(
+    _ item: TiebaHotThreadRankItem,
+    applying filter: ContentFilterSnapshot = .empty
+  ) -> HotThreadRankItem {
+    HotThreadRankItem(
+      rank: item.rank,
+      hotScore: max(item.hotScore, 0),
+      thread: filter.applying(to: mapThread(item.thread))
     )
   }
 

@@ -5,7 +5,7 @@ struct TiebaPlusPlusApp: App {
   @AppStorage(AppPreferenceKey.appearance)
   private var appearance = AppAppearance.system.rawValue
   private let service:
-    any BrowseService & SearchService & ForumPostSearchService & HotTopicService
+    any BrowseService & SearchService & ForumPostSearchService & HotTopicService & HotThreadService
       & UserProfileService & ForumInformationService
   private let contentFilterRepository: any ContentFilterRepository
   private let historyRepository: any BrowsingHistoryRepository = FileBrowsingHistoryStore.live()

@@ -15,7 +15,7 @@ public struct TiebaClientConfiguration: Sendable, Hashable {
   public init(
     clientVersion: String = "12.64.1.1",
     authenticatedClientVersion: String = "22.6.5.1",
-    userAgent: String = "TiebaPlusPlus/0.28 (iOS)",
+    userAgent: String = "TiebaPlusPlus/0.29 (iOS)",
     requestTimeout: TimeInterval = 30
   ) {
     self.clientVersion = clientVersion
@@ -280,6 +280,16 @@ public actor TiebaClient {
     let request = try requestFactory.hotTopics()
     let body = try await send(request)
     return try TiebaHotTopicDecoder.topics(from: body)
+  }
+
+  public func getHotThreadRanking(
+    categoryCode: String = "all"
+  ) async throws -> TiebaHotThreadRanking {
+    let request = try requestFactory.hotThreadRanking(categoryCode: categoryCode)
+    let body = try await send(request)
+    let response: HotThreadListResIdl = try decode(body)
+    try checkServerError(code: response.error.errorno, message: response.error.errmsg)
+    return TiebaProtoMapper.hotThreadRanking(response.data)
   }
 
   public func getHotTopic(

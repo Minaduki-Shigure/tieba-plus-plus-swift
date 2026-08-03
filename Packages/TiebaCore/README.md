@@ -7,6 +7,10 @@ values to the app.
 
 ```swift
 let client = TiebaClient()
+let hotThreads = try await client.getHotThreadRanking()
+if let category = hotThreads.categories.first {
+    let categoryRanking = try await client.getHotThreadRanking(categoryCode: category.code)
+}
 let topics = try await client.getHotTopics()
 let topic = try await client.getHotTopic(
   topicID: topics[0].id,
@@ -77,6 +81,12 @@ let followed = try await authenticatedClient.getFollowedForums(
 - Hot-topic discovery uses the credential-free `/mo/q/hotMessage/list` and
   `/mo/q/newtopic/topicDetail` Web endpoints. Detail pagination forwards both
   the numeric page/offset and the previous page's final feed cursor.
+- The anonymous hot-thread ranking uses protobuf command `309661` with fixed
+  `tab_id = "1"` and either `tab_code = "all"` or an opaque server-advertised
+  category code. It is a complete replacement snapshot with no page, size,
+  cursor, or load-more contract. Category titles remain bound to their exact
+  server codes rather than being inferred from those codes. Mapped collections
+  are bounded to 20 topics, 20 unique categories, and 100 unique valid threads.
 - Requests identify as client type `2` and version `12.64.1.1` by default.
 - Account validation and authenticated read requests use version `22.6.5.1`.
 - The first FRS page is encoded as `pn = 0`, matching aiotieba behavior.

@@ -669,6 +669,7 @@ final class TiebaRequestFactoryTests: XCTestCase {
         filter: .all)
     )
     XCTAssertThrowsError(try injected.hotTopics())
+    XCTAssertThrowsError(try injected.hotThreadRanking(categoryCode: "all"))
     XCTAssertThrowsError(
       try injected.hotTopic(
         topicID: 1,
@@ -678,6 +679,66 @@ final class TiebaRequestFactoryTests: XCTestCase {
         lastID: nil
       )
     )
+  }
+
+  func testHotThreadRankingRequestUsesExactMinimalAnonymousWireContract() throws {
+    let request = try factory.hotThreadRanking(categoryCode: " all ")
+    let payload = try protobufPayload(from: request)
+    let expectedWire = try XCTUnwrap(
+      Data(hexString: "0a170a0d0802120931322e36342e312e311201311a03616c6c")
+    )
+    let decoded = try HotThreadListReqIdl(serializedBytes: payload)
+
+    XCTAssertEqual(payload, expectedWire)
+    XCTAssertEqual(request.url?.scheme, "https")
+    XCTAssertEqual(request.url?.host, "tiebac.baidu.com")
+    XCTAssertEqual(request.url?.path, "/c/f/forum/hotThreadList")
+    XCTAssertEqual(request.url?.query, "cmd=309661")
+    XCTAssertEqual(request.httpMethod, "POST")
+    XCTAssertFalse(request.httpShouldHandleCookies)
+    XCTAssertEqual(request.value(forHTTPHeaderField: "x_bd_data_type"), "protobuf")
+    XCTAssertEqual(
+      request.value(forHTTPHeaderField: "Content-Type"),
+      "multipart/form-data; boundary=-*_r1999"
+    )
+    XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+    XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+    XCTAssertNil(request.value(forHTTPHeaderField: "Referer"))
+    XCTAssertEqual(
+      Set(request.allHTTPHeaderFields?.keys.map { $0.lowercased() } ?? []),
+      Set(["accept-encoding", "content-type", "user-agent", "x_bd_data_type"])
+    )
+    XCTAssertEqual(decoded.data.tabID, "1")
+    XCTAssertEqual(decoded.data.tabCode, "all")
+    XCTAssertEqual(decoded.data.common.clientType, 2)
+    XCTAssertEqual(decoded.data.common.clientVersion, "12.64.1.1")
+    XCTAssertEqual(decoded.data.common.clientID, "")
+    XCTAssertEqual(decoded.data.common.phoneImei, "")
+    XCTAssertEqual(decoded.data.common.cuid, "")
+    XCTAssertEqual(decoded.data.common.timestamp, 0)
+    XCTAssertEqual(decoded.data.common.bduss, "")
+    XCTAssertEqual(decoded.data.common.tbs, "")
+    XCTAssertEqual(decoded.data.common.stoken, "")
+    XCTAssertEqual(decoded.data.common.zID, "")
+  }
+
+  func testHotThreadRankingRequestPassesUnknownCategoryAndRejectsInvalidCodes() throws {
+    let unknownRequest = try factory.hotThreadRanking(categoryCode: " server-37 ")
+    let unknown = try HotThreadListReqIdl(
+      serializedBytes: protobufPayload(from: unknownRequest)
+    )
+    XCTAssertEqual(unknown.data.tabCode, "server-37")
+
+    let composed = String(repeating: "e\u{301}", count: 64)
+    let composedRequest = try factory.hotThreadRanking(categoryCode: composed)
+    let composedPayload = try HotThreadListReqIdl(
+      serializedBytes: protobufPayload(from: composedRequest)
+    )
+    XCTAssertEqual(composedPayload.data.tabCode.count, 64)
+
+    for invalid in ["", " \n ", String(repeating: "x", count: 65), "bad\ncode"] {
+      XCTAssertThrowsError(try factory.hotThreadRanking(categoryCode: invalid))
+    }
   }
 
   func testHotTopicRequestsUseCredentialFreeHTTPSWebEndpoints() throws {

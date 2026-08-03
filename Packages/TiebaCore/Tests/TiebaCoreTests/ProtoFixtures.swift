@@ -533,6 +533,116 @@ enum ProtoFixtures {
     return response
   }
 
+  static func hotThreadRanking() -> HotThreadListResIdl {
+    var firstTopic = RecommendTopicList()
+    firstTopic.topicID = 101
+    firstTopic.topicName = " First topic "
+    firstTopic.discussNum = UInt64.max
+    firstTopic.tag = 2
+    firstTopic.topicDesc = " Topic description "
+    firstTopic.topicPic = "https://img.example/topic.png"
+    var duplicateTopic = firstTopic
+    duplicateTopic.topicName = "duplicate"
+    var invalidTopic = RecommendTopicList()
+    invalidTopic.topicID = UInt64.max
+    invalidTopic.topicName = "overflow"
+    var emptyTopic = RecommendTopicList()
+    emptyTopic.topicID = 103
+    emptyTopic.topicName = " \n "
+    var secondTopic = RecommendTopicList()
+    secondTopic.topicID = 103
+    secondTopic.topicName = "Second topic"
+
+    var videoCategory = FrsTabInfo()
+    videoCategory.tabName = " 视频 "
+    videoCategory.tabCode = " changgeng "
+    var unknownCategory = FrsTabInfo()
+    unknownCategory.tabID = 37
+    unknownCategory.tabName = "未知分类"
+    unknownCategory.tabCode = "server-37"
+    var duplicateCategory = unknownCategory
+    duplicateCategory.tabName = "duplicate"
+    var emptyCode = FrsTabInfo()
+    emptyCode.tabName = "empty code"
+    emptyCode.tabCode = " \n "
+    var emptyTitle = FrsTabInfo()
+    emptyTitle.tabName = " \n "
+    emptyTitle.tabCode = "server-37"
+    var overlongCode = FrsTabInfo()
+    overlongCode.tabName = "overlong code"
+    overlongCode.tabCode = String(repeating: "x", count: 65)
+    var longTitle = FrsTabInfo()
+    longTitle.tabID = 8
+    longTitle.tabName = "  \(String(repeating: "e\u{301}", count: 45))\n"
+    longTitle.tabCode = "youxi"
+    var controlCode = FrsTabInfo()
+    controlCode.tabName = "control"
+    controlCode.tabCode = "bad\u{0000}code"
+
+    var firstThread = ThreadInfo()
+    firstThread.id = 1_001
+    firstThread.threadID = 1_001
+    firstThread.firstPostID = 11_001
+    firstThread.title = "First ranked thread"
+    firstThread.fid = 10
+    firstThread.fname = " Forum A "
+    firstThread.replyNum = 12
+    firstThread.viewNum = 345
+    firstThread.hotNum = 900
+    firstThread.author.id = 1
+    firstThread.author.name = "author-a"
+    firstThread.firstPostContent = [text("First content")]
+    var duplicateThread = firstThread
+    duplicateThread.title = "duplicate"
+    var fallbackThread = ThreadInfo()
+    fallbackThread.threadID = 1_002
+    fallbackThread.firstPostID = 11_002
+    fallbackThread.title = "Fallback ID thread"
+    fallbackThread.fid = 20
+    fallbackThread.fname = "Forum B"
+    fallbackThread.hotNum = -3
+    fallbackThread.firstPostContent = [text("Fallback content")]
+    var mismatchedThread = firstThread
+    mismatchedThread.id = 1_003
+    mismatchedThread.threadID = 1_004
+    mismatchedThread.fid = 30
+    mismatchedThread.fname = "Forum C"
+    var invalidForumID = firstThread
+    invalidForumID.id = 1_005
+    invalidForumID.threadID = 0
+    invalidForumID.fid = 0
+    var invalidForumName = firstThread
+    invalidForumName.id = 1_007
+    invalidForumName.threadID = 0
+    invalidForumName.fid = 60
+    invalidForumName.fname = " \n "
+    var invalidIDs = firstThread
+    invalidIDs.id = 0
+    invalidIDs.threadID = 0
+    var idOnlyThread = ThreadInfo()
+    idOnlyThread.id = 1_007
+    idOnlyThread.firstPostID = 11_007
+    idOnlyThread.title = "ID-only thread"
+    idOnlyThread.fid = 70
+    idOnlyThread.fname = "Forum D"
+    idOnlyThread.hotNum = 700
+
+    var data = HotThreadListResIdl.DataRes()
+    data.topicList = [firstTopic, duplicateTopic, invalidTopic, emptyTopic, secondTopic]
+    data.hotThreadTabInfo = [
+      videoCategory, emptyTitle, unknownCategory, duplicateCategory, emptyCode, overlongCode,
+      longTitle, controlCode,
+    ]
+    data.threadInfo = [
+      firstThread, duplicateThread, fallbackThread, mismatchedThread, invalidForumID,
+      invalidForumName, invalidIDs, idOnlyThread,
+    ]
+
+    var response = HotThreadListResIdl()
+    response.data = data
+    return response
+  }
+
   static func serverError(code: Int32, message: String) -> FrsPageResIdl {
     var response = FrsPageResIdl()
     response.error.errorno = code

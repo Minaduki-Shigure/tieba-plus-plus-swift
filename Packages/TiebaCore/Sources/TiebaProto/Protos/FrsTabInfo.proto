@@ -8,6 +8,7 @@ message FrsTabInfo {
     int32 tab_type = 2;
     string tab_name = 3;
     int32 is_general_tab = 7;
+    string tab_code = 8;
     int32 is_default = 10;
     repeated SortButton sort_menu = 19;
 }

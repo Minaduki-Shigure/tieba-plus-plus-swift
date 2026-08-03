@@ -465,6 +465,29 @@ struct HotTopicPageData: Sendable {
   let nextPageCursor: Int64?
 }
 
+struct HotThreadCategory: Identifiable, Hashable, Sendable {
+  var id: String { code }
+
+  let serverID: Int32
+  let code: String
+  let title: String
+
+  static let all = HotThreadCategory(serverID: 1, code: "all", title: "总榜")
+}
+
+struct HotThreadRankItem: Identifiable, Hashable, Sendable {
+  var id: Int64 { thread.id }
+
+  let rank: Int
+  let hotScore: Int
+  let thread: BrowseThread
+}
+
+struct HotThreadFeedData: Hashable, Sendable {
+  let categories: [HotThreadCategory]
+  let items: [HotThreadRankItem]
+}
+
 enum BrowseThreadKind: Hashable, Sendable {
   case article
   case album

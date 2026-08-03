@@ -60,6 +60,46 @@ final class TiebaClientTests: XCTestCase {
     XCTAssertTrue(thread.isPinned)
   }
 
+  func testHotThreadRankingClientMapsFixtureAndForwardsUnknownCategory() async throws {
+    let transport = CapturingTransport(
+      body: try ProtoFixtures.hotThreadRanking().serializedData()
+    )
+    let client = TiebaClient(transport: transport)
+
+    let result = try await client.getHotThreadRanking(categoryCode: " server-37 ")
+
+    XCTAssertEqual(result.topics.map(\.id), [101, 103])
+    XCTAssertEqual(result.categories.map(\.code), ["changgeng", "server-37", "youxi"])
+    XCTAssertEqual(result.items.map(\.id), [1_001, 1_002, 1_007])
+    let capturedRequest = await transport.lastRequest()
+    let request = try XCTUnwrap(capturedRequest)
+    let decoded = try HotThreadListReqIdl(
+      serializedBytes: protobufPayload(from: try XCTUnwrap(request.httpBody))
+    )
+    XCTAssertEqual(decoded.data.tabID, "1")
+    XCTAssertEqual(decoded.data.tabCode, "server-37")
+    XCTAssertEqual(decoded.data.common.clientType, 2)
+    XCTAssertEqual(decoded.data.common.clientVersion, "12.64.1.1")
+  }
+
+  func testHotThreadRankingClientMapsServerError() async {
+    var response = HotThreadListResIdl()
+    response.error.errorno = 4
+    response.error.errmsg = "ranking unavailable"
+    let body: Data
+    do {
+      body = try response.serializedData()
+    } catch {
+      XCTFail("Failed to serialize fixture: \(error)")
+      return
+    }
+    let client = TiebaClient(transport: StubTransport(body: body))
+
+    await assertClientError(.server(code: 4, message: "ranking unavailable")) {
+      _ = try await client.getHotThreadRanking()
+    }
+  }
+
   func testMapsForumChannelPageAndCursor() async throws {
     let transport = CapturingTransport(
       body: try ProtoFixtures.forumChannelPage().serializedData()

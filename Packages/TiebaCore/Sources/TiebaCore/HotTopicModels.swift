@@ -28,6 +28,50 @@ public struct TiebaHotTopic: Identifiable, Sendable, Hashable {
   }
 }
 
+public struct TiebaHotThreadCategory: Identifiable, Sendable, Hashable {
+  public let serverID: Int32
+  public let code: String
+  public let title: String
+
+  public var id: String { code }
+
+  public init(serverID: Int32, code: String, title: String) {
+    self.serverID = serverID
+    self.code = code
+    self.title = title
+  }
+}
+
+public struct TiebaHotThreadRankItem: Identifiable, Sendable, Hashable {
+  public let rank: Int
+  public let hotScore: Int
+  public let thread: TiebaThread
+
+  public var id: Int64 { thread.id }
+
+  public init(rank: Int, hotScore: Int, thread: TiebaThread) {
+    self.rank = rank
+    self.hotScore = hotScore
+    self.thread = thread
+  }
+}
+
+public struct TiebaHotThreadRanking: Sendable, Hashable {
+  public let topics: [TiebaHotTopic]
+  public let categories: [TiebaHotThreadCategory]
+  public let items: [TiebaHotThreadRankItem]
+
+  public init(
+    topics: [TiebaHotTopic],
+    categories: [TiebaHotThreadCategory],
+    items: [TiebaHotThreadRankItem]
+  ) {
+    self.topics = topics
+    self.categories = categories
+    self.items = items
+  }
+}
+
 public struct TiebaHotTopicForum: Identifiable, Sendable, Hashable {
   public let id: Int64
   public let name: String

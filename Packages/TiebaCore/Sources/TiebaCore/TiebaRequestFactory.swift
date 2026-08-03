@@ -366,6 +366,35 @@ struct TiebaRequestFactory: Sendable {
     )
   }
 
+  func hotThreadRanking(categoryCode rawCategoryCode: String) throws -> URLRequest {
+    let categoryCode = rawCategoryCode.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard
+      (1...64).contains(categoryCode.count),
+      !categoryCode.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+    else {
+      throw TiebaClientError.invalidArgument(
+        "Hot-thread category code must contain between 1 and 64 non-control characters."
+      )
+    }
+
+    var common = CommonReq()
+    common.clientType = 2
+    common.clientVersion = configuration.clientVersion
+
+    var data = HotThreadListReqIdl.DataReq()
+    data.common = common
+    data.tabID = "1"
+    data.tabCode = categoryCode
+
+    var message = HotThreadListReqIdl()
+    message.data = data
+    return try request(
+      path: "/c/f/forum/hotThreadList",
+      command: 309_661,
+      protobuf: message.serializedData()
+    )
+  }
+
   func hotTopic(
     topicID: Int64,
     topicName rawTopicName: String,

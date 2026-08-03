@@ -6,6 +6,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 
 ## Available
 
+- Anonymous hot-thread ranking with server-defined categories and snapshot refresh
 - Ranked anonymous hot-topic discovery with images and discussion counts
 - Hot-topic details with related forums and cursor-aware thread pagination
 - Categorized anonymous forum, thread, and user search
@@ -246,6 +247,15 @@ thread IDs, and pagination cursors as 64-bit values. Detail refresh preserves
 the prior page and cursor on failure; duplicate-only pages terminate pagination
 instead of repeatedly requesting the same feed. Login-related fields returned
 incidentally by the public detail response are ignored.
+
+The anonymous hot-thread ranking is a separate protobuf endpoint. Its initial
+`all` request returns one complete ranking snapshot and an opaque server-defined
+category menu; category requests replace that snapshot and have no page, size,
+cursor, or load-more fields. Category names stay bound to the exact codes from
+the same server records even when a code's spelling appears unrelated to its
+title. The app synthesizes only the visible total-list tab, limits selections to
+the current advertised menu, and refreshes the selected category without
+attaching an account or device identifier.
 
 Post pages expose an origin-thread object for both ordinary and shared topics,
 so the app treats it as a share only when `is_share_thread == 1` and the origin

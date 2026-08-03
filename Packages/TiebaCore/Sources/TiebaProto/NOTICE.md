@@ -18,6 +18,10 @@ under GPL-3.0; this project is distributed under the same license.
 
 The `Agree.diff_agree_num` field used for read-only post score display is
 adapted from TiebaLite commit `b8409486a2f7bd85881835163bd2c1ebe4fed7f7`.
+The minimal `HotThreadList` request/response and `RecommendTopicList` schemas,
+together with the `FrsTabInfo.tab_code`, `ThreadInfo.thread_id`, and
+`ThreadInfo.hot_num` fields used for the anonymous server-defined hot ranking,
+are adapted from the same TiebaLite commit.
 The additional `FrsTabInfo` discriminator and `SortButton` menu fields, the
 minimal `GeneralTabList` request/response closure used for anonymous forum
 channels, the `PbPageResIdl.DataRes.first_floor_post` field used to preserve

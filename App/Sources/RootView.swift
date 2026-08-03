@@ -4,7 +4,7 @@ import SwiftUI
 
 struct RootView: View {
   let service:
-    any BrowseService & SearchService & ForumPostSearchService & HotTopicService
+    any BrowseService & SearchService & ForumPostSearchService & HotTopicService & HotThreadService
       & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
@@ -26,7 +26,7 @@ struct RootView: View {
 
   init(
     service: any BrowseService & SearchService & ForumPostSearchService & HotTopicService
-      & UserProfileService & ForumInformationService,
+      & HotThreadService & UserProfileService & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository,
@@ -100,6 +100,10 @@ struct RootView: View {
         }
 
         Section("\u{53d1}\u{73b0}") {
+          NavigationLink(value: RootDestination.hotThreads) {
+            Label("帖子热榜", systemImage: "chart.bar.fill")
+          }
+
           NavigationLink(value: RootDestination.hotTopics) {
             Label("\u{70ed}\u{95e8}\u{8bdd}\u{9898}", systemImage: "flame.fill")
           }
@@ -204,6 +208,13 @@ struct RootView: View {
           )
         case .hotTopics:
           HotTopicListView(
+            service: service,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
+          )
+        case .hotThreads:
+          HotThreadListView(
             service: service,
             historyRepository: historyRepository,
             favoritesRepository: favoritesRepository,
@@ -555,6 +566,7 @@ private enum RootDestination: Hashable {
   case forum(String)
   case search(String)
   case hotTopics
+  case hotThreads
   case history
   case favorites
   case account

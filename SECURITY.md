@@ -82,6 +82,17 @@ client metadata; these fields must not be persisted, promoted into an account
 session, or forwarded into later requests. Topic media must pass the same
 HTTPS URL normalization policy as all other remote media.
 
+Hot-thread ranking requests are independent anonymous protobuf calls. Their
+protobuf payload may contain only client type/version, the fixed public tab ID,
+and a bounded category code; they must not add Cookie, BDUSS, STOKEN, CUID,
+advertising IDs, device identifiers, or invented pagination fields. The app may
+request `all` or a code from the current bounded server menu, and must preserve
+each server title/code pair without inference. Mapped collections are bounded
+and deduplicated before display. Any response `Set-Cookie` remains unused
+because the anonymous transport does not store or handle cookies. The ranking
+is read only and must not expose the reference client's agree or other reaction
+writes.
+
 Public forum introductions, rules, and moderator-team requests must remain
 credential-free. They may include only the forum identifier and anonymous
 client metadata; no future account Cookie, BDUSS, or STOKEN may be attached to

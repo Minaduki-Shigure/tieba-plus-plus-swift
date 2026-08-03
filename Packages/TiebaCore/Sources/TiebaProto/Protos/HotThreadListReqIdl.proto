@@ -1,0 +1,13 @@
+// tbclient.HotThreadList.HotThreadListRequest
+syntax = "proto3";
+
+import "CommonReq.proto";
+
+message HotThreadListReqIdl {
+    message DataReq {
+        CommonReq common = 1;
+        string tab_id = 2;
+        string tab_code = 3;
+    }
+    DataReq data = 1;
+}
