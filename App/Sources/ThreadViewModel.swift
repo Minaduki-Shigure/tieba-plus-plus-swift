@@ -6,6 +6,7 @@ final class ThreadViewModel: ObservableObject {
   @Published private(set) var thread: BrowseThread
   @Published private(set) var originThread: BrowseThread?
   @Published private(set) var poll: BrowsePoll?
+  @Published private(set) var firstPost: BrowsePost?
   @Published private(set) var posts: [BrowsePost] = []
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
@@ -44,6 +45,7 @@ final class ThreadViewModel: ObservableObject {
     self.thread = thread
     self.originThread = nil
     self.poll = nil
+    self.firstPost = nil
     self.service = service
     self.options = options
     self.initialLocation = options.sort == .hot ? nil : initialLocation
@@ -82,6 +84,7 @@ final class ThreadViewModel: ObservableObject {
     nextPagePostID = nil
     descendingFallbackPage = nil
     scrollTargetPostID = nil
+    firstPost = nil
     posts = []
     state = .loading
     load(page: 1, replacing: true, location: location, jumping: false)
@@ -171,13 +174,17 @@ final class ThreadViewModel: ObservableObject {
     isRestoringPrependPosition = false
     previousLoadAnchorPostID = nil
     if state == .loading {
-      state = posts.isEmpty ? .idle : .loaded
+      state = firstPost == nil && posts.isEmpty ? .idle : .loaded
     }
   }
 
   func loadMoreIfNeeded(current post: BrowsePost) {
+    guard post.id == posts.last?.id else { return }
+    loadMoreIfNeeded()
+  }
+
+  func loadMoreIfNeeded() {
     guard
-      post.id == posts.last?.id,
       hasMore,
       !isLoadingMore,
       !isAdjustingPrependPosition,
@@ -299,14 +306,23 @@ final class ThreadViewModel: ObservableObject {
         )
         try Task.checkCancellation()
         guard generation == loadGeneration else { return }
-        try validatePostPage(response, threadID: threadID)
+        var normalized = try normalizedPostPage(response, threadID: threadID)
+        try validateRetainedFirstPostIdentity(
+          normalized.firstPost,
+          responseThread: response.thread,
+          replacing: replacing
+        )
 
         var resolvedScrollTarget: Int64?
         var effectiveLocation = location
         var didFallBackFromMissingPosition = false
         var didHideRequestedPosition = false
         if case .postID(let postID) = location {
-          if let target = response.posts.first(where: { $0.id == postID }) {
+          if let target = post(
+            withID: postID,
+            firstPost: normalized.firstPost,
+            replies: normalized.replies
+          ) {
             if target.localVisibility == .hidden {
               didHideRequestedPosition = true
             } else {
@@ -331,15 +347,23 @@ final class ThreadViewModel: ObservableObject {
             }
             try Task.checkCancellation()
             guard generation == loadGeneration else { return }
-            try validatePostPage(response, threadID: threadID)
-            resolvedScrollTarget = response.posts.first(where: {
-              $0.localVisibility != .hidden
-            })?.id
+            normalized = try normalizedPostPage(response, threadID: threadID)
+            try validateRetainedFirstPostIdentity(
+              normalized.firstPost,
+              responseThread: response.thread,
+              replacing: replacing
+            )
+            resolvedScrollTarget = firstVisiblePost(
+              firstPost: normalized.firstPost,
+              replies: normalized.replies
+            )?.id
           }
         } else if replacing && jumping {
-          resolvedScrollTarget = response.posts.first(where: {
+          resolvedScrollTarget = normalized.replies.first(where: {
             $0.localVisibility != .hidden
-          })?.id
+          })?.id ?? normalized.firstPost.flatMap {
+            $0.localVisibility == .hidden ? nil : $0.id
+          }
         }
 
         if prepending {
@@ -350,7 +374,11 @@ final class ThreadViewModel: ObservableObject {
           else {
             throw BrowseError.unavailable("贴吧返回的上一页页码异常，未合并该响应。")
           }
-          let newItems = uniqueValidPosts(response.posts, excluding: posts, threadID: threadID)
+          let newItems = uniqueValidPosts(
+            normalized.replies,
+            excluding: posts,
+            threadID: threadID
+          )
           guard !newItems.isEmpty else {
             canLoadPrevious = false
             previousLoadAnchorPostID = nil
@@ -360,6 +388,9 @@ final class ThreadViewModel: ObservableObject {
           let restorePostID = previousLoadAnchorPostID
           isRestoringPrependPosition = true
           thread = response.thread
+          if let responseFirstPost = normalized.firstPost {
+            firstPost = responseFirstPost
+          }
           if let responseOriginThread = response.originThread {
             originThread = responseOriginThread
           }
@@ -384,7 +415,9 @@ final class ThreadViewModel: ObservableObject {
         } else {
           requestedCursor = nil
         }
-        let mergedPosts = replacing ? response.posts : merge(previousPosts, response.posts)
+        let mergedPosts = replacing
+          ? normalized.replies
+          : merge(previousPosts, normalized.replies)
         if replacing, jumping, effectiveLocation == .pageNumber, response.currentPage != page {
           throw BrowseError.unavailable("贴吧返回的跳转页码异常，未显示该响应。")
         }
@@ -411,6 +444,11 @@ final class ThreadViewModel: ObservableObject {
           }
         }
         thread = response.thread
+        if replacing {
+          firstPost = normalized.firstPost
+        } else if let responseFirstPost = normalized.firstPost {
+          firstPost = responseFirstPost
+        }
         if replacing {
           originThread = response.originThread
         } else if let responseOriginThread = response.originThread {
@@ -498,7 +536,9 @@ final class ThreadViewModel: ObservableObject {
         } else if jumping {
           failedJumpPage = page
           jumpError = error.localizedDescription
-          state = posts.isEmpty ? .failed(error.localizedDescription) : .loaded
+          state = firstPost == nil && posts.isEmpty
+            ? .failed(error.localizedDescription)
+            : .loaded
         } else if replacing {
           state = .failed(error.localizedDescription)
         } else {
@@ -568,15 +608,124 @@ final class ThreadViewModel: ObservableObject {
     return existing + newItems.filter { seen.insert($0.id).inserted }
   }
 
-  private func validatePostPage(_ page: PostPageData, threadID: Int64) throws {
+  func post(withID postID: Int64) -> BrowsePost? {
+    post(withID: postID, firstPost: firstPost, replies: posts)
+  }
+
+  private struct NormalizedPostPage {
+    let firstPost: BrowsePost?
+    let replies: [BrowsePost]
+  }
+
+  private func normalizedPostPage(
+    _ page: PostPageData,
+    threadID: Int64
+  ) throws -> NormalizedPostPage {
     guard page.thread.id == threadID else {
       throw BrowseError.unavailable("贴吧返回的主题归属异常，未显示该响应。")
     }
+
+    let expectedFirstPostID = page.thread.firstPostID
+    let explicitFirstPost = page.firstPost
+    if let explicitFirstPost {
+      try validateFirstPost(
+        explicitFirstPost,
+        threadID: threadID,
+        expectedFirstPostID: expectedFirstPostID
+      )
+    }
+
+    let shouldExtractLegacyFirstPost = explicitFirstPost == nil && expectedFirstPostID > 0
+    let firstPostCandidates = page.posts.filter { post in
+      if let explicitFirstPost {
+        return post.floor == 1 || post.id == explicitFirstPost.id
+      }
+      return shouldExtractLegacyFirstPost
+        && (post.floor == 1 || post.id == expectedFirstPostID)
+    }
+    for candidate in firstPostCandidates {
+      try validateFirstPost(
+        candidate,
+        threadID: threadID,
+        expectedFirstPostID: expectedFirstPostID
+      )
+    }
+
+    guard firstPostCandidates.count <= 1 else {
+      throw BrowseError.unavailable("贴吧返回了相互冲突的主题首楼，未显示该响应。")
+    }
+    if
+      let explicitFirstPost,
+      let candidate = firstPostCandidates.first,
+      candidate.id != explicitFirstPost.id
+    {
+      throw BrowseError.unavailable("贴吧返回了相互冲突的主题首楼，未显示该响应。")
+    }
+
+    let resolvedFirstPost = explicitFirstPost
+      ?? (shouldExtractLegacyFirstPost ? firstPostCandidates.first : nil)
+    let replies: [BrowsePost]
+    if let resolvedFirstPost {
+      replies = page.posts.filter { $0.id != resolvedFirstPost.id && $0.floor != 1 }
+    } else {
+      replies = page.posts
+    }
+
     var seen = Set<Int64>()
-    guard page.posts.allSatisfy({ post in
+    guard replies.allSatisfy({ post in
       post.id > 0 && post.threadID == threadID && seen.insert(post.id).inserted
     }) else {
       throw BrowseError.unavailable("贴吧返回的楼层标识或归属异常，未显示该响应。")
+    }
+    return NormalizedPostPage(firstPost: resolvedFirstPost, replies: replies)
+  }
+
+  private func validateFirstPost(
+    _ post: BrowsePost,
+    threadID: Int64,
+    expectedFirstPostID: Int64
+  ) throws {
+    guard
+      post.id > 0,
+      post.threadID == threadID,
+      post.floor == 1,
+      expectedFirstPostID <= 0 || post.id == expectedFirstPostID
+    else {
+      throw BrowseError.unavailable("贴吧返回的主题首楼标识或归属异常，未显示该响应。")
+    }
+  }
+
+  private func post(
+    withID postID: Int64,
+    firstPost: BrowsePost?,
+    replies: [BrowsePost]
+  ) -> BrowsePost? {
+    if firstPost?.id == postID { return firstPost }
+    return replies.first(where: { $0.id == postID })
+  }
+
+  private func firstVisiblePost(
+    firstPost: BrowsePost?,
+    replies: [BrowsePost]
+  ) -> BrowsePost? {
+    if let reply = replies.first(where: { $0.localVisibility != .hidden }) {
+      return reply
+    }
+    guard let firstPost, firstPost.localVisibility != .hidden else { return nil }
+    return firstPost
+  }
+
+  private func validateRetainedFirstPostIdentity(
+    _ responseFirstPost: BrowsePost?,
+    responseThread: BrowseThread,
+    replacing: Bool
+  ) throws {
+    guard !replacing, let firstPost else { return }
+    let metadataConflicts = responseThread.firstPostID > 0
+      && responseThread.firstPostID != firstPost.id
+    let payloadConflicts = responseFirstPost.map { $0.id != firstPost.id } ?? false
+    guard !metadataConflicts, !payloadConflicts else {
+      throw BrowseError.unavailable("贴吧返回的主题首楼标识发生冲突，未合并该响应。")
     }
   }
 

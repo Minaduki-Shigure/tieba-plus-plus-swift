@@ -20,8 +20,10 @@ moderator teams, and shared-thread origin cards with original media and
 navigation, plus anonymous single- and multiple-choice poll results, post
 author forum levels, bounded forum-moderator roles, IP locations, read-only net
 approval counts, post sorting, position-preserving earlier-floor loading for
-anchored ascending threads, page jumps, an only-thread-author filter, and in-app public-profile navigation
-from user mentions without dropping reply context.
+anchored ascending threads, page jumps, an only-thread-author filter, and a
+validated first-floor topic section that remains available when an anchored or
+page-number request opens in the middle of a thread. User mentions provide
+in-app public-profile navigation without dropping reply context.
 Forum, channel, hot-topic, global-search, and public-profile thread lists share
 a metadata-aware card that distinguishes pinned, featured, live, shared, and
 special-format topics. Ordinary cards can show one to three downsampled image
@@ -55,13 +57,15 @@ history records the last visible post ID for stable post orders and restores it
 with the active sort/filter options; the changing hot ranking reopens at its
 first page. Prepending an adjacent earlier thread page restores the leading
 rendered floor before reading progress can be updated and leaves the existing
-tail cursor intact. Forums and threads can also be saved in an independent local
-favorites list; saved threads retain their reading position and browsing mode,
-while saved forums appear as home-screen shortcuts. History and favorites can
-be cleared independently. Per-forum search terms are kept in a separate,
-versioned local history and can be deleted individually or cleared for that
-forum. Global search terms use their own versioned local history on the home
-screen, with recent/all views, individual deletion, clear, and explicit
+tail cursor intact. The first floor is kept outside that reply window, so it
+cannot alter the physical page or PID cursor and is not duplicated when earlier
+or later replies are merged. Forums and threads can also be saved in an
+independent local favorites list; saved threads retain their reading position
+and browsing mode, while saved forums appear as home-screen shortcuts. History
+and favorites can be cleared independently. Per-forum search terms are kept in
+a separate, versioned local history and can be deleted individually or cleared
+for that forum. Global search terms use their own versioned local history on the
+home screen, with recent/all views, individual deletion, clear, and explicit
 corruption recovery. The first authenticated milestone adds an ephemeral
 Baidu login flow with an exact host allowlist, device-only Keychain storage,
 local multi-account switching, and the current account's followed-forum list.

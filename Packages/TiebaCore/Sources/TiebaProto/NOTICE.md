@@ -18,11 +18,12 @@ under GPL-3.0; this project is distributed under the same license.
 
 The `Agree.diff_agree_num` field used for read-only post score display is
 adapted from TiebaLite commit `b8409486a2f7bd85881835163bd2c1ebe4fed7f7`.
-The additional `FrsTabInfo` discriminator fields and the minimal
-`GeneralTabList` request/response closure used for anonymous forum channels are
-adapted from the same TiebaLite commit. Device, account, advertising, write, and
-reaction fields outside the implemented read-only contract are intentionally
-omitted.
+The additional `FrsTabInfo` discriminator fields, the minimal `GeneralTabList`
+request/response closure used for anonymous forum channels, and the
+`PbPageResIdl.DataRes.first_floor_post` field used to preserve first-floor topic
+context are adapted from the same TiebaLite commit. Device, account, advertising,
+write, and reaction fields outside the implemented read-only contract are
+intentionally omitted.
 
 Only the dependency closure needed by the implemented anonymous endpoints is
 included here. The schemas document an unofficial Baidu Tieba wire protocol and

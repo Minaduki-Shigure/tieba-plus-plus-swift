@@ -133,6 +133,7 @@ enum ProtoFixtures {
     var thread = ThreadInfo()
     thread.id = 100
     thread.postID = 101
+    thread.firstPostID = 101
     thread.title = "A test thread"
     thread.author = author
     thread.authorID = author.id
@@ -205,11 +206,20 @@ enum ProtoFixtures {
     post.agree.diffAgreeNum = 5
     post.time = 1_700_000_150
 
+    var firstPost = Post()
+    firstPost.id = thread.firstPostID
+    firstPost.tid = thread.id
+    firstPost.floor = 1
+    firstPost.authorID = author.id
+    firstPost.content = [text("First floor content")]
+    firstPost.time = 1_700_000_000
+
     var data = PbPageResIdl.DataRes()
     data.forum = forum
     data.page = page
     data.thread = thread
     data.postList = [post]
+    data.firstFloorPost = firstPost
     data.userList = [author, commenter]
     data.threadFreqNum = 500
 

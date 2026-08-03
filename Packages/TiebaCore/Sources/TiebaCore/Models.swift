@@ -793,6 +793,7 @@ public struct TiebaPostPage: Sendable, Hashable {
   public let thread: TiebaThread
   public let originThread: TiebaOriginThread?
   public let poll: TiebaPoll?
+  public let firstPost: TiebaPost?
   public let posts: [TiebaPost]
   public let pagination: TiebaPagination
 
@@ -802,12 +803,14 @@ public struct TiebaPostPage: Sendable, Hashable {
     posts: [TiebaPost],
     pagination: TiebaPagination,
     originThread: TiebaOriginThread? = nil,
-    poll: TiebaPoll? = nil
+    poll: TiebaPoll? = nil,
+    firstPost: TiebaPost? = nil
   ) {
     self.forum = forum
     self.thread = thread
     self.originThread = originThread
     self.poll = poll
+    self.firstPost = firstPost
     self.posts = posts
     self.pagination = pagination
   }

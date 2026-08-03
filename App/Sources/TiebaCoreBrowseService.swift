@@ -112,9 +112,13 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       throw Self.browseError(error)
     }
     let filter = await contentFilterSnapshot()
+    let returnedPostIDs = Self.returnedPostIDs(
+      response.posts.map(\.id),
+      firstPostID: response.firstPost?.id
+    )
     return PostPageData(
       thread: Self.mapThread(response.thread),
-      posts: response.posts.map { filter.applying(to: Self.mapPost($0)) },
+      posts: response.posts.map { Self.mapPost($0, applying: filter) },
       currentPage: response.pagination.currentPage,
       hasMore: response.pagination.hasMore,
       hasPrevious: response.pagination.hasPrevious,
@@ -122,13 +126,14 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       totalCount: response.pagination.totalCount,
       nextPagePostID: Self.nextPagePostID(
         from: response.thread.pagePostIDs,
-        returnedPostIDs: Set(response.posts.map(\.id)),
+        returnedPostIDs: returnedPostIDs,
         sort: options.sort
       ),
       originThread: response.originThread.map {
         filter.applying(to: Self.mapOriginThread($0))
       },
-      poll: response.poll.map(Self.mapPoll)
+      poll: response.poll.map(Self.mapPoll),
+      firstPost: response.firstPost.map { Self.mapPost($0, applying: filter) }
     )
   }
 
@@ -737,6 +742,13 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     )
   }
 
+  static func mapPost(
+    _ post: TiebaPost,
+    applying filter: ContentFilterSnapshot
+  ) -> BrowsePost {
+    filter.applying(to: mapPost(post))
+  }
+
   static func mapCommentPage(
     _ response: TiebaCommentPage,
     requestedThreadID: Int64,
@@ -970,6 +982,14 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     case .ascending:
       return pagePostIDs.last(where: { $0 > 0 && !returnedPostIDs.contains($0) })
     }
+  }
+
+  static func returnedPostIDs(_ postIDs: [Int64], firstPostID: Int64?) -> Set<Int64> {
+    var result = Set(postIDs)
+    if let firstPostID {
+      result.insert(firstPostID)
+    }
+    return result
   }
 
   static func browseError(_ error: Error) -> BrowseError {

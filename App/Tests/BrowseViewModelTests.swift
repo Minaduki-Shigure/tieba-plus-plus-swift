@@ -198,6 +198,38 @@ final class BrowseViewModelTests: XCTestCase {
     )
   }
 
+  func testPostCursorReturnedIDsIncludeDedicatedFirstPost() {
+    let returnedPostIDs = TiebaCoreBrowseService.returnedPostIDs(
+      [20],
+      firstPostID: 30
+    )
+
+    XCTAssertEqual(returnedPostIDs, [20, 30])
+    XCTAssertEqual(
+      TiebaCoreBrowseService.nextPagePostID(
+        from: [10, 20, 30],
+        returnedPostIDs: returnedPostIDs,
+        sort: .ascending
+      ),
+      10
+    )
+    XCTAssertEqual(
+      TiebaCoreBrowseService.nextPagePostID(
+        from: [10, 20, 30],
+        returnedPostIDs: returnedPostIDs,
+        sort: .descending
+      ),
+      10
+    )
+    XCTAssertNil(
+      TiebaCoreBrowseService.nextPagePostID(
+        from: [10, 20, 30],
+        returnedPostIDs: returnedPostIDs,
+        sort: .hot
+      )
+    )
+  }
+
   func testPollProgressUsesVoteTotalFallbackAndClampsInvalidRatios() throws {
     let first = BrowsePollOption(id: 0, text: "First", voteCount: 2)
     let second = BrowsePollOption(id: 1, text: "Second", voteCount: 1)
@@ -326,6 +358,34 @@ final class BrowseViewModelTests: XCTestCase {
       agreeScore: -2
     )
     XCTAssertEqual(TiebaCoreBrowseService.mapPost(negativeScorePost).agreeScore, 0)
+  }
+
+  func testPostMappingAppliesTheSameLocalFilterUsedByDedicatedFirstPost() {
+    let post = TiebaPost(
+      id: 109,
+      threadID: 100,
+      floor: 1,
+      author: nil,
+      content: TiebaContent(fragments: [.text("blocked first post")]),
+      signature: "",
+      comments: [],
+      commentCount: 0,
+      agreeCount: 0,
+      disagreeCount: 0,
+      createdAt: nil,
+      isThreadAuthor: true,
+      isAIMeme: false
+    )
+    let filter = ContentFilterSnapshot(
+      displayMode: .placeholder,
+      blockVideos: false,
+      rules: [.keyword("blocked", list: .block)]
+    )
+
+    XCTAssertEqual(
+      TiebaCoreBrowseService.mapPost(post, applying: filter).localVisibility,
+      .placeholder
+    )
   }
 
   func testPostMappingBoundsAndValidatesInlineCommentsWithoutReordering() {
@@ -1139,6 +1199,440 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(requests, [PostRequest(threadID: 41, page: 1, pageSize: 30)])
   }
 
+  func testPostPageDataDefaultsToNoDedicatedFirstPost() {
+    let page = PostPageData(
+      thread: Fixtures.thread(id: 40),
+      posts: [],
+      currentPage: 1,
+      hasMore: false
+    )
+
+    XCTAssertNil(page.firstPost)
+  }
+
+  @MainActor
+  func testThreadSeparatesExplicitFirstPostAndRecognizesItAsAnchor() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 401, firstPostID: 40_101)
+    let firstPost = Fixtures.post(id: 40_101, threadID: thread.id, floor: 1)
+    let reply = Fixtures.post(id: 40_102, threadID: thread.id, floor: 2)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [reply],
+          currentPage: 1,
+          hasMore: false,
+          firstPost: firstPost
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(
+      thread: thread,
+      service: service,
+      initialLocation: .postID(firstPost.id)
+    )
+
+    viewModel.loadIfNeeded()
+    await viewModel.waitForCurrentLoad()
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.firstPost, firstPost)
+    XCTAssertEqual(viewModel.posts, [reply])
+    XCTAssertEqual(viewModel.post(withID: firstPost.id), firstPost)
+    XCTAssertEqual(viewModel.scrollTargetPostID, firstPost.id)
+  }
+
+  @MainActor
+  func testThreadExtractsLegacyFirstPostOnlyWithMatchingMetadata() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 402, firstPostID: 40_201)
+    let firstPost = Fixtures.post(id: 40_201, threadID: thread.id, floor: 1)
+    let reply = Fixtures.post(id: 40_202, threadID: thread.id, floor: 2)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [firstPost, reply],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+
+    viewModel.loadIfNeeded()
+    await viewModel.waitForCurrentLoad()
+
+    XCTAssertEqual(viewModel.firstPost, firstPost)
+    XCTAssertEqual(viewModel.posts, [reply])
+  }
+
+  @MainActor
+  func testThreadDoesNotGuessLegacyFirstPostWithoutMetadata() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 403)
+    let ambiguousPost = Fixtures.post(id: 40_301, threadID: thread.id, floor: 1)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [ambiguousPost],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+
+    viewModel.loadIfNeeded()
+    await viewModel.waitForCurrentLoad()
+
+    XCTAssertNil(viewModel.firstPost)
+    XCTAssertEqual(viewModel.posts, [ambiguousPost])
+  }
+
+  @MainActor
+  func testThreadRejectsConflictingExplicitAndLegacyFirstPosts() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 404, firstPostID: 40_401)
+    let explicitFirstPost = Fixtures.post(id: 40_401, threadID: thread.id, floor: 1)
+    let conflictingFirstPost = Fixtures.post(id: 40_402, threadID: thread.id, floor: 1)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [conflictingFirstPost],
+          currentPage: 1,
+          hasMore: false,
+          firstPost: explicitFirstPost
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+
+    viewModel.loadIfNeeded()
+    await viewModel.waitForCurrentLoad()
+
+    guard case .failed(let message) = viewModel.state else {
+      return XCTFail("Expected conflicting first-post response to fail")
+    }
+    XCTAssertTrue(message.contains("主题首楼"))
+    XCTAssertNil(viewModel.firstPost)
+    XCTAssertTrue(viewModel.posts.isEmpty)
+  }
+
+  @MainActor
+  func testThreadFirstPostPreservesOnAppendUpdatesWhenPresentAndClearsOnRefresh() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 405, firstPostID: 40_501)
+    let initialFirstPost = Fixtures.post(
+      id: 40_501,
+      threadID: thread.id,
+      authorName: "initial first post",
+      floor: 1
+    )
+    let updatedFirstPost = Fixtures.post(
+      id: 40_501,
+      threadID: thread.id,
+      authorName: "updated first post",
+      floor: 1
+    )
+    let firstReply = Fixtures.post(id: 40_502, threadID: thread.id, floor: 2)
+    let secondReply = Fixtures.post(id: 40_503, threadID: thread.id, floor: 3)
+    let thirdReply = Fixtures.post(id: 40_504, threadID: thread.id, floor: 4)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [firstReply],
+          currentPage: 1,
+          hasMore: true,
+          totalPages: 3,
+          firstPost: initialFirstPost
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [secondReply],
+          currentPage: 2,
+          hasMore: true,
+          totalPages: 3
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [thirdReply],
+          currentPage: 3,
+          hasMore: false,
+          totalPages: 3,
+          firstPost: updatedFirstPost
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [firstReply],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+    XCTAssertEqual(viewModel.firstPost, initialFirstPost)
+
+    viewModel.loadMoreIfNeeded(current: firstReply)
+    try await waitUntil { viewModel.posts == [firstReply, secondReply] }
+    XCTAssertEqual(viewModel.firstPost, initialFirstPost)
+
+    viewModel.loadMoreIfNeeded(current: secondReply)
+    try await waitUntil { viewModel.posts == [firstReply, secondReply, thirdReply] }
+    XCTAssertEqual(viewModel.firstPost, updatedFirstPost)
+
+    await viewModel.refresh()
+    XCTAssertNil(viewModel.firstPost)
+    XCTAssertEqual(viewModel.posts, [firstReply])
+  }
+
+  @MainActor
+  func testThreadWithOnlyFirstPostCanLoadReplyContinuation() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 406, firstPostID: 40_601)
+    let firstPost = Fixtures.post(id: 40_601, threadID: thread.id, floor: 1)
+    let reply = Fixtures.post(id: 40_602, threadID: thread.id, floor: 2)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [],
+          currentPage: 1,
+          hasMore: true,
+          totalPages: 2,
+          firstPost: firstPost
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [reply],
+          currentPage: 2,
+          hasMore: false,
+          totalPages: 2
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+    XCTAssertEqual(viewModel.firstPost, firstPost)
+    XCTAssertTrue(viewModel.posts.isEmpty)
+
+    viewModel.loadMoreIfNeeded()
+    try await waitUntil { viewModel.posts == [reply] }
+    XCTAssertEqual(viewModel.firstPost, firstPost)
+  }
+
+  @MainActor
+  func testThreadRejectsMalformedDedicatedFirstPostFields() async throws {
+    let thread = Fixtures.thread(id: 407, firstPostID: 40_701)
+    let malformedFirstPosts = [
+      Fixtures.post(id: 0, threadID: thread.id, floor: 1),
+      Fixtures.post(id: 40_701, threadID: 999, floor: 1),
+      Fixtures.post(id: 40_701, threadID: thread.id, floor: 2),
+      Fixtures.post(id: 40_799, threadID: thread.id, floor: 1),
+    ]
+
+    for malformedFirstPost in malformedFirstPosts {
+      let service = ScriptedBrowseService()
+      await service.enqueuePosts(
+        .value(
+          PostPageData(
+            thread: thread,
+            posts: [],
+            currentPage: 1,
+            hasMore: false,
+            firstPost: malformedFirstPost
+          )
+        )
+      )
+      let viewModel = ThreadViewModel(thread: thread, service: service)
+
+      viewModel.loadIfNeeded()
+      await viewModel.waitForCurrentLoad()
+
+      guard case .failed(let message) = viewModel.state else {
+        XCTFail("Expected malformed first-post response to fail")
+        continue
+      }
+      XCTAssertTrue(message.contains("主题首楼"))
+      XCTAssertNil(viewModel.firstPost)
+      XCTAssertTrue(viewModel.posts.isEmpty)
+    }
+  }
+
+  @MainActor
+  func testThreadTailRejectsChangedFirstPostIdentityWithoutMutatingSnapshot() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 408, firstPostID: 40_801)
+    let conflictingThread = Fixtures.thread(id: 408, firstPostID: 40_899)
+    let firstPost = Fixtures.post(id: 40_801, threadID: thread.id, floor: 1)
+    let conflictingFirstPost = Fixtures.post(id: 40_899, threadID: thread.id, floor: 1)
+    let currentReply = Fixtures.post(id: 40_802, threadID: thread.id, floor: 2)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [currentReply],
+          currentPage: 1,
+          hasMore: true,
+          totalPages: 2,
+          firstPost: firstPost
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: conflictingThread,
+          posts: [Fixtures.post(id: 40_803, threadID: thread.id, floor: 3)],
+          currentPage: 2,
+          hasMore: false,
+          totalPages: 2,
+          firstPost: conflictingFirstPost
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+    viewModel.loadMoreIfNeeded(current: currentReply)
+    try await waitUntil { viewModel.loadMoreError != nil && !viewModel.isLoadingMore }
+
+    XCTAssertEqual(viewModel.thread, thread)
+    XCTAssertEqual(viewModel.firstPost, firstPost)
+    XCTAssertEqual(viewModel.posts, [currentReply])
+    XCTAssertEqual(viewModel.currentPage, 1)
+  }
+
+  @MainActor
+  func testThreadPreviousPageRejectsChangedFirstPostIdentityWithoutMutatingSnapshot() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 409, firstPostID: 40_901)
+    let conflictingThread = Fixtures.thread(id: 409, firstPostID: 40_999)
+    let firstPost = Fixtures.post(id: 40_901, threadID: thread.id, floor: 1)
+    let currentReply = Fixtures.post(id: 40_903, threadID: thread.id, floor: 3)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [currentReply],
+          currentPage: 2,
+          hasMore: false,
+          hasPrevious: true,
+          totalPages: 2,
+          firstPost: firstPost
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: conflictingThread,
+          posts: [Fixtures.post(id: 40_902, threadID: thread.id, floor: 2)],
+          currentPage: 1,
+          hasMore: true,
+          hasPrevious: false,
+          totalPages: 2
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+    viewModel.loadPrevious(anchorPostID: currentReply.id)
+    try await waitUntil {
+      viewModel.loadPreviousError != nil && !viewModel.isLoadingPrevious
+    }
+
+    XCTAssertEqual(viewModel.thread, thread)
+    XCTAssertEqual(viewModel.firstPost, firstPost)
+    XCTAssertEqual(viewModel.posts, [currentReply])
+    XCTAssertEqual(viewModel.currentPage, 2)
+    XCTAssertTrue(viewModel.canLoadPrevious)
+  }
+
+  @MainActor
+  func testDuplicateOnlyPreviousPageDoesNotRefreshDedicatedFirstPost() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 410, firstPostID: 41_001)
+    let initialFirstPost = Fixtures.post(
+      id: 41_001,
+      threadID: thread.id,
+      authorName: "initial",
+      floor: 1
+    )
+    let updatedFirstPost = Fixtures.post(
+      id: 41_001,
+      threadID: thread.id,
+      authorName: "should not merge",
+      floor: 1
+    )
+    let currentReply = Fixtures.post(id: 41_003, threadID: thread.id, floor: 3)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [currentReply],
+          currentPage: 2,
+          hasMore: false,
+          hasPrevious: true,
+          totalPages: 2,
+          firstPost: initialFirstPost
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [currentReply],
+          currentPage: 1,
+          hasMore: true,
+          hasPrevious: false,
+          totalPages: 2,
+          firstPost: updatedFirstPost
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+    viewModel.loadPrevious(anchorPostID: currentReply.id)
+    try await waitUntil { !viewModel.isLoadingPrevious }
+
+    XCTAssertEqual(viewModel.firstPost, initialFirstPost)
+    XCTAssertEqual(viewModel.posts, [currentReply])
+    XCTAssertFalse(viewModel.canLoadPrevious)
+    XCTAssertFalse(viewModel.isRestoringPrependPosition)
+  }
+
   @MainActor
   func testThreadLinkRouteForwardsAuthorFilterAndPostAnchor() async throws {
     let service = ScriptedBrowseService()
@@ -1239,10 +1733,11 @@ final class BrowseViewModelTests: XCTestCase {
       .value(
         PostPageData(
           thread: thread,
-          posts: [firstPost],
+          posts: [],
           currentPage: 1,
           hasMore: true,
-          originThread: origin
+          originThread: origin,
+          firstPost: firstPost
         )
       )
     )
@@ -1261,9 +1756,10 @@ final class BrowseViewModelTests: XCTestCase {
     viewModel.loadIfNeeded()
     try await waitUntil { viewModel.state == .loaded }
     XCTAssertEqual(viewModel.originThread, origin)
+    XCTAssertEqual(viewModel.firstPost, firstPost)
 
-    viewModel.loadMoreIfNeeded(current: firstPost)
-    try await waitUntil { viewModel.posts.map(\.id) == [4_201, 4_202] }
+    viewModel.loadMoreIfNeeded()
+    try await waitUntil { viewModel.posts.map(\.id) == [4_202] }
     XCTAssertEqual(viewModel.originThread, origin)
   }
 
@@ -1276,10 +1772,11 @@ final class BrowseViewModelTests: XCTestCase {
       .value(
         PostPageData(
           thread: thread,
-          posts: [Fixtures.post(id: 4_301, threadID: 43, floor: 1)],
+          posts: [],
           currentPage: 1,
           hasMore: false,
-          originThread: origin
+          originThread: origin,
+          firstPost: Fixtures.post(id: 4_301, threadID: 43, floor: 1)
         )
       )
     )
@@ -1287,9 +1784,10 @@ final class BrowseViewModelTests: XCTestCase {
       .value(
         PostPageData(
           thread: thread,
-          posts: [Fixtures.post(id: 4_302, threadID: 43, floor: 1)],
+          posts: [],
           currentPage: 1,
-          hasMore: false
+          hasMore: false,
+          firstPost: Fixtures.post(id: 4_302, threadID: 43, floor: 1)
         )
       )
     )
@@ -1301,7 +1799,8 @@ final class BrowseViewModelTests: XCTestCase {
     await viewModel.refresh()
 
     XCTAssertNil(viewModel.originThread)
-    XCTAssertEqual(viewModel.posts.map(\.id), [4_302])
+    XCTAssertEqual(viewModel.firstPost?.id, 4_302)
+    XCTAssertTrue(viewModel.posts.isEmpty)
   }
 
   @MainActor
@@ -1314,10 +1813,11 @@ final class BrowseViewModelTests: XCTestCase {
       .value(
         PostPageData(
           thread: thread,
-          posts: [firstPost],
+          posts: [],
           currentPage: 1,
           hasMore: true,
-          poll: poll
+          poll: poll,
+          firstPost: firstPost
         )
       )
     )
@@ -1336,9 +1836,10 @@ final class BrowseViewModelTests: XCTestCase {
     viewModel.loadIfNeeded()
     try await waitUntil { viewModel.state == .loaded }
     XCTAssertEqual(viewModel.poll, poll)
+    XCTAssertEqual(viewModel.firstPost, firstPost)
 
-    viewModel.loadMoreIfNeeded(current: firstPost)
-    try await waitUntil { viewModel.posts.map(\.id) == [4_401, 4_402] }
+    viewModel.loadMoreIfNeeded()
+    try await waitUntil { viewModel.posts.map(\.id) == [4_402] }
     XCTAssertEqual(viewModel.poll, poll)
   }
 
@@ -1351,10 +1852,11 @@ final class BrowseViewModelTests: XCTestCase {
       .value(
         PostPageData(
           thread: thread,
-          posts: [Fixtures.post(id: 4_501, threadID: 45, floor: 1)],
+          posts: [],
           currentPage: 1,
           hasMore: false,
-          poll: poll
+          poll: poll,
+          firstPost: Fixtures.post(id: 4_501, threadID: 45, floor: 1)
         )
       )
     )
@@ -1362,9 +1864,10 @@ final class BrowseViewModelTests: XCTestCase {
       .value(
         PostPageData(
           thread: thread,
-          posts: [Fixtures.post(id: 4_502, threadID: 45, floor: 1)],
+          posts: [],
           currentPage: 1,
-          hasMore: false
+          hasMore: false,
+          firstPost: Fixtures.post(id: 4_502, threadID: 45, floor: 1)
         )
       )
     )
@@ -1376,7 +1879,8 @@ final class BrowseViewModelTests: XCTestCase {
     await viewModel.refresh()
 
     XCTAssertNil(viewModel.poll)
-    XCTAssertEqual(viewModel.posts.map(\.id), [4_502])
+    XCTAssertEqual(viewModel.firstPost?.id, 4_502)
+    XCTAssertTrue(viewModel.posts.isEmpty)
   }
 
   @MainActor
@@ -1539,9 +2043,10 @@ final class BrowseViewModelTests: XCTestCase {
   @MainActor
   func testThreadMissingResumePostFallsBackToOrdinaryFirstPage() async throws {
     let service = ScriptedBrowseService()
-    let thread = Fixtures.thread(id: 541)
+    let thread = Fixtures.thread(id: 541, firstPostID: 54_100)
     let missingPostID: Int64 = 54_199
-    let locationPage = [Fixtures.post(id: 54_101, threadID: 541)]
+    let firstPost = Fixtures.post(id: 54_100, threadID: 541, floor: 1)
+    let locationPage = [Fixtures.post(id: 54_101, threadID: 541, floor: 2)]
     let firstPage = [Fixtures.post(id: 54_102, threadID: 541)]
     await service.enqueuePosts(
       .value(
@@ -1550,7 +2055,8 @@ final class BrowseViewModelTests: XCTestCase {
           posts: locationPage,
           currentPage: 2,
           hasMore: true,
-          totalPages: 5
+          totalPages: 5,
+          firstPost: firstPost
         )
       )
     )
@@ -1561,7 +2067,8 @@ final class BrowseViewModelTests: XCTestCase {
           posts: firstPage,
           currentPage: 1,
           hasMore: true,
-          totalPages: 5
+          totalPages: 5,
+          firstPost: firstPost
         )
       )
     )
@@ -1578,9 +2085,10 @@ final class BrowseViewModelTests: XCTestCase {
       return viewModel.state == .loaded && requestCount == 2
     }
     XCTAssertEqual(viewModel.posts, firstPage)
+    XCTAssertEqual(viewModel.firstPost, firstPost)
     XCTAssertEqual(viewModel.currentPage, 1)
     XCTAssertNotNil(viewModel.positionNotice)
-    XCTAssertNotEqual(viewModel.scrollTargetPostID, missingPostID)
+    XCTAssertEqual(viewModel.scrollTargetPostID, firstPage.first?.id)
     let requests = await service.postRequestSnapshot()
     XCTAssertEqual(
       requests,
@@ -3890,6 +4398,7 @@ private enum Fixtures {
     id: Int64,
     title: String? = nil,
     forumName: String = "Swift",
+    firstPostID: Int64 = 0,
     isPinned: Bool = false,
     isFeatured: Bool = false
   ) -> BrowseThread {
@@ -3905,6 +4414,7 @@ private enum Fixtures {
       createdAt: Date(timeIntervalSince1970: 1_700_000_000),
       lastReplyAt: Date(timeIntervalSince1970: 1_700_000_100),
       contents: [.text("thread content")],
+      firstPostID: firstPostID,
       isPinned: isPinned,
       isFeatured: isFeatured
     )

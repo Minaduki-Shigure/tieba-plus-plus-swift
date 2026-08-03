@@ -52,14 +52,14 @@ struct ThreadView: View {
 
   var body: some View {
     Group {
-      if viewModel.posts.isEmpty {
+      if viewModel.firstPost == nil && viewModel.posts.isEmpty {
         switch viewModel.state {
         case .idle, .loading:
           ProgressView()
         case .failed(let message):
           ErrorStateView(message: message, retry: viewModel.reload)
         case .loaded:
-          EmptyStateView(title: "暂无楼层", systemImage: "bubble.left.and.bubble.right")
+          postList
         }
       } else {
         postList
@@ -195,7 +195,9 @@ struct ThreadView: View {
       hasRecordedHistoryVisit = true
       let requestedPostID = restoredHistorySnapshot?.lastPostID ?? linkRoute?.postID
       let resolvedPost = requestedPostID.flatMap { postID in
-        viewModel.posts.first(where: { $0.id == postID && $0.localVisibility != .hidden })
+        viewModel.post(withID: postID).flatMap {
+          $0.localVisibility == .hidden ? nil : $0
+        }
       }
       try? await historyRepository.record(
         .thread(
@@ -341,6 +343,47 @@ struct ThreadView: View {
       ScrollViewReader { proxy in
         ScrollView {
           LazyVStack(spacing: 0) {
+            if let firstPost = viewModel.firstPost {
+              LocallyFilteredContent(
+                visibility: effectiveVisibility(for: firstPost),
+                placeholder: "已屏蔽主题首楼"
+              ) {
+                VStack(spacing: 0) {
+                  PostView(
+                    post: firstPost,
+                    originThread: viewModel.originThread,
+                    poll: viewModel.poll,
+                    service: service,
+                    historyRepository: historyRepository,
+                    favoritesRepository: favoritesRepository,
+                    searchHistoryRepository: searchHistoryRepository,
+                    threadTitle: viewModel.thread.title,
+                    isPureReadingMode: isPureReadingMode,
+                    openMentionedUser: openMentionedUser,
+                    openTiebaLink: openTiebaLink,
+                    openComments: { commentID in
+                      commentsRoute = CommentsRoute(
+                        threadID: firstPost.threadID,
+                        postID: firstPost.id,
+                        commentID: commentID
+                      )
+                    }
+                  )
+                  Divider()
+                    .padding(.leading, isPureReadingMode ? 0 : 52)
+                }
+                .background {
+                  GeometryReader { geometry in
+                    Color.clear.preference(
+                      key: PostFramePreferenceKey.self,
+                      value: [firstPost.id: geometry.frame(in: .named("thread-scroll"))]
+                    )
+                  }
+                }
+              }
+              .id(firstPost.id)
+            }
+
             if viewModel.isLoadingPrevious {
               ProgressView()
                 .frame(maxWidth: .infinity)
@@ -371,8 +414,8 @@ struct ThreadView: View {
                 VStack(spacing: 0) {
                   PostView(
                     post: post,
-                    originThread: post.floor == 1 ? viewModel.originThread : nil,
-                    poll: post.floor == 1 ? viewModel.poll : nil,
+                    originThread: nil,
+                    poll: nil,
                     service: service,
                     historyRepository: historyRepository,
                     favoritesRepository: favoritesRepository,
@@ -414,12 +457,14 @@ struct ThreadView: View {
                 viewModel.loadMoreIfNeeded(current: post)
               }
             }
-            if let lastPost = viewModel.posts.last {
-              Color.clear
-                .frame(height: 1)
-                .accessibilityHidden(true)
-                .onAppear { viewModel.loadMoreIfNeeded(current: lastPost) }
+            if viewModel.firstPost == nil && viewModel.posts.isEmpty && viewModel.state == .loaded {
+              EmptyStateView(title: "暂无楼层", systemImage: "bubble.left.and.bubble.right")
+                .padding(.vertical, 24)
             }
+            Color.clear
+              .frame(height: 1)
+              .accessibilityHidden(true)
+              .onAppear { viewModel.loadMoreIfNeeded() }
             if viewModel.isLoadingMore || viewModel.isJumping {
               ProgressView()
                 .padding(20)
@@ -438,7 +483,7 @@ struct ThreadView: View {
             .max { lhs, rhs in lhs.value.minY < rhs.value.minY }?
             .key
           visiblePost = lastVisibleID.flatMap { postID in
-            viewModel.posts.first(where: { $0.id == postID })
+            viewModel.post(withID: postID)
           }
         }
         .onPreferenceChange(PrependAnchorFramePreferenceKey.self) { frames in
@@ -545,7 +590,8 @@ struct ThreadView: View {
 
   private var favoriteTarget: LocalFavoriteTarget {
     let progress = viewModel.options.sort == .hot ? nil : visiblePost
-    let authorAvatarURL = viewModel.posts.first(where: { $0.isThreadAuthor })?.authorPortraitURL
+    let authorAvatarURL = viewModel.firstPost?.authorPortraitURL
+      ?? viewModel.posts.first(where: { $0.isThreadAuthor })?.authorPortraitURL
     return .thread(
       ThreadHistorySnapshot(
         thread: viewModel.thread,

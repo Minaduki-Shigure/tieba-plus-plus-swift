@@ -120,8 +120,32 @@ enum TiebaProtoMapper {
     let threadAuthorID =
       data.thread.authorID != 0 ? data.thread.authorID : mappedThread.author?.id ?? 0
 
+    let firstPostProto = data.postList.first(where: {
+      validFirstPost(
+        $0,
+        threadID: mappedThread.id,
+        firstPostID: mappedThread.firstPostID
+      )
+    }) ?? (validFirstPost(
+      data.firstFloorPost,
+      threadID: mappedThread.id,
+      firstPostID: mappedThread.firstPostID
+    ) ? data.firstFloorPost : nil)
+    let firstPost = firstPostProto.map {
+      post(
+        $0,
+        threadID: mappedThread.id,
+        threadAuthorID: threadAuthorID,
+        users: users
+      )
+    }
+    let selectedFirstPostID = firstPostProto?.id ?? 0
     let posts = data.postList.compactMap { proto -> TiebaPost? in
-      guard proto.chatContent.botUk.isEmpty else { return nil }
+      guard
+        proto.floor != 1,
+        proto.id != selectedFirstPostID,
+        proto.chatContent.botUk.isEmpty
+      else { return nil }
       return post(
         proto,
         threadID: mappedThread.id,
@@ -135,7 +159,8 @@ enum TiebaProtoMapper {
       posts: posts,
       pagination: pagination(data.page),
       originThread: originThread(data.thread),
-      poll: threadPoll(data.thread)
+      poll: threadPoll(data.thread),
+      firstPost: firstPost
     )
   }
 
@@ -727,6 +752,21 @@ enum TiebaProtoMapper {
       isAIMeme: proto.spriteMemeInfo.memeID != 0,
       agreeScore: agreeScore(proto.agree)
     )
+  }
+
+  private static func validFirstPost(
+    _ proto: Post,
+    threadID: Int64,
+    firstPostID: Int64
+  ) -> Bool {
+    guard
+      proto.id > 0,
+      proto.floor == 1,
+      proto.chatContent.botUk.isEmpty,
+      proto.tid == 0 || proto.tid == threadID,
+      firstPostID <= 0 || proto.id == firstPostID
+    else { return false }
+    return true
   }
 
   private static func comment(

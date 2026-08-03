@@ -29,6 +29,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Protocol-correct descending pagination with PID cursors
 - Page-number jump and last-visible-post restoration
 - Adjacent earlier-page loading for anchored ascending threads with leading-floor restoration
+- Independently preserved first-floor topic context on anchored and middle-page windows
 - Versioned local browsing history with delete, clear, and recording controls
 - Settings-level no-history mode using the existing browsing-history archive
 - Native system, light, and dark appearance selection
@@ -79,6 +80,16 @@ wrong-thread, skipped-page, duplicate-only, invalid-ID, or stalled response is
 rejected before it can mutate the loaded window. Descending and hot windows do
 not expose this control because their physical-page direction and ranking
 semantics require separate live validation.
+
+Post responses can carry the first floor independently from the current reply
+page. The app accepts that topic context only when it has a positive ID, floor
+one, a matching thread owner, and, when declared, the thread's exact first-post
+ID. A valid first floor is rendered once above the reply window and owns the
+outer thread's shared-origin card and poll. It is filtered like any other floor,
+is retained when later or earlier reply pages omit it, and is replaced or
+cleared by a new snapshot. It never participates in reply deduplication,
+physical-page progression, prepend restoration, or the tail PID cursor. An
+absent or invalid first floor is not synthesized from the thread-list excerpt.
 
 Public profiles use the protocol's guest fields instead of impersonating the
 target user as the current account. The public-theme endpoint ignores its

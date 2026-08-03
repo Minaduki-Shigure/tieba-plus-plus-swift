@@ -115,6 +115,106 @@ final class TiebaProtoMapperTests: XCTestCase {
     XCTAssertEqual(result.thread.pagePostIDs, [301, 302])
   }
 
+  func testPostPageMapsIndependentFirstFloorSeparatelyFromReplies() throws {
+    let result = TiebaProtoMapper.postPage(ProtoFixtures.postPage().data)
+
+    let firstPost = try XCTUnwrap(result.firstPost)
+    XCTAssertEqual(firstPost.id, 101)
+    XCTAssertEqual(firstPost.threadID, result.thread.id)
+    XCTAssertEqual(firstPost.floor, 1)
+    XCTAssertEqual(firstPost.content.plainText, "First floor content")
+    XCTAssertEqual(firstPost.author?.id, 7)
+    XCTAssertTrue(firstPost.isThreadAuthor)
+    XCTAssertEqual(result.posts.map(\.id), [201])
+    XCTAssertFalse(result.posts.contains { $0.floor == 1 || $0.id == firstPost.id })
+  }
+
+  func testPostPagePrefersValidFirstFloorFromPostList() throws {
+    var fixture = ProtoFixtures.postPage().data
+    var listedFirstPost = fixture.firstFloorPost
+    listedFirstPost.content = [PbContent.with {
+      $0.type = 0
+      $0.text = "Listed first floor"
+    }]
+    fixture.postList.insert(listedFirstPost, at: 0)
+
+    let result = TiebaProtoMapper.postPage(fixture)
+
+    XCTAssertEqual(try XCTUnwrap(result.firstPost).content.plainText, "Listed first floor")
+    XCTAssertEqual(result.posts.map(\.id), [201])
+  }
+
+  func testPostPageFallsBackFromInvalidListedFirstFloor() throws {
+    var fixture = ProtoFixtures.postPage().data
+    var wrongThreadFirstPost = fixture.firstFloorPost
+    wrongThreadFirstPost.tid = fixture.thread.id + 1
+    fixture.postList.insert(wrongThreadFirstPost, at: 0)
+
+    let result = TiebaProtoMapper.postPage(fixture)
+
+    XCTAssertEqual(try XCTUnwrap(result.firstPost).content.plainText, "First floor content")
+    XCTAssertEqual(result.posts.map(\.id), [201])
+  }
+
+  func testPostPageRejectsInvalidIndependentFirstFloor() {
+    let base = ProtoFixtures.postPage().data
+    var invalidID = base.firstFloorPost
+    invalidID.id = 0
+    var invalidFloor = base.firstFloorPost
+    invalidFloor.floor = 2
+    var invalidThread = base.firstFloorPost
+    invalidThread.tid = base.thread.id + 1
+    var mismatchedFirstPostID = base.firstFloorPost
+    mismatchedFirstPostID.id = base.thread.firstPostID + 1
+    var botPost = base.firstFloorPost
+    botPost.chatContent.botUk = "bot-user"
+
+    for (label, candidate) in [
+      ("invalid ID", invalidID),
+      ("invalid floor", invalidFloor),
+      ("invalid thread", invalidThread),
+      ("mismatched first-post ID", mismatchedFirstPostID),
+      ("bot post", botPost),
+    ] {
+      var fixture = base
+      fixture.firstFloorPost = candidate
+      XCTAssertNil(TiebaProtoMapper.postPage(fixture).firstPost, label)
+    }
+  }
+
+  func testPostPageAllowsMissingFirstFloorWireThreadID() throws {
+    var fixture = ProtoFixtures.postPage().data
+    fixture.firstFloorPost.tid = 0
+
+    let firstPost = try XCTUnwrap(TiebaProtoMapper.postPage(fixture).firstPost)
+
+    XCTAssertEqual(firstPost.id, fixture.thread.firstPostID)
+    XCTAssertEqual(firstPost.threadID, fixture.thread.id)
+  }
+
+  func testPostPagePeelsFirstFloorWithoutDeduplicatingOrdinaryReplies() throws {
+    var fixture = ProtoFixtures.postPage().data
+    let reply = try XCTUnwrap(fixture.postList.first)
+    let listedFirstPost = fixture.firstFloorPost
+    var selectedIDWithWrongFloor = listedFirstPost
+    selectedIDWithWrongFloor.floor = 2
+    var unrelatedFirstFloor = listedFirstPost
+    unrelatedFirstFloor.id += 1
+    fixture.postList = [
+      listedFirstPost,
+      reply,
+      selectedIDWithWrongFloor,
+      unrelatedFirstFloor,
+      reply,
+    ]
+
+    let result = TiebaProtoMapper.postPage(fixture)
+    let firstPost = try XCTUnwrap(result.firstPost)
+
+    XCTAssertEqual(firstPost.id, listedFirstPost.id)
+    XCTAssertEqual(result.posts.map(\.id), [reply.id, reply.id])
+  }
+
   func testPostPageFallsBackToLegacyTotalPage() {
     var fixture = ProtoFixtures.postPage().data
     fixture.page.newTotalPage = 0
