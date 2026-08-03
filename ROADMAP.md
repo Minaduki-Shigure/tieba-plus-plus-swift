@@ -14,7 +14,8 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Default-off anonymous online suggestions for the home search field
 - Local home-entry customization with a next-launch destination and optional discovery section
 - Global post search with newest, oldest, and relevance sorting
-- Local keyword, user, and video filtering for global post-search results
+- Local keyword, user, and video filtering for global and per-forum search results
+- Local filtering for paginated public-profile activity
 - Versioned local global-search history with recent/all, delete, and clear controls
 - Anonymous per-forum post search with newest/relevance sorting
 - Topic-only and topic-plus-reply search filters with target-aware navigation
@@ -255,21 +256,26 @@ the currently decoded public textual fragments plus fixed `[图片]`, `[视频]`
 into the copied text.
 
 Local content filtering covers ordinary and channel forum thread lists, global
-thread-search results, post floors, nested replies, and shared-thread origin
-cards. Keyword rules use case-sensitive literal substring matching; user rules
-match an exact positive UID or exact name. An allow rule takes precedence only
-within the same matching domain and inspected field: a user allow rule does not
-override a blocked keyword, and a keyword allowed in one field does not override
-a blocked match in another. Blocked content can remain as a placeholder or be
-fully hidden. The independent video-topic switch applies to thread rows; global
-search preserves the server's public video marker even when no usable cover URL
-survives media normalization. Filtering annotates the raw models instead of
-removing them, so page and cursor progression still uses every server result
-even when an entire visible page is hidden. A raw-tail sentinel can therefore
-advance through hidden search pages without exposing their content. Per-forum
-search and public-profile activity remain outside this milestone's filter scope.
-Regular-expression rules are intentionally unsupported until a bounded or
-non-backtracking implementation is available.
+and per-forum search results, public-profile activity, post floors, nested
+replies, and shared-thread origin cards. Keyword rules use case-sensitive
+literal substring matching; user rules match an exact positive UID or exact
+name. An allow rule takes precedence only within the same matching domain and
+inspected field: a user allow rule does not override a blocked keyword, and a
+keyword allowed in one field does not override a blocked match in another.
+Blocked content can remain as a placeholder or be fully hidden. In per-forum
+search, the matched entity and its displayed topic or parent-floor context are
+filtered independently. A blocked context can be replaced or omitted without
+removing an otherwise visible match; a blocked match suppresses the complete
+row so its nested context cannot reveal it. The independent video-topic switch
+applies to thread rows; global search and the matched per-forum entity preserve
+the server's public video marker even when no usable cover URL survives media
+normalization.
+Filtering annotates the raw models instead of removing them, so page and cursor
+progression still uses every server result even when an entire visible page is
+hidden. Inaccessible raw-tail sentinels can therefore advance through hidden
+global-search, per-forum-search, and public-profile pages without exposing their
+content. Regular-expression rules are intentionally unsupported until a
+bounded or non-backtracking implementation is available.
 
 Each authenticated milestone remains gated on protocol tests, credential
 isolation, and real-device validation. The initial authenticated feature is

@@ -336,14 +336,263 @@ final class ForumPostSearchViewModelTests: XCTestCase {
   }
 
   @MainActor
-  func testRefreshFailurePreservesResultsAndClearsPaginationState() async throws {
+  func testDisplayableResultsKeepPlaceholdersAndExcludeHiddenItems() async throws {
+    let service = ScriptedForumPostSearchService()
+    let history = MemoryForumSearchHistoryRepository()
+    let visible = ForumPostSearchFixtures.item(threadID: 31, target: .thread)
+    let placeholder = ForumPostSearchFixtures.item(
+      threadID: 32,
+      target: .post(320),
+      localVisibility: .placeholder
+    )
+    let hidden = ForumPostSearchFixtures.item(
+      threadID: 33,
+      target: .comment(postID: 330, commentID: 331),
+      localVisibility: .hidden
+    )
+    await service.enqueue(
+      .value(
+        ForumPostSearchPageData(
+          results: [visible, placeholder, hidden],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ForumPostSearchViewModel(
+      forumName: "swift",
+      service: service,
+      historyRepository: history
+    )
+
+    viewModel.submit("actors")
+    try await forumPostSearchWaitUntil { viewModel.state == .loaded }
+
+    XCTAssertEqual(viewModel.results, [visible, placeholder, hidden])
+    XCTAssertEqual(viewModel.displayableResults, [visible, placeholder])
+    XCTAssertTrue(viewModel.hasDisplayableResults)
+  }
+
+  @MainActor
+  func testHiddenRawTailPaginatesAfterFirstPageReplacementAdvancesEpoch() async throws {
+    let service = ScriptedForumPostSearchService()
+    let history = MemoryForumSearchHistoryRepository()
+    let visible = ForumPostSearchFixtures.item(threadID: 41, target: .thread)
+    let hiddenTail = ForumPostSearchFixtures.item(
+      threadID: 42,
+      target: .post(420),
+      localVisibility: .hidden
+    )
+    let firstPage = ForumPostSearchPageData(
+      results: [visible, hiddenTail],
+      currentPage: 1,
+      hasMore: true
+    )
+    let next = ForumPostSearchFixtures.item(threadID: 43, target: .thread)
+    await service.enqueue(.value(firstPage))
+    await service.enqueue(.value(firstPage))
+    await service.enqueue(
+      .value(ForumPostSearchPageData(results: [next], currentPage: 2, hasMore: false))
+    )
+    let viewModel = ForumPostSearchViewModel(
+      forumName: "swift",
+      service: service,
+      historyRepository: history
+    )
+
+    viewModel.submit("actors")
+    try await forumPostSearchWaitUntil { viewModel.state == .loaded }
+    let firstEpoch = viewModel.resultPaginationEpoch
+
+    await viewModel.refresh()
+
+    XCTAssertGreaterThan(viewModel.resultPaginationEpoch, firstEpoch)
+    XCTAssertEqual(viewModel.displayableResults, [visible])
+    viewModel.loadMoreIfNeeded(current: hiddenTail)
+    try await forumPostSearchWaitUntil { viewModel.results == [visible, hiddenTail, next] }
+    let requests = await service.requestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 1, 2])
+  }
+
+  @MainActor
+  func testAllHiddenPagesCanBeTriggeredUntilAVisibleResultArrives() async throws {
+    let service = ScriptedForumPostSearchService()
+    let history = MemoryForumSearchHistoryRepository()
+    let first = ForumPostSearchFixtures.item(
+      threadID: 51,
+      target: .thread,
+      localVisibility: .hidden
+    )
+    let second = ForumPostSearchFixtures.item(
+      threadID: 52,
+      target: .post(520),
+      localVisibility: .hidden
+    )
+    let visible = ForumPostSearchFixtures.item(threadID: 53, target: .thread)
+    await service.enqueue(
+      .value(ForumPostSearchPageData(results: [first], currentPage: 1, hasMore: true))
+    )
+    await service.enqueue(
+      .value(ForumPostSearchPageData(results: [second], currentPage: 2, hasMore: true))
+    )
+    await service.enqueue(
+      .value(ForumPostSearchPageData(results: [visible], currentPage: 3, hasMore: false))
+    )
+    let viewModel = ForumPostSearchViewModel(
+      forumName: "swift",
+      service: service,
+      historyRepository: history
+    )
+
+    viewModel.submit("actors")
+    try await forumPostSearchWaitUntil { viewModel.state == .loaded }
+    XCTAssertFalse(viewModel.hasDisplayableResults)
+
+    viewModel.loadMoreIfNeeded(current: try XCTUnwrap(viewModel.results.last))
+    try await forumPostSearchWaitUntil { viewModel.results == [first, second] }
+    XCTAssertFalse(viewModel.hasDisplayableResults)
+
+    viewModel.loadMoreIfNeeded(current: try XCTUnwrap(viewModel.results.last))
+    try await forumPostSearchWaitUntil { viewModel.results == [first, second, visible] }
+    XCTAssertEqual(viewModel.displayableResults, [visible])
+    let requests = await service.requestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2, 3])
+  }
+
+  @MainActor
+  func testContentFilterChangeReloadsFirstPageWithoutRewritingHistory() async throws {
+    let service = ScriptedForumPostSearchService()
+    let history = MemoryForumSearchHistoryRepository()
+    let old = ForumPostSearchFixtures.item(threadID: 61, target: .thread)
+    let reloaded = ForumPostSearchFixtures.item(
+      threadID: 62,
+      target: .post(620),
+      localVisibility: .placeholder
+    )
+    await service.enqueue(
+      .value(ForumPostSearchPageData(results: [old], currentPage: 4, hasMore: true))
+    )
+    await service.enqueue(
+      .value(ForumPostSearchPageData(results: [reloaded], currentPage: 1, hasMore: false))
+    )
+    let viewModel = ForumPostSearchViewModel(
+      forumName: "swift",
+      service: service,
+      historyRepository: history
+    )
+    viewModel.setSort(.relevance)
+    viewModel.setFilter(.threadsOnly)
+    viewModel.submit("actors")
+    try await forumPostSearchWaitUntil { viewModel.results == [old] }
+    try await forumPostSearchWaitUntil {
+      let entries = try? await history.entries(forumName: "swift")
+      return entries?.count == 1
+    }
+    let historyBeforeReload = try await history.entries(forumName: "swift")
+
+    viewModel.reloadAfterContentFilterChange()
+
+    XCTAssertTrue(viewModel.results.isEmpty)
+    try await forumPostSearchWaitUntil { viewModel.results == [reloaded] }
+    let historyAfterReload = try await history.entries(forumName: "swift")
+    let recordedQueryCount = await history.recordCount()
+    XCTAssertEqual(historyAfterReload, historyBeforeReload)
+    XCTAssertEqual(recordedQueryCount, 1)
+    let requests = await service.requestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 1])
+    XCTAssertEqual(requests.map(\.sort), [.relevance, .relevance])
+    XCTAssertEqual(requests.map(\.filter), [.threadsOnly, .threadsOnly])
+  }
+
+  @MainActor
+  func testContentFilterChangeRejectsLateResponseFromCancelledRefresh() async throws {
+    let service = ScriptedForumPostSearchService()
+    let history = MemoryForumSearchHistoryRepository()
+    let initial = ForumPostSearchFixtures.item(threadID: 71, target: .thread)
+    let filtered = ForumPostSearchFixtures.item(
+      threadID: 72,
+      target: .post(720),
+      localVisibility: .hidden
+    )
+    await service.enqueue(
+      .value(ForumPostSearchPageData(results: [initial], currentPage: 1, hasMore: false))
+    )
+    await service.enqueue(.suspended(701))
+    await service.enqueue(
+      .value(ForumPostSearchPageData(results: [filtered], currentPage: 1, hasMore: false))
+    )
+    let viewModel = ForumPostSearchViewModel(
+      forumName: "swift",
+      service: service,
+      historyRepository: history
+    )
+    viewModel.submit("actors")
+    try await forumPostSearchWaitUntil { viewModel.results == [initial] }
+
+    let refreshTask = Task { @MainActor in await viewModel.refresh() }
+    try await forumPostSearchWaitUntil {
+      let requests = await service.requestSnapshot()
+      return requests.count == 2 && viewModel.state == .loading
+    }
+    XCTAssertEqual(viewModel.results, [initial])
+
+    viewModel.reloadAfterContentFilterChange()
+    XCTAssertTrue(viewModel.results.isEmpty)
+    try await forumPostSearchWaitUntil { viewModel.results == [filtered] }
+
+    let stale = ForumPostSearchFixtures.item(threadID: 79, target: .thread)
+    let resumed = await service.resume(
+      id: 701,
+      returning: ForumPostSearchPageData(results: [stale], currentPage: 1, hasMore: false)
+    )
+    XCTAssertTrue(resumed)
+    await refreshTask.value
+    await forumPostSearchDrainMainActor()
+
+    XCTAssertEqual(viewModel.results, [filtered])
+    XCTAssertFalse(viewModel.hasDisplayableResults)
+  }
+
+  @MainActor
+  func testContentFilterChangeWhileShowingHistoryDoesNotSearch() async throws {
+    let service = ScriptedForumPostSearchService()
+    let history = MemoryForumSearchHistoryRepository()
+    await history.seed(
+      ForumSearchHistoryEntry(
+        forumName: "swift",
+        query: "actors",
+        searchedAt: Date(timeIntervalSince1970: 1)
+      )
+    )
+    let viewModel = ForumPostSearchViewModel(
+      forumName: "swift",
+      service: service,
+      historyRepository: history
+    )
+    await viewModel.loadHistoryIfNeeded()
+
+    viewModel.reloadAfterContentFilterChange()
+    await forumPostSearchDrainMainActor()
+
+    XCTAssertTrue(viewModel.isShowingHistory)
+    XCTAssertEqual(viewModel.history.map(\.query), ["actors"])
+    let requests = await service.requestSnapshot()
+    XCTAssertTrue(requests.isEmpty)
+  }
+
+  @MainActor
+  func testRefreshFailurePreservesPaginationAndRearmsRawTail() async throws {
     let service = ScriptedForumPostSearchService()
     let history = MemoryForumSearchHistoryRepository()
     let first = ForumPostSearchFixtures.item(threadID: 1, target: .thread)
+    let second = ForumPostSearchFixtures.item(threadID: 2, target: .thread)
     await service.enqueue(
       .value(ForumPostSearchPageData(results: [first], currentPage: 1, hasMore: true))
     )
     await service.enqueue(.failure(ForumPostSearchFailure(message: "refresh failed")))
+    await service.enqueue(
+      .value(ForumPostSearchPageData(results: [second], currentPage: 2, hasMore: false))
+    )
     let viewModel = ForumPostSearchViewModel(
       forumName: "swift",
       service: service,
@@ -351,14 +600,120 @@ final class ForumPostSearchViewModelTests: XCTestCase {
     )
     viewModel.submit("async")
     try await forumPostSearchWaitUntil { viewModel.state == .loaded }
+    let epochBeforeRefresh = viewModel.resultPaginationEpoch
 
     await viewModel.refresh()
 
     XCTAssertEqual(viewModel.results, [first])
     XCTAssertEqual(viewModel.state, .loaded)
     XCTAssertEqual(viewModel.refreshError, "refresh failed")
+    XCTAssertGreaterThan(viewModel.resultPaginationEpoch, epochBeforeRefresh)
     XCTAssertFalse(viewModel.isLoadingMore)
     XCTAssertNil(viewModel.loadMoreError)
+
+    viewModel.loadMoreIfNeeded(current: first)
+    try await forumPostSearchWaitUntil { viewModel.results == [first, second] }
+
+    let requests = await service.requestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 1, 2])
+  }
+
+  @MainActor
+  func testCancellingRefreshPreservesPaginationAndRearmsRawTail() async throws {
+    let service = ScriptedForumPostSearchService()
+    let history = MemoryForumSearchHistoryRepository()
+    let first = ForumPostSearchFixtures.item(threadID: 11, target: .thread)
+    let second = ForumPostSearchFixtures.item(threadID: 12, target: .thread)
+    let third = ForumPostSearchFixtures.item(threadID: 13, target: .thread)
+    await service.enqueue(
+      .value(ForumPostSearchPageData(results: [first], currentPage: 1, hasMore: true))
+    )
+    await service.enqueue(
+      .value(ForumPostSearchPageData(results: [second], currentPage: 2, hasMore: true))
+    )
+    await service.enqueue(.suspended(303))
+    await service.enqueue(
+      .value(ForumPostSearchPageData(results: [third], currentPage: 3, hasMore: false))
+    )
+    let viewModel = ForumPostSearchViewModel(
+      forumName: "swift",
+      service: service,
+      historyRepository: history
+    )
+
+    viewModel.submit("async")
+    try await forumPostSearchWaitUntil { viewModel.state == .loaded }
+    viewModel.loadMoreIfNeeded(current: first)
+    try await forumPostSearchWaitUntil { viewModel.results == [first, second] }
+    let epochBeforeRefresh = viewModel.resultPaginationEpoch
+
+    let refreshTask = Task { @MainActor in await viewModel.refresh() }
+    try await forumPostSearchWaitUntil {
+      await service.requestSnapshot().count == 3 && viewModel.state == .loading
+    }
+    viewModel.cancel()
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.results, [first, second])
+    XCTAssertGreaterThan(viewModel.resultPaginationEpoch, epochBeforeRefresh)
+
+    viewModel.loadMoreIfNeeded(current: second)
+    try await forumPostSearchWaitUntil { viewModel.results == [first, second, third] }
+
+    let resumed = await service.resume(
+      id: 303,
+      returning: ForumPostSearchPageData(results: [first], currentPage: 1, hasMore: true)
+    )
+    XCTAssertTrue(resumed)
+    await refreshTask.value
+
+    let requests = await service.requestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2, 1, 3])
+  }
+
+  @MainActor
+  func testCancellingLoadMoreRearmsRawTailWithoutAdvancingPage() async throws {
+    let service = ScriptedForumPostSearchService()
+    let history = MemoryForumSearchHistoryRepository()
+    let first = ForumPostSearchFixtures.item(threadID: 21, target: .thread)
+    let second = ForumPostSearchFixtures.item(threadID: 22, target: .thread)
+    await service.enqueue(
+      .value(ForumPostSearchPageData(results: [first], currentPage: 1, hasMore: true))
+    )
+    await service.enqueue(.suspended(404))
+    await service.enqueue(
+      .value(ForumPostSearchPageData(results: [second], currentPage: 2, hasMore: false))
+    )
+    let viewModel = ForumPostSearchViewModel(
+      forumName: "swift",
+      service: service,
+      historyRepository: history
+    )
+
+    viewModel.submit("async")
+    try await forumPostSearchWaitUntil { viewModel.state == .loaded }
+    let epochBeforeLoadMore = viewModel.resultPaginationEpoch
+    viewModel.loadMoreIfNeeded(current: first)
+    try await forumPostSearchWaitUntil {
+      await service.requestSnapshot().count == 2 && viewModel.isLoadingMore
+    }
+
+    viewModel.cancel()
+
+    XCTAssertFalse(viewModel.isLoadingMore)
+    XCTAssertGreaterThan(viewModel.resultPaginationEpoch, epochBeforeLoadMore)
+    viewModel.loadMoreIfNeeded(current: first)
+    try await forumPostSearchWaitUntil { viewModel.results == [first, second] }
+
+    let resumed = await service.resume(
+      id: 404,
+      returning: ForumPostSearchPageData(results: [second], currentPage: 2, hasMore: false)
+    )
+    XCTAssertTrue(resumed)
+    await forumPostSearchDrainMainActor()
+
+    let requests = await service.requestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2, 2])
   }
 
   @MainActor
@@ -407,6 +762,7 @@ final class ForumPostSearchViewModelTests: XCTestCase {
     viewModel.retry()
     viewModel.setSort(.relevance)
     viewModel.setFilter(.threadsOnly)
+    viewModel.reloadAfterContentFilterChange()
     await forumPostSearchDrainMainActor()
 
     XCTAssertEqual(viewModel.state, .failed("搜索关键词不能超过 100 个字符。"))
@@ -492,6 +848,7 @@ private actor ScriptedForumPostSearchService: ForumPostSearchService {
 
 private actor MemoryForumSearchHistoryRepository: ForumSearchHistoryRepository {
   private var storedEntries: [ForumSearchHistoryEntry] = []
+  private var recordedQueryCount = 0
 
   func seed(_ entry: ForumSearchHistoryEntry) {
     storedEntries.append(entry)
@@ -507,6 +864,7 @@ private actor MemoryForumSearchHistoryRepository: ForumSearchHistoryRepository {
   }
 
   func record(query: String, forumName: String, at date: Date) async throws {
+    recordedQueryCount += 1
     let entry = ForumSearchHistoryEntry(forumName: forumName, query: query, searchedAt: date)
     storedEntries.removeAll { $0.id == entry.id }
     storedEntries.append(entry)
@@ -526,12 +884,17 @@ private actor MemoryForumSearchHistoryRepository: ForumSearchHistoryRepository {
   func reset() async throws {
     storedEntries = []
   }
+
+  func recordCount() -> Int {
+    recordedQueryCount
+  }
 }
 
 private enum ForumPostSearchFixtures {
   static func item(
     threadID: Int64,
-    target: ForumPostSearchTarget
+    target: ForumPostSearchTarget,
+    localVisibility: LocalContentVisibility = .visible
   ) -> ForumPostSearchItem {
     ForumPostSearchItem(
       thread: BrowseThread(
@@ -558,7 +921,8 @@ private enum ForumPostSearchFixtures {
       likeCount: 2,
       shareCount: 1,
       matchedContents: [],
-      context: nil
+      context: nil,
+      localVisibility: localVisibility
     )
   }
 }

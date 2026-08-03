@@ -11,6 +11,7 @@ final class ForumPostSearchViewModel: ObservableObject {
   @Published private(set) var isLoadingMore = false
   @Published private(set) var loadMoreError: String?
   @Published private(set) var refreshError: String?
+  @Published private(set) var resultPaginationEpoch = 0
   @Published private(set) var history: [ForumSearchHistoryEntry] = []
   @Published private(set) var isHistoryLoading = false
   @Published private(set) var historyError: String?
@@ -38,6 +39,10 @@ final class ForumPostSearchViewModel: ObservableObject {
   }
 
   var hasResults: Bool { !results.isEmpty }
+  var displayableResults: [ForumPostSearchItem] {
+    results.filter { $0.localVisibility != .hidden }
+  }
+  var hasDisplayableResults: Bool { !displayableResults.isEmpty }
   var isShowingHistory: Bool { submittedQuery.isEmpty }
 
   func loadHistoryIfNeeded() async {
@@ -112,6 +117,11 @@ final class ForumPostSearchViewModel: ObservableObject {
     restart(preservingResults: false)
   }
 
+  func reloadAfterContentFilterChange() {
+    guard !submittedQuery.isEmpty, submittedQuery.count <= 100 else { return }
+    restart(preservingResults: false)
+  }
+
   func loadMoreIfNeeded(current result: ForumPostSearchItem) {
     guard
       result.id == results.last?.id,
@@ -178,8 +188,12 @@ final class ForumPostSearchViewModel: ObservableObject {
   }
 
   func cancel() {
+    let shouldRearmPagination = !results.isEmpty && (state == .loading || isLoadingMore)
     invalidateSearch()
     isLoadingMore = false
+    if shouldRearmPagination {
+      resultPaginationEpoch &+= 1
+    }
     if state == .loading {
       state = results.isEmpty ? .idle : .loaded
     }
@@ -201,17 +215,25 @@ final class ForumPostSearchViewModel: ObservableObject {
     invalidateSearch()
     if !preservingResults {
       results = []
+      currentPage = 0
+      hasMore = true
     }
-    currentPage = 0
-    hasMore = true
     isLoadingMore = false
     loadMoreError = nil
     refreshError = nil
     state = .loading
-    load(page: 1, replacing: true, preservingResults: preservingResults)
+    load(
+      page: 1,
+      replacing: true,
+      preservingResults: preservingResults
+    )
   }
 
-  private func load(page: Int, replacing: Bool, preservingResults: Bool) {
+  private func load(
+    page: Int,
+    replacing: Bool,
+    preservingResults: Bool
+  ) {
     let query = submittedQuery
     let forumName = forumName
     let sort = sort
@@ -252,6 +274,9 @@ final class ForumPostSearchViewModel: ObservableObject {
         loadMoreError = nil
         refreshError = nil
         state = .loaded
+        if replacing {
+          resultPaginationEpoch &+= 1
+        }
       } catch is CancellationError {
         return
       } catch {
@@ -261,6 +286,7 @@ final class ForumPostSearchViewModel: ObservableObject {
           loadMoreError = error.localizedDescription
           state = .loaded
         } else if preservingResults, !results.isEmpty {
+          resultPaginationEpoch &+= 1
           refreshError = error.localizedDescription
           state = .loaded
         } else {

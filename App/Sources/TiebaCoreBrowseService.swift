@@ -277,8 +277,11 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     } catch {
       throw Self.browseError(error)
     }
+    let contentFilter = await contentFilterSnapshot()
     return ForumPostSearchPageData(
-      results: response.results.map(Self.mapForumPostSearchResult),
+      results: response.results.map {
+        Self.mapForumPostSearchResult($0, applying: contentFilter)
+      },
       currentPage: response.pagination.currentPage,
       hasMore: response.pagination.hasMore
     )
@@ -396,8 +399,22 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     } catch {
       throw Self.browseError(error)
     }
-    return UserThreadPageData(
-      threads: response.threads.map(Self.mapThread),
+    let contentFilter = await contentFilterSnapshot()
+    return Self.mapUserThreadPage(response, applying: contentFilter)
+  }
+
+  static func mapUserThreadPage(
+    _ response: TiebaUserThreadPage,
+    applying filter: ContentFilterSnapshot = .empty
+  ) -> UserThreadPageData {
+    UserThreadPageData(
+      threads: response.threads.map { thread in
+        let mapped = mapThread(thread)
+        return filter.applying(
+          to: mapped,
+          hasKnownVideo: mapped.kind == .video
+        )
+      },
       currentPage: response.pagination.currentPage,
       hasMore: response.pagination.hasMore,
       isHidden: response.isHidden
@@ -718,7 +735,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
   }
 
   static func mapForumPostSearchResult(
-    _ result: TiebaThreadSearchResult
+    _ result: TiebaThreadSearchResult,
+    applying filter: ContentFilterSnapshot = .empty
   ) -> ForumPostSearchItem {
     let threadContext = result.mainPost ?? result.postInfo
     let displayContext = result.postInfo ?? result.mainPost
@@ -747,7 +765,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     let target = mapForumPostSearchTarget(result.target)
     let threadReplyCount = target == .thread ? result.replyCount : threadContext?.replyCount ?? 0
 
-    return ForumPostSearchItem(
+    let mapped = ForumPostSearchItem(
       thread: BrowseThread(
         id: result.threadID,
         forumID: result.forumID,
@@ -786,6 +804,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       },
       matchedAuthorUsername: result.authorUsername
     )
+    return filter.applying(to: mapped, hasKnownVideo: result.hasVideo)
   }
 
   private static func mapForumPostSearchTarget(

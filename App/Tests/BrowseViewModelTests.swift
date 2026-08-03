@@ -283,42 +283,146 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertTrue(mapped.hasMore)
   }
 
-  func testForumPostSearchMappingRemainsOutsideGlobalContentFilter() {
+  func testForumPostSearchMappingAppliesLayeredFilterWithoutSynthesizingVideo() {
+    let mainPost = TiebaSearchPostContext(
+      threadID: 201,
+      postID: 202,
+      title: "ordinary thread",
+      excerpt: "ordinary thread excerpt",
+      authorID: 11,
+      authorName: "Blocked thread author",
+      authorPortraitURL: nil,
+      replyCount: 30
+    )
+    let postInfo = TiebaSearchPostContext(
+      threadID: 201,
+      postID: 203,
+      title: "ordinary context",
+      excerpt: "ordinary context excerpt",
+      authorID: 33,
+      authorName: "Blocked context author",
+      authorPortraitURL: nil,
+      replyCount: 4
+    )
     let result = TiebaThreadSearchResult(
       threadID: 201,
       firstPostID: 202,
       forumID: 7,
       forumName: "swift",
-      title: "广告视频",
-      excerpt: "blocked excerpt",
-      authorID: 9,
-      authorName: "Blocked author",
+      title: "ordinary matched comment",
+      excerpt: "ordinary matched excerpt",
+      authorID: 22,
+      authorName: "Matched author",
       authorPortraitURL: nil,
       replyCount: 3,
       likeCount: 4,
       shareCount: 5,
       createdAt: nil,
       images: [],
-      hasVideo: true
+      hasVideo: true,
+      target: .comment(postID: 203, commentID: 204),
+      mainPost: mainPost,
+      postInfo: postInfo
     )
     let filter = ContentFilterSnapshot(
       displayMode: .hidden,
       blockVideos: true,
       rules: [
-        .keyword("广告", list: .block),
-        .user(id: 9, name: "Blocked author", list: .block),
+        .user(id: 11, name: "", list: .block),
+        .user(id: 33, name: "", list: .block),
       ]
     )
 
-    let globalResult = TiebaCoreBrowseService.mapGlobalThreadSearchResult(
+    let forumResult = TiebaCoreBrowseService.mapForumPostSearchResult(
       result,
       applying: filter
     )
-    let forumResult = TiebaCoreBrowseService.mapForumPostSearchResult(result)
 
-    XCTAssertEqual(globalResult.localVisibility, .hidden)
     XCTAssertEqual(forumResult.thread.id, 201)
-    XCTAssertEqual(forumResult.thread.localVisibility, .visible)
+    XCTAssertEqual(forumResult.localVisibility, .hidden)
+    XCTAssertEqual(forumResult.thread.localVisibility, .hidden)
+    XCTAssertEqual(forumResult.context?.localVisibility, .hidden)
+    XCTAssertFalse(
+      forumResult.matchedContents.contains { content in
+        guard case .video = content else { return false }
+        return true
+      }
+    )
+  }
+
+  func testUserThreadPageFilteringPreservesRawOrderCountAndPagination() {
+    func thread(
+      id: Int64,
+      title: String,
+      kind: TiebaThreadKind = .article,
+      isHidden: Bool = false
+    ) -> TiebaThread {
+      TiebaThread(
+        id: id,
+        firstPostID: id + 1_000,
+        forumID: 7,
+        forumName: "swift",
+        title: title,
+        content: TiebaContent(fragments: [.text("ordinary contents")]),
+        author: nil,
+        kind: kind,
+        tabID: Int(id),
+        viewCount: Int(id + 1),
+        replyCount: Int(id + 2),
+        shareCount: Int(id + 3),
+        agreeCount: Int(id + 4),
+        disagreeCount: Int(id + 5),
+        createdAt: nil,
+        lastReplyAt: nil,
+        isPinned: false,
+        isFeatured: false,
+        isShared: false,
+        isHidden: isHidden,
+        isLive: false
+      )
+    }
+    let response = TiebaUserThreadPage(
+      userID: 91,
+      threads: [
+        thread(id: 101, title: "blocked title"),
+        thread(id: 102, title: "ordinary video", kind: .video, isHidden: true),
+        thread(id: 103, title: "ordinary article"),
+      ],
+      pagination: TiebaPagination(
+        pageSize: 3,
+        currentPage: 4,
+        totalPages: 8,
+        totalCount: 24,
+        hasMore: true,
+        hasPrevious: true
+      ),
+      isHidden: true
+    )
+    let filter = ContentFilterSnapshot(
+      displayMode: .placeholder,
+      blockVideos: true,
+      rules: [.keyword("blocked", list: .block)]
+    )
+
+    let mapped = TiebaCoreBrowseService.mapUserThreadPage(response, applying: filter)
+
+    XCTAssertEqual(mapped.threads.map(\.id), [101, 102, 103])
+    XCTAssertEqual(mapped.threads.count, response.threads.count)
+    XCTAssertEqual(
+      mapped.threads.map(\.localVisibility),
+      [.placeholder, .placeholder, .visible]
+    )
+    XCTAssertEqual(mapped.threads.map(\.firstPostID), [1_101, 1_102, 1_103])
+    XCTAssertEqual(mapped.currentPage, 4)
+    XCTAssertTrue(mapped.hasMore)
+    XCTAssertTrue(mapped.isHidden)
+    XCTAssertTrue(mapped.threads[1].isServerHidden)
+    XCTAssertFalse(
+      mapped.threads[1].contents.contains { content in
+        guard case .video = content else { return false }
+        return true
+      }
+    )
   }
 
   func testContentFilterSnapshotReadFailureFailsOpen() async {

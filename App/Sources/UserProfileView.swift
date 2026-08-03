@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import UIKit
 
@@ -78,6 +79,9 @@ struct UserProfileView: View {
     }
     .task { viewModel.loadIfNeeded() }
     .onDisappear(perform: viewModel.cancel)
+    .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
+      Task { @MainActor in viewModel.reloadThreadsAfterContentFilterChange() }
+    }
   }
 
   private var navigationTitle: String {
@@ -105,21 +109,46 @@ struct UserProfileView: View {
         } else if viewModel.threads.isEmpty {
           Label("暂无公开主题", systemImage: "text.bubble")
             .foregroundStyle(.secondary)
+        } else if !viewModel.hasDisplayableThreads {
+          Label("暂无可显示的公开主题", systemImage: "eye.slash")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
+            .padding(.vertical, 8)
+            .listRowSeparator(.hidden)
+            .accessibilityElement(children: .combine)
         } else {
-          ForEach(viewModel.threads) { thread in
-            NavigationLink {
-              ThreadView(
-                thread: thread,
-                service: service,
-                historyRepository: historyRepository,
-                favoritesRepository: favoritesRepository,
-                searchHistoryRepository: searchHistoryRepository
-              )
-            } label: {
-              UserActivityThreadRow(thread: thread)
+          ForEach(viewModel.displayableThreads) { thread in
+            LocallyFilteredContent(
+              visibility: thread.localVisibility,
+              placeholder: "已屏蔽此公开主题"
+            ) {
+              NavigationLink {
+                ThreadView(
+                  thread: thread,
+                  service: service,
+                  historyRepository: historyRepository,
+                  favoritesRepository: favoritesRepository,
+                  searchHistoryRepository: searchHistoryRepository
+                )
+              } label: {
+                UserActivityThreadRow(thread: thread)
+              }
             }
-            .onAppear { viewModel.loadMoreIfNeeded(current: thread) }
+            .frame(minHeight: 44)
           }
+        }
+
+        if !viewModel.isActivityHidden, let lastThread = viewModel.threads.last {
+          Color.clear
+            .frame(height: 1)
+            .id(
+              "user-profile-thread-pagination-\(lastThread.id)-\(viewModel.threads.count)-\(viewModel.threadPaginationEpoch)"
+            )
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .accessibilityHidden(true)
+            .onAppear { viewModel.loadMoreIfNeeded(current: lastThread) }
         }
 
         if viewModel.isLoadingMore {
@@ -141,6 +170,7 @@ struct UserProfileView: View {
         }
       }
     }
+    .environment(\.defaultMinListRowHeight, 1)
     .listStyle(.plain)
     .refreshable { await viewModel.refresh() }
   }

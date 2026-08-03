@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 private enum ForumSearchHistoryAction {
@@ -76,6 +77,9 @@ struct ForumPostSearchView: View {
     }
     .task { await viewModel.loadHistoryIfNeeded() }
     .onDisappear(perform: viewModel.cancel)
+    .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
+      Task { @MainActor in viewModel.reloadAfterContentFilterChange() }
+    }
     .alert("刷新失败", isPresented: refreshErrorIsPresented) {
       Button("好", role: .cancel) { viewModel.clearRefreshError() }
     } message: {
@@ -261,26 +265,54 @@ struct ForumPostSearchView: View {
   private var resultList: some View {
     List {
       Section("搜索结果") {
-        ForEach(viewModel.results) { result in
-          HStack(alignment: .top, spacing: 10) {
-            authorAvatar(for: result)
+        ForEach(viewModel.displayableResults) { result in
+          LocallyFilteredContent(
+            visibility: result.localVisibility,
+            placeholder: "已屏蔽此搜索结果"
+          ) {
+            HStack(alignment: .top, spacing: 10) {
+              authorAvatar(for: result)
 
-            NavigationLink {
-              destination(for: result)
-            } label: {
-              HStack(spacing: 8) {
-                ForumPostSearchResultRow(result: result)
-                  .frame(maxWidth: .infinity, alignment: .leading)
-                Image(systemName: "chevron.right")
-                  .font(.caption.weight(.semibold))
-                  .foregroundStyle(.tertiary)
-                  .accessibilityHidden(true)
+              NavigationLink {
+                destination(for: result)
+              } label: {
+                HStack(spacing: 8) {
+                  ForumPostSearchResultRow(result: result)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                  Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+                }
+                .contentShape(Rectangle())
               }
-              .contentShape(Rectangle())
+              .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
           }
-          .onAppear { viewModel.loadMoreIfNeeded(current: result) }
+          .frame(minHeight: 44)
+        }
+
+        if !viewModel.results.isEmpty && !viewModel.hasDisplayableResults {
+          Label("暂无可显示的搜索结果", systemImage: "eye.slash")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
+            .padding(.vertical, 8)
+            .listRowSeparator(.hidden)
+            .accessibilityElement(children: .combine)
+        }
+
+        if let rawTail = viewModel.results.last {
+          Color.clear
+            .frame(height: 1)
+            .id(
+              "forum-post-search-pagination-\(rawTail.id)-"
+                + "\(viewModel.results.count)-\(viewModel.resultPaginationEpoch)"
+            )
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .accessibilityHidden(true)
+            .onAppear { viewModel.loadMoreIfNeeded(current: rawTail) }
         }
 
         if viewModel.isLoadingMore {
@@ -296,6 +328,7 @@ struct ForumPostSearchView: View {
         }
       }
     }
+    .environment(\.defaultMinListRowHeight, 1)
     .listStyle(.plain)
     .refreshable { await viewModel.refresh() }
   }
@@ -427,28 +460,33 @@ private struct ForumPostSearchResultRow: View {
       ForumPostSearchMediaStrip(contents: result.matchedContents)
 
       if let context = result.context, result.target != .thread {
-        VStack(alignment: .leading, spacing: 4) {
-          Label(contextLabel, systemImage: "quote.opening")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-          let contextTitle = context.title.trimmingCharacters(in: .whitespacesAndNewlines)
-          let contextExcerpt = context.excerpt.trimmingCharacters(in: .whitespacesAndNewlines)
-          if !contextTitle.isEmpty {
-            Text(contextTitle)
-              .font(.subheadline.weight(.semibold))
-              .lineLimit(2)
-          }
-          if !contextExcerpt.isEmpty, contextExcerpt != contextTitle {
-            Text(contextExcerpt)
-              .font(.caption)
+        LocallyFilteredContent(
+          visibility: context.localVisibility,
+          placeholder: "已屏蔽相关上下文"
+        ) {
+          VStack(alignment: .leading, spacing: 4) {
+            Label(contextLabel, systemImage: "quote.opening")
+              .font(.caption.weight(.semibold))
               .foregroundStyle(.secondary)
-              .lineLimit(2)
+            let contextTitle = context.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let contextExcerpt = context.excerpt.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !contextTitle.isEmpty {
+              Text(contextTitle)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(2)
+            }
+            if !contextExcerpt.isEmpty, contextExcerpt != contextTitle {
+              Text(contextExcerpt)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            }
           }
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(8)
+          .background(Color(uiColor: .secondarySystemBackground))
+          .clipShape(RoundedRectangle(cornerRadius: 6))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(8)
-        .background(Color(uiColor: .secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
       }
 
       HStack(spacing: 14) {

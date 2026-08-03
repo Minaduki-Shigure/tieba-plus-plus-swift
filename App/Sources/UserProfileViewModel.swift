@@ -9,6 +9,7 @@ final class UserProfileViewModel: ObservableObject {
   @Published private(set) var isLoadingMore = false
   @Published private(set) var loadMoreError: String?
   @Published private(set) var isActivityHidden = false
+  @Published private(set) var threadPaginationEpoch = 0
 
   let userID: Int64
 
@@ -21,6 +22,14 @@ final class UserProfileViewModel: ObservableObject {
   init(userID: Int64, service: any UserProfileService) {
     self.userID = userID
     self.service = service
+  }
+
+  var displayableThreads: [BrowseThread] {
+    threads.filter { $0.localVisibility != .hidden }
+  }
+
+  var hasDisplayableThreads: Bool {
+    !displayableThreads.isEmpty
   }
 
   func loadIfNeeded() {
@@ -46,9 +55,14 @@ final class UserProfileViewModel: ObservableObject {
     await loadTask?.value
   }
 
+  func reloadThreadsAfterContentFilterChange() {
+    reload()
+  }
+
   func loadMoreIfNeeded(current thread: BrowseThread) {
     guard
       thread.id == threads.last?.id,
+      !isActivityHidden,
       hasMore,
       !isLoadingMore,
       loadMoreError == nil,
@@ -58,13 +72,23 @@ final class UserProfileViewModel: ObservableObject {
   }
 
   func retryLoadMore() {
-    guard loadMoreError != nil, hasMore, !isLoadingMore, state == .loaded else { return }
+    guard
+      !isActivityHidden,
+      loadMoreError != nil,
+      hasMore,
+      !isLoadingMore,
+      state == .loaded
+    else { return }
     loadThreads(page: currentPage + 1)
   }
 
   func cancel() {
+    let shouldRearmPagination = !threads.isEmpty && isLoadingMore
     invalidateCurrentLoad()
     isLoadingMore = false
+    if shouldRearmPagination {
+      threadPaginationEpoch &+= 1
+    }
     if state == .loading {
       state = profile == nil ? .idle : .loaded
     }
@@ -93,6 +117,7 @@ final class UserProfileViewModel: ObservableObject {
         hasMore = response.hasMore
         isActivityHidden = response.isHidden
         state = .loaded
+        threadPaginationEpoch &+= 1
       } catch is CancellationError {
         return
       } catch {

@@ -421,6 +421,7 @@ struct ForumPostSearchSummary: Hashable, Sendable {
   let authorID: Int64
   let authorName: String
   let authorUsername: String
+  let localVisibility: LocalContentVisibility
 
   init(
     postID: Int64,
@@ -428,7 +429,8 @@ struct ForumPostSearchSummary: Hashable, Sendable {
     excerpt: String,
     authorID: Int64,
     authorName: String,
-    authorUsername: String = ""
+    authorUsername: String = "",
+    localVisibility: LocalContentVisibility = .visible
   ) {
     self.postID = postID
     self.title = title
@@ -436,6 +438,19 @@ struct ForumPostSearchSummary: Hashable, Sendable {
     self.authorID = authorID
     self.authorName = authorName
     self.authorUsername = authorUsername
+    self.localVisibility = localVisibility
+  }
+
+  func withLocalVisibility(_ visibility: LocalContentVisibility) -> Self {
+    ForumPostSearchSummary(
+      postID: postID,
+      title: title,
+      excerpt: excerpt,
+      authorID: authorID,
+      authorName: authorName,
+      authorUsername: authorUsername,
+      localVisibility: visibility
+    )
   }
 }
 
@@ -456,6 +471,7 @@ struct ForumPostSearchItem: Identifiable, Hashable, Sendable {
   let shareCount: Int
   let matchedContents: [BrowseContent]
   let context: ForumPostSearchSummary?
+  let localVisibility: LocalContentVisibility
 
   init(
     thread: BrowseThread,
@@ -471,7 +487,8 @@ struct ForumPostSearchItem: Identifiable, Hashable, Sendable {
     shareCount: Int,
     matchedContents: [BrowseContent],
     context: ForumPostSearchSummary?,
-    matchedAuthorUsername: String = ""
+    matchedAuthorUsername: String = "",
+    localVisibility: LocalContentVisibility = .visible
   ) {
     self.thread = thread
     self.target = target
@@ -487,6 +504,31 @@ struct ForumPostSearchItem: Identifiable, Hashable, Sendable {
     self.shareCount = shareCount
     self.matchedContents = matchedContents
     self.context = context
+    self.localVisibility = localVisibility
+  }
+
+  func withLocalPresentation(
+    visibility: LocalContentVisibility,
+    thread: BrowseThread,
+    context: ForumPostSearchSummary?
+  ) -> Self {
+    ForumPostSearchItem(
+      thread: thread,
+      target: target,
+      matchedTitle: matchedTitle,
+      matchedExcerpt: matchedExcerpt,
+      matchedAuthorID: matchedAuthorID,
+      matchedAuthorName: matchedAuthorName,
+      matchedAuthorPortraitURL: matchedAuthorPortraitURL,
+      matchedAt: matchedAt,
+      replyCount: replyCount,
+      likeCount: likeCount,
+      shareCount: shareCount,
+      matchedContents: matchedContents,
+      context: context,
+      matchedAuthorUsername: matchedAuthorUsername,
+      localVisibility: visibility
+    )
   }
 }
 

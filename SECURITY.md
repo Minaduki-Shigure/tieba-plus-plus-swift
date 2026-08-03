@@ -256,15 +256,30 @@ anonymous content remains available without loading credentials; deletion is
 allowed only through the explicit reset action. Keyword matching is currently
 case-sensitive and literal. Regular-expression rules must remain unsupported
 until their runtime can be bounded or a non-backtracking engine is adopted.
-Global thread-search results apply that same fail-open snapshot only after the
-anonymous response has arrived. Filtering may annotate a result as visible,
-placeholder, or hidden, but must preserve every raw ID, order position, page,
-and pagination decision. A hidden final item or fully hidden page must still be
-able to trigger pagination through an inaccessible raw-tail sentinel; the app
-must not reveal the filtered row or repeatedly request a duplicate-only page.
-The public search media marker may be used only to enforce the local video
-switch and must not add a media request. Forum and user lookup plus per-forum
-post search remain outside this filtering boundary.
+Global thread-search, per-forum post-search, and public-profile thread responses
+apply that same fail-open snapshot only after the anonymous response has
+arrived. Filtering may annotate a result as visible, placeholder, or hidden,
+but must preserve every raw ID, order position, page, and pagination decision.
+A hidden final item or fully hidden page must still be able to trigger
+pagination through an inaccessible raw-tail sentinel; the app must not reveal
+the filtered row or repeatedly request a duplicate-only page. The public search
+media marker may be used only to enforce the local video switch and must not add
+a media request.
+
+Raw-tail pagination applies only to content hidden by local rules. When a
+public-profile response declares its activity hidden, that server privacy state
+takes precedence: the UI must not render returned activity or create a sentinel,
+and load-more plus retry paths must stop even if the response also contains raw
+threads or advertises another page.
+
+Per-forum search must evaluate the matched entity and its displayed topic or
+parent-floor context independently. A keyword or user allow match in one field
+or identity must not exempt a block match in the other entity, and filtering
+must not alter the post or comment target used for navigation. A blocked context
+may be replaced or omitted while a visible match remains navigable; a blocked
+match must suppress the entire row, including its context. Context payloads do
+not expose a video marker, so video blocking applies only to the matched entity.
+Forum and user lookup remain outside this filtering boundary.
 
 Remote media uses an ephemeral, credential-free session, rejects cleartext
 requests or redirect destinations, and is decoded through ImageIO with a

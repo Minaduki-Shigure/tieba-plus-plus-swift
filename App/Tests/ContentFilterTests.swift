@@ -272,6 +272,177 @@ final class ContentFilterTests: XCTestCase {
     )
   }
 
+  func testForumPostSearchModelsDefaultVisibleAndCopyLosslessly() {
+    let summary = ForumPostSearchSummary(
+      postID: 41,
+      title: "Context title",
+      excerpt: "Context excerpt",
+      authorID: 42,
+      authorName: "Context display name",
+      authorUsername: "context-account"
+    )
+    let item = forumPostSearchItem(
+      threadAuthorID: 11,
+      matchedAuthorID: 22,
+      context: summary,
+      matchedContents: [.text("Matched body")]
+    )
+
+    XCTAssertEqual(summary.localVisibility, .visible)
+    XCTAssertEqual(item.localVisibility, .visible)
+
+    let annotatedSummary = summary.withLocalVisibility(.hidden)
+    XCTAssertEqual(annotatedSummary.localVisibility, .hidden)
+    XCTAssertEqual(annotatedSummary.withLocalVisibility(.visible), summary)
+
+    let annotatedItem = item.withLocalPresentation(
+      visibility: .placeholder,
+      thread: item.thread.withLocalVisibility(.hidden),
+      context: annotatedSummary
+    )
+    XCTAssertEqual(annotatedItem.localVisibility, .placeholder)
+    XCTAssertEqual(annotatedItem.thread.localVisibility, .hidden)
+    XCTAssertEqual(annotatedItem.context?.localVisibility, .hidden)
+    XCTAssertEqual(
+      annotatedItem.withLocalPresentation(
+        visibility: item.localVisibility,
+        thread: item.thread,
+        context: item.context
+      ),
+      item
+    )
+  }
+
+  func testForumPostSearchAuthorsAreFilteredIndependently() {
+    let item = forumPostSearchItem(
+      threadAuthorID: 11,
+      matchedAuthorID: 22,
+      context: ForumPostSearchSummary(
+        postID: 31,
+        title: "ordinary context",
+        excerpt: "ordinary context excerpt",
+        authorID: 33,
+        authorName: "Context author"
+      )
+    )
+    let cases: [(Int64, LocalContentVisibility, LocalContentVisibility, LocalContentVisibility)] = [
+      (11, .visible, .placeholder, .visible),
+      (22, .placeholder, .visible, .visible),
+      (33, .visible, .visible, .placeholder),
+    ]
+
+    for (blockedID, expectedItem, expectedThread, expectedContext) in cases {
+      let snapshot = ContentFilterSnapshot(
+        displayMode: .placeholder,
+        blockVideos: false,
+        rules: [.user(id: blockedID, name: "", list: .block)]
+      )
+      let filtered = snapshot.applying(to: item)
+
+      XCTAssertEqual(filtered.localVisibility, expectedItem, "blocked ID: \(blockedID)")
+      XCTAssertEqual(
+        filtered.thread.localVisibility,
+        expectedThread,
+        "blocked ID: \(blockedID)"
+      )
+      XCTAssertEqual(
+        filtered.context?.localVisibility,
+        expectedContext,
+        "blocked ID: \(blockedID)"
+      )
+    }
+  }
+
+  func testForumPostSearchKeywordAllowListIsScopedToEachFieldAndLayer() {
+    let snapshot = ContentFilterSnapshot(
+      displayMode: .placeholder,
+      blockVideos: false,
+      rules: [
+        .keyword("广告", list: .block),
+        .keyword("可信广告", list: .allow),
+      ]
+    )
+    let blockedExcerpt = forumPostSearchItem(
+      matchedTitle: "可信广告",
+      matchedExcerpt: "这里仍有广告"
+    )
+    let blockedContext = forumPostSearchItem(
+      matchedTitle: "可信广告",
+      matchedExcerpt: "ordinary match",
+      context: ForumPostSearchSummary(
+        postID: 31,
+        title: "可信广告",
+        excerpt: "上下文仍有广告",
+        authorID: 33,
+        authorName: "Context author"
+      )
+    )
+    let allowedContents = forumPostSearchItem(
+      matchedTitle: "ordinary match",
+      matchedExcerpt: "ordinary match excerpt",
+      matchedContents: [.text("可信广告中含有广告")]
+    )
+
+    XCTAssertEqual(snapshot.applying(to: blockedExcerpt).localVisibility, .placeholder)
+
+    let contextFiltered = snapshot.applying(to: blockedContext)
+    XCTAssertEqual(contextFiltered.localVisibility, .visible)
+    XCTAssertEqual(contextFiltered.thread.localVisibility, .visible)
+    XCTAssertEqual(contextFiltered.context?.localVisibility, .placeholder)
+
+    XCTAssertEqual(snapshot.applying(to: allowedContents).localVisibility, .visible)
+  }
+
+  func testForumPostSearchContextCanHideWithoutHidingMainResult() {
+    let item = forumPostSearchItem(
+      context: ForumPostSearchSummary(
+        postID: 31,
+        title: "ordinary context",
+        excerpt: "ordinary context excerpt",
+        authorID: 33,
+        authorName: "Blocked context"
+      )
+    )
+    let snapshot = ContentFilterSnapshot(
+      displayMode: .hidden,
+      blockVideos: false,
+      rules: [.user(id: 33, name: "", list: .block)]
+    )
+
+    let filtered = snapshot.applying(to: item)
+
+    XCTAssertEqual(filtered.localVisibility, .visible)
+    XCTAssertEqual(filtered.thread.localVisibility, .visible)
+    XCTAssertEqual(filtered.context?.localVisibility, .hidden)
+  }
+
+  func testForumPostSearchKnownVideoOnlyAnnotatesMainResultWithoutSynthesizingMedia() {
+    let item = forumPostSearchItem(matchedContents: [])
+    let snapshot = ContentFilterSnapshot(
+      displayMode: .placeholder,
+      blockVideos: true,
+      rules: []
+    )
+
+    let filtered = snapshot.applying(to: item, hasKnownVideo: true)
+
+    XCTAssertEqual(filtered.localVisibility, .placeholder)
+    XCTAssertEqual(filtered.thread.localVisibility, .visible)
+    XCTAssertEqual(filtered.context?.localVisibility, .visible)
+    XCTAssertEqual(filtered.matchedContents, item.matchedContents)
+    XCTAssertFalse(
+      filtered.matchedContents.contains { content in
+        guard case .video = content else { return false }
+        return true
+      }
+    )
+
+    let explicitVideo = forumPostSearchItem(
+      matchedContents: [.video(url: nil, cover: nil, width: 0, height: 0)]
+    )
+    XCTAssertEqual(snapshot.applying(to: explicitVideo).localVisibility, .placeholder)
+  }
+
   func testFileStoreNormalizesPersistsAndRejectsDuplicates() async throws {
     let fileURL = temporaryFileURL()
     defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
@@ -416,6 +587,63 @@ final class ContentFilterTests: XCTestCase {
       contents: [],
       authorID: authorID,
       authorUsername: authorUsername
+    )
+  }
+
+  private func forumPostSearchItem(
+    threadAuthorID: Int64 = 11,
+    matchedAuthorID: Int64 = 22,
+    matchedTitle: String = "ordinary match",
+    matchedExcerpt: String = "ordinary match excerpt",
+    context: ForumPostSearchSummary? = ForumPostSearchSummary(
+      postID: 31,
+      title: "ordinary context",
+      excerpt: "ordinary context excerpt",
+      authorID: 33,
+      authorName: "Context author"
+    ),
+    matchedContents: [BrowseContent] = []
+  ) -> ForumPostSearchItem {
+    ForumPostSearchItem(
+      thread: BrowseThread(
+        id: 1,
+        forumID: 2,
+        forumName: "swift",
+        title: "ordinary thread",
+        excerpt: "ordinary thread excerpt",
+        authorName: "Thread author",
+        replyCount: 3,
+        viewCount: 4,
+        createdAt: Date(timeIntervalSince1970: 100),
+        lastReplyAt: Date(timeIntervalSince1970: 200),
+        contents: [.text("ordinary thread contents")],
+        authorID: threadAuthorID,
+        authorUsername: "thread-account",
+        firstPostID: 10,
+        shareCount: 5,
+        agreeCount: 6,
+        disagreeCount: 1,
+        kind: .article,
+        tabID: 7,
+        isPinned: true,
+        isFeatured: true,
+        isShared: true,
+        isServerHidden: true,
+        isLive: true
+      ),
+      target: .comment(postID: 31, commentID: 32),
+      matchedTitle: matchedTitle,
+      matchedExcerpt: matchedExcerpt,
+      matchedAuthorID: matchedAuthorID,
+      matchedAuthorName: "Matched author",
+      matchedAuthorPortraitURL: URL(string: "https://example.com/matched.png"),
+      matchedAt: Date(timeIntervalSince1970: 300),
+      replyCount: 8,
+      likeCount: 9,
+      shareCount: 10,
+      matchedContents: matchedContents,
+      context: context,
+      matchedAuthorUsername: "matched-account"
     )
   }
 

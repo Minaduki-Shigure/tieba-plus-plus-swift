@@ -117,11 +117,11 @@ but authenticated write operations remain intentionally unsupported.
   fields and does not add a network request.
 - Local filtering supports case-sensitive literal keywords, exact UID/name
   block and allow lists, placeholder or hidden presentation, and independent
-  video-topic blocking. It covers forum/channel, hot-thread, and global
-  thread-search lists, floors, nested replies, and shared origins without
-  changing raw pagination. Per-forum search and public-profile activity are not
-  yet filtered, while public profiles can add a user directly to either user
-  list.
+  video-topic blocking. It covers forum/channel, hot-thread, global and
+  per-forum search lists, public-profile activity, floors, nested replies, and
+  shared origins without changing raw pagination. Per-forum search filters the
+  matched result and its displayed context independently, while public profiles
+  can add a user directly to either user list.
 
 ### Accounts and current limits
 

@@ -553,6 +553,36 @@ extension ContentFilterSnapshot {
     )
   }
 
+  func visibility(
+    for result: ForumPostSearchItem,
+    hasKnownVideo: Bool = false
+  ) -> LocalContentVisibility {
+    let containsVideo = hasKnownVideo || result.matchedContents.contains(where: Self.isVideo)
+    return visibility(
+      isBlocked: (blockVideos && containsVideo)
+        || blocksKeyword(result.matchedTitle)
+        || blocksKeyword(result.matchedExcerpt)
+        || blocksKeyword(Self.plainText(result.matchedContents))
+        || blocksUser(
+          id: result.matchedAuthorID,
+          preferredName: result.matchedAuthorName,
+          username: result.matchedAuthorUsername
+        )
+    )
+  }
+
+  func visibility(for summary: ForumPostSearchSummary) -> LocalContentVisibility {
+    visibility(
+      isBlocked: blocksKeyword(summary.title)
+        || blocksKeyword(summary.excerpt)
+        || blocksUser(
+          id: summary.authorID,
+          preferredName: summary.authorName,
+          username: summary.authorUsername
+        )
+    )
+  }
+
   func applying(
     to thread: BrowseThread,
     hasKnownVideo: Bool = false
@@ -575,6 +605,19 @@ extension ContentFilterSnapshot {
 
   func applying(to parentPost: CommentParentPostContext) -> CommentParentPostContext {
     parentPost.withLocalVisibility(visibility(for: parentPost))
+  }
+
+  func applying(
+    to result: ForumPostSearchItem,
+    hasKnownVideo: Bool = false
+  ) -> ForumPostSearchItem {
+    result.withLocalPresentation(
+      visibility: visibility(for: result, hasKnownVideo: hasKnownVideo),
+      thread: applying(to: result.thread),
+      context: result.context.map {
+        $0.withLocalVisibility(visibility(for: $0))
+      }
+    )
   }
 
   private func visibility(isBlocked: Bool) -> LocalContentVisibility {
