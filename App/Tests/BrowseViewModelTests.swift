@@ -5,6 +5,64 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class BrowseViewModelTests: XCTestCase {
+  func testUserProfileMappingKeepsRegularAndStrictPortraitSourcesSeparate() throws {
+    func response(portraitSource: String) -> TiebaUserProfile {
+      let user = TiebaUser(
+        id: 7,
+        username: "profile-user",
+        displayName: "Profile User",
+        portrait: "profile-portrait",
+        level: 0,
+        growthLevel: 0,
+        gender: .unknown,
+        ipLocation: "",
+        badges: [],
+        isModerator: false,
+        isVIP: false,
+        isVerifiedCreator: false
+      )
+      return TiebaUserProfile(
+        user: user,
+        tiebaUID: nil,
+        biography: "",
+        tiebaAge: "",
+        threadCount: 0,
+        postCount: 0,
+        followerCount: 0,
+        followingCount: 0,
+        followedForumCount: 0,
+        totalAgreeCount: 0,
+        isBlocked: false,
+        portraitSource: portraitSource
+      )
+    }
+
+    let cacheBusted = TiebaCoreBrowseService.mapUserProfile(
+      response(portraitSource: "profile-portrait?t=1234567890")
+    )
+    let plain = TiebaCoreBrowseService.mapUserProfile(
+      response(portraitSource: "plain-token")
+    )
+    let untrustedQuery = TiebaCoreBrowseService.mapUserProfile(
+      response(portraitSource: "profile-portrait?x=y")
+    )
+
+    XCTAssertEqual(
+      cacheBusted.portraitURL?.absoluteString,
+      "https://himg.bdimg.com/sys/portraitn/item/profile-portrait"
+    )
+    XCTAssertEqual(
+      cacheBusted.largePortraitURL?.absoluteString,
+      "https://himg.bdimg.com/sys/portraith/item/profile-portrait"
+    )
+    XCTAssertEqual(
+      plain.largePortraitURL?.absoluteString,
+      "https://himg.bdimg.com/sys/portraith/item/plain-token"
+    )
+    XCTAssertNotNil(untrustedQuery.portraitURL)
+    XCTAssertNil(untrustedQuery.largePortraitURL)
+  }
+
   func testForumChannelMappingPreservesServerSortMenuAndUnknownRawValue() {
     let mapped = TiebaCoreBrowseService.mapForumChannel(
       TiebaForumChannel(

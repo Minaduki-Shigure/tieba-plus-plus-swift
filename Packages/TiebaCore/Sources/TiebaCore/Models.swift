@@ -97,6 +97,7 @@ public struct TiebaUser: Identifiable, Sendable, Hashable {
 
 public struct TiebaUserProfile: Sendable, Hashable {
   public let user: TiebaUser
+  public let portraitSource: String
   public let tiebaUID: Int64?
   public let biography: String
   public let tiebaAge: String
@@ -121,9 +122,11 @@ public struct TiebaUserProfile: Sendable, Hashable {
     followedForumCount: Int,
     likedForums: [TiebaProfileForum] = [],
     totalAgreeCount: Int64,
-    isBlocked: Bool
+    isBlocked: Bool,
+    portraitSource: String? = nil
   ) {
     self.user = user
+    self.portraitSource = portraitSource ?? user.portrait
     self.tiebaUID = tiebaUID
     self.biography = biography
     self.tiebaAge = tiebaAge

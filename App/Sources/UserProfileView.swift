@@ -2,6 +2,27 @@ import Combine
 import SwiftUI
 import UIKit
 
+struct UserProfilePortraitPresentation: Identifiable, Equatable, Sendable {
+  let sourceURL: URL
+
+  var id: URL { sourceURL }
+
+  init?(
+    largePortraitURL: URL?,
+    fallbackPortraitURL: URL?
+  ) {
+    guard let sourceURL = largePortraitURL ?? fallbackPortraitURL else { return nil }
+    self.sourceURL = sourceURL
+  }
+
+  init?(profile: BrowseUserProfile) {
+    self.init(
+      largePortraitURL: profile.largePortraitURL,
+      fallbackPortraitURL: profile.portraitURL
+    )
+  }
+}
+
 struct UserProfileView: View {
   @Environment(\.contentFilterRepository) private var contentFilterRepository
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
@@ -13,6 +34,7 @@ struct UserProfileView: View {
 
   @StateObject private var viewModel: UserProfileViewModel
   @State private var contentFilterMessage: String?
+  @State private var portraitPresentation: UserProfilePortraitPresentation?
 
   init(
     userID: Int64,
@@ -77,6 +99,9 @@ struct UserProfileView: View {
     } message: {
       Text(contentFilterMessage ?? "")
     }
+    .fullScreenCover(item: $portraitPresentation) { presentation in
+      ImageViewer(url: presentation.sourceURL)
+    }
     .task { viewModel.loadIfNeeded() }
     .onDisappear(perform: viewModel.cancel)
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
@@ -96,7 +121,9 @@ struct UserProfileView: View {
   private var profileList: some View {
     List {
       if let profile = viewModel.profile {
-        UserProfileHeader(profile: profile)
+        UserProfileHeader(profile: profile) {
+          portraitPresentation = UserProfilePortraitPresentation(profile: profile)
+        }
           .listRowSeparator(.hidden)
 
         likedForumPreview(profile)
@@ -234,6 +261,7 @@ struct UserProfileView: View {
 
 private struct UserProfileHeader: View {
   let profile: BrowseUserProfile
+  let onOpenPortrait: () -> Void
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
 
   private var displayedName: String {
@@ -254,7 +282,7 @@ private struct UserProfileHeader: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack(alignment: .center, spacing: 14) {
-        AvatarView(url: profile.portraitURL, name: displayedName, size: 82)
+        profileAvatar
         VStack(alignment: .leading, spacing: 5) {
           HStack(spacing: 6) {
             Text(displayedName)
@@ -359,6 +387,20 @@ private struct UserProfileHeader: View {
     }
     if let tiebaUID = profile.tiebaUID {
       Text("主页 UID \(tiebaUID)")
+    }
+  }
+
+  @ViewBuilder
+  private var profileAvatar: some View {
+    if profile.largePortraitURL != nil || profile.portraitURL != nil {
+      Button(action: onOpenPortrait) {
+        AvatarView(url: profile.portraitURL, name: displayedName, size: 82)
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("查看\(displayedName)的头像")
+      .help("查看头像")
+    } else {
+      AvatarView(url: nil, name: displayedName, size: 82)
     }
   }
 

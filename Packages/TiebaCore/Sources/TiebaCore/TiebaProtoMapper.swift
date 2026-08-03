@@ -358,7 +358,8 @@ enum TiebaProtoMapper {
       followedForumCount: Int(data.user.myLikeNum),
       likedForums: profileForums(data.user.likeForum),
       totalAgreeCount: max(responseAgreeCount, userAgreeCount),
-      isBlocked: anti.blockStat != 0 && anti.hideStat != 0 && anti.daysTofree > 30
+      isBlocked: anti.blockStat != 0 && anti.hideStat != 0 && anti.daysTofree > 30,
+      portraitSource: data.user.portrait
     )
   }
 

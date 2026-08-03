@@ -381,6 +381,27 @@ already authorized request keeps that authorization until it finishes. A
 deduplicated transfer may continue only when another active, independently
 authorized waiter still owns it.
 
+High-resolution profile-avatar derivation is a source-construction boundary,
+not a remote-media redirect-host allowlist. The untrimmed raw source is limited
+to 4,096 UTF-8 bytes. After surrounding whitespace is removed, a bare source
+must be a 1-through-512 byte ASCII token from `[A-Za-z0-9._~-]` other than `.`
+or `..`. A URL-shaped source may use only HTTP, HTTPS, or protocol-relative
+syntax; the exact `tb.himg.baidu.com` or `himg.bdimg.com` host; no credentials,
+explicit port, or fragment; one of the `/sys/portrait/item/`,
+`/sys/portraitn/item/`, or `/sys/portraith/item/` prefixes; and one token path
+segment that remains valid after exactly one percent-decoding pass. Either form
+may omit a query or carry exactly one cache-buster consisting of `t=` followed
+by 1 through 20 ASCII digits. The app strips that query and rebuilds every
+accepted source as `https://himg.bdimg.com/sys/portraith/item/<token>`. Encoded
+separators, double encoding, malformed percent sequences, other or repeated
+queries, unrelated HTTPS media hosts, and all other structures are rejected.
+Rejection falls back only to the separately normalized regular portrait. It
+does not change the credential-free media transport or broaden/narrow that
+transport's existing HTTPS redirect checks. The separately derived large source
+is not placed in a remote-image view until the user presses the profile avatar;
+sharing and saving remain further explicit actions using the same bounded
+original-file exporter.
+
 Thread-list previews reuse that same media pipeline. Metadata badges and
 read-only counters come only from existing anonymous responses; rendering a
 card must not introduce a personalized request, autoplay video, or broaden the

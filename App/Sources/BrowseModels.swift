@@ -266,6 +266,7 @@ struct BrowseUserProfile: Identifiable, Sendable, Hashable {
   let username: String
   let displayName: String
   let portraitURL: URL?
+  let largePortraitURL: URL?
   let growthLevel: Int
   let gender: BrowseGender
   let ipLocation: String

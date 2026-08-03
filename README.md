@@ -42,7 +42,9 @@ corresponding surface or control.
 - **Public profiles:** Credential-free public profiles are available from
   topic threads, search results, moderator lists, posts, nested replies, and
   user mentions. They include public statistics, a bounded liked-forum preview,
-  and paginated public threads.
+  and paginated public threads. An explicit avatar tap opens the best available
+  portrait source in the existing image viewer, where it can be shared or
+  saved; a derived larger portrait is not requested before that tap.
 
 ### Forums and threads
 

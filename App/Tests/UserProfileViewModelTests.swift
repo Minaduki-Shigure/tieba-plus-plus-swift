@@ -534,6 +534,7 @@ extension BrowseUserProfile {
     username: "fixture-user",
     displayName: "测试用户",
     portraitURL: nil,
+    largePortraitURL: nil,
     growthLevel: 8,
     gender: .female,
     ipLocation: "上海",

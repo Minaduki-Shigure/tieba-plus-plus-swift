@@ -356,12 +356,17 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     } catch {
       throw Self.browseError(error)
     }
-    return BrowseUserProfile(
+    return Self.mapUserProfile(response)
+  }
+
+  static func mapUserProfile(_ response: TiebaUserProfile) -> BrowseUserProfile {
+    BrowseUserProfile(
       id: response.user.id,
       tiebaUID: response.tiebaUID,
       username: response.user.username,
       displayName: response.user.displayName,
       portraitURL: SecureTiebaURL.portrait(response.user.portrait),
+      largePortraitURL: SecureTiebaURL.largePortrait(response.portraitSource),
       growthLevel: response.user.growthLevel,
       gender: Self.mapGender(response.user.gender),
       ipLocation: response.user.ipLocation,
@@ -1252,6 +1257,102 @@ enum SecureTiebaURL {
     components.host = "himg.bdimg.com"
     components.path = "/sys/portraitn/item/\(portrait)"
     return components.url
+  }
+
+  static func largePortrait(_ rawValue: String?) -> URL? {
+    guard let rawValue else { return nil }
+    guard rawValue.utf8.count <= 4_096 else { return nil }
+    let portrait = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !portrait.isEmpty else { return nil }
+
+    let token: String
+    if portrait.hasPrefix("//") || portrait.contains("://") {
+      guard let parsedToken = strictPortraitToken(from: portrait) else { return nil }
+      token = parsedToken
+    } else {
+      guard let parsedToken = strictBarePortraitToken(from: portrait) else { return nil }
+      token = parsedToken
+    }
+
+    var components = URLComponents()
+    components.scheme = "https"
+    components.host = "himg.bdimg.com"
+    components.path = "/sys/portraith/item/\(token)"
+    return components.url
+  }
+
+  private static func strictPortraitToken(from rawValue: String) -> String? {
+    let absoluteValue = rawValue.hasPrefix("//") ? "https:\(rawValue)" : rawValue
+    guard
+      let components = URLComponents(string: absoluteValue),
+      let scheme = components.scheme?.lowercased(),
+      scheme == "http" || scheme == "https",
+      components.user == nil,
+      components.password == nil,
+      components.port == nil,
+      isAllowedPortraitCacheBuster(components.percentEncodedQuery),
+      components.percentEncodedFragment == nil,
+      let host = components.host?.lowercased(),
+      host == "tb.himg.baidu.com" || host == "himg.bdimg.com",
+      strictPortraitAuthority(from: absoluteValue)?.lowercased() == host
+    else { return nil }
+
+    let prefixes = [
+      "/sys/portrait/item/",
+      "/sys/portraitn/item/",
+      "/sys/portraith/item/",
+    ]
+    let encodedPath = components.percentEncodedPath
+    guard let prefix = prefixes.first(where: { encodedPath.hasPrefix($0) }) else { return nil }
+    let encodedToken = String(encodedPath.dropFirst(prefix.count))
+    guard
+      !encodedToken.isEmpty,
+      let token = encodedToken.removingPercentEncoding,
+      isStrictPortraitToken(token)
+    else { return nil }
+    return token
+  }
+
+  private static func strictBarePortraitToken(from source: String) -> String? {
+    guard !source.contains("#") else { return nil }
+    let parts = source.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+    guard
+      parts.count == 1 || (parts.count == 2 && isAllowedPortraitCacheBuster(String(parts[1]))),
+      let tokenPart = parts.first
+    else { return nil }
+    let token = String(tokenPart)
+    return isStrictPortraitToken(token) ? token : nil
+  }
+
+  private static func isAllowedPortraitCacheBuster(_ query: String?) -> Bool {
+    guard let query else { return true }
+    guard query.hasPrefix("t=") else { return false }
+    let digits = query.utf8.dropFirst(2)
+    return (1...20).contains(digits.count)
+      && digits.allSatisfy { (48...57).contains($0) }
+  }
+
+  private static func strictPortraitAuthority(from absoluteValue: String) -> Substring? {
+    // The raw authority also exposes empty ports and encoded hosts that URLComponents normalizes.
+    guard let separator = absoluteValue.range(of: "://") else { return nil }
+    let remainder = absoluteValue[separator.upperBound...]
+    let authorityEnd = remainder.firstIndex { character in
+      character == "/" || character == "?" || character == "#"
+    } ?? remainder.endIndex
+    return remainder[..<authorityEnd]
+  }
+
+  private static func isStrictPortraitToken(_ token: String) -> Bool {
+    guard
+      !token.isEmpty,
+      token.utf8.count <= 512,
+      token != ".",
+      token != ".."
+    else { return false }
+    let allowedCharacters = CharacterSet(
+      charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~-"
+    )
+    return token.unicodeScalars.allSatisfy { allowedCharacters.contains($0) }
   }
 
   static func media(_ url: URL?) -> URL? {

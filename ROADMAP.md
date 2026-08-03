@@ -62,6 +62,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Read-only scores, author forum levels, bounded moderator roles, and IP locations
 - Lossless nested-reply context and public-profile links for user mentions
 - Public user profiles opened from post and nested-reply authors
+- Explicit profile-avatar viewing, sharing, and Photos saving
 - Limited public liked-forum previews with direct forum navigation
 - Paginated public threads on user profiles
 - Default-off combined public nickname and username presentation
@@ -159,6 +160,20 @@ The profile response may include a small public liked-forum preview. It is
 presented as a preview alongside the server's declared total, never as a full
 list, and an empty preview remains a valid privacy state. The authenticated
 full-list endpoint is not called from a public profile.
+
+The profile header keeps its existing bounded portrait preview and creates a
+large-portrait presentation only after an explicit avatar tap. A bare portrait
+token can derive the HTTPS `/sys/portraith/item/` resource; URL-shaped inputs
+must use one of the exact legacy or current portrait hosts, one of the three
+known portrait paths, and one bounded single-segment token. The raw source is
+limited to 4,096 UTF-8 bytes before surrounding whitespace is removed. Its only
+accepted query is the observed cache-buster `t=` followed by 1 through 20 ASCII
+digits; it is stripped from the canonical result. Credentials, explicit ports,
+other or repeated queries, fragments, encoded separators, and unrelated media
+hosts cannot seed that derivation. If no strict large source exists, the viewer
+uses the already normalized regular portrait; if neither exists, the
+placeholder is noninteractive. Viewing, sharing, and Photos saving then reuse
+the existing credential-free image viewer and validated original-file exporter.
 
 A default-off local preference combines a returned public nickname and username
 as `nickname(username)` across thread cards, floors, nested replies, search,

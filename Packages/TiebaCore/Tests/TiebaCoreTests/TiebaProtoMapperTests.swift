@@ -165,6 +165,8 @@ final class TiebaProtoMapperTests: XCTestCase {
 
     let profile = try XCTUnwrap(TiebaProtoMapper.userProfile(fixture))
 
+    XCTAssertEqual(profile.user.portrait, "profile-portrait")
+    XCTAssertEqual(profile.portraitSource, "profile-portrait?t=1234567890")
     XCTAssertEqual(profile.followedForumCount, 1)
     XCTAssertEqual(
       profile.likedForums,

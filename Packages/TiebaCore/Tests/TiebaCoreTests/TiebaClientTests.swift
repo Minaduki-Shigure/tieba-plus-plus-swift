@@ -386,6 +386,7 @@ final class TiebaClientTests: XCTestCase {
     XCTAssertEqual(profile.user.id, 957_339_815)
     XCTAssertEqual(profile.user.preferredName, "Profile User")
     XCTAssertEqual(profile.user.portrait, "profile-portrait")
+    XCTAssertEqual(profile.portraitSource, "profile-portrait?t=1234567890")
     XCTAssertEqual(profile.user.growthLevel, 12)
     XCTAssertEqual(profile.user.gender, .female)
     XCTAssertEqual(profile.tiebaUID, 123_456_789)
