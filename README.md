@@ -101,9 +101,12 @@ but authenticated write operations remain intentionally unsupported.
   together with active sort and filter options. Hot order deliberately reopens
   at its first page because its ranking changes over time.
 - Forums and threads have an independent local favorites archive. Saved threads
-  retain reading position and browse mode, while saved forums appear as home
-  shortcuts and can be pinned above other favorites. An explicit context menu
-  can pin or unpin a forum, copy its canonical name, or remove it locally.
+  retain reading position and browse mode. Two default-off controls are evaluated
+  when a thread is opened from local favorites and can force only-author or
+  descending mode. That effective mode participates in the existing favorite
+  and history persistence, so later openings can resume it. Saved forums appear
+  as home shortcuts and can be pinned above other favorites. An explicit context
+  menu can pin or unpin a forum, copy its canonical name, or remove it locally.
   Favorites and browsing history can be cleared independently.
 - The home screen projects up to 100 recently visited forums from browsing
   history. The section starts expanded and can be persistently hidden without

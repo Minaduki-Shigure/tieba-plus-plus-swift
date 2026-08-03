@@ -89,6 +89,97 @@ final class AppPreferencesTests: XCTestCase {
     XCTAssertFalse(EnvironmentValues().showsBothUsernameAndNickname)
   }
 
+  func testFavoriteThreadOpenOverridesUseStableKeysAndDefaultOff() {
+    XCTAssertEqual(
+      AppPreferenceKey.favoriteThreadsOpenOnlyAuthor,
+      "TiebaPlusPlus.favoriteThreadsOpenOnlyAuthor"
+    )
+    XCTAssertEqual(
+      AppPreferenceKey.favoriteThreadsOpenDescending,
+      "TiebaPlusPlus.favoriteThreadsOpenDescending"
+    )
+    XCTAssertFalse(AppPreferenceDefaults.favoriteThreadsOpenOnlyAuthor)
+    XCTAssertFalse(AppPreferenceDefaults.favoriteThreadsOpenDescending)
+    XCTAssertEqual(
+      FavoriteThreadOpenOverrides(),
+      FavoriteThreadOpenOverrides(onlyThreadAuthor: false, descending: false)
+    )
+  }
+
+  func testFavoriteThreadOpenOverridesApplyAllForceOnCombinations() {
+    let original = ThreadBrowseOptions(sort: .hot, onlyThreadAuthor: false)
+    let combinations: [(Bool, Bool, ThreadPostSort, Bool)] = [
+      (false, false, .hot, false),
+      (true, false, .hot, true),
+      (false, true, .descending, false),
+      (true, true, .descending, true),
+    ]
+
+    for (onlyThreadAuthor, descending, expectedSort, expectedOnlyThreadAuthor) in combinations {
+      let result = FavoriteThreadOpenOverrides(
+        onlyThreadAuthor: onlyThreadAuthor,
+        descending: descending
+      ).applying(to: original)
+
+      XCTAssertEqual(result.sort, expectedSort)
+      XCTAssertEqual(result.onlyThreadAuthor, expectedOnlyThreadAuthor)
+    }
+  }
+
+  func testDisabledFavoriteThreadOverridesPreserveExistingOptions() {
+    let original = ThreadBrowseOptions(sort: .ascending, onlyThreadAuthor: true)
+
+    XCTAssertEqual(FavoriteThreadOpenOverrides().applying(to: original), original)
+  }
+
+  func testFavoriteThreadOverridesPreserveCompleteHistorySnapshot() throws {
+    let snapshot = ThreadHistorySnapshot(
+      threadID: 42,
+      forumID: 7,
+      forumName: "Swift",
+      title: "A saved thread",
+      excerpt: "Full snapshot excerpt",
+      authorName: "Display name",
+      authorUsername: "account_name",
+      replyCount: 12,
+      viewCount: 34,
+      createdAt: Date(timeIntervalSince1970: 100),
+      lastReplyAt: Date(timeIntervalSince1970: 200),
+      authorAvatarURL: try XCTUnwrap(
+        URL(string: "https://himg.bdimg.com/sys/portrait/item/test.jpg")
+      ),
+      browseOptions: ThreadBrowseOptions(sort: .hot, onlyThreadAuthor: false),
+      lastPostID: 99,
+      lastFloor: 8
+    )
+
+    XCTAssertEqual(FavoriteThreadOpenOverrides().applying(to: snapshot), snapshot)
+
+    let result = FavoriteThreadOpenOverrides(
+      onlyThreadAuthor: true,
+      descending: true
+    ).applying(to: snapshot)
+
+    XCTAssertEqual(result.threadID, snapshot.threadID)
+    XCTAssertEqual(result.forumID, snapshot.forumID)
+    XCTAssertEqual(result.forumName, snapshot.forumName)
+    XCTAssertEqual(result.title, snapshot.title)
+    XCTAssertEqual(result.excerpt, snapshot.excerpt)
+    XCTAssertEqual(result.authorName, snapshot.authorName)
+    XCTAssertEqual(result.authorUsername, snapshot.authorUsername)
+    XCTAssertEqual(result.replyCount, snapshot.replyCount)
+    XCTAssertEqual(result.viewCount, snapshot.viewCount)
+    XCTAssertEqual(result.createdAt, snapshot.createdAt)
+    XCTAssertEqual(result.lastReplyAt, snapshot.lastReplyAt)
+    XCTAssertEqual(result.authorAvatarURL, snapshot.authorAvatarURL)
+    XCTAssertEqual(result.lastPostID, snapshot.lastPostID)
+    XCTAssertEqual(result.lastFloor, snapshot.lastFloor)
+    XCTAssertEqual(
+      result.browseOptions,
+      ThreadBrowseOptions(sort: .descending, onlyThreadAuthor: true)
+    )
+  }
+
   func testForumSortUsesPerForumOverrideBeforeGlobalDefault() throws {
     let suiteName = "AppPreferencesTests.\(UUID().uuidString)"
     let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

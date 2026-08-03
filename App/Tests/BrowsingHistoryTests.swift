@@ -341,6 +341,42 @@ final class BrowsingHistoryTests: XCTestCase {
     XCTAssertEqual(entry.lastVisitedAt, Date(timeIntervalSince1970: 30))
   }
 
+  func testFavoriteOpenOverrideCanBecomeSharedHistoryMode() async throws {
+    let location = try HistoryTestLocation()
+    defer { location.remove() }
+    let store = FileBrowsingHistoryStore(fileURL: location.fileURL)
+    let snapshot = ThreadHistorySnapshot(
+      threadID: 15,
+      title: "favorite override",
+      browseOptions: ThreadBrowseOptions(sort: .ascending, onlyThreadAuthor: false),
+      lastPostID: 150,
+      lastFloor: 15
+    )
+    try await store.record(.thread(snapshot), at: Date(timeIntervalSince1970: 10))
+    let effectiveSnapshot = FavoriteThreadOpenOverrides(
+      onlyThreadAuthor: true,
+      descending: true
+    ).applying(to: snapshot)
+
+    try await store.updateThreadOptions(
+      threadID: snapshot.threadID,
+      options: effectiveSnapshot.browseOptions,
+      at: Date(timeIntervalSince1970: 20)
+    )
+
+    let entries = try await store.entries(kind: .thread)
+    let entry = try XCTUnwrap(entries.first)
+    guard case .thread(let persisted) = entry.target else {
+      return XCTFail("Expected a thread history entry")
+    }
+    XCTAssertEqual(
+      persisted.browseOptions,
+      ThreadBrowseOptions(sort: .descending, onlyThreadAuthor: true)
+    )
+    XCTAssertEqual(persisted.lastPostID, 150)
+    XCTAssertEqual(persisted.lastFloor, 15)
+  }
+
   @MainActor
   func testViewModelGroupsTodayAndEarlierForSelectedKind() async throws {
     let location = try HistoryTestLocation()

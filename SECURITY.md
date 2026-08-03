@@ -234,6 +234,18 @@ forum name requires an explicit context-menu action and writes only the
 normalized public forum name; this feature must never read the clipboard or
 copy account data.
 
+The favorite-thread opening preferences are two default-off UserDefaults
+booleans evaluated only after an explicit selection in the local-favorites
+list. They may force only-thread-author or descending browse options, but the
+resolver must preserve the saved thread identity, public metadata, and
+post/floor position and must not rewrite the favorite archive by itself. The
+existing thread workflow may subsequently persist the effective browse mode to
+both local favorites and browsing history. Other entry points do not evaluate
+these booleans directly, but a later history or ordinary opening may resume that
+persisted mode; deep links continue to bypass stored snapshots. Turning an
+override off is not a rollback operation. The feature must not read account
+state or credentials and adds no network request.
+
 The default-off username presentation preference is a local UserDefaults value.
 It may display only the public nickname and username already returned by the
 current anonymous or public-profile response and must not expose `tiebaUID`,

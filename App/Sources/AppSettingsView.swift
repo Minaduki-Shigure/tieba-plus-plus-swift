@@ -12,6 +12,12 @@ struct AppSettingsView: View {
   private var homeShowsDiscovery = AppPreferenceDefaults.homeShowsDiscovery
   @AppStorage(AppPreferenceKey.homeShowsRecentForums)
   private var homeShowsRecentForums = true
+  @AppStorage(AppPreferenceKey.favoriteThreadsOpenOnlyAuthor)
+  private var favoriteThreadsOpenOnlyAuthor =
+    AppPreferenceDefaults.favoriteThreadsOpenOnlyAuthor
+  @AppStorage(AppPreferenceKey.favoriteThreadsOpenDescending)
+  private var favoriteThreadsOpenDescending =
+    AppPreferenceDefaults.favoriteThreadsOpenDescending
   @AppStorage(AppPreferenceKey.searchSuggestionsEnabled)
   private var searchSuggestionsEnabled = false
   @AppStorage(AppPreferenceKey.contentMediaLoadPolicy)
@@ -95,6 +101,19 @@ struct AppSettingsView: View {
         Text("首页")
       } footer: {
         Text("启动首选页会在下次启动应用时生效。")
+      }
+
+      Section {
+        Toggle("从收藏打开时只看楼主", isOn: $favoriteThreadsOpenOnlyAuthor)
+
+        Toggle("从收藏打开时使用倒序", isOn: $favoriteThreadsOpenDescending)
+      } header: {
+        Text("本地收藏")
+      } footer: {
+        Text(
+          "这些开关只在从本地收藏进入帖子时直接覆盖模式。打开后，实际模式会按现有规则"
+            + "成为该帖在收藏和浏览记录中的当前模式；关闭开关不会恢复此前值。"
+        )
       }
 
       Section {

@@ -25,6 +25,12 @@ struct RootView: View {
   private var homeShowsDiscovery = AppPreferenceDefaults.homeShowsDiscovery
   @AppStorage(AppPreferenceKey.searchSuggestionsEnabled)
   private var searchSuggestionsEnabled = false
+  @AppStorage(AppPreferenceKey.favoriteThreadsOpenOnlyAuthor)
+  private var favoriteThreadsOpenOnlyAuthor =
+    AppPreferenceDefaults.favoriteThreadsOpenOnlyAuthor
+  @AppStorage(AppPreferenceKey.favoriteThreadsOpenDescending)
+  private var favoriteThreadsOpenDescending =
+    AppPreferenceDefaults.favoriteThreadsOpenDescending
   @StateObject private var favoritesViewModel: LocalFavoritesViewModel
   @StateObject private var globalSearchHistoryViewModel: GlobalSearchHistoryViewModel
   @StateObject private var recentForumsViewModel: BrowsingHistoryViewModel
@@ -260,12 +266,13 @@ struct RootView: View {
           }
         case .favorites:
           LocalFavoritesView(repository: favoritesRepository) { target in
-            switch target {
-            case .forum(let forum):
-              path.append(.forum(forum.name))
-            case .thread(let thread):
-              path.append(.thread(thread))
-            }
+            let overrides = FavoriteThreadOpenOverrides(
+              onlyThreadAuthor: favoriteThreadsOpenOnlyAuthor,
+              descending: favoriteThreadsOpenDescending
+            )
+            path.append(
+              RootFavoriteNavigation.destination(for: target, overrides: overrides)
+            )
           }
         case .account:
           AccountView(
@@ -683,5 +690,19 @@ enum RootStartupNavigation {
       result.append(.user(userID))
     }
     return result
+  }
+}
+
+enum RootFavoriteNavigation {
+  static func destination(
+    for target: LocalFavoriteTarget,
+    overrides: FavoriteThreadOpenOverrides
+  ) -> RootDestination {
+    switch target {
+    case .forum(let forum):
+      .forum(forum.name)
+    case .thread(let thread):
+      .thread(overrides.applying(to: thread))
+    }
   }
 }

@@ -14,10 +14,60 @@ enum AppPreferenceKey {
     "TiebaPlusPlus.darkensContentThumbnailsInDarkMode"
   static let showsBothUsernameAndNickname =
     "TiebaPlusPlus.showsBothUsernameAndNickname"
+  static let favoriteThreadsOpenOnlyAuthor =
+    "TiebaPlusPlus.favoriteThreadsOpenOnlyAuthor"
+  static let favoriteThreadsOpenDescending =
+    "TiebaPlusPlus.favoriteThreadsOpenDescending"
 }
 
 enum AppPreferenceDefaults {
   static let homeShowsDiscovery = true
+  static let favoriteThreadsOpenOnlyAuthor = false
+  static let favoriteThreadsOpenDescending = false
+}
+
+struct FavoriteThreadOpenOverrides: Equatable, Sendable {
+  let onlyThreadAuthor: Bool
+  let descending: Bool
+
+  init(
+    onlyThreadAuthor: Bool = AppPreferenceDefaults.favoriteThreadsOpenOnlyAuthor,
+    descending: Bool = AppPreferenceDefaults.favoriteThreadsOpenDescending
+  ) {
+    self.onlyThreadAuthor = onlyThreadAuthor
+    self.descending = descending
+  }
+
+  func applying(to options: ThreadBrowseOptions) -> ThreadBrowseOptions {
+    var result = options
+    if onlyThreadAuthor {
+      result.onlyThreadAuthor = true
+    }
+    if descending {
+      result.sort = .descending
+    }
+    return result
+  }
+
+  func applying(to snapshot: ThreadHistorySnapshot) -> ThreadHistorySnapshot {
+    ThreadHistorySnapshot(
+      threadID: snapshot.threadID,
+      forumID: snapshot.forumID,
+      forumName: snapshot.forumName,
+      title: snapshot.title,
+      excerpt: snapshot.excerpt,
+      authorName: snapshot.authorName,
+      authorUsername: snapshot.authorUsername,
+      replyCount: snapshot.replyCount,
+      viewCount: snapshot.viewCount,
+      createdAt: snapshot.createdAt,
+      lastReplyAt: snapshot.lastReplyAt,
+      authorAvatarURL: snapshot.authorAvatarURL,
+      browseOptions: applying(to: snapshot.browseOptions),
+      lastPostID: snapshot.lastPostID,
+      lastFloor: snapshot.lastFloor
+    )
+  }
 }
 
 enum AppStartDestination: String, CaseIterable, Hashable, Identifiable, Sendable {

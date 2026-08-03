@@ -66,6 +66,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Independent local forum and thread favorites
 - Local pinned-forum ordering and explicit forum-favorite context actions
 - Saved-thread reading-position and browse-mode restoration
+- Default-off only-author and descending overrides for locally saved threads
 - Home-screen shortcuts for locally saved forums
 - HTTPS-only, credential-free anonymous requests
 - Ephemeral, HTTPS-only Baidu Web login with an exact host allowlist
@@ -155,6 +156,18 @@ Tieba's account-backed collection service. Disabling or clearing history does
 not remove favorites, and the UI labels them as local rather than implying
 cross-device account sync. Hot-ranked threads retain the mode but not an
 unstable ranking position.
+
+Two default-off, force-on preferences are evaluated only when a thread is
+opened from the local-favorites list. A disabled preference preserves the
+snapshot's saved browse mode; an enabled preference can force only-thread-author
+or descending mode while preserving thread identity, public metadata, and the
+saved post/floor position. History, deep links, search, and ordinary thread-card
+navigation do not evaluate the switches directly. The existing thread workflow
+persists the effective mode to the favorite and browsing history, so later
+history or ordinary openings of the same thread may resume it; deep links still
+bypass stored snapshots. Disabling an override does not reconstruct an older
+value. The preferences require no favorite-schema migration, account state, or
+additional network request.
 
 Saved forums can be pinned locally from an explicit context menu in either the
 favorites list or its home-screen projection. Pinned forums appear first, with
