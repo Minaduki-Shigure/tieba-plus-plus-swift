@@ -14,6 +14,7 @@ struct ForumPostSearchView: View {
   let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @StateObject private var viewModel: ForumPostSearchViewModel
   @State private var query = ""
   @State private var historyAction: ForumSearchHistoryAction?
@@ -148,40 +149,56 @@ struct ForumPostSearchView: View {
   }
 
   private var optionsBar: some View {
-    HStack(spacing: 12) {
-      Picker(
-        "排序",
-        selection: Binding(
-          get: { viewModel.sort },
-          set: { viewModel.setSort($0) }
-        )
-      ) {
-        ForEach(ForumPostSearchSort.allCases) { sort in
-          Text(sort.title).tag(sort)
+    Group {
+      if AppDynamicTypeLayout.prefersExpandedControls(for: dynamicTypeSize) {
+        VStack(spacing: 8) {
+          forumPostSearchSortPicker
+          forumPostSearchFilterPicker
+        }
+      } else {
+        HStack(spacing: 12) {
+          forumPostSearchSortPicker
+          forumPostSearchFilterPicker
         }
       }
-      .pickerStyle(.segmented)
-      .frame(maxWidth: .infinity, minHeight: 32)
-      .accessibilityIdentifier("forum-post-search-sort-picker")
-
-      Picker(
-        "范围",
-        selection: Binding(
-          get: { viewModel.filter },
-          set: { viewModel.setFilter($0) }
-        )
-      ) {
-        ForEach(ForumPostSearchFilter.allCases) { filter in
-          Text(filter.title).tag(filter)
-        }
-      }
-      .pickerStyle(.segmented)
-      .frame(maxWidth: .infinity, minHeight: 32)
-      .accessibilityIdentifier("forum-post-search-filter-picker")
     }
     .padding(.horizontal, 12)
     .padding(.vertical, 8)
     .background(.regularMaterial)
+  }
+
+  private var forumPostSearchSortPicker: some View {
+    Picker(
+      "排序",
+      selection: Binding(
+        get: { viewModel.sort },
+        set: { viewModel.setSort($0) }
+      )
+    ) {
+      ForEach(ForumPostSearchSort.allCases) { sort in
+        Text(sort.title).tag(sort)
+      }
+    }
+    .pickerStyle(.segmented)
+    .frame(maxWidth: .infinity, minHeight: 32)
+    .accessibilityIdentifier("forum-post-search-sort-picker")
+  }
+
+  private var forumPostSearchFilterPicker: some View {
+    Picker(
+      "范围",
+      selection: Binding(
+        get: { viewModel.filter },
+        set: { viewModel.setFilter($0) }
+      )
+    ) {
+      ForEach(ForumPostSearchFilter.allCases) { filter in
+        Text(filter.title).tag(filter)
+      }
+    }
+    .pickerStyle(.segmented)
+    .frame(maxWidth: .infinity, minHeight: 32)
+    .accessibilityIdentifier("forum-post-search-filter-picker")
   }
 
   @ViewBuilder

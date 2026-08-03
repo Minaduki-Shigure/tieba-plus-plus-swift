@@ -19,6 +19,7 @@ struct ThreadView: View {
   @State private var restoredHistorySnapshot: ThreadHistorySnapshot?
   @State private var hasRecordedHistoryVisit = false
   @State private var isPureReadingMode = false
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   private let historySnapshot: ThreadHistorySnapshot?
   private let linkRoute: TiebaThreadRoute?
 
@@ -307,33 +308,19 @@ struct ThreadView: View {
 
   private var optionsBar: some View {
     VStack(spacing: 0) {
-      HStack(spacing: 12) {
-        Picker(
-          "楼层排序",
-          selection: Binding(
-            get: { viewModel.options.sort },
-            set: { sort in viewModel.setSort(sort) }
-          )
-        ) {
-          ForEach(ThreadPostSort.allCases) { sort in
-            Text(sort.title).tag(sort)
+      Group {
+        if AppDynamicTypeLayout.prefersExpandedControls(for: dynamicTypeSize) {
+          VStack(alignment: .leading, spacing: 8) {
+            threadSortPicker
+            threadAuthorToggle
+          }
+        } else {
+          HStack(spacing: 12) {
+            threadSortPicker
+            threadAuthorToggle
+              .fixedSize()
           }
         }
-        .pickerStyle(.segmented)
-        .frame(maxWidth: .infinity, minHeight: 32)
-        .accessibilityIdentifier("thread-sort-picker")
-
-        Toggle(
-          "只看楼主",
-          isOn: Binding(
-            get: { viewModel.options.onlyThreadAuthor },
-            set: { onlyThreadAuthor in viewModel.setOnlyThreadAuthor(onlyThreadAuthor) }
-          )
-        )
-        .toggleStyle(.switch)
-        .controlSize(.small)
-        .fixedSize()
-        .accessibilityIdentifier("thread-author-toggle")
       }
       .font(.subheadline)
       .padding(.horizontal, 12)
@@ -342,6 +329,36 @@ struct ThreadView: View {
 
       Divider()
     }
+  }
+
+  private var threadSortPicker: some View {
+    Picker(
+      "楼层排序",
+      selection: Binding(
+        get: { viewModel.options.sort },
+        set: { sort in viewModel.setSort(sort) }
+      )
+    ) {
+      ForEach(ThreadPostSort.allCases) { sort in
+        Text(sort.title).tag(sort)
+      }
+    }
+    .pickerStyle(.segmented)
+    .frame(maxWidth: .infinity, minHeight: 32)
+    .accessibilityIdentifier("thread-sort-picker")
+  }
+
+  private var threadAuthorToggle: some View {
+    Toggle(
+      "只看楼主",
+      isOn: Binding(
+        get: { viewModel.options.onlyThreadAuthor },
+        set: { onlyThreadAuthor in viewModel.setOnlyThreadAuthor(onlyThreadAuthor) }
+      )
+    )
+    .toggleStyle(.switch)
+    .controlSize(.small)
+    .accessibilityIdentifier("thread-author-toggle")
   }
 
   private var postList: some View {

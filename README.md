@@ -121,6 +121,11 @@ but authenticated write operations remain intentionally unsupported.
 - Settings provide system, light, and dark appearance, a global forum-sort
   default with normalized per-forum memory, and a no-history mode backed by the
   same versioned browsing-history archive.
+- A persistent six-position app text-size adjustment moves the SwiftUI
+  interface from two steps smaller through three steps larger relative to the
+  current iOS Dynamic Type category. Following the system is the default;
+  semantic fonts and scale-aware controls update immediately, while Safari,
+  share sheets, and other system UI retain their system-managed text size.
 - A default-off author-name option can combine each returned public nickname
   and username as `nickname(username)` across live content, search, profiles,
   forum staff, browsing history, and local favorites. It uses existing response

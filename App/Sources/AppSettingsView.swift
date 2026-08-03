@@ -2,8 +2,11 @@ import SwiftUI
 
 struct AppSettingsView: View {
   @StateObject private var historyViewModel: BrowsingHistoryViewModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @AppStorage(AppPreferenceKey.appearance)
   private var appearance = AppAppearance.system.rawValue
+  @AppStorage(AppPreferenceKey.textSizeAdjustment)
+  private var textSizeAdjustment = AppTextSizeAdjustment.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.defaultForumSort)
   private var defaultForumSort = ForumThreadSort.replyTime.rawValue
   @AppStorage(AppPreferenceKey.homeStartDestination)
@@ -40,21 +43,30 @@ struct AppSettingsView: View {
   var body: some View {
     List {
       Section("外观") {
-        Picker("外观", selection: appearanceSelection) {
-          ForEach(AppAppearance.allCases) { appearance in
-            Text(appearance.title).tag(appearance)
+        if AppDynamicTypeLayout.prefersMenuPickers(for: dynamicTypeSize) {
+          appearancePicker
+            .pickerStyle(.menu)
+        } else {
+          appearancePicker
+            .pickerStyle(.segmented)
+        }
+
+        Picker("应用内字号", selection: textSizeAdjustmentSelection) {
+          ForEach(AppTextSizeAdjustment.allCases) { adjustment in
+            Text(adjustment.title).tag(adjustment)
           }
         }
-        .pickerStyle(.segmented)
+        .pickerStyle(.menu)
       }
 
       Section("使用习惯") {
-        Picker("吧默认排序", selection: defaultForumSortSelection) {
-          ForEach(ForumThreadSort.allCases) { sort in
-            Text(sort.title).tag(sort)
-          }
+        if AppDynamicTypeLayout.prefersMenuPickers(for: dynamicTypeSize) {
+          defaultForumSortPicker
+            .pickerStyle(.menu)
+        } else {
+          defaultForumSortPicker
+            .pickerStyle(.segmented)
         }
-        .pickerStyle(.segmented)
 
         Toggle(
           "不保存浏览记录",
@@ -151,12 +163,13 @@ struct AppSettingsView: View {
       }
 
       Section {
-        Picker("媒体加载", selection: contentMediaLoadPolicySelection) {
-          ForEach(ContentMediaLoadPolicy.allCases) { policy in
-            Text(policy.title).tag(policy)
-          }
+        if AppDynamicTypeLayout.prefersMenuPickers(for: dynamicTypeSize) {
+          contentMediaLoadPolicyPicker
+            .pickerStyle(.menu)
+        } else {
+          contentMediaLoadPolicyPicker
+            .pickerStyle(.segmented)
         }
-        .pickerStyle(.segmented)
 
         Toggle("收起帖子列表的图片和视频", isOn: $hidesThreadListMedia)
 
@@ -206,11 +219,34 @@ struct AppSettingsView: View {
     )
   }
 
+  private var appearancePicker: some View {
+    Picker("外观", selection: appearanceSelection) {
+      ForEach(AppAppearance.allCases) { appearance in
+        Text(appearance.title).tag(appearance)
+      }
+    }
+  }
+
+  private var textSizeAdjustmentSelection: Binding<AppTextSizeAdjustment> {
+    Binding(
+      get: { AppTextSizeAdjustment.resolved(textSizeAdjustment) },
+      set: { textSizeAdjustment = $0.rawValue }
+    )
+  }
+
   private var defaultForumSortSelection: Binding<ForumThreadSort> {
     Binding(
       get: { ForumThreadSort(rawValue: defaultForumSort) ?? .replyTime },
       set: { defaultForumSort = $0.rawValue }
     )
+  }
+
+  private var defaultForumSortPicker: some View {
+    Picker("吧默认排序", selection: defaultForumSortSelection) {
+      ForEach(ForumThreadSort.allCases) { sort in
+        Text(sort.title).tag(sort)
+      }
+    }
   }
 
   private var homeStartDestinationSelection: Binding<AppStartDestination> {
@@ -225,6 +261,14 @@ struct AppSettingsView: View {
       get: { ContentMediaLoadPolicy.resolved(contentMediaLoadPolicy) },
       set: { contentMediaLoadPolicy = $0.rawValue }
     )
+  }
+
+  private var contentMediaLoadPolicyPicker: some View {
+    Picker("媒体加载", selection: contentMediaLoadPolicySelection) {
+      ForEach(ContentMediaLoadPolicy.allCases) { policy in
+        Text(policy.title).tag(policy)
+      }
+    }
   }
 
   private var externalWebOpenModeSelection: Binding<ExternalWebOpenMode> {

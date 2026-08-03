@@ -49,6 +49,90 @@ final class AppPreferencesTests: XCTestCase {
     XCTAssertEqual(AppAppearance.dark.colorScheme, .dark)
   }
 
+  func testTextSizeAdjustmentUsesStableValuesTitlesAndDefault() {
+    XCTAssertEqual(
+      AppPreferenceKey.textSizeAdjustment,
+      "TiebaPlusPlus.textSizeAdjustment"
+    )
+    XCTAssertEqual(
+      AppTextSizeAdjustment.allCases,
+      [
+        .twoStepsSmaller,
+        .oneStepSmaller,
+        .standard,
+        .oneStepLarger,
+        .twoStepsLarger,
+        .threeStepsLarger,
+      ]
+    )
+    XCTAssertEqual(AppTextSizeAdjustment.allCases.map(\.rawValue), [-2, -1, 0, 1, 2, 3])
+    XCTAssertEqual(
+      AppTextSizeAdjustment.allCases.map(\.title),
+      [
+        "比系统小两级",
+        "比系统小一级",
+        "跟随系统",
+        "比系统大一级",
+        "比系统大两级",
+        "比系统大三级",
+      ]
+    )
+    XCTAssertEqual(AppTextSizeAdjustment.defaultValue, .standard)
+    XCTAssertEqual(AppTextSizeAdjustment.resolved(-2), .twoStepsSmaller)
+    XCTAssertEqual(AppTextSizeAdjustment.resolved(3), .threeStepsLarger)
+    XCTAssertEqual(AppTextSizeAdjustment.resolved(Int.min), .standard)
+    XCTAssertEqual(AppTextSizeAdjustment.resolved(Int.max), .standard)
+  }
+
+  func testTextSizeAdjustmentOffsetsAndClampsEveryDynamicTypeSize() {
+    let sizes: [DynamicTypeSize] = [
+      .xSmall,
+      .small,
+      .medium,
+      .large,
+      .xLarge,
+      .xxLarge,
+      .xxxLarge,
+      .accessibility1,
+      .accessibility2,
+      .accessibility3,
+      .accessibility4,
+      .accessibility5,
+    ]
+
+    for (systemIndex, systemSize) in sizes.enumerated() {
+      for adjustment in AppTextSizeAdjustment.allCases {
+        let expectedIndex = min(
+          max(systemIndex + adjustment.rawValue, sizes.startIndex),
+          sizes.index(before: sizes.endIndex)
+        )
+        XCTAssertEqual(
+          AppDynamicTypeSizeResolver.resolvedSize(
+            systemSize: systemSize,
+            adjustment: adjustment
+          ),
+          sizes[expectedIndex],
+          "Unexpected result for system index \(systemIndex), adjustment \(adjustment.rawValue)"
+        )
+      }
+    }
+  }
+
+  func testExpandedControlsStartAtExtraExtraLargeDynamicTypeSize() {
+    XCTAssertFalse(AppDynamicTypeLayout.prefersExpandedControls(for: .xSmall))
+    XCTAssertFalse(AppDynamicTypeLayout.prefersExpandedControls(for: .xLarge))
+    XCTAssertTrue(AppDynamicTypeLayout.prefersExpandedControls(for: .xxLarge))
+    XCTAssertTrue(AppDynamicTypeLayout.prefersExpandedControls(for: .accessibility5))
+  }
+
+  func testSettingsUseMenuPickersFromExtraExtraExtraLargeDynamicTypeSize() {
+    XCTAssertFalse(AppDynamicTypeLayout.prefersMenuPickers(for: .xSmall))
+    XCTAssertFalse(AppDynamicTypeLayout.prefersMenuPickers(for: .xxLarge))
+    XCTAssertTrue(AppDynamicTypeLayout.prefersMenuPickers(for: .xxxLarge))
+    XCTAssertTrue(AppDynamicTypeLayout.prefersMenuPickers(for: .accessibility1))
+    XCTAssertTrue(AppDynamicTypeLayout.prefersMenuPickers(for: .accessibility5))
+  }
+
   func testContentMediaLoadPolicyUsesStableValuesAndFallsBackToAutomatic() {
     XCTAssertEqual(
       AppPreferenceKey.contentMediaLoadPolicy,

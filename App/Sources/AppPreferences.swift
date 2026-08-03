@@ -3,6 +3,7 @@ import SwiftUI
 
 enum AppPreferenceKey {
   static let appearance = "TiebaPlusPlus.appearance"
+  static let textSizeAdjustment = "TiebaPlusPlus.textSizeAdjustment"
   static let defaultForumSort = "TiebaPlusPlus.defaultForumSort"
   static let homeStartDestination = "TiebaPlusPlus.homeStartDestination"
   static let homeShowsDiscovery = "TiebaPlusPlus.homeShowsDiscovery"
@@ -19,6 +20,40 @@ enum AppPreferenceKey {
     "TiebaPlusPlus.favoriteThreadsOpenOnlyAuthor"
   static let favoriteThreadsOpenDescending =
     "TiebaPlusPlus.favoriteThreadsOpenDescending"
+}
+
+enum AppTextSizeAdjustment: Int, CaseIterable, Hashable, Identifiable, Sendable {
+  case twoStepsSmaller = -2
+  case oneStepSmaller = -1
+  case standard = 0
+  case oneStepLarger = 1
+  case twoStepsLarger = 2
+  case threeStepsLarger = 3
+
+  static let defaultValue = Self.standard
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .twoStepsSmaller:
+      "比系统小两级"
+    case .oneStepSmaller:
+      "比系统小一级"
+    case .standard:
+      "跟随系统"
+    case .oneStepLarger:
+      "比系统大一级"
+    case .twoStepsLarger:
+      "比系统大两级"
+    case .threeStepsLarger:
+      "比系统大三级"
+    }
+  }
+
+  static func resolved(_ rawValue: Int) -> Self {
+    Self(rawValue: rawValue) ?? defaultValue
+  }
 }
 
 enum AppPreferenceDefaults {

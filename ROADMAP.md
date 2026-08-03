@@ -41,6 +41,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Versioned local browsing history with delete, clear, and recording controls
 - Settings-level no-history mode using the existing browsing-history archive
 - Native system, light, and dark appearance selection
+- Persistent six-position app text-size adjustment relative to iOS Dynamic Type
 - Transient pure-reading mode and full textual floor copying
 - Home-screen recent-forum history, expanded by default and independently hideable
 - Canonical forum/thread sharing and browse-mode-aware thread-link copying
@@ -277,14 +278,23 @@ changing a forum's picker stores a normalized, bounded per-forum override.
 Channel-menu choices are remembered separately only while the current forum
 screen is alive, are revalidated when a menu changes, and never overwrite the
 global or per-forum topic-sort preference.
-Appearance and sort values are nonsecret local enums. No-history mode updates
-the recording flag inside the existing versioned history archive, so it does not
-create a competing source of truth or delete favorites. Pure-reading mode is
-transient and removes author chrome, filter placeholders, and nested-reply entry
-points without changing post data or the persisted sort. Full-floor copy uses
-the currently decoded public textual fragments plus fixed `[图片]`, `[视频]`, and
-`[语音]` boundary markers; media URLs and nested replies are not synthesized
-into the copied text.
+TiebaLite implements text sizing as a fixed app-wide Android font-scale
+override. Tieba++ instead stores a relative adjustment from two steps smaller
+through three steps larger, with following the system as the default. It shifts
+the current iOS Dynamic Type category within the platform's 12 supported
+categories and clamps the result at either end, so the system setting remains
+the baseline.
+The resolved category updates semantic fonts and scale-aware controls throughout
+the app's SwiftUI hierarchy immediately; Safari, share sheets, and other system
+UI remain system-managed. Unknown stored values normalize to following the system.
+Appearance, sort, and text-size adjustment values are nonsecret local enums.
+No-history mode updates the recording flag inside the existing versioned
+history archive, so it does not create a competing source of truth or delete
+favorites. Pure-reading mode is transient and removes author chrome, filter
+placeholders, and nested-reply entry points without changing post data or the
+persisted sort. Full-floor copy uses the currently decoded public textual
+fragments plus fixed `[图片]`, `[视频]`, and `[语音]` boundary markers; media URLs
+and nested replies are not synthesized into the copied text.
 
 Local content filtering covers ordinary and channel forum thread lists, global
 and per-forum search results, public-profile activity, post floors, nested

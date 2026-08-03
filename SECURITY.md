@@ -416,8 +416,11 @@ deduplication, and local-filter checks before display. Empty or duplicate-only
 responses must not replace the loaded snapshot, and automatic polling remains
 unsupported.
 
-Appearance and forum-sort preferences may store only bounded, nonsecret local
-values in UserDefaults. The no-history control must update the recording flag in
+Appearance, app text-size adjustment, and forum-sort preferences may store only
+bounded, nonsecret local values in UserDefaults. Text-size adjustment is a
+presentation-only offset from the current system Dynamic Type category and must
+not enter requests, account storage, archives, logs, or exported content. The
+no-history control must update the recording flag in
 the existing browsing-history archive and must never duplicate that state in a
 second store. Full-floor copying is initiated by an explicit user gesture and
 may include decoded public textual fragments and fixed non-URL media boundary

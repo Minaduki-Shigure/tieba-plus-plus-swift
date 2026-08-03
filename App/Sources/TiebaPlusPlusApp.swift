@@ -7,6 +7,8 @@ struct TiebaPlusPlusApp: App {
   @StateObject private var contentMediaNetworkMonitor = ContentMediaNetworkMonitor()
   @AppStorage(AppPreferenceKey.appearance)
   private var appearance = AppAppearance.system.rawValue
+  @AppStorage(AppPreferenceKey.textSizeAdjustment)
+  private var textSizeAdjustment = AppTextSizeAdjustment.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.contentMediaLoadPolicy)
   private var contentMediaLoadPolicy = ContentMediaLoadPolicy.automatic.rawValue
   @AppStorage(AppPreferenceKey.hidesThreadListMedia)
@@ -60,6 +62,7 @@ struct TiebaPlusPlusApp: App {
         accountService: accountService,
         startDestination: startDestination
       )
+      .appTextSizeAdjustment(AppTextSizeAdjustment.resolved(textSizeAdjustment))
       .environment(\.contentFilterRepository, contentFilterRepository)
       .environment(
         \.contentMediaLoadPolicy,

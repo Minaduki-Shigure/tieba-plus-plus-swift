@@ -130,7 +130,7 @@ struct HotThreadListView: View {
 
   @ViewBuilder
   private var hotTopicHeader: some View {
-    if dynamicTypeSize.isAccessibilitySize {
+    if AppDynamicTypeLayout.prefersExpandedControls(for: dynamicTypeSize) {
       VStack(alignment: .leading, spacing: 0) {
         hotTopicTitle
         allHotTopicsLink
@@ -175,7 +175,8 @@ struct HotThreadListView: View {
 
   private var hotTopicColumns: [GridItem] {
     let column = GridItem(.flexible(), spacing: 16, alignment: .leading)
-    return Array(repeating: column, count: dynamicTypeSize.isAccessibilitySize ? 1 : 2)
+    let count = AppDynamicTypeLayout.prefersExpandedControls(for: dynamicTypeSize) ? 1 : 2
+    return Array(repeating: column, count: count)
   }
 
   private func hotTopicAccessibilityLabel(topic: HotTopicItem, position: Int) -> String {

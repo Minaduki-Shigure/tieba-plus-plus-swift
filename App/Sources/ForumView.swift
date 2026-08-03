@@ -9,6 +9,7 @@ struct ForumView: View {
   let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @StateObject private var viewModel: ForumViewModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
   init(
     forumName: String,
@@ -123,33 +124,19 @@ struct ForumView: View {
       }
 
       if viewModel.selectedChannelID == nil {
-        HStack(spacing: 12) {
-          Picker(
-            "主题排序",
-            selection: Binding(
-              get: { viewModel.options.sort },
-              set: { sort in viewModel.setSort(sort) }
-            )
-          ) {
-            ForEach(ForumThreadSort.allCases) { sort in
-              Text(sort.title).tag(sort)
+        Group {
+          if AppDynamicTypeLayout.prefersExpandedControls(for: dynamicTypeSize) {
+            VStack(alignment: .leading, spacing: 8) {
+              forumSortPicker
+              forumFeaturedToggle
+            }
+          } else {
+            HStack(spacing: 12) {
+              forumSortPicker
+              forumFeaturedToggle
+                .fixedSize()
             }
           }
-          .pickerStyle(.segmented)
-          .frame(maxWidth: .infinity, minHeight: 32)
-          .accessibilityIdentifier("forum-sort-picker")
-
-          Toggle(
-            "精华",
-            isOn: Binding(
-              get: { viewModel.options.featuredOnly },
-              set: { featuredOnly in viewModel.setFeaturedOnly(featuredOnly) }
-            )
-          )
-          .toggleStyle(.switch)
-          .controlSize(.small)
-          .fixedSize()
-          .accessibilityIdentifier("forum-featured-toggle")
         }
         .font(.subheadline)
         .padding(.horizontal, 12)
@@ -211,6 +198,36 @@ struct ForumView: View {
 
       Divider()
     }
+  }
+
+  private var forumSortPicker: some View {
+    Picker(
+      "主题排序",
+      selection: Binding(
+        get: { viewModel.options.sort },
+        set: { sort in viewModel.setSort(sort) }
+      )
+    ) {
+      ForEach(ForumThreadSort.allCases) { sort in
+        Text(sort.title).tag(sort)
+      }
+    }
+    .pickerStyle(.segmented)
+    .frame(maxWidth: .infinity, minHeight: 32)
+    .accessibilityIdentifier("forum-sort-picker")
+  }
+
+  private var forumFeaturedToggle: some View {
+    Toggle(
+      "精华",
+      isOn: Binding(
+        get: { viewModel.options.featuredOnly },
+        set: { featuredOnly in viewModel.setFeaturedOnly(featuredOnly) }
+      )
+    )
+    .toggleStyle(.switch)
+    .controlSize(.small)
+    .accessibilityIdentifier("forum-featured-toggle")
   }
 
   private var threadList: some View {
