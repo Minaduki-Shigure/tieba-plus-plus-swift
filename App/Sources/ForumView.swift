@@ -262,7 +262,7 @@ private struct ForumHeaderView: View {
     HStack(alignment: .top, spacing: 14) {
       DownsampledRemoteImage(url: forum.avatarURL, maxPixelSize: 256) { phase in
         switch phase {
-        case .success(let image):
+        case .success(let image, _):
           image.resizable().scaledToFill()
         default:
           Image(systemName: "text.bubble.fill")

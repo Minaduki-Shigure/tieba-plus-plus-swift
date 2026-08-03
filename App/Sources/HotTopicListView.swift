@@ -191,7 +191,7 @@ struct HotTopicRemoteImage: View {
   var body: some View {
     DownsampledRemoteImage(url: url, maxPixelSize: maxPixelSize) { phase in
       switch phase {
-      case .success(let image):
+      case .success(let image, _):
         image
           .resizable()
           .scaledToFill()

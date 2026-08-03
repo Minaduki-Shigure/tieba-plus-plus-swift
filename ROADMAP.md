@@ -38,6 +38,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Canonical forum/thread sharing and browse-mode-aware thread-link copying
 - Strict internal routing for supported Tieba HTTPS, pasted official-scheme, and app links
 - Nested replies, images, video links, and voice playback
+- Same-content multi-image gallery with paging, zoom, original-file sharing, and Photos saving
 - Server-ranked inline nested-reply previews with anchored opening and safe text copying
 - Full nested-reply pages with parent-floor context and bidirectional anchored pagination
 - Shared-thread origin cards with original content, media, and navigation
@@ -92,6 +93,17 @@ reply pages omit it, and is replaced or
 cleared by a new snapshot. It never participates in reply deduplication,
 physical-page progression, prepend restoration, or the tail PID cursor. An
 absent or invalid first floor is not synthesized from the thread-list excerpt.
+
+Rich-content images open as one gallery scoped to the already filtered content
+array that produced the tapped image. Source offsets, rather than URLs, identify
+pages, so repeated images remain distinct and the selected duplicate opens at
+the correct position. Paging, the visible counter, and per-page zoom never fetch
+or aggregate another floor. Sharing and Photos saving explicitly download only
+the selected original image through the bounded credential-free media transport,
+validate its real ImageIO type and dimensions, and retain the temporary file only
+until the system consumer finishes. Whole-thread `picpage` traversal remains a
+separate milestone because the current domain model does not yet preserve its
+picture IDs or bidirectional cursor contract.
 
 Public profiles use the protocol's guest fields instead of impersonating the
 target user as the current account. The public-theme endpoint ignores its

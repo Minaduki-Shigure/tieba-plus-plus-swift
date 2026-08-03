@@ -344,7 +344,7 @@ private struct ThreadPreviewImage: View {
   var body: some View {
     DownsampledRemoteImage(url: url, maxPixelSize: 720) { phase in
       switch phase {
-      case .success(let image):
+      case .success(let image, _):
         image
           .resizable()
           .scaledToFill()

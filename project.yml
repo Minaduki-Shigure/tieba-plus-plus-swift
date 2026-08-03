@@ -37,6 +37,7 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSApplicationCategoryType: public.app-category.social-networking
+        NSPhotoLibraryAddUsageDescription: "用于将您选择的贴吧图片保存到系统照片。"
         CFBundleURLTypes:
           - CFBundleTypeRole: Viewer
             CFBundleURLName: io.github.minaduki.tieba-plus-plus
@@ -60,8 +61,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.minaduki.tieba-plus-plus
         PRODUCT_NAME: TiebaPlusPlus
-        MARKETING_VERSION: 0.25.0
-        CURRENT_PROJECT_VERSION: 25
+        MARKETING_VERSION: 0.26.0
+        CURRENT_PROJECT_VERSION: 26
         CODE_SIGN_STYLE: Automatic
         SUPPORTS_MACCATALYST: false
         ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: true

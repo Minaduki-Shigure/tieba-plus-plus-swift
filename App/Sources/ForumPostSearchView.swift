@@ -495,7 +495,7 @@ private struct ForumPostSearchMediaStrip: View {
         ForEach(Array(imageURLs.prefix(3).enumerated()), id: \.offset) { _, imageURL in
           DownsampledRemoteImage(url: imageURL, maxPixelSize: 512) { phase in
             switch phase {
-            case .success(let renderedImage):
+            case .success(let renderedImage, _):
               renderedImage.resizable().scaledToFill()
             case .empty, .failure:
               Image(systemName: "photo")

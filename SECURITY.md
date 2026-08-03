@@ -217,6 +217,27 @@ count exceeds that bound. Explicit higher-resolution image views retain the
 canceled when the final waiter disappears, so scrolling cannot leave orphaned
 preview transfers running in the background.
 
+An image gallery is built only from the already filtered `BrowseContent` array
+that owns the tapped image. It must not rescan a raw response, cross a floor or
+origin-card boundary, merge repeated URLs, or reveal a locally hidden fragment.
+Sharing and saving are explicit user actions and operate only on the currently
+selected HTTPS image. They reuse the credential-free media transport, its HTTPS
+redirect and 80 MiB transfer limits, and a private temporary-file lease. Before
+the file reaches a system consumer, ImageIO and Uniform Type Identifiers must
+confirm a supported image with positive, bounded dimensions. Every frame is
+decoded at a small validation size, while the frame count and cumulative pixel
+count are also bounded; URL suffixes and response MIME types are not trusted.
+Temporary files are excluded from backup and removed after the share sheet or
+Photos change finishes.
+
+Saving requests PhotoKit `.addOnly` authorization only after the user presses
+the save control. A denied or restricted state must cause no image download, and
+the app must not request read access, enumerate the photo library, or persist an
+asset identifier. System sharing requires no Photos permission and receives the
+validated local original file, not a credential-bearing URL or a downsampled
+re-encoding. Gallery export must not add cookies, URL credentials, analytics,
+background transfers, or authenticated Tieba fields.
+
 Appearance and forum-sort preferences may store only bounded, nonsecret local
 values in UserDefaults. The no-history control must update the recording flag in
 the existing browsing-history archive and must never duplicate that state in a

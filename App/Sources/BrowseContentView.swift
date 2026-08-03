@@ -6,6 +6,8 @@ struct BrowseContentView: View {
   let onUserMention: ((Int64) -> Void)?
   let onTiebaLink: ((TiebaLinkTarget) -> Void)?
 
+  @State private var imageGalleryPresentation: ImageGalleryPresentation?
+
   init(
     contents: [BrowseContent],
     onUserMention: ((Int64) -> Void)? = nil,
@@ -26,13 +28,13 @@ struct BrowseContentView: View {
       inline.removeAll(keepingCapacity: true)
     }
 
-    for content in contents {
+    for (offset, content) in contents.enumerated() {
       switch content {
       case .text, .mention, .link, .emoticon, .unsupported:
         inline.append(content)
       case .image, .video, .voice:
         flushInline()
-        result.append(.standalone(content))
+        result.append(.standalone(contentOffset: offset, content: content))
       }
     }
     flushInline()
@@ -53,12 +55,18 @@ struct BrowseContentView: View {
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
             .environment(\.openURL, mentionOpenURLAction)
-        case .standalone(let content):
-          standalone(content)
+        case .standalone(let contentOffset, let content):
+          standalone(content, contentOffset: contentOffset)
         }
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
+    .fullScreenCover(item: $imageGalleryPresentation) { presentation in
+      ImageViewer(
+        items: presentation.items,
+        initialIndex: presentation.initialIndex
+      )
+    }
   }
 
   private var mentionOpenURLAction: OpenURLAction {
@@ -75,14 +83,19 @@ struct BrowseContentView: View {
   }
 
   @ViewBuilder
-  private func standalone(_ content: BrowseContent) -> some View {
+  private func standalone(_ content: BrowseContent, contentOffset: Int) -> some View {
     switch content {
-    case .image(let thumbnail, let original, let width, let height):
+    case .image(let thumbnail, _, let width, let height):
       BrowseImageView(
         thumbnailURL: thumbnail,
-        originalURL: original,
         width: width,
-        height: height
+        height: height,
+        onOpen: {
+          imageGalleryPresentation = ImageGalleryPresentation(
+            contents: contents,
+            selectedContentOffset: contentOffset
+          )
+        }
       )
     case .video(let url, let cover, let width, let height):
       BrowseVideoView(url: url, coverURL: cover, width: width, height: height)
@@ -137,16 +150,14 @@ struct BrowseContentView: View {
 
 private enum BrowseContentBlock {
   case inline([BrowseContent])
-  case standalone(BrowseContent)
+  case standalone(contentOffset: Int, content: BrowseContent)
 }
 
 private struct BrowseImageView: View {
   let thumbnailURL: URL
-  let originalURL: URL?
   let width: Int
   let height: Int
-
-  @State private var isPresented = false
+  let onOpen: () -> Void
 
   private var aspectRatio: CGFloat {
     guard width > 0, height > 0 else { return 4 / 3 }
@@ -155,11 +166,11 @@ private struct BrowseImageView: View {
 
   var body: some View {
     Button {
-      isPresented = true
+      onOpen()
     } label: {
       DownsampledRemoteImage(url: thumbnailURL, maxPixelSize: 1_600) { phase in
         switch phase {
-        case .success(let image):
+        case .success(let image, _):
           image.resizable().scaledToFill()
         case .failure:
           Image(systemName: "photo.badge.exclamationmark")
@@ -177,9 +188,6 @@ private struct BrowseImageView: View {
     }
     .buttonStyle(.plain)
     .accessibilityLabel("查看大图")
-    .fullScreenCover(isPresented: $isPresented) {
-      ImageViewer(url: originalURL ?? thumbnailURL)
-    }
   }
 }
 
@@ -204,7 +212,7 @@ private struct BrowseVideoView: View {
         ZStack {
           DownsampledRemoteImage(url: coverURL, maxPixelSize: 1_600) { phase in
             switch phase {
-            case .success(let image):
+            case .success(let image, _):
               image.resizable().scaledToFill()
             case .empty, .failure:
               Color.black.opacity(0.88)
