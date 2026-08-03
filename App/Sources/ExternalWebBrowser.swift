@@ -130,7 +130,8 @@ struct ExternalWebBrowserPresenter: UIViewControllerRepresentable {
   }
 
   @MainActor
-  final class HostViewController: UIViewController, SFSafariViewControllerDelegate,
+  final class HostViewController: UIViewController,
+    @preconcurrency SFSafariViewControllerDelegate,
     UIAdaptivePresentationControllerDelegate
   {
     private var requestedPage: ExternalWebPage?
