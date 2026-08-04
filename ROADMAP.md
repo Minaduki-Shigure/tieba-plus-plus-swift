@@ -97,21 +97,26 @@ the source metadata is updated to that tested IPA.
   unfollow confirmation
 - Authoritative per-forum check-in state and explicitly confirmed single-forum
   check-in, with already-signed idempotence and no automatic or batch mode
-- Account-bound topic approval and cancellation on the canonical first floor,
-  with explicit confirmation and lease-guarded read-only recovery
+- Account-bound approval and cancellation on the canonical topic, ordinary
+  floors, and both parent and child items in a full nested-reply page, with
+  explicit confirmation and lease-guarded read-only recovery
+- Page-shaped authenticated approval overlays that mirror the anonymous post
+  and nested-reply requests, batch the currently retained targets, and refresh
+  a full nested-reply page even when its target set is unchanged
 - Short-lived `tbs` availability for at most the immediately following write,
   without Keychain persistence or exposure to application models
 - Isolated anonymous and authenticated networking clients
 
 ## Next milestones
 
-1. Real-device validation of topic approval/cancellation and single-forum
-   check-in success, idempotent, server-error, uncertain-failure, and read-only
-   reconciliation paths, followed by account switching and follow recovery checks
+1. Real-device validation of canonical-topic, ordinary-floor, and full
+   nested-reply approval/cancellation, plus single-forum check-in success,
+   idempotent, server-error, uncertain-failure, and read-only reconciliation
+   paths, followed by account switching and follow recovery checks
 2. Server-side thread favorites after the login flow can safely acquire and bind
    the required STOKEN; this workflow is currently blocked
-3. Ordinary floor, nested-reply, and creation workflows behind explicit
-   confirmation and anti-CSRF tests
+3. Content creation and reply workflows behind explicit confirmation and
+   anti-CSRF tests
 4. Notifications, moderation tools, and broader settings parity
 
 Tieba's anonymous post endpoint does not currently honor its nominal numeric
@@ -481,15 +486,34 @@ content. Regular-expression rules are intentionally unsupported until a
 bounded or non-backtracking implementation is available.
 
 Each authenticated milestone remains gated on protocol tests, credential
-isolation, and real-device validation. Forum follow/unfollow, check-in, and topic
-approval bind a fresh FRS response to the current account and forum before a
-write, make its short-lived `tbs` available to at most that write inside the
-authenticated client, and never retry an uncertain write. Topic approval first
-reads account-scoped `Agree.has_agree`, distinguishes the topic's `obj_type=3`
-from ordinary floors and nested replies, and uses a nonpersistent random
-Galaxy2 CUID with a Helios checksum required by the endpoint. A conflicting
-account operation waits for the active write to settle and then enters the
-lease-guarded read-only recovery path instead of queuing another write. Check-in
+isolation, and real-device validation. Forum follow/unfollow, check-in, and
+content approval bind a fresh FRS response to the current account and forum
+before a changed-state write, make its short-lived `tbs` available to at most
+that write inside the authenticated client, and never retry an uncertain write.
+Content approval uses exact target identities: `thread(firstPostID)` for the
+canonical topic, `post(postID)` for an ordinary floor, and
+`subpost(parentPostID, subpostID)` for a nested reply. The write endpoint maps
+those targets to `obj_type=3`, `obj_type=1`, and `obj_type=2` respectively; all
+three use the target object ID as `post_id`, the owning thread ID, and a
+nonpersistent random Galaxy2 CUID with the required Helios checksum.
+
+Authenticated PB Page and PB Floor reads overlay account-scoped
+`Agree.has_agree` onto the exact anonymous page request instead of issuing one
+read per row. A page is accepted only for its expected account, forum, thread,
+and complete target identity; nested replies additionally remain bound to their
+parent post. Duplicate targets are rejected, unrelated returned targets are
+ignored, and an expected target omitted by the response becomes an explicit
+read failure rather than inheriting another row's state. These overlays are
+reads only: they never turn page loading or refresh into a batch write.
+
+The authenticated core serializes content-approval writes per account even when
+they address different targets. Identical in-flight writes for one target share
+their result; a conflicting request waits for the active write and performs a
+read-only reconciliation instead of queuing another write. A transport outcome
+that may have reached the server receives at most one readback and is never
+resent. At the application boundary, the account UID plus `sessionRevision`
+forms the lease for every read and write, so switching accounts or logging the
+same UID in again discards late state from the older session. Check-in
 additionally requires authoritative per-forum sign state and rejects an
 unfollowed forum. All writes require explicit user confirmation and perform no
 write when the server already reports the requested state. Anonymous browsing
@@ -566,10 +590,12 @@ approval score. Moderator roles normalize only recognized manager and assistant
 wire values; a flagged but empty or unknown value becomes the generic `吧务`
 label. The raw role string and arbitrary badge images never enter the UI. Missing
 or malformed values collapse to a quiet empty state instead of creating a
-control. These values are response snapshots only. The canonical first floor may
-replace its topic score label with the separately authenticated topic-approval
-control; ordinary floors and nested replies do not submit reactions or expose
-moderation actions.
+control. These values are public response snapshots. With a validated active
+account, the canonical first floor and ordinary floor headers can replace that
+snapshot with an authenticated approval control; a full nested-reply page does
+the same for its parent floor and each returned child. Signed-out and pure-reading
+presentations remain read only, and no approval control exposes moderation
+actions.
 
 Nested replies preserve every server content fragment, including both direct
 leading mentions and the legacy `reply + mention + colon` form. Positive mention
@@ -586,7 +612,10 @@ images, video, and voice use fixed textual markers. Each child receives its own
 local-filter annotation without changing the parent floor, raw count, or post
 pagination. Fully hidden children disappear, but the full-reply entry remains
 available whenever the server declares replies. Pure-reading mode hides the
-entire preview surface without triggering another request.
+entire preview surface without triggering another request. Inline preview
+children remain read only even for a signed-in account and are deliberately
+excluded from the active approval overlay; opening the full nested-reply page is
+required before a child can expose an approval action.
 
 Opening a preview first uses the comment-anchor field so the matching reply can
 be centered after load. Once that response resolves the enclosing parent post,
@@ -600,7 +629,11 @@ Both parent and child content use the same local-filter snapshot and the normal
 rich-content, media, internal-link, profile, and copy boundaries. The page
 rejects responses whose thread or parent identity differs from the request and
 drops nonpositive, cross-context, or duplicate child IDs before they reach the
-list. A hidden anchor produces an explicit notice instead of an invalid scroll
+list. Its authenticated PB Floor overlay batch-reads the parent and every retained
+child after first verifying the parent's topic-or-floor identity through PB Page.
+Pull to refresh explicitly invalidates the matching authenticated read cache and
+repeats that batch read even when the anonymous response returns the same target
+set. A hidden anchor produces an explicit notice instead of an invalid scroll
 target.
 
 Anchored requests carry both the enclosing `pid` and target `spid`. Replies can

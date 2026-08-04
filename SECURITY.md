@@ -91,48 +91,71 @@ accepted only when the error code is zero, the returned sign user ID matches the
 expected account, `is_sign_in` is exactly one, and the returned consecutive-day
 and rank values are nonnegative integers.
 
-Topic approval state must come from an authenticated protobuf post-page request,
-never from the anonymous default value of `Agree.has_agree`. A read first binds
-the same BDUSS to the exact expected UID, forum ID, and normalized forum name
-through the FRS contract, then accepts only a matching thread ID, forum ID,
-canonical first-post ID, present `Agree` message, and zero-or-one `has_agree`.
-Before a requested change, the client may preflight that state, but must acquire
-and bind a fresh FRS `tbs` immediately before at most one HTTPS POST to
-`https://tiebac.baidu.com/c/c/agree/opAgree`. The signed form contains exactly
-`BDUSS`, `_client_version`, `agree_type=2`, `cuid`, `obj_type=3`, `op_type`,
-`post_id`, `tbs`, `thread_id`, and `sign`; it must not add STOKEN or a credential
-Cookie. `post_id` is the validated canonical first-post ID. `op_type=0` approves
-and `op_type=1` cancels approval. The mandatory `cuid` is generated once per
-authenticated client as a random uppercase Galaxy2 identifier (`32HEX|V` plus
-an 8-character Helios checksum), reused only for that client lifetime, never
-derived from hardware or IDFV, and never persisted. A write response is limited
-to 64 KiB and succeeds only when its error code is zero; its optional score is
-not a substitute for that success code.
+Approval state for a topic, ordinary post, or nested reply must come from an
+authenticated protobuf response, never from the anonymous default value of
+`Agree.has_agree`. Topic and post reads use PB Page; nested-reply reads use PB
+Floor only after an authenticated PB Page probe has uniquely validated the
+parent. PB Page must bind a logged-in response user to the exact expected UID,
+forum ID, and thread ID, resolve one canonical first-post ID, normalize its two
+allowed response representations, and reject invalid, cross-thread, conflicting,
+or duplicate ordinary-post and child identities. PB
+Floor inherits that validated UID and must bind the same forum and thread, the
+exact positive parent-post ID and its topic-or-post classification, and every
+positive child ID to that parent. An anchored read must contain the requested
+child exactly once. The App may accept only the exact intersection declared by
+the anonymous page's read descriptor; extra targets cannot create state or a
+control, while a missing or duplicate expected target fails closed.
 
-The authenticated Core client single-flights equivalent calls for check-in and
-topic approval. Topic approval is keyed by UID, thread ID, and canonical first-
-post ID; an identical credential and target state shares one task, while an
-opposite state or rotated credential waits for the active task and then fails
-without issuing another write. The App account-service layer additionally binds
-the operation to `sessionRevision`, coalesces identical operations, and makes
-follow/unfollow and check-in for the same account and forum mutually exclusive,
-including across credential rotation.
-A conflicting App call must wait for the active write to settle, then request
-lease-guarded read-only reconciliation; it must not enqueue or automatically
-start another write. No uncertain write may be automatically retried. The App
-must verify that the initiating account lease is readable and current before
-starting reconciliation and again before applying its result. A lease change or
-Keychain failure before the request prevents it; a change after it starts makes
-the result ineligible to update current state. Follow, unfollow, check-in, and
-topic approval or cancellation all require explicit user confirmation.
-Automatic, scheduled, and batch check-in are deliberately unsupported.
+Before a requested change, the authenticated client reads the exact target and
+returns without writing if it already has the requested state. Otherwise it must
+acquire a fresh FRS context that binds the same credential to the exact expected
+UID, forum ID, normalized forum name, and `tbs`, then make at most one HTTPS POST
+to `https://tiebac.baidu.com/c/c/agree/opAgree`. The signed form contains exactly
+`BDUSS`, `_client_version`, `agree_type=2`, `cuid`, `obj_type`, `op_type`,
+`post_id`, `tbs`, `thread_id`, and `sign`; it must not add STOKEN or a credential
+Cookie. `obj_type` is `3` for the canonical topic first post, `1` for an ordinary
+post, and `2` for a nested reply. `post_id` is respectively that validated first-
+post, post, or child ID; the nested reply's parent remains bound by the preceding
+PB Page and PB Floor reads. `op_type=0` approves and `op_type=1` cancels approval.
+The mandatory `cuid` is generated once per authenticated client as a random
+uppercase Galaxy2 identifier (`32HEX|V` plus an 8-character Helios checksum),
+reused only for that client lifetime, never derived from hardware or IDFV, and
+never persisted. A write response is limited to 64 KiB and succeeds only when
+its error code is zero; its optional score is not a substitute for that code.
+
+An uncertain transport or response failure after the write must trigger exactly
+one read-only target readback operation. That operation must repeat the same
+account, forum, thread, parent, and child binding and can confirm success only
+when the returned state equals the requested state. It must never retry, replay,
+or redirect the write; an unconfirmed readback preserves the original failure.
+
+The authenticated Core client single-flights an identical approval operation for
+one exact target and credential. All approval writes for the same UID, including
+writes to different topics, posts, or nested replies, are serialized behind one
+account-level tail. A conflicting same-target operation waits for the active
+write, performs read-only reconciliation, and issues no second write. The App
+account-service identity additionally includes `sessionRevision` and credential
+state: an identical operation may share one task, while a rotated session or an
+opposite operation waits and then fails for an explicit reread instead of being
+coalesced with the old account lease. Registered batch reads are single-flighted
+by exact UID-plus-`sessionRevision` lease and PB request while visible scopes
+share only their expected-target union. Scope changes, a write in progress, or
+an account switch must invalidate or epoch-guard stale batch results so they
+cannot overwrite a mutation or the new account's state.
+
+Follow, unfollow, check-in, and topic, post, or nested-reply approval or
+cancellation all require explicit user confirmation. Automatic, scheduled, and
+batch check-in are deliberately unsupported. `disagree` or downvote, content
+creation, replying, editing, deletion, reporting, and every other authenticated
+content write remain unsupported and must not be inferred from the approval
+endpoint.
 
 STOKEN is neither extracted nor persisted. An endpoint that actually requires
 it remains unsupported until a login flow can verify that BDUSS and STOKEN
 belong to the same returned account. Server-side thread favorites are therefore
-blocked. The current unfollow, check-in, and topic-approval requests deliberately
-omit STOKEN and must fail visibly rather than fall back to a second write endpoint
-or add hardware-derived device metadata.
+blocked. The current unfollow, check-in, and content-approval requests
+deliberately omit STOKEN and must fail visibly rather than fall back to a second
+write endpoint or add hardware-derived device metadata.
 
 Anonymous public-profile requests must use the protocol's guest target fields.
 They must not place the target user in the current-account field, attach account
@@ -218,13 +241,14 @@ shared thread's origin poll must never be attributed to the outer thread. The
 anonymous UI is strictly read-only and must not expose selection state, collect
 votes, call a submission endpoint, or attach account credentials.
 
-Post author levels, IP locations, and net approval scores originate in the
+Post author levels, IP locations, and public net approval scores originate in the
 anonymous post response. An IP location is server-supplied public author context,
 not the device's current location; displaying it must never request Core Location
-permission. These values are not persisted in local history. Only the separately
-authenticated control attached to the exact canonical first floor may call the
-topic-approval endpoint; ordinary floor and nested-reply labels remain static and
-must not call an agree, disagree, or profile-write endpoint.
+permission. These values are not persisted in local history. Separately
+authenticated approval controls may be attached only to an exact validated topic
+or ordinary floor, or to the exact parent and children on the complete nested-
+reply page. They must not turn the anonymous score into account state or expose a
+`disagree`, downvote, profile-write, or other authenticated action.
 
 Forum-moderator roles come from that same anonymous author object and are
 normalized into a closed manager, assistant, or generic-moderator enum. Raw,
@@ -240,19 +264,24 @@ bounded `floor_rn` fields to that credential-free request; it must not attach an
 account cookie, token, device identifier, or create a second network request.
 Preview routing accepts only positive enclosing thread, post, and comment IDs.
 The preview is a noninteractive text projection: it does not fetch avatars or
-media, expose active external links, or put resource URLs on the pasteboard.
+media, expose active external links, put resource URLs on the pasteboard, or
+expose an approval control even when the authenticated PB Page mirror already
+contains state for that child.
 Every child is filtered independently, while filtering must not change the
 server reply count or remove access to the complete nested-reply page.
 
-Complete nested-reply requests remain credential-free. A direct request sends
-only the public thread, parent-post, and page fields; anchored opening adds the
-public target-comment field while retaining the parent-post field. Before any
-response is displayed or merged, the app requires a matching positive thread and
-parent identity and discards nonpositive, cross-thread, cross-parent, or duplicate
-child identities. Earlier and later pages must advance strictly in their requested
-direction, and an invalid or stalled response must not mutate the loaded snapshot.
-The parent floor is projected into a dedicated model without embedded reply
-previews, preventing duplicate storage and recursive entry points.
+Complete nested-reply content requests remain credential-free. A direct content
+request sends only the public thread, parent-post, and page fields; anchored
+opening adds the public target-comment field while retaining the parent-post
+field. Before any response is displayed or merged, the app requires a matching
+positive thread and parent identity and discards nonpositive, cross-thread,
+cross-parent, or duplicate child identities. Earlier and later pages must advance
+strictly in their requested direction, and an invalid or stalled response must
+not mutate the loaded snapshot. The parent floor is projected into a dedicated
+model without embedded reply previews, preventing duplicate storage and recursive
+entry points. When an account is active, a separate authenticated PB Page plus PB
+Floor approval read may mirror only that already validated page descriptor; it
+must not add a credential to or otherwise change the anonymous content request.
 
 Earlier-floor thread loading reuses the existing credential-free anonymous PB
 request and sends only the public thread ID, adjacent numeric page, active sort,
@@ -264,7 +293,7 @@ loaded content, page state, or cursors; a duplicate-only adjacent page may only
 close that pagination direction. Prepending must preserve the established tail
 page and PID cursor, freeze both pagination directions until leading-floor
 restoration is consumed, and suppress history progress writes only during that layout change.
-This read-only path must not attach account fields, persist response metadata,
+This credential-free pagination path must not attach account fields, persist response metadata,
 or synthesize TiebaLite's separate backward-PID request semantics.
 
 The same anonymous post response may expose a dedicated first-floor object
@@ -278,15 +307,19 @@ first-post identity fallback. The accepted first floor is filtered independently
 and kept outside reply pagination, deduplication, prepend anchors, and PID cursor
 selection. Origin-thread and poll
 context may be attached only to this validated topic section. The app must not
-reconstruct a missing first floor from a thread-list excerpt, persist its
-response copy, or use it to expose filtered content or authenticated actions.
+reconstruct a missing first floor from a thread-list excerpt or persist its
+response copy. The anonymous object alone cannot supply account state; an
+approval control requires the separate exact-target authenticated validation
+described above.
 
 Parent-floor links, media, profiles, and copying reuse the same strict routing,
 credential-free media, and text-projection policies as ordinary post content.
 Parent and child filtering use one immutable rule snapshot; hiding the parent or
 anchor must not expose filtered content, alter pagination identity, or synthesize
-a pasteboard value. The page remains read only and must not expose reply, like,
-delete, report, or other authenticated write operations.
+a pasteboard value. A visible parent or child may expose only the separately
+authenticated, confirmation-gated approval or cancellation control described
+above. Reply, `disagree`, downvote, create, edit, delete, report, and all other
+authenticated write operations remain unavailable.
 
 Internal navigation uses one strict parser for exact `tieba.baidu.com` HTTP(S)
 forum/thread URLs, supported `com.baidu.tieba` forum/thread route text, and the
@@ -676,12 +709,21 @@ be introduced elsewhere.
 Automated tests use synthetic fixed-length placeholders only. Real `BDUSS`,
 `STOKEN`, `tbs`, cookies, passwords, or private account responses must never be
 placed in GitHub Actions secrets or exercised by CI. A write-capable prerelease
-must remain identified as a validation build until its success, explicit server
-failure, uncertain transport failure, account-switch race, and reconciliation
-paths have been exercised manually with a disposable test account. Check-in
-validation must additionally cover an unfollowed forum, missing sign state,
-already-signed idempotence, returned-UID mismatch, and the same-forum
-follow/check-in exclusion rule.
+must remain identified as a validation build until a disposable test account has
+exercised approval and cancellation for a topic, an ordinary post, a complete-
+page parent, and a complete-page child. Device validation must cover an already-
+settled no-write result, explicit server failure, uncertain transport failure
+followed by exactly one readback and no second write, same-account concurrent
+targets proving account-level serialization, identical-operation sharing,
+opposite-operation reconciliation, logout, a `sessionRevision` rotation, and a
+switch to a different UID while reads or writes are in flight. It must also
+confirm that shared batch reads do not duplicate requests, scope removal stops
+protecting removed targets, a late batch cannot overwrite a confirmed write or a
+new account, signed-out browsing makes no authenticated call, inline previews
+remain static, and complete-page parent and child controls both require explicit
+confirmation. Check-in validation must additionally cover an unfollowed forum,
+missing sign state, already-signed idempotence, returned-UID mismatch, and the
+same-forum follow/check-in exclusion rule.
 
 Report security issues privately to the repository owner rather than opening a
 public issue.
