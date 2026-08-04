@@ -1,4 +1,4 @@
-# Protocol definition attribution
+# Protocol and implementation attribution
 
 Most Protocol Buffer definitions under `Protos/`, including the base anonymous
 forum-detail and moderator-list schemas, are copied from
@@ -16,8 +16,8 @@ request and response schemas are adapted from
 closure. TiebaLite is authored by zzc10086 and contributors and is released
 under GPL-3.0; this project is distributed under the same license.
 
-The `Agree.diff_agree_num` field used for read-only post score display is
-adapted from TiebaLite commit `b8409486a2f7bd85881835163bd2c1ebe4fed7f7`.
+The `Agree.diff_agree_num` field used for post score display is adapted from
+TiebaLite commit `b8409486a2f7bd85881835163bd2c1ebe4fed7f7`.
 The minimal `HotThreadList` request/response and `RecommendTopicList` schemas,
 together with the `FrsTabInfo.tab_code`, `ThreadInfo.thread_id`, and
 `ThreadInfo.hot_num` fields used for the anonymous server-defined hot ranking,
@@ -43,6 +43,13 @@ not exposed by the public model or persisted.
 The minimal `forum.sign_in_info` and nested `SignInfo.user_info` fields used to
 read server-authoritative per-forum check-in state are adapted from the same
 TiebaLite commit.
+The `Agree.has_agree`, `agree_type`, and `lz_agree` fields used to read
+account-scoped topic-approval state are adapted from the same TiebaLite commit.
+The Galaxy2 CUID framing and Helios checksum implementation in
+`TiebaGalaxy2CUID.swift` are adapted from TiebaLite's `CuidUtils` and
+`utils/helios` helpers at that commit. This implementation deliberately replaces
+TiebaLite's device-derived prefix with a random client-lifetime prefix that is
+neither hardware-derived nor persisted.
 
 Only the dependency closure needed by the implemented endpoints is included
 here. The schemas document an unofficial Baidu Tieba wire protocol and do not

@@ -96,3 +96,28 @@ public struct TiebaForumAccountState: Sendable, Hashable {
     self.checkIn = checkIn
   }
 }
+
+public struct TiebaThreadAgreement: Sendable, Hashable {
+  public let userID: Int64
+  public let forumID: Int64
+  public let threadID: Int64
+  public let firstPostID: Int64
+  public let isAgreed: Bool
+  public let agreeScore: Int
+
+  public init(
+    userID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    firstPostID: Int64,
+    isAgreed: Bool,
+    agreeScore: Int
+  ) {
+    self.userID = userID
+    self.forumID = forumID
+    self.threadID = threadID
+    self.firstPostID = firstPostID
+    self.isAgreed = isAgreed
+    self.agreeScore = agreeScore
+  }
+}

@@ -45,6 +45,31 @@ struct ForumAccountStateData: Hashable, Sendable {
   let checkIn: ForumCheckInData?
 }
 
+struct ThreadAgreementData: Hashable, Sendable {
+  let userID: Int64
+  let forumID: Int64
+  let threadID: Int64
+  let firstPostID: Int64
+  let isAgreed: Bool
+  let agreeScore: Int
+
+  init(
+    userID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    firstPostID: Int64,
+    isAgreed: Bool,
+    agreeScore: Int
+  ) {
+    self.userID = userID
+    self.forumID = forumID
+    self.threadID = threadID
+    self.firstPostID = firstPostID
+    self.isAgreed = isAgreed
+    self.agreeScore = max(agreeScore, 0)
+  }
+}
+
 protocol AccountService: Sendable {
   func validate(credential: AccountCredentials) async throws -> ValidatedAccount
   func followedForums(
@@ -73,4 +98,42 @@ protocol AccountService: Sendable {
     forumID: Int64,
     forumName: String
   ) async throws -> ForumAccountStateData
+  func threadAgreement(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    firstPostID: Int64
+  ) async throws -> ThreadAgreementData
+  func setThreadAgreed(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    firstPostID: Int64,
+    isAgreed: Bool
+  ) async throws -> ThreadAgreementData
+}
+
+extension AccountService {
+  func threadAgreement(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    firstPostID: Int64
+  ) async throws -> ThreadAgreementData {
+    throw BrowseError.unavailable("当前账户服务不支持读取主题点赞状态。")
+  }
+
+  func setThreadAgreed(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    firstPostID: Int64,
+    isAgreed: Bool
+  ) async throws -> ThreadAgreementData {
+    throw BrowseError.unavailable("当前账户服务不支持更新主题点赞状态。")
+  }
 }

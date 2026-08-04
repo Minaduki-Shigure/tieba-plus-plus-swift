@@ -1230,6 +1230,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       message = "请先关注该贴吧后再试。"
     case .forumCheckInUnavailable:
       message = "该贴吧当前无法签到。"
+    case .threadAgreementWriteConflict:
+      message = "先前的主题点赞操作已结束，请重新读取当前状态。"
     case .server(let code, let serverMessage):
       message = serverMessage.isEmpty ? "贴吧返回错误 \(code)。" : serverMessage
     @unknown default:

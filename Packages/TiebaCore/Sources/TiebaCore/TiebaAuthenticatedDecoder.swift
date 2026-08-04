@@ -173,6 +173,81 @@ enum TiebaAuthenticatedDecoder {
     )
   }
 
+  static func threadAgreement(
+    from response: PbPageResIdl,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    firstPostID: Int64
+  ) throws -> TiebaThreadAgreement {
+    guard response.error.errorno == 0 else {
+      throw TiebaClientError.server(
+        code: response.error.errorno,
+        message: response.error.errmsg
+      )
+    }
+    guard
+      expectedUserID > 0,
+      forumID > 0,
+      threadID > 0,
+      firstPostID > 0,
+      response.hasData,
+      response.data.hasThread,
+      response.data.hasForum,
+      response.data.thread.id == threadID,
+      response.data.forum.id == forumID,
+      response.data.thread.hasAgree
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+
+    let data = response.data
+    let declaredFirstPostID = data.thread.firstPostID
+    guard declaredFirstPostID == 0 || declaredFirstPostID == firstPostID else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    if declaredFirstPostID == 0 {
+      let matchesExpectedFirstPost: (Post) -> Bool = { post in
+        post.id == firstPostID
+          && post.floor == 1
+          && (post.tid == 0 || post.tid == threadID)
+      }
+      guard
+        matchesExpectedFirstPost(data.firstFloorPost)
+          || data.postList.contains(where: matchesExpectedFirstPost)
+      else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+    }
+
+    let rawAgreement = data.thread.agree.hasAgree
+    guard rawAgreement == 0 || rawAgreement == 1 else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    return TiebaThreadAgreement(
+      userID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      firstPostID: firstPostID,
+      isAgreed: rawAgreement == 1,
+      agreeScore: agreeScore(data.thread.agree)
+    )
+  }
+
+  static func threadAgreementWriteScore(from body: Data) throws -> Int? {
+    let object = try responseObject(from: body)
+    try checkServerError(object)
+    guard
+      let data = object["data"] as? [String: Any],
+      let agree = data["agree"] as? [String: Any],
+      agree["score"] != nil
+    else { return nil }
+    guard let score = int64(agree["score"]) else {
+      throw TiebaClientError.invalidJSON
+    }
+    return Int(clamping: score)
+  }
+
   private static func responseObject(from body: Data) throws -> [String: Any] {
     do {
       guard
@@ -210,6 +285,15 @@ enum TiebaAuthenticatedDecoder {
       consecutiveDays: Int(userInfo.contSignNum),
       rank: Int(userInfo.userSignRank)
     )
+  }
+
+  private static func agreeScore(_ agree: Agree) -> Int {
+    if agree.diffAgreeNum != 0 {
+      return Int(clamping: agree.diffAgreeNum)
+    }
+    let (score, overflow) = agree.agreeNum.subtractingReportingOverflow(agree.disagreeNum)
+    guard !overflow else { return agree.agreeNum >= 0 ? Int.max : Int.min }
+    return Int(clamping: score)
   }
 
   private static func checkServerError(_ object: [String: Any]) throws {

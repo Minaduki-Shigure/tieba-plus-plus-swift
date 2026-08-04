@@ -13,6 +13,7 @@ public enum TiebaClientError: Error, Sendable, Equatable {
   case invalidAuthenticatedResponse
   case forumNotFollowed
   case forumCheckInUnavailable
+  case threadAgreementWriteConflict
   case server(code: Int32, message: String)
 }
 
@@ -43,6 +44,8 @@ extension TiebaClientError: LocalizedError {
       "The forum must be followed before checking in."
     case .forumCheckInUnavailable:
       "Tieba did not advertise check-in state for this forum."
+    case .threadAgreementWriteConflict:
+      "A conflicting thread agreement operation completed; read the current state before retrying."
     case .server(let code, let message):
       message.isEmpty ? "Tieba returned error \(code)." : message
     }

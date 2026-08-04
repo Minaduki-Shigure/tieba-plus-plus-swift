@@ -387,6 +387,7 @@ struct ThreadView: View {
                 VStack(spacing: 0) {
                   PostView(
                     post: firstPost,
+                    threadAgreementContext: threadAgreementContext(for: firstPost),
                     originThread: viewModel.originThread,
                     poll: viewModel.poll,
                     service: service,
@@ -461,6 +462,7 @@ struct ThreadView: View {
                 VStack(spacing: 0) {
                   PostView(
                     post: post,
+                    threadAgreementContext: nil,
                     originThread: nil,
                     poll: nil,
                     service: service,
@@ -779,6 +781,53 @@ struct ThreadView: View {
       posts: viewModel.posts
     )
   }
+
+  private func threadAgreementContext(
+    for firstPost: BrowsePost
+  ) -> ThreadAgreementContext? {
+    ThreadAgreementContext(
+      thread: viewModel.thread,
+      firstPost: firstPost
+    )
+  }
+}
+
+struct ThreadAgreementTarget: Hashable, Sendable {
+  let forumID: Int64
+  let forumName: String
+  let threadID: Int64
+  let firstPostID: Int64
+
+  init?(thread: BrowseThread, firstPost: BrowsePost) {
+    let forumName = thread.forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    guard
+      thread.forumID > 0,
+      !forumName.isEmpty,
+      thread.id > 0,
+      thread.firstPostID > 0,
+      firstPost.id == thread.firstPostID,
+      firstPost.threadID == thread.id,
+      firstPost.floor == 1
+    else { return nil }
+    forumID = thread.forumID
+    self.forumName = forumName
+    threadID = thread.id
+    firstPostID = firstPost.id
+  }
+}
+
+struct ThreadAgreementContext {
+  let target: ThreadAgreementTarget
+  let fallbackAgreeScore: Int
+
+  init?(thread: BrowseThread, firstPost: BrowsePost) {
+    guard let target = ThreadAgreementTarget(thread: thread, firstPost: firstPost) else {
+      return nil
+    }
+    self.target = target
+    fallbackAgreeScore = thread.agreeScore
+  }
 }
 
 enum ThreadAuthorAvatarResolver {
@@ -842,6 +891,7 @@ private struct ThreadProgressTaskID: Hashable {
 
 private struct PostView: View {
   let post: BrowsePost
+  let threadAgreementContext: ThreadAgreementContext?
   let originThread: BrowseThread?
   let poll: BrowsePoll?
   let service:
@@ -857,6 +907,7 @@ private struct PostView: View {
   let openComments: (Int64?) -> Void
 
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
+  @Environment(\.accountAccess) private var accountAccess
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
@@ -938,8 +989,16 @@ private struct PostView: View {
         authorIdentity
       }
 
-      ReadOnlyAgreeLabel(score: post.agreeScore)
-        .padding(.top, 2)
+      if let threadAgreementContext, let accountAccess {
+        ThreadAgreementControl(
+          context: threadAgreementContext,
+          access: accountAccess
+        )
+        .id(threadAgreementContext.target)
+      } else {
+        ReadOnlyAgreeLabel(score: post.agreeScore)
+          .padding(.top, 2)
+      }
     }
   }
 
@@ -1013,6 +1072,159 @@ private struct PostView: View {
       username: post.authorUsername,
       showsBoth: showsBothNames
     )
+  }
+}
+
+private struct ThreadAgreementControl: View {
+  @StateObject private var viewModel: ThreadAgreementViewModel
+  @State private var pendingAgreedState: Bool?
+  let fallbackAgreeScore: Int
+
+  init(context: ThreadAgreementContext, access: AccountAccess) {
+    let target = context.target
+    fallbackAgreeScore = context.fallbackAgreeScore
+    _viewModel = StateObject(
+      wrappedValue: ThreadAgreementViewModel(
+        forumID: target.forumID,
+        forumName: target.forumName,
+        threadID: target.threadID,
+        firstPostID: target.firstPostID,
+        fallbackAgreeScore: context.fallbackAgreeScore,
+        access: access
+      )
+    )
+  }
+
+  var body: some View {
+    control
+      .task { await viewModel.loadIfNeeded() }
+      .onChange(of: fallbackAgreeScore) { agreeScore in
+        viewModel.updateFallbackAgreeScore(agreeScore)
+      }
+      .onDisappear {
+        pendingAgreedState = nil
+        viewModel.presentationDidDisappear()
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+        pendingAgreedState = nil
+        let token = viewModel.invalidateForAccountSessionChange()
+        Task { @MainActor in
+          await viewModel.reloadAfterAccountSessionChange(ifCurrent: token)
+        }
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .threadAgreementDidChange)) {
+        notification in
+        guard let change = ThreadAgreementChange(notification) else { return }
+        Task { @MainActor in
+          if await viewModel.threadAgreementDidChange(change) {
+            pendingAgreedState = nil
+          }
+        }
+      }
+      .confirmationDialog(
+        pendingAgreedState == true ? "点赞这个主题？" : "取消点赞这个主题？",
+        isPresented: Binding(
+          get: { pendingAgreedState != nil },
+          set: { if !$0 { pendingAgreedState = nil } }
+        ),
+        titleVisibility: .visible
+      ) {
+        if pendingAgreedState == true {
+          Button("点赞") { confirmAgreedState(true) }
+        } else if pendingAgreedState == false {
+          Button("取消点赞", role: .destructive) { confirmAgreedState(false) }
+        }
+        Button("取消", role: .cancel) { pendingAgreedState = nil }
+      } message: {
+        Text("这会使用当前贴吧账户更新主题点赞状态。")
+      }
+      .alert(
+        "无法更新主题点赞",
+        isPresented: Binding(
+          get: { viewModel.errorMessage != nil },
+          set: { if !$0 { viewModel.dismissError() } }
+        )
+      ) {
+        Button("好", role: .cancel) { viewModel.dismissError() }
+      } message: {
+        Text(viewModel.errorMessage ?? "无法完成主题点赞操作。")
+      }
+  }
+
+  @ViewBuilder
+  private var control: some View {
+    switch viewModel.state {
+    case .idle, .signedOut:
+      ReadOnlyAgreeLabel(score: viewModel.displayedAgreeScore)
+        .padding(.top, 2)
+    case .loading:
+      ProgressView()
+        .controlSize(.small)
+        .frame(width: 44, height: 44)
+        .accessibilityLabel("正在读取主题点赞状态")
+    case .ready(let snapshot):
+      Button {
+        pendingAgreedState = !snapshot.isAgreed
+      } label: {
+        agreementLabel(snapshot: snapshot, showsProgress: false)
+      }
+      .buttonStyle(.plain)
+      .foregroundStyle(snapshot.isAgreed ? Color.accentColor : Color.secondary)
+      .accessibilityLabel(snapshot.isAgreed ? "取消点赞主题" : "点赞主题")
+      .accessibilityValue("净赞数 \(snapshot.agreeScore.formatted())")
+      .help(snapshot.isAgreed ? "取消点赞主题" : "点赞主题")
+      .accessibilityIdentifier("thread-agreement-button")
+    case .mutating(let previous, _):
+      agreementLabel(snapshot: previous, showsProgress: true)
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("正在更新主题点赞")
+    case .failed:
+      Button {
+        Task { @MainActor in await viewModel.reload() }
+      } label: {
+        HStack(spacing: 5) {
+          Image(systemName: "arrow.clockwise")
+          if viewModel.displayedAgreeScore > 0 {
+            Text(viewModel.displayedAgreeScore.formatted(.number.notation(.compactName)))
+              .monospacedDigit()
+          }
+        }
+        .font(.caption)
+        .frame(minWidth: 44, minHeight: 44)
+      }
+      .buttonStyle(.plain)
+      .foregroundStyle(.secondary)
+      .accessibilityLabel("重试读取主题点赞状态")
+      .help("重试读取主题点赞状态")
+      .accessibilityIdentifier("thread-agreement-retry")
+    }
+  }
+
+  private func agreementLabel(
+    snapshot: ThreadAgreementSnapshot,
+    showsProgress: Bool
+  ) -> some View {
+    HStack(spacing: 5) {
+      if showsProgress {
+        ProgressView()
+          .controlSize(.small)
+      } else {
+        Image(systemName: snapshot.isAgreed ? "hand.thumbsup.fill" : "hand.thumbsup")
+      }
+      if snapshot.agreeScore > 0 {
+        Text(snapshot.agreeScore.formatted(.number.notation(.compactName)))
+          .monospacedDigit()
+      }
+    }
+    .font(.caption)
+    .frame(minWidth: 44, minHeight: 44)
+    .contentShape(Rectangle())
+  }
+
+  private func confirmAgreedState(_ isAgreed: Bool) {
+    pendingAgreedState = nil
+    Task { @MainActor in await viewModel.setAgreed(isAgreed) }
   }
 }
 

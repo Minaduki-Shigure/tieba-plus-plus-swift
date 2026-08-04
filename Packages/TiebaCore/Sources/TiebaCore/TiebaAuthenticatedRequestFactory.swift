@@ -11,9 +11,19 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let followClientVersion = "7.2.0.0"
   static let unfollowClientVersion = "11.10.8.6"
   static let checkInClientVersion = "11.10.8.6"
+  static let agreementClientVersion = "22.6.5.1"
   static let writeHost = TiebaRequestFactory.serviceHost
 
   let configuration: TiebaClientConfiguration
+  private let agreementCUID: String
+
+  init(
+    configuration: TiebaClientConfiguration,
+    agreementCUID: String = TiebaGalaxy2CUID.generate()
+  ) {
+    self.configuration = configuration
+    self.agreementCUID = agreementCUID
+  }
 
   func validateAccount(credential: TiebaBDUSSCredential) throws -> URLRequest {
     try validate(credential)
@@ -147,6 +157,78 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     )
   }
 
+  func threadAgreement(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    threadID: Int64,
+    firstPostID: Int64
+  ) throws -> URLRequest {
+    try validate(credential)
+    try validateThreadAgreementIdentity(
+      expectedUserID: expectedUserID,
+      threadID: threadID,
+      firstPostID: firstPostID
+    )
+    try validateConfiguration()
+
+    var common = CommonReq()
+    common.clientType = 2
+    common.clientVersion = configuration.clientVersion
+    common.bduss = credential.bduss
+
+    var data = PbPageReqIdl.DataReq()
+    data.common = common
+    data.kz = threadID
+    data.pid = firstPostID
+    data.pn = 0
+    data.rn = 2
+
+    var message = PbPageReqIdl()
+    message.data = data
+    return try protobufRequest(
+      path: "/c/f/pb/page",
+      command: 302_001,
+      message: message
+    )
+  }
+
+  func setThreadAgreement(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    threadID: Int64,
+    firstPostID: Int64,
+    tbs: String,
+    isAgreed: Bool
+  ) throws -> URLRequest {
+    try validate(credential)
+    try validateThreadAgreementIdentity(
+      expectedUserID: expectedUserID,
+      threadID: threadID,
+      firstPostID: firstPostID
+    )
+    guard Self.isValidTBS(tbs) else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+
+    let clientVersion = Self.agreementClientVersion
+    return try signedFormRequest(
+      host: Self.writeHost,
+      path: "/c/c/agree/opAgree",
+      fields: [
+        ("BDUSS", credential.bduss),
+        ("_client_version", clientVersion),
+        ("agree_type", "2"),
+        ("cuid", agreementCUID),
+        ("obj_type", "3"),
+        ("op_type", isAgreed ? "0" : "1"),
+        ("post_id", String(firstPostID)),
+        ("tbs", tbs),
+        ("thread_id", String(threadID)),
+      ],
+      userAgent: "bdtb for Android \(clientVersion)"
+    )
+  }
+
   static func signature(for fields: [(String, String)]) -> String {
     TiebaFormSigner.signature(for: fields)
   }
@@ -250,6 +332,25 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     }
     guard forumID > 0 else {
       throw TiebaClientError.invalidArgument("Forum ID must be positive.")
+    }
+  }
+
+  private func validateThreadAgreementIdentity(
+    expectedUserID: Int64,
+    threadID: Int64,
+    firstPostID: Int64
+  ) throws {
+    guard expectedUserID > 0 else {
+      throw TiebaClientError.invalidArgument("Expected user ID must be positive.")
+    }
+    guard threadID > 0 else {
+      throw TiebaClientError.invalidArgument("Thread ID must be positive.")
+    }
+    guard firstPostID > 0 else {
+      throw TiebaClientError.invalidArgument("First post ID must be positive.")
+    }
+    guard TiebaGalaxy2CUID.isValid(agreementCUID) else {
+      throw TiebaClientError.invalidArgument("Agreement client identifier is invalid.")
     }
   }
 

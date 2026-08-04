@@ -36,6 +36,48 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
     forumID: Int64,
     forumName: String
   ) async throws -> TiebaForumAccountState
+  func getThreadAgreement(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    firstPostID: Int64
+  ) async throws -> TiebaThreadAgreement
+  func setThreadAgreementState(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    firstPostID: Int64,
+    isAgreed: Bool
+  ) async throws -> TiebaThreadAgreement
+}
+
+extension TiebaAuthenticatedAccountClient {
+  func getThreadAgreement(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    firstPostID: Int64
+  ) async throws -> TiebaThreadAgreement {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
+  func setThreadAgreementState(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    firstPostID: Int64,
+    isAgreed: Bool
+  ) async throws -> TiebaThreadAgreement {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
 }
 
 extension TiebaAuthenticatedClient: TiebaAuthenticatedAccountClient {}
@@ -43,14 +85,20 @@ extension TiebaAuthenticatedClient: TiebaAuthenticatedAccountClient {}
 struct TiebaCoreAccountService: AccountService {
   private let client: any TiebaAuthenticatedAccountClient
   private let forumWriteCoordinator: ForumAccountWriteCoordinator
+  private let threadAgreementWriteCoordinator: ThreadAgreementWriteCoordinator
 
   init(client: any TiebaAuthenticatedAccountClient = TiebaAuthenticatedClient()) {
     self.client = client
     self.forumWriteCoordinator = ForumAccountWriteCoordinator(client: client)
+    self.threadAgreementWriteCoordinator = ThreadAgreementWriteCoordinator(client: client)
   }
 
   func forumWriteConflictWaiterCount() async -> Int {
     await forumWriteCoordinator.conflictWaiterCount()
+  }
+
+  func threadAgreementWriteConflictWaiterCount() async -> Int {
+    await threadAgreementWriteCoordinator.conflictWaiterCount()
   }
 
   func validate(credential: AccountCredentials) async throws -> ValidatedAccount {
@@ -202,6 +250,61 @@ struct TiebaCoreAccountService: AccountService {
     return Self.accountStateData(response)
   }
 
+  func threadAgreement(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    firstPostID: Int64
+  ) async throws -> ThreadAgreementData {
+    let response: TiebaThreadAgreement
+    do {
+      response = try await client.getThreadAgreement(
+        credential: TiebaBDUSSCredential(bduss: session.bduss),
+        expectedUserID: session.id,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        firstPostID: firstPostID
+      )
+      try Task.checkCancellation()
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.accountError(error)
+    }
+    return Self.threadAgreementData(response)
+  }
+
+  func setThreadAgreed(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    firstPostID: Int64,
+    isAgreed: Bool
+  ) async throws -> ThreadAgreementData {
+    let response: TiebaThreadAgreement
+    do {
+      response = try await threadAgreementWriteCoordinator.perform(
+        session: session,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        firstPostID: firstPostID,
+        isAgreed: isAgreed
+      )
+      try Task.checkCancellation()
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch ThreadAgreementWriteCoordinatorError.conflictingOperationSettled {
+      throw BrowseError.unavailable("先前的主题点赞操作已结束，请重新读取当前状态。")
+    } catch {
+      throw Self.accountError(error)
+    }
+    return Self.threadAgreementData(response)
+  }
+
   private static func membershipData(
     _ membership: TiebaForumMembership
   ) -> ForumMembershipData {
@@ -225,6 +328,19 @@ struct TiebaCoreAccountService: AccountService {
           rank: $0.rank
         )
       }
+    )
+  }
+
+  private static func threadAgreementData(
+    _ agreement: TiebaThreadAgreement
+  ) -> ThreadAgreementData {
+    ThreadAgreementData(
+      userID: agreement.userID,
+      forumID: agreement.forumID,
+      threadID: agreement.threadID,
+      firstPostID: agreement.firstPostID,
+      isAgreed: agreement.isAgreed,
+      agreeScore: max(agreement.agreeScore, 0)
     )
   }
 
@@ -255,12 +371,140 @@ struct TiebaCoreAccountService: AccountService {
       message = "请先关注该贴吧后再签到。"
     case .forumCheckInUnavailable:
       message = "该贴吧当前无法签到。"
+    case .threadAgreementWriteConflict:
+      message = "先前的主题点赞操作已结束，请重新读取当前状态。"
     case .server(let code, _):
       message = "账户请求失败（错误码 \(code)）。"
     @unknown default:
       message = "账户请求失败，请稍后重试。"
     }
     return .unavailable(message)
+  }
+}
+
+private enum ThreadAgreementWriteCoordinatorError: Error, Sendable {
+  case conflictingOperationSettled
+}
+
+private struct ThreadAgreementWriteIdentity:
+  Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let sessionRevision: UUID
+  let forumID: Int64
+  let forumName: String
+  private let bduss: String
+
+  init(session: StoredAccountSession, forumID: Int64, forumName: String) {
+    sessionRevision = session.sessionRevision
+    self.forumID = forumID
+    self.forumName = forumName
+    bduss = session.bduss
+  }
+
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.sessionRevision == rhs.sessionRevision
+      && lhs.forumID == rhs.forumID
+      && lhs.forumName == rhs.forumName
+      && lhs.bduss == rhs.bduss
+  }
+
+  var description: String { "ThreadAgreementWriteIdentity(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(
+      self,
+      children: [
+        "sessionRevision": sessionRevision,
+        "forumID": forumID,
+        "forumName": forumName,
+      ],
+      displayStyle: .struct
+    )
+  }
+}
+
+private actor ThreadAgreementWriteCoordinator {
+  private struct Key: Hashable, Sendable {
+    let userID: Int64
+    let threadID: Int64
+    let firstPostID: Int64
+  }
+
+  private struct Entry: Sendable {
+    let id: UUID
+    let identity: ThreadAgreementWriteIdentity
+    let targetAgreed: Bool
+    let task: Task<TiebaThreadAgreement, Error>
+  }
+
+  private let client: any TiebaAuthenticatedAccountClient
+  private var inFlight: [Key: Entry] = [:]
+  private var conflictWaiters = 0
+
+  init(client: any TiebaAuthenticatedAccountClient) {
+    self.client = client
+  }
+
+  func perform(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    firstPostID: Int64,
+    isAgreed: Bool
+  ) async throws -> TiebaThreadAgreement {
+    try Task.checkCancellation()
+    let normalizedForumName = forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    let key = Key(userID: session.id, threadID: threadID, firstPostID: firstPostID)
+    let identity = ThreadAgreementWriteIdentity(
+      session: session,
+      forumID: forumID,
+      forumName: normalizedForumName
+    )
+    if let entry = inFlight[key] {
+      if entry.identity == identity, entry.targetAgreed == isAgreed {
+        return try await entry.task.value
+      }
+      conflictWaiters += 1
+      defer { conflictWaiters -= 1 }
+      _ = await entry.task.result
+      try Task.checkCancellation()
+      throw ThreadAgreementWriteCoordinatorError.conflictingOperationSettled
+    }
+
+    let client = client
+    let credential = TiebaBDUSSCredential(bduss: session.bduss)
+    let expectedUserID = session.id
+    let entryID = UUID()
+    let task = Task.detached { () async throws -> TiebaThreadAgreement in
+      try await client.setThreadAgreementState(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        forumName: normalizedForumName,
+        threadID: threadID,
+        firstPostID: firstPostID,
+        isAgreed: isAgreed
+      )
+    }
+    inFlight[key] = Entry(
+      id: entryID,
+      identity: identity,
+      targetAgreed: isAgreed,
+      task: task
+    )
+    defer { clearEntry(for: key, id: entryID) }
+    return try await task.value
+  }
+
+  func conflictWaiterCount() -> Int {
+    conflictWaiters
+  }
+
+  private func clearEntry(for key: Key, id: UUID) {
+    guard inFlight[key]?.id == id else { return }
+    inFlight.removeValue(forKey: key)
   }
 }
 

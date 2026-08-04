@@ -91,6 +91,75 @@ struct ForumCheckInChange: Equatable, Sendable {
   }
 }
 
+struct ThreadAgreementChange: Equatable, Sendable {
+  let accountID: Int64
+  let sessionRevision: UUID
+  let forumID: Int64
+  let threadID: Int64
+  let firstPostID: Int64
+  let isAgreed: Bool
+  let agreeScore: Int
+
+  init(
+    accountID: Int64,
+    sessionRevision: UUID,
+    forumID: Int64,
+    threadID: Int64,
+    firstPostID: Int64,
+    isAgreed: Bool,
+    agreeScore: Int
+  ) {
+    self.accountID = accountID
+    self.sessionRevision = sessionRevision
+    self.forumID = forumID
+    self.threadID = threadID
+    self.firstPostID = firstPostID
+    self.isAgreed = isAgreed
+    self.agreeScore = max(agreeScore, 0)
+  }
+
+  init?(_ notification: Notification) {
+    guard
+      let accountID = accountNotificationInt64(
+        notification.userInfo?[AccountNotificationKey.accountID]
+      ),
+      let sessionRevisionValue = notification.userInfo?[AccountNotificationKey.sessionRevision]
+        as? String,
+      let sessionRevision = UUID(uuidString: sessionRevisionValue),
+      let forumID = accountNotificationInt64(
+        notification.userInfo?[AccountNotificationKey.forumID]
+      ),
+      let threadID = accountNotificationInt64(
+        notification.userInfo?[AccountNotificationKey.threadID]
+      ),
+      let firstPostID = accountNotificationInt64(
+        notification.userInfo?[AccountNotificationKey.firstPostID]
+      ),
+      let isAgreed = accountNotificationInt64(
+        notification.userInfo?[AccountNotificationKey.isAgreed]
+      ),
+      let agreeScoreValue = accountNotificationInt64(
+        notification.userInfo?[AccountNotificationKey.agreeScore]
+      ),
+      let agreeScore = Int(exactly: agreeScoreValue),
+      accountID > 0,
+      forumID > 0,
+      threadID > 0,
+      firstPostID > 0,
+      isAgreed == 0 || isAgreed == 1
+    else { return nil }
+    self.init(
+      accountID: accountID,
+      sessionRevision: sessionRevision,
+      forumID: forumID,
+      threadID: threadID,
+      firstPostID: firstPostID,
+      isAgreed: isAgreed == 1,
+      agreeScore: agreeScore
+    )
+  }
+}
+
 extension Notification.Name {
   static let accountSessionDidChange = Notification.Name(
     "TiebaPlusPlus.accountSessionDidChange"
@@ -100,6 +169,9 @@ extension Notification.Name {
   )
   static let forumCheckInDidChange = Notification.Name(
     "TiebaPlusPlus.forumCheckInDidChange"
+  )
+  static let threadAgreementDidChange = Notification.Name(
+    "TiebaPlusPlus.threadAgreementDidChange"
   )
 }
 
@@ -145,6 +217,22 @@ enum AccountChangeNotifications {
       ]
     )
   }
+
+  static func postThreadAgreementChange(_ change: ThreadAgreementChange) {
+    NotificationCenter.default.post(
+      name: .threadAgreementDidChange,
+      object: nil,
+      userInfo: [
+        AccountNotificationKey.accountID: NSNumber(value: change.accountID),
+        AccountNotificationKey.sessionRevision: change.sessionRevision.uuidString,
+        AccountNotificationKey.forumID: NSNumber(value: change.forumID),
+        AccountNotificationKey.threadID: NSNumber(value: change.threadID),
+        AccountNotificationKey.firstPostID: NSNumber(value: change.firstPostID),
+        AccountNotificationKey.isAgreed: NSNumber(value: change.isAgreed),
+        AccountNotificationKey.agreeScore: NSNumber(value: change.agreeScore),
+      ]
+    )
+  }
 }
 
 private enum AccountNotificationKey {
@@ -155,4 +243,13 @@ private enum AccountNotificationKey {
   static let isFollowed = "isFollowed"
   static let consecutiveDays = "consecutiveDays"
   static let rank = "rank"
+  static let threadID = "threadID"
+  static let firstPostID = "firstPostID"
+  static let isAgreed = "isAgreed"
+  static let agreeScore = "agreeScore"
+}
+
+private func accountNotificationInt64(_ value: Any?) -> Int64? {
+  guard let number = value as? NSNumber else { return nil }
+  return Int64(number.stringValue)
 }

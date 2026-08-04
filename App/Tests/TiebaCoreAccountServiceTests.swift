@@ -84,6 +84,344 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     XCTAssertEqual(snapshot.accountStateRequests.first?.credentialByteCount, 192)
   }
 
+  func testThreadAgreementReadAndWritePassIdentityAndMapAuthoritativeResponses() async throws {
+    let client = AccountClientSpy(
+      threadAgreement: TiebaThreadAgreement(
+        userID: 7,
+        forumID: 42,
+        threadID: 123,
+        firstPostID: 456,
+        isAgreed: false,
+        agreeScore: 17
+      ),
+      threadAgreementMutation: TiebaThreadAgreement(
+        userID: 7,
+        forumID: 42,
+        threadID: 123,
+        firstPostID: 456,
+        isAgreed: true,
+        agreeScore: -3
+      )
+    )
+    let service = TiebaCoreAccountService(client: client)
+    let storedSession = session()
+
+    let current = try await service.threadAgreement(
+      session: storedSession,
+      forumID: 42,
+      forumName: "swift",
+      threadID: 123,
+      firstPostID: 456
+    )
+    let updated = try await service.setThreadAgreed(
+      session: storedSession,
+      forumID: 42,
+      forumName: "  swift  ",
+      threadID: 123,
+      firstPostID: 456,
+      isAgreed: true
+    )
+
+    XCTAssertEqual(
+      current,
+      ThreadAgreementData(
+        userID: 7,
+        forumID: 42,
+        threadID: 123,
+        firstPostID: 456,
+        isAgreed: false,
+        agreeScore: 17
+      )
+    )
+    XCTAssertEqual(
+      updated,
+      ThreadAgreementData(
+        userID: 7,
+        forumID: 42,
+        threadID: 123,
+        firstPostID: 456,
+        isAgreed: true,
+        agreeScore: 0
+      )
+    )
+    let snapshot = await client.snapshot()
+    XCTAssertEqual(
+      snapshot.threadAgreementRequests,
+      [
+        ThreadAgreementClientRequest(
+          credentialByteCount: 192,
+          expectedUserID: 7,
+          forumID: 42,
+          forumName: "swift",
+          threadID: 123,
+          firstPostID: 456,
+          desiredState: nil
+        )
+      ]
+    )
+    XCTAssertEqual(
+      snapshot.threadAgreementMutationRequests,
+      [
+        ThreadAgreementClientRequest(
+          credentialByteCount: 192,
+          expectedUserID: 7,
+          forumID: 42,
+          forumName: "swift",
+          threadID: 123,
+          firstPostID: 456,
+          desiredState: true
+        )
+      ]
+    )
+  }
+
+  func testConcurrentIdenticalThreadAgreementWritesShareOneCoreTask() async throws {
+    let client = AccountClientSpy(
+      threadAgreementMutation: coreThreadAgreement(isAgreed: true, score: 18),
+      suspendsThreadAgreementMutation: true
+    )
+    let service = TiebaCoreAccountService(client: client)
+    let storedSession = session()
+
+    let first = Task {
+      try await service.setThreadAgreed(
+        session: storedSession,
+        forumID: 42,
+        forumName: "  swift  ",
+        threadID: 123,
+        firstPostID: 456,
+        isAgreed: true
+      )
+    }
+    try await waitForAccountServiceTest {
+      await client.threadAgreementMutationRequestCount() == 1
+    }
+    let second = Task {
+      try await service.setThreadAgreed(
+        session: storedSession,
+        forumID: 42,
+        forumName: "swift",
+        threadID: 123,
+        firstPostID: 456,
+        isAgreed: true
+      )
+    }
+    for _ in 0..<50 { await Task.yield() }
+
+    let requestCountBeforeRelease = await client.threadAgreementMutationRequestCount()
+    XCTAssertEqual(requestCountBeforeRelease, 1)
+    await client.releaseThreadAgreementMutation()
+    let firstResult = try await first.value
+    let secondResult = try await second.value
+
+    XCTAssertEqual(firstResult, secondResult)
+    XCTAssertTrue(firstResult.isAgreed)
+    XCTAssertEqual(firstResult.agreeScore, 18)
+    let finalRequestCount = await client.threadAgreementMutationRequestCount()
+    XCTAssertEqual(finalRequestCount, 1)
+  }
+
+  func testOppositeThreadAgreementTargetWaitsThenReturnsSettledConflictWithoutSecondWrite()
+    async throws
+  {
+    let client = AccountClientSpy(
+      threadAgreementMutation: coreThreadAgreement(isAgreed: true, score: 18),
+      suspendsThreadAgreementMutation: true
+    )
+    let service = TiebaCoreAccountService(client: client)
+    let storedSession = session()
+    let first = Task {
+      try await service.setThreadAgreed(
+        session: storedSession,
+        forumID: 42,
+        forumName: "swift",
+        threadID: 123,
+        firstPostID: 456,
+        isAgreed: true
+      )
+    }
+    try await waitForAccountServiceTest {
+      await client.threadAgreementMutationRequestCount() == 1
+    }
+
+    let conflictProbe = AccountServiceCompletionProbe()
+    let conflict = Task { () -> String? in
+      await conflictProbe.markStarted()
+      do {
+        _ = try await service.setThreadAgreed(
+          session: storedSession,
+          forumID: 42,
+          forumName: "swift",
+          threadID: 123,
+          firstPostID: 456,
+          isAgreed: false
+        )
+        await conflictProbe.markCompleted()
+        return nil
+      } catch {
+        await conflictProbe.markCompleted()
+        return (error as? BrowseError)?.errorDescription
+      }
+    }
+    try await waitForAccountServiceTest { await conflictProbe.hasStarted() }
+    try await waitForAccountServiceTest {
+      await service.threadAgreementWriteConflictWaiterCount() == 1
+    }
+
+    let requestCountBeforeRelease = await client.threadAgreementMutationRequestCount()
+    let completedBeforeRelease = await conflictProbe.hasCompleted()
+    XCTAssertEqual(requestCountBeforeRelease, 1)
+    XCTAssertFalse(completedBeforeRelease)
+    await client.releaseThreadAgreementMutation()
+    let firstResult = try await first.value
+    try await waitForAccountServiceTest { await conflictProbe.hasCompleted() }
+    let conflictMessage = await conflict.value
+
+    XCTAssertTrue(firstResult.isAgreed)
+    XCTAssertEqual(
+      conflictMessage,
+      "先前的主题点赞操作已结束，请重新读取当前状态。"
+    )
+    let finalRequestCount = await client.threadAgreementMutationRequestCount()
+    let finalConflictWaiterCount = await service.threadAgreementWriteConflictWaiterCount()
+    XCTAssertEqual(finalRequestCount, 1)
+    XCTAssertEqual(finalConflictWaiterCount, 0)
+  }
+
+  func testRotatedThreadAgreementSessionOrChangedCredentialNeverCoalesces() async throws {
+    let client = AccountClientSpy(
+      threadAgreementMutation: coreThreadAgreement(isAgreed: true, score: 18),
+      suspendsThreadAgreementMutation: true
+    )
+    let service = TiebaCoreAccountService(client: client)
+    let originalRevision = try XCTUnwrap(
+      UUID(uuidString: "00000000-0000-0000-0000-000000000031")
+    )
+    let rotatedRevision = try XCTUnwrap(
+      UUID(uuidString: "00000000-0000-0000-0000-000000000032")
+    )
+    let original = session(sessionRevision: originalRevision, credentialComponent: "b")
+    let rotated = session(sessionRevision: rotatedRevision, credentialComponent: "b")
+    let changedCredential = session(sessionRevision: originalRevision, credentialComponent: "c")
+    let first = Task {
+      try await service.setThreadAgreed(
+        session: original,
+        forumID: 42,
+        forumName: "swift",
+        threadID: 123,
+        firstPostID: 456,
+        isAgreed: true
+      )
+    }
+    try await waitForAccountServiceTest {
+      await client.threadAgreementMutationRequestCount() == 1
+    }
+
+    let rotatedConflict = Task { () -> String? in
+      do {
+        _ = try await service.setThreadAgreed(
+          session: rotated,
+          forumID: 42,
+          forumName: "swift",
+          threadID: 123,
+          firstPostID: 456,
+          isAgreed: true
+        )
+        return nil
+      } catch {
+        return (error as? BrowseError)?.errorDescription
+      }
+    }
+    let credentialConflict = Task { () -> String? in
+      do {
+        _ = try await service.setThreadAgreed(
+          session: changedCredential,
+          forumID: 42,
+          forumName: "swift",
+          threadID: 123,
+          firstPostID: 456,
+          isAgreed: true
+        )
+        return nil
+      } catch {
+        return (error as? BrowseError)?.errorDescription
+      }
+    }
+    try await waitForAccountServiceTest {
+      await service.threadAgreementWriteConflictWaiterCount() == 2
+    }
+
+    let requestCountBeforeRelease = await client.threadAgreementMutationRequestCount()
+    XCTAssertEqual(requestCountBeforeRelease, 1)
+    await client.releaseThreadAgreementMutation()
+    _ = try await first.value
+    let rotatedMessage = await rotatedConflict.value
+    let credentialMessage = await credentialConflict.value
+
+    XCTAssertEqual(
+      rotatedMessage,
+      "先前的主题点赞操作已结束，请重新读取当前状态。"
+    )
+    XCTAssertEqual(
+      credentialMessage,
+      "先前的主题点赞操作已结束，请重新读取当前状态。"
+    )
+    let finalRequestCount = await client.threadAgreementMutationRequestCount()
+    let finalConflictWaiterCount = await service.threadAgreementWriteConflictWaiterCount()
+    XCTAssertEqual(finalRequestCount, 1)
+    XCTAssertEqual(finalConflictWaiterCount, 0)
+  }
+
+  func testThreadAgreementWritesForDifferentThreadsRunInParallel() async throws {
+    let client = AccountClientSpy(
+      threadAgreementMutation: coreThreadAgreement(isAgreed: true, score: 18),
+      suspendsThreadAgreementMutation: true
+    )
+    let service = TiebaCoreAccountService(client: client)
+    let storedSession = session()
+    let first = Task {
+      try await service.setThreadAgreed(
+        session: storedSession,
+        forumID: 42,
+        forumName: "swift",
+        threadID: 123,
+        firstPostID: 456,
+        isAgreed: true
+      )
+    }
+    let second = Task {
+      try await service.setThreadAgreed(
+        session: storedSession,
+        forumID: 42,
+        forumName: "swift",
+        threadID: 124,
+        firstPostID: 457,
+        isAgreed: true
+      )
+    }
+    try await waitForAccountServiceTest {
+      await client.threadAgreementMutationRequestCount() == 2
+    }
+
+    let conflictWaiterCount = await service.threadAgreementWriteConflictWaiterCount()
+    XCTAssertEqual(conflictWaiterCount, 0)
+    let snapshotBeforeRelease = await client.snapshot()
+    XCTAssertEqual(
+      Set(snapshotBeforeRelease.threadAgreementMutationRequests.map(\.threadID)),
+      Set<Int64>([123, 124])
+    )
+    XCTAssertEqual(
+      Set(snapshotBeforeRelease.threadAgreementMutationRequests.map(\.firstPostID)),
+      Set<Int64>([456, 457])
+    )
+    await client.releaseThreadAgreementMutation()
+    _ = try await first.value
+    _ = try await second.value
+
+    let finalRequestCount = await client.threadAgreementMutationRequestCount()
+    XCTAssertEqual(finalRequestCount, 2)
+  }
+
   func testConcurrentIdenticalForumWritesShareOneCoreTask() async throws {
     let client = AccountClientSpy(
       mutation: TiebaForumMembership(
@@ -790,6 +1128,22 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
       )
     )
   }
+
+  private func coreThreadAgreement(
+    isAgreed: Bool,
+    score: Int,
+    threadID: Int64 = 123,
+    firstPostID: Int64 = 456
+  ) -> TiebaThreadAgreement {
+    TiebaThreadAgreement(
+      userID: 7,
+      forumID: 42,
+      threadID: threadID,
+      firstPostID: firstPostID,
+      isAgreed: isAgreed,
+      agreeScore: score
+    )
+  }
 }
 
 private struct SensitiveAccountError: LocalizedError {
@@ -805,12 +1159,24 @@ private struct AccountClientRequest: Equatable, Sendable {
   let desiredState: Bool?
 }
 
+private struct ThreadAgreementClientRequest: Equatable, Sendable {
+  let credentialByteCount: Int
+  let expectedUserID: Int64
+  let forumID: Int64
+  let forumName: String
+  let threadID: Int64
+  let firstPostID: Int64
+  let desiredState: Bool?
+}
+
 private struct AccountClientSnapshot: Sendable {
   let validationCredentialByteCounts: [Int]
   let membershipRequests: [AccountClientRequest]
   let accountStateRequests: [AccountClientRequest]
   let mutationRequests: [AccountClientRequest]
   let checkInRequests: [AccountClientRequest]
+  let threadAgreementRequests: [ThreadAgreementClientRequest]
+  let threadAgreementMutationRequests: [ThreadAgreementClientRequest]
 }
 
 private enum AccountClientSpyError: Error, Sendable {
@@ -835,17 +1201,24 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   private let mutationError: TiebaClientError?
   private let checkIn: TiebaForumAccountState?
   private let checkInError: TiebaClientError?
+  private let threadAgreement: TiebaThreadAgreement?
+  private let threadAgreementMutation: TiebaThreadAgreement?
   private let suspendsMutation: Bool
   private let suspendsCheckIn: Bool
+  private let suspendsThreadAgreementMutation: Bool
   private var validationCredentialByteCounts: [Int] = []
   private var membershipRequests: [AccountClientRequest] = []
   private var accountStateRequests: [AccountClientRequest] = []
   private var mutationRequests: [AccountClientRequest] = []
   private var checkInRequests: [AccountClientRequest] = []
+  private var threadAgreementRequests: [ThreadAgreementClientRequest] = []
+  private var threadAgreementMutationRequests: [ThreadAgreementClientRequest] = []
   private var mutationIsReleased = false
   private var mutationWaiters: [CheckedContinuation<Void, Never>] = []
   private var checkInIsReleased = false
   private var checkInWaiters: [CheckedContinuation<Void, Never>] = []
+  private var threadAgreementMutationIsReleased = false
+  private var threadAgreementMutationWaiters: [CheckedContinuation<Void, Never>] = []
 
   init(
     validation: TiebaAuthenticatedAccount? = nil,
@@ -855,8 +1228,11 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     mutationError: TiebaClientError? = nil,
     checkIn: TiebaForumAccountState? = nil,
     checkInError: TiebaClientError? = nil,
+    threadAgreement: TiebaThreadAgreement? = nil,
+    threadAgreementMutation: TiebaThreadAgreement? = nil,
     suspendsMutation: Bool = false,
-    suspendsCheckIn: Bool = false
+    suspendsCheckIn: Bool = false,
+    suspendsThreadAgreementMutation: Bool = false
   ) {
     self.validation = validation
     self.membership = membership
@@ -865,8 +1241,11 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     self.mutationError = mutationError
     self.checkIn = checkIn
     self.checkInError = checkInError
+    self.threadAgreement = threadAgreement
+    self.threadAgreementMutation = threadAgreementMutation
     self.suspendsMutation = suspendsMutation
     self.suspendsCheckIn = suspendsCheckIn
+    self.suspendsThreadAgreementMutation = suspendsThreadAgreementMutation
   }
 
   func validateAccount(
@@ -971,6 +1350,56 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     return checkIn
   }
 
+  func getThreadAgreement(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    firstPostID: Int64
+  ) async throws -> TiebaThreadAgreement {
+    threadAgreementRequests.append(
+      ThreadAgreementClientRequest(
+        credentialByteCount: credential.bduss.utf8.count,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        firstPostID: firstPostID,
+        desiredState: nil
+      )
+    )
+    guard let threadAgreement else { throw AccountClientSpyError.unexpectedCall }
+    return threadAgreement
+  }
+
+  func setThreadAgreementState(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    firstPostID: Int64,
+    isAgreed: Bool
+  ) async throws -> TiebaThreadAgreement {
+    threadAgreementMutationRequests.append(
+      ThreadAgreementClientRequest(
+        credentialByteCount: credential.bduss.utf8.count,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        firstPostID: firstPostID,
+        desiredState: isAgreed
+      )
+    )
+    if suspendsThreadAgreementMutation, !threadAgreementMutationIsReleased {
+      await withCheckedContinuation { threadAgreementMutationWaiters.append($0) }
+    }
+    guard let threadAgreementMutation else { throw AccountClientSpyError.unexpectedCall }
+    return threadAgreementMutation
+  }
+
   func releaseMutation() {
     mutationIsReleased = true
     let waiters = mutationWaiters
@@ -985,8 +1414,18 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     waiters.forEach { $0.resume() }
   }
 
+  func releaseThreadAgreementMutation() {
+    threadAgreementMutationIsReleased = true
+    let waiters = threadAgreementMutationWaiters
+    threadAgreementMutationWaiters.removeAll()
+    waiters.forEach { $0.resume() }
+  }
+
   func mutationRequestCount() -> Int { mutationRequests.count }
   func checkInRequestCount() -> Int { checkInRequests.count }
+  func threadAgreementMutationRequestCount() -> Int {
+    threadAgreementMutationRequests.count
+  }
 
   func snapshot() -> AccountClientSnapshot {
     AccountClientSnapshot(
@@ -994,7 +1433,9 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
       membershipRequests: membershipRequests,
       accountStateRequests: accountStateRequests,
       mutationRequests: mutationRequests,
-      checkInRequests: checkInRequests
+      checkInRequests: checkInRequests,
+      threadAgreementRequests: threadAgreementRequests,
+      threadAgreementMutationRequests: threadAgreementMutationRequests
     )
   }
 }
