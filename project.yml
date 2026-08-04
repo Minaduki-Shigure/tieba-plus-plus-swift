@@ -62,7 +62,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.minaduki.tieba-plus-plus
         PRODUCT_NAME: TiebaPlusPlus
         MARKETING_VERSION: 0.54.2
-        CURRENT_PROJECT_VERSION: 56
+        CURRENT_PROJECT_VERSION: 57
         CODE_SIGN_STYLE: Automatic
         SUPPORTS_MACCATALYST: false
         ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: true

@@ -22,10 +22,10 @@ experimental or unsupported.
 
 ### Release and validation
 
-- **Current alpha:** `v0.54.2-alpha.1` is the login compatibility build based on the
+- **Current alpha:** `v0.54.2-alpha.2` is the login compatibility build based on the
   application-wide voice and video playback coordination from `v0.54.0-alpha.1`.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
-  XcodeGen 2.45.4.
+  XcodeGen 2.45.4 or newer.
 - **Automated checks:** GitHub Actions runs package tests and an unsigned
   simulator build. Authenticated flows never use real credentials in CI and
   still need explicit testing on a physical device.
@@ -34,7 +34,8 @@ experimental or unsupported.
   `v0.54.1-alpha.1` made that failure explicit and confirmed that iOS 18.7.2
   can expose no eligible Secure candidate. `v0.54.2-alpha.1` adds a constrained
   non-Secure metadata fallback only inside the isolated HTTPS login callback;
-  the selected credential still requires online account validation.
+  the selected credential still requires online account validation. The flow has
+  since completed successfully in physical-device testing on iOS 18.7.2.
 
 ### Discovery and forums
 
@@ -123,7 +124,7 @@ STOKEN or the login response's anti-CSRF value.
 
 ## Build
 
-Install Xcode 16.4 or newer and XcodeGen 2.45.4, then run:
+Install Xcode 16.4 or newer and XcodeGen 2.45.4 or newer, then run:
 
 ```sh
 xcodegen generate
