@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 #if canImport(FoundationNetworking)
@@ -6,7 +5,7 @@ import Foundation
 #endif
 
 struct TiebaAuthenticatedRequestFactory: Sendable {
-  static let appSalt = "tiebaclient!!!"
+  static let appSalt = TiebaFormSigner.appSalt
 
   let configuration: TiebaClientConfiguration
 
@@ -50,13 +49,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   }
 
   static func signature(for fields: [(String, String)]) -> String {
-    let source = fields.sorted {
-      $0.0 == $1.0 ? $0.1 < $1.1 : $0.0 < $1.0
-    }
-    .map { "\($0.0)=\($0.1)" }
-    .joined() + appSalt
-    let digest = Insecure.MD5.hash(data: Data(source.utf8))
-    return digest.map { String(format: "%02x", $0) }.joined()
+    TiebaFormSigner.signature(for: fields)
   }
 
   private func signedFormRequest(
@@ -74,11 +67,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     }
 
     let signedFields = fields + [("sign", Self.signature(for: fields))]
-    var bodyComponents = URLComponents()
-    bodyComponents.queryItems = signedFields.map { URLQueryItem(name: $0.0, value: $0.1) }
-    // Query encoding leaves "+" literal, while form decoders interpret it as a space.
-    let formQuery = bodyComponents.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
-    guard let encodedBody = formQuery?.data(using: .utf8) else {
+    guard let encodedBody = TiebaFormSigner.encodedBody(for: signedFields) else {
       throw TiebaClientError.invalidArgument("Unable to encode authenticated request.")
     }
 

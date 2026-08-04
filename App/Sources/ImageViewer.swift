@@ -1,26 +1,45 @@
 import SwiftUI
 
 struct ImageGalleryItem: Identifiable, Equatable, Sendable {
+  enum ID: Hashable, Sendable {
+    case local(postID: Int64?, contentOffset: Int)
+    case remote(overallIndex: Int, pictureID: String, postID: Int64)
+  }
+
+  let id: ID
   let contentOffset: Int
   let url: URL
   let width: Int
   let height: Int
 
   init(contentOffset: Int, url: URL, width: Int = 0, height: Int = 0) {
+    id = .local(postID: nil, contentOffset: contentOffset)
     self.contentOffset = contentOffset
     self.url = url
     self.width = width
     self.height = height
   }
 
-  var id: Int { contentOffset }
+  init(
+    id: ID,
+    contentOffset: Int,
+    url: URL,
+    width: Int = 0,
+    height: Int = 0
+  ) {
+    self.id = id
+    self.contentOffset = contentOffset
+    self.url = url
+    self.width = width
+    self.height = height
+  }
 }
 
 struct ImageGalleryPresentation: Identifiable, Equatable, Sendable {
   let items: [ImageGalleryItem]
   let initialIndex: Int
 
-  var id: Int { items[initialIndex].contentOffset }
+  var id: ImageGalleryItem.ID { items[initialIndex].id }
 
   init?(contents: [BrowseContent], selectedContentOffset: Int) {
     let items: [ImageGalleryItem] = contents.enumerated().compactMap { pair -> ImageGalleryItem? in
@@ -126,7 +145,12 @@ struct ImageViewer: View {
 
   let items: [ImageGalleryItem]
 
-  @State private var selectedIndex: Int
+  private let externalSelection: Binding<ImageGalleryItem.ID?>?
+  private let displayIndexOverride: Int?
+  private let totalCountOverride: Int?
+  private let onLoadIfNeeded: () -> Void
+
+  @State private var internalSelection: ImageGalleryItem.ID?
   @State private var exportTask: Task<Void, Never>?
   @StateObject private var exportViewModel: RemoteImageExportViewModel
 
@@ -137,7 +161,32 @@ struct ImageViewer: View {
   ) {
     self.items = items
     let initialIndex = items.indices.contains(initialIndex) ? initialIndex : 0
-    _selectedIndex = State(initialValue: initialIndex)
+    externalSelection = nil
+    displayIndexOverride = nil
+    totalCountOverride = nil
+    onLoadIfNeeded = {}
+    _internalSelection = State(
+      initialValue: items.indices.contains(initialIndex) ? items[initialIndex].id : nil
+    )
+    _exportViewModel = StateObject(
+      wrappedValue: RemoteImageExportViewModel(exporter: exporter)
+    )
+  }
+
+  init(
+    items: [ImageGalleryItem],
+    selection: Binding<ImageGalleryItem.ID?>,
+    displayIndex: Int?,
+    totalCount: Int?,
+    onLoadIfNeeded: @escaping () -> Void,
+    exporter: any RemoteImageExporting = RemoteImageExporter.shared
+  ) {
+    self.items = items
+    externalSelection = selection
+    displayIndexOverride = displayIndex
+    totalCountOverride = totalCount
+    self.onLoadIfNeeded = onLoadIfNeeded
+    _internalSelection = State(initialValue: nil)
     _exportViewModel = StateObject(
       wrappedValue: RemoteImageExportViewModel(exporter: exporter)
     )
@@ -155,8 +204,28 @@ struct ImageViewer: View {
   }
 
   private var selectedURL: URL? {
-    guard items.indices.contains(selectedIndex) else { return nil }
+    guard let selectedIndex else { return nil }
     return items[selectedIndex].url
+  }
+
+  private var selection: Binding<ImageGalleryItem.ID?> {
+    externalSelection ?? $internalSelection
+  }
+
+  private var selectedIndex: Int? {
+    guard let selectedID = selection.wrappedValue else { return nil }
+    return items.firstIndex(where: { $0.id == selectedID })
+  }
+
+  private var displayedIndex: Int? {
+    if let displayIndexOverride, displayIndexOverride > 0 {
+      return displayIndexOverride
+    }
+    return selectedIndex.map { $0 + 1 }
+  }
+
+  private var displayedTotalCount: Int {
+    max(totalCountOverride ?? items.count, items.count)
   }
 
   var body: some View {
@@ -169,10 +238,10 @@ struct ImageViewer: View {
           .foregroundStyle(.white)
           .accessibilityLabel("没有可显示的图片")
       } else {
-        TabView(selection: $selectedIndex) {
-          ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+        TabView(selection: selection) {
+          ForEach(items) { item in
             ZoomableRemoteImage(item: item)
-              .tag(index)
+              .tag(Optional(item.id))
           }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
@@ -222,7 +291,7 @@ struct ImageViewer: View {
 
         Spacer()
 
-        if !items.isEmpty {
+        if let selectedIndex, let displayedIndex {
           HStack(spacing: 10) {
             Button {
               selectImage(at: selectedIndex - 1)
@@ -232,14 +301,14 @@ struct ImageViewer: View {
             .disabled(selectedIndex == items.startIndex)
             .accessibilityLabel("上一张图片")
 
-            Text("\(selectedIndex + 1) / \(items.count)")
+            Text("\(displayedIndex) / \(displayedTotalCount)")
               .font(.subheadline.monospacedDigit())
               .foregroundStyle(.white)
               .padding(.horizontal, 10)
               .padding(.vertical, 6)
               .background(.black.opacity(0.65), in: Capsule())
               .accessibilityLabel("图片")
-              .accessibilityValue("第 \(selectedIndex + 1) 张，共 \(items.count) 张")
+              .accessibilityValue("第 \(displayedIndex) 张，共 \(displayedTotalCount) 张")
               .accessibilityAdjustableAction { direction in
                 adjustSelection(direction)
               }
@@ -278,6 +347,17 @@ struct ImageViewer: View {
     .onDisappear {
       exportTask?.cancel()
       exportTask = nil
+    }
+    .onChange(of: selection.wrappedValue) { _ in
+      onLoadIfNeeded()
+    }
+    .onChange(of: items.map(\.id)) { _ in
+      normalizeSelection()
+      onLoadIfNeeded()
+    }
+    .task {
+      normalizeSelection()
+      onLoadIfNeeded()
     }
   }
 
@@ -335,6 +415,7 @@ struct ImageViewer: View {
   }
 
   private func adjustSelection(_ direction: AccessibilityAdjustmentDirection) {
+    guard let selectedIndex else { return }
     switch direction {
     case .increment:
       selectImage(at: selectedIndex + 1)
@@ -348,7 +429,21 @@ struct ImageViewer: View {
   private func selectImage(at index: Int) {
     guard items.indices.contains(index) else { return }
     withAnimation(.easeInOut(duration: 0.2)) {
-      selectedIndex = index
+      selection.wrappedValue = items[index].id
+    }
+  }
+
+  private func normalizeSelection() {
+    guard !items.isEmpty else {
+      selection.wrappedValue = nil
+      return
+    }
+    guard
+      let selectedID = selection.wrappedValue,
+      items.contains(where: { $0.id == selectedID })
+    else {
+      selection.wrappedValue = items[0].id
+      return
     }
   }
 }

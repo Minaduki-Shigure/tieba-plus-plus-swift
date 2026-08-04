@@ -158,6 +158,10 @@ struct ContentFilterSnapshot: Codable, Hashable, Sendable {
   func rules(in list: ContentFilterList) -> [ContentFilterRule] {
     rules.filter { $0.list == list }
   }
+
+  var allowsWholeThreadPictureGallery: Bool {
+    !blockVideos && rules.isEmpty
+  }
 }
 
 enum ContentFilterStoreError: LocalizedError, Equatable, Sendable {

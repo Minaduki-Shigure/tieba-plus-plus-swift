@@ -27,7 +27,13 @@ final class ImageGalleryTests: XCTestCase {
         ImageGalleryItem(contentOffset: 3, url: secondThumbnail, width: 80, height: 100),
       ]
     )
-    XCTAssertEqual(presentation.items.map(\.id), [1, 3])
+    XCTAssertEqual(
+      presentation.items.map(\.id),
+      [
+        .local(postID: nil, contentOffset: 1),
+        .local(postID: nil, contentOffset: 3),
+      ]
+    )
     XCTAssertEqual(presentation.initialIndex, 1)
   }
 
@@ -47,7 +53,7 @@ final class ImageGalleryTests: XCTestCase {
     XCTAssertEqual(presentation.items.map(\.url), [duplicateURL, duplicateURL])
     XCTAssertEqual(presentation.items.map(\.contentOffset), [0, 2])
     XCTAssertEqual(presentation.initialIndex, 1)
-    XCTAssertEqual(presentation.id, 2)
+    XCTAssertEqual(presentation.id, .local(postID: nil, contentOffset: 2))
   }
 
   func testPresentationRejectsSelectionThatIsNotAnImageInTheSameContents() throws {

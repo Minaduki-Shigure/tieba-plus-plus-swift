@@ -56,6 +56,8 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Default-on dark-appearance dimming for successfully rendered static content thumbnails
 - Same-content multi-image gallery with paging, zoom, bounded download progress,
   original-file sharing, and Photos saving
+- Anonymous whole-thread image traversal with stable occurrences, global
+  positions, and bidirectional lazy metadata loading
 - Server-ranked inline nested-reply previews with anchored opening and safe text copying
 - Full nested-reply pages with parent-floor context and bidirectional anchored pagination
 - Shared-thread origin cards with original content, media, and navigation
@@ -140,22 +142,31 @@ shortest-column assignment whose ties choose the lower column. Nonfinite
 proposals or spacing and invalid dimensions are normalized before frame
 calculation.
 
-Rich-content images open as one gallery scoped to the already filtered content
-array that produced the tapped image. Source offsets, rather than URLs, identify
-pages, so repeated images remain distinct and the selected duplicate opens at
-the correct position. Paging, the visible counter, and per-page zoom never fetch
-or aggregate another floor. Each original-image page observes its own waiter on
-the existing deduplicated transfer. A stable positive server length produces an
-integer percentage from exact received bytes; missing, changing, or inconsistent
-lengths remain indeterminate, and ImageIO work is shown as a separate processing
-stage. Transfer, waiter, and SwiftUI-attempt identities reject late progress from
-a canceled same-URL request without fragmenting the decoded cache. Sharing and
+Rich-content images first open from the already filtered content array that
+produced the tap, so the local gallery is available without waiting for metadata.
+Source offsets identify local pages and preserve repeated URLs. Ordinary topic
+floors may then use the anonymous HTTPS `picpage` contract when the current
+content-filter snapshot has no rules and does not block video topics. Strict
+picture IDs, post IDs, and global indexes identify remote occurrences; the
+selected occurrence remains stable while inclusive cursor windows are
+deduplicated and prepended or appended. The first response may contain 30 items,
+while continuation windows include their anchor, so no UI logic assumes a fixed
+response size. Empty, duplicate-only, malformed, stale-generation, or
+inconsistent-total responses stop only the affected direction and retain the
+local fallback. Changing thread options or filters cancels and dismisses the
+session. Nested replies, origin cards, search results, forum rules, profiles,
+and filtered threads deliberately keep the same-content gallery.
+
+Each original-image page observes its own waiter on the existing deduplicated
+transfer. A stable positive server length produces an integer percentage from
+exact received bytes; missing, changing, or inconsistent lengths remain
+indeterminate, and ImageIO work is shown as a separate processing stage.
+Transfer, waiter, and SwiftUI-attempt identities reject late progress from a
+canceled same-URL request without fragmenting the decoded cache. Sharing and
 Photos saving explicitly download only the selected original image through the
 bounded credential-free media transport, validate its real ImageIO type and
 dimensions, and retain the temporary file only until the system consumer
-finishes. Whole-thread `picpage` traversal remains a separate milestone because
-the current domain model does not yet preserve its picture IDs or bidirectional
-cursor contract.
+finishes.
 
 Public profiles use the protocol's guest fields instead of impersonating the
 target user as the current account. The public-theme endpoint ignores its

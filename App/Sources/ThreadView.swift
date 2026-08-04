@@ -19,7 +19,10 @@ struct ThreadView: View {
   @State private var restoredHistorySnapshot: ThreadHistorySnapshot?
   @State private var hasRecordedHistoryVisit = false
   @State private var isPureReadingMode = false
+  @State private var pictureGalleryRoute: ThreadImageGalleryRoute?
+  @State private var pictureGalleryPolicyTask: Task<Void, Never>?
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.contentFilterRepository) private var contentFilterRepository
   private let historySnapshot: ThreadHistorySnapshot?
   private let linkRoute: TiebaThreadRoute?
 
@@ -175,6 +178,12 @@ struct ThreadView: View {
         Text("当前第 \(max(viewModel.currentPage, 1)) 页，共 \(viewModel.totalPages) 页")
       }
     }
+    .fullScreenCover(
+      item: $pictureGalleryRoute,
+      onDismiss: cancelPictureGallery
+    ) { route in
+      ThreadImageGalleryView(viewModel: route.viewModel)
+    }
     .task {
       let snapshot: ThreadHistorySnapshot?
       if linkRoute == nil {
@@ -229,6 +238,7 @@ struct ThreadView: View {
       await persistProgress(visiblePost, options: viewModel.options)
     }
     .onChange(of: viewModel.options) { options in
+      cancelPictureGallery()
       visiblePost = nil
       leadingVisiblePostID = nil
       persistBrowseOptions(options)
@@ -240,9 +250,11 @@ struct ThreadView: View {
       } else {
         persistBrowseOptions(viewModel.options)
       }
+      cancelPictureGallery()
       viewModel.cancel()
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
+      cancelPictureGallery()
       Task { @MainActor in
         visiblePost = nil
         viewModel.reload()
@@ -382,6 +394,9 @@ struct ThreadView: View {
                     searchHistoryRepository: searchHistoryRepository,
                     threadTitle: viewModel.thread.title,
                     isPureReadingMode: isPureReadingMode,
+                    openImage: { contentOffset in
+                      openPictureGallery(post: firstPost, contentOffset: contentOffset)
+                    },
                     openMentionedUser: openMentionedUser,
                     openTiebaLink: openTiebaLink,
                     openComments: { commentID in
@@ -453,6 +468,9 @@ struct ThreadView: View {
                     searchHistoryRepository: searchHistoryRepository,
                     threadTitle: viewModel.thread.title,
                     isPureReadingMode: isPureReadingMode,
+                    openImage: { contentOffset in
+                      openPictureGallery(post: post, contentOffset: contentOffset)
+                    },
                     openMentionedUser: openMentionedUser,
                     openTiebaLink: openTiebaLink,
                     openComments: { commentID in
@@ -660,6 +678,75 @@ struct ThreadView: View {
     return .hidden
   }
 
+  private func openPictureGallery(post: BrowsePost, contentOffset: Int) {
+    guard
+      effectiveVisibility(for: post) == .visible,
+      let presentation = ImageGalleryPresentation(
+        contents: post.contents,
+        selectedContentOffset: contentOffset
+      )
+    else { return }
+
+    let remoteService = service as? any ThreadPictureGalleryService
+    let galleryService: any ThreadPictureGalleryService
+    if let remoteService {
+      galleryService = remoteService
+    } else {
+      galleryService = UnavailableThreadPictureGalleryService()
+    }
+
+    let localOccurrences = presentation.items.enumerated().map { pair in
+      let (imageIndex, item) = pair
+      return ThreadPictureOccurrence(
+        localURL: item.url,
+        pictureID: remoteService?.pictureIdentifier(for: item.url) ?? "",
+        postID: post.id,
+        contentOffset: item.contentOffset,
+        width: item.width,
+        height: item.height,
+        imageOrdinal: imageIndex + 1
+      )
+    }
+    let selectedID = ThreadPictureOccurrenceID.local(
+      postID: post.id,
+      contentOffset: contentOffset
+    )
+    let galleryViewModel = ThreadImageGalleryViewModel(
+      context: ThreadPictureGalleryContext(
+        forumID: viewModel.thread.forumID,
+        forumName: viewModel.thread.forumName,
+        threadID: viewModel.thread.id,
+        onlyThreadAuthor: viewModel.options.onlyThreadAuthor
+      ),
+      localOccurrences: localOccurrences,
+      selectedID: selectedID,
+      isRemoteLoadingEnabled: false,
+      service: galleryService
+    )
+    let route = ThreadImageGalleryRoute(viewModel: galleryViewModel)
+    pictureGalleryRoute = route
+
+    guard remoteService != nil, self.viewModel.thread.kind == .article else { return }
+    let repository = contentFilterRepository
+    pictureGalleryPolicyTask = Task { @MainActor in
+      do {
+        let snapshot = try await repository.snapshot()
+        try Task.checkCancellation()
+        guard pictureGalleryRoute?.id == route.id else { return }
+        galleryViewModel.setRemoteLoadingEnabled(snapshot.allowsWholeThreadPictureGallery)
+      } catch {
+        // Reading the local policy is fail-closed; the same-floor gallery stays available.
+      }
+    }
+  }
+
+  private func cancelPictureGallery() {
+    pictureGalleryPolicyTask?.cancel()
+    pictureGalleryPolicyTask = nil
+    pictureGalleryRoute?.viewModel.cancel()
+    pictureGalleryRoute = nil
+  }
+
   private var prependAnchorPostID: Int64? {
     if
       let leadingVisiblePostID,
@@ -719,6 +806,7 @@ private struct PostView: View {
   let searchHistoryRepository: any ForumSearchHistoryRepository
   let threadTitle: String
   let isPureReadingMode: Bool
+  let openImage: (Int) -> Void
   let openMentionedUser: (Int64) -> Void
   let openTiebaLink: (TiebaLinkTarget) -> Void
   let openComments: (Int64?) -> Void
@@ -735,6 +823,7 @@ private struct PostView: View {
 
       BrowseContentView(
         contents: post.contents,
+        onImageOpen: openImage,
         onUserMention: openMentionedUser,
         onTiebaLink: openTiebaLink
       )

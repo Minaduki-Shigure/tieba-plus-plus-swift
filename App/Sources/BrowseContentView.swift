@@ -4,6 +4,7 @@ import SwiftUI
 struct BrowseContentView: View {
   let contents: [BrowseContent]
   let imageLayout: BrowseContentImageLayout
+  let onImageOpen: ((Int) -> Void)?
   let onUserMention: ((Int64) -> Void)?
   let onTiebaLink: ((TiebaLinkTarget) -> Void)?
 
@@ -15,11 +16,13 @@ struct BrowseContentView: View {
   init(
     contents: [BrowseContent],
     imageLayout: BrowseContentImageLayout = .responsive,
+    onImageOpen: ((Int) -> Void)? = nil,
     onUserMention: ((Int64) -> Void)? = nil,
     onTiebaLink: ((TiebaLinkTarget) -> Void)? = nil
   ) {
     self.contents = contents
     self.imageLayout = imageLayout
+    self.onImageOpen = onImageOpen
     self.onUserMention = onUserMention
     self.onTiebaLink = onTiebaLink
   }
@@ -118,10 +121,14 @@ struct BrowseContentView: View {
       width: image.width,
       height: image.height,
       onOpen: {
-        imageGalleryPresentation = ImageGalleryPresentation(
-          contents: contents,
-          selectedContentOffset: image.contentOffset
-        )
+        if let onImageOpen {
+          onImageOpen(image.contentOffset)
+        } else {
+          imageGalleryPresentation = ImageGalleryPresentation(
+            contents: contents,
+            selectedContentOffset: image.contentOffset
+          )
+        }
       }
     )
   }

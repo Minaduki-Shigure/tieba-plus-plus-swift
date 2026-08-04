@@ -3,7 +3,7 @@ import TiebaCore
 
 struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchService,
   SearchSuggestionService, HotTopicService, HotThreadService, UserProfileService,
-  ForumInformationService
+  ForumInformationService, ThreadPictureGalleryService
 {
   private let client: TiebaClient
   private let contentFilterRepository: any ContentFilterRepository
@@ -14,6 +14,74 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
   ) {
     self.client = client
     self.contentFilterRepository = contentFilterRepository
+  }
+
+  func pictureIdentifier(for imageURL: URL) -> String? {
+    TiebaPicturePageCursor(imageURL: imageURL)?.pictureID
+  }
+
+  func picturePage(for request: ThreadPicturePageRequest) async throws -> ThreadPicturePage {
+    let cursor: TiebaPicturePageCursor?
+    let direction: TiebaPicturePageDirection
+    switch request.direction {
+    case .bootstrap:
+      cursor = TiebaPicturePageCursor(
+        imageURL: request.anchorURL,
+        overallIndex: request.anchorIndex
+      )
+      direction = .next
+    case .previous:
+      cursor = TiebaPicturePageCursor(
+        serverPictureID: request.anchorPictureID,
+        overallIndex: request.anchorIndex
+      )
+      direction = .previous
+    case .next:
+      cursor = TiebaPicturePageCursor(
+        serverPictureID: request.anchorPictureID,
+        overallIndex: request.anchorIndex
+      )
+      direction = .next
+    }
+    guard let cursor else {
+      throw BrowseError.unavailable("图片游标无效，已保留本楼图片。")
+    }
+
+    let response: TiebaPicturePage
+    do {
+      response = try await client.getPicturePage(
+        forumID: request.context.forumID,
+        forumName: request.context.forumName,
+        threadID: request.context.threadID,
+        cursor: cursor,
+        direction: direction,
+        onlyThreadAuthor: request.context.onlyThreadAuthor
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+
+    let occurrences = response.pictures.compactMap { picture -> ThreadPictureOccurrence? in
+      guard
+        let postID = picture.postID,
+        postID > 0,
+        let url = SecureTiebaURL.media(picture.originalURL)
+      else { return nil }
+      return ThreadPictureOccurrence(
+        remoteURL: url,
+        pictureID: picture.pictureID,
+        postID: postID,
+        overallIndex: picture.overallIndex,
+        width: picture.width,
+        height: picture.height
+      )
+    }
+    return ThreadPicturePage(
+      occurrences: occurrences,
+      totalCount: response.totalPictureCount
+    )
   }
 
   func threads(

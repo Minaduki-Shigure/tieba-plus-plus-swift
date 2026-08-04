@@ -34,6 +34,17 @@ if let channel = threads.channels.first {
     )
 }
 let posts = try await client.getPosts(threadID: threads.threads[0].id)
+if let imageURL = posts.posts.lazy.flatMap({ $0.content.images }).compactMap({
+    $0.originalURL ?? $0.fullSizeURL ?? $0.thumbnailURL
+}).first,
+   let cursor = TiebaPicturePageCursor(imageURL: imageURL) {
+    let pictures = try await client.getPicturePage(
+        forumID: posts.forum.id,
+        forumName: posts.forum.name,
+        threadID: posts.thread.id,
+        cursor: cursor
+    )
+}
 let comments = try await client.getComments(
     threadID: posts.thread.id,
     postID: posts.posts[0].id
@@ -63,6 +74,11 @@ let followed = try await authenticatedClient.getFollowedForums(
 - Protocol Buffer requests use `https://tiebac.baidu.com`; anonymous JSON
   search uses `https://tieba.baidu.com`. Redirects must remain on the request's
   original HTTPS host.
+- Whole-thread picture metadata uses a minimal signed form request to the exact
+  HTTPS origin `c.tieba.baidu.com`. It sends no account or device identifiers,
+  accepts only strict Baidu picture URLs/cursors, limits the response to 1 MiB
+  during transfer, and normalizes observed cleartext media only for exact known
+  Baidu image hosts.
 - Forum and post browsing use FRS `301001`, GeneralTab `309622`, PB `302001`,
   and floor `302002`. GeneralTab receives only a public forum ID, a validated
   type-15 channel, its independent server-advertised sort value, and pagination

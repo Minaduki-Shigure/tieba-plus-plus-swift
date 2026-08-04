@@ -4,13 +4,74 @@ import XCTest
 @testable import TiebaCore
 
 final class TiebaLiveTests: XCTestCase {
+  func testAnonymousPicturePageMatchesPBImageCursor() async throws {
+    guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
+      throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
+    }
+
+    let client = TiebaClient(
+      configuration: .init(userAgent: "TiebaPlusPlus/0.49 integration-test")
+    )
+    var sample: (
+      page: TiebaPostPage,
+      postID: Int64,
+      cursor: TiebaPicturePageCursor
+    )?
+
+    search: for threadID: Int64 in [6_639_694_648, 1_978_273_802] {
+      guard let postPage = try? await client.getPosts(threadID: threadID, pageSize: 30) else {
+        continue
+      }
+      let posts = (postPage.firstPost.map { [$0] } ?? []) + postPage.posts
+      for post in posts {
+        for (imageIndex, image) in post.content.images.enumerated() {
+          for url in [image.originalURL, image.fullSizeURL, image.thumbnailURL].compactMap({ $0 }) {
+            if let cursor = TiebaPicturePageCursor(
+              imageURL: url,
+              overallIndex: imageIndex + 1
+            ) {
+              sample = (postPage, post.id, cursor)
+              break search
+            }
+          }
+        }
+      }
+    }
+
+    guard let sample else {
+      throw XCTSkip("The fixed public picture threads no longer expose a parseable PB image.")
+    }
+    let picturePage = try await client.getPicturePage(
+      forumID: sample.page.forum.id,
+      forumName: sample.page.forum.name,
+      threadID: sample.page.thread.id,
+      cursor: sample.cursor
+    )
+    let matchedPicture = try XCTUnwrap(
+      picturePage.pictures.first(where: {
+        $0.pictureID == sample.cursor.pictureID
+          && ($0.postID == nil || $0.postID == sample.postID)
+      })
+    )
+
+    XCTAssertEqual(matchedPicture.cursor.pictureID, sample.cursor.pictureID)
+    if let responsePostID = matchedPicture.postID {
+      XCTAssertEqual(responsePostID, sample.postID)
+    }
+    XCTAssertGreaterThanOrEqual(picturePage.totalPictureCount, picturePage.pictures.count)
+    XCTAssertLessThanOrEqual(
+      picturePage.pictures.count,
+      TiebaPicturePagePolicy.maximumResponsePictureCount
+    )
+  }
+
   func testAnonymousForumPostAndCommentFlow() async throws {
     guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
       throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.48 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.49 integration-test")
     )
     let threads = try await client.getThreads(forumName: "starry", pageSize: 10)
     XCTAssertFalse(threads.threads.isEmpty)
@@ -166,7 +227,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.48 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.49 integration-test")
     )
     let forumPage = try await client.getThreads(forumName: "minecraft", pageSize: 10)
     let channel = try XCTUnwrap(
@@ -226,7 +287,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.48 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.49 integration-test")
     )
     let forums = try await client.searchForums(query: "swift")
     XCTAssertFalse(forums.isLoggedIn)
@@ -290,7 +351,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.48 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.49 integration-test")
     )
     let feed = try await client.getThreads(forumName: "steam", pageSize: 100)
     let candidates = feed.threads.filter(\.isShared)
@@ -316,7 +377,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.48 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.49 integration-test")
     )
     let page = try await client.getPosts(threadID: 8_211_419_000, pageSize: 2)
     let firstPost = try XCTUnwrap(page.firstPost)
@@ -370,7 +431,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.48 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.49 integration-test")
     )
     let page = try await client.getComments(
       threadID: 7_763_274_602,
@@ -402,7 +463,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.48 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.49 integration-test")
     )
     let threadID: Int64 = 7_763_274_602
     let postID: Int64 = 143_493_604_437
@@ -433,7 +494,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.48 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.49 integration-test")
     )
     let feed = try await client.getThreads(forumName: "starry", pageSize: 100)
     var candidateIDs = feed.threads.compactMap { thread -> Int64? in
@@ -473,7 +534,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.48 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.49 integration-test")
     )
     let ranking = try await client.getHotThreadRanking()
 
@@ -508,7 +569,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.48 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.49 integration-test")
     )
     let topics = try await client.getHotTopics()
     let topic = try XCTUnwrap(topics.first)
@@ -546,7 +607,7 @@ final class TiebaLiveTests: XCTestCase {
 
     let userID: Int64 = 957_339_815
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.48 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.49 integration-test")
     )
 
     let profile = try await client.getUserProfile(userID: userID)
@@ -572,7 +633,7 @@ final class TiebaLiveTests: XCTestCase {
     }
 
     let client = TiebaClient(
-      configuration: .init(userAgent: "TiebaPlusPlus/0.48 integration-test")
+      configuration: .init(userAgent: "TiebaPlusPlus/0.49 integration-test")
     )
     let forumID: Int64 = 2_432_903
 

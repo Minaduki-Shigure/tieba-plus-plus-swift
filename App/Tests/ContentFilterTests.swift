@@ -4,6 +4,32 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class ContentFilterTests: XCTestCase {
+  func testWholeThreadPictureGalleryRequiresAnUnfilteredSnapshot() {
+    XCTAssertTrue(ContentFilterSnapshot.empty.allowsWholeThreadPictureGallery)
+
+    XCTAssertFalse(
+      ContentFilterSnapshot(
+        displayMode: .placeholder,
+        blockVideos: true,
+        rules: []
+      ).allowsWholeThreadPictureGallery
+    )
+    XCTAssertFalse(
+      ContentFilterSnapshot(
+        displayMode: .hidden,
+        blockVideos: false,
+        rules: [.keyword("blocked", list: .block)]
+      ).allowsWholeThreadPictureGallery
+    )
+    XCTAssertFalse(
+      ContentFilterSnapshot(
+        displayMode: .placeholder,
+        blockVideos: false,
+        rules: [.user(id: 7, name: "allowed", list: .allow)]
+      ).allowsWholeThreadPictureGallery
+    )
+  }
+
   func testKeywordAllowListAppliesPerFieldAndRemainsCaseSensitive() {
     let snapshot = ContentFilterSnapshot(
       displayMode: .placeholder,

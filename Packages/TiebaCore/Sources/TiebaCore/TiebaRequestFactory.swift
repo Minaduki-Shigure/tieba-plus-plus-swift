@@ -625,7 +625,7 @@ struct TiebaRequestFactory: Sendable {
     return query
   }
 
-  private func validateConfiguration() throws {
+  func validateConfiguration() throws {
     guard
       !configuration.clientVersion.isEmpty,
       !configuration.clientVersion.contains(where: { $0.isNewline }),

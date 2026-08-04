@@ -7,9 +7,11 @@ The networking layer must use HTTPS with URLSession's default certificate and
 hostname verification. Any endpoint that requires disabled verification or a
 global cleartext exception must remain unsupported.
 
-API traffic is restricted to the exact HTTPS hosts `tiebac.baidu.com` and
-`tieba.baidu.com`. Redirects between those hosts are rejected even though both
-are individually allowed.
+General API traffic is restricted to the exact HTTPS hosts
+`tiebac.baidu.com` and `tieba.baidu.com`. The whole-thread picture-page request
+has a separate exact allowlist entry for `c.tieba.baidu.com`. Redirects must
+remain on the request's original HTTPS host; redirects between individually
+allowed hosts are rejected.
 
 The login view contains the only app-controlled `WKWebView`. It uses
 `WKWebsiteDataStore.nonPersistent()`, accepts main-frame navigation only on an
@@ -415,14 +417,33 @@ count exceeds that bound. Explicit higher-resolution image views retain the
 canceled when the final waiter disappears, so scrolling cannot leave orphaned
 preview transfers running in the background.
 
-An image gallery is built only from the already filtered `BrowseContent` array
-that owns the tapped image. It must not rescan a raw response, cross a floor or
-origin-card boundary, merge repeated URLs, or reveal a locally hidden fragment.
-Gallery progress is derived only from the existing credential-free download's
-observed and declared byte counts and creates no additional request. Transfer
-limits are evaluated before a progress event is published. A percentage is
-available only while the declared length is positive, stable, and no smaller
-than the observed bytes; unknown or inconsistent lengths remain indeterminate.
+An image gallery always starts from the already filtered `BrowseContent` array
+that owns the tapped image. Whole-thread expansion is available only for an
+ordinary topic floor after a fresh local filter snapshot confirms there are no
+rules, including allow-only rules, and video-topic blocking is off. Snapshot
+read failure is fail-closed. A filter notification, thread-option change,
+dismissal, or navigation away cancels the metadata tasks and discards the
+session. Nested replies, shared origins, search results, rules, profiles, and
+filtered floors must never receive whole-thread context.
+
+Whole-thread metadata uses a signed form POST to the exact HTTPS origin
+`c.tieba.baidu.com`. Its fields are limited to public forum/thread/picture
+cursors, fixed endpoint mode/version values, and direction counts. It must not
+send BDUSS, STOKEN, user ID, cookies, CUID, IMEI, client ID, screen dimensions,
+model, timestamp, or network metadata. The ephemeral transport ignores the
+response `Set-Cookie`; same-origin HTTPS is the only permitted redirect. The
+response is limited to 1 MiB during transfer, then bounded and validated for
+forum ownership, total count, ordered global indexes, picture IDs, post IDs,
+dimensions, byte counts, blocked flags, and exact known Baidu media hosts.
+Observed HTTP media URLs are upgraded only on that exact host allowlist; any
+other cleartext or malformed URL is rejected. Repeated picture IDs remain
+separate occurrences when their global indexes differ.
+
+Gallery progress is derived only from the existing credential-free image
+download's observed and declared byte counts. Transfer limits are evaluated
+before a progress event is published. A percentage is available only while the
+declared length is positive, stable, and no smaller than the observed bytes;
+unknown or inconsistent lengths remain indeterminate.
 Every physical transfer, repository waiter, and SwiftUI loading attempt has a
 separate identity so a canceled same-URL transfer cannot publish into its
 replacement. Cache hits publish no fabricated network progress, and clearing

@@ -15,7 +15,7 @@ public struct TiebaClientConfiguration: Sendable, Hashable {
   public init(
     clientVersion: String = "12.64.1.1",
     authenticatedClientVersion: String = "22.6.5.1",
-    userAgent: String = "TiebaPlusPlus/0.48 (iOS)",
+    userAgent: String = "TiebaPlusPlus/0.49 (iOS)",
     requestTimeout: TimeInterval = 30
   ) {
     self.clientVersion = clientVersion
@@ -32,6 +32,23 @@ struct TiebaHTTPResponse: Sendable {
 
 protocol TiebaTransport: Sendable {
   func send(_ request: URLRequest) async throws -> TiebaHTTPResponse
+  func send(
+    _ request: URLRequest,
+    maximumBodyBytes: Int?
+  ) async throws -> TiebaHTTPResponse
+}
+
+extension TiebaTransport {
+  func send(
+    _ request: URLRequest,
+    maximumBodyBytes: Int?
+  ) async throws -> TiebaHTTPResponse {
+    let response = try await send(request)
+    if let maximumBodyBytes, response.body.count > maximumBodyBytes {
+      throw TiebaClientError.responseTooLarge(maximumBytes: maximumBodyBytes)
+    }
+    return response
+  }
 }
 
 enum TiebaRedirectPolicy: Sendable {
@@ -42,6 +59,7 @@ enum TiebaRedirectPolicy: Sendable {
     switch self {
     case .sameOrigin:
       TiebaEndpointPolicy.allowsRedirect(from: source, to: destination)
+        || TiebaPicturePageEndpointPolicy.allowsRedirect(from: source, to: destination)
     case .rejectAll:
       false
     }
@@ -70,16 +88,17 @@ final class HTTPSOnlySessionDelegate: NSObject, URLSessionTaskDelegate, @uncheck
 
 final class URLSessionTiebaTransport: TiebaTransport, @unchecked Sendable {
   private let delegate: HTTPSOnlySessionDelegate
+  private let redirectPolicy: TiebaRedirectPolicy
   private let session: URLSession
 
-  init(redirectPolicy: TiebaRedirectPolicy = .sameOrigin) {
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.httpCookieStorage = nil
-    configuration.urlCredentialStorage = nil
-    configuration.httpShouldSetCookies = false
-    configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+  init(
+    redirectPolicy: TiebaRedirectPolicy = .sameOrigin,
+    configuration: URLSessionConfiguration = .ephemeral
+  ) {
+    let configuration = Self.hardenedConfiguration(from: configuration)
     let delegate = HTTPSOnlySessionDelegate(redirectPolicy: redirectPolicy)
     self.delegate = delegate
+    self.redirectPolicy = redirectPolicy
     self.session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
   }
 
@@ -90,6 +109,173 @@ final class URLSessionTiebaTransport: TiebaTransport, @unchecked Sendable {
     }
     return TiebaHTTPResponse(body: body, statusCode: response.statusCode)
   }
+
+  func send(
+    _ request: URLRequest,
+    maximumBodyBytes: Int?
+  ) async throws -> TiebaHTTPResponse {
+    guard let maximumBodyBytes else { return try await send(request) }
+    guard maximumBodyBytes >= 0 else {
+      throw TiebaClientError.responseTooLarge(maximumBytes: maximumBodyBytes)
+    }
+
+    let taskDelegate = BoundedTiebaResponseTaskDelegate(
+      maximumResponseBytes: Int64(maximumBodyBytes),
+      redirectPolicy: redirectPolicy
+    )
+    let temporaryURL: URL
+    let response: URLResponse
+    do {
+      (temporaryURL, response) = try await session.download(
+        for: request,
+        delegate: taskDelegate
+      )
+    } catch {
+      if Task.isCancelled {
+        throw CancellationError()
+      }
+      if taskDelegate.exceededResponseLimit {
+        throw TiebaClientError.responseTooLarge(maximumBytes: maximumBodyBytes)
+      }
+      throw error
+    }
+    defer { try? FileManager.default.removeItem(at: temporaryURL) }
+
+    try Task.checkCancellation()
+    guard let response = response as? HTTPURLResponse else {
+      throw TiebaClientError.invalidHTTPResponse
+    }
+    if BoundedTiebaResponseTaskDelegate.exceedsLimit(
+      totalBytesWritten: 0,
+      totalBytesExpected: response.expectedContentLength,
+      maximumResponseBytes: Int64(maximumBodyBytes)
+    ) {
+      throw TiebaClientError.responseTooLarge(maximumBytes: maximumBodyBytes)
+    }
+
+    let fileSize: Int
+    do {
+      guard
+        let measuredSize = try temporaryURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+        measuredSize >= 0
+      else {
+        throw TiebaClientError.transportFailure
+      }
+      fileSize = measuredSize
+    } catch let error as TiebaClientError {
+      throw error
+    } catch {
+      throw TiebaClientError.transportFailure
+    }
+    guard fileSize <= maximumBodyBytes else {
+      throw TiebaClientError.responseTooLarge(maximumBytes: maximumBodyBytes)
+    }
+    try Task.checkCancellation()
+
+    let body: Data
+    do {
+      body = try Data(contentsOf: temporaryURL)
+    } catch {
+      throw TiebaClientError.transportFailure
+    }
+    try Task.checkCancellation()
+    guard body.count <= maximumBodyBytes else {
+      throw TiebaClientError.responseTooLarge(maximumBytes: maximumBodyBytes)
+    }
+    return TiebaHTTPResponse(body: body, statusCode: response.statusCode)
+  }
+
+  private static func hardenedConfiguration(
+    from configuration: URLSessionConfiguration
+  ) -> URLSessionConfiguration {
+    let hardened = URLSessionConfiguration.ephemeral
+    hardened.protocolClasses = configuration.protocolClasses
+    hardened.httpCookieStorage = nil
+    hardened.urlCredentialStorage = nil
+    hardened.httpShouldSetCookies = false
+    hardened.httpCookieAcceptPolicy = .never
+    hardened.urlCache = nil
+    hardened.requestCachePolicy = .reloadIgnoringLocalCacheData
+    hardened.httpAdditionalHeaders = nil
+    return hardened
+  }
+}
+
+final class BoundedTiebaResponseTaskDelegate: NSObject,
+  URLSessionDownloadDelegate, @unchecked Sendable
+{
+  private final class State: @unchecked Sendable {
+    private let lock = NSLock()
+    private var responseLimitExceeded = false
+
+    func markResponseLimitExceeded() {
+      lock.lock()
+      responseLimitExceeded = true
+      lock.unlock()
+    }
+
+    func readResponseLimitExceeded() -> Bool {
+      lock.lock()
+      defer { lock.unlock() }
+      return responseLimitExceeded
+    }
+  }
+
+  private let maximumResponseBytes: Int64
+  private let redirectPolicy: TiebaRedirectPolicy
+  private let state = State()
+
+  var exceededResponseLimit: Bool { state.readResponseLimitExceeded() }
+
+  init(maximumResponseBytes: Int64, redirectPolicy: TiebaRedirectPolicy) {
+    self.maximumResponseBytes = maximumResponseBytes
+    self.redirectPolicy = redirectPolicy
+  }
+
+  static func exceedsLimit(
+    totalBytesWritten: Int64,
+    totalBytesExpected: Int64,
+    maximumResponseBytes: Int64
+  ) -> Bool {
+    totalBytesWritten < 0
+      || totalBytesWritten > maximumResponseBytes
+      || totalBytesExpected > maximumResponseBytes
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    task: URLSessionTask,
+    willPerformHTTPRedirection response: HTTPURLResponse,
+    newRequest request: URLRequest,
+    completionHandler: @escaping @Sendable (URLRequest?) -> Void
+  ) {
+    completionHandler(
+      redirectPolicy.allows(from: response.url, to: request.url) ? request : nil
+    )
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    downloadTask: URLSessionDownloadTask,
+    didWriteData bytesWritten: Int64,
+    totalBytesWritten: Int64,
+    totalBytesExpectedToWrite: Int64
+  ) {
+    if Self.exceedsLimit(
+      totalBytesWritten: totalBytesWritten,
+      totalBytesExpected: totalBytesExpectedToWrite,
+      maximumResponseBytes: maximumResponseBytes
+    ) {
+      state.markResponseLimitExceeded()
+      downloadTask.cancel()
+    }
+  }
+
+  func urlSession(
+    _ session: URLSession,
+    downloadTask: URLSessionDownloadTask,
+    didFinishDownloadingTo location: URL
+  ) {}
 }
 
 public actor TiebaClient {
@@ -194,6 +380,29 @@ public actor TiebaClient {
     let response: PbPageResIdl = try decode(body)
     try checkServerError(code: response.error.errorno, message: response.error.errmsg)
     return TiebaProtoMapper.postPage(response.data)
+  }
+
+  public func getPicturePage(
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    cursor: TiebaPicturePageCursor,
+    direction: TiebaPicturePageDirection = .next,
+    onlyThreadAuthor: Bool = false
+  ) async throws -> TiebaPicturePage {
+    let request = try requestFactory.picturePage(
+      forumID: forumID,
+      forumName: forumName,
+      threadID: threadID,
+      cursor: cursor,
+      direction: direction,
+      onlyThreadAuthor: onlyThreadAuthor
+    )
+    let body = try await send(
+      request,
+      maximumBodyBytes: TiebaPicturePagePolicy.maximumResponseBodyBytes
+    )
+    return try TiebaPicturePageDecoder.page(from: body, expectedForumID: forumID)
   }
 
   public func getComments(
@@ -415,7 +624,10 @@ public actor TiebaClient {
   ) async throws -> Data {
     let response: TiebaHTTPResponse
     do {
-      response = try await transport.send(request)
+      response = try await transport.send(
+        request,
+        maximumBodyBytes: maximumBodyBytes
+      )
     } catch let error as TiebaClientError {
       throw error
     } catch is CancellationError {
