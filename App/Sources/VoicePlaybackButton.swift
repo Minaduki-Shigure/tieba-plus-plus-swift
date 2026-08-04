@@ -805,9 +805,9 @@ struct VoicePlaybackButton: View {
     guard isActive, displayedDuration > 0 else { return false }
     switch activeState {
     case .playing, .paused:
-      true
+      return true
     case .idle, .loading, .failed:
-      false
+      return false
     }
   }
 
