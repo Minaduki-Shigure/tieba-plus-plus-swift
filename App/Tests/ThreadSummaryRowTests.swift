@@ -14,7 +14,13 @@ final class ThreadSummaryRowTests: XCTestCase {
     let coverURL = try XCTUnwrap(URL(string: "https://example.com/video.jpg"))
     let thread = makeThread(
       contents: [
-        .image(thumbnail: imageURL, original: nil, width: 100, height: 100),
+        .image(
+          thumbnail: imageURL,
+          fullSize: nil,
+          original: nil,
+          width: 100,
+          height: 100
+        ),
         .video(url: nil, cover: coverURL, width: 1280, height: 720),
       ]
     )
@@ -36,7 +42,7 @@ final class ThreadSummaryRowTests: XCTestCase {
     }
     let thread = makeThread(
       contents: urls.map {
-        .image(thumbnail: $0, original: nil, width: 100, height: 100)
+        .image(thumbnail: $0, fullSize: nil, original: nil, width: 100, height: 100)
       }
     )
 
@@ -54,11 +60,50 @@ final class ThreadSummaryRowTests: XCTestCase {
     )
   }
 
+  func testImagePreviewQualitySelectsHighDefinitionWithoutChangingCount() throws {
+    let thumbnail = try XCTUnwrap(URL(string: "https://example.com/standard.jpg"))
+    let fullSize = try XCTUnwrap(URL(string: "https://example.com/high-definition.jpg"))
+    let thread = makeThread(
+      contents: [
+        .image(
+          thumbnail: thumbnail,
+          fullSize: fullSize,
+          original: try XCTUnwrap(URL(string: "https://example.com/original.jpg")),
+          width: 100,
+          height: 100
+        )
+      ]
+    )
+
+    XCTAssertEqual(
+      ThreadSummaryPresentation.media(for: thread, quality: .standard),
+      .images([thumbnail], totalCount: 1)
+    )
+    XCTAssertEqual(
+      ThreadSummaryPresentation.media(for: thread, quality: .highDefinition),
+      .images([fullSize], totalCount: 1)
+    )
+    XCTAssertEqual(
+      ThreadSummaryPresentation.mediaPresentation(
+        for: thread,
+        hidesMedia: true,
+        quality: .highDefinition
+      ),
+      .collapsed(.images(count: 1))
+    )
+  }
+
   func testCollapsedImageCountPreservesDuplicateURLs() throws {
     let repeatedURL = try XCTUnwrap(URL(string: "https://example.com/repeated.jpg"))
     let thread = makeThread(
       contents: (0..<4).map { _ in
-        .image(thumbnail: repeatedURL, original: nil, width: 100, height: 100)
+        .image(
+          thumbnail: repeatedURL,
+          fullSize: nil,
+          original: nil,
+          width: 100,
+          height: 100
+        )
       }
     )
 
@@ -89,7 +134,13 @@ final class ThreadSummaryRowTests: XCTestCase {
     let threadWithImage = makeThread(
       contents: [
         .video(url: videoURL, cover: nil, width: 1280, height: 720),
-        .image(thumbnail: imageURL, original: nil, width: 100, height: 100),
+        .image(
+          thumbnail: imageURL,
+          fullSize: nil,
+          original: nil,
+          width: 100,
+          height: 100
+        ),
       ]
     )
 
@@ -106,7 +157,15 @@ final class ThreadSummaryRowTests: XCTestCase {
   func testPinnedThreadNeverLoadsInlineMedia() throws {
     let imageURL = try XCTUnwrap(URL(string: "https://example.com/image.jpg"))
     let thread = makeThread(
-      contents: [.image(thumbnail: imageURL, original: nil, width: 100, height: 100)],
+      contents: [
+        .image(
+          thumbnail: imageURL,
+          fullSize: nil,
+          original: nil,
+          width: 100,
+          height: 100
+        )
+      ],
       isPinned: true
     )
 

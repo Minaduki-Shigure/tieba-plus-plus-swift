@@ -28,6 +28,8 @@ struct AppSettingsView: View {
   private var externalWebOpenMode = ExternalWebOpenMode.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.contentMediaLoadPolicy)
   private var contentMediaLoadPolicy = ContentMediaLoadPolicy.automatic.rawValue
+  @AppStorage(AppPreferenceKey.contentImagePreviewQuality)
+  private var contentImagePreviewQuality = ContentImagePreviewQuality.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.hidesThreadListMedia)
   private var hidesThreadListMedia = false
   @AppStorage(AppPreferenceKey.darkensContentThumbnailsInDarkMode)
@@ -172,6 +174,13 @@ struct AppSettingsView: View {
             .pickerStyle(.segmented)
         }
 
+        Picker("图片预览画质", selection: contentImagePreviewQualitySelection) {
+          ForEach(ContentImagePreviewQuality.allCases) { quality in
+            Text(quality.title).tag(quality)
+          }
+        }
+        .pickerStyle(.menu)
+
         Toggle("收起帖子列表的图片和视频", isOn: $hidesThreadListMedia)
 
         Toggle("深色模式压暗缩略图", isOn: $darkensContentThumbnailsInDarkMode)
@@ -189,6 +198,8 @@ struct AppSettingsView: View {
             + "在蜂窝网络、个人热点或低数据模式下需点按加载。\u{201c}点按加载\u{201d}在所有网络上"
             + "均需点按；两种模式都会直接显示进程内缓存的图片。这些模式控制展开后的列表媒体、"
             + "帖子正文、话题图片和视频封面，头像、图库、页面数据和其他网络请求不受影响。\n\n"
+            + "图片预览画质只在服务器同时返回标准和高清地址时选择帖子正文、帖子列表和吧内搜索"
+            + "所用的图片地址；高清可能使用更多流量。打开图库后仍优先加载原图，不受此选项影响。\n\n"
             + "\u{201c}收起帖子列表的图片和视频\u{201d}仅影响帖子列表和吧内搜索；收起时不会创建列表"
             + "媒体预览请求。\u{201c}深色模式压暗缩略图\u{201d}仅对已加载成功的帖子列表、吧内搜索、"
             + "正文和话题静态图片应用视觉效果，不影响下载、缓存或任何网络请求；视频封面、头像、"
@@ -293,6 +304,13 @@ struct AppSettingsView: View {
         Text(policy.title).tag(policy)
       }
     }
+  }
+
+  private var contentImagePreviewQualitySelection: Binding<ContentImagePreviewQuality> {
+    Binding(
+      get: { ContentImagePreviewQuality.resolved(contentImagePreviewQuality) },
+      set: { contentImagePreviewQuality = $0.rawValue }
+    )
   }
 
   private var externalWebOpenModeSelection: Binding<ExternalWebOpenMode> {

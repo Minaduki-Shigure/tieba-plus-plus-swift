@@ -16,6 +16,7 @@ final class PostCopyTextTests: XCTestCase {
         .unsupported(label: "未知内容"),
         .image(
           thumbnail: try XCTUnwrap(URL(string: "https://example.com/thumb.jpg")),
+          fullSize: nil,
           original: nil,
           width: 100,
           height: 100
@@ -49,6 +50,7 @@ final class PostCopyTextTests: XCTestCase {
       contents: [
         .image(
           thumbnail: try XCTUnwrap(URL(string: "https://example.com/thumb.jpg")),
+          fullSize: nil,
           original: nil,
           width: 100,
           height: 100

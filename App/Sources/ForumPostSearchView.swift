@@ -561,15 +561,22 @@ enum ForumPostSearchMediaPresentation: Equatable, Sendable {
 
   static func resolve(
     contents: [BrowseContent],
-    hidesMedia: Bool
+    hidesMedia: Bool,
+    quality: ContentImagePreviewQuality = .standard
   ) -> Self {
     var imageURLs: [URL] = []
     var totalCount = 0
     for content in contents {
-      guard case .image(let thumbnail, _, _, _) = content else { continue }
+      guard case .image(let thumbnail, let fullSize, _, _, _) = content else { continue }
       totalCount += 1
       if !hidesMedia, imageURLs.count < 3 {
-        imageURLs.append(thumbnail)
+        imageURLs.append(
+          BrowseContentImageSourceResolver.previewURL(
+            thumbnail: thumbnail,
+            fullSize: fullSize,
+            quality: quality
+          )
+        )
       }
     }
     guard totalCount > 0 else { return .none }
@@ -584,13 +591,15 @@ private struct ForumPostSearchMediaStrip: View {
   let contents: [BrowseContent]
 
   @Environment(\.contentMediaLoadBehavior) private var contentMediaLoadBehavior
+  @Environment(\.contentImagePreviewQuality) private var contentImagePreviewQuality
   @Environment(\.hidesThreadListMedia) private var hidesThreadListMedia
 
   @ViewBuilder
   var body: some View {
     switch ForumPostSearchMediaPresentation.resolve(
       contents: contents,
-      hidesMedia: hidesThreadListMedia
+      hidesMedia: hidesThreadListMedia,
+      quality: contentImagePreviewQuality
     ) {
     case .expanded(let imageURLs, let totalCount):
       expandedAccessibility(totalCount: totalCount) {

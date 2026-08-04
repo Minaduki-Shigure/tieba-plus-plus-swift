@@ -51,6 +51,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Nested replies, images, video links, and voice playback
 - Responsive one-to-three-column masonry for consecutive post-body image runs
 - Persistent automatic, data-saving, or tap-to-load policy for content media
+- Persistent standard or high-definition quality selection for supported image previews
 - Explicit eviction of the process-local decoded-image memory cache
 - Optional compact media summaries for thread lists and per-forum search, with no collapsed preview request
 - Default-on dark-appearance dimming for successfully rendered static content thumbnails
@@ -305,9 +306,17 @@ preview with request-level cellular, expensive, and constrained access denied;
 all other states read the memory cache and expose the existing exact-request
 load control. An explicit tap remains unrestricted and stays authorized across
 later path changes. Avatars, galleries, media playback, export, page data, and
-all nonmedia requests remain outside this policy. Unlike TiebaLite, this version
-does not select between multiple remote thumbnail qualities because the current
-response model does not retain an ordered quality set.
+all nonmedia requests remain outside this policy.
+An independent preview-quality setting retains the separately normalized
+standard, high-definition, and original candidates already carried by the
+anonymous response. Standard remains the default and preserves the prior URL
+choice. The opt-in high-definition mode selects that candidate when available
+and otherwise falls back to the standard candidate. It applies dynamically to
+post bodies, thread cards, and per-forum search without changing whether a
+request is automatic, economical, or user initiated. Gallery, sharing, and
+saving always retain the original-then-high-definition-then-standard chain and
+do not consult the preview preference. Avatars, video covers, and single-source
+hot-topic images are also unchanged.
 An independent persistent compact mode replaces those thread-list previews and
 per-forum search image strips with noninteractive media summaries. Its collapsed
 presentation retains only a media type or full image count and never constructs

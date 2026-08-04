@@ -44,12 +44,18 @@ struct ImageGalleryPresentation: Identifiable, Equatable, Sendable {
   init?(contents: [BrowseContent], selectedContentOffset: Int) {
     let items: [ImageGalleryItem] = contents.enumerated().compactMap { pair -> ImageGalleryItem? in
       let (offset, content) = pair
-      guard case .image(let thumbnail, let original, let width, let height) = content else {
+      guard
+        case .image(let thumbnail, let fullSize, let original, let width, let height) = content
+      else {
         return nil
       }
       return ImageGalleryItem(
         contentOffset: offset,
-        url: original ?? thumbnail,
+        url: BrowseContentImageSourceResolver.galleryURL(
+          thumbnail: thumbnail,
+          fullSize: fullSize,
+          original: original
+        ),
         width: width,
         height: height
       )

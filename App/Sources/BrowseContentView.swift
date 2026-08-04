@@ -11,6 +11,7 @@ struct BrowseContentView: View {
   @Environment(\.externalWebOpenMode) private var externalWebOpenMode
   @Environment(\.openExternalWeb) private var openExternalWeb
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.contentImagePreviewQuality) private var contentImagePreviewQuality
   @State private var imageGalleryPresentation: ImageGalleryPresentation?
 
   init(
@@ -97,11 +98,12 @@ struct BrowseContentView: View {
   @ViewBuilder
   private func standalone(_ content: BrowseContent, contentOffset: Int) -> some View {
     switch content {
-    case .image(let thumbnail, _, let width, let height):
+    case .image(let thumbnail, let fullSize, _, let width, let height):
       browseImage(
         BrowseContentImageItem(
           contentOffset: contentOffset,
           thumbnailURL: thumbnail,
+          fullSizeURL: fullSize,
           width: width,
           height: height
         )
@@ -117,7 +119,11 @@ struct BrowseContentView: View {
 
   private func browseImage(_ image: BrowseContentImageItem) -> some View {
     BrowseImageView(
-      thumbnailURL: image.thumbnailURL,
+      thumbnailURL: BrowseContentImageSourceResolver.previewURL(
+        thumbnail: image.thumbnailURL,
+        fullSize: image.fullSizeURL,
+        quality: contentImagePreviewQuality
+      ),
       width: image.width,
       height: image.height,
       onOpen: {
@@ -183,6 +189,7 @@ enum BrowseContentImageLayout: Equatable, Sendable {
 struct BrowseContentImageItem: Identifiable, Equatable, Sendable {
   let contentOffset: Int
   let thumbnailURL: URL
+  let fullSizeURL: URL?
   let width: Int
   let height: Int
 
@@ -242,12 +249,13 @@ enum BrowseContentBlock: Identifiable, Equatable, Sendable {
           inlineStartOffset = offset
         }
         inline.append(content)
-      case .image(let thumbnail, _, let width, let height):
+      case .image(let thumbnail, let fullSize, _, let width, let height):
         flushInline()
         images.append(
           BrowseContentImageItem(
             contentOffset: offset,
             thumbnailURL: thumbnail,
+            fullSizeURL: fullSize,
             width: width,
             height: height
           )

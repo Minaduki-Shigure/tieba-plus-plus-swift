@@ -11,6 +11,7 @@ enum AppPreferenceKey {
   static let searchSuggestionsEnabled = "TiebaPlusPlus.searchSuggestionsEnabled"
   static let externalWebOpenMode = "TiebaPlusPlus.externalWebOpenMode"
   static let contentMediaLoadPolicy = "TiebaPlusPlus.contentMediaLoadPolicy"
+  static let contentImagePreviewQuality = "TiebaPlusPlus.contentImagePreviewQuality"
   static let hidesThreadListMedia = "TiebaPlusPlus.hidesThreadListMedia"
   static let darkensContentThumbnailsInDarkMode =
     "TiebaPlusPlus.darkensContentThumbnailsInDarkMode"
@@ -251,6 +252,39 @@ enum ContentMediaLoadPolicy: String, CaseIterable, Identifiable, Sendable {
 
   static func resolved(_ rawValue: String) -> Self {
     Self(rawValue: rawValue) ?? .automatic
+  }
+}
+
+enum ContentImagePreviewQuality: String, CaseIterable, Hashable, Identifiable, Sendable {
+  case standard
+  case highDefinition
+
+  static let defaultValue = Self.standard
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .standard:
+      "标准（推荐）"
+    case .highDefinition:
+      "高清"
+    }
+  }
+
+  static func resolved(_ rawValue: String) -> Self {
+    Self(rawValue: rawValue) ?? defaultValue
+  }
+}
+
+private struct ContentImagePreviewQualityEnvironmentKey: EnvironmentKey {
+  static let defaultValue = ContentImagePreviewQuality.defaultValue
+}
+
+extension EnvironmentValues {
+  var contentImagePreviewQuality: ContentImagePreviewQuality {
+    get { self[ContentImagePreviewQualityEnvironmentKey.self] }
+    set { self[ContentImagePreviewQualityEnvironmentKey.self] = newValue }
   }
 }
 

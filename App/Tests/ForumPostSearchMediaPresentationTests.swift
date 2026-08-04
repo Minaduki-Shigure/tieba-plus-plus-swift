@@ -9,7 +9,13 @@ final class ForumPostSearchMediaPresentationTests: XCTestCase {
       try XCTUnwrap(URL(string: "https://img.example/\(index).jpg"))
     }
     let contents = urls.map {
-      BrowseContent.image(thumbnail: $0, original: nil, width: 100, height: 100)
+      BrowseContent.image(
+        thumbnail: $0,
+        fullSize: nil,
+        original: nil,
+        width: 100,
+        height: 100
+      )
     }
 
     XCTAssertEqual(
@@ -23,6 +29,7 @@ final class ForumPostSearchMediaPresentationTests: XCTestCase {
     let contents = (0..<4).map { _ in
       BrowseContent.image(
         thumbnail: repeatedURL,
+        fullSize: nil,
         original: nil,
         width: 100,
         height: 100
@@ -32,6 +39,37 @@ final class ForumPostSearchMediaPresentationTests: XCTestCase {
     XCTAssertEqual(
       ForumPostSearchMediaPresentation.resolve(contents: contents, hidesMedia: true),
       .collapsed(.images(count: 4))
+    )
+  }
+
+  func testExpandedPresentationUsesSelectedPreviewQuality() throws {
+    let thumbnail = try XCTUnwrap(URL(string: "https://img.example/standard.jpg"))
+    let fullSize = try XCTUnwrap(URL(string: "https://img.example/high-definition.jpg"))
+    let contents: [BrowseContent] = [
+      .image(
+        thumbnail: thumbnail,
+        fullSize: fullSize,
+        original: try XCTUnwrap(URL(string: "https://img.example/original.jpg")),
+        width: 100,
+        height: 100
+      )
+    ]
+
+    XCTAssertEqual(
+      ForumPostSearchMediaPresentation.resolve(
+        contents: contents,
+        hidesMedia: false,
+        quality: .standard
+      ),
+      .expanded(imageURLs: [thumbnail], totalCount: 1)
+    )
+    XCTAssertEqual(
+      ForumPostSearchMediaPresentation.resolve(
+        contents: contents,
+        hidesMedia: false,
+        quality: .highDefinition
+      ),
+      .expanded(imageURLs: [fullSize], totalCount: 1)
     )
   }
 
@@ -59,7 +97,13 @@ final class ForumPostSearchMediaPresentationTests: XCTestCase {
     let contents: [BrowseContent] = [
       .text("matched text"),
       .video(url: videoURL, cover: nil, width: 1_280, height: 720),
-      .image(thumbnail: imageURL, original: nil, width: 100, height: 100),
+      .image(
+        thumbnail: imageURL,
+        fullSize: nil,
+        original: nil,
+        width: 100,
+        height: 100
+      ),
     ]
 
     XCTAssertEqual(

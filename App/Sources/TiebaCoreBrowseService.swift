@@ -759,7 +759,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       else { return nil }
       return .image(
         thumbnail: thumbnail,
-        original: SecureTiebaURL.media(image.fullSizeURL),
+        fullSize: SecureTiebaURL.media(image.fullSizeURL),
+        original: nil,
         width: image.width,
         height: image.height
       )
@@ -902,7 +903,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       else { return nil }
       return .image(
         thumbnail: thumbnail,
-        original: SecureTiebaURL.media(image.fullSizeURL),
+        fullSize: SecureTiebaURL.media(image.fullSizeURL),
+        original: nil,
         width: image.width,
         height: image.height
       )
@@ -1257,7 +1259,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
         }
         return .image(
           thumbnail: thumbnail,
-          original: firstSecureMediaURL(image.originalURL, image.fullSizeURL),
+          fullSize: firstSecureMediaURL(image.fullSizeURL),
+          original: firstSecureMediaURL(image.originalURL),
           width: image.width,
           height: image.height
         )

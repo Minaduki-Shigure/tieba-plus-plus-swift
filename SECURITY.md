@@ -326,6 +326,17 @@ only a transient availability/cost snapshot; it never reads an SSID, BSSID,
 carrier identity, or local-network peer and does not probe a URL to classify
 the network.
 
+The image preview-quality preference is independent from that network policy.
+Every standard, high-definition, and original candidate is normalized through
+the existing HTTPS media policy before it enters the browsing model. Standard
+quality remains the default; high-definition can select only the separately
+accepted high-definition candidate and otherwise falls back to the accepted
+standard candidate. Changing quality changes the existing URL-based request
+identity and therefore cannot inherit a manual authorization or failed state
+from another source. It does not alter request access flags, byte limits,
+decoder bounds, cache keys, or the gallery's fixed
+original-then-high-definition-then-standard selection.
+
 A cold manually gated image performs an exact in-memory cache lookup and must
 not create or join a network request until the user presses its load control.
 That authorization is bound to the current HTTPS URL and requested pixel size;

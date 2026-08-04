@@ -49,6 +49,33 @@ final class AppPreferencesTests: XCTestCase {
     XCTAssertEqual(AppAppearance.dark.colorScheme, .dark)
   }
 
+  @MainActor
+  func testContentImagePreviewQualityUsesStableValuesAndDefaultsToStandard() {
+    XCTAssertEqual(
+      AppPreferenceKey.contentImagePreviewQuality,
+      "TiebaPlusPlus.contentImagePreviewQuality"
+    )
+    XCTAssertEqual(ContentImagePreviewQuality.allCases, [.standard, .highDefinition])
+    XCTAssertEqual(
+      ContentImagePreviewQuality.allCases.map(\.rawValue),
+      ["standard", "highDefinition"]
+    )
+    XCTAssertEqual(
+      ContentImagePreviewQuality.allCases.map(\.title),
+      ["标准（推荐）", "高清"]
+    )
+    XCTAssertEqual(ContentImagePreviewQuality.defaultValue, .standard)
+    XCTAssertEqual(ContentImagePreviewQuality.resolved("standard"), .standard)
+    XCTAssertEqual(ContentImagePreviewQuality.resolved("highDefinition"), .highDefinition)
+    XCTAssertEqual(ContentImagePreviewQuality.resolved(""), .standard)
+    XCTAssertEqual(ContentImagePreviewQuality.resolved("future-value"), .standard)
+    XCTAssertEqual(EnvironmentValues().contentImagePreviewQuality, .standard)
+
+    var environment = EnvironmentValues()
+    environment.contentImagePreviewQuality = .highDefinition
+    XCTAssertEqual(environment.contentImagePreviewQuality, .highDefinition)
+  }
+
   func testTextSizeAdjustmentUsesStableValuesTitlesAndDefault() {
     XCTAssertEqual(
       AppPreferenceKey.textSizeAdjustment,

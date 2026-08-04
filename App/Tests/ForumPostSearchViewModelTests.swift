@@ -109,6 +109,60 @@ final class ForumPostSearchViewModelTests: XCTestCase {
     XCTAssertEqual(mapped.matchedAuthorUsername, "reply-account")
   }
 
+  func testCoreMapperPreservesBothSearchPreviewQualitiesAndGalleryFallback() throws {
+    let thumbnail = try XCTUnwrap(URL(string: "https://img.example/standard.jpg"))
+    let fullSize = try XCTUnwrap(URL(string: "https://img.example/high-definition.jpg"))
+    let coreResult = TiebaThreadSearchResult(
+      threadID: 42,
+      firstPostID: 100,
+      forumID: 7,
+      forumName: "swift",
+      title: "Image match",
+      excerpt: "Matched post",
+      authorID: 1,
+      authorName: "author",
+      authorPortraitURL: nil,
+      replyCount: 1,
+      likeCount: 0,
+      shareCount: 0,
+      createdAt: nil,
+      images: [
+        TiebaSearchImage(
+          thumbnailURL: thumbnail,
+          fullSizeURL: fullSize,
+          width: 640,
+          height: 480
+        )
+      ]
+    )
+
+    let mapped = TiebaCoreBrowseService.mapForumPostSearchResult(coreResult)
+
+    XCTAssertEqual(
+      ForumPostSearchMediaPresentation.resolve(
+        contents: mapped.matchedContents,
+        hidesMedia: false,
+        quality: .standard
+      ),
+      .expanded(imageURLs: [thumbnail], totalCount: 1)
+    )
+    XCTAssertEqual(
+      ForumPostSearchMediaPresentation.resolve(
+        contents: mapped.matchedContents,
+        hidesMedia: false,
+        quality: .highDefinition
+      ),
+      .expanded(imageURLs: [fullSize], totalCount: 1)
+    )
+    XCTAssertEqual(
+      ImageGalleryPresentation(
+        contents: mapped.matchedContents,
+        selectedContentOffset: 0
+      )?.items.map(\.url),
+      [fullSize]
+    )
+  }
+
   @MainActor
   func testHistoryLoadsWithoutIssuingSearchAndSubmissionIsRecorded() async throws {
     let service = ScriptedForumPostSearchService()

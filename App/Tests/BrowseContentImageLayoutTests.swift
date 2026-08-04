@@ -7,6 +7,7 @@ import XCTest
 final class BrowseContentImageLayoutTests: XCTestCase {
   func testBlocksGroupOnlyConsecutiveImagesAndPreserveOriginalOffsets() throws {
     let firstImageURL = try url("https://example.com/first.jpg")
+    let firstFullSizeURL = try url("https://example.com/first-full.jpg")
     let secondImageURL = try url("https://example.com/second.jpg")
     let thirdImageURL = try url("https://example.com/third.jpg")
     let fourthImageURL = try url("https://example.com/fourth.jpg")
@@ -14,12 +15,36 @@ final class BrowseContentImageLayoutTests: XCTestCase {
     let voiceURL = try url("https://example.com/voice.mp3")
     let contents: [BrowseContent] = [
       .text("before"),
-      .image(thumbnail: firstImageURL, original: nil, width: 100, height: 80),
-      .image(thumbnail: secondImageURL, original: nil, width: 80, height: 100),
+      .image(
+        thumbnail: firstImageURL,
+        fullSize: firstFullSizeURL,
+        original: nil,
+        width: 100,
+        height: 80
+      ),
+      .image(
+        thumbnail: secondImageURL,
+        fullSize: nil,
+        original: nil,
+        width: 80,
+        height: 100
+      ),
       .unsupported(label: "separator"),
-      .image(thumbnail: thirdImageURL, original: nil, width: 200, height: 100),
+      .image(
+        thumbnail: thirdImageURL,
+        fullSize: nil,
+        original: nil,
+        width: 200,
+        height: 100
+      ),
       .video(url: videoURL, cover: nil, width: 1_280, height: 720),
-      .image(thumbnail: fourthImageURL, original: nil, width: 100, height: 200),
+      .image(
+        thumbnail: fourthImageURL,
+        fullSize: nil,
+        original: nil,
+        width: 100,
+        height: 200
+      ),
       .voice(url: voiceURL, duration: 4),
       .text("after"),
     ]
@@ -34,12 +59,14 @@ final class BrowseContentImageLayoutTests: XCTestCase {
           BrowseContentImageItem(
             contentOffset: 1,
             thumbnailURL: firstImageURL,
+            fullSizeURL: firstFullSizeURL,
             width: 100,
             height: 80
           ),
           BrowseContentImageItem(
             contentOffset: 2,
             thumbnailURL: secondImageURL,
+            fullSizeURL: nil,
             width: 80,
             height: 100
           ),
@@ -49,6 +76,7 @@ final class BrowseContentImageLayoutTests: XCTestCase {
           BrowseContentImageItem(
             contentOffset: 4,
             thumbnailURL: thirdImageURL,
+            fullSizeURL: nil,
             width: 200,
             height: 100
           )
@@ -61,6 +89,7 @@ final class BrowseContentImageLayoutTests: XCTestCase {
           BrowseContentImageItem(
             contentOffset: 6,
             thumbnailURL: fourthImageURL,
+            fullSizeURL: nil,
             width: 100,
             height: 200
           )
@@ -87,8 +116,20 @@ final class BrowseContentImageLayoutTests: XCTestCase {
   func testBlocksKeepDuplicateImageURLsAsDistinctItems() throws {
     let repeatedURL = try url("https://example.com/repeated.jpg")
     let blocks = BrowseContentBlock.makeBlocks([
-      .image(thumbnail: repeatedURL, original: nil, width: 100, height: 100),
-      .image(thumbnail: repeatedURL, original: repeatedURL, width: 100, height: 100),
+      .image(
+        thumbnail: repeatedURL,
+        fullSize: nil,
+        original: nil,
+        width: 100,
+        height: 100
+      ),
+      .image(
+        thumbnail: repeatedURL,
+        fullSize: nil,
+        original: repeatedURL,
+        width: 100,
+        height: 100
+      ),
     ])
 
     guard case .imageRun(let images) = try XCTUnwrap(blocks.first) else {
@@ -325,7 +366,9 @@ final class BrowseContentImageLayoutTests: XCTestCase {
       try url("https://example.com/\(index).jpg")
     }
     let blocks = BrowseContentBlock.makeBlocks(
-      urls.map { .image(thumbnail: $0, original: nil, width: 100, height: 100) }
+      urls.map {
+        .image(thumbnail: $0, fullSize: nil, original: nil, width: 100, height: 100)
+      }
     )
     guard case .imageRun(let images) = try XCTUnwrap(blocks.first) else {
       return XCTFail("Expected an image run")

@@ -93,7 +93,7 @@ final class BrowseViewModelTests: XCTestCase {
     let validImage = TiebaImage(
       thumbnailURL: try XCTUnwrap(URL(string: "https://img.example/thumb.jpg")),
       fullSizeURL: try XCTUnwrap(URL(string: "https://img.example/full.jpg")),
-      originalURL: nil,
+      originalURL: try XCTUnwrap(URL(string: "https://img.example/original.jpg")),
       width: 640,
       height: 480,
       originalByteCount: 0
@@ -186,13 +186,30 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertFalse(mapped.isLive)
     XCTAssertEqual(
       mapped.contents.compactMap { content -> URL? in
-        guard case .image(let thumbnail, _, _, _) = content else { return nil }
+        guard case .image(let thumbnail, _, _, _, _) = content else { return nil }
         return thumbnail
       },
       [
         try XCTUnwrap(URL(string: "https://img.example/thumb.jpg")),
         fallbackImageURL,
       ]
+    )
+    XCTAssertEqual(
+      mapped.contents.compactMap { content -> URL? in
+        guard case .image(_, let fullSize, _, _, _) = content else { return nil }
+        return fullSize
+      },
+      [
+        try XCTUnwrap(URL(string: "https://img.example/full.jpg")),
+        fallbackImageURL,
+      ]
+    )
+    XCTAssertEqual(
+      mapped.contents.compactMap { content -> URL? in
+        guard case .image(_, _, let original, _, _) = content else { return nil }
+        return original
+      },
+      [try XCTUnwrap(URL(string: "https://img.example/original.jpg"))]
     )
     XCTAssertTrue(
       mapped.contents.contains { content in
@@ -210,6 +227,7 @@ final class BrowseViewModelTests: XCTestCase {
 
   func testSearchThreadMappingPreservesAvailableCountsAndImages() throws {
     let thumbnailURL = try XCTUnwrap(URL(string: "https://img.example/search.jpg"))
+    let highDefinitionURL = try XCTUnwrap(URL(string: "https://img.example/search-full.jpg"))
     let fallbackURL = try XCTUnwrap(URL(string: "https://img.example/fallback.jpg"))
     let result = TiebaThreadSearchResult(
       threadID: 50,
@@ -229,7 +247,7 @@ final class BrowseViewModelTests: XCTestCase {
       images: [
         TiebaSearchImage(
           thumbnailURL: thumbnailURL,
-          fullSizeURL: nil,
+          fullSizeURL: highDefinitionURL,
           width: 640,
           height: 480
         ),
@@ -251,6 +269,10 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(
       ThreadSummaryPresentation.media(for: mapped),
       .images([thumbnailURL, fallbackURL], totalCount: 2)
+    )
+    XCTAssertEqual(
+      ThreadSummaryPresentation.media(for: mapped, quality: .highDefinition),
+      .images([highDefinitionURL, fallbackURL], totalCount: 2)
     )
   }
 

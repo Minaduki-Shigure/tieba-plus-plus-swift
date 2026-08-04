@@ -973,9 +973,38 @@ enum BrowseContent: Hashable, Sendable {
   case text(String)
   case mention(name: String, userID: Int64)
   case link(label: String, url: URL)
-  case image(thumbnail: URL, original: URL?, width: Int, height: Int)
+  case image(
+    thumbnail: URL,
+    fullSize: URL?,
+    original: URL?,
+    width: Int,
+    height: Int
+  )
   case video(url: URL?, cover: URL?, width: Int, height: Int)
   case voice(url: URL, duration: Int)
   case emoticon(name: String, url: URL?)
   case unsupported(label: String)
+}
+
+enum BrowseContentImageSourceResolver {
+  static func previewURL(
+    thumbnail: URL,
+    fullSize: URL?,
+    quality: ContentImagePreviewQuality
+  ) -> URL {
+    switch quality {
+    case .standard:
+      thumbnail
+    case .highDefinition:
+      fullSize ?? thumbnail
+    }
+  }
+
+  static func galleryURL(
+    thumbnail: URL,
+    fullSize: URL?,
+    original: URL?
+  ) -> URL {
+    original ?? fullSize ?? thumbnail
+  }
 }

@@ -97,7 +97,13 @@ final class InlineCommentPreviewTests: XCTestCase {
         .text("hello "),
         .mention(name: "reader", userID: 7),
         .link(label: "文档", url: linkURL),
-        .image(thumbnail: imageURL, original: nil, width: 1, height: 1),
+        .image(
+          thumbnail: imageURL,
+          fullSize: nil,
+          original: nil,
+          width: 1,
+          height: 1
+        ),
         .voice(url: voiceURL, duration: 3),
         .video(url: nil, cover: nil, width: 0, height: 0),
       ]),

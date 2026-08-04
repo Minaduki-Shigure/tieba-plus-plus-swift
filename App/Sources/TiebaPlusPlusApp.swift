@@ -11,6 +11,8 @@ struct TiebaPlusPlusApp: App {
   private var textSizeAdjustment = AppTextSizeAdjustment.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.contentMediaLoadPolicy)
   private var contentMediaLoadPolicy = ContentMediaLoadPolicy.automatic.rawValue
+  @AppStorage(AppPreferenceKey.contentImagePreviewQuality)
+  private var contentImagePreviewQuality = ContentImagePreviewQuality.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.hidesThreadListMedia)
   private var hidesThreadListMedia = false
   @AppStorage(AppPreferenceKey.darkensContentThumbnailsInDarkMode)
@@ -69,6 +71,10 @@ struct TiebaPlusPlusApp: App {
         resolvedContentMediaLoadPolicy
       )
       .environment(\.contentMediaLoadBehavior, contentMediaLoadBehavior)
+      .environment(
+        \.contentImagePreviewQuality,
+        ContentImagePreviewQuality.resolved(contentImagePreviewQuality)
+      )
       .environment(\.hidesThreadListMedia, hidesThreadListMedia)
       .environment(
         \.darkensContentThumbnailsInDarkMode,

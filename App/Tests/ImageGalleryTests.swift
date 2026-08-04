@@ -8,11 +8,24 @@ final class ImageGalleryTests: XCTestCase {
     let firstThumbnail = try url("https://example.com/first-thumb.jpg")
     let firstOriginal = try url("https://example.com/first-original.jpg")
     let secondThumbnail = try url("https://example.com/second-thumb.jpg")
+    let secondFullSize = try url("https://example.com/second-full.jpg")
     let contents: [BrowseContent] = [
       .text("before"),
-      .image(thumbnail: firstThumbnail, original: firstOriginal, width: 100, height: 80),
+      .image(
+        thumbnail: firstThumbnail,
+        fullSize: nil,
+        original: firstOriginal,
+        width: 100,
+        height: 80
+      ),
       .video(url: nil, cover: nil, width: 0, height: 0),
-      .image(thumbnail: secondThumbnail, original: nil, width: 80, height: 100),
+      .image(
+        thumbnail: secondThumbnail,
+        fullSize: secondFullSize,
+        original: nil,
+        width: 80,
+        height: 100
+      ),
       .voice(url: try url("https://example.com/voice.mp3"), duration: 3),
     ]
 
@@ -24,7 +37,7 @@ final class ImageGalleryTests: XCTestCase {
       presentation.items,
       [
         ImageGalleryItem(contentOffset: 1, url: firstOriginal, width: 100, height: 80),
-        ImageGalleryItem(contentOffset: 3, url: secondThumbnail, width: 80, height: 100),
+        ImageGalleryItem(contentOffset: 3, url: secondFullSize, width: 80, height: 100),
       ]
     )
     XCTAssertEqual(
@@ -40,9 +53,21 @@ final class ImageGalleryTests: XCTestCase {
   func testPresentationDoesNotMergeDuplicateURLsAndSelectsByContentOffset() throws {
     let duplicateURL = try url("https://example.com/duplicate.jpg")
     let contents: [BrowseContent] = [
-      .image(thumbnail: duplicateURL, original: nil, width: 100, height: 100),
+      .image(
+        thumbnail: duplicateURL,
+        fullSize: nil,
+        original: nil,
+        width: 100,
+        height: 100
+      ),
       .text("between"),
-      .image(thumbnail: duplicateURL, original: duplicateURL, width: 200, height: 200),
+      .image(
+        thumbnail: duplicateURL,
+        fullSize: nil,
+        original: duplicateURL,
+        width: 200,
+        height: 200
+      ),
     ]
 
     let presentation = try XCTUnwrap(
@@ -60,7 +85,13 @@ final class ImageGalleryTests: XCTestCase {
     let imageURL = try url("https://example.com/image.jpg")
     let contents: [BrowseContent] = [
       .text("not an image"),
-      .image(thumbnail: imageURL, original: nil, width: 100, height: 100),
+      .image(
+        thumbnail: imageURL,
+        fullSize: nil,
+        original: nil,
+        width: 100,
+        height: 100
+      ),
     ]
 
     XCTAssertNil(ImageGalleryPresentation(contents: contents, selectedContentOffset: 0))

@@ -11,7 +11,10 @@ enum ThreadSummaryMediaPresentation: Equatable, Sendable {
 }
 
 enum ThreadSummaryPresentation {
-  static func media(for thread: BrowseThread) -> ThreadSummaryMedia? {
+  static func media(
+    for thread: BrowseThread,
+    quality: ContentImagePreviewQuality = .standard
+  ) -> ThreadSummaryMedia? {
     guard !thread.isPinned else { return nil }
     if let cover = thread.contents.compactMap({ content -> URL? in
       guard case .video(_, let cover, _, _) = content else { return nil }
@@ -20,8 +23,12 @@ enum ThreadSummaryPresentation {
       return .video(cover)
     }
     let images = thread.contents.compactMap { content -> URL? in
-      guard case .image(let thumbnail, _, _, _) = content else { return nil }
-      return thumbnail
+      guard case .image(let thumbnail, let fullSize, _, _, _) = content else { return nil }
+      return BrowseContentImageSourceResolver.previewURL(
+        thumbnail: thumbnail,
+        fullSize: fullSize,
+        quality: quality
+      )
     }
     guard !images.isEmpty else { return nil }
     return .images(Array(images.prefix(3)), totalCount: images.count)
@@ -29,9 +36,10 @@ enum ThreadSummaryPresentation {
 
   static func mediaPresentation(
     for thread: BrowseThread,
-    hidesMedia: Bool
+    hidesMedia: Bool,
+    quality: ContentImagePreviewQuality = .standard
   ) -> ThreadSummaryMediaPresentation? {
-    guard let media = media(for: thread) else { return nil }
+    guard let media = media(for: thread, quality: quality) else { return nil }
     guard hidesMedia else { return .expanded(media) }
 
     switch media {
@@ -49,6 +57,7 @@ struct ThreadSummaryRow: View {
   let showsAuthor: Bool
 
   @Environment(\.contentMediaLoadBehavior) private var contentMediaLoadBehavior
+  @Environment(\.contentImagePreviewQuality) private var contentImagePreviewQuality
   @Environment(\.hidesThreadListMedia) private var hidesThreadListMedia
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
 
@@ -130,7 +139,8 @@ struct ThreadSummaryRow: View {
   private var mediaPreview: some View {
     switch ThreadSummaryPresentation.mediaPresentation(
       for: thread,
-      hidesMedia: hidesThreadListMedia
+      hidesMedia: hidesThreadListMedia,
+      quality: contentImagePreviewQuality
     ) {
     case .some(.collapsed(let summary)):
       CompactListMediaView(summary: summary)
