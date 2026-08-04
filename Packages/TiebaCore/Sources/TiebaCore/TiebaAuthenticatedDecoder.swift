@@ -207,13 +207,13 @@ enum TiebaAuthenticatedDecoder {
       guard CFGetTypeID(value) != CFBooleanGetTypeID() else { return nil }
       return Int64(value.stringValue)
     case let value as Int64:
-      value
+      return value
     case let value as Int:
-      Int64(value)
+      return Int64(value)
     case let value as String:
-      Int64(value)
+      return Int64(value)
     default:
-      nil
+      return nil
     }
   }
 
