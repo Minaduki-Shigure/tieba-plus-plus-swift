@@ -10,6 +10,7 @@ struct HotThreadListView: View {
 
   @StateObject private var viewModel: HotThreadListViewModel
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.appAccentColor) private var appAccentColor
 
   init(
     service: any BrowseService & ForumPostSearchService & HotTopicService & HotThreadService
@@ -227,7 +228,7 @@ struct HotThreadListView: View {
                 .foregroundStyle(isSelected ? Color.primary : Color.secondary)
                 .lineLimit(1)
               Rectangle()
-                .fill(isSelected ? Color.accentColor : Color.clear)
+                .fill(isSelected ? appAccentColor.color : Color.clear)
                 .frame(height: 2)
             }
             .frame(minHeight: 40)

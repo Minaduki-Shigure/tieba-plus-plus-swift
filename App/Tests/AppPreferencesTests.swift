@@ -50,6 +50,30 @@ final class AppPreferencesTests: XCTestCase {
   }
 
   @MainActor
+  func testAccentColorUsesStableValuesTitlesAndDefault() {
+    XCTAssertEqual(AppPreferenceKey.accentColor, "TiebaPlusPlus.accentColor")
+    XCTAssertEqual(AppAccentColor.allCases, [.blue, .indigo, .teal, .green, .rose])
+    XCTAssertEqual(
+      AppAccentColor.allCases.map(\.rawValue),
+      ["blue", "indigo", "teal", "green", "rose"]
+    )
+    XCTAssertEqual(
+      AppAccentColor.allCases.map(\.title),
+      ["贴吧蓝", "靛蓝", "青绿", "叶绿", "玫红"]
+    )
+    XCTAssertEqual(AppAccentColor.defaultValue, .blue)
+    XCTAssertEqual(AppAccentColor.resolved("blue"), .blue)
+    XCTAssertEqual(AppAccentColor.resolved("rose"), .rose)
+    XCTAssertEqual(AppAccentColor.resolved(""), .blue)
+    XCTAssertEqual(AppAccentColor.resolved("future-value"), .blue)
+    XCTAssertEqual(EnvironmentValues().appAccentColor, .blue)
+
+    var environment = EnvironmentValues()
+    environment.appAccentColor = .teal
+    XCTAssertEqual(environment.appAccentColor, .teal)
+  }
+
+  @MainActor
   func testContentImagePreviewQualityUsesStableValuesAndDefaultsToStandard() {
     XCTAssertEqual(
       AppPreferenceKey.contentImagePreviewQuality,

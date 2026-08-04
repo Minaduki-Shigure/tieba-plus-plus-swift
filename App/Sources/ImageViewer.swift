@@ -330,6 +330,7 @@ struct ImageViewer: View {
           .padding(.bottom, 12)
         }
       }
+      .tint(.white)
       .buttonStyle(ImageViewerControlButtonStyle())
     }
     .accessibilityAction(.escape) {

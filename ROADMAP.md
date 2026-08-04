@@ -42,6 +42,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Versioned local browsing history with delete, clear, and recording controls
 - Settings-level no-history mode using the existing browsing-history archive
 - Native system, light, and dark appearance selection
+- Persistent five-color accent selection with light, dark, and high-contrast variants
 - Persistent six-position app text-size adjustment relative to iOS Dynamic Type
 - Transient pure-reading mode and full textual floor copying
 - Home-screen recent-forum history, expanded by default and independently hideable
@@ -330,6 +331,18 @@ bodies, per-forum search, and hot topics. Video covers, avatars, galleries,
 placeholders, and compact summaries remain unchanged. The control is a pure
 rendering decision and does not enter URL normalization, fetch policy, reload
 identity, transfer deduplication, decoding, or cache keys.
+
+TiebaLite exposes fixed themes, dynamic Android colors, and arbitrary custom
+colors. The first iOS adaptation keeps appearance mode independent and offers a
+bounded five-color accent palette instead of importing wallpaper, translucent,
+or arbitrary-HEX theme behavior. Each choice has explicit light, dark,
+high-contrast-light, and high-contrast-dark values plus a contrasting foreground
+for prominent controls. The default light blue exactly preserves the asset
+catalog color used before this setting existed. Root SwiftUI tint covers native
+controls and tint shape styles, while a matching enum environment supplies the
+concrete color needed by attributed strings, comment highlights, badges, and
+progress fills. System Safari, Web login, share sheets, semantic warning colors,
+and immersive media controls remain system-managed or explicitly white.
 
 TiebaLite clears both memory and persistent image caches. Tieba++ deliberately
 offers only process-local decoded-image eviction because its hardened ephemeral

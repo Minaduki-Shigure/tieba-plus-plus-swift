@@ -11,6 +11,7 @@ struct BrowseContentView: View {
   @Environment(\.externalWebOpenMode) private var externalWebOpenMode
   @Environment(\.openExternalWeb) private var openExternalWeb
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.appAccentColor) private var appAccentColor
   @Environment(\.contentImagePreviewQuality) private var contentImagePreviewQuality
   @State private var imageGalleryPresentation: ImageGalleryPresentation?
 
@@ -40,7 +41,8 @@ struct BrowseContentView: View {
           Text(
             Self.inlineText(
               contents,
-              linksUserMentions: onUserMention != nil || onTiebaLink != nil
+              linksUserMentions: onUserMention != nil || onTiebaLink != nil,
+              accentColor: appAccentColor.color
             )
           )
             .textSelection(.enabled)
@@ -141,7 +143,8 @@ struct BrowseContentView: View {
 
   static func inlineText(
     _ contents: [BrowseContent],
-    linksUserMentions: Bool = false
+    linksUserMentions: Bool = false,
+    accentColor: Color = AppAccentColor.defaultValue.color
   ) -> AttributedString {
     var result = AttributedString()
     for content in contents {
@@ -151,14 +154,14 @@ struct BrowseContentView: View {
         fragment = AttributedString(text)
       case .mention(let name, let userID):
         fragment = AttributedString("@\(name)")
-        fragment.foregroundColor = .accentColor
+        fragment.foregroundColor = accentColor
         if linksUserMentions, let url = mentionURL(for: userID) {
           fragment.link = url
         }
       case .link(let label, let url):
         fragment = AttributedString(label.isEmpty ? url.host ?? url.absoluteString : label)
         fragment.link = url
-        fragment.foregroundColor = .accentColor
+        fragment.foregroundColor = accentColor
       case .emoticon(let name, _):
         fragment = AttributedString(name)
       case .unsupported(let label):

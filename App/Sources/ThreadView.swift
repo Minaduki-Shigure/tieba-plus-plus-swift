@@ -974,6 +974,8 @@ private struct PostView: View {
 private struct PollResultsCard: View {
   let poll: BrowsePoll
 
+  @Environment(\.appAccentColor) private var appAccentColor
+
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       VStack(alignment: .leading, spacing: 5) {
@@ -1047,7 +1049,7 @@ private struct PollResultsCard: View {
           Capsule()
             .fill(Color(uiColor: .tertiarySystemFill))
           Capsule()
-            .fill(Color.accentColor.opacity(0.65))
+            .fill(appAccentColor.color.opacity(0.65))
             .frame(width: geometry.size.width * CGFloat(poll.progress(for: option)))
         }
       }

@@ -377,6 +377,15 @@ can redraw an existing image without creating or canceling a request. Video
 covers, avatars, galleries, loading and failure placeholders, compact summaries,
 badges, and playback controls remain outside this modifier.
 
+Accent selection is also local presentation state. It stores only one bounded
+enum value in UserDefaults and must not enter a request, URL, cookie, account
+record, cache key, download policy, or content archive. Every palette entry has
+fixed light, dark, and increased-contrast variants; arbitrary input and remote
+theme data are unsupported. Semantic warning and destructive colors remain
+independent, while image viewers and video overlays keep their explicit white
+controls on black. System Web, Safari, and share surfaces continue to manage
+their own appearance.
+
 Manual image-cache clearing may evict only the process-local decoded-image
 `NSCache`. It must advance a generation barrier so a transfer started before the
 clear cannot later repopulate that old cache state. It must not cancel active

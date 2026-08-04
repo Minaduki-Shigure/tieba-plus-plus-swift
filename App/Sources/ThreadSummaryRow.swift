@@ -58,6 +58,7 @@ struct ThreadSummaryRow: View {
 
   @Environment(\.contentMediaLoadBehavior) private var contentMediaLoadBehavior
   @Environment(\.contentImagePreviewQuality) private var contentImagePreviewQuality
+  @Environment(\.appAccentColor) private var appAccentColor
   @Environment(\.hidesThreadListMedia) private var hidesThreadListMedia
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
 
@@ -357,7 +358,7 @@ struct ThreadSummaryRow: View {
       ForEach(Array(badges.enumerated()), id: \.offset) { _, badge in
         Label(badge.title, systemImage: badge.systemImage)
           .font(.caption2.weight(.semibold))
-          .foregroundStyle(badge.isProminent ? Color.accentColor : Color.secondary)
+          .foregroundStyle(badge.isProminent ? appAccentColor.color : Color.secondary)
           .lineLimit(1)
           .fixedSize(horizontal: true, vertical: false)
       }

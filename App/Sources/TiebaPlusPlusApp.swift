@@ -7,6 +7,8 @@ struct TiebaPlusPlusApp: App {
   @StateObject private var contentMediaNetworkMonitor = ContentMediaNetworkMonitor()
   @AppStorage(AppPreferenceKey.appearance)
   private var appearance = AppAppearance.system.rawValue
+  @AppStorage(AppPreferenceKey.accentColor)
+  private var accentColor = AppAccentColor.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.textSizeAdjustment)
   private var textSizeAdjustment = AppTextSizeAdjustment.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.contentMediaLoadPolicy)
@@ -47,6 +49,7 @@ struct TiebaPlusPlusApp: App {
   }
 
   var body: some Scene {
+    let resolvedAccentColor = AppAccentColor.resolved(accentColor)
     let resolvedContentMediaLoadPolicy = ContentMediaLoadPolicy.resolved(contentMediaLoadPolicy)
     let contentMediaLoadBehavior = ContentMediaLoadBehavior.resolved(
       policy: resolvedContentMediaLoadPolicy,
@@ -65,6 +68,7 @@ struct TiebaPlusPlusApp: App {
         startDestination: startDestination
       )
       .appTextSizeAdjustment(AppTextSizeAdjustment.resolved(textSizeAdjustment))
+      .environment(\.appAccentColor, resolvedAccentColor)
       .environment(\.contentFilterRepository, contentFilterRepository)
       .environment(
         \.contentMediaLoadPolicy,
@@ -102,6 +106,7 @@ struct TiebaPlusPlusApp: App {
         .allowsHitTesting(false)
         .accessibilityHidden(true)
       }
+      .tint(resolvedAccentColor.color)
       .preferredColorScheme(AppAppearance.resolved(appearance).colorScheme)
     }
   }

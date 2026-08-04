@@ -79,6 +79,7 @@ private struct InlineCommentPreviewRow: View {
   let action: () -> Void
 
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
+  @Environment(\.appAccentColor) private var appAccentColor
 
   private var bodyText: String {
     BrowseContentCopyText.text(comment.contents) ?? "（无可显示内容）"
@@ -111,11 +112,11 @@ private struct InlineCommentPreviewRow: View {
 
   private var previewText: Text {
     var result = Text(displayedAuthorName)
-      .foregroundColor(.accentColor)
+      .foregroundColor(appAccentColor.color)
       .bold()
     if comment.isThreadAuthor {
       result = result + Text(" [楼主]")
-        .foregroundColor(.accentColor)
+        .foregroundColor(appAccentColor.color)
         .fontWeight(.semibold)
     }
     return result + Text("：\(bodyText)")

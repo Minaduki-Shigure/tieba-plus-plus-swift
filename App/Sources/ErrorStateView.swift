@@ -4,6 +4,8 @@ struct ErrorStateView: View {
   let message: String
   let retry: () -> Void
 
+  @Environment(\.appAccentColor) private var appAccentColor
+
   var body: some View {
     VStack(spacing: 14) {
       Image(systemName: "exclamationmark.triangle")
@@ -15,6 +17,7 @@ struct ErrorStateView: View {
         .multilineTextAlignment(.center)
       Button(action: retry) {
         Label("重试", systemImage: "arrow.clockwise")
+          .foregroundStyle(appAccentColor.onAccentColor)
       }
       .buttonStyle(.borderedProminent)
     }

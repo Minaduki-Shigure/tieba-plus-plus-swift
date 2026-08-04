@@ -6,6 +6,8 @@ struct AppSettingsView: View {
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @AppStorage(AppPreferenceKey.appearance)
   private var appearance = AppAppearance.system.rawValue
+  @AppStorage(AppPreferenceKey.accentColor)
+  private var accentColor = AppAccentColor.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.textSizeAdjustment)
   private var textSizeAdjustment = AppTextSizeAdjustment.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.defaultForumSort)
@@ -53,6 +55,29 @@ struct AppSettingsView: View {
           appearancePicker
             .pickerStyle(.segmented)
         }
+
+        NavigationLink {
+          AppAccentColorSettingsView(selection: accentColorSelection)
+        } label: {
+          HStack(spacing: 10) {
+            Label("强调色", systemImage: "paintpalette")
+            Spacer(minLength: 12)
+            Circle()
+              .fill(selectedAccentColor.color)
+              .frame(width: 18, height: 18)
+              .overlay {
+                Circle()
+                  .stroke(Color(uiColor: .separator), lineWidth: 0.5)
+              }
+              .accessibilityHidden(true)
+            Text(selectedAccentColor.title)
+              .foregroundStyle(.secondary)
+          }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("强调色")
+        .accessibilityValue(selectedAccentColor.title)
+        .accessibilityIdentifier("settings-accent-color")
 
         Picker("应用内字号", selection: textSizeAdjustmentSelection) {
           ForEach(AppTextSizeAdjustment.allCases) { adjustment in
@@ -260,6 +285,17 @@ struct AppSettingsView: View {
         Text(appearance.title).tag(appearance)
       }
     }
+  }
+
+  private var selectedAccentColor: AppAccentColor {
+    AppAccentColor.resolved(accentColor)
+  }
+
+  private var accentColorSelection: Binding<AppAccentColor> {
+    Binding(
+      get: { selectedAccentColor },
+      set: { accentColor = $0.rawValue }
+    )
   }
 
   private var textSizeAdjustmentSelection: Binding<AppTextSizeAdjustment> {

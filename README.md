@@ -144,9 +144,10 @@ corresponding surface or control.
 - **Recent forums:** The home screen projects up to 100 recently visited forums from browsing
   history. The section starts expanded and can be persistently hidden without
   changing the underlying archive.
-- **General settings:** Settings provide system, light, and dark appearance, a global forum-sort
-  default with normalized per-forum memory, and a no-history mode backed by the
-  same versioned browsing-history archive.
+- **General settings:** Settings provide system, light, and dark appearance, a
+  controlled five-color accent palette with light, dark, and increased-contrast
+  variants, a global forum-sort default with normalized per-forum memory, and a
+  no-history mode backed by the same versioned browsing-history archive.
 - **Image cache:** Settings can explicitly evict the process-local decoded-image cache without
   cancelling active transfers or removing currently displayed images. The app
   has no persistent image cache, so this action does not claim disk-space

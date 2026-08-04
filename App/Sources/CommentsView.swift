@@ -5,6 +5,7 @@ import UIKit
 struct CommentsView: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.appAccentColor) private var appAccentColor
   @StateObject private var viewModel: CommentsViewModel
   @State private var linkedTarget: TiebaLinkTarget?
   @State private var highlightedComment: CommentHighlightToken?
@@ -162,12 +163,12 @@ struct CommentsView: View {
                 .id(CommentsListItemID.comment(comment.id))
                 .listRowBackground(
                   highlightedComment?.commentID == comment.id
-                    ? Color.accentColor.opacity(0.12)
+                    ? appAccentColor.color.opacity(0.12)
                     : Color.clear
                 )
                 .overlay(alignment: .leading) {
                   if highlightedComment?.commentID == comment.id {
-                    Color.accentColor
+                    appAccentColor.color
                       .frame(width: 3)
                       .accessibilityHidden(true)
                   }

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import TiebaCore
 import XCTest
 
@@ -1005,12 +1006,15 @@ final class BrowseViewModelTests: XCTestCase {
       XCTAssertNil(BrowseContentView.mentionUserID(from: try XCTUnwrap(URL(string: invalidURL))))
     }
 
+    let customAccent = Color.green
     let linkedText = BrowseContentView.inlineText(
       [.mention(name: "reader", userID: 77), .text(" hello")],
-      linksUserMentions: true
+      linksUserMentions: true,
+      accentColor: customAccent
     )
     XCTAssertEqual(String(linkedText.characters), "@reader hello")
     XCTAssertEqual(linkedText.runs.compactMap { $0.link }, [url])
+    XCTAssertEqual(linkedText.runs.compactMap { $0.foregroundColor }, [customAccent])
   }
 
   @MainActor
