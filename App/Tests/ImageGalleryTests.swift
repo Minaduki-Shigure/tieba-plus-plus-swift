@@ -71,6 +71,42 @@ final class ImageGalleryTests: XCTestCase {
     XCTAssertTrue(ImageZoomGeometry.allowsPanning(at: 1.01))
   }
 
+  func testLoadingPresentationUsesExactDeterminateProgressWhenLengthIsReliable() {
+    let progress = RemoteImageDownloadProgress(
+      receivedByteCount: 49,
+      expectedByteCount: 100
+    )
+
+    XCTAssertEqual(
+      ImageViewerLoadingPresentation.make(from: .downloading(progress)),
+      .determinate(fraction: 0.49, percentage: 49)
+    )
+  }
+
+  func testLoadingPresentationDoesNotInventPercentageForUnknownOrInvalidLength() {
+    XCTAssertEqual(ImageViewerLoadingPresentation.make(from: nil), .indeterminate)
+    XCTAssertEqual(
+      ImageViewerLoadingPresentation.make(
+        from: .downloading(
+          RemoteImageDownloadProgress(receivedByteCount: 10, expectedByteCount: nil)
+        )
+      ),
+      .indeterminate
+    )
+    XCTAssertEqual(
+      ImageViewerLoadingPresentation.make(
+        from: .downloading(
+          RemoteImageDownloadProgress(receivedByteCount: 101, expectedByteCount: 100)
+        )
+      ),
+      .indeterminate
+    )
+  }
+
+  func testLoadingPresentationSeparatesDecodingFromTransfer() {
+    XCTAssertEqual(ImageViewerLoadingPresentation.make(from: .decoding), .decoding)
+  }
+
   func testZoomGeometryClampsPanAndResetsItAtOneTimesZoom() {
     let viewport = CGSize(width: 200, height: 100)
 

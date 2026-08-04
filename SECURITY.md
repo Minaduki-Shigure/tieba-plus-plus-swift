@@ -418,6 +418,15 @@ preview transfers running in the background.
 An image gallery is built only from the already filtered `BrowseContent` array
 that owns the tapped image. It must not rescan a raw response, cross a floor or
 origin-card boundary, merge repeated URLs, or reveal a locally hidden fragment.
+Gallery progress is derived only from the existing credential-free download's
+observed and declared byte counts and creates no additional request. Transfer
+limits are evaluated before a progress event is published. A percentage is
+available only while the declared length is positive, stable, and no smaller
+than the observed bytes; unknown or inconsistent lengths remain indeterminate.
+Every physical transfer, repository waiter, and SwiftUI loading attempt has a
+separate identity so a canceled same-URL transfer cannot publish into its
+replacement. Cache hits publish no fabricated network progress, and clearing
+the decoded cache neither cancels nor resets an active transfer's progress.
 Sharing and saving are explicit user actions and operate only on the currently
 selected HTTPS image. They reuse the credential-free media transport, its HTTPS
 redirect and 80 MiB transfer limits, and a private temporary-file lease. Before

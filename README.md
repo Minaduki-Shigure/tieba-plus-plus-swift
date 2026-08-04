@@ -90,8 +90,10 @@ corresponding surface or control.
   and shared-thread origin media. Consecutive images in post-like content use a
   one-to-three-column masonry layout based on their actual container width;
   Accessibility Dynamic Type and forum-rule documents remain single-column.
-  Images open in a same-content gallery with paging and zoom; explicit actions
-  can share the original file or save it through add-only Photos access.
+  Images open in a same-content gallery with paging, zoom, and exact transfer
+  percentage when the server supplies a reliable length; unknown or
+  inconsistent lengths remain indeterminate. Explicit actions can share the
+  original file or save it through add-only Photos access.
 - **Media loading:** Content media can load automatically, conserve data, or
   wait for every explicit tap. Data-saving mode loads automatically only on an
   available network that iOS does not mark expensive or constrained; otherwise

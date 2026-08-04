@@ -54,7 +54,8 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Explicit eviction of the process-local decoded-image memory cache
 - Optional compact media summaries for thread lists and per-forum search, with no collapsed preview request
 - Default-on dark-appearance dimming for successfully rendered static content thumbnails
-- Same-content multi-image gallery with paging, zoom, original-file sharing, and Photos saving
+- Same-content multi-image gallery with paging, zoom, bounded download progress,
+  original-file sharing, and Photos saving
 - Server-ranked inline nested-reply previews with anchored opening and safe text copying
 - Full nested-reply pages with parent-floor context and bidirectional anchored pagination
 - Shared-thread origin cards with original content, media, and navigation
@@ -143,12 +144,18 @@ Rich-content images open as one gallery scoped to the already filtered content
 array that produced the tapped image. Source offsets, rather than URLs, identify
 pages, so repeated images remain distinct and the selected duplicate opens at
 the correct position. Paging, the visible counter, and per-page zoom never fetch
-or aggregate another floor. Sharing and Photos saving explicitly download only
-the selected original image through the bounded credential-free media transport,
-validate its real ImageIO type and dimensions, and retain the temporary file only
-until the system consumer finishes. Whole-thread `picpage` traversal remains a
-separate milestone because the current domain model does not yet preserve its
-picture IDs or bidirectional cursor contract.
+or aggregate another floor. Each original-image page observes its own waiter on
+the existing deduplicated transfer. A stable positive server length produces an
+integer percentage from exact received bytes; missing, changing, or inconsistent
+lengths remain indeterminate, and ImageIO work is shown as a separate processing
+stage. Transfer, waiter, and SwiftUI-attempt identities reject late progress from
+a canceled same-URL request without fragmenting the decoded cache. Sharing and
+Photos saving explicitly download only the selected original image through the
+bounded credential-free media transport, validate its real ImageIO type and
+dimensions, and retain the temporary file only until the system consumer
+finishes. Whole-thread `picpage` traversal remains a separate milestone because
+the current domain model does not yet preserve its picture IDs or bidirectional
+cursor contract.
 
 Public profiles use the protocol's guest fields instead of impersonating the
 target user as the current account. The public-theme endpoint ignores its

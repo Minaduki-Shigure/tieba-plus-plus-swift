@@ -4,6 +4,92 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class RemoteImageTransportTests: XCTestCase {
+  func testDownloadProgressComputesDeterminateValuesAndFloorsPercentage() throws {
+    let empty = RemoteImageDownloadProgress(
+      receivedByteCount: 0,
+      expectedByteCount: 100
+    )
+    XCTAssertEqual(empty.fractionCompleted, 0)
+    XCTAssertEqual(empty.percentageCompleted, 0)
+
+    let partial = RemoteImageDownloadProgress(
+      receivedByteCount: 1,
+      expectedByteCount: 3
+    )
+    XCTAssertEqual(try XCTUnwrap(partial.fractionCompleted), 1.0 / 3.0, accuracy: 0.000_001)
+    XCTAssertEqual(partial.percentageCompleted, 33)
+
+    let complete = RemoteImageDownloadProgress(
+      receivedByteCount: 100,
+      expectedByteCount: 100
+    )
+    XCTAssertEqual(complete.fractionCompleted, 1)
+    XCTAssertEqual(complete.percentageCompleted, 100)
+
+    let nearIntegerLimit = RemoteImageDownloadProgress(
+      receivedByteCount: Int64.max - 1,
+      expectedByteCount: Int64.max
+    )
+    XCTAssertEqual(nearIntegerLimit.percentageCompleted, 99)
+  }
+
+  func testDownloadProgressIsIndeterminateForInvalidCounts() {
+    for progress in [
+      RemoteImageDownloadProgress(receivedByteCount: -1, expectedByteCount: 10),
+      RemoteImageDownloadProgress(receivedByteCount: 0, expectedByteCount: nil),
+      RemoteImageDownloadProgress(receivedByteCount: 0, expectedByteCount: 0),
+      RemoteImageDownloadProgress(receivedByteCount: 0, expectedByteCount: -1),
+      RemoteImageDownloadProgress(receivedByteCount: 11, expectedByteCount: 10),
+    ] {
+      XCTAssertNil(progress.fractionCompleted)
+      XCTAssertNil(progress.percentageCompleted)
+    }
+  }
+
+  func testProgressRequirementUsesDynamicDispatchThroughExistential() async throws {
+    let downloader: any RemoteImageDownloading = ProgressDispatchProbe()
+    let recorder = RemoteImageProgressRecorder()
+    let url = try XCTUnwrap(URL(string: "https://img.example/image"))
+
+    do {
+      _ = try await downloader.download(
+        from: url,
+        kind: .preview,
+        networkAccess: .unrestricted,
+        onProgress: { recorder.record($0) }
+      )
+      XCTFail("Expected the dispatch probe to throw")
+    } catch ProgressDispatchProbeError.progressRequirement {
+      // Expected.
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+
+    XCTAssertEqual(
+      recorder.snapshot(),
+      [RemoteImageDownloadProgress(receivedByteCount: 1, expectedByteCount: 1)]
+    )
+  }
+
+  func testProgressRequirementDefaultsToLegacyRequirementForExistingConformers() async throws {
+    let downloader: any RemoteImageDownloading = LegacyDownloadProbe()
+    let url = try XCTUnwrap(URL(string: "https://img.example/image"))
+
+    do {
+      _ = try await downloader.download(
+        from: url,
+        kind: .preview,
+        networkAccess: .unrestricted,
+        onProgress: { _ in }
+      )
+      XCTFail("Expected the legacy probe to throw")
+    } catch ProgressDispatchProbeError.legacyRequirement {
+      // Expected.
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+  }
+
   func testURLPolicyAllowsOnlyCredentialFreeHTTPSURLsWithHosts() throws {
     XCTAssertTrue(RemoteImageURLPolicy.allows(try XCTUnwrap(URL(string: "https://img.example/a"))))
 
@@ -175,6 +261,73 @@ final class RemoteImageTransportTests: XCTestCase {
     withExtendedLifetime(lease) {}
   }
 
+  func testKnownLengthDownloadReportsMonotonicProgressThroughTransport() async throws {
+    let root = makeTemporaryDirectoryURL()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let transport = makeTransport(temporaryDirectory: root)
+    let recorder = RemoteImageProgressRecorder()
+    let url = try XCTUnwrap(URL(string: "https://remote-image.test/known-progress"))
+
+    let lease = try await transport.download(
+      from: url,
+      kind: .preview,
+      networkAccess: .unrestricted,
+      onProgress: { recorder.record($0) }
+    )
+    let progress = recorder.snapshot()
+
+    XCTAssertFalse(progress.isEmpty)
+    XCTAssertEqual(
+      progress.last,
+      RemoteImageDownloadProgress(
+        receivedByteCount: lease.byteCount,
+        expectedByteCount: lease.byteCount
+      )
+    )
+    XCTAssertEqual(progress.last?.percentageCompleted, 100)
+    XCTAssertTrue(
+      zip(progress, progress.dropFirst()).allSatisfy {
+        $0.0.receivedByteCount <= $0.1.receivedByteCount
+      }
+    )
+    XCTAssertTrue(
+      zip(progress, progress.dropFirst()).allSatisfy {
+        guard
+          let firstPercentage = $0.0.percentageCompleted,
+          let secondPercentage = $0.1.percentageCompleted
+        else { return false }
+        return firstPercentage < secondPercentage
+      }
+    )
+    withExtendedLifetime(lease) {}
+  }
+
+  func testUnknownLengthDownloadReportsIndeterminateMonotonicProgress() async throws {
+    let root = makeTemporaryDirectoryURL()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let transport = makeTransport(temporaryDirectory: root)
+    let recorder = RemoteImageProgressRecorder()
+    let url = try XCTUnwrap(URL(string: "https://remote-image.test/unknown-progress"))
+
+    let lease = try await transport.download(
+      from: url,
+      kind: .preview,
+      networkAccess: .unrestricted,
+      onProgress: { recorder.record($0) }
+    )
+    let progress = recorder.snapshot()
+
+    XCTAssertFalse(progress.isEmpty)
+    XCTAssertTrue(progress.allSatisfy { $0.expectedByteCount == nil })
+    XCTAssertTrue(progress.allSatisfy { $0.fractionCompleted == nil })
+    XCTAssertTrue(
+      zip(progress, progress.dropFirst()).allSatisfy {
+        $0.0.receivedByteCount <= $0.1.receivedByteCount
+      }
+    )
+    withExtendedLifetime(lease) {}
+  }
+
   func testDownloadRejectsNonSuccessHTTPResponse() async throws {
     let transport = makeTransport(temporaryDirectory: makeTemporaryDirectoryURL())
     let url = try XCTUnwrap(URL(string: "https://remote-image.test/not-found"))
@@ -209,6 +362,34 @@ final class RemoteImageTransportTests: XCTestCase {
     } catch {
       XCTFail("Unexpected error: \(error)")
     }
+  }
+
+  func testOversizeTransferDoesNotReportProgress() async throws {
+    let transport = makeTransport(
+      limits: RemoteImageDownloadLimits(
+        previewMaximumResponseBytes: 8,
+        originalMaximumResponseBytes: 16
+      ),
+      temporaryDirectory: makeTemporaryDirectoryURL()
+    )
+    let recorder = RemoteImageProgressRecorder()
+    let url = try XCTUnwrap(URL(string: "https://remote-image.test/oversize-progress"))
+
+    do {
+      _ = try await transport.download(
+        from: url,
+        kind: .preview,
+        networkAccess: .unrestricted,
+        onProgress: { recorder.record($0) }
+      )
+      XCTFail("Expected a response-too-large error")
+    } catch RemoteImageDownloadError.responseTooLarge {
+      // Expected.
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+
+    XCTAssertTrue(recorder.snapshot().isEmpty)
   }
 
   func testCallerCancellationRemainsCancellationError() async throws {
@@ -280,28 +461,94 @@ private final class RemoteImageURLProtocol: URLProtocol, @unchecked Sendable {
 
     let statusCode = url.path == "/not-found" ? 404 : 200
     let body: Data
-    if url.path == "/oversize" {
+    if url.path == "/oversize" || url.path == "/oversize-progress" {
       body = Data(repeating: 0x41, count: 9)
+    } else if url.path == "/known-progress" || url.path == "/unknown-progress" {
+      body = Data(repeating: 0x49, count: 256 * 1_024)
     } else {
       body = Data("image".utf8)
+    }
+    var headerFields = ["Content-Type": "image/jpeg"]
+    if url.path == "/known-progress" || url.path == "/oversize-progress" {
+      headerFields["Content-Length"] = String(body.count)
     }
     guard
       let response = HTTPURLResponse(
         url: url,
         statusCode: statusCode,
         httpVersion: "HTTP/1.1",
-        headerFields: ["Content-Type": "image/jpeg"]
+        headerFields: headerFields
       )
     else {
       client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
       return
     }
     client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-    client?.urlProtocol(self, didLoad: body)
+    if url.path == "/known-progress" || url.path == "/unknown-progress" {
+      let chunkByteCount = 16 * 1_024
+      for lowerBound in stride(from: 0, to: body.count, by: chunkByteCount) {
+        let upperBound = min(lowerBound + chunkByteCount, body.count)
+        client?.urlProtocol(self, didLoad: body.subdata(in: lowerBound..<upperBound))
+      }
+    } else {
+      client?.urlProtocol(self, didLoad: body)
+    }
     client?.urlProtocolDidFinishLoading(self)
   }
 
   override func stopLoading() {}
+}
+
+private enum ProgressDispatchProbeError: Error {
+  case legacyRequirement
+  case progressRequirement
+}
+
+private struct ProgressDispatchProbe: RemoteImageDownloading {
+  func download(
+    from url: URL,
+    kind: RemoteImageDownloadKind,
+    networkAccess: RemoteImageNetworkAccess
+  ) async throws -> RemoteImageFileLease {
+    throw ProgressDispatchProbeError.legacyRequirement
+  }
+
+  func download(
+    from url: URL,
+    kind: RemoteImageDownloadKind,
+    networkAccess: RemoteImageNetworkAccess,
+    onProgress: @escaping @Sendable (RemoteImageDownloadProgress) -> Void
+  ) async throws -> RemoteImageFileLease {
+    onProgress(RemoteImageDownloadProgress(receivedByteCount: 1, expectedByteCount: 1))
+    throw ProgressDispatchProbeError.progressRequirement
+  }
+}
+
+private struct LegacyDownloadProbe: RemoteImageDownloading {
+  func download(
+    from url: URL,
+    kind: RemoteImageDownloadKind,
+    networkAccess: RemoteImageNetworkAccess
+  ) async throws -> RemoteImageFileLease {
+    throw ProgressDispatchProbeError.legacyRequirement
+  }
+}
+
+private final class RemoteImageProgressRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var progress = [RemoteImageDownloadProgress]()
+
+  func record(_ value: RemoteImageDownloadProgress) {
+    lock.lock()
+    progress.append(value)
+    lock.unlock()
+  }
+
+  func snapshot() -> [RemoteImageDownloadProgress] {
+    lock.lock()
+    defer { lock.unlock() }
+    return progress
+  }
 }
 
 private final class RemoteImageRequestRecorder: @unchecked Sendable {

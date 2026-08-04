@@ -99,6 +99,28 @@ enum ImageZoomGeometry {
   }
 }
 
+enum ImageViewerLoadingPresentation: Equatable, Sendable {
+  case indeterminate
+  case determinate(fraction: Double, percentage: Int)
+  case decoding
+
+  static func make(
+    from progress: DownsampledRemoteImageLoadProgress?
+  ) -> ImageViewerLoadingPresentation {
+    guard let progress else { return .indeterminate }
+    switch progress {
+    case .decoding:
+      return .decoding
+    case .downloading(let downloadProgress):
+      guard
+        let fraction = downloadProgress.fractionCompleted,
+        let percentage = downloadProgress.percentageCompleted
+      else { return .indeterminate }
+      return .determinate(fraction: fraction, percentage: percentage)
+    }
+  }
+}
+
 struct ImageViewer: View {
   @Environment(\.dismiss) private var dismiss
 
@@ -341,7 +363,11 @@ private struct ZoomableRemoteImage: View {
 
   var body: some View {
     GeometryReader { proxy in
-      DownsampledRemoteImage(url: item.url, maxPixelSize: 4_096) { phase in
+      DownsampledRemoteImage(
+        url: item.url,
+        maxPixelSize: 4_096,
+        fetchPolicy: .allowNetwork(.original)
+      ) { phase, progress in
         switch phase {
         case .success(let image, let pixelSize):
           image
@@ -379,9 +405,9 @@ private struct ZoomableRemoteImage: View {
             .foregroundStyle(.white)
             .accessibilityLabel("图片加载失败")
         default:
-          ProgressView()
-            .tint(.white)
-            .accessibilityLabel("正在加载图片")
+          ImageViewerLoadingIndicator(
+            presentation: ImageViewerLoadingPresentation.make(from: progress)
+          )
         }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -461,6 +487,41 @@ private struct ZoomableRemoteImage: View {
       height: imagePixelSize.height > 0 ? Int(imagePixelSize.height) : item.height,
       viewportSize: viewportSize
     )
+  }
+}
+
+private struct ImageViewerLoadingIndicator: View {
+  let presentation: ImageViewerLoadingPresentation
+
+  var body: some View {
+    Group {
+      switch presentation {
+      case .indeterminate:
+        ProgressView()
+          .accessibilityLabel("正在加载图片")
+      case .decoding:
+        VStack(spacing: 8) {
+          ProgressView()
+          Text("正在处理")
+            .font(.caption)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("正在处理图片")
+      case .determinate(let fraction, let percentage):
+        VStack(spacing: 8) {
+          ProgressView(value: fraction)
+            .frame(width: 144)
+          Text("\(percentage)%")
+            .font(.subheadline.monospacedDigit())
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("正在加载图片")
+        .accessibilityValue("\(percentage)%")
+      }
+    }
+    .tint(.white)
+    .foregroundStyle(.white)
+    .frame(width: 176, height: 72)
   }
 }
 
