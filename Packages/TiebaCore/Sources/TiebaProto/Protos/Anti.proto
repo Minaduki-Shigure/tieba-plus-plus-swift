@@ -1,0 +1,6 @@
+// tbclient.Anti
+syntax = "proto3";
+
+message Anti {
+    string tbs = 1;
+}

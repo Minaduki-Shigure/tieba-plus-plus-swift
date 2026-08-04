@@ -182,13 +182,16 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       throw Self.browseError(error)
     }
     let filter = await contentFilterSnapshot()
+    let mappedThread = Self.mapThread(response.thread)
+    let mappedPosts = response.posts.map { Self.mapPost($0, applying: filter) }
+    let mappedFirstPost = response.firstPost.map { Self.mapPost($0, applying: filter) }
     let returnedPostIDs = Self.returnedPostIDs(
       response.posts.map(\.id),
       firstPostID: response.firstPost?.id
     )
     return PostPageData(
-      thread: Self.mapThread(response.thread),
-      posts: response.posts.map { Self.mapPost($0, applying: filter) },
+      thread: mappedThread,
+      posts: mappedPosts,
       currentPage: response.pagination.currentPage,
       hasMore: response.pagination.hasMore,
       hasPrevious: response.pagination.hasPrevious,
@@ -203,7 +206,16 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
         filter.applying(to: Self.mapOriginThread($0))
       },
       poll: response.poll.map(Self.mapPoll),
-      firstPost: response.firstPost.map { Self.mapPost($0, applying: filter) }
+      firstPost: mappedFirstPost,
+      agreementReadDescriptor: Self.postAgreementDescriptor(
+        thread: mappedThread,
+        firstPost: mappedFirstPost,
+        posts: mappedPosts,
+        page: page,
+        pageSize: pageSize,
+        options: options,
+        location: location
+      )
     )
   }
 
@@ -225,6 +237,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       response,
       requestedThreadID: threadID,
       expectedPostID: postID,
+      requestedPage: page,
+      aroundCommentID: nil,
       filter: filter
     )
   }
@@ -253,6 +267,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       response,
       requestedThreadID: threadID,
       expectedPostID: postID,
+      requestedPage: page,
+      aroundCommentID: commentID,
       filter: filter
     )
   }
@@ -962,6 +978,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     _ response: TiebaCommentPage,
     requestedThreadID: Int64,
     expectedPostID: Int64,
+    requestedPage: Int = 1,
+    aroundCommentID: Int64? = nil,
     filter: ContentFilterSnapshot
   ) throws -> CommentPageData {
     let parentPost = response.parentPost
@@ -986,8 +1004,10 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       else { return nil }
       return filter.applying(to: mapComment(comment))
     }
+    let mappedThread = mapThread(response.thread)
+    let mappedParentPost = filter.applying(to: mapCommentParentPost(parentPost))
     return CommentPageData(
-      parentPost: filter.applying(to: mapCommentParentPost(parentPost)),
+      parentPost: mappedParentPost,
       comments: comments,
       currentPage: response.pagination.currentPage,
       hasMore: response.pagination.hasMore,
@@ -996,6 +1016,14 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       totalCount: max(
         max(response.pagination.totalCount, parentPost.commentCount),
         comments.count
+      ),
+      thread: mappedThread,
+      agreementReadDescriptor: subpostAgreementDescriptor(
+        thread: mappedThread,
+        parentPost: mappedParentPost,
+        comments: comments,
+        requestedPage: requestedPage,
+        aroundCommentID: aroundCommentID
       )
     )
   }
@@ -1060,7 +1088,75 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       replyToUserID: comment.replyToUserID.flatMap { $0 > 0 ? $0 : nil },
       replyToUserName: comment.replyToUserName.trimmingCharacters(
         in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "@"))
-      )
+      ),
+      threadID: comment.threadID,
+      parentPostID: comment.parentPostID
+    )
+  }
+
+  static func postAgreementDescriptor(
+    thread: BrowseThread,
+    firstPost: BrowsePost?,
+    posts: [BrowsePost],
+    page: Int,
+    pageSize: Int,
+    options: ThreadBrowseOptions,
+    location: ThreadPostLocation?
+  ) -> ContentAgreementReadDescriptor? {
+    guard let request = ContentAgreementPostPageRequest(
+      forumID: thread.forumID,
+      forumName: thread.forumName,
+      threadID: thread.id,
+      page: page,
+      pageSize: pageSize,
+      options: options,
+      location: location
+    ) else { return nil }
+
+    var targets = Set<ContentAgreementTarget>()
+    for post in [firstPost].compactMap({ $0 }) + posts {
+      if let target = ContentAgreementTarget(thread: thread, post: post) {
+        targets.insert(target)
+      }
+    }
+    return ContentAgreementReadDescriptor(
+      request: .postPage(request),
+      expectedTargets: targets
+    )
+  }
+
+  private static func subpostAgreementDescriptor(
+    thread: BrowseThread,
+    parentPost: CommentParentPostContext,
+    comments: [BrowseComment],
+    requestedPage: Int,
+    aroundCommentID: Int64?
+  ) -> ContentAgreementReadDescriptor? {
+    guard let request = ContentAgreementSubpostPageRequest(
+      forumID: thread.forumID,
+      forumName: thread.forumName,
+      threadID: thread.id,
+      parentPostID: parentPost.id,
+      aroundSubpostID: aroundCommentID,
+      page: requestedPage
+    ) else { return nil }
+
+    var targets = Set<ContentAgreementTarget>()
+    if let parentTarget = ContentAgreementTarget(thread: thread, parentPost: parentPost) {
+      targets.insert(parentTarget)
+    }
+    for comment in comments {
+      if let target = ContentAgreementTarget(
+        thread: thread,
+        parentPostID: parentPost.id,
+        comment: comment
+      ) {
+        targets.insert(target)
+      }
+    }
+    return ContentAgreementReadDescriptor(
+      request: .subpostPage(request),
+      expectedTargets: targets
     )
   }
 

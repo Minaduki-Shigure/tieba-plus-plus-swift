@@ -3,11 +3,17 @@ import Foundation
 
 @MainActor
 final class ThreadViewModel: ObservableObject {
-  @Published private(set) var thread: BrowseThread
+  @Published private(set) var thread: BrowseThread {
+    didSet { rebuildAgreementTargetIndex() }
+  }
   @Published private(set) var originThread: BrowseThread?
   @Published private(set) var poll: BrowsePoll?
-  @Published private(set) var firstPost: BrowsePost?
-  @Published private(set) var posts: [BrowsePost] = []
+  @Published private(set) var firstPost: BrowsePost? {
+    didSet { rebuildAgreementTargetIndex() }
+  }
+  @Published private(set) var posts: [BrowsePost] = [] {
+    didSet { rebuildAgreementTargetIndex() }
+  }
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
   @Published private(set) var loadMoreError: String?
@@ -26,6 +32,8 @@ final class ThreadViewModel: ObservableObject {
   @Published private(set) var jumpError: String?
   @Published private(set) var positionNotice: String?
   @Published private(set) var scrollTargetPostID: Int64?
+  @Published private(set) var agreementReadDescriptors: [ContentAgreementReadDescriptor] = []
+  @Published private(set) var agreementDescriptorEpoch = 0
 
   private let service: any BrowseService
   private var hasMore = true
@@ -37,6 +45,7 @@ final class ThreadViewModel: ObservableObject {
   private var previousLoadAnchorPostID: Int64?
   private var nextPagePostID: Int64?
   private var descendingFallbackPage: Int?
+  private var agreementTargetsByPostID: [Int64: ContentAgreementTarget] = [:]
 
   init(
     thread: BrowseThread,
@@ -88,6 +97,7 @@ final class ThreadViewModel: ObservableObject {
     nextPagePostID = nil
     descendingFallbackPage = nil
     scrollTargetPostID = nil
+    replaceAgreementDescriptors(with: [])
     firstPost = nil
     posts = []
     state = .loading
@@ -300,6 +310,7 @@ final class ThreadViewModel: ObservableObject {
 
         thread = response.thread
         posts.append(contentsOf: newReplies)
+        upsertAgreementDescriptor(response.agreementReadDescriptor)
         currentPage = response.currentPage
         totalPages = response.totalPages
         hasMore = response.hasMore
@@ -493,6 +504,7 @@ final class ThreadViewModel: ObservableObject {
             poll = responsePoll
           }
           posts = newItems + posts
+          upsertAgreementDescriptor(response.agreementReadDescriptor)
           lowestLoadedPage = response.currentPage
           totalPages = max(totalPages, response.totalPages)
           canLoadPrevious = response.hasPrevious && lowestLoadedPage > 1
@@ -589,6 +601,13 @@ final class ThreadViewModel: ObservableObject {
           && !stalledAscendingPage
           && !stalledHotPage
         posts = mergedPosts
+        if replacing {
+          replaceAgreementDescriptors(
+            with: response.agreementReadDescriptor.map { [$0] } ?? []
+          )
+        } else {
+          upsertAgreementDescriptor(response.agreementReadDescriptor)
+        }
         if replacing {
           lowestLoadedPage = max(response.currentPage, 1)
           canLoadPrevious = options.sort == .ascending
@@ -706,6 +725,60 @@ final class ThreadViewModel: ObservableObject {
 
   func post(withID postID: Int64) -> BrowsePost? {
     post(withID: postID, firstPost: firstPost, replies: posts)
+  }
+
+  func agreementTarget(forPostID postID: Int64) -> ContentAgreementTarget? {
+    agreementTargetsByPostID[postID]
+  }
+
+  private func replaceAgreementDescriptors(
+    with descriptors: [ContentAgreementReadDescriptor]
+  ) {
+    let retainedTargets = Set(agreementTargetsByPostID.values)
+    var normalized: [ContentAgreementReadDescriptor] = []
+    normalized.reserveCapacity(descriptors.count)
+    for descriptor in descriptors {
+      guard
+        let retainedDescriptor = ContentAgreementReadDescriptor(
+          request: descriptor.request,
+          expectedTargets: descriptor.expectedTargets.intersection(retainedTargets)
+        )
+      else { continue }
+      if let index = normalized.firstIndex(where: { $0.request == retainedDescriptor.request }) {
+        normalized[index] = retainedDescriptor
+      } else {
+        normalized.append(retainedDescriptor)
+      }
+    }
+    guard normalized != agreementReadDescriptors else { return }
+    agreementReadDescriptors = normalized
+    agreementDescriptorEpoch &+= 1
+  }
+
+  private func upsertAgreementDescriptor(_ descriptor: ContentAgreementReadDescriptor?) {
+    var descriptors = agreementReadDescriptors
+    if let descriptor {
+      if let index = descriptors.firstIndex(where: { $0.request == descriptor.request }) {
+        descriptors[index] = descriptor
+      } else {
+        descriptors.append(descriptor)
+      }
+    }
+    replaceAgreementDescriptors(with: descriptors)
+  }
+
+  private func rebuildAgreementTargetIndex() {
+    var targets: [Int64: ContentAgreementTarget] = [:]
+    targets.reserveCapacity(posts.count + (firstPost == nil ? 0 : 1))
+    if let firstPost, let target = ContentAgreementTarget(thread: thread, post: firstPost) {
+      targets[firstPost.id] = target
+    }
+    for post in posts {
+      if let target = ContentAgreementTarget(thread: thread, post: post) {
+        targets[post.id] = target
+      }
+    }
+    agreementTargetsByPostID = targets
   }
 
   private struct NormalizedPostPage {

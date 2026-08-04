@@ -1023,6 +1023,304 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     )
   }
 
+  func testContentAgreementBatchMapsAllObjectKindsAndKeepsOnlyDescriptorIntersection()
+    async throws
+  {
+    let topic = ContentAgreementTarget(
+      kind: .topic,
+      forumID: 42,
+      forumName: "swift",
+      threadID: 123,
+      objectID: 456
+    )!
+    let post = ContentAgreementTarget(
+      kind: .post,
+      forumID: 42,
+      forumName: "swift",
+      threadID: 123,
+      objectID: 457
+    )!
+    let subpost = ContentAgreementTarget(
+      kind: .subpost,
+      forumID: 42,
+      forumName: "swift",
+      threadID: 123,
+      parentPostID: 457,
+      objectID: 789
+    )!
+    let corePage = TiebaAgreementPage(
+      userID: 7,
+      forumID: 42,
+      threadID: 123,
+      agreements: [
+        coreAgreement(target: .thread(firstPostID: 456), isAgreed: true, score: 10),
+        coreAgreement(target: .post(postID: 457), isAgreed: false, score: 4),
+        coreAgreement(
+          target: .subpost(parentPostID: 457, subpostID: 789),
+          isAgreed: true,
+          score: -3
+        ),
+        coreAgreement(target: .post(postID: 999), isAgreed: true, score: 99),
+      ],
+      pagination: TiebaPagination(
+        pageSize: 30,
+        currentPage: 1,
+        totalPages: 1,
+        totalCount: 4,
+        hasMore: false,
+        hasPrevious: false
+      )
+    )
+    let client = AccountClientSpy(agreementPage: corePage)
+    let service = TiebaCoreAccountService(client: client)
+    let request = ContentAgreementPostPageRequest(
+      forumID: 42,
+      forumName: "swift",
+      threadID: 123,
+      page: 1,
+      pageSize: 30,
+      options: ThreadBrowseOptions(sort: .hot, onlyThreadAuthor: true),
+      location: .pageCursor(457),
+      includesSubposts: true,
+      subpostsSortedByAgree: true,
+      subpostPageSize: 4
+    )!
+    let descriptor = ContentAgreementReadDescriptor(
+      request: .postPage(request),
+      expectedTargets: [topic, post, subpost]
+    )!
+
+    let page = try await service.contentAgreements(session: session(), descriptor: descriptor)
+
+    XCTAssertEqual(Set(page.agreements.map(\.target)), Set([topic, post, subpost]))
+    XCTAssertEqual(page.agreements.first(where: { $0.target == subpost })?.snapshot.agreeScore, 0)
+    let snapshot = await client.snapshot()
+    XCTAssertEqual(
+      snapshot.agreementPostPageRequests,
+      [
+        ContentAgreementPostPageClientRequest(
+          credentialByteCount: 192,
+          expectedUserID: 7,
+          forumID: 42,
+          threadID: 123,
+          page: 1,
+          pageSize: 30,
+          sort: .hot,
+          onlyThreadAuthor: true,
+          location: .pageCursor(457),
+          includeSubposts: true,
+          subpostsSortedByAgree: true,
+          subpostPageSize: 4
+        )
+      ]
+    )
+    XCTAssertTrue(snapshot.agreementSubpostPageRequests.isEmpty)
+  }
+
+  func testContentAgreementSubpostBatchMapsRequestAndKeepsOnlyDescriptorIntersection()
+    async throws
+  {
+    let parent = ContentAgreementTarget(
+      kind: .post,
+      forumID: 42,
+      forumName: "swift",
+      threadID: 123,
+      objectID: 457
+    )!
+    let subpost = ContentAgreementTarget(
+      kind: .subpost,
+      forumID: 42,
+      forumName: "swift",
+      threadID: 123,
+      parentPostID: 457,
+      objectID: 789
+    )!
+    let corePage = TiebaAgreementPage(
+      userID: 7,
+      forumID: 42,
+      threadID: 123,
+      agreements: [
+        coreAgreement(target: .post(postID: 457), isAgreed: false, score: 4),
+        coreAgreement(
+          target: .subpost(parentPostID: 457, subpostID: 789),
+          isAgreed: true,
+          score: 8
+        ),
+        coreAgreement(
+          target: .subpost(parentPostID: 457, subpostID: 790),
+          isAgreed: true,
+          score: 99
+        ),
+      ],
+      pagination: TiebaPagination(
+        pageSize: 20,
+        currentPage: 3,
+        totalPages: 4,
+        totalCount: 3,
+        hasMore: true,
+        hasPrevious: true
+      )
+    )
+    let client = AccountClientSpy(agreementPage: corePage)
+    let service = TiebaCoreAccountService(client: client)
+    let request = ContentAgreementSubpostPageRequest(
+      forumID: 42,
+      forumName: "swift",
+      threadID: 123,
+      parentPostID: 457,
+      aroundSubpostID: 789,
+      page: 3
+    )!
+    let descriptor = ContentAgreementReadDescriptor(
+      request: .subpostPage(request),
+      expectedTargets: [parent, subpost]
+    )!
+
+    let page = try await service.contentAgreements(session: session(), descriptor: descriptor)
+
+    XCTAssertEqual(Set(page.agreements.map(\.target)), Set([parent, subpost]))
+    XCTAssertEqual(page.agreements.first(where: { $0.target == subpost })?.snapshot.agreeScore, 8)
+    let snapshot = await client.snapshot()
+    XCTAssertTrue(snapshot.agreementPostPageRequests.isEmpty)
+    XCTAssertEqual(
+      snapshot.agreementSubpostPageRequests,
+      [
+        ContentAgreementSubpostPageClientRequest(
+          credentialByteCount: 192,
+          expectedUserID: 7,
+          forumID: 42,
+          threadID: 123,
+          parentPostID: 457,
+          aroundSubpostID: 789,
+          page: 3
+        )
+      ]
+    )
+  }
+
+  func testContentAgreementSingleReadAndWriteMapEveryObjectTargetExactly() async throws {
+    let mappings: [(ContentAgreementTarget, TiebaAgreementTarget)] = [
+      (
+        ContentAgreementTarget(
+          kind: .topic,
+          forumID: 42,
+          forumName: "swift",
+          threadID: 123,
+          objectID: 456
+        )!,
+        .thread(firstPostID: 456)
+      ),
+      (
+        ContentAgreementTarget(
+          kind: .post,
+          forumID: 42,
+          forumName: "swift",
+          threadID: 123,
+          objectID: 457
+        )!,
+        .post(postID: 457)
+      ),
+      (
+        ContentAgreementTarget(
+          kind: .subpost,
+          forumID: 42,
+          forumName: "swift",
+          threadID: 123,
+          parentPostID: 457,
+          objectID: 789
+        )!,
+        .subpost(parentPostID: 457, subpostID: 789)
+      ),
+    ]
+
+    for (target, coreTarget) in mappings {
+      let response = coreAgreement(target: coreTarget, isAgreed: true, score: 8)
+      let client = AccountClientSpy(
+        agreement: response,
+        agreementMutation: response
+      )
+      let service = TiebaCoreAccountService(client: client)
+
+      let current = try await service.contentAgreement(session: session(), target: target)
+      let updated = try await service.setContentAgreed(
+        session: session(),
+        target: target,
+        isAgreed: true
+      )
+
+      XCTAssertEqual(current.target, target)
+      XCTAssertEqual(updated.target, target)
+      let snapshot = await client.snapshot()
+      XCTAssertEqual(snapshot.agreementRequests.map(\.target), [coreTarget])
+      XCTAssertEqual(snapshot.agreementMutationRequests.map(\.target), [coreTarget])
+      XCTAssertEqual(snapshot.agreementMutationRequests.map(\.desiredState), [true])
+    }
+  }
+
+  func testContentAgreementCoordinatorDoesNotCoalesceSameUserAcrossSessionRevisions()
+    async throws
+  {
+    let firstRevision = try XCTUnwrap(
+      UUID(uuidString: "00000000-0000-0000-0000-000000000041")
+    )
+    let secondRevision = try XCTUnwrap(
+      UUID(uuidString: "00000000-0000-0000-0000-000000000042")
+    )
+    let target = ContentAgreementTarget(
+      kind: .post,
+      forumID: 42,
+      forumName: "swift",
+      threadID: 123,
+      objectID: 457
+    )!
+    let client = AccountClientSpy(
+      agreementMutation: coreAgreement(
+        target: .post(postID: 457),
+        isAgreed: true,
+        score: 8
+      ),
+      suspendsAgreementMutation: true
+    )
+    let service = TiebaCoreAccountService(client: client)
+    let first = Task {
+      try await service.setContentAgreed(
+        session: session(sessionRevision: firstRevision),
+        target: target,
+        isAgreed: true
+      )
+    }
+    try await waitForAccountServiceTest {
+      await client.agreementMutationRequestCount() == 1
+    }
+    let second = Task { () -> String? in
+      do {
+        _ = try await service.setContentAgreed(
+          session: session(sessionRevision: secondRevision),
+          target: target,
+          isAgreed: true
+        )
+        return nil
+      } catch {
+        return (error as? BrowseError)?.errorDescription
+      }
+    }
+    try await waitForAccountServiceTest {
+      await service.contentAgreementWriteConflictWaiterCount() == 1
+    }
+
+    let requestCountBeforeRelease = await client.agreementMutationRequestCount()
+    XCTAssertEqual(requestCountBeforeRelease, 1)
+    await client.releaseAgreementMutation()
+    _ = try await first.value
+    let conflict = await second.value
+
+    XCTAssertEqual(conflict, "先前的内容点赞操作已结束，请重新读取当前状态。")
+    let finalRequestCount = await client.agreementMutationRequestCount()
+    let finalWaiterCount = await service.contentAgreementWriteConflictWaiterCount()
+    XCTAssertEqual(finalRequestCount, 1)
+    XCTAssertEqual(finalWaiterCount, 0)
+  }
+
   func testServerErrorDoesNotExposeResponseMessage() throws {
     let secret = String(repeating: "b", count: 192)
     let error = TiebaCoreAccountService.accountError(
@@ -1144,6 +1442,21 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
       agreeScore: score
     )
   }
+
+  private func coreAgreement(
+    target: TiebaAgreementTarget,
+    isAgreed: Bool,
+    score: Int
+  ) -> TiebaAgreementState {
+    TiebaAgreementState(
+      userID: 7,
+      forumID: 42,
+      threadID: 123,
+      target: target,
+      isAgreed: isAgreed,
+      agreeScore: score
+    )
+  }
 }
 
 private struct SensitiveAccountError: LocalizedError {
@@ -1169,6 +1482,41 @@ private struct ThreadAgreementClientRequest: Equatable, Sendable {
   let desiredState: Bool?
 }
 
+private struct ContentAgreementClientRequest: Equatable, Sendable {
+  let credentialByteCount: Int
+  let expectedUserID: Int64
+  let forumID: Int64
+  let forumName: String?
+  let threadID: Int64
+  let target: TiebaAgreementTarget
+  let desiredState: Bool?
+}
+
+private struct ContentAgreementPostPageClientRequest: Equatable, Sendable {
+  let credentialByteCount: Int
+  let expectedUserID: Int64
+  let forumID: Int64
+  let threadID: Int64
+  let page: Int
+  let pageSize: Int
+  let sort: TiebaPostSort
+  let onlyThreadAuthor: Bool
+  let location: TiebaPostLocation?
+  let includeSubposts: Bool
+  let subpostsSortedByAgree: Bool
+  let subpostPageSize: Int
+}
+
+private struct ContentAgreementSubpostPageClientRequest: Equatable, Sendable {
+  let credentialByteCount: Int
+  let expectedUserID: Int64
+  let forumID: Int64
+  let threadID: Int64
+  let parentPostID: Int64
+  let aroundSubpostID: Int64?
+  let page: Int
+}
+
 private struct AccountClientSnapshot: Sendable {
   let validationCredentialByteCounts: [Int]
   let membershipRequests: [AccountClientRequest]
@@ -1177,6 +1525,10 @@ private struct AccountClientSnapshot: Sendable {
   let checkInRequests: [AccountClientRequest]
   let threadAgreementRequests: [ThreadAgreementClientRequest]
   let threadAgreementMutationRequests: [ThreadAgreementClientRequest]
+  let agreementRequests: [ContentAgreementClientRequest]
+  let agreementMutationRequests: [ContentAgreementClientRequest]
+  let agreementPostPageRequests: [ContentAgreementPostPageClientRequest]
+  let agreementSubpostPageRequests: [ContentAgreementSubpostPageClientRequest]
 }
 
 private enum AccountClientSpyError: Error, Sendable {
@@ -1203,9 +1555,13 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   private let checkInError: TiebaClientError?
   private let threadAgreement: TiebaThreadAgreement?
   private let threadAgreementMutation: TiebaThreadAgreement?
+  private let agreement: TiebaAgreementState?
+  private let agreementPage: TiebaAgreementPage?
+  private let agreementMutation: TiebaAgreementState?
   private let suspendsMutation: Bool
   private let suspendsCheckIn: Bool
   private let suspendsThreadAgreementMutation: Bool
+  private let suspendsAgreementMutation: Bool
   private var validationCredentialByteCounts: [Int] = []
   private var membershipRequests: [AccountClientRequest] = []
   private var accountStateRequests: [AccountClientRequest] = []
@@ -1213,12 +1569,18 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   private var checkInRequests: [AccountClientRequest] = []
   private var threadAgreementRequests: [ThreadAgreementClientRequest] = []
   private var threadAgreementMutationRequests: [ThreadAgreementClientRequest] = []
+  private var agreementRequests: [ContentAgreementClientRequest] = []
+  private var agreementMutationRequests: [ContentAgreementClientRequest] = []
+  private var agreementPostPageRequests: [ContentAgreementPostPageClientRequest] = []
+  private var agreementSubpostPageRequests: [ContentAgreementSubpostPageClientRequest] = []
   private var mutationIsReleased = false
   private var mutationWaiters: [CheckedContinuation<Void, Never>] = []
   private var checkInIsReleased = false
   private var checkInWaiters: [CheckedContinuation<Void, Never>] = []
   private var threadAgreementMutationIsReleased = false
   private var threadAgreementMutationWaiters: [CheckedContinuation<Void, Never>] = []
+  private var agreementMutationIsReleased = false
+  private var agreementMutationWaiters: [CheckedContinuation<Void, Never>] = []
 
   init(
     validation: TiebaAuthenticatedAccount? = nil,
@@ -1230,9 +1592,13 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     checkInError: TiebaClientError? = nil,
     threadAgreement: TiebaThreadAgreement? = nil,
     threadAgreementMutation: TiebaThreadAgreement? = nil,
+    agreement: TiebaAgreementState? = nil,
+    agreementPage: TiebaAgreementPage? = nil,
+    agreementMutation: TiebaAgreementState? = nil,
     suspendsMutation: Bool = false,
     suspendsCheckIn: Bool = false,
-    suspendsThreadAgreementMutation: Bool = false
+    suspendsThreadAgreementMutation: Bool = false,
+    suspendsAgreementMutation: Bool = false
   ) {
     self.validation = validation
     self.membership = membership
@@ -1243,9 +1609,13 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     self.checkInError = checkInError
     self.threadAgreement = threadAgreement
     self.threadAgreementMutation = threadAgreementMutation
+    self.agreement = agreement
+    self.agreementPage = agreementPage
+    self.agreementMutation = agreementMutation
     self.suspendsMutation = suspendsMutation
     self.suspendsCheckIn = suspendsCheckIn
     self.suspendsThreadAgreementMutation = suspendsThreadAgreementMutation
+    self.suspendsAgreementMutation = suspendsAgreementMutation
   }
 
   func validateAccount(
@@ -1400,6 +1770,113 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     return threadAgreementMutation
   }
 
+  func getAgreement(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    target: TiebaAgreementTarget
+  ) async throws -> TiebaAgreementState {
+    agreementRequests.append(
+      ContentAgreementClientRequest(
+        credentialByteCount: credential.bduss.utf8.count,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        forumName: nil,
+        threadID: threadID,
+        target: target,
+        desiredState: nil
+      )
+    )
+    guard let agreement else { throw AccountClientSpyError.unexpectedCall }
+    return agreement
+  }
+
+  func getAgreementPage(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    page: Int,
+    pageSize: Int,
+    sort: TiebaPostSort,
+    onlyThreadAuthor: Bool,
+    location: TiebaPostLocation?,
+    includeSubposts: Bool,
+    subpostsSortedByAgree: Bool,
+    subpostPageSize: Int
+  ) async throws -> TiebaAgreementPage {
+    agreementPostPageRequests.append(
+      ContentAgreementPostPageClientRequest(
+        credentialByteCount: credential.bduss.utf8.count,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID,
+        page: page,
+        pageSize: pageSize,
+        sort: sort,
+        onlyThreadAuthor: onlyThreadAuthor,
+        location: location,
+        includeSubposts: includeSubposts,
+        subpostsSortedByAgree: subpostsSortedByAgree,
+        subpostPageSize: subpostPageSize
+      )
+    )
+    guard let agreementPage else { throw AccountClientSpyError.unexpectedCall }
+    return agreementPage
+  }
+
+  func getSubpostAgreementPage(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    parentPostID: Int64,
+    aroundSubpostID: Int64?,
+    page: Int
+  ) async throws -> TiebaAgreementPage {
+    agreementSubpostPageRequests.append(
+      ContentAgreementSubpostPageClientRequest(
+        credentialByteCount: credential.bduss.utf8.count,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID,
+        parentPostID: parentPostID,
+        aroundSubpostID: aroundSubpostID,
+        page: page
+      )
+    )
+    guard let agreementPage else { throw AccountClientSpyError.unexpectedCall }
+    return agreementPage
+  }
+
+  func setAgreementState(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    target: TiebaAgreementTarget,
+    isAgreed: Bool
+  ) async throws -> TiebaAgreementState {
+    agreementMutationRequests.append(
+      ContentAgreementClientRequest(
+        credentialByteCount: credential.bduss.utf8.count,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        target: target,
+        desiredState: isAgreed
+      )
+    )
+    if suspendsAgreementMutation, !agreementMutationIsReleased {
+      await withCheckedContinuation { agreementMutationWaiters.append($0) }
+    }
+    guard let agreementMutation else { throw AccountClientSpyError.unexpectedCall }
+    return agreementMutation
+  }
+
   func releaseMutation() {
     mutationIsReleased = true
     let waiters = mutationWaiters
@@ -1421,11 +1898,19 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     waiters.forEach { $0.resume() }
   }
 
+  func releaseAgreementMutation() {
+    agreementMutationIsReleased = true
+    let waiters = agreementMutationWaiters
+    agreementMutationWaiters.removeAll()
+    waiters.forEach { $0.resume() }
+  }
+
   func mutationRequestCount() -> Int { mutationRequests.count }
   func checkInRequestCount() -> Int { checkInRequests.count }
   func threadAgreementMutationRequestCount() -> Int {
     threadAgreementMutationRequests.count
   }
+  func agreementMutationRequestCount() -> Int { agreementMutationRequests.count }
 
   func snapshot() -> AccountClientSnapshot {
     AccountClientSnapshot(
@@ -1435,7 +1920,11 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
       mutationRequests: mutationRequests,
       checkInRequests: checkInRequests,
       threadAgreementRequests: threadAgreementRequests,
-      threadAgreementMutationRequests: threadAgreementMutationRequests
+      threadAgreementMutationRequests: threadAgreementMutationRequests,
+      agreementRequests: agreementRequests,
+      agreementMutationRequests: agreementMutationRequests,
+      agreementPostPageRequests: agreementPostPageRequests,
+      agreementSubpostPageRequests: agreementSubpostPageRequests
     )
   }
 }

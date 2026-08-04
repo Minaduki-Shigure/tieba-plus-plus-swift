@@ -3,6 +3,7 @@ import UIKit
 
 struct CommentParentPostView: View {
   let post: CommentParentPostContext
+  let agreementTarget: ContentAgreementTarget?
   let service:
     any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
@@ -10,6 +11,10 @@ struct CommentParentPostView: View {
   let searchHistoryRepository: any ForumSearchHistoryRepository
   let openMentionedUser: (Int64) -> Void
   let openTiebaLink: (TiebaLinkTarget) -> Void
+  let requestAgreementChange: (ContentAgreementTarget, Bool) -> Void
+  let retryAgreement: (ContentAgreementTarget) -> Void
+
+  @Environment(\.contentAgreementStore) private var contentAgreementStore
 
   var body: some View {
     VStack(alignment: .leading, spacing: 9) {
@@ -31,8 +36,13 @@ struct CommentParentPostView: View {
           authorIdentity
         }
 
-        ReadOnlyAgreeLabel(score: post.agreeScore)
-          .padding(.top, 2)
+        ContentAgreementControlSlot(
+          store: contentAgreementStore,
+          target: agreementTarget,
+          fallbackAgreeScore: post.agreeScore,
+          requestChange: requestAgreementChange,
+          retry: retryAgreement
+        )
       }
 
       BrowseContentView(

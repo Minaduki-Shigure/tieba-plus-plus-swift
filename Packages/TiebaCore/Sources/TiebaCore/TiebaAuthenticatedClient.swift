@@ -42,13 +42,14 @@ private struct TiebaForumCheckInFlight:
   }
 }
 
-private struct TiebaThreadAgreementResourceKey: Hashable, Sendable {
+private struct TiebaAgreementResourceKey: Hashable, Sendable {
   let userID: Int64
+  let forumID: Int64
   let threadID: Int64
-  let firstPostID: Int64
+  let target: TiebaAgreementTarget
 }
 
-private struct TiebaThreadAgreementIdentity:
+private struct TiebaAgreementIdentity:
   Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
 {
   let credential: TiebaBDUSSCredential
@@ -61,7 +62,7 @@ private struct TiebaThreadAgreementIdentity:
       && lhs.forumName == rhs.forumName
   }
 
-  var description: String { "TiebaThreadAgreementIdentity(redacted)" }
+  var description: String { "TiebaAgreementIdentity(redacted)" }
   var debugDescription: String { description }
   var customMirror: Mirror {
     Mirror(
@@ -75,15 +76,15 @@ private struct TiebaThreadAgreementIdentity:
   }
 }
 
-private struct TiebaThreadAgreementFlight:
+private struct TiebaAgreementFlight:
   Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
 {
   let id: UUID
-  let identity: TiebaThreadAgreementIdentity
+  let identity: TiebaAgreementIdentity
   let targetAgreed: Bool
-  let task: Task<TiebaThreadAgreement, Swift.Error>
+  let task: Task<TiebaAgreementState, Swift.Error>
 
-  var description: String { "TiebaThreadAgreementFlight(redacted)" }
+  var description: String { "TiebaAgreementFlight(redacted)" }
   var debugDescription: String { description }
   var customMirror: Mirror {
     Mirror(
@@ -98,13 +99,19 @@ private struct TiebaThreadAgreementFlight:
   }
 }
 
+private struct TiebaAgreementAccountTail: Sendable {
+  let id: UUID
+  let task: Task<Void, Never>
+}
+
 public actor TiebaAuthenticatedClient {
   static let accountResponseMaximumBytes = 512 * 1_024
   static let followedForumsResponseMaximumBytes = 2 * 1_024 * 1_024
   static let forumMembershipResponseMaximumBytes = 512 * 1_024
   static let forumFollowWriteResponseMaximumBytes = 64 * 1_024
   static let forumCheckInResponseMaximumBytes = 64 * 1_024
-  static let threadAgreementResponseMaximumBytes = 512 * 1_024
+  static let agreementPageResponseMaximumBytes = 8 * 1_024 * 1_024
+  static let subpostAgreementPageResponseMaximumBytes = 4 * 1_024 * 1_024
   static let threadAgreementWriteResponseMaximumBytes = 64 * 1_024
 
   private let requestFactory: TiebaAuthenticatedRequestFactory
@@ -114,11 +121,12 @@ public actor TiebaAuthenticatedClient {
   private var forumCheckInConflictWaiters = [
     TiebaForumCheckInResourceKey: [UUID: CheckedContinuation<Void, Never>]
   ]()
-  private var threadAgreementFlights = [
-    TiebaThreadAgreementResourceKey: TiebaThreadAgreementFlight
+  private var agreementFlights = [
+    TiebaAgreementResourceKey: TiebaAgreementFlight
   ]()
-  private var threadAgreementSharedWaiterCounts = [UUID: Int]()
-  private var threadAgreementConflictWaiterCounts = [TiebaThreadAgreementResourceKey: Int]()
+  private var agreementSharedWaiterCounts = [UUID: Int]()
+  private var agreementConflictWaiterCounts = [TiebaAgreementResourceKey: Int]()
+  private var agreementAccountTails = [Int64: TiebaAgreementAccountTail]()
 
   public init(configuration: TiebaClientConfiguration = .init()) {
     self.requestFactory = TiebaAuthenticatedRequestFactory(configuration: configuration)
@@ -292,20 +300,158 @@ public actor TiebaAuthenticatedClient {
     threadID: Int64,
     firstPostID: Int64
   ) async throws -> TiebaThreadAgreement {
-    _ = try await getForumMembershipContext(
-      credential: credential,
-      expectedUserID: expectedUserID,
-      forumID: forumID,
-      forumName: forumName,
-      validatesCheckInMetadata: false
-    )
-    return try await getThreadAgreementSnapshot(
+    let agreement = try await getAgreement(
       credential: credential,
       expectedUserID: expectedUserID,
       forumID: forumID,
       threadID: threadID,
-      firstPostID: firstPostID
+      target: .thread(firstPostID: firstPostID)
     )
+    return TiebaThreadAgreement(
+      userID: agreement.userID,
+      forumID: agreement.forumID,
+      threadID: agreement.threadID,
+      firstPostID: firstPostID,
+      isAgreed: agreement.isAgreed,
+      agreeScore: agreement.agreeScore
+    )
+  }
+
+  public func getAgreement(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    target: TiebaAgreementTarget
+  ) async throws -> TiebaAgreementState {
+    switch target {
+    case .thread(let firstPostID):
+      let page = try await awaitAgreementPage(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID,
+        location: .postID(firstPostID)
+      )
+      return try uniqueAgreement(target, in: page)
+    case .post(let postID):
+      let page = try await awaitAgreementPage(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID,
+        location: .postID(postID)
+      )
+      return try uniqueAgreement(target, in: page)
+    case .subpost(let parentPostID, let subpostID):
+      let page = try await getSubpostAgreementPage(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID,
+        parentPostID: parentPostID,
+        aroundSubpostID: subpostID,
+        page: 1
+      )
+      return try uniqueAgreement(target, in: page)
+    }
+  }
+
+  public func getAgreementPage(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    page: Int = 1,
+    pageSize: Int = 30,
+    sort: TiebaPostSort = .ascending,
+    onlyThreadAuthor: Bool = false,
+    location: TiebaPostLocation? = nil,
+    includeSubposts: Bool = true,
+    subpostsSortedByAgree: Bool = true,
+    subpostPageSize: Int = 4
+  ) async throws -> TiebaAgreementPage {
+    let request = try requestFactory.agreementPage(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      page: page,
+      pageSize: pageSize,
+      sort: sort,
+      onlyThreadAuthor: onlyThreadAuthor,
+      location: location,
+      includeSubposts: includeSubposts,
+      subpostsSortedByAgree: subpostsSortedByAgree,
+      subpostPageSize: subpostPageSize
+    )
+    let response: PbPageResIdl = try await sendProtobuf(
+      request,
+      maximumBodyBytes: Self.agreementPageResponseMaximumBytes
+    )
+    return try TiebaAuthenticatedDecoder.agreementPage(
+      from: response,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID
+    )
+  }
+
+  public func getSubpostAgreementPage(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    parentPostID: Int64,
+    aroundSubpostID: Int64? = nil,
+    page: Int = 1
+  ) async throws -> TiebaAgreementPage {
+    let parentProbe = try await awaitAgreementPage(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      location: .postID(parentPostID)
+    )
+    let matchingParentTargets = parentProbe.agreements.compactMap { agreement in
+      switch agreement.target {
+      case .thread(let firstPostID) where firstPostID == parentPostID:
+        agreement.target
+      case .post(let postID) where postID == parentPostID:
+        agreement.target
+      default:
+        nil
+      }
+    }
+    guard matchingParentTargets.count == 1, let parentTarget = matchingParentTargets.first else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+
+    let request = try requestFactory.subpostAgreementPage(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      parentPostID: parentPostID,
+      aroundSubpostID: aroundSubpostID,
+      page: page
+    )
+    let response: PbFloorResIdl = try await sendProtobuf(
+      request,
+      maximumBodyBytes: Self.subpostAgreementPageResponseMaximumBytes
+    )
+    let page = try TiebaAuthenticatedDecoder.subpostAgreementPage(
+      from: response,
+      validatedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      parentPostID: parentPostID,
+      requiredSubpostID: aroundSubpostID
+    )
+    guard page.agreements.lazy.filter({ $0.target == parentTarget }).count == 1 else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    return page
   }
 
   public func setThreadAgreementState(
@@ -317,72 +463,120 @@ public actor TiebaAuthenticatedClient {
     firstPostID: Int64,
     isAgreed: Bool
   ) async throws -> TiebaThreadAgreement {
-    try Task.checkCancellation()
-    let forumName = try requestFactory.normalizedForumName(forumName)
-    let resourceKey = TiebaThreadAgreementResourceKey(
-      userID: expectedUserID,
-      threadID: threadID,
-      firstPostID: firstPostID
-    )
-    let identity = TiebaThreadAgreementIdentity(
+    let agreement = try await setAgreementState(
       credential: credential,
+      expectedUserID: expectedUserID,
       forumID: forumID,
-      forumName: forumName
+      forumName: forumName,
+      threadID: threadID,
+      target: .thread(firstPostID: firstPostID),
+      isAgreed: isAgreed
     )
-
-    if let flight = threadAgreementFlights[resourceKey] {
-      if flight.identity == identity, flight.targetAgreed == isAgreed {
-        registerSharedThreadAgreementWaiter(flightID: flight.id)
-        defer { unregisterSharedThreadAgreementWaiter(flightID: flight.id) }
-        return try await flight.task.value
-      }
-
-      registerConflictingThreadAgreementWaiter(resourceKey: resourceKey)
-      defer { unregisterConflictingThreadAgreementWaiter(resourceKey: resourceKey) }
-      _ = await flight.task.result
-      try Task.checkCancellation()
-      throw TiebaClientError.threadAgreementWriteConflict
-    }
-
-    try Task.checkCancellation()
-    let flightID = UUID()
-    let task: Task<TiebaThreadAgreement, Swift.Error> = Task.detached { [self] in
-      try await performThreadAgreementWrite(
-        credential: credential,
-        expectedUserID: expectedUserID,
-        forumID: forumID,
-        forumName: forumName,
-        threadID: threadID,
-        firstPostID: firstPostID,
-        isAgreed: isAgreed
-      )
-    }
-    threadAgreementFlights[resourceKey] = TiebaThreadAgreementFlight(
-      id: flightID,
-      identity: identity,
-      targetAgreed: isAgreed,
-      task: task
+    return TiebaThreadAgreement(
+      userID: agreement.userID,
+      forumID: agreement.forumID,
+      threadID: agreement.threadID,
+      firstPostID: firstPostID,
+      isAgreed: agreement.isAgreed,
+      agreeScore: agreement.agreeScore
     )
-    defer { clearThreadAgreementFlight(resourceKey: resourceKey, flightID: flightID) }
-    return try await task.value
   }
 
-  private func performThreadAgreementWrite(
+  public func setAgreementState(
     credential: TiebaBDUSSCredential,
     expectedUserID: Int64,
     forumID: Int64,
     forumName: String,
     threadID: Int64,
-    firstPostID: Int64,
+    target: TiebaAgreementTarget,
     isAgreed: Bool
-  ) async throws -> TiebaThreadAgreement {
-    let current = try await getThreadAgreementSnapshot(
+  ) async throws -> TiebaAgreementState {
+    try Task.checkCancellation()
+    let forumName = try requestFactory.normalizedForumName(forumName)
+    let resourceKey = TiebaAgreementResourceKey(
+      userID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      target: target
+    )
+    let identity = TiebaAgreementIdentity(
+      credential: credential,
+      forumID: forumID,
+      forumName: forumName
+    )
+
+    if let flight = agreementFlights[resourceKey] {
+      if flight.identity == identity, flight.targetAgreed == isAgreed {
+        registerSharedAgreementWaiter(flightID: flight.id)
+        defer { unregisterSharedAgreementWaiter(flightID: flight.id) }
+        return try await flight.task.value
+      }
+
+      registerConflictingAgreementWaiter(resourceKey: resourceKey)
+      defer { unregisterConflictingAgreementWaiter(resourceKey: resourceKey) }
+      _ = await flight.task.result
+      try Task.checkCancellation()
+      return try await getAgreement(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID,
+        target: target
+      )
+    }
+
+    try Task.checkCancellation()
+    let flightID = UUID()
+    let predecessor = agreementAccountTails[expectedUserID]?.task
+    let task: Task<TiebaAgreementState, Swift.Error> = Task.detached { [self] in
+      await predecessor?.value
+      return try await performAgreementWrite(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        target: target,
+        isAgreed: isAgreed
+      )
+    }
+    agreementFlights[resourceKey] = TiebaAgreementFlight(
+      id: flightID,
+      identity: identity,
+      targetAgreed: isAgreed,
+      task: task
+    )
+    let tailID = UUID()
+    let tailTask = Task.detached { _ = await task.result }
+    agreementAccountTails[expectedUserID] = TiebaAgreementAccountTail(id: tailID, task: tailTask)
+    defer {
+      clearAgreementFlight(
+        resourceKey: resourceKey,
+        flightID: flightID,
+        userID: expectedUserID,
+        tailID: tailID
+      )
+    }
+    return try await task.value
+  }
+
+  private func performAgreementWrite(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    target: TiebaAgreementTarget,
+    isAgreed: Bool
+  ) async throws -> TiebaAgreementState {
+    let current = try await getAgreement(
       credential: credential,
       expectedUserID: expectedUserID,
       forumID: forumID,
       threadID: threadID,
-      firstPostID: firstPostID
+      target: target
     )
+    guard current.isAgreed != isAgreed else { return current }
     let forumContext = try await getForumMembershipContext(
       credential: credential,
       expectedUserID: expectedUserID,
@@ -390,29 +584,43 @@ public actor TiebaAuthenticatedClient {
       forumName: forumName,
       validatesCheckInMetadata: false
     )
-    guard current.isAgreed != isAgreed else { return current }
-
-    let request = try requestFactory.setThreadAgreement(
+    let request = try requestFactory.setAgreement(
       credential: credential,
       expectedUserID: expectedUserID,
+      forumID: forumID,
       threadID: threadID,
-      firstPostID: firstPostID,
+      target: target,
       tbs: forumContext.tbs,
       isAgreed: isAgreed
     )
-    let body = try await send(
-      request,
-      maximumBodyBytes: Self.threadAgreementWriteResponseMaximumBytes
-    )
-    let responseScore = try TiebaAuthenticatedDecoder.threadAgreementWriteScore(from: body)
-    return TiebaThreadAgreement(
-      userID: expectedUserID,
-      forumID: forumID,
-      threadID: threadID,
-      firstPostID: firstPostID,
-      isAgreed: isAgreed,
-      agreeScore: responseScore ?? adjustedAgreementScore(current.agreeScore, isAgreed: isAgreed)
-    )
+    do {
+      let body = try await send(
+        request,
+        maximumBodyBytes: Self.threadAgreementWriteResponseMaximumBytes
+      )
+      let responseScore = try TiebaAuthenticatedDecoder.agreementWriteScore(from: body)
+      return TiebaAgreementState(
+        userID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID,
+        target: target,
+        isAgreed: isAgreed,
+        agreeScore: responseScore
+          ?? adjustedAgreementScore(current.agreeScore, isAgreed: isAgreed)
+      )
+    } catch {
+      guard isUncertainAgreementWriteError(error) else { throw error }
+      if let reconciled = try? await getAgreement(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID,
+        target: target
+      ), reconciled.isAgreed == isAgreed {
+        return reconciled
+      }
+      throw error
+    }
   }
 
   private func performForumCheckIn(
@@ -459,36 +667,46 @@ public actor TiebaAuthenticatedClient {
     )
   }
 
-  private func getThreadAgreementSnapshot(
+  private func awaitAgreementPage(
     credential: TiebaBDUSSCredential,
     expectedUserID: Int64,
     forumID: Int64,
     threadID: Int64,
-    firstPostID: Int64
-  ) async throws -> TiebaThreadAgreement {
-    let request = try requestFactory.threadAgreement(
+    location: TiebaPostLocation
+  ) async throws -> TiebaAgreementPage {
+    try await getAgreementPage(
       credential: credential,
-      expectedUserID: expectedUserID,
-      threadID: threadID,
-      firstPostID: firstPostID
-    )
-    let body = try await send(
-      request,
-      maximumBodyBytes: Self.threadAgreementResponseMaximumBytes
-    )
-    let response: PbPageResIdl
-    do {
-      response = try PbPageResIdl(serializedBytes: body)
-    } catch {
-      throw TiebaClientError.invalidProtobuf
-    }
-    return try TiebaAuthenticatedDecoder.threadAgreement(
-      from: response,
       expectedUserID: expectedUserID,
       forumID: forumID,
       threadID: threadID,
-      firstPostID: firstPostID
+      page: 1,
+      pageSize: 2,
+      location: location,
+      includeSubposts: false
     )
+  }
+
+  private func uniqueAgreement(
+    _ target: TiebaAgreementTarget,
+    in page: TiebaAgreementPage
+  ) throws -> TiebaAgreementState {
+    let matches = page.agreements.filter { $0.target == target }
+    guard matches.count == 1, let agreement = matches.first else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    return agreement
+  }
+
+  private func sendProtobuf<Message: SwiftProtobuf.Message>(
+    _ request: URLRequest,
+    maximumBodyBytes: Int
+  ) async throws -> Message {
+    let body = try await send(request, maximumBodyBytes: maximumBodyBytes)
+    do {
+      return try Message(serializedBytes: body)
+    } catch {
+      throw TiebaClientError.invalidProtobuf
+    }
   }
 
   private func adjustedAgreementScore(_ score: Int, isAgreed: Bool) -> Int {
@@ -498,65 +716,95 @@ public actor TiebaAuthenticatedClient {
     return adjusted
   }
 
+  private func isUncertainAgreementWriteError(_ error: any Error) -> Bool {
+    if error is CancellationError { return true }
+    guard let error = error as? TiebaClientError else { return true }
+    switch error {
+    case .invalidArgument, .invalidEndpoint, .server:
+      return false
+    default:
+      return true
+    }
+  }
+
   func threadAgreementWaiterCounts(
     expectedUserID: Int64,
     threadID: Int64,
     firstPostID: Int64
   ) -> (shared: Int, conflict: Int) {
-    let resourceKey = TiebaThreadAgreementResourceKey(
+    let target = TiebaAgreementTarget.thread(firstPostID: firstPostID)
+    let keys = agreementFlights.keys.filter {
+      $0.userID == expectedUserID && $0.threadID == threadID && $0.target == target
+    }
+    return keys.reduce(into: (shared: 0, conflict: 0)) { result, key in
+      if let flightID = agreementFlights[key]?.id {
+        result.shared += agreementSharedWaiterCounts[flightID] ?? 0
+      }
+      result.conflict += agreementConflictWaiterCounts[key] ?? 0
+    }
+  }
+
+  func agreementWaiterCounts(
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    target: TiebaAgreementTarget
+  ) -> (shared: Int, conflict: Int) {
+    let resourceKey = TiebaAgreementResourceKey(
       userID: expectedUserID,
+      forumID: forumID,
       threadID: threadID,
-      firstPostID: firstPostID
+      target: target
     )
-    let shared: Int
-    if let flightID = threadAgreementFlights[resourceKey]?.id {
-      shared = threadAgreementSharedWaiterCounts[flightID] ?? 0
-    } else {
-      shared = 0
-    }
-    return (
-      shared: shared,
-      conflict: threadAgreementConflictWaiterCounts[resourceKey] ?? 0
-    )
+    let shared = agreementFlights[resourceKey].flatMap {
+      agreementSharedWaiterCounts[$0.id]
+    } ?? 0
+    return (shared, agreementConflictWaiterCounts[resourceKey] ?? 0)
   }
 
-  private func registerSharedThreadAgreementWaiter(flightID: UUID) {
-    threadAgreementSharedWaiterCounts[flightID, default: 0] += 1
+  private func registerSharedAgreementWaiter(flightID: UUID) {
+    agreementSharedWaiterCounts[flightID, default: 0] += 1
   }
 
-  private func unregisterSharedThreadAgreementWaiter(flightID: UUID) {
-    guard let count = threadAgreementSharedWaiterCounts[flightID] else { return }
+  private func unregisterSharedAgreementWaiter(flightID: UUID) {
+    guard let count = agreementSharedWaiterCounts[flightID] else { return }
     if count <= 1 {
-      threadAgreementSharedWaiterCounts.removeValue(forKey: flightID)
+      agreementSharedWaiterCounts.removeValue(forKey: flightID)
     } else {
-      threadAgreementSharedWaiterCounts[flightID] = count - 1
+      agreementSharedWaiterCounts[flightID] = count - 1
     }
   }
 
-  private func registerConflictingThreadAgreementWaiter(
-    resourceKey: TiebaThreadAgreementResourceKey
+  private func registerConflictingAgreementWaiter(
+    resourceKey: TiebaAgreementResourceKey
   ) {
-    threadAgreementConflictWaiterCounts[resourceKey, default: 0] += 1
+    agreementConflictWaiterCounts[resourceKey, default: 0] += 1
   }
 
-  private func unregisterConflictingThreadAgreementWaiter(
-    resourceKey: TiebaThreadAgreementResourceKey
+  private func unregisterConflictingAgreementWaiter(
+    resourceKey: TiebaAgreementResourceKey
   ) {
-    guard let count = threadAgreementConflictWaiterCounts[resourceKey] else { return }
+    guard let count = agreementConflictWaiterCounts[resourceKey] else { return }
     if count <= 1 {
-      threadAgreementConflictWaiterCounts.removeValue(forKey: resourceKey)
+      agreementConflictWaiterCounts.removeValue(forKey: resourceKey)
     } else {
-      threadAgreementConflictWaiterCounts[resourceKey] = count - 1
+      agreementConflictWaiterCounts[resourceKey] = count - 1
     }
   }
 
-  private func clearThreadAgreementFlight(
-    resourceKey: TiebaThreadAgreementResourceKey,
-    flightID: UUID
+  private func clearAgreementFlight(
+    resourceKey: TiebaAgreementResourceKey,
+    flightID: UUID,
+    userID: Int64,
+    tailID: UUID
   ) {
-    guard threadAgreementFlights[resourceKey]?.id == flightID else { return }
-    threadAgreementFlights.removeValue(forKey: resourceKey)
-    threadAgreementSharedWaiterCounts.removeValue(forKey: flightID)
+    if agreementFlights[resourceKey]?.id == flightID {
+      agreementFlights.removeValue(forKey: resourceKey)
+      agreementSharedWaiterCounts.removeValue(forKey: flightID)
+    }
+    if agreementAccountTails[userID]?.id == tailID {
+      agreementAccountTails.removeValue(forKey: userID)
+    }
   }
 
   private func getForumMembershipContext(

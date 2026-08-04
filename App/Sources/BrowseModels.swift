@@ -179,6 +179,151 @@ struct BrowsePoll: Hashable, Sendable {
   }
 }
 
+struct ContentAgreementPostPageRequest: Hashable, Sendable {
+  let forumID: Int64
+  let forumName: String
+  let threadID: Int64
+  let page: Int
+  let pageSize: Int
+  let options: ThreadBrowseOptions
+  let location: ThreadPostLocation?
+  let includesSubposts: Bool
+  let subpostsSortedByAgree: Bool
+  let subpostPageSize: Int
+
+  init?(
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    page: Int,
+    pageSize: Int,
+    options: ThreadBrowseOptions,
+    location: ThreadPostLocation?,
+    includesSubposts: Bool = true,
+    subpostsSortedByAgree: Bool = true,
+    subpostPageSize: Int = 4
+  ) {
+    let forumName = forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    let pageIsValid: Bool
+    if case .pageCursor = location {
+      pageIsValid = page >= 0
+    } else {
+      pageIsValid = page > 0
+    }
+    guard
+      forumID > 0,
+      !forumName.isEmpty,
+      threadID > 0,
+      pageIsValid,
+      pageSize > 0,
+      pageSize <= 100,
+      subpostPageSize > 0,
+      subpostPageSize <= 20
+    else { return nil }
+    self.forumID = forumID
+    self.forumName = forumName
+    self.threadID = threadID
+    self.page = page
+    self.pageSize = pageSize
+    self.options = options
+    self.location = location
+    self.includesSubposts = includesSubposts
+    self.subpostsSortedByAgree = subpostsSortedByAgree
+    self.subpostPageSize = subpostPageSize
+  }
+}
+
+struct ContentAgreementSubpostPageRequest: Hashable, Sendable {
+  let forumID: Int64
+  let forumName: String
+  let threadID: Int64
+  let parentPostID: Int64
+  let aroundSubpostID: Int64?
+  let page: Int
+
+  init?(
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    parentPostID: Int64,
+    aroundSubpostID: Int64?,
+    page: Int
+  ) {
+    let forumName = forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    guard
+      forumID > 0,
+      !forumName.isEmpty,
+      threadID > 0,
+      parentPostID > 0,
+      page > 0,
+      aroundSubpostID.map({ $0 > 0 && $0 != parentPostID }) ?? true
+    else { return nil }
+    self.forumID = forumID
+    self.forumName = forumName
+    self.threadID = threadID
+    self.parentPostID = parentPostID
+    self.aroundSubpostID = aroundSubpostID
+    self.page = page
+  }
+}
+
+enum ContentAgreementReadRequest: Hashable, Sendable {
+  case postPage(ContentAgreementPostPageRequest)
+  case subpostPage(ContentAgreementSubpostPageRequest)
+
+  var forumID: Int64 {
+    switch self {
+    case .postPage(let request): request.forumID
+    case .subpostPage(let request): request.forumID
+    }
+  }
+
+  var forumName: String {
+    switch self {
+    case .postPage(let request): request.forumName
+    case .subpostPage(let request): request.forumName
+    }
+  }
+
+  var threadID: Int64 {
+    switch self {
+    case .postPage(let request): request.threadID
+    case .subpostPage(let request): request.threadID
+    }
+  }
+}
+
+struct ContentAgreementReadDescriptor: Hashable, Sendable {
+  let request: ContentAgreementReadRequest
+  let expectedTargets: Set<ContentAgreementTarget>
+
+  init?(request: ContentAgreementReadRequest, expectedTargets: Set<ContentAgreementTarget>) {
+    guard !expectedTargets.isEmpty else { return nil }
+    guard expectedTargets.allSatisfy({ target in
+      guard
+        target.forumID == request.forumID,
+        target.forumName == request.forumName,
+        target.threadID == request.threadID
+      else { return false }
+      switch request {
+      case .postPage:
+        return true
+      case .subpostPage(let page):
+        switch target.kind {
+        case .topic, .post:
+          return target.parentPostID == nil && target.objectID == page.parentPostID
+        case .subpost:
+          return target.parentPostID == page.parentPostID
+        }
+      }
+    }) else { return nil }
+    self.request = request
+    self.expectedTargets = expectedTargets
+  }
+}
+
 struct PostPageData: Sendable {
   let thread: BrowseThread
   let originThread: BrowseThread?
@@ -191,6 +336,7 @@ struct PostPageData: Sendable {
   let totalPages: Int
   let totalCount: Int
   let nextPagePostID: Int64?
+  let agreementReadDescriptor: ContentAgreementReadDescriptor?
 
   init(
     thread: BrowseThread,
@@ -203,7 +349,8 @@ struct PostPageData: Sendable {
     nextPagePostID: Int64? = nil,
     originThread: BrowseThread? = nil,
     poll: BrowsePoll? = nil,
-    firstPost: BrowsePost? = nil
+    firstPost: BrowsePost? = nil,
+    agreementReadDescriptor: ContentAgreementReadDescriptor? = nil
   ) {
     self.thread = thread
     self.originThread = originThread
@@ -216,17 +363,20 @@ struct PostPageData: Sendable {
     self.totalPages = totalPages
     self.totalCount = totalCount
     self.nextPagePostID = nextPagePostID
+    self.agreementReadDescriptor = agreementReadDescriptor
   }
 }
 
 struct CommentPageData: Sendable {
   let parentPost: CommentParentPostContext
   let comments: [BrowseComment]
+  let thread: BrowseThread?
   let currentPage: Int
   let hasMore: Bool
   let hasPrevious: Bool
   let totalPages: Int
   let totalCount: Int
+  let agreementReadDescriptor: ContentAgreementReadDescriptor?
 
   init(
     parentPost: CommentParentPostContext,
@@ -235,7 +385,9 @@ struct CommentPageData: Sendable {
     hasMore: Bool,
     hasPrevious: Bool = false,
     totalPages: Int = 0,
-    totalCount: Int = 0
+    totalCount: Int = 0,
+    thread: BrowseThread? = nil,
+    agreementReadDescriptor: ContentAgreementReadDescriptor? = nil
   ) {
     self.parentPost = parentPost
     self.comments = comments
@@ -244,6 +396,8 @@ struct CommentPageData: Sendable {
     self.hasPrevious = hasPrevious
     self.totalPages = totalPages
     self.totalCount = totalCount
+    self.thread = thread
+    self.agreementReadDescriptor = agreementReadDescriptor
   }
 
   var parentPostID: Int64 { parentPost.id }
@@ -903,6 +1057,8 @@ struct CommentParentPostContext: Identifiable, Hashable, Sendable {
 
 struct BrowseComment: Identifiable, Hashable, Sendable {
   let id: Int64
+  let threadID: Int64
+  let parentPostID: Int64
   let authorID: Int64
   let authorName: String
   let authorUsername: String
@@ -933,9 +1089,13 @@ struct BrowseComment: Identifiable, Hashable, Sendable {
     isThreadAuthor: Bool = false,
     replyToUserID: Int64? = nil,
     replyToUserName: String = "",
-    localVisibility: LocalContentVisibility = .visible
+    localVisibility: LocalContentVisibility = .visible,
+    threadID: Int64 = 0,
+    parentPostID: Int64 = 0
   ) {
     self.id = id
+    self.threadID = threadID
+    self.parentPostID = parentPostID
     self.authorID = authorID
     self.authorName = authorName
     self.authorUsername = authorUsername
@@ -968,7 +1128,71 @@ struct BrowseComment: Identifiable, Hashable, Sendable {
       isThreadAuthor: isThreadAuthor,
       replyToUserID: replyToUserID,
       replyToUserName: replyToUserName,
-      localVisibility: visibility
+      localVisibility: visibility,
+      threadID: threadID,
+      parentPostID: parentPostID
+    )
+  }
+}
+
+extension ContentAgreementTarget {
+  init?(thread: BrowseThread, post: BrowsePost) {
+    guard post.id > 0, post.threadID == thread.id else { return nil }
+    let kind: ContentAgreementKind
+    if
+      thread.firstPostID > 0,
+      post.id == thread.firstPostID,
+      post.floor == 1
+    {
+      kind = .topic
+    } else {
+      guard post.floor > 1, post.id != thread.firstPostID else { return nil }
+      kind = .post
+    }
+    self.init(
+      kind: kind,
+      forumID: thread.forumID,
+      forumName: thread.forumName,
+      threadID: thread.id,
+      objectID: post.id
+    )
+  }
+
+  init?(thread: BrowseThread, parentPost: CommentParentPostContext) {
+    guard parentPost.id > 0, parentPost.threadID == thread.id else { return nil }
+    let kind: ContentAgreementKind
+    if
+      thread.firstPostID > 0,
+      parentPost.id == thread.firstPostID,
+      parentPost.floor == 1
+    {
+      kind = .topic
+    } else {
+      guard parentPost.floor > 1, parentPost.id != thread.firstPostID else { return nil }
+      kind = .post
+    }
+    self.init(
+      kind: kind,
+      forumID: thread.forumID,
+      forumName: thread.forumName,
+      threadID: thread.id,
+      objectID: parentPost.id
+    )
+  }
+
+  init?(thread: BrowseThread, parentPostID: Int64, comment: BrowseComment) {
+    guard
+      parentPostID > 0,
+      comment.threadID == thread.id,
+      comment.parentPostID == parentPostID
+    else { return nil }
+    self.init(
+      kind: .subpost,
+      forumID: thread.forumID,
+      forumName: thread.forumName,
+      threadID: thread.id,
+      parentPostID: parentPostID,
+      objectID: comment.id
     )
   }
 }

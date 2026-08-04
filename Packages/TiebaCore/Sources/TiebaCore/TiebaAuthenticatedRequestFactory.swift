@@ -157,18 +157,34 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     )
   }
 
-  func threadAgreement(
+  func agreementPage(
     credential: TiebaBDUSSCredential,
     expectedUserID: Int64,
+    forumID: Int64,
     threadID: Int64,
-    firstPostID: Int64
+    page: Int,
+    pageSize: Int,
+    sort: TiebaPostSort,
+    onlyThreadAuthor: Bool,
+    location: TiebaPostLocation?,
+    includeSubposts: Bool,
+    subpostsSortedByAgree: Bool,
+    subpostPageSize: Int
   ) throws -> URLRequest {
     try validate(credential)
-    try validateThreadAgreementIdentity(
+    try validateAgreementContext(
       expectedUserID: expectedUserID,
+      forumID: forumID,
       threadID: threadID,
-      firstPostID: firstPostID
+      target: nil
     )
+    if case .pageCursor = location {
+      try validateCursorPage(page)
+    } else {
+      try validatePage(page, name: "Page")
+    }
+    try validatePageSize(pageSize, maximum: 100, name: "Page size")
+    try validatePageSize(subpostPageSize, maximum: 50, name: "Subpost page size")
     try validateConfiguration()
 
     var common = CommonReq()
@@ -179,9 +195,34 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     var data = PbPageReqIdl.DataReq()
     data.common = common
     data.kz = threadID
-    data.pid = firstPostID
-    data.pn = 0
-    data.rn = 2
+    data.forumID = forumID
+    switch location {
+    case .postID(let postID):
+      try validatePositiveID(postID, name: "Post ID")
+      data.pid = postID
+      data.pn = 0
+    case .pageNumber:
+      data.pn = Int32(page)
+    case .pageCursor(let postID):
+      try validatePositiveID(postID, name: "Post cursor ID")
+      data.pid = postID
+      data.pn = Int32(page)
+    case .latestReplies(let postID):
+      try validatePositiveID(postID, name: "Last post ID")
+      data.pid = postID
+      data.pn = 0
+      data.lastPid = postID
+    case nil:
+      data.pn = sort == .descending && page == 1 ? 0 : Int32(page)
+    }
+    data.rn = Int32(max(pageSize, 2))
+    data.r = sort.rawValue
+    data.lz = onlyThreadAuthor ? 1 : 0
+    if includeSubposts {
+      data.withFloor = 1
+      data.floorSortType = subpostsSortedByAgree ? 1 : 0
+      data.floorRn = Int32(subpostPageSize)
+    }
 
     var message = PbPageReqIdl()
     message.data = data
@@ -192,22 +233,88 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     )
   }
 
-  func setThreadAgreement(
+  func subpostAgreementPage(
     credential: TiebaBDUSSCredential,
     expectedUserID: Int64,
+    forumID: Int64,
     threadID: Int64,
-    firstPostID: Int64,
+    parentPostID: Int64,
+    aroundSubpostID: Int64?,
+    page: Int
+  ) throws -> URLRequest {
+    let target: TiebaAgreementTarget
+    if let aroundSubpostID {
+      target = .subpost(parentPostID: parentPostID, subpostID: aroundSubpostID)
+    } else {
+      target = .post(postID: parentPostID)
+    }
+    try validate(credential)
+    try validateAgreementContext(
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      target: target
+    )
+    try validatePage(page, name: "Page")
+    try validateConfiguration()
+
+    var common = CommonReq()
+    common.clientType = 2
+    common.clientVersion = configuration.clientVersion
+    common.bduss = credential.bduss
+
+    var data = PbFloorReqIdl.DataReq()
+    data.common = common
+    data.kz = threadID
+    data.pid = parentPostID
+    data.spid = aroundSubpostID ?? 0
+    data.pn = Int32(page)
+    data.forumID = forumID
+
+    var message = PbFloorReqIdl()
+    message.data = data
+    return try protobufRequest(
+      path: "/c/f/pb/floor",
+      command: 302_002,
+      message: message
+    )
+  }
+
+  func setAgreement(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    target: TiebaAgreementTarget,
     tbs: String,
     isAgreed: Bool
   ) throws -> URLRequest {
     try validate(credential)
-    try validateThreadAgreementIdentity(
+    try validateAgreementContext(
       expectedUserID: expectedUserID,
+      forumID: forumID,
       threadID: threadID,
-      firstPostID: firstPostID
+      target: target
     )
     guard Self.isValidTBS(tbs) else {
       throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    guard TiebaGalaxy2CUID.isValid(agreementCUID) else {
+      throw TiebaClientError.invalidArgument("Agreement client identifier is invalid.")
+    }
+
+    let objectType: String
+    let postID: Int64
+    switch target {
+    case .thread(let firstPostID):
+      objectType = "3"
+      postID = firstPostID
+    case .post(let targetPostID):
+      objectType = "1"
+      postID = targetPostID
+    case .subpost(_, let subpostID):
+      objectType = "2"
+      postID = subpostID
     }
 
     let clientVersion = Self.agreementClientVersion
@@ -219,13 +326,56 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
         ("_client_version", clientVersion),
         ("agree_type", "2"),
         ("cuid", agreementCUID),
-        ("obj_type", "3"),
+        ("obj_type", objectType),
         ("op_type", isAgreed ? "0" : "1"),
-        ("post_id", String(firstPostID)),
+        ("post_id", String(postID)),
         ("tbs", tbs),
         ("thread_id", String(threadID)),
       ],
       userAgent: "bdtb for Android \(clientVersion)"
+    )
+  }
+
+  func threadAgreement(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    firstPostID: Int64
+  ) throws -> URLRequest {
+    try agreementPage(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      page: 1,
+      pageSize: 2,
+      sort: .ascending,
+      onlyThreadAuthor: false,
+      location: .postID(firstPostID),
+      includeSubposts: false,
+      subpostsSortedByAgree: true,
+      subpostPageSize: 4
+    )
+  }
+
+  func setThreadAgreement(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    firstPostID: Int64,
+    tbs: String,
+    isAgreed: Bool
+  ) throws -> URLRequest {
+    try setAgreement(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      target: .thread(firstPostID: firstPostID),
+      tbs: tbs,
+      isAgreed: isAgreed
     )
   }
 
@@ -335,10 +485,11 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     }
   }
 
-  private func validateThreadAgreementIdentity(
+  private func validateAgreementContext(
     expectedUserID: Int64,
+    forumID: Int64,
     threadID: Int64,
-    firstPostID: Int64
+    target: TiebaAgreementTarget?
   ) throws {
     guard expectedUserID > 0 else {
       throw TiebaClientError.invalidArgument("Expected user ID must be positive.")
@@ -346,11 +497,45 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     guard threadID > 0 else {
       throw TiebaClientError.invalidArgument("Thread ID must be positive.")
     }
-    guard firstPostID > 0 else {
-      throw TiebaClientError.invalidArgument("First post ID must be positive.")
+    guard forumID > 0 else {
+      throw TiebaClientError.invalidArgument("Forum ID must be positive.")
     }
-    guard TiebaGalaxy2CUID.isValid(agreementCUID) else {
-      throw TiebaClientError.invalidArgument("Agreement client identifier is invalid.")
+    switch target {
+    case .thread(let firstPostID):
+      try validatePositiveID(firstPostID, name: "First post ID")
+    case .post(let postID):
+      try validatePositiveID(postID, name: "Post ID")
+    case .subpost(let parentPostID, let subpostID):
+      try validatePositiveID(parentPostID, name: "Parent post ID")
+      try validatePositiveID(subpostID, name: "Subpost ID")
+    case nil:
+      break
+    }
+  }
+
+  private func validatePositiveID(_ value: Int64, name: String) throws {
+    guard value > 0 else {
+      throw TiebaClientError.invalidArgument("\(name) must be positive.")
+    }
+  }
+
+  private func validatePage(_ value: Int, name: String) throws {
+    guard (1...Int(Int32.max)).contains(value) else {
+      throw TiebaClientError.invalidArgument("\(name) must be between 1 and \(Int32.max).")
+    }
+  }
+
+  private func validateCursorPage(_ value: Int) throws {
+    guard (0...Int(Int32.max)).contains(value) else {
+      throw TiebaClientError.invalidArgument(
+        "Cursor page must be between 0 and \(Int32.max)."
+      )
+    }
+  }
+
+  private func validatePageSize(_ value: Int, maximum: Int, name: String) throws {
+    guard (1...maximum).contains(value) else {
+      throw TiebaClientError.invalidArgument("\(name) must be between 1 and \(maximum).")
     }
   }
 

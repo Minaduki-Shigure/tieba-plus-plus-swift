@@ -21,8 +21,12 @@ struct ThreadView: View {
   @State private var isPureReadingMode = false
   @State private var pictureGalleryRoute: ThreadImageGalleryRoute?
   @State private var pictureGalleryPolicyTask: Task<Void, Never>?
+  @State private var agreementScopeID = UUID()
+  @State private var pendingAgreementChange: PendingContentAgreementChange?
+  @State private var agreementErrorMessage: String?
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Environment(\.contentFilterRepository) private var contentFilterRepository
+  @Environment(\.contentAgreementStore) private var contentAgreementStore
   private let historySnapshot: ThreadHistorySnapshot?
   private let linkRoute: TiebaThreadRoute?
 
@@ -124,7 +128,7 @@ struct ThreadView: View {
 
       ToolbarItemGroup(placement: .navigationBarTrailing) {
         Button {
-          withAnimation { isPureReadingMode.toggle() }
+          togglePureReadingMode()
         } label: {
           Image(systemName: isPureReadingMode ? "book.closed.fill" : "book.closed")
         }
@@ -178,6 +182,31 @@ struct ThreadView: View {
         Text("当前第 \(max(viewModel.currentPage, 1)) 页，共 \(viewModel.totalPages) 页")
       }
     }
+    .confirmationDialog(
+      pendingAgreementChange?.confirmationTitle ?? "更新点赞状态？",
+      isPresented: agreementConfirmationIsPresented,
+      titleVisibility: .visible
+    ) {
+      if let pendingAgreementChange {
+        if pendingAgreementChange.targetAgreed {
+          Button(pendingAgreementChange.actionTitle) {
+            confirmAgreementChange(pendingAgreementChange)
+          }
+        } else {
+          Button(pendingAgreementChange.actionTitle, role: .destructive) {
+            confirmAgreementChange(pendingAgreementChange)
+          }
+        }
+      }
+      Button("取消", role: .cancel) { pendingAgreementChange = nil }
+    } message: {
+      Text(pendingAgreementChange?.confirmationMessage ?? "")
+    }
+    .alert("无法更新点赞状态", isPresented: agreementErrorIsPresented) {
+      Button("好", role: .cancel) { agreementErrorMessage = nil }
+    } message: {
+      Text(agreementErrorMessage ?? "无法完成点赞操作。")
+    }
     .fullScreenCover(
       item: $pictureGalleryRoute,
       onDismiss: cancelPictureGallery
@@ -200,6 +229,22 @@ struct ThreadView: View {
         )
       }
       viewModel.loadIfNeeded()
+    }
+    .task(
+      id: ContentAgreementRegistrationTaskID(
+        descriptorEpoch: viewModel.agreementDescriptorEpoch,
+        isEnabled: !isPureReadingMode
+      )
+    ) {
+      guard let contentAgreementStore else { return }
+      guard !isPureReadingMode else {
+        contentAgreementStore.removeScope(agreementScopeID)
+        return
+      }
+      await contentAgreementStore.replaceDescriptors(
+        viewModel.agreementReadDescriptors,
+        for: agreementScopeID
+      )
     }
     .task(id: viewModel.state) {
       guard
@@ -252,7 +297,13 @@ struct ThreadView: View {
         persistBrowseOptions(viewModel.options)
       }
       cancelPictureGallery()
+      pendingAgreementChange = nil
+      contentAgreementStore?.removeScope(agreementScopeID)
       viewModel.cancel()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+      pendingAgreementChange = nil
+      agreementErrorMessage = nil
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       cancelPictureGallery()
@@ -387,7 +438,8 @@ struct ThreadView: View {
                 VStack(spacing: 0) {
                   PostView(
                     post: firstPost,
-                    threadAgreementContext: threadAgreementContext(for: firstPost),
+                    agreementTarget: viewModel.agreementTarget(forPostID: firstPost.id),
+                    agreementFallbackScore: viewModel.thread.agreeScore,
                     originThread: viewModel.originThread,
                     poll: viewModel.poll,
                     service: service,
@@ -401,6 +453,8 @@ struct ThreadView: View {
                     },
                     openMentionedUser: openMentionedUser,
                     openTiebaLink: openTiebaLink,
+                    requestAgreementChange: requestAgreementChange,
+                    retryAgreement: retryAgreement,
                     openComments: { commentID in
                       commentsRoute = CommentsRoute(
                         threadID: firstPost.threadID,
@@ -462,7 +516,8 @@ struct ThreadView: View {
                 VStack(spacing: 0) {
                   PostView(
                     post: post,
-                    threadAgreementContext: nil,
+                    agreementTarget: viewModel.agreementTarget(forPostID: post.id),
+                    agreementFallbackScore: post.agreeScore,
                     originThread: nil,
                     poll: nil,
                     service: service,
@@ -476,6 +531,8 @@ struct ThreadView: View {
                     },
                     openMentionedUser: openMentionedUser,
                     openTiebaLink: openTiebaLink,
+                    requestAgreementChange: requestAgreementChange,
+                    retryAgreement: retryAgreement,
                     openComments: { commentID in
                       commentsRoute = CommentsRoute(
                         threadID: post.threadID,
@@ -782,13 +839,72 @@ struct ThreadView: View {
     )
   }
 
-  private func threadAgreementContext(
-    for firstPost: BrowsePost
-  ) -> ThreadAgreementContext? {
-    ThreadAgreementContext(
-      thread: viewModel.thread,
-      firstPost: firstPost
+  private var agreementConfirmationIsPresented: Binding<Bool> {
+    Binding(
+      get: { pendingAgreementChange != nil },
+      set: { isPresented in
+        if !isPresented { pendingAgreementChange = nil }
+      }
     )
+  }
+
+  private var agreementErrorIsPresented: Binding<Bool> {
+    Binding(
+      get: { agreementErrorMessage != nil },
+      set: { isPresented in
+        if !isPresented { agreementErrorMessage = nil }
+      }
+    )
+  }
+
+  private func togglePureReadingMode() {
+    if !isPureReadingMode {
+      pendingAgreementChange = nil
+      agreementErrorMessage = nil
+      contentAgreementStore?.removeScope(agreementScopeID)
+    }
+    withAnimation { isPureReadingMode.toggle() }
+  }
+
+  private func requestAgreementChange(
+    _ target: ContentAgreementTarget,
+    targetAgreed: Bool
+  ) {
+    guard !isPureReadingMode else { return }
+    pendingAgreementChange = PendingContentAgreementChange(
+      target: target,
+      targetAgreed: targetAgreed
+    )
+  }
+
+  private func confirmAgreementChange(_ change: PendingContentAgreementChange) {
+    pendingAgreementChange = nil
+    guard !isPureReadingMode, let contentAgreementStore else { return }
+    Task { @MainActor in
+      do {
+        try await contentAgreementStore.setAgreed(
+          change.targetAgreed,
+          for: change.target
+        )
+      } catch is CancellationError {
+        return
+      } catch {
+        agreementErrorMessage = error.localizedDescription
+      }
+    }
+  }
+
+  private func retryAgreement(_ target: ContentAgreementTarget) {
+    guard !isPureReadingMode, let contentAgreementStore else { return }
+    Task { @MainActor in
+      do {
+        try await contentAgreementStore.reload(target)
+      } catch is CancellationError {
+        return
+      } catch {
+        agreementErrorMessage = error.localizedDescription
+      }
+    }
   }
 }
 
@@ -889,9 +1005,71 @@ private struct ThreadProgressTaskID: Hashable {
   let isRestoringPrependPosition: Bool
 }
 
+private struct ContentAgreementRegistrationTaskID: Hashable {
+  let descriptorEpoch: Int
+  let isEnabled: Bool
+}
+
+struct PendingContentAgreementChange: Equatable {
+  let target: ContentAgreementTarget
+  let targetAgreed: Bool
+
+  var confirmationTitle: String {
+    targetAgreed
+      ? "点赞这个\(target.kind.localizedObjectName)？"
+      : "取消点赞这个\(target.kind.localizedObjectName)？"
+  }
+
+  var actionTitle: String {
+    targetAgreed ? "点赞" : "取消点赞"
+  }
+
+  var confirmationMessage: String {
+    "这会使用当前贴吧账户更新\(target.kind.localizedObjectName)的点赞状态。"
+  }
+}
+
+extension ContentAgreementKind {
+  var localizedObjectName: String {
+    switch self {
+    case .topic:
+      "主题"
+    case .post:
+      "楼层"
+    case .subpost:
+      "楼中楼回复"
+    }
+  }
+}
+
+enum ContentAgreementControlPresentation: Equatable {
+  case readOnly(score: Int)
+  case loading(score: Int)
+  case ready(ContentAgreementSnapshot)
+  case mutating(ContentAgreementSnapshot)
+  case retry(score: Int)
+
+  init(state: ContentAgreementEntryState, fallbackAgreeScore: Int) {
+    let fallbackAgreeScore = max(fallbackAgreeScore, 0)
+    switch state {
+    case .unknown, .signedOut:
+      self = .readOnly(score: fallbackAgreeScore)
+    case .loading(let previous):
+      self = .loading(score: previous?.agreeScore ?? fallbackAgreeScore)
+    case .ready(let snapshot):
+      self = .ready(snapshot)
+    case .mutating(let previous, _):
+      self = .mutating(previous)
+    case .failed(let previous):
+      self = .retry(score: previous?.agreeScore ?? fallbackAgreeScore)
+    }
+  }
+}
+
 private struct PostView: View {
   let post: BrowsePost
-  let threadAgreementContext: ThreadAgreementContext?
+  let agreementTarget: ContentAgreementTarget?
+  let agreementFallbackScore: Int
   let originThread: BrowseThread?
   let poll: BrowsePoll?
   let service:
@@ -904,10 +1082,12 @@ private struct PostView: View {
   let openImage: (Int) -> Void
   let openMentionedUser: (Int64) -> Void
   let openTiebaLink: (TiebaLinkTarget) -> Void
+  let requestAgreementChange: (ContentAgreementTarget, Bool) -> Void
+  let retryAgreement: (ContentAgreementTarget) -> Void
   let openComments: (Int64?) -> Void
 
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
-  @Environment(\.accountAccess) private var accountAccess
+  @Environment(\.contentAgreementStore) private var contentAgreementStore
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
@@ -989,16 +1169,13 @@ private struct PostView: View {
         authorIdentity
       }
 
-      if let threadAgreementContext, let accountAccess {
-        ThreadAgreementControl(
-          context: threadAgreementContext,
-          access: accountAccess
-        )
-        .id(threadAgreementContext.target)
-      } else {
-        ReadOnlyAgreeLabel(score: post.agreeScore)
-          .padding(.top, 2)
-      }
+      ContentAgreementControlSlot(
+        store: contentAgreementStore,
+        target: agreementTarget,
+        fallbackAgreeScore: agreementFallbackScore,
+        requestChange: requestAgreementChange,
+        retry: retryAgreement
+      )
     }
   }
 
@@ -1075,156 +1252,149 @@ private struct PostView: View {
   }
 }
 
-private struct ThreadAgreementControl: View {
-  @StateObject private var viewModel: ThreadAgreementViewModel
-  @State private var pendingAgreedState: Bool?
+struct ContentAgreementControlSlot: View {
+  let store: ContentAgreementStore?
+  let target: ContentAgreementTarget?
   let fallbackAgreeScore: Int
+  let requestChange: (ContentAgreementTarget, Bool) -> Void
+  let retry: (ContentAgreementTarget) -> Void
 
-  init(context: ThreadAgreementContext, access: AccountAccess) {
-    let target = context.target
-    fallbackAgreeScore = context.fallbackAgreeScore
-    _viewModel = StateObject(
-      wrappedValue: ThreadAgreementViewModel(
-        forumID: target.forumID,
-        forumName: target.forumName,
-        threadID: target.threadID,
-        firstPostID: target.firstPostID,
-        fallbackAgreeScore: context.fallbackAgreeScore,
-        access: access
-      )
-    )
-  }
-
+  @ViewBuilder
   var body: some View {
-    control
-      .task { await viewModel.loadIfNeeded() }
-      .onChange(of: fallbackAgreeScore) { agreeScore in
-        viewModel.updateFallbackAgreeScore(agreeScore)
-      }
-      .onDisappear {
-        pendingAgreedState = nil
-        viewModel.presentationDidDisappear()
-      }
-      .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
-        pendingAgreedState = nil
-        let token = viewModel.invalidateForAccountSessionChange()
-        Task { @MainActor in
-          await viewModel.reloadAfterAccountSessionChange(ifCurrent: token)
-        }
-      }
-      .onReceive(NotificationCenter.default.publisher(for: .threadAgreementDidChange)) {
-        notification in
-        guard let change = ThreadAgreementChange(notification) else { return }
-        Task { @MainActor in
-          if await viewModel.threadAgreementDidChange(change) {
-            pendingAgreedState = nil
-          }
-        }
-      }
-      .confirmationDialog(
-        pendingAgreedState == true ? "点赞这个主题？" : "取消点赞这个主题？",
-        isPresented: Binding(
-          get: { pendingAgreedState != nil },
-          set: { if !$0 { pendingAgreedState = nil } }
-        ),
-        titleVisibility: .visible
-      ) {
-        if pendingAgreedState == true {
-          Button("点赞") { confirmAgreedState(true) }
-        } else if pendingAgreedState == false {
-          Button("取消点赞", role: .destructive) { confirmAgreedState(false) }
-        }
-        Button("取消", role: .cancel) { pendingAgreedState = nil }
-      } message: {
-        Text("这会使用当前贴吧账户更新主题点赞状态。")
-      }
-      .alert(
-        "无法更新主题点赞",
-        isPresented: Binding(
-          get: { viewModel.errorMessage != nil },
-          set: { if !$0 { viewModel.dismissError() } }
-        )
-      ) {
-        Button("好", role: .cancel) { viewModel.dismissError() }
-      } message: {
-        Text(viewModel.errorMessage ?? "无法完成主题点赞操作。")
-      }
+    if let store, let target {
+      ContentAgreementControl(
+        entry: store.entry(for: target),
+        fallbackAgreeScore: fallbackAgreeScore,
+        requestChange: requestChange,
+        retry: retry
+      )
+    } else {
+      ContentAgreementFixedLabel(
+        score: fallbackAgreeScore,
+        icon: .thumbsUp
+      )
+      .foregroundStyle(.secondary)
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel("净赞数 \(max(fallbackAgreeScore, 0).formatted())")
+    }
+  }
+}
+
+private struct ContentAgreementControl: View {
+  @ObservedObject private var entry: ContentAgreementEntry
+  let fallbackAgreeScore: Int
+  let requestChange: (ContentAgreementTarget, Bool) -> Void
+  let retry: (ContentAgreementTarget) -> Void
+
+  init(
+    entry: ContentAgreementEntry,
+    fallbackAgreeScore: Int,
+    requestChange: @escaping (ContentAgreementTarget, Bool) -> Void,
+    retry: @escaping (ContentAgreementTarget) -> Void
+  ) {
+    _entry = ObservedObject(wrappedValue: entry)
+    self.fallbackAgreeScore = fallbackAgreeScore
+    self.requestChange = requestChange
+    self.retry = retry
   }
 
   @ViewBuilder
-  private var control: some View {
-    switch viewModel.state {
-    case .idle, .signedOut:
-      ReadOnlyAgreeLabel(score: viewModel.displayedAgreeScore)
-        .padding(.top, 2)
-    case .loading:
-      ProgressView()
-        .controlSize(.small)
-        .frame(width: 44, height: 44)
-        .accessibilityLabel("正在读取主题点赞状态")
+  var body: some View {
+    switch presentation {
+    case .readOnly(let score):
+      ContentAgreementFixedLabel(score: score, icon: .thumbsUp)
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("净赞数 \(score.formatted())")
+    case .loading(let score):
+      ContentAgreementFixedLabel(score: score, icon: .progress)
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("正在读取\(entry.target.kind.localizedObjectName)点赞状态")
     case .ready(let snapshot):
       Button {
-        pendingAgreedState = !snapshot.isAgreed
+        requestChange(entry.target, !snapshot.isAgreed)
       } label: {
-        agreementLabel(snapshot: snapshot, showsProgress: false)
+        ContentAgreementFixedLabel(
+          score: snapshot.agreeScore,
+          icon: snapshot.isAgreed ? .thumbsUpFilled : .thumbsUp
+        )
       }
       .buttonStyle(.plain)
       .foregroundStyle(snapshot.isAgreed ? Color.accentColor : Color.secondary)
-      .accessibilityLabel(snapshot.isAgreed ? "取消点赞主题" : "点赞主题")
+      .accessibilityLabel(
+        snapshot.isAgreed
+          ? "取消点赞\(entry.target.kind.localizedObjectName)"
+          : "点赞\(entry.target.kind.localizedObjectName)"
+      )
       .accessibilityValue("净赞数 \(snapshot.agreeScore.formatted())")
-      .help(snapshot.isAgreed ? "取消点赞主题" : "点赞主题")
-      .accessibilityIdentifier("thread-agreement-button")
-    case .mutating(let previous, _):
-      agreementLabel(snapshot: previous, showsProgress: true)
+      .help(
+        snapshot.isAgreed
+          ? "取消点赞\(entry.target.kind.localizedObjectName)"
+          : "点赞\(entry.target.kind.localizedObjectName)"
+      )
+      .accessibilityIdentifier(
+        "content-agreement-\(entry.target.kind.rawValue)-\(entry.target.objectID)"
+      )
+    case .mutating(let previous):
+      ContentAgreementFixedLabel(score: previous.agreeScore, icon: .progress)
         .foregroundStyle(.secondary)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("正在更新主题点赞")
-    case .failed:
-      Button {
-        Task { @MainActor in await viewModel.reload() }
-      } label: {
-        HStack(spacing: 5) {
-          Image(systemName: "arrow.clockwise")
-          if viewModel.displayedAgreeScore > 0 {
-            Text(viewModel.displayedAgreeScore.formatted(.number.notation(.compactName)))
-              .monospacedDigit()
-          }
-        }
-        .font(.caption)
-        .frame(minWidth: 44, minHeight: 44)
+        .accessibilityLabel("正在更新\(entry.target.kind.localizedObjectName)点赞")
+    case .retry(let score):
+      Button { retry(entry.target) } label: {
+        ContentAgreementFixedLabel(score: score, icon: .retry)
       }
       .buttonStyle(.plain)
       .foregroundStyle(.secondary)
-      .accessibilityLabel("重试读取主题点赞状态")
-      .help("重试读取主题点赞状态")
-      .accessibilityIdentifier("thread-agreement-retry")
+      .accessibilityLabel("重试读取\(entry.target.kind.localizedObjectName)点赞状态")
+      .help("重试读取\(entry.target.kind.localizedObjectName)点赞状态")
+      .accessibilityIdentifier(
+        "content-agreement-retry-\(entry.target.kind.rawValue)-\(entry.target.objectID)"
+      )
     }
   }
 
-  private func agreementLabel(
-    snapshot: ThreadAgreementSnapshot,
-    showsProgress: Bool
-  ) -> some View {
+  private var presentation: ContentAgreementControlPresentation {
+    ContentAgreementControlPresentation(
+      state: entry.state,
+      fallbackAgreeScore: fallbackAgreeScore
+    )
+  }
+}
+
+private enum ContentAgreementFixedLabelIcon {
+  case thumbsUp
+  case thumbsUpFilled
+  case progress
+  case retry
+}
+
+private struct ContentAgreementFixedLabel: View {
+  let score: Int
+  let icon: ContentAgreementFixedLabelIcon
+
+  var body: some View {
     HStack(spacing: 5) {
-      if showsProgress {
+      switch icon {
+      case .thumbsUp:
+        Image(systemName: "hand.thumbsup")
+      case .thumbsUpFilled:
+        Image(systemName: "hand.thumbsup.fill")
+      case .progress:
         ProgressView()
           .controlSize(.small)
-      } else {
-        Image(systemName: snapshot.isAgreed ? "hand.thumbsup.fill" : "hand.thumbsup")
+      case .retry:
+        Image(systemName: "arrow.clockwise")
       }
-      if snapshot.agreeScore > 0 {
-        Text(snapshot.agreeScore.formatted(.number.notation(.compactName)))
-          .monospacedDigit()
-      }
+      Text(max(score, 0).formatted(.number.notation(.compactName)))
+        .monospacedDigit()
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
     }
     .font(.caption)
-    .frame(minWidth: 44, minHeight: 44)
+    .frame(width: 72, height: 44)
     .contentShape(Rectangle())
-  }
-
-  private func confirmAgreedState(_ isAgreed: Bool) {
-    pendingAgreedState = nil
-    Task { @MainActor in await viewModel.setAgreed(isAgreed) }
   }
 }
 

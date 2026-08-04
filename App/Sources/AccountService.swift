@@ -70,6 +70,80 @@ struct ThreadAgreementData: Hashable, Sendable {
   }
 }
 
+enum ContentAgreementKind: Int32, Hashable, Sendable {
+  case post = 1
+  case subpost = 2
+  case topic = 3
+}
+
+struct ContentAgreementTarget: Hashable, Sendable {
+  let kind: ContentAgreementKind
+  let forumID: Int64
+  let forumName: String
+  let threadID: Int64
+  let parentPostID: Int64?
+  let objectID: Int64
+
+  init?(
+    kind: ContentAgreementKind,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    parentPostID: Int64? = nil,
+    objectID: Int64
+  ) {
+    let forumName = forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    guard forumID > 0, !forumName.isEmpty, threadID > 0, objectID > 0 else { return nil }
+    switch kind {
+    case .topic, .post:
+      guard parentPostID == nil else { return nil }
+    case .subpost:
+      guard let parentPostID, parentPostID > 0, parentPostID != objectID else { return nil }
+    }
+    self.kind = kind
+    self.forumID = forumID
+    self.forumName = forumName
+    self.threadID = threadID
+    self.parentPostID = parentPostID
+    self.objectID = objectID
+  }
+}
+
+struct ContentAgreementSnapshot: Hashable, Sendable {
+  let isAgreed: Bool
+  let agreeScore: Int
+
+  init(isAgreed: Bool, agreeScore: Int) {
+    self.isAgreed = isAgreed
+    self.agreeScore = max(agreeScore, 0)
+  }
+}
+
+struct ContentAgreementData: Hashable, Sendable {
+  let userID: Int64
+  let target: ContentAgreementTarget
+  let snapshot: ContentAgreementSnapshot
+
+  init(
+    userID: Int64,
+    target: ContentAgreementTarget,
+    isAgreed: Bool,
+    agreeScore: Int
+  ) {
+    self.userID = userID
+    self.target = target
+    self.snapshot = ContentAgreementSnapshot(isAgreed: isAgreed, agreeScore: agreeScore)
+  }
+}
+
+struct ContentAgreementPageData: Hashable, Sendable {
+  let userID: Int64
+  let forumID: Int64
+  let threadID: Int64
+  let agreements: [ContentAgreementData]
+}
+
 protocol AccountService: Sendable {
   func validate(credential: AccountCredentials) async throws -> ValidatedAccount
   func followedForums(
@@ -113,6 +187,19 @@ protocol AccountService: Sendable {
     firstPostID: Int64,
     isAgreed: Bool
   ) async throws -> ThreadAgreementData
+  func contentAgreement(
+    session: StoredAccountSession,
+    target: ContentAgreementTarget
+  ) async throws -> ContentAgreementData
+  func contentAgreements(
+    session: StoredAccountSession,
+    descriptor: ContentAgreementReadDescriptor
+  ) async throws -> ContentAgreementPageData
+  func setContentAgreed(
+    session: StoredAccountSession,
+    target: ContentAgreementTarget,
+    isAgreed: Bool
+  ) async throws -> ContentAgreementData
 }
 
 extension AccountService {
@@ -135,5 +222,74 @@ extension AccountService {
     isAgreed: Bool
   ) async throws -> ThreadAgreementData {
     throw BrowseError.unavailable("当前账户服务不支持更新主题点赞状态。")
+  }
+
+  func contentAgreement(
+    session: StoredAccountSession,
+    target: ContentAgreementTarget
+  ) async throws -> ContentAgreementData {
+    guard target.kind == .topic else {
+      throw BrowseError.unavailable("当前账户服务不支持读取此内容的点赞状态。")
+    }
+    let agreement = try await threadAgreement(
+      session: session,
+      forumID: target.forumID,
+      forumName: target.forumName,
+      threadID: target.threadID,
+      firstPostID: target.objectID
+    )
+    guard
+      agreement.userID == session.id,
+      agreement.forumID == target.forumID,
+      agreement.threadID == target.threadID,
+      agreement.firstPostID == target.objectID
+    else {
+      throw BrowseError.unavailable("贴吧返回了不匹配的点赞状态，请重新加载后再试。")
+    }
+    return ContentAgreementData(
+      userID: agreement.userID,
+      target: target,
+      isAgreed: agreement.isAgreed,
+      agreeScore: agreement.agreeScore
+    )
+  }
+
+  func contentAgreements(
+    session: StoredAccountSession,
+    descriptor: ContentAgreementReadDescriptor
+  ) async throws -> ContentAgreementPageData {
+    throw BrowseError.unavailable("当前账户服务不支持批量读取内容点赞状态。")
+  }
+
+  func setContentAgreed(
+    session: StoredAccountSession,
+    target: ContentAgreementTarget,
+    isAgreed: Bool
+  ) async throws -> ContentAgreementData {
+    guard target.kind == .topic else {
+      throw BrowseError.unavailable("当前账户服务不支持更新此内容的点赞状态。")
+    }
+    let agreement = try await setThreadAgreed(
+      session: session,
+      forumID: target.forumID,
+      forumName: target.forumName,
+      threadID: target.threadID,
+      firstPostID: target.objectID,
+      isAgreed: isAgreed
+    )
+    guard
+      agreement.userID == session.id,
+      agreement.forumID == target.forumID,
+      agreement.threadID == target.threadID,
+      agreement.firstPostID == target.objectID
+    else {
+      throw BrowseError.unavailable("贴吧返回了不匹配的点赞状态，请重新加载后再试。")
+    }
+    return ContentAgreementData(
+      userID: agreement.userID,
+      target: target,
+      isAgreed: agreement.isAgreed,
+      agreeScore: agreement.agreeScore
+    )
   }
 }

@@ -14,6 +14,7 @@ message PbPageReqIdl {
         int32 floor_rn = 9;
         int32 rn = 13;
         int32 pn = 18;
+        int64 forum_id = 56;
         int32 floor_sort_type = 74;
         optional int64 last_pid = 81;
     }

@@ -7,12 +7,15 @@ import "Page.proto";
 import "Post.proto";
 import "ThreadInfo.proto";
 import "User.proto";
+import "Anti.proto";
 
 message PbPageResIdl {
     Error error = 1;
     message DataRes {
+        User user = 1;
         SimpleForum forum = 2;
         Page page = 3;
+        Anti anti = 4;
         repeated Post post_list = 6;
         ThreadInfo thread = 8;
         repeated User user_list = 13;

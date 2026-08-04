@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 
 @main
+@MainActor
 struct TiebaPlusPlusApp: App {
   @StateObject private var externalWebPresentation = ExternalWebPresentationModel()
   @StateObject private var contentMediaNetworkMonitor = ContentMediaNetworkMonitor()
@@ -36,11 +37,19 @@ struct TiebaPlusPlusApp: App {
     FileForumSearchHistoryStore.live()
   private let globalSearchHistoryRepository: any GlobalSearchHistoryRepository =
     FileGlobalSearchHistoryStore.live()
-  private let accountVault: any AccountVault = KeychainAccountVault()
-  private let accountService: any AccountService = TiebaCoreAccountService()
+  private let accountVault: any AccountVault
+  private let accountService: any AccountService
+  private let contentAgreementStore: ContentAgreementStore
   private let startDestination: AppStartDestination
 
   init() {
+    let accountVault: any AccountVault = KeychainAccountVault()
+    let accountService: any AccountService = TiebaCoreAccountService()
+    self.accountVault = accountVault
+    self.accountService = accountService
+    self.contentAgreementStore = ContentAgreementStore(
+      access: AccountAccess(vault: accountVault, service: accountService)
+    )
     let mediaPlaybackCoordinator = MediaPlaybackCoordinator()
     _mediaPlaybackCoordinator = StateObject(wrappedValue: mediaPlaybackCoordinator)
     _voicePlaybackController = StateObject(
@@ -82,6 +91,7 @@ struct TiebaPlusPlusApp: App {
         \.accountAccess,
         AccountAccess(vault: accountVault, service: accountService)
       )
+      .environment(\.contentAgreementStore, contentAgreementStore)
       .appTextSizeAdjustment(AppTextSizeAdjustment.resolved(textSizeAdjustment))
       .environment(\.appAccentColor, resolvedAccentColor)
       .environment(\.contentFilterRepository, contentFilterRepository)

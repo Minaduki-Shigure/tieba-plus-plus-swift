@@ -3,6 +3,7 @@
     {
       "protoFiles": [
         "Agree.proto",
+        "Anti.proto",
         "CommonReq.proto",
         "Error.proto",
         "ForumRuleDetailReqIdl.proto",

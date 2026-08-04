@@ -44,7 +44,13 @@ The minimal `forum.sign_in_info` and nested `SignInfo.user_info` fields used to
 read server-authoritative per-forum check-in state are adapted from the same
 TiebaLite commit.
 The `Agree.has_agree`, `agree_type`, and `lz_agree` fields used to read
-account-scoped topic-approval state are adapted from the same TiebaLite commit.
+account-scoped topic, ordinary-post, and subpost approval state are adapted from
+the same TiebaLite commit. The authenticated `PbPage` additions (`user`, `anti`,
+and request `forum_id`), authenticated `PbFloor` additions (`anti`, request
+`forum_id`, and its forum/thread/post/subpost response closure), `User.is_login`,
+and the embedded `Post.SubPost.pid` parent identifier used to bind those states
+are also adapted from TiebaLite commit
+`268f388c7824ae2c8f6ed549827a943ec8a7f352`.
 The Galaxy2 CUID framing and Helios checksum implementation in
 `TiebaGalaxy2CUID.swift` are adapted from TiebaLite's `CuidUtils` and
 `utils/helios` helpers at that commit. This implementation deliberately replaces

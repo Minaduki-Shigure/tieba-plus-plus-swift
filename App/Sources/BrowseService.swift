@@ -63,7 +63,7 @@ enum ThreadPostSort: String, CaseIterable, Codable, Hashable, Identifiable, Send
   }
 }
 
-struct ThreadBrowseOptions: Codable, Equatable, Sendable {
+struct ThreadBrowseOptions: Codable, Hashable, Sendable {
   var sort: ThreadPostSort
   var onlyThreadAuthor: Bool
 
@@ -73,7 +73,7 @@ struct ThreadBrowseOptions: Codable, Equatable, Sendable {
   }
 }
 
-enum ThreadPostLocation: Equatable, Sendable {
+enum ThreadPostLocation: Hashable, Sendable {
   case postID(Int64)
   case pageNumber
   case pageCursor(Int64)

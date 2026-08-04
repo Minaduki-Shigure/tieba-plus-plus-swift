@@ -15,8 +15,15 @@ private enum CommentPagePlacement: Equatable {
 
 @MainActor
 final class CommentsViewModel: ObservableObject {
-  @Published private(set) var parentPost: CommentParentPostContext?
-  @Published private(set) var comments: [BrowseComment] = []
+  @Published private(set) var parentPost: CommentParentPostContext? {
+    didSet { rebuildAgreementTargetIndex() }
+  }
+  @Published private(set) var thread: BrowseThread? {
+    didSet { rebuildAgreementTargetIndex() }
+  }
+  @Published private(set) var comments: [BrowseComment] = [] {
+    didSet { rebuildAgreementTargetIndex() }
+  }
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
   @Published private(set) var isLoadingPrevious = false
@@ -29,6 +36,9 @@ final class CommentsViewModel: ObservableObject {
   @Published private(set) var positionNotice: String?
   @Published private(set) var totalCount = 0
   @Published private(set) var canLoadPrevious = false
+  @Published private(set) var agreementReadDescriptors: [ContentAgreementReadDescriptor] = []
+  @Published private(set) var agreementDescriptorEpoch = 0
+  @Published private(set) var agreementExplicitRefreshEpoch = 0
 
   let threadID: Int64
   let anchor: CommentsAnchor
@@ -40,6 +50,8 @@ final class CommentsViewModel: ObservableObject {
   private var loadTask: Task<Void, Never>?
   private var loadGeneration = 0
   private var lockedParentPostID: Int64?
+  private var indexedParentAgreementTarget: ContentAgreementTarget?
+  private var agreementTargetsByCommentID: [Int64: ContentAgreementTarget] = [:]
 
   init(threadID: Int64, postID: Int64, service: any BrowseService) {
     self.threadID = threadID
@@ -82,7 +94,9 @@ final class CommentsViewModel: ObservableObject {
     positionNotice = nil
     totalCount = 0
     parentPost = nil
+    thread = nil
     comments = []
+    replaceAgreementDescriptors(with: [])
     state = .loading
     load(page: 1, placement: .replacing)
   }
@@ -179,6 +193,14 @@ final class CommentsViewModel: ObservableObject {
     refreshError = nil
   }
 
+  var parentAgreementTarget: ContentAgreementTarget? {
+    indexedParentAgreementTarget
+  }
+
+  func agreementTarget(forCommentID commentID: Int64) -> ContentAgreementTarget? {
+    agreementTargetsByCommentID[commentID]
+  }
+
   private func load(page: Int, placement: CommentPagePlacement) {
     guard loadTask == nil else { return }
     let service = service
@@ -242,12 +264,14 @@ final class CommentsViewModel: ObservableObject {
         else {
           throw BrowseError.unavailable("贴吧返回的楼中楼归属异常，未显示该响应。")
         }
+        try validateThreadContext(response.thread, placement: placement)
         let pageComments = normalized(response.comments)
         switch placement {
         case .replacing, .refreshing:
           if self.lockedParentPostID == nil {
             self.lockedParentPostID = response.parentPost.id
           }
+          thread = response.thread
           parentPost = response.parentPost
           comments = pageComments
           totalCount = max(response.totalCount, comments.count)
@@ -294,6 +318,18 @@ final class CommentsViewModel: ObservableObject {
             hasMore = response.hasMore
           }
           totalCount = max(max(totalCount, response.totalCount), comments.count)
+        }
+        if placement == .replacing {
+          replaceAgreementDescriptors(
+            with: response.agreementReadDescriptor.map { [$0] } ?? []
+          )
+        } else if placement == .refreshing {
+          replaceAgreementDescriptors(
+            with: response.agreementReadDescriptor.map { [$0] } ?? [],
+            forceReadIfUnchanged: true
+          )
+        } else {
+          upsertAgreementDescriptor(response.agreementReadDescriptor)
         }
         if (placement == .replacing || placement == .refreshing),
           case .comment(_, let commentID) = anchor
@@ -344,5 +380,82 @@ final class CommentsViewModel: ObservableObject {
   ) -> [BrowseComment] {
     var seen = Set(existing.map(\.id))
     return newItems.filter { seen.insert($0.id).inserted }
+  }
+
+  private func validateThreadContext(
+    _ responseThread: BrowseThread?,
+    placement: CommentPagePlacement
+  ) throws {
+    guard let responseThread else { return }
+    guard responseThread.id == threadID else {
+      throw BrowseError.unavailable("贴吧返回的楼中楼主题归属异常，未显示该响应。")
+    }
+    if placement == .before || placement == .after {
+      guard let thread else {
+        throw BrowseError.unavailable("楼中楼分页缺少已锁定的主题归属，未合并该响应。")
+      }
+      let forumConflicts = thread.forumID > 0 && responseThread.forumID > 0
+        && thread.forumID != responseThread.forumID
+      let firstPostConflicts = thread.firstPostID > 0 && responseThread.firstPostID > 0
+        && thread.firstPostID != responseThread.firstPostID
+      guard !forumConflicts, !firstPostConflicts else {
+        throw BrowseError.unavailable("贴吧返回的楼中楼主题上下文发生冲突，未合并该响应。")
+      }
+    }
+  }
+
+  private func replaceAgreementDescriptors(
+    with descriptors: [ContentAgreementReadDescriptor],
+    forceReadIfUnchanged: Bool = false
+  ) {
+    var normalized: [ContentAgreementReadDescriptor] = []
+    normalized.reserveCapacity(descriptors.count)
+    for descriptor in descriptors {
+      if let index = normalized.firstIndex(where: { $0.request == descriptor.request }) {
+        normalized[index] = descriptor
+      } else {
+        normalized.append(descriptor)
+      }
+    }
+    guard normalized != agreementReadDescriptors else {
+      if forceReadIfUnchanged, !normalized.isEmpty {
+        agreementExplicitRefreshEpoch &+= 1
+      }
+      return
+    }
+    agreementReadDescriptors = normalized
+    agreementDescriptorEpoch &+= 1
+  }
+
+  private func upsertAgreementDescriptor(_ descriptor: ContentAgreementReadDescriptor?) {
+    guard let descriptor else { return }
+    var descriptors = agreementReadDescriptors
+    if let index = descriptors.firstIndex(where: { $0.request == descriptor.request }) {
+      descriptors[index] = descriptor
+    } else {
+      descriptors.append(descriptor)
+    }
+    replaceAgreementDescriptors(with: descriptors)
+  }
+
+  private func rebuildAgreementTargetIndex() {
+    guard let thread, let parentPost else {
+      indexedParentAgreementTarget = nil
+      agreementTargetsByCommentID = [:]
+      return
+    }
+    indexedParentAgreementTarget = ContentAgreementTarget(thread: thread, parentPost: parentPost)
+    var targets: [Int64: ContentAgreementTarget] = [:]
+    targets.reserveCapacity(comments.count)
+    for comment in comments {
+      if let target = ContentAgreementTarget(
+        thread: thread,
+        parentPostID: parentPost.id,
+        comment: comment
+      ) {
+        targets[comment.id] = target
+      }
+    }
+    agreementTargetsByCommentID = targets
   }
 }

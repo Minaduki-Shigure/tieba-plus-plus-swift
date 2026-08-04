@@ -10,10 +10,19 @@ private struct AccountAccessEnvironmentKey: EnvironmentKey {
   static let defaultValue: AccountAccess? = nil
 }
 
+private struct ContentAgreementStoreEnvironmentKey: EnvironmentKey {
+  static let defaultValue: ContentAgreementStore? = nil
+}
+
 extension EnvironmentValues {
   var accountAccess: AccountAccess? {
     get { self[AccountAccessEnvironmentKey.self] }
     set { self[AccountAccessEnvironmentKey.self] = newValue }
+  }
+
+  var contentAgreementStore: ContentAgreementStore? {
+    get { self[ContentAgreementStoreEnvironmentKey.self] }
+    set { self[ContentAgreementStoreEnvironmentKey.self] = newValue }
   }
 }
 

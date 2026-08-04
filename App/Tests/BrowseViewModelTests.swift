@@ -959,6 +959,21 @@ final class BrowseViewModelTests: XCTestCase {
       [.text("comment-2")],
     ])
     XCTAssertEqual(mapped.nestedReplyCount, 4)
+
+    let thread = Fixtures.thread(id: 100)
+    let descriptor = TiebaCoreBrowseService.postAgreementDescriptor(
+      thread: thread,
+      firstPost: nil,
+      posts: [mapped],
+      page: 1,
+      pageSize: 30,
+      options: ThreadBrowseOptions(),
+      location: nil
+    )
+    XCTAssertEqual(
+      descriptor?.expectedTargets,
+      Set([ContentAgreementTarget(thread: thread, post: mapped)!])
+    )
   }
 
   func testCommentPageMappingValidatesOwnershipAndFiltersParentAndReplies() throws {
@@ -2058,6 +2073,175 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.posts, posts)
     let requests = await service.postRequestSnapshot()
     XCTAssertEqual(requests, [PostRequest(threadID: 41, page: 1, pageSize: 30)])
+  }
+
+  @MainActor
+  func testThreadAgreementDescriptorsAccumulateAcrossPrependAndAppendThenReplaceOnRefresh()
+    async throws
+  {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 410, firstPostID: 41_001)
+    let firstPost = Fixtures.post(id: 41_001, threadID: thread.id, floor: 1)
+    let earlier = Fixtures.post(id: 41_002, threadID: thread.id, floor: 2)
+    let current = Fixtures.post(id: 41_003, threadID: thread.id, floor: 3)
+    let later = Fixtures.post(id: 41_004, threadID: thread.id, floor: 4)
+    let refreshed = Fixtures.post(id: 41_005, threadID: thread.id, floor: 5)
+    let topicTarget = ContentAgreementTarget(thread: thread, post: firstPost)!
+    let earlierTarget = ContentAgreementTarget(thread: thread, post: earlier)!
+    let currentTarget = ContentAgreementTarget(thread: thread, post: current)!
+    let laterTarget = ContentAgreementTarget(thread: thread, post: later)!
+    let refreshedTarget = ContentAgreementTarget(thread: thread, post: refreshed)!
+    let initialDescriptor = Fixtures.postAgreementDescriptor(
+      thread: thread,
+      page: 1,
+      location: .postID(current.id),
+      targets: [topicTarget, currentTarget]
+    )
+    let previousDescriptor = Fixtures.postAgreementDescriptor(
+      thread: thread,
+      page: 1,
+      location: .pageNumber,
+      targets: [earlierTarget]
+    )
+    let nextDescriptor = Fixtures.postAgreementDescriptor(
+      thread: thread,
+      page: 3,
+      location: .pageNumber,
+      targets: [laterTarget]
+    )
+    let refreshDescriptor = Fixtures.postAgreementDescriptor(
+      thread: thread,
+      page: 1,
+      location: nil,
+      targets: [topicTarget, refreshedTarget]
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [current],
+          currentPage: 2,
+          hasMore: true,
+          hasPrevious: true,
+          totalPages: 3,
+          firstPost: firstPost,
+          agreementReadDescriptor: initialDescriptor
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [earlier],
+          currentPage: 1,
+          hasMore: true,
+          hasPrevious: false,
+          totalPages: 3,
+          agreementReadDescriptor: previousDescriptor
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [later],
+          currentPage: 3,
+          hasMore: false,
+          totalPages: 3,
+          agreementReadDescriptor: nextDescriptor
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [refreshed],
+          currentPage: 1,
+          hasMore: false,
+          totalPages: 1,
+          firstPost: firstPost,
+          agreementReadDescriptor: refreshDescriptor
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(
+      thread: thread,
+      service: service,
+      initialLocation: .postID(current.id)
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    XCTAssertEqual(viewModel.agreementReadDescriptors, [initialDescriptor])
+    XCTAssertEqual(viewModel.agreementTarget(forPostID: firstPost.id), topicTarget)
+    XCTAssertEqual(viewModel.agreementTarget(forPostID: current.id), currentTarget)
+
+    viewModel.loadPrevious(anchorPostID: current.id)
+    try await waitUntil { viewModel.posts.map(\.id) == [earlier.id, current.id] }
+    XCTAssertEqual(
+      Set(viewModel.agreementReadDescriptors),
+      Set([initialDescriptor, previousDescriptor])
+    )
+    viewModel.consumePrependRestoreTarget()
+
+    viewModel.loadMoreIfNeeded(current: current)
+    try await waitUntil { viewModel.posts.map(\.id) == [earlier.id, current.id, later.id] }
+    XCTAssertEqual(
+      Set(viewModel.agreementReadDescriptors),
+      Set([initialDescriptor, previousDescriptor, nextDescriptor])
+    )
+
+    await viewModel.refresh()
+
+    XCTAssertEqual(viewModel.agreementReadDescriptors, [refreshDescriptor])
+    XCTAssertEqual(viewModel.agreementTarget(forPostID: refreshed.id), refreshedTarget)
+    XCTAssertNil(viewModel.agreementTarget(forPostID: current.id))
+  }
+
+  @MainActor
+  func testThreadAgreementDescriptorsKeepOnlyTargetsForRetainedPosts() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 411, firstPostID: 41_101)
+    let retainedPost = Fixtures.post(id: 41_102, threadID: thread.id, floor: 2)
+    let absentPost = Fixtures.post(id: 41_103, threadID: thread.id, floor: 3)
+    let retainedTarget = ContentAgreementTarget(thread: thread, post: retainedPost)!
+    let absentTarget = ContentAgreementTarget(thread: thread, post: absentPost)!
+    let oversizedDescriptor = Fixtures.postAgreementDescriptor(
+      thread: thread,
+      page: 1,
+      location: nil,
+      targets: [retainedTarget, absentTarget]
+    )
+    let retainedDescriptor = Fixtures.postAgreementDescriptor(
+      thread: thread,
+      page: 1,
+      location: nil,
+      targets: [retainedTarget]
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [retainedPost],
+          currentPage: 1,
+          hasMore: false,
+          totalPages: 1,
+          agreementReadDescriptor: oversizedDescriptor
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    XCTAssertEqual(viewModel.agreementReadDescriptors, [retainedDescriptor])
+    XCTAssertEqual(viewModel.agreementTarget(forPostID: retainedPost.id), retainedTarget)
+    XCTAssertNil(viewModel.agreementTarget(forPostID: absentPost.id))
   }
 
   func testPostPageDataDefaultsToNoDedicatedFirstPost() {
@@ -4623,6 +4807,271 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testCommentAgreementDescriptorsAccumulateAcrossPagesThenReplaceOnRefresh()
+    async throws
+  {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 81, firstPostID: 8_101)
+    let parent = Fixtures.commentParentPost(id: 8_102, threadID: thread.id, floor: 2)
+    let earlier = Fixtures.comment(
+      id: 8_201,
+      threadID: thread.id,
+      parentPostID: parent.id
+    )
+    let current = Fixtures.comment(
+      id: 8_202,
+      threadID: thread.id,
+      parentPostID: parent.id
+    )
+    let later = Fixtures.comment(
+      id: 8_203,
+      threadID: thread.id,
+      parentPostID: parent.id
+    )
+    let refreshed = Fixtures.comment(
+      id: 8_204,
+      threadID: thread.id,
+      parentPostID: parent.id
+    )
+    let parentTarget = ContentAgreementTarget(thread: thread, parentPost: parent)!
+    let earlierTarget = ContentAgreementTarget(
+      thread: thread,
+      parentPostID: parent.id,
+      comment: earlier
+    )!
+    let currentTarget = ContentAgreementTarget(
+      thread: thread,
+      parentPostID: parent.id,
+      comment: current
+    )!
+    let laterTarget = ContentAgreementTarget(
+      thread: thread,
+      parentPostID: parent.id,
+      comment: later
+    )!
+    let refreshedTarget = ContentAgreementTarget(
+      thread: thread,
+      parentPostID: parent.id,
+      comment: refreshed
+    )!
+    let initialDescriptor = Fixtures.commentAgreementDescriptor(
+      thread: thread,
+      parentPostID: parent.id,
+      aroundCommentID: current.id,
+      page: 1,
+      targets: [parentTarget, currentTarget]
+    )
+    let previousDescriptor = Fixtures.commentAgreementDescriptor(
+      thread: thread,
+      parentPostID: parent.id,
+      aroundCommentID: nil,
+      page: 1,
+      targets: [earlierTarget]
+    )
+    let nextDescriptor = Fixtures.commentAgreementDescriptor(
+      thread: thread,
+      parentPostID: parent.id,
+      aroundCommentID: nil,
+      page: 3,
+      targets: [laterTarget]
+    )
+    let refreshDescriptor = Fixtures.commentAgreementDescriptor(
+      thread: thread,
+      parentPostID: parent.id,
+      aroundCommentID: current.id,
+      page: 1,
+      targets: [parentTarget, currentTarget, refreshedTarget]
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: thread.id,
+          postID: parent.id,
+          comments: [current],
+          currentPage: 2,
+          hasMore: true,
+          hasPrevious: true,
+          totalPages: 3,
+          parentPost: parent,
+          thread: thread,
+          agreementReadDescriptor: initialDescriptor
+        )
+      )
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: thread.id,
+          postID: parent.id,
+          comments: [earlier],
+          currentPage: 1,
+          hasMore: true,
+          totalPages: 3,
+          parentPost: parent,
+          thread: thread,
+          agreementReadDescriptor: previousDescriptor
+        )
+      )
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: thread.id,
+          postID: parent.id,
+          comments: [later],
+          currentPage: 3,
+          hasMore: false,
+          totalPages: 3,
+          parentPost: parent,
+          thread: thread,
+          agreementReadDescriptor: nextDescriptor
+        )
+      )
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: thread.id,
+          postID: parent.id,
+          comments: [current, refreshed],
+          currentPage: 1,
+          hasMore: false,
+          totalPages: 1,
+          parentPost: parent,
+          thread: thread,
+          agreementReadDescriptor: refreshDescriptor
+        )
+      )
+    )
+    let viewModel = CommentsViewModel(
+      threadID: thread.id,
+      postID: parent.id,
+      aroundCommentID: current.id,
+      service: service
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    XCTAssertEqual(viewModel.agreementReadDescriptors, [initialDescriptor])
+    XCTAssertEqual(viewModel.agreementExplicitRefreshEpoch, 0)
+    XCTAssertEqual(viewModel.parentAgreementTarget, parentTarget)
+    XCTAssertEqual(viewModel.agreementTarget(forCommentID: current.id), currentTarget)
+
+    viewModel.loadPrevious()
+    try await waitUntil { viewModel.comments.map(\.id) == [earlier.id, current.id] }
+    XCTAssertEqual(
+      Set(viewModel.agreementReadDescriptors),
+      Set([initialDescriptor, previousDescriptor])
+    )
+    XCTAssertEqual(viewModel.agreementTarget(forCommentID: earlier.id), earlierTarget)
+    XCTAssertEqual(viewModel.agreementExplicitRefreshEpoch, 0)
+    viewModel.consumePrependRestoreTarget()
+
+    viewModel.loadMoreIfNeeded(current: current)
+    try await waitUntil { viewModel.comments.map(\.id) == [earlier.id, current.id, later.id] }
+    XCTAssertEqual(
+      Set(viewModel.agreementReadDescriptors),
+      Set([initialDescriptor, previousDescriptor, nextDescriptor])
+    )
+    XCTAssertEqual(viewModel.agreementTarget(forCommentID: later.id), laterTarget)
+    XCTAssertEqual(viewModel.agreementExplicitRefreshEpoch, 0)
+
+    await viewModel.refresh()
+
+    XCTAssertEqual(viewModel.agreementReadDescriptors, [refreshDescriptor])
+    XCTAssertEqual(viewModel.agreementExplicitRefreshEpoch, 0)
+    XCTAssertEqual(viewModel.agreementTarget(forCommentID: refreshed.id), refreshedTarget)
+    XCTAssertEqual(viewModel.agreementTarget(forCommentID: current.id), currentTarget)
+    XCTAssertNil(viewModel.agreementTarget(forCommentID: earlier.id))
+    XCTAssertNil(viewModel.agreementTarget(forCommentID: later.id))
+  }
+
+  @MainActor
+  func testCommentsIdenticalDescriptorRefreshForcesAgreementReadWithoutInvalidatingCache()
+    async throws
+  {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 82, firstPostID: 8_201)
+    let parent = Fixtures.commentParentPost(id: 8_202, threadID: thread.id, floor: 2)
+    let original = Fixtures.comment(
+      id: 8_301,
+      authorName: "original",
+      threadID: thread.id,
+      parentPostID: parent.id
+    )
+    let refreshed = Fixtures.comment(
+      id: original.id,
+      authorName: "refreshed",
+      threadID: thread.id,
+      parentPostID: parent.id
+    )
+    let parentTarget = ContentAgreementTarget(thread: thread, parentPost: parent)!
+    let commentTarget = ContentAgreementTarget(
+      thread: thread,
+      parentPostID: parent.id,
+      comment: original
+    )!
+    let descriptor = Fixtures.commentAgreementDescriptor(
+      thread: thread,
+      parentPostID: parent.id,
+      aroundCommentID: nil,
+      page: 1,
+      targets: [parentTarget, commentTarget]
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: thread.id,
+          postID: parent.id,
+          comments: [original],
+          currentPage: 1,
+          hasMore: false,
+          parentPost: parent,
+          thread: thread,
+          agreementReadDescriptor: descriptor
+        )
+      )
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: thread.id,
+          postID: parent.id,
+          comments: [refreshed],
+          currentPage: 1,
+          hasMore: false,
+          parentPost: parent,
+          thread: thread,
+          agreementReadDescriptor: descriptor
+        )
+      )
+    )
+    let viewModel = CommentsViewModel(
+      threadID: thread.id,
+      postID: parent.id,
+      service: service
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+    let descriptorEpoch = viewModel.agreementDescriptorEpoch
+
+    await viewModel.refresh()
+
+    XCTAssertEqual(viewModel.comments, [refreshed])
+    XCTAssertEqual(viewModel.agreementReadDescriptors, [descriptor])
+    XCTAssertEqual(viewModel.agreementDescriptorEpoch, descriptorEpoch)
+    XCTAssertEqual(viewModel.agreementExplicitRefreshEpoch, 1)
+
+    await service.enqueueComments(.failure(StubFailure(message: "refresh failed")))
+    await viewModel.refresh()
+
+    XCTAssertEqual(viewModel.agreementExplicitRefreshEpoch, 1)
+    XCTAssertEqual(viewModel.refreshError, "refresh failed")
+  }
+
+  @MainActor
   func testCommentsCanLoadAroundMatchedNestedReply() async throws {
     let service = ScriptedBrowseService()
     let comments = [Fixtures.comment(id: 8_001), Fixtures.comment(id: 8_002)]
@@ -5796,7 +6245,9 @@ private enum Fixtures {
   static func comment(
     id: Int64,
     authorName: String? = nil,
-    localVisibility: LocalContentVisibility = .visible
+    localVisibility: LocalContentVisibility = .visible,
+    threadID: Int64 = 0,
+    parentPostID: Int64 = 0
   ) -> BrowseComment {
     BrowseComment(
       id: id,
@@ -5805,7 +6256,9 @@ private enum Fixtures {
       authorPortraitURL: URL(string: "https://example.com/avatar/\(id).png"),
       createdAt: Date(timeIntervalSince1970: 1_700_000_300),
       contents: [.text("comment content")],
-      localVisibility: localVisibility
+      localVisibility: localVisibility,
+      threadID: threadID,
+      parentPostID: parentPostID
     )
   }
 
@@ -5839,7 +6292,9 @@ private enum Fixtures {
     hasPrevious: Bool = false,
     totalPages: Int = 0,
     totalCount: Int = 0,
-    parentPost: CommentParentPostContext? = nil
+    parentPost: CommentParentPostContext? = nil,
+    thread: BrowseThread? = nil,
+    agreementReadDescriptor: ContentAgreementReadDescriptor? = nil
   ) -> CommentPageData {
     CommentPageData(
       parentPost: parentPost ?? commentParentPost(id: postID, threadID: threadID),
@@ -5848,8 +6303,52 @@ private enum Fixtures {
       hasMore: hasMore,
       hasPrevious: hasPrevious,
       totalPages: totalPages,
-      totalCount: totalCount
+      totalCount: totalCount,
+      thread: thread,
+      agreementReadDescriptor: agreementReadDescriptor
     )
+  }
+
+  static func postAgreementDescriptor(
+    thread: BrowseThread,
+    page: Int,
+    location: ThreadPostLocation?,
+    targets: [ContentAgreementTarget]
+  ) -> ContentAgreementReadDescriptor {
+    let request = ContentAgreementPostPageRequest(
+      forumID: thread.forumID,
+      forumName: thread.forumName,
+      threadID: thread.id,
+      page: page,
+      pageSize: 30,
+      options: ThreadBrowseOptions(),
+      location: location
+    )!
+    return ContentAgreementReadDescriptor(
+      request: .postPage(request),
+      expectedTargets: Set(targets)
+    )!
+  }
+
+  static func commentAgreementDescriptor(
+    thread: BrowseThread,
+    parentPostID: Int64,
+    aroundCommentID: Int64?,
+    page: Int,
+    targets: [ContentAgreementTarget]
+  ) -> ContentAgreementReadDescriptor {
+    let request = ContentAgreementSubpostPageRequest(
+      forumID: thread.forumID,
+      forumName: thread.forumName,
+      threadID: thread.id,
+      parentPostID: parentPostID,
+      aroundSubpostID: aroundCommentID,
+      page: page
+    )!
+    return ContentAgreementReadDescriptor(
+      request: .subpostPage(request),
+      expectedTargets: Set(targets)
+    )!
   }
 }
 

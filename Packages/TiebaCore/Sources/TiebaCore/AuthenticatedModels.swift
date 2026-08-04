@@ -121,3 +121,56 @@ public struct TiebaThreadAgreement: Sendable, Hashable {
     self.agreeScore = agreeScore
   }
 }
+
+public enum TiebaAgreementTarget: Sendable, Hashable {
+  case thread(firstPostID: Int64)
+  case post(postID: Int64)
+  case subpost(parentPostID: Int64, subpostID: Int64)
+}
+
+public struct TiebaAgreementState: Sendable, Hashable {
+  public let userID: Int64
+  public let forumID: Int64
+  public let threadID: Int64
+  public let target: TiebaAgreementTarget
+  public let isAgreed: Bool
+  public let agreeScore: Int
+
+  public init(
+    userID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    target: TiebaAgreementTarget,
+    isAgreed: Bool,
+    agreeScore: Int
+  ) {
+    self.userID = userID
+    self.forumID = forumID
+    self.threadID = threadID
+    self.target = target
+    self.isAgreed = isAgreed
+    self.agreeScore = agreeScore
+  }
+}
+
+public struct TiebaAgreementPage: Sendable, Hashable {
+  public let userID: Int64
+  public let forumID: Int64
+  public let threadID: Int64
+  public let agreements: [TiebaAgreementState]
+  public let pagination: TiebaPagination
+
+  public init(
+    userID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    agreements: [TiebaAgreementState],
+    pagination: TiebaPagination
+  ) {
+    self.userID = userID
+    self.forumID = forumID
+    self.threadID = threadID
+    self.agreements = agreements
+    self.pagination = pagination
+  }
+}

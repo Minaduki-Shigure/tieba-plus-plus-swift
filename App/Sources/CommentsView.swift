@@ -6,9 +6,13 @@ struct CommentsView: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.appAccentColor) private var appAccentColor
+  @Environment(\.contentAgreementStore) private var contentAgreementStore
   @StateObject private var viewModel: CommentsViewModel
   @State private var linkedTarget: TiebaLinkTarget?
   @State private var highlightedComment: CommentHighlightToken?
+  @State private var agreementScopeID = UUID()
+  @State private var pendingAgreementChange: PendingContentAgreementChange?
+  @State private var agreementErrorMessage: String?
   let service:
     any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
@@ -76,12 +80,15 @@ struct CommentsView: View {
               ) {
                 CommentParentPostView(
                   post: parentPost,
+                  agreementTarget: viewModel.parentAgreementTarget,
                   service: service,
                   historyRepository: historyRepository,
                   favoritesRepository: favoritesRepository,
                   searchHistoryRepository: searchHistoryRepository,
                   openMentionedUser: openMentionedUser,
-                  openTiebaLink: openTiebaLink
+                  openTiebaLink: openTiebaLink,
+                  requestAgreementChange: requestAgreementChange,
+                  retryAgreement: retryAgreement
                 )
               }
               .id(CommentsListItemID.parentPost(parentPost.id))
@@ -140,8 +147,13 @@ struct CommentsView: View {
                         commentAuthorIdentity(comment)
                       }
 
-                      ReadOnlyAgreeLabel(score: comment.agreeScore)
-                        .padding(.top, 2)
+                      ContentAgreementControlSlot(
+                        store: contentAgreementStore,
+                        target: viewModel.agreementTarget(forCommentID: comment.id),
+                        fallbackAgreeScore: comment.agreeScore,
+                        requestChange: requestAgreementChange,
+                        retry: retryAgreement
+                      )
                     }
                     BrowseContentView(
                       contents: comment.contents,
@@ -236,12 +248,46 @@ struct CommentsView: View {
               highlightedComment = nil
             }
           }
-          .refreshable { await viewModel.refresh() }
+          .refreshable {
+            let previousAgreementRefreshEpoch = viewModel.agreementExplicitRefreshEpoch
+            await viewModel.refresh()
+            if
+              viewModel.agreementExplicitRefreshEpoch != previousAgreementRefreshEpoch,
+              let contentAgreementStore
+            {
+              await contentAgreementStore.refreshDescriptors(for: agreementScopeID)
+            }
+          }
         }
       }
     }
     .navigationTitle(navigationTitle)
     .navigationBarTitleDisplayMode(.inline)
+    .confirmationDialog(
+      pendingAgreementChange?.confirmationTitle ?? "更新点赞状态？",
+      isPresented: agreementConfirmationIsPresented,
+      titleVisibility: .visible
+    ) {
+      if let pendingAgreementChange {
+        if pendingAgreementChange.targetAgreed {
+          Button(pendingAgreementChange.actionTitle) {
+            confirmAgreementChange(pendingAgreementChange)
+          }
+        } else {
+          Button(pendingAgreementChange.actionTitle, role: .destructive) {
+            confirmAgreementChange(pendingAgreementChange)
+          }
+        }
+      }
+      Button("取消", role: .cancel) { pendingAgreementChange = nil }
+    } message: {
+      Text(pendingAgreementChange?.confirmationMessage ?? "")
+    }
+    .alert("无法更新点赞状态", isPresented: agreementErrorIsPresented) {
+      Button("好", role: .cancel) { agreementErrorMessage = nil }
+    } message: {
+      Text(agreementErrorMessage ?? "无法完成点赞操作。")
+    }
     .safeAreaInset(edge: .bottom, spacing: 0) {
       if let message = viewModel.positionNotice {
         HStack(spacing: 10) {
@@ -296,7 +342,22 @@ struct CommentsView: View {
       }
     }
     .task { viewModel.loadIfNeeded() }
-    .onDisappear(perform: viewModel.cancel)
+    .task(id: viewModel.agreementDescriptorEpoch) {
+      guard let contentAgreementStore else { return }
+      await contentAgreementStore.replaceDescriptors(
+        viewModel.agreementReadDescriptors,
+        for: agreementScopeID
+      )
+    }
+    .onDisappear {
+      pendingAgreementChange = nil
+      contentAgreementStore?.removeScope(agreementScopeID)
+      viewModel.cancel()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+      pendingAgreementChange = nil
+      agreementErrorMessage = nil
+    }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       Task { @MainActor in viewModel.reload() }
     }
@@ -311,6 +372,24 @@ struct CommentsView: View {
     )
   }
 
+  private var agreementConfirmationIsPresented: Binding<Bool> {
+    Binding(
+      get: { pendingAgreementChange != nil },
+      set: { isPresented in
+        if !isPresented { pendingAgreementChange = nil }
+      }
+    )
+  }
+
+  private var agreementErrorIsPresented: Binding<Bool> {
+    Binding(
+      get: { agreementErrorMessage != nil },
+      set: { isPresented in
+        if !isPresented { agreementErrorMessage = nil }
+      }
+    )
+  }
+
   private func openMentionedUser(_ userID: Int64) {
     guard userID > 0 else { return }
     linkedTarget = .user(userID)
@@ -318,6 +397,46 @@ struct CommentsView: View {
 
   private func openTiebaLink(_ target: TiebaLinkTarget) {
     linkedTarget = target
+  }
+
+  private func requestAgreementChange(
+    _ target: ContentAgreementTarget,
+    targetAgreed: Bool
+  ) {
+    pendingAgreementChange = PendingContentAgreementChange(
+      target: target,
+      targetAgreed: targetAgreed
+    )
+  }
+
+  private func confirmAgreementChange(_ change: PendingContentAgreementChange) {
+    pendingAgreementChange = nil
+    guard let contentAgreementStore else { return }
+    Task { @MainActor in
+      do {
+        try await contentAgreementStore.setAgreed(
+          change.targetAgreed,
+          for: change.target
+        )
+      } catch is CancellationError {
+        return
+      } catch {
+        agreementErrorMessage = error.localizedDescription
+      }
+    }
+  }
+
+  private func retryAgreement(_ target: ContentAgreementTarget) {
+    guard let contentAgreementStore else { return }
+    Task { @MainActor in
+      do {
+        try await contentAgreementStore.reload(target)
+      } catch is CancellationError {
+        return
+      } catch {
+        agreementErrorMessage = error.localizedDescription
+      }
+    }
   }
 
   private func commentAuthorIdentity(_ comment: BrowseComment) -> some View {

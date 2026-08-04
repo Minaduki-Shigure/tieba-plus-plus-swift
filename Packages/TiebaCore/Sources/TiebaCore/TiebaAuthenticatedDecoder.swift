@@ -173,13 +173,12 @@ enum TiebaAuthenticatedDecoder {
     )
   }
 
-  static func threadAgreement(
+  static func agreementPage(
     from response: PbPageResIdl,
     expectedUserID: Int64,
     forumID: Int64,
-    threadID: Int64,
-    firstPostID: Int64
-  ) throws -> TiebaThreadAgreement {
+    threadID: Int64
+  ) throws -> TiebaAgreementPage {
     guard response.error.errorno == 0 else {
       throw TiebaClientError.server(
         code: response.error.errorno,
@@ -190,51 +189,221 @@ enum TiebaAuthenticatedDecoder {
       expectedUserID > 0,
       forumID > 0,
       threadID > 0,
-      firstPostID > 0,
       response.hasData,
+      response.data.hasUser,
       response.data.hasThread,
       response.data.hasForum,
+      response.data.hasPage,
+      response.data.user.isLogin == 1,
+      response.data.user.id == expectedUserID,
       response.data.thread.id == threadID,
       response.data.forum.id == forumID,
-      response.data.thread.hasAgree
+      response.data.thread.fid == 0 || response.data.thread.fid == forumID
     else {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
 
     let data = response.data
-    let declaredFirstPostID = data.thread.firstPostID
-    guard declaredFirstPostID == 0 || declaredFirstPostID == firstPostID else {
-      throw TiebaClientError.invalidAuthenticatedResponse
+    var agreements = [TiebaAgreementState]()
+    var seenTargets = Set<TiebaAgreementTarget>()
+
+    let resolvedFirstPost = try resolvedFirstPost(data, threadID: threadID)
+    let firstPostID = resolvedFirstPost.id
+    try appendAgreement(
+      agree: data.thread.hasAgree ? data.thread.agree : nil,
+      target: .thread(firstPostID: firstPostID),
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      agreements: &agreements,
+      seenTargets: &seenTargets
+    )
+    if let firstPost = resolvedFirstPost.post {
+      try appendInlineSubposts(
+        from: firstPost,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID,
+        agreements: &agreements,
+        seenTargets: &seenTargets
+      )
     }
-    if declaredFirstPostID == 0 {
-      let matchesExpectedFirstPost: (Post) -> Bool = { post in
-        post.id == firstPostID
-          && post.floor == 1
-          && (post.tid == 0 || post.tid == threadID)
-      }
+
+    for post in data.postList {
       guard
-        matchesExpectedFirstPost(data.firstFloorPost)
-          || data.postList.contains(where: matchesExpectedFirstPost)
+        post.id > 0,
+        post.floor >= 1,
+        post.tid == 0 || post.tid == threadID
       else {
         throw TiebaClientError.invalidAuthenticatedResponse
       }
+      guard post.floor != 1 else { continue }
+      try appendAgreement(
+        agree: post.hasAgree ? post.agree : nil,
+        target: .post(postID: post.id),
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID,
+        agreements: &agreements,
+        seenTargets: &seenTargets
+      )
+
+      try appendInlineSubposts(
+        from: post,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID,
+        agreements: &agreements,
+        seenTargets: &seenTargets
+      )
     }
 
-    let rawAgreement = data.thread.agree.hasAgree_p
-    guard rawAgreement == 0 || rawAgreement == 1 else {
-      throw TiebaClientError.invalidAuthenticatedResponse
-    }
-    return TiebaThreadAgreement(
+    return TiebaAgreementPage(
       userID: expectedUserID,
       forumID: forumID,
       threadID: threadID,
-      firstPostID: firstPostID,
-      isAgreed: rawAgreement == 1,
-      agreeScore: agreeScore(data.thread.agree)
+      agreements: agreements,
+      pagination: try pagination(data.page)
     )
   }
 
-  static func threadAgreementWriteScore(from body: Data) throws -> Int? {
+  static func agreement(
+    from response: PbPageResIdl,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    target: TiebaAgreementTarget
+  ) throws -> TiebaAgreementState {
+    let page = try agreementPage(
+      from: response,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID
+    )
+    let matches = page.agreements.filter { $0.target == target }
+    guard matches.count == 1, let agreement = matches.first else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    return agreement
+  }
+
+  static func subpostAgreementPage(
+    from response: PbFloorResIdl,
+    validatedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    parentPostID: Int64,
+    requiredSubpostID: Int64? = nil
+  ) throws -> TiebaAgreementPage {
+    guard response.error.errorno == 0 else {
+      throw TiebaClientError.server(
+        code: response.error.errorno,
+        message: response.error.errmsg
+      )
+    }
+    guard
+      validatedUserID > 0,
+      forumID > 0,
+      threadID > 0,
+      parentPostID > 0,
+      response.hasData,
+      response.data.hasForum,
+      response.data.hasThread,
+      response.data.hasPost,
+      response.data.hasPage,
+      response.data.forum.id == forumID,
+      response.data.thread.id == threadID,
+      response.data.thread.fid == 0 || response.data.thread.fid == forumID,
+      response.data.post.id == parentPostID,
+      response.data.post.floor >= 1,
+      response.data.post.tid == 0 || response.data.post.tid == threadID
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+
+    var agreements = [TiebaAgreementState]()
+    var seenTargets = Set<TiebaAgreementTarget>()
+    if response.data.post.floor == 1 {
+      guard response.data.thread.firstPostID == parentPostID else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+      try appendAgreement(
+        agree: response.data.thread.hasAgree ? response.data.thread.agree : nil,
+        target: .thread(firstPostID: parentPostID),
+        expectedUserID: validatedUserID,
+        forumID: forumID,
+        threadID: threadID,
+        agreements: &agreements,
+        seenTargets: &seenTargets
+      )
+    } else {
+      try appendAgreement(
+        agree: response.data.post.hasAgree ? response.data.post.agree : nil,
+        target: .post(postID: parentPostID),
+        expectedUserID: validatedUserID,
+        forumID: forumID,
+        threadID: threadID,
+        agreements: &agreements,
+        seenTargets: &seenTargets
+      )
+    }
+    for subpost in response.data.subpostList {
+      guard subpost.id > 0 else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+      try appendAgreement(
+        agree: subpost.hasAgree ? subpost.agree : nil,
+        target: .subpost(parentPostID: parentPostID, subpostID: subpost.id),
+        expectedUserID: validatedUserID,
+        forumID: forumID,
+        threadID: threadID,
+        agreements: &agreements,
+        seenTargets: &seenTargets
+      )
+    }
+    if let requiredSubpostID {
+      let target = TiebaAgreementTarget.subpost(
+        parentPostID: parentPostID,
+        subpostID: requiredSubpostID
+      )
+      guard agreements.lazy.filter({ $0.target == target }).count == 1 else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+    }
+    return TiebaAgreementPage(
+      userID: validatedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      agreements: agreements,
+      pagination: try pagination(response.data.page)
+    )
+  }
+
+  static func threadAgreement(
+    from response: PbPageResIdl,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    firstPostID: Int64
+  ) throws -> TiebaThreadAgreement {
+    let agreement = try agreement(
+      from: response,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      target: .thread(firstPostID: firstPostID)
+    )
+    return TiebaThreadAgreement(
+      userID: agreement.userID,
+      forumID: agreement.forumID,
+      threadID: agreement.threadID,
+      firstPostID: firstPostID,
+      isAgreed: agreement.isAgreed,
+      agreeScore: agreement.agreeScore
+    )
+  }
+
+  static func agreementWriteScore(from body: Data) throws -> Int? {
     let object = try responseObject(from: body)
     try checkServerError(object)
     guard
@@ -246,6 +415,10 @@ enum TiebaAuthenticatedDecoder {
       throw TiebaClientError.invalidJSON
     }
     return Int(clamping: score)
+  }
+
+  static func threadAgreementWriteScore(from body: Data) throws -> Int? {
+    try agreementWriteScore(from: body)
   }
 
   private static func responseObject(from body: Data) throws -> [String: Any] {
@@ -294,6 +467,140 @@ enum TiebaAuthenticatedDecoder {
     let (score, overflow) = agree.agreeNum.subtractingReportingOverflow(agree.disagreeNum)
     guard !overflow else { return agree.agreeNum >= 0 ? Int.max : Int.min }
     return Int(clamping: score)
+  }
+
+  private static func resolvedFirstPost(
+    _ data: PbPageResIdl.DataRes,
+    threadID: Int64
+  ) throws -> (id: Int64, post: Post?) {
+    let declared = data.thread.firstPostID
+    guard declared >= 0 else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    if data.hasFirstFloorPost {
+      guard
+        data.firstFloorPost.id > 0,
+        data.firstFloorPost.floor == 1,
+        data.firstFloorPost.tid == 0 || data.firstFloorPost.tid == threadID
+      else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+    }
+    let firstFloorPosts = data.postList.filter { $0.floor == 1 }
+    guard
+      firstFloorPosts.count <= 1,
+      firstFloorPosts.allSatisfy({ post in
+        post.id > 0 && (post.tid == 0 || post.tid == threadID)
+      })
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    let candidates = (data.hasFirstFloorPost ? [data.firstFloorPost] : []) + firstFloorPosts
+    let candidateIDs = Set(candidates.map(\.id))
+    guard candidateIDs.count <= 1 else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    if declared > 0 {
+      guard candidateIDs.isEmpty || candidateIDs == Set([declared]) else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+      return (
+        declared,
+        firstFloorPosts.first ?? (data.hasFirstFloorPost ? data.firstFloorPost : nil)
+      )
+    }
+    guard let candidate = candidateIDs.first else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    return (
+      candidate,
+      firstFloorPosts.first ?? (data.hasFirstFloorPost ? data.firstFloorPost : nil)
+    )
+  }
+
+  private static func appendInlineSubposts(
+    from post: Post,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    agreements: inout [TiebaAgreementState],
+    seenTargets: inout Set<TiebaAgreementTarget>
+  ) throws {
+    guard post.hasSubPostList else { return }
+    let container = post.subPostList
+    guard container.pid == 0 || container.pid == UInt64(post.id) else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    for subpost in container.subPostList {
+      guard subpost.id > 0 else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+      try appendAgreement(
+        agree: subpost.hasAgree ? subpost.agree : nil,
+        target: .subpost(parentPostID: post.id, subpostID: subpost.id),
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID,
+        agreements: &agreements,
+        seenTargets: &seenTargets
+      )
+    }
+  }
+
+  private static func appendAgreement(
+    agree: Agree?,
+    target: TiebaAgreementTarget,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    agreements: inout [TiebaAgreementState],
+    seenTargets: inout Set<TiebaAgreementTarget>
+  ) throws {
+    guard seenTargets.insert(target).inserted else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    let rawAgreement = agree?.hasAgree_p ?? 0
+    guard rawAgreement == 0 || rawAgreement == 1 else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    agreements.append(
+      TiebaAgreementState(
+        userID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID,
+        target: target,
+        isAgreed: rawAgreement == 1,
+        agreeScore: agree.map { agreeScore($0) } ?? 0
+      )
+    )
+  }
+
+  private static func pagination(_ page: Page) throws -> TiebaPagination {
+    guard
+      page.pageSize >= 0,
+      page.currentPage >= 0,
+      page.totalPage >= 0,
+      page.newTotalPage >= 0,
+      page.totalCount >= 0,
+      page.hasMore_p == 0 || page.hasMore_p == 1,
+      page.hasPrev_p == 0 || page.hasPrev_p == 1
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    let pageSize = Int(page.pageSize)
+    let currentPage = page.currentPage == 0 ? 1 : Int(page.currentPage)
+    let totalPages = Int(page.newTotalPage > 0 ? page.newTotalPage : page.totalPage)
+    guard totalPages == 0 || currentPage <= totalPages else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    return TiebaPagination(
+      pageSize: pageSize,
+      currentPage: currentPage,
+      totalPages: totalPages,
+      totalCount: Int(page.totalCount),
+      hasMore: page.hasMore_p != 0 || (totalPages > 0 && currentPage < totalPages),
+      hasPrevious: page.hasPrev_p != 0 || currentPage > 1
+    )
   }
 
   private static func checkServerError(_ object: [String: Any]) throws {
