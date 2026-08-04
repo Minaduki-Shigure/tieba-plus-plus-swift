@@ -23,6 +23,8 @@ concurrency:
 jobs:
   source-validation:
     name: App source validation
+    # Release assets do not exist until the tag's remaining CI jobs pass.
+    if: ${{ github.ref_type != 'tag' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
