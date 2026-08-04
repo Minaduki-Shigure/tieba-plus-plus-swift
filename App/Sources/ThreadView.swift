@@ -219,6 +219,7 @@ struct ThreadView: View {
         .thread(
           ThreadHistorySnapshot(
             thread: viewModel.thread,
+            resolvedAuthorAvatarURL: threadAuthorAvatarURL,
             browseOptions: viewModel.options,
             lastPostID: resolvedPost?.id,
             lastFloor: resolvedPost?.floor
@@ -760,17 +761,61 @@ struct ThreadView: View {
 
   private var favoriteTarget: LocalFavoriteTarget {
     let progress = viewModel.options.sort == .hot ? nil : visiblePost
-    let authorAvatarURL = viewModel.firstPost?.authorPortraitURL
-      ?? viewModel.posts.first(where: { $0.isThreadAuthor })?.authorPortraitURL
     return .thread(
       ThreadHistorySnapshot(
         thread: viewModel.thread,
-        authorAvatarURL: authorAvatarURL,
+        resolvedAuthorAvatarURL: threadAuthorAvatarURL,
         browseOptions: viewModel.options,
         lastPostID: progress?.id,
         lastFloor: progress?.floor
       )
     )
+  }
+
+  private var threadAuthorAvatarURL: URL? {
+    ThreadAuthorAvatarResolver.resolve(
+      thread: viewModel.thread,
+      firstPost: viewModel.firstPost,
+      posts: viewModel.posts
+    )
+  }
+}
+
+enum ThreadAuthorAvatarResolver {
+  static func resolve(
+    thread: BrowseThread,
+    firstPost: BrowsePost?,
+    posts: [BrowsePost]
+  ) -> URL? {
+    guard thread.localVisibility == .visible else { return nil }
+    if let authorAvatarURL = thread.authorAvatarURL {
+      return authorAvatarURL
+    }
+    guard thread.id > 0, thread.authorID > 0 else { return nil }
+
+    if
+      let firstPost,
+      firstPost.floor == 1,
+      let authorAvatarURL = matchingAvatarURL(for: firstPost, thread: thread)
+    {
+      return authorAvatarURL
+    }
+    for post in posts {
+      if let authorAvatarURL = matchingAvatarURL(for: post, thread: thread) {
+        return authorAvatarURL
+      }
+    }
+    return nil
+  }
+
+  private static func matchingAvatarURL(for post: BrowsePost, thread: BrowseThread) -> URL? {
+    guard
+      post.threadID == thread.id,
+      post.authorID == thread.authorID,
+      post.isThreadAuthor,
+      post.localVisibility == .visible
+    else { return nil }
+    return SecureTiebaURL.media(post.authorPortraitURL)
   }
 }
 

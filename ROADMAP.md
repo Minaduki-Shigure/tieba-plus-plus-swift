@@ -26,7 +26,7 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Global default sorting with normalized per-forum sort memory
 - Server-defined forum channels with bounded server-provided sorting menus and cursor pagination
 - Shared rich thread cards across forum, channel, hot-topic, global-search, and public profiles
-- Compact pinned rows, topic-state badges, bounded image previews, and video covers
+- Compact pinned rows, bounded author avatars, topic-state badges, image previews, and video covers
 - Forum header, statistics, rules state, and featured classifications
 - Public forum introductions with original avatars and server statistics
 - Full forum-rule documents with publisher and rich section content
@@ -306,12 +306,24 @@ with both the page number and the final valid thread ID. Missing, duplicate, or
 stalled cursors terminate pagination instead of repeatedly loading one page.
 
 Thread-list mapping preserves the public topic kind, first-post ID, server state
-flags, and available read-only counters through the application layer. One card
-renders this metadata across forum/channel lists, hot-topic details, global
-search, and public user themes without reordering or filtering the server result
-set. Pinned rows deliberately omit excerpts and media. Ordinary rows load at
+flags, author portrait, and available read-only counters through the application
+layer. Bare portraits from ordinary topic responses use the existing portrait
+derivation, while URL-shaped search portraits pass the same HTTPS media
+normalization used by other avatars. Per-forum search binds the card avatar to
+the first exact-TID thread context (matching `mainPost`, then matching `postInfo`)
+that supplies the card's author name and UID; a matched reply or comment author
+remains separate. History and local favorites preserve that normalized URL. If
+it is absent after a thread
+loads, a floor portrait may fill it only when the topic has a positive author UID
+and the post belongs to the exact thread, is marked as the thread author, and
+matches that UID; both models must remain locally visible. One card renders this
+metadata across forum/channel lists, hot-topic details, global search, and public
+user themes without reordering or filtering the server result set. Only an ordinary,
+locally visible row whose surface displays its author constructs the 24-point
+avatar view. Pinned rows, filtered placeholders, hidden rows, and profile-owned
+thread lists deliberately issue no author-avatar request. Ordinary rows load at
 most three image thumbnails or one video cover; a cover is never an autoplaying
-player. Every preview still passes the existing HTTPS URL normalization,
+player. Every requested image still passes the existing HTTPS URL normalization,
 credential-free downloader, redirect policy, transfer-time byte limit, and pixel
 downsampling. Automatic 720-pixel previews stop at 16 MiB; higher-resolution
 explicit image views retain the 80 MiB ceiling.

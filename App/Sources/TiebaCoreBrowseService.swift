@@ -567,6 +567,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       contents: mapContent(thread.content),
       authorID: thread.author?.id ?? 0,
       authorUsername: authorUsername(thread.author),
+      authorAvatarURL: SecureTiebaURL.portrait(thread.author?.portrait),
       firstPostID: thread.firstPostID,
       shareCount: max(thread.shareCount, 0),
       agreeCount: max(thread.agreeCount, 0),
@@ -779,6 +780,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       contents: [.text(result.excerpt)] + images,
       authorID: result.authorID,
       authorUsername: result.authorUsername,
+      authorAvatarURL: SecureTiebaURL.media(result.authorPortraitURL),
       firstPostID: result.firstPostID,
       shareCount: max(result.shareCount, 0),
       agreeCount: max(result.likeCount, 0)
@@ -812,14 +814,17 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     _ result: TiebaThreadSearchResult,
     applying filter: ContentFilterSnapshot = .empty
   ) -> ForumPostSearchItem {
-    let threadContext = result.mainPost ?? result.postInfo
-    let displayContext = result.postInfo ?? result.mainPost
+    let mainPostContext = matchingSearchContext(result.mainPost, threadID: result.threadID)
+    let postInfoContext = matchingSearchContext(result.postInfo, threadID: result.threadID)
+    let threadContext = mainPostContext ?? postInfoContext
+    let displayContext = postInfoContext ?? mainPostContext
     let contextTitle = threadContext?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     let contextExcerpt = threadContext?.excerpt.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     let threadTitle = contextTitle.isEmpty ? result.title : contextTitle
     let threadExcerpt = contextExcerpt.isEmpty ? result.excerpt : contextExcerpt
     let threadAuthorName: String
     let threadAuthorUsername: String
+    let threadAuthorAvatarURL: URL?
     if let threadContext {
       let contextAuthorName = threadContext.authorName.trimmingCharacters(
         in: .whitespacesAndNewlines
@@ -831,9 +836,11 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
         ? (contextAuthorUsername.isEmpty ? "匿名用户" : contextAuthorUsername)
         : contextAuthorName
       threadAuthorUsername = contextAuthorUsername
+      threadAuthorAvatarURL = SecureTiebaURL.media(threadContext.authorPortraitURL)
     } else {
       threadAuthorName = result.authorName.trimmingCharacters(in: .whitespacesAndNewlines)
       threadAuthorUsername = result.authorUsername.trimmingCharacters(in: .whitespacesAndNewlines)
+      threadAuthorAvatarURL = SecureTiebaURL.media(result.authorPortraitURL)
     }
     let matchedContents = mapSearchImages(result.images)
     let target = mapForumPostSearchTarget(result.target)
@@ -853,7 +860,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
         lastReplyAt: nil,
         contents: threadExcerpt.isEmpty ? [] : [.text(threadExcerpt)],
         authorID: threadContext?.authorID ?? result.authorID,
-        authorUsername: threadAuthorUsername
+        authorUsername: threadAuthorUsername,
+        authorAvatarURL: threadAuthorAvatarURL
       ),
       target: target,
       matchedTitle: result.title,
@@ -879,6 +887,14 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       matchedAuthorUsername: result.authorUsername
     )
     return filter.applying(to: mapped, hasKnownVideo: result.hasVideo)
+  }
+
+  private static func matchingSearchContext(
+    _ context: TiebaSearchPostContext?,
+    threadID: Int64
+  ) -> TiebaSearchPostContext? {
+    guard threadID > 0, context?.threadID == threadID else { return nil }
+    return context
   }
 
   private static func mapForumPostSearchTarget(

@@ -49,6 +49,19 @@ enum ThreadSummaryPresentation {
       return .collapsed(.images(count: totalCount))
     }
   }
+
+  static func authorAvatarURL(for thread: BrowseThread, showsAuthor: Bool) -> URL? {
+    let hasAuthorIdentity =
+      !thread.authorName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      || !thread.authorUsername.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    guard
+      showsAuthor,
+      !thread.isPinned,
+      thread.localVisibility == .visible,
+      hasAuthorIdentity
+    else { return nil }
+    return thread.authorAvatarURL
+  }
 }
 
 struct ThreadSummaryRow: View {
@@ -295,10 +308,22 @@ struct ThreadSummaryRow: View {
         .lineLimit(1)
     }
     if hasAuthor {
-      Label(displayedAuthorName, systemImage: "person")
-        .lineLimit(showsBothNames ? 2 : 1)
-        .minimumScaleFactor(0.75)
-        .accessibilityLabel(displayedAuthorName)
+      HStack(spacing: 5) {
+        if let avatarURL = ThreadSummaryPresentation.authorAvatarURL(
+          for: thread,
+          showsAuthor: showsAuthor
+        ) {
+          AvatarView(url: avatarURL, name: displayedAuthorName, size: 24)
+        } else {
+          Image(systemName: "person")
+            .accessibilityHidden(true)
+        }
+        Text(displayedAuthorName)
+          .lineLimit(showsBothNames ? 2 : 1)
+          .minimumScaleFactor(0.75)
+      }
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel(displayedAuthorName)
     }
   }
 

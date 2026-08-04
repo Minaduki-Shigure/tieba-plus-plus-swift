@@ -128,7 +128,7 @@ final class BrowseViewModelTests: XCTestCase {
       id: 8,
       username: "author-account",
       displayName: " \n ",
-      portrait: "",
+      portrait: "author-token",
       level: 0,
       growthLevel: 0,
       gender: .unknown,
@@ -174,6 +174,10 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(mapped.firstPostID, 43)
     XCTAssertEqual(mapped.authorName, "author-account")
     XCTAssertEqual(mapped.authorUsername, "author-account")
+    XCTAssertEqual(
+      mapped.authorAvatarURL?.absoluteString,
+      "https://himg.bdimg.com/sys/portraitn/item/author-token"
+    )
     XCTAssertEqual(mapped.kind, .video)
     XCTAssertEqual(mapped.tabID, 9)
     XCTAssertEqual(mapped.shareCount, 5)
@@ -230,6 +234,9 @@ final class BrowseViewModelTests: XCTestCase {
     let thumbnailURL = try XCTUnwrap(URL(string: "https://img.example/search.jpg"))
     let highDefinitionURL = try XCTUnwrap(URL(string: "https://img.example/search-full.jpg"))
     let fallbackURL = try XCTUnwrap(URL(string: "https://img.example/fallback.jpg"))
+    let authorAvatarURL = try XCTUnwrap(
+      URL(string: "https://himg.bdimg.com/sys/portraitn/item/search-author")
+    )
     let result = TiebaThreadSearchResult(
       threadID: 50,
       firstPostID: 51,
@@ -240,7 +247,7 @@ final class BrowseViewModelTests: XCTestCase {
       authorID: 9,
       authorName: "Author",
       authorUsername: "author-account",
-      authorPortraitURL: nil,
+      authorPortraitURL: authorAvatarURL,
       replyCount: 10,
       likeCount: 8,
       shareCount: 3,
@@ -265,6 +272,7 @@ final class BrowseViewModelTests: XCTestCase {
 
     XCTAssertEqual(mapped.firstPostID, 51)
     XCTAssertEqual(mapped.authorUsername, "author-account")
+    XCTAssertEqual(mapped.authorAvatarURL, authorAvatarURL)
     XCTAssertEqual(mapped.agreeCount, 8)
     XCTAssertEqual(mapped.shareCount, 3)
     XCTAssertEqual(
@@ -274,6 +282,26 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(
       ThreadSummaryPresentation.media(for: mapped, quality: .highDefinition),
       .images([highDefinitionURL, fallbackURL], totalCount: 2)
+    )
+
+    let unsafePortraitResult = TiebaThreadSearchResult(
+      threadID: 60,
+      firstPostID: 61,
+      forumID: 7,
+      forumName: "swift",
+      title: "Unsafe portrait",
+      excerpt: "Excerpt",
+      authorID: 9,
+      authorName: "Author",
+      authorPortraitURL: try XCTUnwrap(URL(string: "http://example.com/avatar.jpg")),
+      replyCount: 0,
+      likeCount: 0,
+      shareCount: 0,
+      createdAt: nil,
+      images: []
+    )
+    XCTAssertNil(
+      TiebaCoreBrowseService.mapThreadSearchResult(unsafePortraitResult).authorAvatarURL
     )
   }
 
@@ -364,7 +392,16 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertTrue(mapped.hasMore)
   }
 
-  func testForumPostSearchMappingAppliesLayeredFilterWithoutSynthesizingVideo() {
+  func testForumPostSearchMappingAppliesLayeredFilterWithoutSynthesizingVideo() throws {
+    let threadAuthorAvatarURL = try XCTUnwrap(
+      URL(string: "https://himg.bdimg.com/sys/portraitn/item/thread-author")
+    )
+    let contextAuthorAvatarURL = try XCTUnwrap(
+      URL(string: "https://himg.bdimg.com/sys/portraitn/item/context-author")
+    )
+    let matchedAuthorAvatarURL = try XCTUnwrap(
+      URL(string: "https://himg.bdimg.com/sys/portraitn/item/matched-author")
+    )
     let mainPost = TiebaSearchPostContext(
       threadID: 201,
       postID: 202,
@@ -372,7 +409,7 @@ final class BrowseViewModelTests: XCTestCase {
       excerpt: "ordinary thread excerpt",
       authorID: 11,
       authorName: "Blocked thread author",
-      authorPortraitURL: nil,
+      authorPortraitURL: threadAuthorAvatarURL,
       replyCount: 30
     )
     let postInfo = TiebaSearchPostContext(
@@ -382,7 +419,7 @@ final class BrowseViewModelTests: XCTestCase {
       excerpt: "ordinary context excerpt",
       authorID: 33,
       authorName: "Blocked context author",
-      authorPortraitURL: nil,
+      authorPortraitURL: contextAuthorAvatarURL,
       replyCount: 4
     )
     let result = TiebaThreadSearchResult(
@@ -394,7 +431,7 @@ final class BrowseViewModelTests: XCTestCase {
       excerpt: "ordinary matched excerpt",
       authorID: 22,
       authorName: "Matched author",
-      authorPortraitURL: nil,
+      authorPortraitURL: matchedAuthorAvatarURL,
       replyCount: 3,
       likeCount: 4,
       shareCount: 5,
@@ -420,6 +457,8 @@ final class BrowseViewModelTests: XCTestCase {
     )
 
     XCTAssertEqual(forumResult.thread.id, 201)
+    XCTAssertEqual(forumResult.thread.authorAvatarURL, threadAuthorAvatarURL)
+    XCTAssertEqual(forumResult.matchedAuthorPortraitURL, matchedAuthorAvatarURL)
     XCTAssertEqual(forumResult.localVisibility, .hidden)
     XCTAssertEqual(forumResult.thread.localVisibility, .hidden)
     XCTAssertEqual(forumResult.context?.localVisibility, .hidden)
@@ -429,6 +468,105 @@ final class BrowseViewModelTests: XCTestCase {
         return true
       }
     )
+  }
+
+  func testForumPostSearchKeepsThreadAndMatchedAuthorPortraitSourcesSeparate() throws {
+    let contextAvatarURL = try XCTUnwrap(
+      URL(string: "https://himg.bdimg.com/sys/portraitn/item/context-author")
+    )
+    let matchedAvatarURL = try XCTUnwrap(
+      URL(string: "https://himg.bdimg.com/sys/portraitn/item/matched-author")
+    )
+    let mainPost = TiebaSearchPostContext(
+      threadID: 201,
+      postID: 202,
+      title: "Thread",
+      excerpt: "Thread excerpt",
+      authorID: 11,
+      authorName: "Thread author",
+      authorUsername: "thread-account",
+      authorPortraitURL: nil
+    )
+    let postInfo = TiebaSearchPostContext(
+      threadID: 201,
+      postID: 203,
+      title: "Context",
+      excerpt: "Context excerpt",
+      authorID: 33,
+      authorName: "Context author",
+      authorUsername: "context-account",
+      authorPortraitURL: contextAvatarURL
+    )
+    let foreignMainPost = TiebaSearchPostContext(
+      threadID: 999,
+      postID: 1_000,
+      title: "Foreign thread",
+      excerpt: "Foreign excerpt",
+      authorID: 99,
+      authorName: "Foreign author",
+      authorUsername: "foreign-account",
+      authorPortraitURL: try XCTUnwrap(
+        URL(string: "https://himg.bdimg.com/sys/portraitn/item/foreign-author")
+      )
+    )
+    func result(
+      mainPost: TiebaSearchPostContext?,
+      postInfo: TiebaSearchPostContext?
+    ) -> TiebaThreadSearchResult {
+      TiebaThreadSearchResult(
+        threadID: 201,
+        firstPostID: 202,
+        forumID: 7,
+        forumName: "swift",
+        title: "Matched comment",
+        excerpt: "Matched excerpt",
+        authorID: 22,
+        authorName: "Matched author",
+        authorUsername: "matched-account",
+        authorPortraitURL: matchedAvatarURL,
+        replyCount: 3,
+        likeCount: 4,
+        shareCount: 5,
+        createdAt: nil,
+        images: [],
+        target: .comment(postID: 203, commentID: 204),
+        mainPost: mainPost,
+        postInfo: postInfo
+      )
+    }
+
+    let mappedMainPost = TiebaCoreBrowseService.mapForumPostSearchResult(
+      result(mainPost: mainPost, postInfo: postInfo)
+    )
+    XCTAssertNil(mappedMainPost.thread.authorAvatarURL)
+    XCTAssertEqual(mappedMainPost.matchedAuthorPortraitURL, matchedAvatarURL)
+
+    let mappedPostInfo = TiebaCoreBrowseService.mapForumPostSearchResult(
+      result(mainPost: nil, postInfo: postInfo)
+    )
+    XCTAssertEqual(mappedPostInfo.thread.authorID, postInfo.authorID)
+    XCTAssertEqual(mappedPostInfo.thread.authorName, postInfo.authorName)
+    XCTAssertEqual(mappedPostInfo.thread.authorUsername, postInfo.authorUsername)
+    XCTAssertEqual(mappedPostInfo.thread.authorAvatarURL, contextAvatarURL)
+    XCTAssertEqual(mappedPostInfo.matchedAuthorPortraitURL, matchedAvatarURL)
+
+    let mappedForeignMainPost = TiebaCoreBrowseService.mapForumPostSearchResult(
+      result(mainPost: foreignMainPost, postInfo: postInfo)
+    )
+    XCTAssertEqual(mappedForeignMainPost.thread.authorID, postInfo.authorID)
+    XCTAssertEqual(mappedForeignMainPost.thread.authorName, postInfo.authorName)
+    XCTAssertEqual(mappedForeignMainPost.thread.authorUsername, postInfo.authorUsername)
+    XCTAssertEqual(mappedForeignMainPost.thread.authorAvatarURL, contextAvatarURL)
+    XCTAssertEqual(mappedForeignMainPost.context?.authorID, postInfo.authorID)
+
+    let mappedWithoutContext = TiebaCoreBrowseService.mapForumPostSearchResult(
+      result(mainPost: nil, postInfo: nil)
+    )
+    XCTAssertEqual(mappedWithoutContext.thread.authorID, 22)
+    XCTAssertEqual(mappedWithoutContext.thread.authorName, "Matched author")
+    XCTAssertEqual(mappedWithoutContext.thread.authorUsername, "matched-account")
+    XCTAssertEqual(mappedWithoutContext.thread.authorAvatarURL, matchedAvatarURL)
+    XCTAssertEqual(mappedWithoutContext.matchedAuthorPortraitURL, matchedAvatarURL)
   }
 
   func testUserThreadPageFilteringPreservesRawOrderCountAndPagination() {
@@ -537,6 +675,7 @@ final class BrowseViewModelTests: XCTestCase {
 
     XCTAssertEqual(mapped.id, 60)
     XCTAssertEqual(mapped.firstPostID, 61)
+    XCTAssertNil(mapped.authorAvatarURL)
     XCTAssertEqual(mapped.contents, [.text("Excerpt")])
   }
 

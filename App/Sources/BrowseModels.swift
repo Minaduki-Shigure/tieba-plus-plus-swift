@@ -612,6 +612,7 @@ struct BrowseThread: Identifiable, Hashable, Sendable {
   let excerpt: String
   let authorName: String
   let authorUsername: String
+  let authorAvatarURL: URL?
   let authorID: Int64
   let replyCount: Int
   let viewCount: Int
@@ -644,6 +645,7 @@ struct BrowseThread: Identifiable, Hashable, Sendable {
     contents: [BrowseContent],
     authorID: Int64 = 0,
     authorUsername: String = "",
+    authorAvatarURL: URL? = nil,
     firstPostID: Int64 = 0,
     shareCount: Int = 0,
     agreeCount: Int = 0,
@@ -665,6 +667,7 @@ struct BrowseThread: Identifiable, Hashable, Sendable {
     self.excerpt = excerpt
     self.authorName = authorName
     self.authorUsername = authorUsername
+    self.authorAvatarURL = SecureTiebaURL.media(authorAvatarURL)
     self.authorID = authorID
     self.replyCount = replyCount
     self.viewCount = viewCount
@@ -705,6 +708,7 @@ struct BrowseThread: Identifiable, Hashable, Sendable {
       contents: contents,
       authorID: authorID,
       authorUsername: authorUsername,
+      authorAvatarURL: authorAvatarURL,
       firstPostID: firstPostID,
       shareCount: shareCount,
       agreeCount: agreeCount,

@@ -135,7 +135,22 @@ struct ThreadHistorySnapshot: Codable, Hashable, Sendable {
 
   init(
     thread: BrowseThread,
-    authorAvatarURL: URL? = nil,
+    browseOptions: ThreadBrowseOptions = ThreadBrowseOptions(),
+    lastPostID: Int64? = nil,
+    lastFloor: Int? = nil
+  ) {
+    self.init(
+      thread: thread,
+      resolvedAuthorAvatarURL: thread.localVisibility == .visible ? thread.authorAvatarURL : nil,
+      browseOptions: browseOptions,
+      lastPostID: lastPostID,
+      lastFloor: lastFloor
+    )
+  }
+
+  init(
+    thread: BrowseThread,
+    resolvedAuthorAvatarURL: URL?,
     browseOptions: ThreadBrowseOptions = ThreadBrowseOptions(),
     lastPostID: Int64? = nil,
     lastFloor: Int? = nil
@@ -152,7 +167,7 @@ struct ThreadHistorySnapshot: Codable, Hashable, Sendable {
       viewCount: thread.viewCount,
       createdAt: thread.createdAt,
       lastReplyAt: thread.lastReplyAt,
-      authorAvatarURL: authorAvatarURL,
+      authorAvatarURL: resolvedAuthorAvatarURL,
       browseOptions: browseOptions,
       lastPostID: lastPostID,
       lastFloor: lastFloor
@@ -172,7 +187,8 @@ struct ThreadHistorySnapshot: Codable, Hashable, Sendable {
       createdAt: createdAt,
       lastReplyAt: lastReplyAt,
       contents: excerpt.isEmpty ? [] : [.text(excerpt)],
-      authorUsername: authorUsername
+      authorUsername: authorUsername,
+      authorAvatarURL: authorAvatarURL
     )
   }
 
@@ -499,7 +515,6 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
 
   func record(
     thread: BrowseThread,
-    authorAvatarURL: URL? = nil,
     options: ThreadBrowseOptions = ThreadBrowseOptions(),
     lastPostID: Int64? = nil,
     lastFloor: Int? = nil,
@@ -509,7 +524,28 @@ actor FileBrowsingHistoryStore: BrowsingHistoryRepository {
       .thread(
         ThreadHistorySnapshot(
           thread: thread,
-          authorAvatarURL: authorAvatarURL,
+          browseOptions: options,
+          lastPostID: lastPostID,
+          lastFloor: lastFloor
+        )
+      ),
+      at: date
+    )
+  }
+
+  func record(
+    thread: BrowseThread,
+    resolvedAuthorAvatarURL: URL?,
+    options: ThreadBrowseOptions = ThreadBrowseOptions(),
+    lastPostID: Int64? = nil,
+    lastFloor: Int? = nil,
+    at date: Date = Date()
+  ) async throws {
+    try await record(
+      .thread(
+        ThreadHistorySnapshot(
+          thread: thread,
+          resolvedAuthorAvatarURL: resolvedAuthorAvatarURL,
           browseOptions: options,
           lastPostID: lastPostID,
           lastFloor: lastFloor

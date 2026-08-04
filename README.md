@@ -82,10 +82,10 @@ corresponding surface or control.
 - **Thread cards:** Forum, channel, hot-thread ranking, hot-topic,
   global-search, and public-profile lists share one metadata-aware thread card.
   It distinguishes pinned, featured, live, shared, and special-format topics.
-  Ordinary rows can show one to three downsampled image previews or a
-  nonplaying video cover together with reply, view, approval, share, and
-  relative-time context; pinned rows stay compact and do not request preview
-  media.
+  Ordinary visible rows can show a bounded, downsampled author avatar together
+  with one to three image previews or a nonplaying video cover, plus reply,
+  view, approval, share, and relative-time context. Pinned rows stay compact
+  and request neither author avatars nor preview media.
 - **Rich media:** Rich content supports images, video links, voice playback,
   and shared-thread origin media. Consecutive images in post-like content use a
   one-to-three-column masonry layout based on their actual container width;
@@ -108,10 +108,11 @@ corresponding surface or control.
   available network that iOS does not mark expensive or constrained; otherwise
   it reads the memory cache first and offers a load control. These modes cover
   thread previews, post images, video covers, per-forum search media, and
-  hot-topic images while leaving avatars, opened gallery originals, sharing,
-  and saving on their existing user-initiated paths. A separate preview-quality
-  setting keeps the existing standard source by default or selects a returned
-  high-definition source for post bodies, thread cards, and per-forum search.
+  hot-topic images. Avatars remain outside this policy on their existing
+  automatic path; opened gallery originals, sharing, and saving remain
+  user-initiated. A separate preview-quality setting keeps the existing standard
+  source by default or selects a returned high-definition source for post bodies,
+  thread cards, and per-forum search.
   It does not make original images load automatically or change when networking
   is allowed.
 - **Compact previews:** An optional compact mode replaces media previews in

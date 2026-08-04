@@ -50,6 +50,7 @@ final class TiebaLinkTests: XCTestCase {
     XCTAssertNil(
       TiebaLink.canonicalURL(for: .thread(TiebaThreadRoute(threadID: 0)))
     )
+    XCTAssertNil(TiebaThreadRoute(threadID: 42).placeholderThread.authorAvatarURL)
     XCTAssertNil(TiebaLink.canonicalURL(for: .user(7)))
   }
 

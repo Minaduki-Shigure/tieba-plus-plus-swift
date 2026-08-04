@@ -189,8 +189,59 @@ final class ThreadSummaryRowTests: XCTestCase {
     )
   }
 
+  func testAuthorAvatarOnlyLoadsForVisibleOrdinaryRowsThatShowAuthors() throws {
+    let avatarURL = try XCTUnwrap(
+      URL(string: "https://himg.bdimg.com/sys/portraitn/item/author-token")
+    )
+    let visible = makeThread(contents: [.text("Text")], authorAvatarURL: avatarURL)
+
+    XCTAssertEqual(
+      ThreadSummaryPresentation.authorAvatarURL(for: visible, showsAuthor: true),
+      avatarURL
+    )
+    XCTAssertNil(ThreadSummaryPresentation.authorAvatarURL(for: visible, showsAuthor: false))
+    XCTAssertNil(
+      ThreadSummaryPresentation.authorAvatarURL(
+        for: visible.withLocalVisibility(.placeholder),
+        showsAuthor: true
+      )
+    )
+    XCTAssertNil(
+      ThreadSummaryPresentation.authorAvatarURL(
+        for: visible.withLocalVisibility(.hidden),
+        showsAuthor: true
+      )
+    )
+
+    let pinned = makeThread(
+      contents: [.text("Pinned")],
+      authorAvatarURL: avatarURL,
+      isPinned: true
+    )
+    XCTAssertNil(ThreadSummaryPresentation.authorAvatarURL(for: pinned, showsAuthor: true))
+
+    let identityless = makeThread(
+      contents: [.text("No author")],
+      authorName: "",
+      authorUsername: "",
+      authorAvatarURL: avatarURL
+    )
+    XCTAssertNil(ThreadSummaryPresentation.authorAvatarURL(for: identityless, showsAuthor: true))
+  }
+
+  func testThreadModelRejectsUnsafeAuthorAvatarURL() throws {
+    let unsafeURL = try XCTUnwrap(URL(string: "http://example.com/avatar.jpg"))
+    let thread = makeThread(contents: [], authorAvatarURL: unsafeURL)
+
+    XCTAssertNil(thread.authorAvatarURL)
+    XCTAssertNil(ThreadSummaryPresentation.authorAvatarURL(for: thread, showsAuthor: true))
+  }
+
   private func makeThread(
     contents: [BrowseContent],
+    authorName: String = "Author",
+    authorUsername: String = "",
+    authorAvatarURL: URL? = nil,
     isPinned: Bool = false
   ) -> BrowseThread {
     BrowseThread(
@@ -199,12 +250,14 @@ final class ThreadSummaryRowTests: XCTestCase {
       forumName: "swift",
       title: "Thread",
       excerpt: "Excerpt",
-      authorName: "Author",
+      authorName: authorName,
       replyCount: 3,
       viewCount: 10,
       createdAt: nil,
       lastReplyAt: nil,
       contents: contents,
+      authorUsername: authorUsername,
+      authorAvatarURL: authorAvatarURL,
       isPinned: isPinned
     )
   }

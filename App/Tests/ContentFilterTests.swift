@@ -201,7 +201,10 @@ final class ContentFilterTests: XCTestCase {
     )
   }
 
-  func testVideoSwitchBlocksOnlyThreadsContainingVideo() {
+  func testVideoSwitchBlocksOnlyThreadsContainingVideo() throws {
+    let authorAvatarURL = try XCTUnwrap(
+      URL(string: "https://himg.bdimg.com/sys/portraitn/item/author-token")
+    )
     let snapshot = ContentFilterSnapshot(
       displayMode: .placeholder,
       blockVideos: true,
@@ -219,6 +222,7 @@ final class ContentFilterTests: XCTestCase {
       createdAt: nil,
       lastReplyAt: nil,
       contents: [.video(url: nil, cover: nil, width: 0, height: 0)],
+      authorAvatarURL: authorAvatarURL,
       firstPostID: 11,
       shareCount: 3,
       agreeCount: 8,
@@ -238,6 +242,7 @@ final class ContentFilterTests: XCTestCase {
     let filtered = snapshot.applying(to: videoThread)
     XCTAssertEqual(filtered.firstPostID, videoThread.firstPostID)
     XCTAssertEqual(filtered.contents, videoThread.contents)
+    XCTAssertEqual(filtered.authorAvatarURL, authorAvatarURL)
     XCTAssertEqual(filtered.kind, videoThread.kind)
     XCTAssertEqual(filtered.shareCount, videoThread.shareCount)
     XCTAssertEqual(filtered.agreeScore, videoThread.agreeScore)

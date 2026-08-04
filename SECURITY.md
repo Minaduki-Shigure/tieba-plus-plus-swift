@@ -444,13 +444,27 @@ is not placed in a remote-image view until the user presses the profile avatar;
 sharing and saving remain further explicit actions using the same bounded
 original-file exporter.
 
-Thread-list previews reuse that same media pipeline. Metadata badges and
-read-only counters come only from existing anonymous responses; rendering a
-card must not introduce a personalized request, autoplay video, or broaden the
-media host policy. Pinned cards intentionally make no preview request, and an
-invalid media URL remains an unsupported fragment rather than a fallback
-cleartext load. Automatic and explicitly requested content previews have a
-16 MiB transfer-time limit; the task
+Thread-list previews and author avatars reuse that same media pipeline. A bare
+topic portrait is converted by the existing regular-portrait builder; a
+URL-shaped search portrait must pass HTTPS media normalization. Per-forum search
+must reject a `mainPost` or `postInfo` whose thread ID differs from the outer
+result, then use the portrait belonging to the first matching context
+(`mainPost`, then `postInfo`) that supplies the card's author identity, never the
+independently matched reply or comment author. A floor portrait may fill a
+missing history or favorite portrait only after exact positive thread-author UID,
+thread ID, and thread-author-flag checks; a merely valid first-floor identity is
+insufficient. Neither a locally hidden/placeholder thread nor a nonvisible floor
+may supply that stored fallback.
+Metadata badges, portraits, and read-only counters come only from existing
+anonymous responses; rendering a card must not introduce a personalized
+request, autoplay video, or broaden the media host policy. Author-avatar views
+may be constructed only for ordinary, locally visible rows on surfaces that
+show the author. Pinned cards request neither an author avatar nor preview media,
+and filtered placeholders or hidden rows construct no card content. Public
+profile thread lists suppress only the redundant author avatar; their existing
+content-preview policy remains unchanged. An invalid media URL remains absent
+rather than becoming a fallback cleartext load. Automatic and explicitly
+requested content previews have a 16 MiB transfer-time limit; the task
 delegate cancels a response as soon as either its declared or observed byte
 count exceeds that bound. Explicit higher-resolution image views retain the
 80 MiB transfer limit. Deduplicated downloads track active view waiters and are

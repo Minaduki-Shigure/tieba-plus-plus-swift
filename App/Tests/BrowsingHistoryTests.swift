@@ -9,6 +9,9 @@ final class BrowsingHistoryTests: XCTestCase {
     defer { location.remove() }
     let visitedAt = Date(timeIntervalSince1970: 1_700_000_000)
     let firstStore = FileBrowsingHistoryStore(fileURL: location.fileURL)
+    let authorAvatarURL = try XCTUnwrap(
+      URL(string: "https://himg.bdimg.com/sys/portraitn/item/history-author")
+    )
 
     try await firstStore.record(
       .thread(
@@ -19,7 +22,8 @@ final class BrowsingHistoryTests: XCTestCase {
           title: "A persisted thread",
           excerpt: "excerpt",
           authorName: "author",
-          authorUsername: "author-account"
+          authorUsername: "author-account",
+          authorAvatarURL: authorAvatarURL
         )
       ),
       at: visitedAt
@@ -43,6 +47,8 @@ final class BrowsingHistoryTests: XCTestCase {
     XCTAssertEqual(snapshot.browseThread.forumName, "swift")
     XCTAssertEqual(snapshot.authorUsername, "author-account")
     XCTAssertEqual(snapshot.browseThread.authorUsername, "author-account")
+    XCTAssertEqual(snapshot.authorAvatarURL, authorAvatarURL)
+    XCTAssertEqual(snapshot.browseThread.authorAvatarURL, authorAvatarURL)
 
     let archive = try String(contentsOf: location.fileURL, encoding: .utf8)
     XCTAssertTrue(archive.contains("\"schemaVersion\":1"))
@@ -57,7 +63,85 @@ final class BrowsingHistoryTests: XCTestCase {
 
     XCTAssertEqual(snapshot.authorName, "legacy author")
     XCTAssertEqual(snapshot.authorUsername, "")
+    XCTAssertNil(snapshot.authorAvatarURL)
     XCTAssertEqual(snapshot.browseThread.authorUsername, "")
+    XCTAssertNil(snapshot.browseThread.authorAvatarURL)
+  }
+
+  func testThreadSnapshotDefaultsToMappedThreadAvatar() throws {
+    let authorAvatarURL = try XCTUnwrap(
+      URL(string: "https://himg.bdimg.com/sys/portraitn/item/thread-author")
+    )
+    let thread = BrowseThread(
+      id: 42,
+      forumID: 7,
+      forumName: "swift",
+      title: "Thread",
+      excerpt: "Excerpt",
+      authorName: "Author",
+      replyCount: 3,
+      viewCount: 10,
+      createdAt: nil,
+      lastReplyAt: nil,
+      contents: [],
+      authorAvatarURL: authorAvatarURL
+    )
+
+    let snapshot = ThreadHistorySnapshot(thread: thread)
+    let explicitlySuppressed = ThreadHistorySnapshot(
+      thread: thread,
+      resolvedAuthorAvatarURL: nil
+    )
+    let hidden = ThreadHistorySnapshot(thread: thread.withLocalVisibility(.hidden))
+    let placeholder = ThreadHistorySnapshot(thread: thread.withLocalVisibility(.placeholder))
+
+    XCTAssertEqual(snapshot.authorAvatarURL, authorAvatarURL)
+    XCTAssertEqual(snapshot.browseThread.authorAvatarURL, authorAvatarURL)
+    XCTAssertNil(explicitlySuppressed.authorAvatarURL)
+    XCTAssertNil(explicitlySuppressed.browseThread.authorAvatarURL)
+    XCTAssertNil(hidden.authorAvatarURL)
+    XCTAssertNil(placeholder.authorAvatarURL)
+  }
+
+  func testThreadRecordConvenienceDistinguishesInheritedAndResolvedAvatar() async throws {
+    let location = try HistoryTestLocation()
+    defer { location.remove() }
+    let authorAvatarURL = try XCTUnwrap(
+      URL(string: "https://himg.bdimg.com/sys/portraitn/item/record-author")
+    )
+    let thread = BrowseThread(
+      id: 43,
+      forumID: 7,
+      forumName: "swift",
+      title: "Thread",
+      excerpt: "Excerpt",
+      authorName: "Author",
+      replyCount: 3,
+      viewCount: 10,
+      createdAt: nil,
+      lastReplyAt: nil,
+      contents: [],
+      authorAvatarURL: authorAvatarURL
+    )
+    let store = FileBrowsingHistoryStore(fileURL: location.fileURL)
+
+    try await store.record(thread: thread, at: Date(timeIntervalSince1970: 10))
+    var entries = try await store.entries(kind: .thread)
+    guard case .thread(let inherited) = try XCTUnwrap(entries.first).target else {
+      return XCTFail("Expected a thread history entry")
+    }
+    XCTAssertEqual(inherited.authorAvatarURL, authorAvatarURL)
+
+    try await store.record(
+      thread: thread,
+      resolvedAuthorAvatarURL: nil,
+      at: Date(timeIntervalSince1970: 20)
+    )
+    entries = try await store.entries(kind: .thread)
+    guard case .thread(let suppressed) = try XCTUnwrap(entries.first).target else {
+      return XCTFail("Expected a thread history entry")
+    }
+    XCTAssertNil(suppressed.authorAvatarURL)
   }
 
   func testMigratesAndRemovesLegacyRecentForumsBeforeClear() async throws {
@@ -242,12 +326,16 @@ final class BrowsingHistoryTests: XCTestCase {
     let location = try HistoryTestLocation()
     defer { location.remove() }
     let store = FileBrowsingHistoryStore(fileURL: location.fileURL)
+    let authorAvatarURL = try XCTUnwrap(
+      URL(string: "https://himg.bdimg.com/sys/portraitn/item/progress-author")
+    )
     try await store.record(
       .thread(
         ThreadHistorySnapshot(
           threadID: 12,
           title: "thread",
-          authorUsername: "author-account"
+          authorUsername: "author-account",
+          authorAvatarURL: authorAvatarURL
         )
       ),
       at: Date(timeIntervalSince1970: 10)
@@ -273,6 +361,7 @@ final class BrowsingHistoryTests: XCTestCase {
     XCTAssertEqual(thread.browseOptions.sort, .descending)
     XCTAssertTrue(thread.browseOptions.onlyThreadAuthor)
     XCTAssertEqual(thread.authorUsername, "author-account")
+    XCTAssertEqual(thread.authorAvatarURL, authorAvatarURL)
   }
 
   func testHotProgressPersistsModeWithoutAnUnstableResumePosition() async throws {
@@ -306,11 +395,15 @@ final class BrowsingHistoryTests: XCTestCase {
     let location = try HistoryTestLocation()
     defer { location.remove() }
     let store = FileBrowsingHistoryStore(fileURL: location.fileURL)
+    let authorAvatarURL = try XCTUnwrap(
+      URL(string: "https://himg.bdimg.com/sys/portraitn/item/options-author")
+    )
     try await store.record(
       .thread(
         ThreadHistorySnapshot(
           threadID: 14,
           title: "options",
+          authorAvatarURL: authorAvatarURL,
           lastPostID: 140,
           lastFloor: 14
         )
@@ -338,6 +431,7 @@ final class BrowsingHistoryTests: XCTestCase {
     XCTAssertEqual(thread.browseOptions, newestOptions)
     XCTAssertEqual(thread.lastPostID, 140)
     XCTAssertEqual(thread.lastFloor, 14)
+    XCTAssertEqual(thread.authorAvatarURL, authorAvatarURL)
     XCTAssertEqual(entry.lastVisitedAt, Date(timeIntervalSince1970: 30))
   }
 

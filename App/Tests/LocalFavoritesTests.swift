@@ -80,6 +80,35 @@ final class LocalFavoritesTests: XCTestCase {
     XCTAssertTrue(archive.contains("\"schemaVersion\":1"))
   }
 
+  func testThreadAuthorAvatarRoundTripsAcrossStoreRestart() async throws {
+    let location = try FavoritesTestLocation()
+    defer { location.remove() }
+    let authorAvatarURL = try XCTUnwrap(
+      URL(string: "https://himg.bdimg.com/sys/portraitn/item/favorite-author")
+    )
+    let store = FileLocalFavoritesStore(fileURL: location.fileURL)
+    try await store.save(
+      .thread(
+        ThreadHistorySnapshot(
+          threadID: 42,
+          title: "Saved thread",
+          authorName: "Author",
+          authorAvatarURL: authorAvatarURL
+        )
+      ),
+      at: Date(timeIntervalSince1970: 10)
+    )
+
+    let restartedStore = FileLocalFavoritesStore(fileURL: location.fileURL)
+    let entries = try await restartedStore.entries(kind: .thread)
+    let entry = try XCTUnwrap(entries.first)
+    guard case .thread(let snapshot) = entry.target else {
+      return XCTFail("Expected a thread favorite")
+    }
+    XCTAssertEqual(snapshot.authorAvatarURL, authorAvatarURL)
+    XCTAssertEqual(snapshot.browseThread.authorAvatarURL, authorAvatarURL)
+  }
+
   func testPinnedForumRoundTripsAcrossStoreRestart() async throws {
     let location = try FavoritesTestLocation()
     defer { location.remove() }
@@ -260,12 +289,16 @@ final class LocalFavoritesTests: XCTestCase {
     let location = try FavoritesTestLocation()
     defer { location.remove() }
     let store = FileLocalFavoritesStore(fileURL: location.fileURL)
+    let authorAvatarURL = try XCTUnwrap(
+      URL(string: "https://himg.bdimg.com/sys/portraitn/item/favorite-progress-author")
+    )
     try await store.save(
       .thread(
         ThreadHistorySnapshot(
           threadID: 42,
           title: "收藏帖子",
-          authorUsername: "author-account"
+          authorUsername: "author-account",
+          authorAvatarURL: authorAvatarURL
         )
       ),
       at: Date(timeIntervalSince1970: 10)
@@ -299,6 +332,7 @@ final class LocalFavoritesTests: XCTestCase {
     XCTAssertEqual(thread.lastFloor, 18)
     XCTAssertEqual(thread.browseOptions, newestOptions)
     XCTAssertEqual(thread.authorUsername, "author-account")
+    XCTAssertEqual(thread.authorAvatarURL, authorAvatarURL)
 
     try await store.updateThreadOptions(
       threadID: 42,
@@ -315,6 +349,8 @@ final class LocalFavoritesTests: XCTestCase {
     XCTAssertNil(updatedThread.lastFloor)
     XCTAssertEqual(updatedThread.authorUsername, "author-account")
     XCTAssertEqual(updatedThread.browseThread.authorUsername, "author-account")
+    XCTAssertEqual(updatedThread.authorAvatarURL, authorAvatarURL)
+    XCTAssertEqual(updatedThread.browseThread.authorAvatarURL, authorAvatarURL)
     XCTAssertNil(entry.pinnedAt)
   }
 
