@@ -48,6 +48,80 @@ struct RemoteImageDownloadProgress: Equatable, Sendable {
   }
 }
 
+final class RemoteImageProgressAccumulator: @unchecked Sendable {
+  private let lock = NSLock()
+  private var lastReceivedByteCount: Int64?
+  private var establishedExpectedByteCount: Int64?
+  private var lastReportedPercentage: Int?
+  private var reportedInitialIndeterminateProgress = false
+  private var permanentlyIndeterminate = false
+
+  func progressToReport(
+    receivedByteCount: Int64,
+    expectedByteCount rawExpectedByteCount: Int64
+  ) -> RemoteImageDownloadProgress? {
+    lock.lock()
+    defer { lock.unlock() }
+
+    guard receivedByteCount >= 0 else { return nil }
+    if let lastReceivedByteCount, receivedByteCount < lastReceivedByteCount {
+      return nil
+    }
+    self.lastReceivedByteCount = receivedByteCount
+
+    guard !permanentlyIndeterminate else { return nil }
+    let observedExpectedByteCount = rawExpectedByteCount > 0
+      ? rawExpectedByteCount
+      : nil
+
+    if let establishedExpectedByteCount {
+      guard
+        observedExpectedByteCount == establishedExpectedByteCount,
+        receivedByteCount <= establishedExpectedByteCount
+      else {
+        permanentlyIndeterminate = true
+        return RemoteImageDownloadProgress(
+          receivedByteCount: receivedByteCount,
+          expectedByteCount: nil
+        )
+      }
+
+      let progress = RemoteImageDownloadProgress(
+        receivedByteCount: receivedByteCount,
+        expectedByteCount: establishedExpectedByteCount
+      )
+      guard let percentage = progress.percentageCompleted else { return nil }
+      guard lastReportedPercentage != percentage else { return nil }
+      lastReportedPercentage = percentage
+      return progress
+    }
+
+    if let observedExpectedByteCount {
+      guard receivedByteCount <= observedExpectedByteCount else {
+        permanentlyIndeterminate = true
+        return RemoteImageDownloadProgress(
+          receivedByteCount: receivedByteCount,
+          expectedByteCount: nil
+        )
+      }
+      establishedExpectedByteCount = observedExpectedByteCount
+      let progress = RemoteImageDownloadProgress(
+        receivedByteCount: receivedByteCount,
+        expectedByteCount: observedExpectedByteCount
+      )
+      lastReportedPercentage = progress.percentageCompleted
+      return progress
+    }
+
+    guard !reportedInitialIndeterminateProgress else { return nil }
+    reportedInitialIndeterminateProgress = true
+    return RemoteImageDownloadProgress(
+      receivedByteCount: receivedByteCount,
+      expectedByteCount: nil
+    )
+  }
+}
+
 struct RemoteImageDownloadLimits: Equatable, Sendable {
   static let standard = RemoteImageDownloadLimits(
     previewMaximumResponseBytes: RemoteImageDownloadPolicy.previewMaximumResponseBytes,
@@ -351,17 +425,12 @@ final class BoundedHTTPSRemoteImageTransport: RemoteImageDownloading, @unchecked
   }
 }
 
-private final class BoundedHTTPSRemoteImageTaskDelegate: NSObject,
+final class BoundedHTTPSRemoteImageTaskDelegate: NSObject,
   URLSessionDownloadDelegate, @unchecked Sendable
 {
   private final class State: @unchecked Sendable {
     private let lock = NSLock()
     private var responseLimitExceeded = false
-    private var lastReceivedByteCount: Int64?
-    private var establishedExpectedByteCount: Int64?
-    private var lastReportedPercentage: Int?
-    private var reportedInitialIndeterminateProgress = false
-    private var permanentlyIndeterminate = false
 
     func markResponseLimitExceeded() {
       lock.lock()
@@ -374,76 +443,13 @@ private final class BoundedHTTPSRemoteImageTaskDelegate: NSObject,
       defer { lock.unlock() }
       return responseLimitExceeded
     }
-
-    func progressToReport(
-      receivedByteCount: Int64,
-      expectedByteCount rawExpectedByteCount: Int64
-    ) -> RemoteImageDownloadProgress? {
-      lock.lock()
-      defer { lock.unlock() }
-
-      if let lastReceivedByteCount, receivedByteCount < lastReceivedByteCount {
-        return nil
-      }
-      self.lastReceivedByteCount = receivedByteCount
-
-      guard !permanentlyIndeterminate else { return nil }
-      let observedExpectedByteCount = rawExpectedByteCount > 0
-        ? rawExpectedByteCount
-        : nil
-
-      if let establishedExpectedByteCount {
-        guard
-          observedExpectedByteCount == establishedExpectedByteCount,
-          receivedByteCount <= establishedExpectedByteCount
-        else {
-          permanentlyIndeterminate = true
-          return RemoteImageDownloadProgress(
-            receivedByteCount: receivedByteCount,
-            expectedByteCount: nil
-          )
-        }
-
-        let progress = RemoteImageDownloadProgress(
-          receivedByteCount: receivedByteCount,
-          expectedByteCount: establishedExpectedByteCount
-        )
-        guard let percentage = progress.percentageCompleted else { return nil }
-        guard lastReportedPercentage != percentage else { return nil }
-        lastReportedPercentage = percentage
-        return progress
-      }
-
-      if let observedExpectedByteCount {
-        guard receivedByteCount <= observedExpectedByteCount else {
-          permanentlyIndeterminate = true
-          return RemoteImageDownloadProgress(
-            receivedByteCount: receivedByteCount,
-            expectedByteCount: nil
-          )
-        }
-        establishedExpectedByteCount = observedExpectedByteCount
-        let progress = RemoteImageDownloadProgress(
-          receivedByteCount: receivedByteCount,
-          expectedByteCount: observedExpectedByteCount
-        )
-        lastReportedPercentage = progress.percentageCompleted
-        return progress
-      }
-
-      guard !reportedInitialIndeterminateProgress else { return nil }
-      reportedInitialIndeterminateProgress = true
-      return RemoteImageDownloadProgress(
-        receivedByteCount: receivedByteCount,
-        expectedByteCount: nil
-      )
-    }
   }
 
   private let maximumResponseBytes: Int64
   private let networkAccess: RemoteImageNetworkAccess
   private let onProgress: @Sendable (RemoteImageDownloadProgress) -> Void
   private let state = State()
+  private let progressAccumulator = RemoteImageProgressAccumulator()
 
   var exceededResponseLimit: Bool {
     state.readResponseLimitExceeded()
@@ -505,7 +511,7 @@ private final class BoundedHTTPSRemoteImageTaskDelegate: NSObject,
       downloadTask.cancel()
       return
     }
-    if let progress = state.progressToReport(
+    if let progress = progressAccumulator.progressToReport(
       receivedByteCount: totalBytesWritten,
       expectedByteCount: totalBytesExpectedToWrite
     ) {

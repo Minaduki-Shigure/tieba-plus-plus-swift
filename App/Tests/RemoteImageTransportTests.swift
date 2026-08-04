@@ -261,71 +261,109 @@ final class RemoteImageTransportTests: XCTestCase {
     withExtendedLifetime(lease) {}
   }
 
-  func testKnownLengthDownloadReportsMonotonicProgressThroughTransport() async throws {
-    let root = makeTemporaryDirectoryURL()
-    defer { try? FileManager.default.removeItem(at: root) }
-    let transport = makeTransport(temporaryDirectory: root)
-    let recorder = RemoteImageProgressRecorder()
-    let url = try XCTUnwrap(URL(string: "https://remote-image.test/known-progress"))
+  func testProgressAccumulatorReportsFirstChangedPercentageAndCompletion() {
+    let accumulator = RemoteImageProgressAccumulator()
 
-    let lease = try await transport.download(
-      from: url,
-      kind: .preview,
-      networkAccess: .unrestricted,
-      onProgress: { recorder.record($0) }
-    )
-    let progress = recorder.snapshot()
-
-    XCTAssertFalse(progress.isEmpty)
     XCTAssertEqual(
-      progress.last,
-      RemoteImageDownloadProgress(
-        receivedByteCount: lease.byteCount,
-        expectedByteCount: lease.byteCount
-      )
+      accumulator.progressToReport(receivedByteCount: 1, expectedByteCount: 1_000),
+      RemoteImageDownloadProgress(receivedByteCount: 1, expectedByteCount: 1_000)
     )
-    XCTAssertEqual(progress.last?.percentageCompleted, 100)
-    XCTAssertTrue(
-      zip(progress, progress.dropFirst()).allSatisfy {
-        $0.0.receivedByteCount <= $0.1.receivedByteCount
-      }
+    XCTAssertNil(
+      accumulator.progressToReport(receivedByteCount: 5, expectedByteCount: 1_000)
     )
-    XCTAssertTrue(
-      zip(progress, progress.dropFirst()).allSatisfy {
-        guard
-          let firstPercentage = $0.0.percentageCompleted,
-          let secondPercentage = $0.1.percentageCompleted
-        else { return false }
-        return firstPercentage < secondPercentage
-      }
+    XCTAssertEqual(
+      accumulator.progressToReport(receivedByteCount: 10, expectedByteCount: 1_000),
+      RemoteImageDownloadProgress(receivedByteCount: 10, expectedByteCount: 1_000)
     )
-    withExtendedLifetime(lease) {}
+    XCTAssertEqual(
+      accumulator.progressToReport(receivedByteCount: 1_000, expectedByteCount: 1_000),
+      RemoteImageDownloadProgress(receivedByteCount: 1_000, expectedByteCount: 1_000)
+    )
+    XCTAssertNil(
+      accumulator.progressToReport(receivedByteCount: 999, expectedByteCount: 1_000)
+    )
   }
 
-  func testUnknownLengthDownloadReportsIndeterminateMonotonicProgress() async throws {
-    let root = makeTemporaryDirectoryURL()
-    defer { try? FileManager.default.removeItem(at: root) }
-    let transport = makeTransport(temporaryDirectory: root)
-    let recorder = RemoteImageProgressRecorder()
-    let url = try XCTUnwrap(URL(string: "https://remote-image.test/unknown-progress"))
+  func testProgressAccumulatorHandlesUnknownAndPermanentlyInvalidLengths() {
+    let unknownThenKnown = RemoteImageProgressAccumulator()
+    XCTAssertEqual(
+      unknownThenKnown.progressToReport(receivedByteCount: 10, expectedByteCount: -1),
+      RemoteImageDownloadProgress(receivedByteCount: 10, expectedByteCount: nil)
+    )
+    XCTAssertNil(
+      unknownThenKnown.progressToReport(receivedByteCount: 20, expectedByteCount: -1)
+    )
+    XCTAssertEqual(
+      unknownThenKnown.progressToReport(receivedByteCount: 30, expectedByteCount: 100),
+      RemoteImageDownloadProgress(receivedByteCount: 30, expectedByteCount: 100)
+    )
+    XCTAssertEqual(
+      unknownThenKnown.progressToReport(receivedByteCount: 40, expectedByteCount: -1),
+      RemoteImageDownloadProgress(receivedByteCount: 40, expectedByteCount: nil)
+    )
+    XCTAssertNil(
+      unknownThenKnown.progressToReport(receivedByteCount: 50, expectedByteCount: 100)
+    )
 
-    let lease = try await transport.download(
-      from: url,
-      kind: .preview,
+    let changedLength = RemoteImageProgressAccumulator()
+    _ = changedLength.progressToReport(receivedByteCount: 10, expectedByteCount: 100)
+    XCTAssertEqual(
+      changedLength.progressToReport(receivedByteCount: 20, expectedByteCount: 200),
+      RemoteImageDownloadProgress(receivedByteCount: 20, expectedByteCount: nil)
+    )
+    XCTAssertNil(
+      changedLength.progressToReport(receivedByteCount: 30, expectedByteCount: 200)
+    )
+
+    let overrun = RemoteImageProgressAccumulator()
+    XCTAssertEqual(
+      overrun.progressToReport(receivedByteCount: 11, expectedByteCount: 10),
+      RemoteImageDownloadProgress(receivedByteCount: 11, expectedByteCount: nil)
+    )
+    XCTAssertNil(overrun.progressToReport(receivedByteCount: 12, expectedByteCount: 20))
+    XCTAssertNil(overrun.progressToReport(receivedByteCount: -1, expectedByteCount: 20))
+  }
+
+  func testDownloadDelegateForwardsProgressOnlyAfterPassingTransferLimit() throws {
+    let recorder = RemoteImageProgressRecorder()
+    let session = URLSession(configuration: .ephemeral)
+    let task = session.downloadTask(
+      with: try XCTUnwrap(URL(string: "https://img.example/progress.jpg"))
+    )
+    defer {
+      task.cancel()
+      session.invalidateAndCancel()
+    }
+    let delegate = BoundedHTTPSRemoteImageTaskDelegate(
+      maximumResponseBytes: 100,
       networkAccess: .unrestricted,
       onProgress: { recorder.record($0) }
     )
-    let progress = recorder.snapshot()
 
-    XCTAssertFalse(progress.isEmpty)
-    XCTAssertTrue(progress.allSatisfy { $0.expectedByteCount == nil })
-    XCTAssertTrue(progress.allSatisfy { $0.fractionCompleted == nil })
-    XCTAssertTrue(
-      zip(progress, progress.dropFirst()).allSatisfy {
-        $0.0.receivedByteCount <= $0.1.receivedByteCount
-      }
+    delegate.urlSession(
+      session,
+      downloadTask: task,
+      didWriteData: 10,
+      totalBytesWritten: 10,
+      totalBytesExpectedToWrite: 100
     )
-    withExtendedLifetime(lease) {}
+
+    XCTAssertFalse(delegate.exceededResponseLimit)
+    XCTAssertEqual(
+      recorder.snapshot(),
+      [RemoteImageDownloadProgress(receivedByteCount: 10, expectedByteCount: 100)]
+    )
+
+    delegate.urlSession(
+      session,
+      downloadTask: task,
+      didWriteData: 91,
+      totalBytesWritten: 101,
+      totalBytesExpectedToWrite: 100
+    )
+
+    XCTAssertTrue(delegate.exceededResponseLimit)
+    XCTAssertEqual(recorder.snapshot().count, 1)
   }
 
   func testDownloadRejectsNonSuccessHTTPResponse() async throws {
@@ -463,13 +501,11 @@ private final class RemoteImageURLProtocol: URLProtocol, @unchecked Sendable {
     let body: Data
     if url.path == "/oversize" || url.path == "/oversize-progress" {
       body = Data(repeating: 0x41, count: 9)
-    } else if url.path == "/known-progress" || url.path == "/unknown-progress" {
-      body = Data(repeating: 0x49, count: 256 * 1_024)
     } else {
       body = Data("image".utf8)
     }
     var headerFields = ["Content-Type": "image/jpeg"]
-    if url.path == "/known-progress" || url.path == "/oversize-progress" {
+    if url.path == "/oversize-progress" {
       headerFields["Content-Length"] = String(body.count)
     }
     guard
@@ -484,15 +520,7 @@ private final class RemoteImageURLProtocol: URLProtocol, @unchecked Sendable {
       return
     }
     client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-    if url.path == "/known-progress" || url.path == "/unknown-progress" {
-      let chunkByteCount = 16 * 1_024
-      for lowerBound in stride(from: 0, to: body.count, by: chunkByteCount) {
-        let upperBound = min(lowerBound + chunkByteCount, body.count)
-        client?.urlProtocol(self, didLoad: body.subdata(in: lowerBound..<upperBound))
-      }
-    } else {
-      client?.urlProtocol(self, didLoad: body)
-    }
+    client?.urlProtocol(self, didLoad: body)
     client?.urlProtocolDidFinishLoading(self)
   }
 
