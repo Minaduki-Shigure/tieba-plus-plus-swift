@@ -23,7 +23,7 @@ experimental or unsupported.
 
 ### Release and validation
 
-- **Current alpha:** `v0.55.0-alpha.1` adds the first account-write validation
+- **Current alpha:** `v0.55.0-alpha.2` adds the first account-write validation
   workflow: authoritative per-forum follow state plus confirmed follow/unfollow.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
   XcodeGen 2.45.4 or newer.
