@@ -716,7 +716,7 @@ public actor TiebaAuthenticatedClient {
     return adjusted
   }
 
-  private func isUncertainAgreementWriteError(_ error: any Error) -> Bool {
+  private func isUncertainAgreementWriteError(_ error: Swift.Error) -> Bool {
     if error is CancellationError { return true }
     guard let error = error as? TiebaClientError else { return true }
     switch error {
