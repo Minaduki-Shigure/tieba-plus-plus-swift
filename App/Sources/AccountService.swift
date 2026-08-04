@@ -91,6 +91,30 @@ struct InboxPage: Hashable, Sendable {
   let hasMore: Bool
 }
 
+struct CloudFavoriteThread: Identifiable, Hashable, Sendable {
+  let id: Int64
+  let title: String
+  let forumName: String
+  let authorName: String
+  let markPostID: Int64?
+  let latestPostID: Int64?
+  let latestFloor: Int?
+  let hasUpdates: Bool
+  let isDeleted: Bool
+  let updatedAt: Date?
+
+  var threadRoute: TiebaThreadRoute {
+    TiebaThreadRoute(threadID: id, postID: markPostID)
+  }
+}
+
+struct CloudFavoritePage: Hashable, Sendable {
+  let userID: Int64
+  let items: [CloudFavoriteThread]
+  let nextOffset: Int?
+  let hasMore: Bool
+}
+
 struct ForumMembershipData: Hashable, Sendable {
   let userID: Int64
   let forumID: Int64
@@ -220,6 +244,11 @@ protocol AccountService: Sendable {
     kind: InboxKind,
     page: Int
   ) async throws -> InboxPage
+  func cloudFavorites(
+    session: StoredAccountSession,
+    offset: Int,
+    pageSize: Int
+  ) async throws -> CloudFavoritePage
   func forumMembership(
     session: StoredAccountSession,
     forumID: Int64,
@@ -272,6 +301,14 @@ protocol AccountService: Sendable {
 }
 
 extension AccountService {
+  func cloudFavorites(
+    session: StoredAccountSession,
+    offset: Int,
+    pageSize: Int
+  ) async throws -> CloudFavoritePage {
+    throw BrowseError.unavailable("当前账户服务不支持读取贴吧收藏。")
+  }
+
   func notifications(
     session: StoredAccountSession,
     kind: InboxKind,

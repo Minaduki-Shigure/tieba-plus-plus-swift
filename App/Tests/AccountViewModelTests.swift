@@ -40,7 +40,9 @@ final class AccountViewModelTests: XCTestCase {
     )
     let viewModel = LoginViewModel(service: service, vault: vault)
     let credentials = AccountCredentials(
-      bduss: String(repeating: "b", count: 192)
+      bduss: String(repeating: "b", count: 192),
+      stoken: String(repeating: "s", count: 64),
+      bdussCookieName: .bdussBFESS
     )
 
     let succeeded = await viewModel.complete(credentials: credentials)
@@ -50,10 +52,13 @@ final class AccountViewModelTests: XCTestCase {
     XCTAssertNil(viewModel.errorMessage)
     let validationLengths = await service.validationCredentialLengths()
     XCTAssertEqual(validationLengths?.bduss, 192)
+    XCTAssertEqual(validationLengths?.stoken, 64)
     let storedSession = await vault.session(userID: 7)
     let stored = try XCTUnwrap(storedSession)
     XCTAssertEqual(stored.username, "validated-user")
     XCTAssertEqual(stored.bduss.count, 192)
+    XCTAssertEqual(stored.stoken?.count, 64)
+    XCTAssertEqual(stored.bdussCookieName, .bdussBFESS)
     XCTAssertEqual(Array(validatedAccount.customMirror.children).count, 2)
   }
 
@@ -64,6 +69,7 @@ final class AccountViewModelTests: XCTestCase {
       displayName: "old",
       portraitURL: nil,
       isActive: true,
+      hasFullCredentials: false,
       updatedAt: Date(timeIntervalSince1970: 1)
     )
     let new = AccountSummary(
@@ -72,6 +78,7 @@ final class AccountViewModelTests: XCTestCase {
       displayName: "new",
       portraitURL: nil,
       isActive: true,
+      hasFullCredentials: true,
       updatedAt: Date(timeIntervalSince1970: 2)
     )
     let vault = OutOfOrderSummaryVault(first: [old], second: [new])
@@ -109,7 +116,9 @@ final class AccountViewModelTests: XCTestCase {
 
     let succeeded = await viewModel.complete(
       credentials: AccountCredentials(
-        bduss: String(repeating: "b", count: 192)
+        bduss: String(repeating: "b", count: 192),
+        stoken: String(repeating: "s", count: 64),
+        bdussCookieName: .bduss
       )
     )
 
@@ -260,6 +269,7 @@ private struct FollowedRequest: Equatable, Sendable {
 
 private struct CredentialLengths: Equatable, Sendable {
   let bduss: Int
+  let stoken: Int
 }
 
 private struct AccountTestFailure: LocalizedError, Sendable {
@@ -271,6 +281,7 @@ private actor AccountServiceSpy: AccountService {
   private let validation: Result<ValidatedAccount, AccountTestFailure>
   private let followedPages: [Int: Result<FollowedForumPageData, AccountTestFailure>]
   private var validatedBDUSSLength: Int?
+  private var validatedSTOKENLength: Int?
   private var followedRequests: [FollowedRequest] = []
 
   init(
@@ -285,6 +296,7 @@ private actor AccountServiceSpy: AccountService {
 
   func validate(credential: AccountCredentials) async throws -> ValidatedAccount {
     validatedBDUSSLength = credential.bduss.count
+    validatedSTOKENLength = credential.stoken.count
     return try validation.get()
   }
 
@@ -334,7 +346,8 @@ private actor AccountServiceSpy: AccountService {
   }
 
   func validationCredentialLengths() -> CredentialLengths? {
-    validatedBDUSSLength.map { CredentialLengths(bduss: $0) }
+    guard let validatedBDUSSLength, let validatedSTOKENLength else { return nil }
+    return CredentialLengths(bduss: validatedBDUSSLength, stoken: validatedSTOKENLength)
   }
 
   func followedRequestSnapshot() -> [FollowedRequest] { followedRequests }
@@ -360,6 +373,7 @@ private actor AccountVaultSpy: AccountVault {
           displayName: $0.displayName,
           portraitURL: nil,
           isActive: $0.id == activeUserID,
+          hasFullCredentials: $0.credentials != nil,
           updatedAt: $0.updatedAt
         )
       }

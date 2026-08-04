@@ -148,7 +148,7 @@ struct AccountView: View {
         }
 
         if viewModel.activeAccount != nil {
-          Section {
+          Section("贴吧账户") {
             NavigationLink {
               FollowedForumsView(
                 browseService: browseService,
@@ -173,6 +173,26 @@ struct AccountView: View {
               )
             } label: {
               Label("消息", systemImage: "bell")
+            }
+
+            if viewModel.activeAccount?.hasFullCredentials == true {
+              NavigationLink {
+                CloudFavoritesView(
+                  browseService: browseService,
+                  accountService: accountService,
+                  vault: vault,
+                  historyRepository: historyRepository,
+                  favoritesRepository: favoritesRepository,
+                  searchHistoryRepository: searchHistoryRepository
+                )
+              } label: {
+                Label("贴吧收藏（云端）", systemImage: "bookmark.circle")
+              }
+            } else {
+              Button { showsLogin = true } label: {
+                Label("重新登录以启用贴吧收藏", systemImage: "key")
+              }
+              .disabled(viewModel.isMutating)
             }
 
             Button(role: .destructive) { confirmsLogout = true } label: {

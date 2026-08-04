@@ -16,9 +16,9 @@ experimental or unsupported.
 | --- | --- |
 | Anonymous browsing | Available across discovery, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, and media preferences |
-| Accounts | Web login, switching, logout, followed forums, a foreground ReplyMe/AtMe inbox, per-forum state, and experimental content approval |
+| Accounts | Bound Web login, switching, logout, followed forums, read-only Tieba cloud favorites, a foreground ReplyMe/AtMe inbox, per-forum state, and experimental content approval |
 | Server-side writes | Confirmed forum follow/unfollow, check-in, and content approval are in device validation; other writes stay disabled |
-| TiebaLite parity | Anonymous reading and media: about 85–95%; full product scope: about 57–62% |
+| TiebaLite parity | Anonymous reading and media: about 85–95%; full product scope: about 58–63% |
 | Distribution | Public SideStore/LiveContainer source backed by tested unsigned GitHub Release IPAs |
 
 ### Release and validation
@@ -31,10 +31,10 @@ experimental or unsupported.
   XcodeGen 2.45.4 or newer.
 - **Automated checks:** GitHub Actions runs package tests and an unsigned
   simulator build, validates the app source, and verifies its public IPA hash.
-  Authenticated flows never use real credentials in CI. The inbox contract is
-  covered by fixtures, while successful private-list reads, forum
-  follow/unfollow, check-in, and topic/post/subpost content approval remain
-  physical-device validation features in this alpha.
+  Authenticated flows never use real credentials in CI. Login binding, cloud
+  favorites, and inbox contracts are covered by fixtures, while successful
+  private-list reads, forum follow/unfollow, check-in, and topic/post/subpost
+  content approval remain physical-device validation features in this alpha.
 - **App source:** Add [`sidestore-source.json`](https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json)
   to LiveContainer or SideStore. Its latest IPA is published only after the tag's
   package, anonymous integration, and simulator tests all pass.
@@ -102,8 +102,13 @@ experimental or unsupported.
 ### Accounts and boundaries
 
 - **Login and storage:** Login uses a nonpersistent, HTTPS-only Baidu Web view
-  with an exact host allowlist. Validated account records are stored in the
-  device-only Keychain and can be switched or removed locally.
+  with an exact host allowlist. A new login captures BDUSS and STOKEN from one
+  Cookie-store snapshot, requires independent app and Web probes to return the
+  same UID, and stores the same-snapshot pair in the device-only Keychain.
+  Whether both probes reject a wrong STOKEN still requires disposable-account
+  negative testing; STOKEN-dependent writes remain blocked. Existing v1/v2
+  records migrate without STOKEN and retain their current BDUSS features; they
+  must be logged in again before an STOKEN-dependent feature is available.
 - **Forum account state:** The active account can load its paginated
   followed-forum list. A loaded forum independently reads authoritative
   account-specific follow and check-in state, exposes confirmed follow/unfollow,
@@ -118,11 +123,18 @@ experimental or unsupported.
   without guessing the parent floor because the legacy `quote_pid` field is not
   a stable parent identifier. No background polling, badge clearing, or explicit
   mark-read request is implemented.
+- **Tieba cloud favorites:** The account page has a separate, read-only cloud
+  favorites list with refresh, offset pagination, saved-post navigation, deleted
+  thread state, and account-lease isolation. It never uploads, merges, or deletes
+  the independent local favorites archive. Successful authenticated retrieval
+  over the minimal HTTPS contract still requires physical-device validation.
 - **Credential boundary:** Anonymous and authenticated requests use isolated,
-  ephemeral clients. BDUSS is the only credential stored by the vault. STOKEN is
-  not extracted, and the 26-character `tbs` value is validated, made available
-  to at most the immediately following write, and never returned to the app
-  model or persisted. Content approval's mandatory `cuid` is a random
+  ephemeral clients. The vault stores only the same-snapshot BDUSS/STOKEN pair
+  accepted by the UID-consistency probes and its actual BDUSS Cookie name;
+  neither value enters summaries, client-owned logs, App-visible errors, or
+  mirrors. The 26-character `tbs` value is validated, made available to at most
+  the immediately following write, and never returned to the app model or
+  persisted. Content approval's mandatory `cuid` is a random
   client-lifetime Galaxy2 identifier (`32HEX|V` plus an 8-character Helios
   checksum); it is not hardware-derived or persisted.
 - **Write safety:** Each write is bound to the expected account UID and forum.
@@ -136,15 +148,16 @@ experimental or unsupported.
   uncertain failure retries a write. Already-completed check-in and matching
   content state are idempotent. All supported writes require explicit user
   confirmation. Automatic and batch check-in are not implemented.
-- **Unsupported operations:** Server-side thread favorites remain blocked on
-  safely acquiring and binding the required STOKEN. Disagreement and other
-  reaction types, thread or reply creation, notification replies, background
-  notification polling, and moderation remain unavailable until their request
-  contracts and recovery paths have been validated on a disposable account.
+- **Unsupported operations:** Cloud-favorite add, remove, and saved-position
+  updates remain disabled until their state reconciliation has been validated on
+  a disposable account. Disagreement and other reaction types, thread or reply
+  creation, notification replies, background notification polling, and
+  moderation remain unavailable until their request contracts and recovery
+  paths have been validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, protocol constraints, and next milestones. The current weighted
   end-to-end audit estimates 85–95% coverage of anonymous reading and media, or
-  57–62% of the full TiebaLite product scope once the remaining account writes,
+  58–63% of the full TiebaLite product scope once the remaining account writes,
   creation, background messaging, and moderation are included.
 
 ## Architecture
@@ -162,9 +175,9 @@ authenticated API clients are separate, ephemeral transports. API traffic uses
 normal URLSession certificate validation; global App Transport Security
 exceptions are forbidden. See [`SECURITY.md`](SECURITY.md) before testing an
 account build.
-The account vault persists BDUSS only. It does not extract or store STOKEN or
-the short-lived anti-CSRF value made available to at most one confirmed account
-write.
+The account vault persists the same-snapshot BDUSS/STOKEN pair accepted by the
+UID-consistency probes for new logins. It does not persist the short-lived
+anti-CSRF value made available to at most one confirmed account write.
 
 ## Build
 

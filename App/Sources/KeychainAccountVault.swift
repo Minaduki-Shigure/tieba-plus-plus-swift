@@ -137,6 +137,7 @@ actor KeychainAccountVault: AccountVault {
           displayName: session.displayName,
           portraitURL: SecureTiebaURL.portrait(session.portrait),
           isActive: session.id == archive.activeUserID,
+          hasFullCredentials: session.credentials != nil,
           updatedAt: session.updatedAt
         )
       }
@@ -160,6 +161,8 @@ actor KeychainAccountVault: AccountVault {
         displayName: session.displayName,
         portrait: session.portrait,
         bduss: session.bduss,
+        stoken: session.stoken,
+        bdussCookieName: session.bdussCookieName,
         createdAt: current.createdAt,
         updatedAt: max(current.updatedAt, session.updatedAt),
         sessionRevision: nextSessionRevision(replacing: current.sessionRevision)
@@ -230,6 +233,21 @@ actor KeychainAccountVault: AccountVault {
       } catch {
         throw AccountVaultError.invalidArchive
       }
+    case AccountVaultArchiveV2.supportedVersion:
+      let legacyArchive: AccountVaultArchiveV2
+      do {
+        legacyArchive = try decoder.decode(AccountVaultArchiveV2.self, from: data)
+      } catch {
+        throw AccountVaultError.invalidArchive
+      }
+      try validate(legacyArchive)
+      archive = AccountVaultArchive(
+        activeUserID: legacyArchive.activeUserID,
+        accounts: legacyArchive.accounts.map { $0.migrated() }
+      )
+      try validate(archive)
+      try save(archive)
+      return archive
     case AccountVaultArchiveV1.supportedVersion:
       let legacyArchive: AccountVaultArchiveV1
       do {
@@ -237,6 +255,7 @@ actor KeychainAccountVault: AccountVault {
       } catch {
         throw AccountVaultError.invalidArchive
       }
+      try validate(legacyArchive)
       archive = AccountVaultArchive(
         activeUserID: legacyArchive.activeUserID,
         accounts: legacyArchive.accounts.map {
@@ -271,6 +290,52 @@ actor KeychainAccountVault: AccountVault {
     }
   }
 
+  private func validate(_ archive: AccountVaultArchiveV2) throws {
+    try validateLegacyArchive(
+      activeUserID: archive.activeUserID,
+      accounts: archive.accounts.map {
+        ($0.id, $0.username, $0.displayName, $0.bduss, $0.createdAt, $0.updatedAt)
+      }
+    )
+  }
+
+  private func validate(_ archive: AccountVaultArchiveV1) throws {
+    try validateLegacyArchive(
+      activeUserID: archive.activeUserID,
+      accounts: archive.accounts.map {
+        ($0.id, $0.username, $0.displayName, $0.bduss, $0.createdAt, $0.updatedAt)
+      }
+    )
+  }
+
+  private func validateLegacyArchive(
+    activeUserID: Int64?,
+    accounts: [
+      (
+        id: Int64, username: String, displayName: String, bduss: String,
+        createdAt: Date, updatedAt: Date
+      )
+    ]
+  ) throws {
+    guard accounts.count <= Self.maximumAccounts else {
+      throw AccountVaultError.tooManyAccounts
+    }
+    var seen = Set<Int64>()
+    guard accounts.allSatisfy({ account in
+      seen.insert(account.id).inserted
+        && account.id > 0
+        && !account.username.contains(where: { $0.isNewline })
+        && !account.displayName.contains(where: { $0.isNewline })
+        && AccountCredentialFormat.isValidBDUSS(account.bduss)
+        && account.createdAt <= account.updatedAt
+    }) else {
+      throw AccountVaultError.invalidArchive
+    }
+    if let activeUserID, !accounts.contains(where: { $0.id == activeUserID }) {
+      throw AccountVaultError.invalidArchive
+    }
+  }
+
   private func save(_ archive: AccountVaultArchive) throws {
     let data: Data
     do {
@@ -297,14 +362,15 @@ actor KeychainAccountVault: AccountVault {
     session.id > 0
       && !session.username.contains(where: { $0.isNewline })
       && !session.displayName.contains(where: { $0.isNewline })
-      && session.bduss.count == 192
-      && session.bduss.allSatisfy { $0.isASCII && !$0.isWhitespace }
+      && AccountCredentialFormat.isValidBDUSS(session.bduss)
+      && (session.stoken.map { AccountCredentialFormat.isValidSTOKEN($0) } ?? true)
+      && (session.stoken != nil || session.bdussCookieName == .bduss)
       && session.createdAt <= session.updatedAt
   }
 }
 
 private struct AccountVaultArchive: Codable {
-  static let currentVersion = 2
+  static let currentVersion = 3
 
   var version = currentVersion
   var activeUserID: Int64?
@@ -318,6 +384,59 @@ private struct AccountVaultArchive: Codable {
 
 private struct AccountVaultArchiveHeader: Decodable {
   let version: Int
+}
+
+private struct AccountVaultArchiveV2: Decodable {
+  static let supportedVersion = 2
+
+  let activeUserID: Int64?
+  let accounts: [StoredAccountSessionV2]
+
+  private enum CodingKeys: CodingKey {
+    case version
+    case activeUserID
+    case accounts
+  }
+
+  init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    let version = try container.decode(Int.self, forKey: .version)
+    guard version == Self.supportedVersion else {
+      throw DecodingError.dataCorruptedError(
+        forKey: .version,
+        in: container,
+        debugDescription: "Unexpected account archive version."
+      )
+    }
+    activeUserID = try container.decodeIfPresent(Int64.self, forKey: .activeUserID)
+    accounts = try container.decode([StoredAccountSessionV2].self, forKey: .accounts)
+  }
+}
+
+private struct StoredAccountSessionV2: Decodable {
+  let id: Int64
+  let username: String
+  let displayName: String
+  let portrait: String
+  let bduss: String
+  let createdAt: Date
+  let updatedAt: Date
+  let sessionRevision: UUID
+
+  func migrated() -> StoredAccountSession {
+    StoredAccountSession(
+      id: id,
+      username: username,
+      displayName: displayName,
+      portrait: portrait,
+      bduss: bduss,
+      stoken: nil,
+      bdussCookieName: .bduss,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      sessionRevision: sessionRevision
+    )
+  }
 }
 
 private struct AccountVaultArchiveV1: Decodable {
@@ -363,6 +482,8 @@ private struct StoredAccountSessionV1: Decodable {
       displayName: displayName,
       portrait: portrait,
       bduss: bduss,
+      stoken: nil,
+      bdussCookieName: .bduss,
       createdAt: createdAt,
       updatedAt: updatedAt,
       sessionRevision: sessionRevision

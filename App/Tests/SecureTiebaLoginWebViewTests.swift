@@ -143,206 +143,185 @@ final class SecureTiebaLoginWebViewTests: XCTestCase {
     )
   }
 
-  func testCredentialCaptureAcceptsOnlyParentDomainBDUSS() throws {
-    let unrelated = [
-      try cookie(name: "BDUSS", value: String(repeating: "x", count: 192), domain: ".example.com")
-    ]
-    XCTAssertNil(TiebaLoginNavigationPolicy.credentials(from: unrelated))
+  func testCredentialCaptureRequiresACompletePairFromOneSnapshot() throws {
+    let bduss = try cookie(name: "BDUSS", value: validBDUSS, domain: ".baidu.com")
+    let stoken = try cookie(
+      name: "STOKEN", value: validSTOKEN, domain: ".tieba.baidu.com"
+    )
 
-    let cookies = unrelated + [
-      try cookie(name: "BDUSS", value: String(repeating: "b", count: 192), domain: ".baidu.com"),
-      try cookie(name: "STOKEN", value: String(repeating: "s", count: 64), domain: ".tieba.baidu.com"),
-      try cookie(
-        name: "BDUSS",
-        value: String(repeating: "m", count: 192),
-        domain: ".baidu.com",
-        path: "/passport",
-        expires: Date(timeIntervalSinceNow: 7_200)
-      ),
-    ]
-    let credentials = try XCTUnwrap(TiebaLoginNavigationPolicy.credentials(from: cookies))
-    XCTAssertEqual(credentials.bduss.count, 192)
-    XCTAssertEqual(credentials.bduss.first, "b")
+    XCTAssertNil(TiebaLoginNavigationPolicy.credentials(from: [bduss]))
+    XCTAssertNil(TiebaLoginNavigationPolicy.credentials(from: [stoken]))
+
+    let credentials = try XCTUnwrap(
+      TiebaLoginNavigationPolicy.credentials(from: [bduss, stoken])
+    )
+    XCTAssertEqual(credentials.bduss, validBDUSS)
+    XCTAssertEqual(credentials.stoken, validSTOKEN)
+    XCTAssertEqual(credentials.bdussCookieName, .bduss)
   }
 
-  func testCredentialCapturePrefersSecureBFESSOverBDUSSRegardlessOfExpiry() throws {
+  func testCredentialCapturePreservesActualBFESSCookieName() throws {
     let credentials = try XCTUnwrap(
       TiebaLoginNavigationPolicy.credentials(from: [
         try cookie(
-          name: "BDUSS",
+          name: "bduss",
           value: String(repeating: "b", count: 192),
           domain: ".baidu.com",
           expires: Date(timeIntervalSinceNow: 7_200)
         ),
         try cookie(
-          name: "BDUSS_BFESS",
+          name: "bduss_bfess",
           value: String(repeating: "f", count: 192),
           domain: "baidu.com",
           expires: Date(timeIntervalSinceNow: 3_600)
         ),
+        try cookie(name: "stoken", value: validSTOKEN, domain: "tieba.baidu.com"),
       ])
     )
 
     XCTAssertEqual(credentials.bduss.first, "f")
+    XCTAssertEqual(credentials.bdussCookieName, .bdussBFESS)
   }
 
-  func testCredentialCaptureFallsBackFromExpiredBFESSToSecureBDUSS() throws {
-    let credentials = try XCTUnwrap(
-      TiebaLoginNavigationPolicy.credentials(from: [
-        try cookie(
-          name: "BDUSS_BFESS",
-          value: String(repeating: "f", count: 192),
-          domain: ".baidu.com",
-          expires: Date(timeIntervalSinceNow: -60)
-        ),
-        try cookie(
-          name: "BDUSS",
-          value: String(repeating: "b", count: 192),
-          domain: ".baidu.com",
-          expires: nil
-        ),
-      ])
-    )
+  func testSecureCookiesPrecedeNewerNonSecureCandidates() throws {
+    let cookies = [
+      try cookie(
+        name: "BDUSS",
+        value: String(repeating: "b", count: 192),
+        domain: ".baidu.com",
+        expires: Date(timeIntervalSinceNow: 3_600)
+      ),
+      try cookie(
+        name: "BDUSS_BFESS",
+        value: String(repeating: "f", count: 192),
+        domain: ".baidu.com",
+        secure: false,
+        expires: Date(timeIntervalSinceNow: 7_200)
+      ),
+      try cookie(
+        name: "STOKEN",
+        value: String(repeating: "s", count: 64),
+        domain: ".tieba.baidu.com",
+        expires: Date(timeIntervalSinceNow: 3_600)
+      ),
+      try cookie(
+        name: "STOKEN",
+        value: String(repeating: "n", count: 64),
+        domain: ".tieba.baidu.com",
+        secure: false,
+        expires: Date(timeIntervalSinceNow: 7_200)
+      ),
+    ]
 
-    XCTAssertEqual(credentials.bduss.first, "b")
-  }
-
-  func testNonSecureCredentialFallbackRequiresExplicitIsolatedHTTPSPolicy() throws {
-    let nonSecureBDUSS = try cookie(
-      name: "BDUSS",
-      value: String(repeating: "b", count: 192),
-      domain: ".baidu.com",
-      secure: false,
-      expires: nil
-    )
-    XCTAssertNil(TiebaLoginNavigationPolicy.credentials(from: [nonSecureBDUSS]))
-
-    let credentials = try XCTUnwrap(
-      TiebaLoginNavigationPolicy.credentials(
-        from: [nonSecureBDUSS],
-        cookiePolicy: .isolatedHTTPSLoginCompletion
-      )
-    )
-    XCTAssertEqual(credentials.bduss.first, "b")
-
-    let nonSecureBFESS = try cookie(
-      name: "BDUSS_BFESS",
-      value: String(repeating: "f", count: 192),
-      domain: ".baidu.com",
-      secure: false
-    )
-    let preferred = try XCTUnwrap(
-      TiebaLoginNavigationPolicy.credentials(
-        from: [nonSecureBDUSS, nonSecureBFESS],
-        cookiePolicy: .isolatedHTTPSLoginCompletion
-      )
-    )
-    XCTAssertEqual(preferred.bduss.first, "f")
-  }
-
-  func testSecureBDUSSAlwaysPrecedesNewerNonSecureBFESS() throws {
-    let secureBDUSS = try cookie(
-      name: "BDUSS",
-      value: String(repeating: "b", count: 192),
-      domain: ".baidu.com",
-      expires: Date(timeIntervalSinceNow: 3_600)
-    )
-    let nonSecureBFESS = try cookie(
-      name: "BDUSS_BFESS",
-      value: String(repeating: "f", count: 192),
-      domain: ".baidu.com",
-      secure: false,
-      expires: Date(timeIntervalSinceNow: 7_200)
-    )
-
-    for cookies in [[secureBDUSS, nonSecureBFESS], [nonSecureBFESS, secureBDUSS]] {
+    for orderedCookies in [cookies, Array(cookies.reversed())] {
       let credentials = try XCTUnwrap(
         TiebaLoginNavigationPolicy.credentials(
-          from: cookies,
+          from: orderedCookies,
           cookiePolicy: .isolatedHTTPSLoginCompletion
         )
       )
       XCTAssertEqual(credentials.bduss.first, "b")
+      XCTAssertEqual(credentials.stoken.first, "s")
+      XCTAssertEqual(credentials.bdussCookieName, .bduss)
     }
   }
 
-  func testNonSecureFallbackRetainsDomainPathExpiryAndFormatBoundaries() throws {
-    let validBDUSS = String(repeating: "b", count: 192)
-    let invalidCookies = [
+  func testNonSecurePairRequiresExplicitIsolatedHTTPSPolicy() throws {
+    let cookies = try credentialCookies(secure: false)
+    XCTAssertNil(TiebaLoginNavigationPolicy.credentials(from: cookies))
+
+    let credentials = try XCTUnwrap(
+      TiebaLoginNavigationPolicy.credentials(
+        from: cookies,
+        cookiePolicy: .isolatedHTTPSLoginCompletion
+      )
+    )
+    XCTAssertEqual(credentials.bduss, validBDUSS)
+    XCTAssertEqual(credentials.stoken, validSTOKEN)
+  }
+
+  func testCredentialCaptureEnforcesExactDomainsPathsExpiryAndLengths() throws {
+    let validBDUSSCookie = try cookie(
+      name: "BDUSS", value: validBDUSS, domain: ".baidu.com"
+    )
+    let validSTOKENCookie = try cookie(
+      name: "STOKEN", value: validSTOKEN, domain: ".tieba.baidu.com"
+    )
+    let invalidBDUSSCookies = [
+      try cookie(name: "BDUSS", value: validBDUSS, domain: ".tieba.baidu.com"),
+      try cookie(name: "BDUSS", value: validBDUSS, domain: ".sub.baidu.com"),
+      try cookie(name: "BDUSS", value: validBDUSS, domain: ".baidu.com", path: "/login"),
       try cookie(
-        name: "BDUSS", value: validBDUSS, domain: ".tieba.baidu.com", secure: false
+        name: "BDUSS", value: validBDUSS, domain: ".baidu.com",
+        expires: Date(timeIntervalSinceNow: -60)
+      ),
+      try cookie(name: "BDUSS", value: String(repeating: "b", count: 191), domain: ".baidu.com"),
+    ]
+    let invalidSTOKENCookies = [
+      try cookie(name: "STOKEN", value: validSTOKEN, domain: ".baidu.com"),
+      try cookie(name: "STOKEN", value: validSTOKEN, domain: ".sub.tieba.baidu.com"),
+      try cookie(
+        name: "STOKEN", value: validSTOKEN, domain: ".tieba.baidu.com", path: "/login"
       ),
       try cookie(
-        name: "BDUSS", value: validBDUSS, domain: ".baidu.com", path: "/passport",
-        secure: false
-      ),
-      try cookie(
-        name: "BDUSS", value: validBDUSS, domain: ".baidu.com", secure: false,
+        name: "STOKEN", value: validSTOKEN, domain: ".tieba.baidu.com",
         expires: Date(timeIntervalSinceNow: -60)
       ),
       try cookie(
-        name: "BDUSS", value: String(repeating: "b", count: 191), domain: ".baidu.com",
-        secure: false
-      ),
-      try cookie(
-        name: "BDUSS", value: String(repeating: "b", count: 191) + " ",
-        domain: ".baidu.com", secure: false
+        name: "STOKEN", value: String(repeating: "s", count: 63),
+        domain: ".tieba.baidu.com"
       ),
     ]
 
-    for cookie in invalidCookies {
+    for cookie in invalidBDUSSCookies {
       XCTAssertNil(
-        TiebaLoginNavigationPolicy.credentials(
-          from: [cookie],
-          cookiePolicy: .isolatedHTTPSLoginCompletion
-        )
+        TiebaLoginNavigationPolicy.credentials(from: [cookie, validSTOKENCookie])
+      )
+    }
+    for cookie in invalidSTOKENCookies {
+      XCTAssertNil(
+        TiebaLoginNavigationPolicy.credentials(from: [validBDUSSCookie, cookie])
       )
     }
   }
 
-  func testCredentialCaptureRejectsWrongDomainOrMalformedValues() throws {
-    let wrongDomain = [
-      try cookie(
-        name: "BDUSS",
-        value: String(repeating: "b", count: 192),
-        domain: ".tieba.baidu.com"
-      )
-    ]
-    XCTAssertNil(TiebaLoginNavigationPolicy.credentials(from: wrongDomain))
+  func testCredentialCaptureRejectsRFC6265UnsafeOctetsInEitherSecret() throws {
+    let forbiddenSuffixes = [" ", "\t", "\"", ",", ";", "\\"]
 
-    let malformed = [
-      try cookie(name: "BDUSS", value: "short", domain: ".baidu.com")
-    ]
-    XCTAssertNil(TiebaLoginNavigationPolicy.credentials(from: malformed))
-  }
-
-  func testCredentialCaptureRejectsInsecureExpiredAndWhitespaceValues() throws {
-    let validBDUSS = String(repeating: "b", count: 192)
-
-    XCTAssertNil(
-      TiebaLoginNavigationPolicy.credentials(from: [
-        try cookie(name: "BDUSS", value: validBDUSS, domain: ".baidu.com", secure: false)
-      ])
-    )
-    XCTAssertNil(
-      TiebaLoginNavigationPolicy.credentials(from: [
-        try cookie(
-          name: "BDUSS",
-          value: validBDUSS,
-          domain: ".baidu.com",
-          expires: Date(timeIntervalSinceNow: -60)
+    for suffix in forbiddenSuffixes {
+      let invalidBDUSS = String(repeating: "b", count: 191) + suffix
+      let invalidSTOKEN = String(repeating: "s", count: 63) + suffix
+      XCTAssertFalse(AccountCredentialFormat.isValidBDUSS(invalidBDUSS))
+      XCTAssertFalse(AccountCredentialFormat.isValidSTOKEN(invalidSTOKEN))
+      if let bdussCookie = HTTPCookie(
+        properties: cookieProperties(
+          name: "BDUSS", value: invalidBDUSS, domain: ".baidu.com"
         )
-      ])
-    )
-    XCTAssertNil(
-      TiebaLoginNavigationPolicy.credentials(from: [
-        try cookie(
-          name: "BDUSS",
-          value: String(repeating: "b", count: 191) + " ",
-          domain: ".baidu.com"
+      ) {
+        XCTAssertNil(
+          TiebaLoginNavigationPolicy.credentials(
+            from: [
+              bdussCookie,
+              try cookie(name: "STOKEN", value: validSTOKEN, domain: ".tieba.baidu.com"),
+            ]
+          )
         )
-      ])
-    )
+      }
+      if let stokenCookie = HTTPCookie(
+        properties: cookieProperties(
+          name: "STOKEN", value: invalidSTOKEN, domain: ".tieba.baidu.com"
+        )
+      ) {
+        XCTAssertNil(
+          TiebaLoginNavigationPolicy.credentials(
+            from: [
+              try cookie(name: "BDUSS", value: validBDUSS, domain: ".baidu.com"),
+              stokenCookie,
+            ]
+          )
+        )
+      }
+    }
   }
 
   func testCredentialRetryPolicyStopsAtItsBound() {
@@ -377,18 +356,67 @@ final class SecureTiebaLoginWebViewTests: XCTestCase {
       return XCTFail("Expected the first missing-cookie attempt to retry")
     }
 
-    let expected = String(repeating: "b", count: 192)
-    guard case .captured(let credentials) = policy.evaluate(AccountCredentials(bduss: expected))
+    let expected = AccountCredentials(
+      bduss: validBDUSS,
+      stoken: validSTOKEN,
+      bdussCookieName: .bduss
+    )
+    guard case .captured(let credentials) = policy.evaluate(expected)
     else {
       return XCTFail("Expected credentials to finish the capture")
     }
 
-    XCTAssertEqual(credentials.bduss, expected)
+    XCTAssertEqual(credentials.bduss, expected.bduss)
+    XCTAssertEqual(credentials.stoken, expected.stoken)
     XCTAssertEqual(policy.completedAttempts, 2)
     XCTAssertTrue(policy.isTerminal)
-    guard case .ignored = policy.evaluate(AccountCredentials(bduss: expected)) else {
+    guard case .ignored = policy.evaluate(expected) else {
       return XCTFail("Expected late credentials to be ignored")
     }
+  }
+
+  func testCredentialRetryDoesNotCombineSecretsAcrossSnapshots() throws {
+    var policy = TiebaLoginCredentialRetryPolicy()
+    let bdussOnly = [
+      try cookie(name: "BDUSS", value: validBDUSS, domain: ".baidu.com")
+    ]
+    guard
+      case .retry = policy.evaluate(
+        TiebaLoginNavigationPolicy.credentials(from: bdussOnly)
+      )
+    else { return XCTFail("Expected an incomplete first snapshot to retry") }
+
+    let stokenOnly = [
+      try cookie(name: "STOKEN", value: validSTOKEN, domain: ".tieba.baidu.com")
+    ]
+    guard
+      case .retry = policy.evaluate(
+        TiebaLoginNavigationPolicy.credentials(from: stokenOnly)
+      )
+    else { return XCTFail("Expected an unrelated half snapshot to retry") }
+
+    guard
+      case .captured(let credentials) = policy.evaluate(
+        TiebaLoginNavigationPolicy.credentials(from: try credentialCookies())
+      )
+    else { return XCTFail("Expected the later complete snapshot to finish") }
+    XCTAssertEqual(credentials.bduss, validBDUSS)
+    XCTAssertEqual(credentials.stoken, validSTOKEN)
+    XCTAssertEqual(policy.completedAttempts, 3)
+  }
+
+  private var validBDUSS: String { String(repeating: "b", count: 192) }
+  private var validSTOKEN: String { String(repeating: "s", count: 64) }
+
+  private func credentialCookies(secure: Bool = true) throws -> [HTTPCookie] {
+    [
+      try cookie(
+        name: "BDUSS", value: validBDUSS, domain: ".baidu.com", secure: secure
+      ),
+      try cookie(
+        name: "STOKEN", value: validSTOKEN, domain: ".tieba.baidu.com", secure: secure
+      ),
+    ]
   }
 
   private func cookie(
@@ -399,6 +427,27 @@ final class SecureTiebaLoginWebViewTests: XCTestCase {
     secure: Bool = true,
     expires: Date? = Date(timeIntervalSinceNow: 3_600)
   ) throws -> HTTPCookie {
+    let properties = cookieProperties(
+      name: name,
+      value: value,
+      domain: domain,
+      path: path,
+      secure: secure,
+      expires: expires
+    )
+    return try XCTUnwrap(
+      HTTPCookie(properties: properties)
+    )
+  }
+
+  private func cookieProperties(
+    name: String,
+    value: String,
+    domain: String,
+    path: String = "/",
+    secure: Bool = true,
+    expires: Date? = Date(timeIntervalSinceNow: 3_600)
+  ) -> [HTTPCookiePropertyKey: Any] {
     var properties: [HTTPCookiePropertyKey: Any] = [
       .name: name,
       .value: value,
@@ -411,8 +460,6 @@ final class SecureTiebaLoginWebViewTests: XCTestCase {
     if secure {
       properties[.secure] = "TRUE"
     }
-    return try XCTUnwrap(
-      HTTPCookie(properties: properties)
-    )
+    return properties
   }
 }

@@ -37,6 +37,23 @@ enum TiebaAuthenticatedDecoder {
     )
   }
 
+  static func webAccountID(from body: Data) throws -> Int64 {
+    let object = try responseObject(from: body)
+    guard object["no"] != nil, let result = int64(object["no"]) else {
+      throw TiebaClientError.invalidJSON
+    }
+    try checkServerError(object)
+    guard
+      result == 0,
+      let data = object["data"] as? [String: Any],
+      let userID = int64(data["id"]),
+      userID > 0
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    return userID
+  }
+
   static func followedForums(
     from body: Data,
     page: Int,
@@ -65,6 +82,44 @@ enum TiebaAuthenticatedDecoder {
         hasMore: hasMore,
         hasPrevious: page > 1
       )
+    )
+  }
+
+  static func cloudFavorites(
+    from body: Data,
+    expectedUserID: Int64,
+    offset: Int,
+    pageSize: Int
+  ) throws -> TiebaCloudFavoritePage {
+    let object = try responseObject(from: body)
+    try checkServerError(object)
+    guard
+      expectedUserID > 0,
+      offset >= 0,
+      pageSize > 0
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+
+    guard let rawFavorites = object["store_thread"] as? [Any] else {
+      throw TiebaClientError.invalidJSON
+    }
+    guard rawFavorites.count <= pageSize, offset <= Int.max - pageSize else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+
+    let favorites = try rawFavorites.map { rawFavorite -> TiebaCloudFavorite in
+      guard let rawFavorite = rawFavorite as? [String: Any] else {
+        throw TiebaClientError.invalidJSON
+      }
+      return try cloudFavorite(rawFavorite)
+    }
+    return TiebaCloudFavoritePage(
+      requestedUserID: expectedUserID,
+      favorites: favorites,
+      offset: offset,
+      pageSize: pageSize,
+      hasMore: !favorites.isEmpty
     )
   }
 
@@ -637,6 +692,7 @@ enum TiebaAuthenticatedDecoder {
   ) -> String {
     string(object["error_msg"])
       ?? string(object["errmsg"])
+      ?? string(object["error"])
       ?? string(nestedError?["usermsg"])
       ?? string(nestedError?["errmsg"])
       ?? ""
@@ -657,6 +713,67 @@ enum TiebaAuthenticatedDecoder {
       name: name,
       level: Int(clamping: int64(object["level_id"]) ?? 0),
       experience: Int(clamping: int64(object["cur_score"]) ?? 0)
+    )
+  }
+
+  private static func cloudFavorite(_ object: [String: Any]) throws -> TiebaCloudFavorite {
+    guard
+      let threadID = int64(object["thread_id"]), threadID > 0,
+      let title = string(object["title"]),
+      let forumName = string(object["forum_name"]),
+      let authorObject = object["author"] as? [String: Any],
+      let isDeleted = int64(object["is_deleted"]), isDeleted == 0 || isDeleted == 1,
+      let lastTimestamp = int64(object["last_time"]), lastTimestamp >= 0,
+      let threadTypeValue = int64(object["type"]), threadTypeValue >= 0,
+      let statusValue = int64(object["status"]), statusValue >= 0,
+      let maximumPostID = int64(object["max_pid"]), maximumPostID >= 0,
+      let minimumPostID = int64(object["min_pid"]), minimumPostID >= 0,
+      let markedPostID = int64(object["mark_pid"]), markedPostID >= 0,
+      let markStatusValue = int64(object["mark_status"]), markStatusValue >= 0,
+      let postNumberValue = int64(object["post_no"]), postNumberValue >= 0,
+      let postNumberMessage = string(object["post_no_msg"]),
+      let updateCountValue = int64(object["count"]), updateCountValue >= 0,
+      let threadType = Int(exactly: threadTypeValue),
+      let status = Int(exactly: statusValue),
+      let markStatus = Int(exactly: markStatusValue),
+      let postNumber = Int(exactly: postNumberValue),
+      let updateCount = Int(exactly: updateCountValue)
+    else {
+      throw TiebaClientError.invalidJSON
+    }
+
+    let authorID: Int64?
+    if authorObject["lz_uid"] == nil || authorObject["lz_uid"] is NSNull {
+      authorID = nil
+    } else if let value = string(authorObject["lz_uid"]), value.isEmpty {
+      authorID = nil
+    } else if let value = int64(authorObject["lz_uid"]), value >= 0 {
+      authorID = value == 0 ? nil : value
+    } else {
+      throw TiebaClientError.invalidJSON
+    }
+
+    return TiebaCloudFavorite(
+      id: threadID,
+      title: title,
+      forumName: forumName,
+      author: TiebaCloudFavoriteAuthor(
+        userID: authorID,
+        username: string(authorObject["name"]) ?? "",
+        displayName: string(authorObject["name_show"]) ?? "",
+        portrait: string(authorObject["user_portrait"]) ?? ""
+      ),
+      isDeleted: isDeleted == 1,
+      lastTimestamp: lastTimestamp,
+      threadType: threadType,
+      status: status,
+      maximumPostID: maximumPostID,
+      minimumPostID: minimumPostID,
+      markedPostID: markedPostID,
+      markStatus: markStatus,
+      postNumber: postNumber,
+      postNumberMessage: postNumberMessage,
+      updateCount: updateCount
     )
   }
 

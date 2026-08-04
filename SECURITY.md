@@ -16,13 +16,20 @@ allowed hosts are rejected.
 The login view contains the only app-controlled `WKWebView`. It uses
 `WKWebsiteDataStore.nonPersistent()`, accepts main-frame navigation only on an
 exact first-party host allowlist over HTTPS on the standard port, and captures
-only a structurally valid `BDUSS_BFESS` or `BDUSS` cookie after an expected
-Tieba `/index/tbwise/` account-page callback. Secure candidates always precede
+only a structurally valid `BDUSS_BFESS` or `BDUSS` cookie and a structurally
+valid `STOKEN` from the same Cookie-store snapshot after an expected Tieba
+`/index/tbwise/` account-page callback. BDUSS candidates must belong exactly to
+`baidu.com`; STOKEN must belong exactly to `tieba.baidu.com`. Both require root
+paths, unexpired metadata, 192- or 64-byte values respectively, and RFC 6265
+cookie-octets. Secure candidates always precede
 non-Secure candidates. A non-Secure metadata fallback is permitted only when no
 eligible Secure candidate exists, the current callback is still on the exact
 HTTPS Tieba host and account path, and the WebKit data store is confirmed to be
-nonpersistent. The selected value must still pass the isolated, redirect-free
-`/c/s/login` validation before Keychain storage. Cookie-store propagation is
+nonpersistent. The selected pair must still pass the isolated, redirect-free
+signed `/c/s/login` validation and an independent HTTPS Web identity probe; the
+two responses must return the same positive UID before Keychain storage. The
+Web probe sends only the actual captured BDUSS Cookie name and STOKEN, rejects
+all redirects, and is limited to 256 KiB. Cookie-store propagation is
 retried a bounded number of times, and exhaustion is reported instead of
 leaving the login flow pending. The store is erased when the view is dismantled.
 The app must never inject JavaScript to read passwords, persist the full cookie
@@ -36,12 +43,16 @@ Account sessions are a bounded, versioned archive stored as a generic-password
 Keychain item with `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`, data
 protection Keychain enabled, and synchronization disabled. Only nonsecret
 account summaries may leave the vault. Malformed or future-version archives
-must not be overwritten. The stored BDUSS must remain redacted from
-descriptions, debug mirrors, errors, analytics, and logs.
-Archive v2 adds one random, nonsecret session-revision UUID to each account. A
-valid v1 archive is fully decoded and validated before those revisions are
-generated and the migrated archive is written back; invalid legacy data remains
-untouched. The revision stays stable across ordinary reads and account switches,
+must not be overwritten. Stored BDUSS and STOKEN values must never be
+interpolated by client-owned descriptions, debug mirrors, App-visible errors,
+analytics, or logs. Direct Core callers must treat server-provided error text as
+untrusted and must not log it because a server can echo request data.
+Archive v2 adds one random, nonsecret session-revision UUID to each account.
+Archive v3 adds optional STOKEN and the actual BDUSS Cookie name. A valid v1
+archive is fully decoded and validated before those revisions are generated;
+v2 preserves its existing revision. Both migrate atomically with `stoken = nil`
+and the legacy BDUSS Cookie name, while invalid legacy data remains untouched.
+The revision stays stable across ordinary reads and account switches,
 but every validated upsert of an existing UID rotates it even when the device
 clock repeats or moves backwards. Account write results, recovery reads, and
 check-in notifications must match both UID and revision before changing current
@@ -66,6 +77,17 @@ Authenticated account, followed-forum, forum-state probe, and write responses
 have endpoint-specific transfer limits before decoding. MD5 is used only for
 compatibility with the unofficial request signature protocol, not for password
 storage or verification.
+
+Read-only cloud favorites require a complete v3 session. They use one signed
+HTTPS POST to `https://tiebac.baidu.com/c/f/post/threadstore` containing exactly
+`BDUSS`, `_client_version`, `offset`, `rn`, `stoken`, `user_id`, and `sign`, the
+expected UID in `client_user_token`, and only `ka=open` in the Cookie header. No
+`tbs`, CUID, hardware identifier, or credential Cookie is allowed. Responses are
+limited to 2 MiB. Core carries the request's expected UID as request context; it
+is not a UID assertion from the response, which has no identity field. The App
+checks `userID + sessionRevision` before and after every page request. Cloud
+favorites remain in memory and separate from local favorites. Add, remove, bulk
+sync, and saved-position writes are not implemented.
 
 Private ReplyMe and AtMe lists are foreground-only authenticated reads. ReplyMe
 must use `https://tiebac.baidu.com/c/u/feed/replyme?cmd=303007` with a Protobuf
@@ -173,12 +195,14 @@ creation, replying, editing, deletion, reporting, and every other authenticated
 content write remain unsupported and must not be inferred from the approval
 endpoint.
 
-STOKEN is neither extracted nor persisted. An endpoint that actually requires
-it remains unsupported until a login flow can verify that BDUSS and STOKEN
-belong to the same returned account. Server-side thread favorites are therefore
-blocked. The current unfollow, check-in, and content-approval requests
-deliberately omit STOKEN and must fail visibly rather than fall back to a second
-write endpoint or add hardware-derived device metadata.
+STOKEN is available only through a validated complete session and only to an
+endpoint whose contract explicitly requires it. The current unfollow, check-in,
+and content-approval requests deliberately omit STOKEN and must fail visibly
+rather than fall back to a second write endpoint or add hardware-derived device
+metadata. Before any STOKEN-dependent write is enabled, disposable-account tests
+must prove the behavior of valid, random, cross-account, and expired STOKEN
+pairs; a read-only identity or favorites response is not sufficient evidence for
+safe write behavior.
 
 Anonymous public-profile requests must use the protocol's guest target fields.
 They must not place the target user in the current-account field, attach account

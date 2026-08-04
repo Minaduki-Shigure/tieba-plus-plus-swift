@@ -14,6 +14,37 @@ public struct TiebaBDUSSCredential:
   public var customMirror: Mirror { Mirror(self, children: [:], displayStyle: .struct) }
 }
 
+public enum TiebaBDUSSCookieName: String, Codable, Sendable, Hashable {
+  case bduss = "BDUSS"
+  case bdussBFESS = "BDUSS_BFESS"
+}
+
+public struct TiebaSessionCredential:
+  Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  public let bduss: String
+  public let stoken: String
+  public let bdussCookieName: TiebaBDUSSCookieName
+
+  public init(
+    bduss: String,
+    stoken: String,
+    bdussCookieName: TiebaBDUSSCookieName
+  ) {
+    self.bduss = bduss
+    self.stoken = stoken
+    self.bdussCookieName = bdussCookieName
+  }
+
+  public var bdussCredential: TiebaBDUSSCredential {
+    TiebaBDUSSCredential(bduss: bduss)
+  }
+
+  public var description: String { "TiebaSessionCredential(redacted)" }
+  public var debugDescription: String { description }
+  public var customMirror: Mirror { Mirror(self, children: [:], displayStyle: .struct) }
+}
+
 public struct TiebaAuthenticatedAccount:
   Sendable, Hashable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
 {
@@ -59,6 +90,105 @@ public struct TiebaFollowedForumPage: Sendable, Hashable {
     self.forums = forums
     self.pagination = pagination
   }
+}
+
+public struct TiebaCloudFavoriteAuthor: Sendable, Hashable {
+  public let userID: Int64?
+  public let username: String
+  public let displayName: String
+  public let portrait: String
+
+  public init(
+    userID: Int64?,
+    username: String,
+    displayName: String,
+    portrait: String
+  ) {
+    self.userID = userID
+    self.username = username
+    self.displayName = displayName
+    self.portrait = portrait
+  }
+
+  public var preferredName: String {
+    displayName.isEmpty ? username : displayName
+  }
+}
+
+public struct TiebaCloudFavorite: Identifiable, Sendable, Hashable {
+  public let id: Int64
+  public let title: String
+  public let forumName: String
+  public let author: TiebaCloudFavoriteAuthor
+  public let isDeleted: Bool
+  public let lastTimestamp: Int64
+  public let threadType: Int
+  public let status: Int
+  public let maximumPostID: Int64
+  public let minimumPostID: Int64
+  public let markedPostID: Int64
+  public let markStatus: Int
+  public let postNumber: Int
+  public let postNumberMessage: String
+  public let updateCount: Int
+
+  public init(
+    id: Int64,
+    title: String,
+    forumName: String,
+    author: TiebaCloudFavoriteAuthor,
+    isDeleted: Bool,
+    lastTimestamp: Int64,
+    threadType: Int,
+    status: Int,
+    maximumPostID: Int64,
+    minimumPostID: Int64,
+    markedPostID: Int64,
+    markStatus: Int,
+    postNumber: Int,
+    postNumberMessage: String,
+    updateCount: Int
+  ) {
+    self.id = id
+    self.title = title
+    self.forumName = forumName
+    self.author = author
+    self.isDeleted = isDeleted
+    self.lastTimestamp = lastTimestamp
+    self.threadType = threadType
+    self.status = status
+    self.maximumPostID = maximumPostID
+    self.minimumPostID = minimumPostID
+    self.markedPostID = markedPostID
+    self.markStatus = markStatus
+    self.postNumber = postNumber
+    self.postNumberMessage = postNumberMessage
+    self.updateCount = updateCount
+  }
+}
+
+public struct TiebaCloudFavoritePage: Sendable, Hashable {
+  public let requestedUserID: Int64
+  public let favorites: [TiebaCloudFavorite]
+  public let offset: Int
+  public let pageSize: Int
+  public let hasMore: Bool
+
+  public init(
+    requestedUserID: Int64,
+    favorites: [TiebaCloudFavorite],
+    offset: Int,
+    pageSize: Int,
+    hasMore: Bool
+  ) {
+    self.requestedUserID = requestedUserID
+    self.favorites = favorites
+    self.offset = offset
+    self.pageSize = pageSize
+    self.hasMore = hasMore
+  }
+
+  public var nextOffset: Int { offset + pageSize }
 }
 
 public enum TiebaNotificationKind: Sendable, Hashable {

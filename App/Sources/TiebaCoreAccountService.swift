@@ -5,12 +5,21 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
   func validateAccount(
     credential: TiebaBDUSSCredential
   ) async throws -> TiebaAuthenticatedAccount
+  func validateSession(
+    credential: TiebaSessionCredential
+  ) async throws -> TiebaAuthenticatedAccount
   func getFollowedForums(
     credential: TiebaBDUSSCredential,
     userID: Int64,
     page: Int,
     pageSize: Int
   ) async throws -> TiebaFollowedForumPage
+  func getCloudFavorites(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    offset: Int,
+    pageSize: Int
+  ) async throws -> TiebaCloudFavoritePage
   func getNotifications(
     credential: TiebaBDUSSCredential,
     expectedUserID: Int64,
@@ -101,6 +110,21 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
 }
 
 extension TiebaAuthenticatedAccountClient {
+  func validateSession(
+    credential: TiebaSessionCredential
+  ) async throws -> TiebaAuthenticatedAccount {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
+  func getCloudFavorites(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    offset: Int,
+    pageSize: Int
+  ) async throws -> TiebaCloudFavoritePage {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
   func getNotifications(
     credential: TiebaBDUSSCredential,
     expectedUserID: Int64,
@@ -215,8 +239,8 @@ struct TiebaCoreAccountService: AccountService {
   func validate(credential: AccountCredentials) async throws -> ValidatedAccount {
     let response: TiebaAuthenticatedAccount
     do {
-      response = try await client.validateAccount(
-        credential: TiebaBDUSSCredential(bduss: credential.bduss)
+      response = try await client.validateSession(
+        credential: Self.coreSessionCredential(credential)
       )
     } catch is CancellationError {
       throw CancellationError()
@@ -227,6 +251,59 @@ struct TiebaCoreAccountService: AccountService {
       userID: response.userID,
       username: response.username,
       portrait: response.portrait
+    )
+  }
+
+  func cloudFavorites(
+    session: StoredAccountSession,
+    offset: Int,
+    pageSize: Int
+  ) async throws -> CloudFavoritePage {
+    guard let credentials = session.credentials else {
+      throw BrowseError.unavailable("此账户需要重新登录，才能安全读取贴吧收藏。")
+    }
+    let response: TiebaCloudFavoritePage
+    do {
+      response = try await client.getCloudFavorites(
+        credential: Self.coreSessionCredential(credentials),
+        expectedUserID: session.id,
+        offset: offset,
+        pageSize: pageSize
+      )
+      try Task.checkCancellation()
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.accountError(error)
+    }
+    guard
+      response.requestedUserID == session.id,
+      response.offset == offset,
+      response.pageSize == pageSize,
+      response.favorites.count <= pageSize,
+      response.nextOffset == offset + pageSize,
+      response.hasMore == !response.favorites.isEmpty
+    else {
+      throw BrowseError.unavailable("贴吧返回了不匹配的账户收藏，请重新加载后再试。")
+    }
+    return CloudFavoritePage(
+      userID: response.requestedUserID,
+      items: response.favorites.map { favorite in
+        CloudFavoriteThread(
+          id: favorite.id,
+          title: favorite.title,
+          forumName: favorite.forumName,
+          authorName: favorite.author.preferredName,
+          markPostID: favorite.markedPostID > 0 ? favorite.markedPostID : nil,
+          latestPostID: favorite.maximumPostID > 0 ? favorite.maximumPostID : nil,
+          latestFloor: favorite.postNumber > 0 ? favorite.postNumber : nil,
+          hasUpdates: favorite.updateCount > 0 && favorite.postNumber > 0,
+          isDeleted: favorite.isDeleted,
+          updatedAt: Self.cloudFavoriteDate(favorite.lastTimestamp)
+        )
+      },
+      nextOffset: response.hasMore ? response.nextOffset : nil,
+      hasMore: response.hasMore
     )
   }
 
@@ -563,6 +640,25 @@ struct TiebaCoreAccountService: AccountService {
       forumName: membership.forumName,
       isFollowed: membership.isFollowed
     )
+  }
+
+  private static func coreSessionCredential(
+    _ credential: AccountCredentials
+  ) -> TiebaSessionCredential {
+    let cookieName: TiebaBDUSSCookieName = switch credential.bdussCookieName {
+    case .bduss: .bduss
+    case .bdussBFESS: .bdussBFESS
+    }
+    return TiebaSessionCredential(
+      bduss: credential.bduss,
+      stoken: credential.stoken,
+      bdussCookieName: cookieName
+    )
+  }
+
+  private static func cloudFavoriteDate(_ timestamp: Int64) -> Date? {
+    guard timestamp > 0, timestamp <= 253_402_300_799 else { return nil }
+    return Date(timeIntervalSince1970: TimeInterval(timestamp))
   }
 
   static func inboxPageData(

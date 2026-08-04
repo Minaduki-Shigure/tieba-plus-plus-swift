@@ -91,8 +91,11 @@ the source metadata is updated to that tested IPA.
 - Home-screen shortcuts for locally saved forums
 - HTTPS-only, credential-free anonymous requests
 - Ephemeral, HTTPS-only Baidu Web login with an exact host allowlist
-- Device-only Keychain account storage, account switching, and local logout
+- Same-snapshot BDUSS/STOKEN capture, independent same-UID session binding,
+  device-only Keychain v3 storage, account switching, and local logout
 - Paginated followed-forum list for the active account
+- Separate read-only Tieba cloud favorites with offset pagination, saved-post
+  navigation, deleted-thread state, and account-lease isolation
 - Foreground ReplyMe and AtMe inbox with account-lease isolation, refresh,
   bounded pagination, and safe thread navigation
 - Authoritative per-forum account membership state with explicit follow and
@@ -111,17 +114,20 @@ the source metadata is updated to that tested IPA.
 
 ## Next milestones
 
-1. Real-device validation of canonical-topic, ordinary-floor, and full
+1. Real-device validation of full-session binding and the minimal HTTPS cloud
+   favorites list, including valid, random, cross-account, and expired STOKEN
+   cases and whether reading the list has any server-side side effect
+2. Real-device validation of canonical-topic, ordinary-floor, and full
    nested-reply approval/cancellation, plus single-forum check-in success,
    idempotent, server-error, uncertain-failure, and read-only reconciliation
    paths, followed by account switching and follow recovery checks
-2. Real-device validation of the minimal HTTPS ReplyMe and AtMe requests,
+3. Real-device validation of the minimal HTTPS ReplyMe and AtMe requests,
    including whether opening a list changes server unread state
-3. Safe BDUSS/STOKEN acquisition and same-account binding before any feature
-   that actually requires STOKEN; server-side favorites remain blocked on this
-4. Experimental plain-text reply workflows behind explicit risk confirmation,
+4. Explicit cloud-favorite add/remove and saved-position updates with fresh
+   state reconciliation and no retry after an uncertain write
+5. Experimental plain-text reply workflows behind explicit risk confirmation,
    anti-CSRF tests, and unknown-outcome handling
-5. Exact nested-notification positioning, broader settings parity, content
+6. Exact nested-notification positioning, broader settings parity, content
    creation, and moderation tools
 
 The foreground inbox deliberately does not copy TiebaLite's cleartext JSON
@@ -142,6 +148,18 @@ child reply; the first inbox milestone therefore opens the owning thread without
 claiming exact child positioning. It does not poll in the background, clear a
 local badge, or send a mark-read request. Whether list retrieval itself has an
 implicit server-side read effect remains a physical-device validation item.
+
+New Web logins capture one structurally valid BDUSS or BDUSS_BFESS and one
+STOKEN from the same ephemeral Cookie-store snapshot. The app checks the pair
+through signed app login and an independent Web identity request and persists it
+only when both return the same positive UID. These probes both carry BDUSS, so
+wrong-STOKEN negative cases remain a physical-device requirement rather than a
+proved server invariant. Keychain v1 and v2
+records migrate to v3 without inventing an STOKEN; existing BDUSS-only features
+continue to work, while cloud favorites require an explicit re-login. The cloud
+list uses an HTTPS-only, signed minimal form and returns no credential to the
+application model. Its rows remain separate from local favorites, and a
+`userID + sessionRevision` lease discards late pages after account changes.
 
 Tieba's anonymous post endpoint does not currently honor its nominal numeric
 floor-jump fields. The app therefore restores a stable post ID and offers page

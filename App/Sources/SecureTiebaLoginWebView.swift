@@ -58,45 +58,85 @@ enum TiebaLoginNavigationPolicy {
     cookiePolicy: CredentialCookiePolicy = .secureOnly
   ) -> AccountCredentials? {
     let now = Date()
-    var selected: (value: String, priority: Int, expires: Date)?
+    var selectedBDUSS:
+      (value: String, name: AccountBDUSSCookieName, priority: Int, expires: Date)?
+    var selectedSTOKEN: (value: String, priority: Int, expires: Date)?
 
     for cookie in cookies {
-      let namePriority: Int
+      let bdussCookieName: AccountBDUSSCookieName?
       if cookie.name.caseInsensitiveCompare("BDUSS_BFESS") == .orderedSame {
-        namePriority = 1
+        bdussCookieName = .bdussBFESS
       } else if cookie.name.caseInsensitiveCompare("BDUSS") == .orderedSame {
-        namePriority = 0
+        bdussCookieName = .bduss
       } else {
-        continue
+        bdussCookieName = nil
       }
 
-      let rawDomain = cookie.domain.lowercased()
-      let domain = rawDomain.hasPrefix(".") ? String(rawDomain.dropFirst()) : rawDomain
       let isUnexpired = cookie.expiresDate.map { $0 > now } ?? true
-      let value = cookie.value
       guard
-        domain == "baidu.com",
         cookie.path == "/",
         cookie.isSecure || cookiePolicy.allowsNonSecureFallback,
-        isUnexpired,
-        value.utf8.count == 192,
-        value.unicodeScalars.allSatisfy({ scalar in
-          scalar.value >= 0x21 && scalar.value <= 0x7E
-        })
+        isUnexpired
       else { continue }
 
       let expires = cookie.expiresDate ?? .distantFuture
-      let priority = (cookie.isSecure ? 2 : 0) + namePriority
-      if let current = selected {
-        guard
-          priority > current.priority
-            || (priority == current.priority && expires > current.expires)
-        else { continue }
+      let domain = normalizedCookieDomain(cookie.domain)
+
+      if let bdussCookieName,
+        domain == "baidu.com",
+        AccountCredentialFormat.isValidBDUSS(cookie.value)
+      {
+        let namePriority = bdussCookieName == .bdussBFESS ? 1 : 0
+        let priority = (cookie.isSecure ? 2 : 0) + namePriority
+        if shouldSelect(priority: priority, expires: expires, over: selectedBDUSS) {
+          selectedBDUSS = (cookie.value, bdussCookieName, priority, expires)
+        }
       }
-      selected = (value, priority, expires)
+
+      if cookie.name.caseInsensitiveCompare("STOKEN") == .orderedSame,
+        domain == "tieba.baidu.com",
+        AccountCredentialFormat.isValidSTOKEN(cookie.value)
+      {
+        let priority = cookie.isSecure ? 1 : 0
+        if shouldSelect(priority: priority, expires: expires, over: selectedSTOKEN) {
+          selectedSTOKEN = (cookie.value, priority, expires)
+        }
+      }
     }
 
-    return selected.map { AccountCredentials(bduss: $0.value) }
+    guard let selectedBDUSS, let selectedSTOKEN else { return nil }
+    return AccountCredentials(
+      bduss: selectedBDUSS.value,
+      stoken: selectedSTOKEN.value,
+      bdussCookieName: selectedBDUSS.name
+    )
+  }
+
+  private static func normalizedCookieDomain(_ rawDomain: String) -> String {
+    let domain = rawDomain.lowercased()
+    return domain.hasPrefix(".") ? String(domain.dropFirst()) : domain
+  }
+
+  private static func shouldSelect(
+    priority: Int,
+    expires: Date,
+    over candidate: (value: String, priority: Int, expires: Date)?
+  ) -> Bool {
+    guard let candidate else { return true }
+    return priority > candidate.priority
+      || (priority == candidate.priority && expires > candidate.expires)
+  }
+
+  private static func shouldSelect(
+    priority: Int,
+    expires: Date,
+    over candidate: (
+      value: String, name: AccountBDUSSCookieName, priority: Int, expires: Date
+    )?
+  ) -> Bool {
+    guard let candidate else { return true }
+    return priority > candidate.priority
+      || (priority == candidate.priority && expires > candidate.expires)
   }
 
   private static func allowsHTTPS(_ url: URL, hosts: Set<String>) -> Bool {

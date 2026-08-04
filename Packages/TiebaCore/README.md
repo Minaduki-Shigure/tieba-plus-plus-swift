@@ -56,9 +56,10 @@ if let userID = posts.posts[0].author?.id {
 }
 ```
 
-The authenticated client supports identity validation, followed forums,
-authoritative per-forum follow/check-in state, confirmed follow/unfollow, and
-explicit single-forum check-in. Core single-flights equivalent check-in calls
+The authenticated client supports BDUSS-only identity validation, full-session
+UID-consistency probes, followed forums, read-only Tieba cloud favorites, authoritative
+per-forum follow/check-in state, confirmed follow/unfollow, and explicit
+single-forum check-in. Core single-flights equivalent check-in calls
 and serializes conflicting check-in identities for one account and forum. The
 app's Keychain and account-service layers own persistence, credential-rotation
 leases, and mutual exclusion between follow and check-in. A conflicting App
@@ -90,6 +91,24 @@ if let forum = followed.forums.first {
         )
     }
 }
+```
+
+A newly captured web login can be bound before persistence, then used for the
+read-only cloud-favorites endpoint:
+
+```swift
+let sessionCredential = TiebaSessionCredential(
+    bduss: bduss,
+    stoken: stoken,
+    bdussCookieName: .bduss
+)
+let sessionAccount = try await authenticatedClient.validateSession(
+    credential: sessionCredential
+)
+let cloudFavorites = try await authenticatedClient.getCloudFavorites(
+    credential: sessionCredential,
+    expectedUserID: sessionAccount.userID
+)
 ```
 
 `getForumMembership` remains available for callers that need only
@@ -142,6 +161,20 @@ not advertise a usable sign state; it is not permission to attempt a write.
   are bounded to 20 topics, 20 unique categories, and 100 unique valid threads.
 - Requests identify as client type `2` and version `12.64.1.1` by default.
 - Account validation and authenticated read requests use version `22.6.5.1`.
+- Full-session validation signs an HTTPS `/c/s/login` request containing the
+  192-byte BDUSS and 64-byte STOKEN, then independently reads
+  `https://tieba.baidu.com/mo/q/newmoindex?need_user=1` with only the captured
+  `BDUSS` or `BDUSS_BFESS` cookie and `STOKEN`. Both responses must identify the
+  same positive user ID. Because both probes carry BDUSS, this does not by itself
+  prove rejection of a wrong STOKEN; negative cases remain a physical-device
+  validation requirement. The web response is limited to 256 KiB, cookie and
+  credential storage are disabled, and every redirect is rejected.
+- Read-only cloud favorites use fixed client version `11.10.8.6` and an HTTPS
+  POST to `/c/f/post/threadstore`. The form contains only `BDUSS`,
+  `_client_version`, `offset`, `rn`, `stoken`, `user_id`, and `sign`, with the
+  expected UID in `client_user_token` and only `ka=open` in the Cookie header.
+  Responses are limited to 2 MiB. The returned model labels the requesting UID
+  as context; the endpoint response itself contains no UID assertion.
 - The authenticated FRS forum-state probe binds the returned user ID, forum ID,
   normalized forum name, follow state, optional sign-user ID, and 26-character
   lowercase hexadecimal `tbs` to the request. The `tbs` remains internal and is
@@ -200,11 +233,11 @@ not advertise a usable sign state; it is not permission to attempt a write.
   debug descriptions and mirrors, and the FRS anti-CSRF value is not exposed by
   the public API.
 
-These are unofficial APIs and may change without notice. Only per-forum
-follow/unfollow and explicit single-forum check-in writes are implemented.
-Automatic or batch check-in, thread favorites, approval, creation,
-notifications, and moderation remain unsupported; thread favorites are blocked
-until the app can safely acquire and bind the required STOKEN.
+These are unofficial APIs and may change without notice. Per-forum
+follow/unfollow, explicit single-forum check-in, and explicit topic, post, and
+subpost approval writes are implemented. Cloud favorites and notifications are
+read-only. Automatic or batch check-in, favorite mutations, creation, replies,
+and moderation remain unsupported.
 
 ## Tests
 

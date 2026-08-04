@@ -22,7 +22,11 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     let service = TiebaCoreAccountService(client: client)
 
     let account = try await service.validate(
-      credential: AccountCredentials(bduss: String(repeating: "b", count: 192))
+      credential: AccountCredentials(
+        bduss: String(repeating: "b", count: 192),
+        stoken: String(repeating: "s", count: 64),
+        bdussCookieName: .bdussBFESS
+      )
     )
     let membership = try await service.forumMembership(
       session: session(),
@@ -43,7 +47,10 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
       )
     )
     let snapshot = await client.snapshot()
-    XCTAssertEqual(snapshot.validationCredentialByteCounts, [192])
+    XCTAssertEqual(
+      snapshot.validationSessionShapes,
+      [SessionCredentialShape(bdussBytes: 192, stokenBytes: 64, cookieName: .bdussBFESS)]
+    )
     XCTAssertEqual(
       snapshot.membershipRequests,
       [
@@ -56,6 +63,94 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
         )
       ]
     )
+  }
+
+  func testCloudFavoritesRequireFullCredentialsAndMapServerMetadata() async throws {
+    let coreFavorite = TiebaCloudFavorite(
+      id: 123,
+      title: "A stored thread",
+      forumName: "swift",
+      author: TiebaCloudFavoriteAuthor(
+        userID: 8,
+        username: "author",
+        displayName: "Author",
+        portrait: "portrait"
+      ),
+      isDeleted: false,
+      lastTimestamp: 1_700_000_000,
+      threadType: 0,
+      status: 0,
+      maximumPostID: 999,
+      minimumPostID: 100,
+      markedPostID: 456,
+      markStatus: 1,
+      postNumber: 88,
+      postNumberMessage: "88",
+      updateCount: 3
+    )
+    let client = AccountClientSpy(
+      cloudFavorites: TiebaCloudFavoritePage(
+        requestedUserID: 7,
+        favorites: [coreFavorite],
+        offset: 30,
+        pageSize: 30,
+        hasMore: true
+      )
+    )
+    let service = TiebaCoreAccountService(client: client)
+
+    let page = try await service.cloudFavorites(
+      session: session(),
+      offset: 30,
+      pageSize: 30
+    )
+
+    XCTAssertEqual(page.userID, 7)
+    XCTAssertEqual(page.nextOffset, 60)
+    XCTAssertTrue(page.hasMore)
+    let item = try XCTUnwrap(page.items.first)
+    XCTAssertEqual(item.id, 123)
+    XCTAssertEqual(item.authorName, "Author")
+    XCTAssertEqual(item.markPostID, 456)
+    XCTAssertEqual(item.latestPostID, 999)
+    XCTAssertEqual(item.latestFloor, 88)
+    XCTAssertTrue(item.hasUpdates)
+    XCTAssertEqual(item.updatedAt, Date(timeIntervalSince1970: 1_700_000_000))
+    let snapshot = await client.snapshot()
+    let requests = snapshot.cloudFavoriteRequests
+    XCTAssertEqual(
+      requests,
+      [
+        CloudFavoriteClientRequest(
+          userID: 7,
+          offset: 30,
+          pageSize: 30,
+          bdussBytes: 192,
+          stokenBytes: 64,
+          cookieName: .bduss
+        )
+      ]
+    )
+  }
+
+  func testLegacySessionCannotStartCloudFavoritesRequest() async throws {
+    let client = AccountClientSpy()
+    let service = TiebaCoreAccountService(client: client)
+    let legacySession = session(stokenComponent: nil)
+
+    do {
+      _ = try await service.cloudFavorites(
+        session: legacySession,
+        offset: 0,
+        pageSize: 30
+      )
+      XCTFail("Expected a re-login requirement")
+    } catch let error as BrowseError {
+      XCTAssertEqual(error.errorDescription, "此账户需要重新登录，才能安全读取贴吧收藏。")
+    }
+    let snapshot = await client.snapshot()
+    let requests = snapshot.cloudFavoriteRequests
+    XCTAssertTrue(requests.isEmpty)
   }
 
   func testForumAccountStateMapsCheckInWithoutExposingCredentials() async throws {
@@ -1399,7 +1494,8 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
   private func session(
     updatedAt: TimeInterval = 1,
     sessionRevision: UUID = UUID(),
-    credentialComponent: String = "b"
+    credentialComponent: String = "b",
+    stokenComponent: String? = "s"
   ) -> StoredAccountSession {
     StoredAccountSession(
       id: 7,
@@ -1407,6 +1503,8 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
       displayName: "Account",
       portrait: "portrait-token",
       bduss: String(repeating: credentialComponent, count: 192),
+      stoken: stokenComponent.map { String(repeating: $0, count: 64) },
+      bdussCookieName: .bduss,
       createdAt: Date(timeIntervalSince1970: 1),
       updatedAt: Date(timeIntervalSince1970: updatedAt),
       sessionRevision: sessionRevision
@@ -1474,6 +1572,21 @@ private struct AccountClientRequest: Equatable, Sendable {
   let desiredState: Bool?
 }
 
+private struct SessionCredentialShape: Equatable, Sendable {
+  let bdussBytes: Int
+  let stokenBytes: Int
+  let cookieName: TiebaBDUSSCookieName
+}
+
+private struct CloudFavoriteClientRequest: Equatable, Sendable {
+  let userID: Int64
+  let offset: Int
+  let pageSize: Int
+  let bdussBytes: Int
+  let stokenBytes: Int
+  let cookieName: TiebaBDUSSCookieName
+}
+
 private struct ThreadAgreementClientRequest: Equatable, Sendable {
   let credentialByteCount: Int
   let expectedUserID: Int64
@@ -1521,6 +1634,8 @@ private struct ContentAgreementSubpostPageClientRequest: Equatable, Sendable {
 
 private struct AccountClientSnapshot: Sendable {
   let validationCredentialByteCounts: [Int]
+  let validationSessionShapes: [SessionCredentialShape]
+  let cloudFavoriteRequests: [CloudFavoriteClientRequest]
   let membershipRequests: [AccountClientRequest]
   let accountStateRequests: [AccountClientRequest]
   let mutationRequests: [AccountClientRequest]
@@ -1549,6 +1664,7 @@ private actor AccountServiceCompletionProbe {
 
 private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   private let validation: TiebaAuthenticatedAccount?
+  private let cloudFavorites: TiebaCloudFavoritePage?
   private let membership: TiebaForumMembership?
   private let accountState: TiebaForumAccountState?
   private let mutation: TiebaForumMembership?
@@ -1565,6 +1681,8 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   private let suspendsThreadAgreementMutation: Bool
   private let suspendsAgreementMutation: Bool
   private var validationCredentialByteCounts: [Int] = []
+  private var validationSessionShapes: [SessionCredentialShape] = []
+  private var cloudFavoriteRequests: [CloudFavoriteClientRequest] = []
   private var membershipRequests: [AccountClientRequest] = []
   private var accountStateRequests: [AccountClientRequest] = []
   private var mutationRequests: [AccountClientRequest] = []
@@ -1586,6 +1704,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
 
   init(
     validation: TiebaAuthenticatedAccount? = nil,
+    cloudFavorites: TiebaCloudFavoritePage? = nil,
     membership: TiebaForumMembership? = nil,
     accountState: TiebaForumAccountState? = nil,
     mutation: TiebaForumMembership? = nil,
@@ -1603,6 +1722,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     suspendsAgreementMutation: Bool = false
   ) {
     self.validation = validation
+    self.cloudFavorites = cloudFavorites
     self.membership = membership
     self.accountState = accountState
     self.mutation = mutation
@@ -1626,6 +1746,40 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     validationCredentialByteCounts.append(credential.bduss.utf8.count)
     guard let validation else { throw AccountClientSpyError.unexpectedCall }
     return validation
+  }
+
+  func validateSession(
+    credential: TiebaSessionCredential
+  ) async throws -> TiebaAuthenticatedAccount {
+    validationSessionShapes.append(
+      SessionCredentialShape(
+        bdussBytes: credential.bduss.utf8.count,
+        stokenBytes: credential.stoken.utf8.count,
+        cookieName: credential.bdussCookieName
+      )
+    )
+    guard let validation else { throw AccountClientSpyError.unexpectedCall }
+    return validation
+  }
+
+  func getCloudFavorites(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    offset: Int,
+    pageSize: Int
+  ) async throws -> TiebaCloudFavoritePage {
+    cloudFavoriteRequests.append(
+      CloudFavoriteClientRequest(
+        userID: expectedUserID,
+        offset: offset,
+        pageSize: pageSize,
+        bdussBytes: credential.bduss.utf8.count,
+        stokenBytes: credential.stoken.utf8.count,
+        cookieName: credential.bdussCookieName
+      )
+    )
+    guard let cloudFavorites else { throw AccountClientSpyError.unexpectedCall }
+    return cloudFavorites
   }
 
   func getFollowedForums(
@@ -1917,6 +2071,8 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   func snapshot() -> AccountClientSnapshot {
     AccountClientSnapshot(
       validationCredentialByteCounts: validationCredentialByteCounts,
+      validationSessionShapes: validationSessionShapes,
+      cloudFavoriteRequests: cloudFavoriteRequests,
       membershipRequests: membershipRequests,
       accountStateRequests: accountStateRequests,
       mutationRequests: mutationRequests,

@@ -13,7 +13,10 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let checkInClientVersion = "11.10.8.6"
   static let agreementClientVersion = "22.6.5.1"
   static let notificationClientVersion = "22.6.5.1"
+  static let sessionClientVersion = "11.10.8.6"
+  static let cloudFavoritesClientVersion = "11.10.8.6"
   static let writeHost = TiebaRequestFactory.serviceHost
+  static let webIdentityHost = "tieba.baidu.com"
 
   let configuration: TiebaClientConfiguration
   private let agreementCUID: String
@@ -34,6 +37,93 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
         ("_client_version", configuration.authenticatedClientVersion),
         ("bdusstoken", credential.bduss),
       ]
+    )
+  }
+
+  func validateSessionApp(credential: TiebaSessionCredential) throws -> URLRequest {
+    try validate(credential)
+    return try signedFormRequest(
+      path: "/c/s/login",
+      fields: [
+        ("_client_version", Self.sessionClientVersion),
+        ("authsid", "null"),
+        ("bdusstoken", "\(credential.bduss)|"),
+        ("channel_id", ""),
+        ("channel_uid", ""),
+        ("stoken", credential.stoken),
+      ],
+      userAgent: "bdtb for Android \(Self.sessionClientVersion)",
+      cookie: "ka=open"
+    )
+  }
+
+  func validateSessionWeb(credential: TiebaSessionCredential) throws -> URLRequest {
+    try validate(credential)
+    try validateConfiguration()
+
+    var components = URLComponents()
+    components.scheme = "https"
+    components.host = Self.webIdentityHost
+    components.path = "/mo/q/newmoindex"
+    components.queryItems = [URLQueryItem(name: "need_user", value: "1")]
+    guard
+      let url = components.url,
+      url.scheme?.lowercased() == "https",
+      url.host?.lowercased() == Self.webIdentityHost,
+      url.port == nil,
+      url.user == nil,
+      url.password == nil
+    else {
+      throw TiebaClientError.invalidEndpoint
+    }
+
+    var request = URLRequest(
+      url: url,
+      cachePolicy: .reloadIgnoringLocalCacheData,
+      timeoutInterval: configuration.requestTimeout
+    )
+    request.httpMethod = "GET"
+    request.httpShouldHandleCookies = false
+    request.setValue(configuration.userAgent, forHTTPHeaderField: "User-Agent")
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    request.setValue(
+      "\(credential.bdussCookieName.rawValue)=\(credential.bduss); STOKEN=\(credential.stoken)",
+      forHTTPHeaderField: "Cookie"
+    )
+    return request
+  }
+
+  func cloudFavorites(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    offset: Int,
+    pageSize: Int
+  ) throws -> URLRequest {
+    try validate(credential)
+    guard expectedUserID > 0 else {
+      throw TiebaClientError.invalidArgument("Expected user ID must be positive.")
+    }
+    guard (0...Int(Int32.max)).contains(offset) else {
+      throw TiebaClientError.invalidArgument("Offset must be between 0 and \(Int32.max).")
+    }
+    guard (1...100).contains(pageSize) else {
+      throw TiebaClientError.invalidArgument("Page size must be between 1 and 100.")
+    }
+
+    return try signedFormRequest(
+      host: Self.writeHost,
+      path: "/c/f/post/threadstore",
+      fields: [
+        ("BDUSS", credential.bduss),
+        ("_client_version", Self.cloudFavoritesClientVersion),
+        ("offset", String(offset)),
+        ("rn", String(pageSize)),
+        ("stoken", credential.stoken),
+        ("user_id", String(expectedUserID)),
+      ],
+      userAgent: "bdtb for Android \(Self.cloudFavoritesClientVersion)",
+      clientUserToken: String(expectedUserID),
+      cookie: "ka=open"
     )
   }
 
@@ -506,16 +596,29 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   }
 
   private func validate(_ credential: TiebaBDUSSCredential) throws {
-    let value = credential.bduss
-    guard value.utf8.count == 192 else {
+    guard Self.isValidCookieValue(credential.bduss, expectedLength: 192) else {
       throw TiebaClientError.invalidArgument("Account credentials have an invalid format.")
     }
+  }
+
+  private func validate(_ credential: TiebaSessionCredential) throws {
     guard
-      value.unicodeScalars.allSatisfy({ scalar in
-        scalar.value >= 0x21 && scalar.value <= 0x7E
-      })
+      Self.isValidCookieValue(credential.bduss, expectedLength: 192),
+      Self.isValidCookieValue(credential.stoken, expectedLength: 64)
     else {
       throw TiebaClientError.invalidArgument("Account credentials have an invalid format.")
+    }
+  }
+
+  private static func isValidCookieValue(_ value: String, expectedLength: Int) -> Bool {
+    let bytes = value.utf8
+    guard bytes.count == expectedLength else { return false }
+    return bytes.allSatisfy { byte in
+      byte == 0x21
+        || (0x23...0x2B).contains(byte)
+        || (0x2D...0x3A).contains(byte)
+        || (0x3C...0x5B).contains(byte)
+        || (0x5D...0x7E).contains(byte)
     }
   }
 

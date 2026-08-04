@@ -130,6 +130,8 @@ final class LoginViewModel: ObservableObject {
           displayName: account.username,
           portrait: account.portrait,
           bduss: credentials.bduss,
+          stoken: credentials.stoken,
+          bdussCookieName: credentials.bdussCookieName,
           createdAt: now,
           updatedAt: now
         )

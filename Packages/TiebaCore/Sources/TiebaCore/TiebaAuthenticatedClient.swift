@@ -106,7 +106,9 @@ private struct TiebaAgreementAccountTail: Sendable {
 
 public actor TiebaAuthenticatedClient {
   static let accountResponseMaximumBytes = 512 * 1_024
+  static let webSessionResponseMaximumBytes = 256 * 1_024
   static let followedForumsResponseMaximumBytes = 2 * 1_024 * 1_024
+  static let cloudFavoritesResponseMaximumBytes = 2 * 1_024 * 1_024
   static let notificationResponseMaximumBytes = 2 * 1_024 * 1_024
   static let forumMembershipResponseMaximumBytes = 512 * 1_024
   static let forumFollowWriteResponseMaximumBytes = 64 * 1_024
@@ -151,6 +153,54 @@ public actor TiebaAuthenticatedClient {
       maximumBodyBytes: Self.accountResponseMaximumBytes
     )
     return try TiebaAuthenticatedDecoder.account(from: body)
+  }
+
+  public func validateSession(
+    credential: TiebaSessionCredential
+  ) async throws -> TiebaAuthenticatedAccount {
+    let appRequest = try requestFactory.validateSessionApp(credential: credential)
+    let appBody = try await send(
+      appRequest,
+      maximumBodyBytes: Self.accountResponseMaximumBytes
+    )
+    let account = try TiebaAuthenticatedDecoder.account(from: appBody)
+    try Task.checkCancellation()
+
+    let webRequest = try requestFactory.validateSessionWeb(credential: credential)
+    let webBody = try await send(
+      webRequest,
+      maximumBodyBytes: Self.webSessionResponseMaximumBytes
+    )
+    let webUserID = try TiebaAuthenticatedDecoder.webAccountID(from: webBody)
+    try Task.checkCancellation()
+    guard webUserID == account.userID else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    return account
+  }
+
+  public func getCloudFavorites(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    offset: Int = 0,
+    pageSize: Int = 20
+  ) async throws -> TiebaCloudFavoritePage {
+    let request = try requestFactory.cloudFavorites(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      offset: offset,
+      pageSize: pageSize
+    )
+    let body = try await send(
+      request,
+      maximumBodyBytes: Self.cloudFavoritesResponseMaximumBytes
+    )
+    return try TiebaAuthenticatedDecoder.cloudFavorites(
+      from: body,
+      expectedUserID: expectedUserID,
+      offset: offset,
+      pageSize: pageSize
+    )
   }
 
   public func getFollowedForums(
