@@ -61,6 +61,110 @@ public struct TiebaFollowedForumPage: Sendable, Hashable {
   }
 }
 
+public enum TiebaNotificationKind: Sendable, Hashable {
+  case replies
+  case mentions
+}
+
+public struct TiebaNotificationSender: Identifiable, Sendable, Hashable {
+  public let id: Int64
+  public let username: String
+  public let displayName: String
+  public let portrait: String
+  public let isFriend: Bool
+  public let isFan: Bool
+
+  public init(
+    id: Int64,
+    username: String,
+    displayName: String,
+    portrait: String,
+    isFriend: Bool,
+    isFan: Bool
+  ) {
+    self.id = id
+    self.username = username
+    self.displayName = displayName
+    self.portrait = portrait
+    self.isFriend = isFriend
+    self.isFan = isFan
+  }
+
+  public var preferredName: String {
+    displayName.isEmpty ? username : displayName
+  }
+}
+
+public struct TiebaNotificationItem: Identifiable, Sendable, Hashable {
+  public let id: Int64
+  public let sender: TiebaNotificationSender
+  public let quotedUser: TiebaNotificationSender?
+  public let threadID: Int64
+  public let postID: Int64
+  public let quotedPostID: Int64?
+  public let title: String
+  public let content: String
+  public let quotedContent: String
+  public let forumName: String
+  public let timestamp: Int64
+  public let isFloorReply: Bool
+  public let isFirstPost: Bool
+  public let isUnread: Bool
+  public let threadType: Int
+
+  public init(
+    sender: TiebaNotificationSender,
+    quotedUser: TiebaNotificationSender?,
+    threadID: Int64,
+    postID: Int64,
+    quotedPostID: Int64?,
+    title: String,
+    content: String,
+    quotedContent: String,
+    forumName: String,
+    timestamp: Int64,
+    isFloorReply: Bool,
+    isFirstPost: Bool,
+    isUnread: Bool,
+    threadType: Int
+  ) {
+    self.id = postID
+    self.sender = sender
+    self.quotedUser = quotedUser
+    self.threadID = threadID
+    self.postID = postID
+    self.quotedPostID = quotedPostID
+    self.title = title
+    self.content = content
+    self.quotedContent = quotedContent
+    self.forumName = forumName
+    self.timestamp = timestamp
+    self.isFloorReply = isFloorReply
+    self.isFirstPost = isFirstPost
+    self.isUnread = isUnread
+    self.threadType = threadType
+  }
+}
+
+public struct TiebaNotificationPage: Sendable, Hashable {
+  public let userID: Int64
+  public let kind: TiebaNotificationKind
+  public let items: [TiebaNotificationItem]
+  public let pagination: TiebaPagination
+
+  public init(
+    userID: Int64,
+    kind: TiebaNotificationKind,
+    items: [TiebaNotificationItem],
+    pagination: TiebaPagination
+  ) {
+    self.userID = userID
+    self.kind = kind
+    self.items = items
+    self.pagination = pagination
+  }
+}
+
 public struct TiebaForumMembership: Sendable, Hashable {
   public let userID: Int64
   public let forumID: Int64

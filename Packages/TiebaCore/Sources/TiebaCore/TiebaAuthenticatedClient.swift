@@ -107,6 +107,7 @@ private struct TiebaAgreementAccountTail: Sendable {
 public actor TiebaAuthenticatedClient {
   static let accountResponseMaximumBytes = 512 * 1_024
   static let followedForumsResponseMaximumBytes = 2 * 1_024 * 1_024
+  static let notificationResponseMaximumBytes = 2 * 1_024 * 1_024
   static let forumMembershipResponseMaximumBytes = 512 * 1_024
   static let forumFollowWriteResponseMaximumBytes = 64 * 1_024
   static let forumCheckInResponseMaximumBytes = 64 * 1_024
@@ -173,6 +174,42 @@ public actor TiebaAuthenticatedClient {
       page: page,
       pageSize: pageSize
     )
+  }
+
+  public func getNotifications(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    kind: TiebaNotificationKind,
+    page: Int = 1
+  ) async throws -> TiebaNotificationPage {
+    let request = try requestFactory.notifications(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      kind: kind,
+      page: page
+    )
+    switch kind {
+    case .replies:
+      let response: ReplyMeResIdl = try await sendProtobuf(
+        request,
+        maximumBodyBytes: Self.notificationResponseMaximumBytes
+      )
+      return try TiebaNotificationDecoder.replyPage(
+        from: response,
+        expectedUserID: expectedUserID,
+        requestedPage: page
+      )
+    case .mentions:
+      let body = try await send(
+        request,
+        maximumBodyBytes: Self.notificationResponseMaximumBytes
+      )
+      return try TiebaNotificationDecoder.mentionPage(
+        from: body,
+        expectedUserID: expectedUserID,
+        requestedPage: page
+      )
+    }
   }
 
   public func getForumMembership(

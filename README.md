@@ -16,23 +16,24 @@ experimental or unsupported.
 | --- | --- |
 | Anonymous browsing | Available across discovery, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, and media preferences |
-| Accounts | Web login, switching, logout, followed forums, per-forum state, and experimental content approval for topics, posts, and full-page subposts |
+| Accounts | Web login, switching, logout, followed forums, a foreground ReplyMe/AtMe inbox, per-forum state, and experimental content approval |
 | Server-side writes | Confirmed forum follow/unfollow, check-in, and content approval are in device validation; other writes stay disabled |
-| TiebaLite parity | Anonymous reading and media: about 85–95%; full product scope: about 55–60% |
+| TiebaLite parity | Anonymous reading and media: about 85–95%; full product scope: about 57–62% |
 | Distribution | Public SideStore/LiveContainer source backed by tested unsigned GitHub Release IPAs |
 
 ### Release and validation
 
-- **Current alpha:** `v0.58.0-alpha.1` extends account-bound approval and
-  cancellation from the canonical first floor to ordinary floors and full
-  nested-reply pages. Authenticated state is shared across views, batch-read by
-  page, and reconciled without retrying an uncertain write.
+- **Current alpha:** `v0.59.0-alpha.1` adds a foreground, account-bound inbox for
+  replies and mentions. It uses an HTTPS Protobuf ReplyMe request and a minimal
+  signed HTTPS AtMe form, paginates in memory, and discards responses when the
+  active account lease changes.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
   XcodeGen 2.45.4 or newer.
 - **Automated checks:** GitHub Actions runs package tests and an unsigned
   simulator build, validates the app source, and verifies its public IPA hash.
-  Authenticated flows never use real credentials in CI. Forum follow/unfollow,
-  check-in, and topic/post/subpost content approval therefore remain
+  Authenticated flows never use real credentials in CI. The inbox contract is
+  covered by fixtures, while successful private-list reads, forum
+  follow/unfollow, check-in, and topic/post/subpost content approval remain
   physical-device validation features in this alpha.
 - **App source:** Add [`sidestore-source.json`](https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json)
   to LiveContainer or SideStore. Its latest IPA is published only after the tag's
@@ -111,6 +112,12 @@ experimental or unsupported.
   parent and child rows on a full nested-reply page independently read the active
   account's approval state and expose confirmed approve/cancel actions. Anonymous
   content and inline nested-reply previews remain separate read-only snapshots.
+- **Private inbox:** The account page opens foreground-only ReplyMe and AtMe
+  lists with refresh and bounded page-number pagination. Ordinary notifications
+  can reopen the exact post. A nested-reply notification opens its owning thread
+  without guessing the parent floor because the legacy `quote_pid` field is not
+  a stable parent identifier. No background polling, badge clearing, or explicit
+  mark-read request is implemented.
 - **Credential boundary:** Anonymous and authenticated requests use isolated,
   ephemeral clients. BDUSS is the only credential stored by the vault. STOKEN is
   not extracted, and the 26-character `tbs` value is validated, made available
@@ -131,14 +138,14 @@ experimental or unsupported.
   confirmation. Automatic and batch check-in are not implemented.
 - **Unsupported operations:** Server-side thread favorites remain blocked on
   safely acquiring and binding the required STOKEN. Disagreement and other
-  reaction types, thread or reply creation, notifications, and moderation remain
-  unavailable until their request contracts and recovery paths have been
-  validated on a disposable account.
+  reaction types, thread or reply creation, notification replies, background
+  notification polling, and moderation remain unavailable until their request
+  contracts and recovery paths have been validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, protocol constraints, and next milestones. The current weighted
   end-to-end audit estimates 85–95% coverage of anonymous reading and media, or
-  55–60% of the full TiebaLite product scope once the remaining account writes,
-  creation, notifications, and moderation are included.
+  57–62% of the full TiebaLite product scope once the remaining account writes,
+  creation, background messaging, and moderation are included.
 
 ## Architecture
 

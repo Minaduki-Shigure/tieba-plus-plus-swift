@@ -11,6 +11,12 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
     page: Int,
     pageSize: Int
   ) async throws -> TiebaFollowedForumPage
+  func getNotifications(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    kind: TiebaNotificationKind,
+    page: Int
+  ) async throws -> TiebaNotificationPage
   func getForumMembership(
     credential: TiebaBDUSSCredential,
     expectedUserID: Int64,
@@ -95,6 +101,15 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
 }
 
 extension TiebaAuthenticatedAccountClient {
+  func getNotifications(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    kind: TiebaNotificationKind,
+    page: Int
+  ) async throws -> TiebaNotificationPage {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
   func getThreadAgreement(
     credential: TiebaBDUSSCredential,
     expectedUserID: Int64,
@@ -245,6 +260,35 @@ struct TiebaCoreAccountService: AccountService {
       currentPage: response.pagination.currentPage,
       hasMore: response.pagination.hasMore
     )
+  }
+
+  func notifications(
+    session: StoredAccountSession,
+    kind: InboxKind,
+    page: Int
+  ) async throws -> InboxPage {
+    let response: TiebaNotificationPage
+    do {
+      response = try await client.getNotifications(
+        credential: TiebaBDUSSCredential(bduss: session.bduss),
+        expectedUserID: session.id,
+        kind: Self.coreNotificationKind(kind),
+        page: page
+      )
+      try Task.checkCancellation()
+      return try Self.inboxPageData(
+        response,
+        expectedUserID: session.id,
+        expectedKind: kind,
+        requestedPage: page
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch let error as BrowseError {
+      throw error
+    } catch {
+      throw Self.accountError(error)
+    }
   }
 
   func forumMembership(
@@ -519,6 +563,99 @@ struct TiebaCoreAccountService: AccountService {
       forumName: membership.forumName,
       isFollowed: membership.isFollowed
     )
+  }
+
+  static func inboxPageData(
+    _ page: TiebaNotificationPage,
+    expectedUserID: Int64,
+    expectedKind: InboxKind,
+    requestedPage: Int
+  ) throws -> InboxPage {
+    guard
+      expectedUserID > 0,
+      requestedPage > 0,
+      page.userID == expectedUserID,
+      notificationKind(page.kind) == expectedKind,
+      page.pagination.currentPage == requestedPage,
+      page.pagination.hasPrevious == (requestedPage > 1),
+      page.pagination.pageSize == page.items.count,
+      !page.pagination.hasMore || !page.items.isEmpty
+    else {
+      throw BrowseError.unavailable("贴吧返回了不匹配的账户消息，请重新加载后再试。")
+    }
+
+    var seenPostIDs = Set<Int64>()
+    let messages = try page.items.map { item -> InboxMessage in
+      guard
+        item.id == item.postID,
+        item.postID > 0,
+        item.threadID > 0,
+        item.sender.id > 0,
+        item.quotedUser.map({ $0.id > 0 }) ?? true,
+        item.quotedPostID.map({ $0 > 0 }) ?? true,
+        item.threadType >= 0,
+        seenPostIDs.insert(item.postID).inserted
+      else {
+        throw BrowseError.unavailable("贴吧返回了无效或重复的消息标识，请重新加载后再试。")
+      }
+      return InboxMessage(
+        id: item.postID,
+        sender: inboxSender(item.sender),
+        quotedUser: item.quotedUser.map(inboxSender),
+        threadID: item.threadID,
+        postID: item.postID,
+        quotedPostID: item.quotedPostID,
+        title: item.title,
+        content: item.content,
+        quotedContent: item.quotedContent,
+        forumName: item.forumName,
+        createdAt: try notificationDate(item.timestamp),
+        isFloorReply: item.isFloorReply,
+        isFirstPost: item.isFirstPost,
+        isUnread: item.isUnread,
+        threadType: item.threadType
+      )
+    }
+    return InboxPage(
+      userID: page.userID,
+      kind: expectedKind,
+      messages: messages,
+      currentPage: page.pagination.currentPage,
+      hasMore: page.pagination.hasMore
+    )
+  }
+
+  private static func coreNotificationKind(_ kind: InboxKind) -> TiebaNotificationKind {
+    switch kind {
+    case .replies: .replies
+    case .mentions: .mentions
+    }
+  }
+
+  private static func notificationKind(_ kind: TiebaNotificationKind) -> InboxKind {
+    switch kind {
+    case .replies: .replies
+    case .mentions: .mentions
+    }
+  }
+
+  private static func inboxSender(_ sender: TiebaNotificationSender) -> InboxSender {
+    InboxSender(
+      id: sender.id,
+      username: sender.username,
+      displayName: sender.displayName,
+      portraitURL: SecureTiebaURL.portrait(sender.portrait),
+      isFriend: sender.isFriend,
+      isFan: sender.isFan
+    )
+  }
+
+  private static func notificationDate(_ timestamp: Int64) throws -> Date? {
+    guard timestamp != 0 else { return nil }
+    guard timestamp > 0, timestamp <= 253_402_300_799 else {
+      throw BrowseError.unavailable("贴吧返回了无效的消息时间，请重新加载后再试。")
+    }
+    return Date(timeIntervalSince1970: TimeInterval(timestamp))
   }
 
   private static func accountStateData(

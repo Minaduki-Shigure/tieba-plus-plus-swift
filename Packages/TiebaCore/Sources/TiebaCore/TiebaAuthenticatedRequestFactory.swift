@@ -12,6 +12,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let unfollowClientVersion = "11.10.8.6"
   static let checkInClientVersion = "11.10.8.6"
   static let agreementClientVersion = "22.6.5.1"
+  static let notificationClientVersion = "22.6.5.1"
   static let writeHost = TiebaRequestFactory.serviceHost
 
   let configuration: TiebaClientConfiguration
@@ -62,6 +63,48 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
         ("uid", String(userID)),
       ]
     )
+  }
+
+  func notifications(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    kind: TiebaNotificationKind,
+    page: Int
+  ) throws -> URLRequest {
+    try validate(credential)
+    guard expectedUserID > 0 else {
+      throw TiebaClientError.invalidArgument("Expected user ID must be positive.")
+    }
+    try validatePage(page, name: "Page")
+    try validateConfiguration()
+
+    switch kind {
+    case .replies:
+      var common = CommonReq()
+      common.clientVersion = Self.notificationClientVersion
+      common.bduss = credential.bduss
+
+      var data = ReplyMeReqIdl.DataReq()
+      data.pn = String(page)
+      data.common = common
+
+      var message = ReplyMeReqIdl()
+      message.data = data
+      return try protobufRequest(
+        path: "/c/u/feed/replyme",
+        command: 303_007,
+        message: message
+      )
+    case .mentions:
+      return try signedFormRequest(
+        path: "/c/u/feed/atme",
+        fields: [
+          ("BDUSS", credential.bduss),
+          ("_client_version", Self.notificationClientVersion),
+          ("pn", String(page)),
+        ]
+      )
+    }
   }
 
   func forumMembership(

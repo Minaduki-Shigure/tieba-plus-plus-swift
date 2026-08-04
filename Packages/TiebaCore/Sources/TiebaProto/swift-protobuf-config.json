@@ -32,6 +32,8 @@
         "ProfileReqIdl.proto",
         "ProfileResIdl.proto",
         "RecommendTopicList.proto",
+        "ReplyMeReqIdl.proto",
+        "ReplyMeResIdl.proto",
         "SearchSugReqIdl.proto",
         "SearchSugResIdl.proto",
         "SimpleForum.proto",

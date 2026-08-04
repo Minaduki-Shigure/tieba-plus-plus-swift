@@ -67,6 +67,29 @@ have endpoint-specific transfer limits before decoding. MD5 is used only for
 compatibility with the unofficial request signature protocol, not for password
 storage or verification.
 
+Private ReplyMe and AtMe lists are foreground-only authenticated reads. ReplyMe
+must use `https://tiebac.baidu.com/c/u/feed/replyme?cmd=303007` with a Protobuf
+body whose common data contains only BDUSS and the fixed client version plus the
+one-based page number. AtMe must use a signed HTTPS form at
+`https://tiebac.baidu.com/c/u/feed/atme` containing exactly `BDUSS`,
+`_client_version`, `pn`, and `sign`. Neither request may carry STOKEN, `tbs`, a
+credential cookie, CUID, IMEI, Android ID, model, screen dimensions, randomized
+telemetry, or another hardware-derived identifier. Both use the isolated
+ephemeral authenticated client, reject redirects, bypass URL caching, and apply
+an endpoint-specific response limit before decoding.
+
+Inbox responses must have a zero server error code, the exact requested page,
+bounded pagination flags, and positive thread, post, and sender IDs before they
+are exposed. The Core result is labelled with the expected UID, while the App
+checks the same `userID + sessionRevision` lease before and after every request;
+an account change invalidates all retained pages and discards late results. No
+private message is persisted. A nested notification's `quote_pid` is treated as
+untrusted routing metadata because it is not a stable parent-floor identifier;
+the App must not construct a child route from it. The initial inbox performs no
+background polling, explicit mark-read request, or local badge mutation. An
+implicit server-side unread change caused by list retrieval remains a documented
+real-device validation question.
+
 Before any forum write, the fresh FRS probe must bind the response user ID,
 forum ID, normalized forum name, `is_like`, and `anti.tbs` to the requested
 account and forum. The check-in state read and check-in write paths additionally

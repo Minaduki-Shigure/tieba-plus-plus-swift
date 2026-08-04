@@ -5,6 +5,10 @@ forum-detail and moderator-list schemas, are copied from
 [aiotieba](https://github.com/lumina37/aiotieba) at commit
 `bae68256fd250d5178e1447899ffa155c77eda38`.
 
+This includes the minimal authenticated `ReplyMeReqIdl` and `ReplyMeResIdl`
+schemas used for the read-only ReplyMe notification list. Device and STOKEN
+fields are deliberately left unset in its `CommonReq`.
+
 aiotieba is authored by lumina37 and contributors and is released under the
 Unlicense. A copy of that license is included in `LICENSE.aiotieba`.
 

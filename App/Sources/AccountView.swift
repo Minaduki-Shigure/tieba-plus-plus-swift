@@ -162,6 +162,19 @@ struct AccountView: View {
               Label("我的关注", systemImage: "star")
             }
 
+            NavigationLink {
+              NotificationsView(
+                browseService: browseService,
+                accountService: accountService,
+                vault: vault,
+                historyRepository: historyRepository,
+                favoritesRepository: favoritesRepository,
+                searchHistoryRepository: searchHistoryRepository
+              )
+            } label: {
+              Label("消息", systemImage: "bell")
+            }
+
             Button(role: .destructive) { confirmsLogout = true } label: {
               Label("从本机移除账户", systemImage: "trash")
             }

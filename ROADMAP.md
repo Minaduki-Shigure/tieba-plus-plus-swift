@@ -93,6 +93,8 @@ the source metadata is updated to that tested IPA.
 - Ephemeral, HTTPS-only Baidu Web login with an exact host allowlist
 - Device-only Keychain account storage, account switching, and local logout
 - Paginated followed-forum list for the active account
+- Foreground ReplyMe and AtMe inbox with account-lease isolation, refresh,
+  bounded pagination, and safe thread navigation
 - Authoritative per-forum account membership state with explicit follow and
   unfollow confirmation
 - Authoritative per-forum check-in state and explicitly confirmed single-forum
@@ -113,11 +115,33 @@ the source metadata is updated to that tested IPA.
    nested-reply approval/cancellation, plus single-forum check-in success,
    idempotent, server-error, uncertain-failure, and read-only reconciliation
    paths, followed by account switching and follow recovery checks
-2. Server-side thread favorites after the login flow can safely acquire and bind
-   the required STOKEN; this workflow is currently blocked
-3. Content creation and reply workflows behind explicit confirmation and
-   anti-CSRF tests
-4. Notifications, moderation tools, and broader settings parity
+2. Real-device validation of the minimal HTTPS ReplyMe and AtMe requests,
+   including whether opening a list changes server unread state
+3. Safe BDUSS/STOKEN acquisition and same-account binding before any feature
+   that actually requires STOKEN; server-side favorites remain blocked on this
+4. Experimental plain-text reply workflows behind explicit risk confirmation,
+   anti-CSRF tests, and unknown-outcome handling
+5. Exact nested-notification positioning, broader settings parity, content
+   creation, and moderation tools
+
+The foreground inbox deliberately does not copy TiebaLite's cleartext JSON
+transport or its Android hardware parameters. ReplyMe uses the current HTTPS
+Protobuf command `303007`; AtMe uses a signed HTTPS form containing only BDUSS,
+the fixed client version, page number, and signature. Both are isolated in the
+authenticated client, reject redirects, enforce response limits, and remain
+entirely in memory. A `userID + sessionRevision` lease is checked before and
+after every page request so an account switch cannot display a previous
+account's private response.
+
+Notification pagination is strictly one-based and a returned page must match the
+requested page. Positive thread, post, and sender IDs and zero-or-one flags are
+validated before an item is exposed. Ordinary notifications can reopen a stable
+post ID. Nested replies do not trust the legacy `quote_pid` value because public
+clients document it as ambiguously representing either a parent floor or a
+child reply; the first inbox milestone therefore opens the owning thread without
+claiming exact child positioning. It does not poll in the background, clear a
+local badge, or send a mark-read request. Whether list retrieval itself has an
+implicit server-side read effect remains a physical-device validation item.
 
 Tieba's anonymous post endpoint does not currently honor its nominal numeric
 floor-jump fields. The app therefore restores a stable post ID and offers page

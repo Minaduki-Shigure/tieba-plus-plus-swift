@@ -27,6 +27,70 @@ struct FollowedForumPageData: Sendable {
   let hasMore: Bool
 }
 
+enum InboxKind: String, CaseIterable, Identifiable, Hashable, Sendable {
+  case replies
+  case mentions
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .replies: "回复我的"
+    case .mentions: "提到我的"
+    }
+  }
+}
+
+struct InboxSender: Identifiable, Hashable, Sendable {
+  let id: Int64
+  let username: String
+  let displayName: String
+  let portraitURL: URL?
+  let isFriend: Bool
+  let isFan: Bool
+
+  var preferredName: String {
+    for candidate in [displayName, username] {
+      let name = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !name.isEmpty { return name }
+    }
+    return "用户 \(id)"
+  }
+}
+
+struct InboxMessage: Identifiable, Hashable, Sendable {
+  let id: Int64
+  let sender: InboxSender
+  let quotedUser: InboxSender?
+  let threadID: Int64
+  let postID: Int64
+  let quotedPostID: Int64?
+  let title: String
+  let content: String
+  let quotedContent: String
+  let forumName: String
+  let createdAt: Date?
+  let isFloorReply: Bool
+  let isFirstPost: Bool
+  let isUnread: Bool
+  let threadType: Int
+
+  var threadRoute: TiebaThreadRoute {
+    TiebaThreadRoute(
+      threadID: threadID,
+      postID: isFloorReply ? nil : postID
+    )
+  }
+}
+
+struct InboxPage: Hashable, Sendable {
+  let userID: Int64
+  let kind: InboxKind
+  let messages: [InboxMessage]
+  let currentPage: Int
+  let hasMore: Bool
+}
+
 struct ForumMembershipData: Hashable, Sendable {
   let userID: Int64
   let forumID: Int64
@@ -151,6 +215,11 @@ protocol AccountService: Sendable {
     page: Int,
     pageSize: Int
   ) async throws -> FollowedForumPageData
+  func notifications(
+    session: StoredAccountSession,
+    kind: InboxKind,
+    page: Int
+  ) async throws -> InboxPage
   func forumMembership(
     session: StoredAccountSession,
     forumID: Int64,
@@ -203,6 +272,14 @@ protocol AccountService: Sendable {
 }
 
 extension AccountService {
+  func notifications(
+    session: StoredAccountSession,
+    kind: InboxKind,
+    page: Int
+  ) async throws -> InboxPage {
+    throw BrowseError.unavailable("当前账户服务不支持读取消息。")
+  }
+
   func threadAgreement(
     session: StoredAccountSession,
     forumID: Int64,
