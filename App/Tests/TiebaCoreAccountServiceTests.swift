@@ -159,9 +159,11 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
       suspendsMutation: true
     )
     let service = TiebaCoreAccountService(client: client)
+    let oldSession = session(updatedAt: 1)
+    let rotatedSession = session(updatedAt: 2)
     let first = Task {
       try await service.setForumFollowed(
-        session: session(updatedAt: 1),
+        session: oldSession,
         forumID: 42,
         forumName: "swift",
         isFollowed: true
@@ -171,7 +173,7 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
 
     do {
       _ = try await service.setForumFollowed(
-        session: session(updatedAt: 2),
+        session: rotatedSession,
         forumID: 42,
         forumName: "swift",
         isFollowed: true

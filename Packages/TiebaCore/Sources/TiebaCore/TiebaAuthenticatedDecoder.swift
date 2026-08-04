@@ -1,3 +1,4 @@
+import CoreFoundation
 import Foundation
 import TiebaProto
 
@@ -202,14 +203,13 @@ enum TiebaAuthenticatedDecoder {
 
   private static func int64(_ value: Any?) -> Int64? {
     switch value {
-    case is Bool:
-      nil
+    case let value as NSNumber:
+      guard CFGetTypeID(value) != CFBooleanGetTypeID() else { return nil }
+      return Int64(value.stringValue)
     case let value as Int64:
       value
     case let value as Int:
       Int64(value)
-    case let value as NSNumber:
-      Int64(value.stringValue)
     case let value as String:
       Int64(value)
     default:
