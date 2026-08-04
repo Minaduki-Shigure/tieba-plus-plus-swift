@@ -19,7 +19,7 @@ struct RootView: View {
   @State private var searchHistoryAction: GlobalSearchHistoryAction?
   @State private var linkErrorMessage: String?
   @Environment(\.scenePhase) private var scenePhase
-  @EnvironmentObject private var voicePlaybackController: VoicePlaybackController
+  @EnvironmentObject private var mediaPlaybackCoordinator: MediaPlaybackCoordinator
   @AppStorage(AppPreferenceKey.homeShowsRecentForums)
   private var homeShowsRecentForums = true
   @AppStorage(AppPreferenceKey.homeShowsDiscovery)
@@ -330,6 +330,7 @@ struct RootView: View {
       favoritesViewModel.reload()
       recentForumsViewModel.reload()
       searchSuggestionViewModel.setEnabled(searchSuggestionsEnabled)
+      mediaPlaybackCoordinator.setSceneActive(scenePhase == .active)
     }
     .task { await globalSearchHistoryViewModel.loadIfNeeded() }
     .onChange(of: query) { searchSuggestionViewModel.inputChanged($0) }
@@ -337,9 +338,9 @@ struct RootView: View {
       searchSuggestionViewModel.setEnabled($0)
     }
     .onChange(of: scenePhase) {
+      mediaPlaybackCoordinator.setSceneActive($0 == .active)
       if $0 != .active {
         searchSuggestionViewModel.cancelAndClear()
-        voicePlaybackController.pauseForInactiveScene()
       }
     }
     .onChange(of: path) { _ in

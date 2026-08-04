@@ -50,8 +50,12 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Strict internal routing for supported Tieba HTTPS, pasted official-scheme, and app links
 - Default-system external HTTPS opening with an optional in-app Safari view
 - Nested replies, images, video links, and voice playback
+- Application-scoped voice/video arbitration with one active playback lease,
+  inactive-scene pausing, and no implicit resume
+- Single lazy video player with native AVKit inline/full-screen controls and
+  Picture in Picture disabled
 - Single-session voice playback with loading/failure state, elapsed progress,
-  seeking, audio-interruption handling, and inactive-scene pausing
+  seeking, and audio-interruption handling
 - Responsive one-to-three-column masonry for consecutive post-body image runs
 - Persistent automatic, data-saving, or tap-to-load policy for content media
 - Persistent standard or high-definition quality selection for supported image previews
@@ -146,19 +150,43 @@ shortest-column assignment whose ties choose the lower column. Nonfinite
 proposals or spacing and invalid dimensions are normalized before frame
 calculation.
 
-Voice content uses one application-scoped player rather than one independent
-player per rendered floor. A new control owns a fresh item identity and each
-loaded source owns a fresh session identity. Starting a second control replaces
-the active item, while late progress, completion, failure, or interruption
-events from the replaced session are ignored. The declared public duration is a
-bounded initial fallback; a finite positive AVFoundation duration can replace
-it after loading, and both elapsed time and explicit seeks are clamped before
-presentation. Loading, playing, paused, and generic failure states remain
-separate. Completion returns the same item to zero, while leaving that item,
-backgrounding the scene, an audio interruption, or loss of the active output
-cannot leave an inaccessible player running. This milestone intentionally adds
-no background audio, lock-screen controls, automatic playback, persistent
-audio cache, download, or export path.
+Media playback uses one main-actor application coordinator rather than allowing
+each rendered control to play independently. Voice and video compete for one
+opaque lease: a successful new claim pauses the previous participant, while an
+invalid URL cannot disturb an unrelated lease. Returning from an inactive scene
+does not reacquire a lease or resume anything. Controller leases, owner IDs,
+random load-session IDs, and current player-item identities form separate
+guards, so late engine, interruption, and UI lifecycle events from an old owner
+cannot mutate or stop its successor. Native AVKit play and pause actions pass
+through the same arbitration even when they bypass the app's cover control.
+
+Voice content retains one application-scoped player, and every rendered control
+owns a fresh item identity. The declared public duration is a bounded initial
+fallback; a finite positive AVFoundation duration can replace it after loading,
+and both elapsed time and explicit seeks are clamped before presentation.
+Loading, playing, paused, and generic failure states remain separate. Completion
+returns the same item to zero, while leaving that item, an audio interruption,
+or loss of the active output cannot leave an inaccessible player running.
+
+Video content also has one application-scoped player, but the underlying
+`AVPlayer` and item remain absent while only a cover is visible. An explicit
+start first validates the initial HTTPS URL, acquires the shared lease, and then
+creates the player lazily. Repeated URL values in different cells remain
+different owners, replacing one inline video with another replaces the only
+item, and changing an owner's URL never autoplays the replacement. AVKit keeps
+the same player for inline and full-screen playback. Entering, presented,
+exiting, and inline transition states are tied to the current owner and session;
+owner disappearance or a source change pauses immediately but defers item
+destruction until a transition outcome confirms the player is inline. A
+cancelled entry can complete only its matching pending cleanup, while a
+cancelled exit remains full-screen and keeps cleanup pending. Stale transitions
+cannot tear down a newer session, and another video cannot replace a non-inline
+item.
+
+This milestone intentionally adds no background audio, lock-screen controls,
+automatic playback, automatic resume after scene activation, persistent media
+cache, voice download or export, or custom media credentials and headers.
+Picture in Picture and automatic Picture in Picture startup are disabled.
 
 Rich-content images first open from the already filtered content array that
 produced the tap, so the local gallery is available without waiting for metadata.

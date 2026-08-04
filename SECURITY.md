@@ -412,16 +412,49 @@ custom request header when it constructs the AVFoundation item. AVFoundation
 remains subject to the platform's normal TLS and App Transport Security
 handling; no cleartext exception or custom certificate trust is introduced.
 
-One main-actor controller owns the only voice player. Every replacement load
-receives a random session identity, and asynchronous progress, completion,
-failure, and interruption events must match that identity before mutating UI
-state. Server-declared and AVFoundation durations are accepted only as finite
+Video playback accepts only an initial absolute HTTPS URL whose complete UTF-8
+representation is at most 8,192 bytes and contains no control character. It
+must have a nonempty host and no credentials, explicit port, or fragment. The
+application adds no Cookie, Authorization, account identity, device metadata,
+or custom request header when it constructs the `AVPlayerItem`. This is an
+initial-source boundary, not a custom redirect-host allowlist: TLS validation,
+App Transport Security, and redirects remain under AVFoundation's normal
+platform handling. The app adds no cleartext exception, custom certificate
+trust, redirect rewrite, or redirect credential injection.
+
+One main-actor application coordinator issues at most one opaque playback lease
+across voice and video. A new voice or video lease is installed before the old
+participant is synchronously revoked, and a controller accepts a revocation
+only when its exact lease still matches. Each loaded source also receives a
+random session identity, while player-item completion and failure events are
+matched to the current item. Late lease revocations, progress, completion,
+failure, interruption, and native-player state events from a replaced session
+therefore cannot mutate or stop its successor. Native AVKit play and pause
+controls reacquire or release the same lease instead of bypassing arbitration.
+
+The video controller owns one player and creates it lazily only after a valid,
+explicit start; rendering a cover cannot allocate a player or item. Full-screen
+presentation uses the same player and tracks entering, presented, exiting, and
+inline states with owner and session identities. If the owner disappears or its
+source changes during presentation or a transition, playback pauses immediately
+but destructive item cleanup remains pending until a transition outcome
+confirms the player is inline. Owner and session checks prevent stale callbacks
+from cleaning up a replacement session. A cancelled entry confirms inline and
+may finish only its matching pending cleanup; a cancelled exit remains
+full-screen and keeps cleanup pending. A different video cannot replace the
+item while the current player is non-inline. Picture in Picture and automatic
+Picture in Picture startup are disabled.
+
+Server-declared and AVFoundation voice durations are accepted only as finite
 positive values within a 24-hour presentation bound; elapsed positions and
-seeks are clamped to that duration. An inactive app scene, an audio
-interruption, removal of the current output device, or disappearance of the
-owning control pauses or resets the applicable session. The target declares no
-background-audio mode, and voice content is not downloaded, exported, cached
-persistently, logged, or played automatically.
+seeks are clamped to that duration. An inactive app scene atomically clears the
+current media lease and pauses its participant. Returning active grants no new
+lease and never resumes voice or video automatically. Audio interruptions,
+removal of the current output device, or disappearance of the owning control
+also pause or reset the applicable session. The target does not declare a
+background audio mode, and media is not played automatically or exposed through
+lock-screen controls; voice content is not downloaded, exported, cached
+persistently, or logged.
 
 High-resolution profile-avatar derivation is a source-construction boundary,
 not a remote-media redirect-host allowlist. The untrimmed raw source is limited

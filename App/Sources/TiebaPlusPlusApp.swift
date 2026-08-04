@@ -5,7 +5,9 @@ import SwiftUI
 struct TiebaPlusPlusApp: App {
   @StateObject private var externalWebPresentation = ExternalWebPresentationModel()
   @StateObject private var contentMediaNetworkMonitor = ContentMediaNetworkMonitor()
-  @StateObject private var voicePlaybackController = VoicePlaybackController()
+  @StateObject private var mediaPlaybackCoordinator: MediaPlaybackCoordinator
+  @StateObject private var voicePlaybackController: VoicePlaybackController
+  @StateObject private var videoPlaybackController: VideoPlaybackController
   @AppStorage(AppPreferenceKey.appearance)
   private var appearance = AppAppearance.system.rawValue
   @AppStorage(AppPreferenceKey.accentColor)
@@ -39,6 +41,14 @@ struct TiebaPlusPlusApp: App {
   private let startDestination: AppStartDestination
 
   init() {
+    let mediaPlaybackCoordinator = MediaPlaybackCoordinator()
+    _mediaPlaybackCoordinator = StateObject(wrappedValue: mediaPlaybackCoordinator)
+    _voicePlaybackController = StateObject(
+      wrappedValue: VoicePlaybackController(coordinator: mediaPlaybackCoordinator)
+    )
+    _videoPlaybackController = StateObject(
+      wrappedValue: VideoPlaybackController(coordinator: mediaPlaybackCoordinator)
+    )
     startDestination = AppStartDestination.resolved(
       UserDefaults.standard.string(forKey: AppPreferenceKey.homeStartDestination) ?? ""
     )
@@ -99,7 +109,9 @@ struct TiebaPlusPlusApp: App {
           externalWebPresentation.requestPresentation(for: url)
         }
       )
+      .environmentObject(mediaPlaybackCoordinator)
       .environmentObject(voicePlaybackController)
+      .environmentObject(videoPlaybackController)
       .background {
         ExternalWebBrowserPresenter(page: externalWebPresentation.page) { pageID in
           externalWebPresentation.dismiss(id: pageID)

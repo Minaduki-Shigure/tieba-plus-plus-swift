@@ -86,23 +86,30 @@ corresponding surface or control.
   with one to three image previews or a nonplaying video cover, plus reply,
   view, approval, share, and relative-time context. Pinned rows stay compact
   and request neither author avatars nor preview media.
-- **Rich media:** Rich content supports images, video links, voice playback,
-  and shared-thread origin media. Consecutive images in post-like content use a
-  one-to-three-column masonry layout based on their actual container width;
-  Accessibility Dynamic Type and forum-rule documents remain single-column.
-  Voice posts share one app-scoped spoken-audio player, so starting another
-  voice replaces the previous session. The control exposes loading and failure
-  states, elapsed and resolved duration, and an accessible seek slider; audio
-  pauses when the app becomes inactive, an interruption begins, or an output
-  device is removed.
-  Images open immediately in a same-floor gallery with paging and zoom. In an
-  ordinary unfiltered thread, the gallery can expand anonymously across floors,
-  preserve repeated occurrences, lazily load in both directions, and show the
-  server's global image position; other contexts and filtered threads remain
-  scoped to their already visible content. Original-image loading shows an exact
-  transfer percentage when the server supplies a reliable length; unknown or
-  inconsistent lengths remain indeterminate. Explicit actions can share the
-  selected original file or save it through add-only Photos access.
+- **Rich-content layout:** Rich content supports images, video links, voice
+  playback, and shared-thread origin media. Consecutive images in post-like
+  content use a one-to-three-column masonry layout based on their actual
+  container width; Accessibility Dynamic Type and forum-rule documents remain
+  single-column.
+- **Audio and video playback:** Voice and video share one application-scoped
+  playback arbiter, so starting either pauses the previous voice or video and
+  never resumes it implicitly. Voice retains loading and failure states,
+  elapsed and resolved duration, and an accessible seek slider. A single video
+  player is created lazily only after an explicit valid playback request and
+  uses native AVKit inline and full-screen controls; merely rendering a cover
+  creates no player. Native play and pause controls participate in the same
+  arbitration. Playback pauses when the app becomes inactive, an interruption
+  begins, or the active output disappears, and returning active does not resume
+  it automatically. Picture in Picture is disabled.
+- **Image gallery:** Images open immediately in a same-floor gallery with paging
+  and zoom. In an ordinary unfiltered thread, the gallery can expand
+  anonymously across floors, preserve repeated occurrences, lazily load in both
+  directions, and show the server's global image position; other contexts and
+  filtered threads remain scoped to their already visible content.
+  Original-image loading shows an exact transfer percentage when the server
+  supplies a reliable length; unknown or inconsistent lengths remain
+  indeterminate. Explicit actions can share the selected original file or save
+  it through add-only Photos access.
 - **Media loading:** Content media can load automatically, conserve data, or
   wait for every explicit tap. Data-saving mode loads automatically only on an
   available network that iOS does not mark expensive or constrained; otherwise

@@ -1,4 +1,3 @@
-import AVKit
 import SwiftUI
 
 struct BrowseContentView: View {
@@ -601,8 +600,9 @@ private struct BrowseVideoView: View {
   let width: Int
   let height: Int
 
-  @State private var player: AVPlayer?
+  @State private var ownerID = UUID()
   @Environment(\.contentMediaLoadBehavior) private var contentMediaLoadBehavior
+  @EnvironmentObject private var controller: VideoPlaybackController
 
   private var aspectRatio: CGFloat {
     guard width > 0, height > 0 else { return 16 / 9 }
@@ -611,8 +611,17 @@ private struct BrowseVideoView: View {
 
   var body: some View {
     Group {
-      if let player {
-        VideoPlayer(player: player)
+      if
+        let url,
+        let sessionID = activeSessionID,
+        let player = controller.player(for: ownerID, url: url)
+      {
+        InlineVideoPlayer(
+          player: player,
+          ownerID: ownerID,
+          sessionID: sessionID,
+          controller: controller
+        )
       } else {
         ZStack {
           if let coverURL {
@@ -660,9 +669,7 @@ private struct BrowseVideoView: View {
           }
           if let url {
             Button {
-              let newPlayer = AVPlayer(url: url)
-              player = newPlayer
-              newPlayer.play()
+              controller.start(ownerID: ownerID, url: url)
             } label: {
               Image(systemName: "play.circle.fill")
                 .font(.system(size: 48))
@@ -671,15 +678,42 @@ private struct BrowseVideoView: View {
             }
             .accessibilityLabel("播放视频")
           }
+
+          if let failureMessage {
+            Text(failureMessage)
+              .font(.caption.weight(.medium))
+              .foregroundStyle(.white)
+              .padding(.horizontal, 8)
+              .padding(.vertical, 6)
+              .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+              .allowsHitTesting(false)
+              .accessibilityLabel(failureMessage)
+          }
         }
       }
     }
     .aspectRatio(aspectRatio, contentMode: .fit)
     .frame(maxWidth: 560)
     .clipped()
-    .onDisappear {
-      player?.pause()
-    }
+    .onChange(of: url) { controller.sourceDidChange(ownerID: ownerID, to: $0) }
+    .onDisappear { controller.ownerDidDisappear(ownerID) }
+  }
+
+  private var activeSessionID: UUID? {
+    guard
+      controller.snapshot.ownerID == ownerID,
+      controller.snapshot.sourceURL == url
+    else { return nil }
+    return controller.snapshot.sessionID
+  }
+
+  private var failureMessage: String? {
+    guard
+      controller.snapshot.ownerID == ownerID,
+      controller.snapshot.sourceURL == url,
+      case .failed(let message) = controller.snapshot.state
+    else { return nil }
+    return message
   }
 
   private func videoCoverActionPlaceholder(

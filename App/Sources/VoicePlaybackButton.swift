@@ -51,9 +51,9 @@ protocol VoicePlaybackEngine: AnyObject {
 
   func load(url: URL, sessionID: UUID)
   func play()
-  func pause()
+  func pause(deactivateAudioSession: Bool)
   func seek(to time: TimeInterval)
-  func reset()
+  func reset(deactivateAudioSession: Bool)
 }
 
 enum VoicePlaybackURLPolicy {
@@ -124,20 +124,37 @@ enum VoicePlaybackTime {
 }
 
 @MainActor
-final class VoicePlaybackController: ObservableObject {
+final class VoicePlaybackController: ObservableObject, MediaPlaybackParticipant {
   @Published private(set) var snapshot = VoicePlaybackSnapshot.idle
 
   private let engine: any VoicePlaybackEngine
+  private let mediaPlaybackCoordinator: MediaPlaybackCoordinator
   private var sessionID: UUID?
   private var completedSessionID: UUID?
   private var failedSessionID: UUID?
+  private var mediaPlaybackLease: MediaPlaybackLease?
 
   convenience init() {
-    self.init(engine: AVPlayerVoicePlaybackEngine())
+    self.init(
+      engine: AVPlayerVoicePlaybackEngine(),
+      coordinator: MediaPlaybackCoordinator()
+    )
   }
 
-  init(engine: any VoicePlaybackEngine) {
+  convenience init(coordinator: MediaPlaybackCoordinator) {
+    self.init(
+      engine: AVPlayerVoicePlaybackEngine(),
+      coordinator: coordinator
+    )
+  }
+
+  convenience init(engine: any VoicePlaybackEngine) {
+    self.init(engine: engine, coordinator: MediaPlaybackCoordinator())
+  }
+
+  init(engine: any VoicePlaybackEngine, coordinator: MediaPlaybackCoordinator) {
     self.engine = engine
+    self.mediaPlaybackCoordinator = coordinator
     engine.eventHandler = { [weak self] event in
       self?.handle(event)
     }
@@ -147,9 +164,16 @@ final class VoicePlaybackController: ObservableObject {
     if snapshot.itemID == itemID, snapshot.sourceURL == url {
       switch snapshot.state {
       case .loading, .playing:
-        engine.pause()
+        relinquishMediaPlaybackLease()
+        engine.pause(deactivateAudioSession: true)
         snapshot = replacingState(.paused)
       case .paused:
+        guard let lease = mediaPlaybackCoordinator.acquire(
+          kind: .voice,
+          ownerID: itemID,
+          participant: self
+        ) else { return }
+        mediaPlaybackLease = lease
         completedSessionID = nil
         failedSessionID = nil
         snapshot = replacingState(.loading)
@@ -185,7 +209,9 @@ final class VoicePlaybackController: ObservableObject {
 
   func stop(itemID: UUID) {
     guard snapshot.itemID == itemID else { return }
-    engine.reset()
+    let deactivatesAudioSession = ownsCurrentMediaPlaybackLease
+    relinquishMediaPlaybackLease()
+    engine.reset(deactivateAudioSession: deactivatesAudioSession)
     sessionID = nil
     completedSessionID = nil
     failedSessionID = nil
@@ -195,7 +221,8 @@ final class VoicePlaybackController: ObservableObject {
   func pauseForInactiveScene() {
     switch snapshot.state {
     case .loading, .playing:
-      engine.pause()
+      relinquishMediaPlaybackLease()
+      engine.pause(deactivateAudioSession: true)
       snapshot = replacingState(.paused)
     case .idle, .paused, .failed:
       break
@@ -205,7 +232,11 @@ final class VoicePlaybackController: ObservableObject {
   private func start(itemID: UUID, url: URL, declaredDuration: Int) {
     let declaredDuration = VoicePlaybackTime.sanitizedDuration(TimeInterval(declaredDuration))
     guard VoicePlaybackURLPolicy.allows(url) else {
-      engine.reset()
+      // A malformed control must not stop another floor's active voice.
+      guard snapshot.itemID == nil || snapshot.itemID == itemID else { return }
+      let deactivatesAudioSession = ownsCurrentMediaPlaybackLease
+      relinquishMediaPlaybackLease()
+      engine.reset(deactivateAudioSession: deactivatesAudioSession)
       sessionID = nil
       completedSessionID = nil
       failedSessionID = nil
@@ -218,6 +249,13 @@ final class VoicePlaybackController: ObservableObject {
       )
       return
     }
+
+    guard let lease = mediaPlaybackCoordinator.acquire(
+      kind: .voice,
+      ownerID: itemID,
+      participant: self
+    ) else { return }
+    mediaPlaybackLease = lease
 
     let sessionID = UUID()
     self.sessionID = sessionID
@@ -242,6 +280,13 @@ final class VoicePlaybackController: ObservableObject {
         eventSessionID != completedSessionID,
         eventSessionID != failedSessionID
       else { return }
+      if state != .paused, !ownsCurrentMediaPlaybackLease {
+        return
+      }
+      if state == .paused, ownsCurrentMediaPlaybackLease {
+        relinquishMediaPlaybackLease()
+        engine.pause(deactivateAudioSession: true)
+      }
       let duration = resolvedDuration(actualDuration)
       snapshot = VoicePlaybackSnapshot(
         itemID: snapshot.itemID,
@@ -253,9 +298,13 @@ final class VoicePlaybackController: ObservableObject {
     case .ended(let eventSessionID):
       guard
         eventSessionID == sessionID,
+        eventSessionID != completedSessionID,
         eventSessionID != failedSessionID
       else { return }
+      let deactivatesAudioSession = ownsCurrentMediaPlaybackLease
+      relinquishMediaPlaybackLease()
       completedSessionID = eventSessionID
+      engine.pause(deactivateAudioSession: deactivatesAudioSession)
       snapshot = VoicePlaybackSnapshot(
         itemID: snapshot.itemID,
         sourceURL: snapshot.sourceURL,
@@ -266,9 +315,13 @@ final class VoicePlaybackController: ObservableObject {
     case .failed(let eventSessionID, _):
       guard
         eventSessionID == sessionID,
-        eventSessionID != completedSessionID
+        eventSessionID != completedSessionID,
+        eventSessionID != failedSessionID
       else { return }
+      let deactivatesAudioSession = ownsCurrentMediaPlaybackLease
+      relinquishMediaPlaybackLease()
       failedSessionID = eventSessionID
+      engine.pause(deactivateAudioSession: deactivatesAudioSession)
       snapshot = replacingState(.failed("语音加载失败。"))
     case .interrupted(let eventSessionID):
       guard
@@ -276,8 +329,44 @@ final class VoicePlaybackController: ObservableObject {
         eventSessionID != completedSessionID,
         eventSessionID != failedSessionID
       else { return }
+      let deactivatesAudioSession = ownsCurrentMediaPlaybackLease
+      relinquishMediaPlaybackLease()
+      engine.pause(deactivateAudioSession: deactivatesAudioSession)
       snapshot = replacingState(.paused)
     }
+  }
+
+  func mediaPlaybackWasRevoked(
+    lease: MediaPlaybackLease,
+    reason: MediaPlaybackRevocationReason
+  ) {
+    guard mediaPlaybackLease == lease else { return }
+    mediaPlaybackLease = nil
+    let deactivatesAudioSession: Bool
+    switch reason {
+    case .superseded:
+      deactivatesAudioSession = false
+    case .sceneInactive:
+      deactivatesAudioSession = true
+    }
+    engine.pause(deactivateAudioSession: deactivatesAudioSession)
+    switch snapshot.state {
+    case .loading, .playing:
+      snapshot = replacingState(.paused)
+    case .idle, .paused, .failed:
+      break
+    }
+  }
+
+  private var ownsCurrentMediaPlaybackLease: Bool {
+    guard let mediaPlaybackLease else { return false }
+    return mediaPlaybackCoordinator.isCurrent(mediaPlaybackLease)
+  }
+
+  private func relinquishMediaPlaybackLease() {
+    guard let lease = mediaPlaybackLease else { return }
+    mediaPlaybackLease = nil
+    mediaPlaybackCoordinator.relinquish(lease)
   }
 
   private func resolvedDuration(_ actualDuration: TimeInterval?) -> TimeInterval {
@@ -409,10 +498,12 @@ private final class AVPlayerVoicePlaybackEngine: VoicePlaybackEngine {
     emitSnapshot(state: .loading, elapsed: player.currentTime().seconds)
   }
 
-  func pause() {
+  func pause(deactivateAudioSession: Bool) {
     guard sessionID != nil else { return }
     player.pause()
-    deactivateAudioSession()
+    if deactivateAudioSession {
+      deactivateAudioSessionIfNeeded()
+    }
     emitSnapshot(state: .paused, elapsed: player.currentTime().seconds)
   }
 
@@ -426,7 +517,7 @@ private final class AVPlayerVoicePlaybackEngine: VoicePlaybackEngine {
     )
   }
 
-  func reset() {
+  func reset(deactivateAudioSession: Bool) {
     observerBag.replaceItemStateObservation(nil)
     player.pause()
     player.replaceCurrentItem(with: nil)
@@ -434,7 +525,9 @@ private final class AVPlayerVoicePlaybackEngine: VoicePlaybackEngine {
     currentItemIdentifier = nil
     didReportFailure = false
     endRewindID = nil
-    deactivateAudioSession()
+    if deactivateAudioSession {
+      deactivateAudioSessionIfNeeded()
+    }
   }
 
   private func installObservers() {
@@ -585,7 +678,6 @@ private final class AVPlayerVoicePlaybackEngine: VoicePlaybackEngine {
     let rewindID = UUID()
     endRewindID = rewindID
     player.pause()
-    deactivateAudioSession()
     player.seek(
       to: .zero,
       toleranceBefore: .zero,
@@ -646,7 +738,6 @@ private final class AVPlayerVoicePlaybackEngine: VoicePlaybackEngine {
       !isRewindingAfterEnd
     else { return }
     player.pause()
-    deactivateAudioSession()
     eventHandler?(.interrupted(sessionID: sessionID))
   }
 
@@ -655,7 +746,6 @@ private final class AVPlayerVoicePlaybackEngine: VoicePlaybackEngine {
     didReportFailure = true
     endRewindID = nil
     player.pause()
-    deactivateAudioSession()
     eventHandler?(
       .failed(
         sessionID: sessionID,
@@ -689,7 +779,7 @@ private final class AVPlayerVoicePlaybackEngine: VoicePlaybackEngine {
     try? audioSession.setActive(true)
   }
 
-  private func deactivateAudioSession() {
+  private func deactivateAudioSessionIfNeeded() {
     try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
   }
 }

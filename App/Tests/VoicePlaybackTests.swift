@@ -188,6 +188,139 @@ final class VoicePlaybackTests: XCTestCase {
     XCTAssertEqual(engine.pauseCount, 2)
   }
 
+  func testVideoSupersedesVoiceWithoutDeactivatingTheReplacementAudioSession() throws {
+    let coordinator = MediaPlaybackCoordinator()
+    let engine = VoicePlaybackEngineSpy()
+    let controller = VoicePlaybackController(engine: engine, coordinator: coordinator)
+    let itemID = UUID()
+    let url = try voiceURL("coordinated")
+
+    controller.toggle(itemID: itemID, url: url, declaredDuration: 9)
+    let sessionID = try XCTUnwrap(engine.loadedSessions.last?.sessionID)
+    engine.send(
+      .snapshot(sessionID: sessionID, state: .playing, elapsed: 2, duration: 9)
+    )
+
+    let videoParticipant = MediaPlaybackParticipantSpy()
+    let videoLease = try XCTUnwrap(
+      coordinator.acquire(
+        kind: .video,
+        ownerID: UUID(),
+        participant: videoParticipant
+      )
+    )
+
+    XCTAssertEqual(controller.snapshot.state, .paused)
+    XCTAssertEqual(engine.pauseDeactivationFlags, [false])
+    XCTAssertTrue(coordinator.isCurrent(videoLease))
+
+    engine.send(
+      .snapshot(sessionID: sessionID, state: .playing, elapsed: 4, duration: 9)
+    )
+    XCTAssertEqual(controller.snapshot.state, .paused)
+
+    engine.send(.ended(sessionID: sessionID))
+    XCTAssertTrue(coordinator.isCurrent(videoLease))
+    XCTAssertEqual(engine.pauseDeactivationFlags, [false, false])
+
+    controller.toggle(itemID: itemID, url: url, declaredDuration: 9)
+    XCTAssertEqual(controller.snapshot.state, .loading)
+    XCTAssertEqual(engine.playCount, 2)
+    XCTAssertEqual(videoParticipant.revocations.map(\.lease), [videoLease])
+    XCTAssertEqual(videoParticipant.revocations.map(\.reason), [.superseded(by: .voice)])
+  }
+
+  func testInvalidVoiceURLDoesNotRevokeOrDeactivateActiveVideo() throws {
+    let coordinator = MediaPlaybackCoordinator()
+    let videoParticipant = MediaPlaybackParticipantSpy()
+    let videoLease = try XCTUnwrap(
+      coordinator.acquire(
+        kind: .video,
+        ownerID: UUID(),
+        participant: videoParticipant
+      )
+    )
+    let engine = VoicePlaybackEngineSpy()
+    let controller = VoicePlaybackController(engine: engine, coordinator: coordinator)
+
+    controller.toggle(
+      itemID: UUID(),
+      url: try XCTUnwrap(URL(string: "https://example.com/voice.mp3")),
+      declaredDuration: 3
+    )
+
+    XCTAssertEqual(controller.snapshot.state, .failed("语音地址不可用。"))
+    XCTAssertTrue(coordinator.isCurrent(videoLease))
+    XCTAssertTrue(videoParticipant.revocations.isEmpty)
+    XCTAssertEqual(engine.resetDeactivationFlags, [false])
+  }
+
+  func testInvalidVoiceURLFromAnotherItemDoesNotStopActiveVoice() throws {
+    let coordinator = MediaPlaybackCoordinator()
+    let engine = VoicePlaybackEngineSpy()
+    let controller = VoicePlaybackController(engine: engine, coordinator: coordinator)
+    let activeItemID = UUID()
+
+    controller.toggle(
+      itemID: activeItemID,
+      url: try voiceURL("active"),
+      declaredDuration: 5
+    )
+    let sessionID = try XCTUnwrap(engine.loadedSessions.last?.sessionID)
+    engine.send(.snapshot(sessionID: sessionID, state: .playing, elapsed: 1, duration: 5))
+
+    controller.toggle(
+      itemID: UUID(),
+      url: try XCTUnwrap(URL(string: "https://example.com/invalid.mp3")),
+      declaredDuration: 3
+    )
+
+    XCTAssertEqual(controller.snapshot.itemID, activeItemID)
+    XCTAssertEqual(controller.snapshot.state, .playing)
+    XCTAssertTrue(engine.resetDeactivationFlags.isEmpty)
+    let videoParticipant = MediaPlaybackParticipantSpy()
+    _ = coordinator.acquire(kind: .video, ownerID: UUID(), participant: videoParticipant)
+    XCTAssertEqual(engine.pauseDeactivationFlags, [false])
+  }
+
+  func testCoordinatorSceneRevocationPausesVoiceAndDeactivatesAudioSession() throws {
+    let coordinator = MediaPlaybackCoordinator()
+    let engine = VoicePlaybackEngineSpy()
+    let controller = VoicePlaybackController(engine: engine, coordinator: coordinator)
+
+    controller.toggle(
+      itemID: UUID(),
+      url: try voiceURL("scene-coordinator"),
+      declaredDuration: 5
+    )
+    coordinator.setSceneActive(false)
+
+    XCTAssertEqual(controller.snapshot.state, .paused)
+    XCTAssertEqual(engine.pauseDeactivationFlags, [true])
+  }
+
+  func testEngineInitiatedPauseRelinquishesVoiceOwnership() throws {
+    let coordinator = MediaPlaybackCoordinator()
+    let engine = VoicePlaybackEngineSpy()
+    let controller = VoicePlaybackController(engine: engine, coordinator: coordinator)
+    let itemID = UUID()
+
+    controller.toggle(
+      itemID: itemID,
+      url: try voiceURL("engine-pause"),
+      declaredDuration: 5
+    )
+    let sessionID = try XCTUnwrap(engine.loadedSessions.last?.sessionID)
+    engine.send(.snapshot(sessionID: sessionID, state: .playing, elapsed: 1, duration: 5))
+    engine.send(.snapshot(sessionID: sessionID, state: .paused, elapsed: 1, duration: 5))
+
+    XCTAssertEqual(controller.snapshot.state, .paused)
+    XCTAssertEqual(engine.pauseDeactivationFlags, [true])
+    let videoParticipant = MediaPlaybackParticipantSpy()
+    _ = coordinator.acquire(kind: .video, ownerID: UUID(), participant: videoParticipant)
+    XCTAssertTrue(videoParticipant.revocations.isEmpty)
+  }
+
   func testEngineFailureUsesAStableGenericPresentation() throws {
     let engine = VoicePlaybackEngineSpy()
     let controller = VoicePlaybackController(engine: engine)
@@ -247,8 +380,10 @@ private final class VoicePlaybackEngineSpy: VoicePlaybackEngine {
   private(set) var loadedSessions = [LoadedSession]()
   private(set) var playCount = 0
   private(set) var pauseCount = 0
+  private(set) var pauseDeactivationFlags = [Bool]()
   private(set) var seekTimes = [TimeInterval]()
   private(set) var resetCount = 0
+  private(set) var resetDeactivationFlags = [Bool]()
 
   func load(url: URL, sessionID: UUID) {
     loadedSessions.append(LoadedSession(url: url, sessionID: sessionID))
@@ -258,19 +393,38 @@ private final class VoicePlaybackEngineSpy: VoicePlaybackEngine {
     playCount += 1
   }
 
-  func pause() {
+  func pause(deactivateAudioSession: Bool) {
     pauseCount += 1
+    pauseDeactivationFlags.append(deactivateAudioSession)
   }
 
   func seek(to time: TimeInterval) {
     seekTimes.append(time)
   }
 
-  func reset() {
+  func reset(deactivateAudioSession: Bool) {
     resetCount += 1
+    resetDeactivationFlags.append(deactivateAudioSession)
   }
 
   func send(_ event: VoicePlaybackEngineEvent) {
     eventHandler?(event)
+  }
+}
+
+@MainActor
+private final class MediaPlaybackParticipantSpy: MediaPlaybackParticipant {
+  struct Revocation: Equatable {
+    let lease: MediaPlaybackLease
+    let reason: MediaPlaybackRevocationReason
+  }
+
+  private(set) var revocations = [Revocation]()
+
+  func mediaPlaybackWasRevoked(
+    lease: MediaPlaybackLease,
+    reason: MediaPlaybackRevocationReason
+  ) {
+    revocations.append(Revocation(lease: lease, reason: reason))
   }
 }
