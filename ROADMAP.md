@@ -97,20 +97,22 @@ the source metadata is updated to that tested IPA.
   unfollow confirmation
 - Authoritative per-forum check-in state and explicitly confirmed single-forum
   check-in, with already-signed idempotence and no automatic or batch mode
+- Account-bound topic approval and cancellation on the canonical first floor,
+  with explicit confirmation and lease-guarded read-only recovery
 - Short-lived `tbs` availability for at most the immediately following write,
   without Keychain persistence or exposure to application models
 - Isolated anonymous and authenticated networking clients
 
 ## Next milestones
 
-1. Real-device validation of single-forum check-in success, already-signed,
-   server-error, uncertain-failure, and read-only reconciliation paths, followed
-   by account switching, followed forums, and follow/unfollow recovery checks
-2. Authenticated thread approval (like) as the next account-write candidate
-3. Server-side thread favorites after the login flow can safely acquire and bind
+1. Real-device validation of topic approval/cancellation and single-forum
+   check-in success, idempotent, server-error, uncertain-failure, and read-only
+   reconciliation paths, followed by account switching and follow recovery checks
+2. Server-side thread favorites after the login flow can safely acquire and bind
    the required STOKEN; this workflow is currently blocked
-4. Post and reply workflows behind explicit confirmation and anti-CSRF tests
-5. Notifications, moderation tools, and broader settings parity
+3. Ordinary floor, nested-reply, and creation workflows behind explicit
+   confirmation and anti-CSRF tests
+4. Notifications, moderation tools, and broader settings parity
 
 Tieba's anonymous post endpoint does not currently honor its nominal numeric
 floor-jump fields. The app therefore restores a stable post ID and offers page
@@ -479,15 +481,18 @@ content. Regular-expression rules are intentionally unsupported until a
 bounded or non-backtracking implementation is available.
 
 Each authenticated milestone remains gated on protocol tests, credential
-isolation, and real-device validation. Forum follow/unfollow and check-in probe
-the current account and forum relationship before every requested change,
-make the response's short-lived `tbs` available to at most the immediately
-following write inside the authenticated client, and never retry an uncertain
-write. A conflicting account operation waits for the active write to settle and
-then enters the lease-guarded read-only recovery path instead of queuing another
-write. Check-in additionally requires authoritative per-forum sign state,
-rejects an unfollowed forum, requires explicit user confirmation, and performs no
-write when the server already reports the account as signed. Anonymous browsing
+isolation, and real-device validation. Forum follow/unfollow, check-in, and topic
+approval bind a fresh FRS response to the current account and forum before a
+write, make its short-lived `tbs` available to at most that write inside the
+authenticated client, and never retry an uncertain write. Topic approval first
+reads account-scoped `Agree.has_agree`, distinguishes the topic's `obj_type=3`
+from ordinary floors and nested replies, and uses a nonpersistent random
+Galaxy2 CUID with a Helios checksum required by the endpoint. A conflicting
+account operation waits for the active write to settle and then enters the
+lease-guarded read-only recovery path instead of queuing another write. Check-in
+additionally requires authoritative per-forum sign state and rejects an
+unfollowed forum. All writes require explicit user confirmation and perform no
+write when the server already reports the requested state. Anonymous browsing
 must continue to work without creating, reading, or storing an account session.
 
 Search categories load independently so one endpoint failure does not discard
@@ -561,8 +566,10 @@ approval score. Moderator roles normalize only recognized manager and assistant
 wire values; a flagged but empty or unknown value becomes the generic `吧务`
 label. The raw role string and arbitrary badge images never enter the UI. Missing
 or malformed values collapse to a quiet empty state instead of creating a
-control. These values are response snapshots only; anonymous cards do not submit
-likes or expose moderation actions.
+control. These values are response snapshots only. The canonical first floor may
+replace its topic score label with the separately authenticated topic-approval
+control; ordinary floors and nested replies do not submit reactions or expose
+moderation actions.
 
 Nested replies preserve every server content fragment, including both direct
 leading mentions and the legacy `reply + mention + colon` form. Positive mention

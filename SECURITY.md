@@ -91,27 +91,48 @@ accepted only when the error code is zero, the returned sign user ID matches the
 expected account, `is_sign_in` is exactly one, and the returned consecutive-day
 and rank values are nonnegative integers.
 
-The authenticated Core client single-flights equivalent check-in calls and
-serializes a different credential or normalized name for the same account and
-forum without sharing its result. The App account-service layer additionally
-coalesces identical operations and makes follow/unfollow and check-in for the
-same account and forum mutually exclusive, including across credential rotation.
+Topic approval state must come from an authenticated protobuf post-page request,
+never from the anonymous default value of `Agree.has_agree`. A read first binds
+the same BDUSS to the exact expected UID, forum ID, and normalized forum name
+through the FRS contract, then accepts only a matching thread ID, forum ID,
+canonical first-post ID, present `Agree` message, and zero-or-one `has_agree`.
+Before a requested change, the client may preflight that state, but must acquire
+and bind a fresh FRS `tbs` immediately before at most one HTTPS POST to
+`https://tiebac.baidu.com/c/c/agree/opAgree`. The signed form contains exactly
+`BDUSS`, `_client_version`, `agree_type=2`, `cuid`, `obj_type=3`, `op_type`,
+`post_id`, `tbs`, `thread_id`, and `sign`; it must not add STOKEN or a credential
+Cookie. `post_id` is the validated canonical first-post ID. `op_type=0` approves
+and `op_type=1` cancels approval. The mandatory `cuid` is generated once per
+authenticated client as a random uppercase Galaxy2 identifier (`32HEX|V` plus
+an 8-character Helios checksum), reused only for that client lifetime, never
+derived from hardware or IDFV, and never persisted. A write response is limited
+to 64 KiB and succeeds only when its error code is zero; its optional score is
+not a substitute for that success code.
+
+The authenticated Core client single-flights equivalent calls for check-in and
+topic approval. Topic approval is keyed by UID, thread ID, and canonical first-
+post ID; an identical credential and target state shares one task, while an
+opposite state or rotated credential waits for the active task and then fails
+without issuing another write. The App account-service layer additionally binds
+the operation to `sessionRevision`, coalesces identical operations, and makes
+follow/unfollow and check-in for the same account and forum mutually exclusive,
+including across credential rotation.
 A conflicting App call must wait for the active write to settle, then request
 lease-guarded read-only reconciliation; it must not enqueue or automatically
 start another write. No uncertain write may be automatically retried. The App
 must verify that the initiating account lease is readable and current before
 starting reconciliation and again before applying its result. A lease change or
 Keychain failure before the request prevents it; a change after it starts makes
-the result ineligible to update current state. Follow, unfollow, and check-in all
-require explicit user confirmation. Automatic, scheduled, and batch check-in
-are deliberately unsupported.
+the result ineligible to update current state. Follow, unfollow, check-in, and
+topic approval or cancellation all require explicit user confirmation.
+Automatic, scheduled, and batch check-in are deliberately unsupported.
 
 STOKEN is neither extracted nor persisted. An endpoint that actually requires
 it remains unsupported until a login flow can verify that BDUSS and STOKEN
 belong to the same returned account. Server-side thread favorites are therefore
-blocked. The current unfollow and check-in requests deliberately omit STOKEN and
-must fail visibly rather than fall back to a second write endpoint or add device
-metadata.
+blocked. The current unfollow, check-in, and topic-approval requests deliberately
+omit STOKEN and must fail visibly rather than fall back to a second write endpoint
+or add hardware-derived device metadata.
 
 Anonymous public-profile requests must use the protocol's guest target fields.
 They must not place the target user in the current-account field, attach account
@@ -197,11 +218,13 @@ shared thread's origin poll must never be attributed to the outer thread. The
 anonymous UI is strictly read-only and must not expose selection state, collect
 votes, call a submission endpoint, or attach account credentials.
 
-Post author levels, IP locations, and net approval scores are also read only from
-the anonymous post response. An IP location is server-supplied public author
-context, not the device's current location; displaying it must never request
-Core Location permission. These values are not persisted in local history, and
-their static labels must not call an agree, disagree, or profile-write endpoint.
+Post author levels, IP locations, and net approval scores originate in the
+anonymous post response. An IP location is server-supplied public author context,
+not the device's current location; displaying it must never request Core Location
+permission. These values are not persisted in local history. Only the separately
+authenticated control attached to the exact canonical first floor may call the
+topic-approval endpoint; ordinary floor and nested-reply labels remain static and
+must not call an agree, disagree, or profile-write endpoint.
 
 Forum-moderator roles come from that same anonymous author object and are
 normalized into a closed manager, assistant, or generic-moderator enum. Raw,

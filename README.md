@@ -16,23 +16,23 @@ experimental or unsupported.
 | --- | --- |
 | Anonymous browsing | Available across discovery, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, and media preferences |
-| Accounts | Web login, switching, logout, followed forums, and experimental per-forum follow and check-in state |
-| Server-side writes | Confirmed forum follow/unfollow and explicit single-forum check-in are in device validation; other writes stay disabled |
-| TiebaLite parity | Anonymous reading and media: about 85–95%; full product scope: about 52–57% |
+| Accounts | Web login, switching, logout, followed forums, per-forum follow/check-in state, and experimental topic approval |
+| Server-side writes | Confirmed forum follow/unfollow, single-forum check-in, and topic approval are in device validation; other writes stay disabled |
+| TiebaLite parity | Anonymous reading and media: about 85–95%; full product scope: about 53–58% |
 | Distribution | Public SideStore/LiveContainer source backed by tested unsigned GitHub Release IPAs |
 
 ### Release and validation
 
-- **Current alpha:** `v0.56.0-alpha.1` adds authoritative per-forum check-in
-  state and an explicit single-forum check-in action alongside confirmed
-  follow/unfollow.
+- **Current alpha:** `v0.57.0-alpha.1` adds account-bound topic approval and
+  cancellation on the canonical first floor, with confirmed state reads and
+  recovery after an uncertain write.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
   XcodeGen 2.45.4 or newer.
 - **Automated checks:** GitHub Actions runs package tests and an unsigned
   simulator build, validates the app source, and verifies its public IPA hash.
-  Authenticated flows never use real credentials in CI. Forum follow/unfollow
-  and check-in therefore remain physical-device validation features in this
-  alpha.
+  Authenticated flows never use real credentials in CI. Forum follow/unfollow,
+  check-in, and topic approval therefore remain physical-device validation
+  features in this alpha.
 - **App source:** Add [`sidestore-source.json`](https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json)
   to LiveContainer or SideStore. Its latest IPA is published only after the tag's
   package, anonymous integration, and simulator tests all pass.
@@ -65,7 +65,9 @@ experimental or unsupported.
   explicit latest-reply checks are implemented with cursor validation.
 - **Replies and metadata:** Floors, nested replies, parent context, polls,
   shared-thread origins, author levels, moderator roles, IP locations, and
-  read-only approval scores are preserved where returned by the server.
+  approval scores are preserved where returned by the server. A logged-in
+  account can explicitly approve or cancel approval on the canonical topic;
+  ordinary floor and nested-reply scores remain read only.
 - **Images:** Responsive image groups open in a pageable, zoomable gallery.
   Ordinary unfiltered threads can expand the gallery across floors; originals
   can be explicitly shared or saved through add-only Photos access.
@@ -103,30 +105,36 @@ experimental or unsupported.
   followed-forum list. A loaded forum independently reads authoritative
   account-specific follow and check-in state, exposes confirmed follow/unfollow,
   and offers an explicit single-forum check-in action when eligible.
+- **Topic account state:** The canonical first floor independently reads the
+  active account's topic approval state and exposes confirmed approve/cancel
+  actions. Anonymous browsing and non-topic reply scores remain read only.
 - **Credential boundary:** Anonymous and authenticated requests use isolated,
   ephemeral clients. BDUSS is the only credential stored by the vault. STOKEN is
   not extracted, and the 26-character `tbs` value is validated, made available
   to at most the immediately following write, and never returned to the app
-  model or persisted.
+  model or persisted. Topic approval's mandatory `cuid` is a random
+  client-lifetime Galaxy2 identifier (`32HEX|V` plus an 8-character Helios
+  checksum); it is not hardware-derived or persisted.
 - **Write safety:** Each write is bound to the expected account UID and forum.
   Follow and check-in operations for the same forum cannot overlap, identical
-  concurrent operations are coalesced, and a conflicting call waits for the
-  active write to settle before requesting a read-only reconciliation. It is
-  never queued as a second write. The App starts and applies reconciliation only
-  while the initiating account lease remains readable and current; a later
-  account change discards its result. No uncertain failure retries a write.
-  Already-completed check-in is idempotent, and following, unfollowing, and
-  check-in all require explicit user confirmation. Automatic and batch check-in
-  are not implemented.
+  concurrent forum operations are coalesced, and both Core and the account
+  service coalesce the same account, topic, and requested approval state. A
+  conflicting call waits for the active write to settle before requesting
+  read-only reconciliation; it is never queued as a second write. The App
+  starts and applies reconciliation only while the initiating account lease remains
+  readable and current; a later account change discards its result. No uncertain
+  failure retries a write. Already-completed check-in and matching topic state
+  are idempotent. All supported writes require explicit user confirmation.
+  Automatic and batch check-in are not implemented.
 - **Unsupported operations:** Server-side thread favorites remain blocked on
-  safely acquiring and binding the required STOKEN. Thread approval (like) is
-  the next account-write candidate; posts, replies, notifications, and
-  moderation remain unavailable until their request contracts and recovery
-  paths have been validated on a disposable account.
+  safely acquiring and binding the required STOKEN. Ordinary floor and nested
+  reply reactions, content creation, notifications, and moderation remain
+  unavailable until their request contracts and recovery paths have been
+  validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, protocol constraints, and next milestones. The current weighted
   end-to-end audit estimates 85–95% coverage of anonymous reading and media, or
-  52–57% of the full TiebaLite product scope once the remaining account writes,
+  53–58% of the full TiebaLite product scope once the remaining account writes,
   creation, notifications, and moderation are included.
 
 ## Architecture
@@ -145,7 +153,7 @@ normal URLSession certificate validation; global App Transport Security
 exceptions are forbidden. See [`SECURITY.md`](SECURITY.md) before testing an
 account build.
 The account vault persists BDUSS only. It does not extract or store STOKEN or
-the short-lived anti-CSRF value made available to at most one confirmed forum
+the short-lived anti-CSRF value made available to at most one confirmed account
 write.
 
 ## Build
