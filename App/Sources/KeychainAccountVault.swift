@@ -114,11 +114,16 @@ actor KeychainAccountVault: AccountVault {
   private let backend: any AccountVaultBackend
   private let encoder: JSONEncoder
   private let decoder: JSONDecoder
+  private let makeSessionRevision: @Sendable () -> UUID
 
-  init(backend: any AccountVaultBackend = SystemKeychainAccountVaultBackend()) {
+  init(
+    backend: any AccountVaultBackend = SystemKeychainAccountVaultBackend(),
+    sessionRevisionGenerator: @escaping @Sendable () -> UUID = { UUID() }
+  ) {
     self.backend = backend
     self.encoder = JSONEncoder()
     self.decoder = JSONDecoder()
+    self.makeSessionRevision = sessionRevisionGenerator
   }
 
   func accountSummaries() throws -> [AccountSummary] {
@@ -156,7 +161,8 @@ actor KeychainAccountVault: AccountVault {
         portrait: session.portrait,
         bduss: session.bduss,
         createdAt: current.createdAt,
-        updatedAt: max(current.updatedAt, session.updatedAt)
+        updatedAt: max(current.updatedAt, session.updatedAt),
+        sessionRevision: nextSessionRevision(replacing: current.sessionRevision)
       )
       try validate(mergedSession)
       archive.accounts[index] = mergedSession
@@ -205,15 +211,50 @@ actor KeychainAccountVault: AccountVault {
     guard data.count <= Self.maximumArchiveBytes else {
       throw AccountVaultError.archiveTooLarge
     }
-    let archive: AccountVaultArchive
+    let version: Int
     do {
-      archive = try decoder.decode(AccountVaultArchive.self, from: data)
+      version = try decoder.decode(AccountVaultArchiveHeader.self, from: data).version
     } catch {
       throw AccountVaultError.invalidArchive
     }
-    guard archive.version == AccountVaultArchive.currentVersion else {
+
+    if version > AccountVaultArchive.currentVersion {
       throw AccountVaultError.futureArchive
     }
+
+    let archive: AccountVaultArchive
+    switch version {
+    case AccountVaultArchive.currentVersion:
+      do {
+        archive = try decoder.decode(AccountVaultArchive.self, from: data)
+      } catch {
+        throw AccountVaultError.invalidArchive
+      }
+    case AccountVaultArchiveV1.supportedVersion:
+      let legacyArchive: AccountVaultArchiveV1
+      do {
+        legacyArchive = try decoder.decode(AccountVaultArchiveV1.self, from: data)
+      } catch {
+        throw AccountVaultError.invalidArchive
+      }
+      archive = AccountVaultArchive(
+        activeUserID: legacyArchive.activeUserID,
+        accounts: legacyArchive.accounts.map {
+          $0.migrated(sessionRevision: makeSessionRevision())
+        }
+      )
+      try validate(archive)
+      try save(archive)
+      return archive
+    default:
+      throw AccountVaultError.invalidArchive
+    }
+
+    try validate(archive)
+    return archive
+  }
+
+  private func validate(_ archive: AccountVaultArchive) throws {
     guard archive.accounts.count <= Self.maximumAccounts else {
       throw AccountVaultError.tooManyAccounts
     }
@@ -228,7 +269,6 @@ actor KeychainAccountVault: AccountVault {
     {
       throw AccountVaultError.invalidArchive
     }
-    return archive
   }
 
   private func save(_ archive: AccountVaultArchive) throws {
@@ -248,6 +288,11 @@ actor KeychainAccountVault: AccountVault {
     guard isValid(session) else { throw AccountVaultError.invalidArchive }
   }
 
+  private func nextSessionRevision(replacing current: UUID) -> UUID {
+    let candidate = makeSessionRevision()
+    return candidate == current ? UUID() : candidate
+  }
+
   private func isValid(_ session: StoredAccountSession) -> Bool {
     session.id > 0
       && !session.username.contains(where: { $0.isNewline })
@@ -259,9 +304,68 @@ actor KeychainAccountVault: AccountVault {
 }
 
 private struct AccountVaultArchive: Codable {
-  static let currentVersion = 1
+  static let currentVersion = 2
 
   var version = currentVersion
   var activeUserID: Int64?
   var accounts: [StoredAccountSession] = []
+
+  init(activeUserID: Int64? = nil, accounts: [StoredAccountSession] = []) {
+    self.activeUserID = activeUserID
+    self.accounts = accounts
+  }
+}
+
+private struct AccountVaultArchiveHeader: Decodable {
+  let version: Int
+}
+
+private struct AccountVaultArchiveV1: Decodable {
+  static let supportedVersion = 1
+
+  let activeUserID: Int64?
+  let accounts: [StoredAccountSessionV1]
+
+  private enum CodingKeys: CodingKey {
+    case version
+    case activeUserID
+    case accounts
+  }
+
+  init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    let version = try container.decode(Int.self, forKey: .version)
+    guard version == Self.supportedVersion else {
+      throw DecodingError.dataCorruptedError(
+        forKey: .version,
+        in: container,
+        debugDescription: "Unexpected account archive version."
+      )
+    }
+    activeUserID = try container.decodeIfPresent(Int64.self, forKey: .activeUserID)
+    accounts = try container.decode([StoredAccountSessionV1].self, forKey: .accounts)
+  }
+}
+
+private struct StoredAccountSessionV1: Decodable {
+  let id: Int64
+  let username: String
+  let displayName: String
+  let portrait: String
+  let bduss: String
+  let createdAt: Date
+  let updatedAt: Date
+
+  func migrated(sessionRevision: UUID) -> StoredAccountSession {
+    StoredAccountSession(
+      id: id,
+      username: username,
+      displayName: displayName,
+      portrait: portrait,
+      bduss: bduss,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      sessionRevision: sessionRevision
+    )
+  }
 }

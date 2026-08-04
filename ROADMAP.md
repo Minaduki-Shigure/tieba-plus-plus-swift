@@ -6,6 +6,10 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 
 ## Available
 
+This section describes the current `main` source. A newly implemented item is
+not installable from the public app source until its tagged build passes CI and
+the source metadata is updated to that tested IPA.
+
 - Anonymous hot-thread ranking with an embedded hot-topic preview,
   server-defined categories, and snapshot refresh
 - Ranked anonymous hot-topic discovery with images and discussion counts
@@ -91,17 +95,22 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Paginated followed-forum list for the active account
 - Authoritative per-forum account membership state with explicit follow and
   unfollow confirmation
-- Short-lived `tbs` consumption inside the authenticated client without Keychain
-  persistence or exposure to application models
+- Authoritative per-forum check-in state and explicitly confirmed single-forum
+  check-in, with already-signed idempotence and no automatic or batch mode
+- Short-lived `tbs` availability for at most the immediately following write,
+  without Keychain persistence or exposure to application models
 - Isolated anonymous and authenticated networking clients
 
 ## Next milestones
 
-1. Real-device validation of account switching, followed forums, and forum
-   follow/unfollow recovery paths
-2. Authenticated forum check-in, thread favorite, and approval workflows
-3. Post and reply workflows behind explicit confirmation and anti-CSRF tests
-4. Notifications, moderation tools, and broader settings parity
+1. Real-device validation of single-forum check-in success, already-signed,
+   server-error, uncertain-failure, and read-only reconciliation paths, followed
+   by account switching, followed forums, and follow/unfollow recovery checks
+2. Authenticated thread approval (like) as the next account-write candidate
+3. Server-side thread favorites after the login flow can safely acquire and bind
+   the required STOKEN; this workflow is currently blocked
+4. Post and reply workflows behind explicit confirmation and anti-CSRF tests
+5. Notifications, moderation tools, and broader settings parity
 
 Tieba's anonymous post endpoint does not currently honor its nominal numeric
 floor-jump fields. The app therefore restores a stable post ID and offers page
@@ -470,11 +479,16 @@ content. Regular-expression rules are intentionally unsupported until a
 bounded or non-backtracking implementation is available.
 
 Each authenticated milestone remains gated on protocol tests, credential
-isolation, and real-device validation. The first write milestone probes the
-current account and forum relationship before every requested change, consumes
-the response's short-lived `tbs` only inside the authenticated client, and never
-retries an uncertain write. Anonymous browsing must continue to work without
-creating, reading, or storing an account session.
+isolation, and real-device validation. Forum follow/unfollow and check-in probe
+the current account and forum relationship before every requested change,
+make the response's short-lived `tbs` available to at most the immediately
+following write inside the authenticated client, and never retry an uncertain
+write. A conflicting account operation waits for the active write to settle and
+then enters the lease-guarded read-only recovery path instead of queuing another
+write. Check-in additionally requires authoritative per-forum sign state,
+rejects an unfollowed forum, requires explicit user confirmation, and performs no
+write when the server already reports the account as signed. Anonymous browsing
+must continue to work without creating, reading, or storing an account session.
 
 Search categories load independently so one endpoint failure does not discard
 another category's results. User search uses the credential-free Web endpoint,

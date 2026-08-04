@@ -16,21 +16,25 @@ experimental or unsupported.
 | --- | --- |
 | Anonymous browsing | Available across discovery, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, and media preferences |
-| Accounts | Web login, switching, logout, followed forums, and experimental per-forum follow state |
-| Server-side writes | Confirmed forum follow/unfollow is in device validation; liking, posting, replying, and moderation stay disabled |
+| Accounts | Web login, switching, logout, followed forums, and experimental per-forum follow and check-in state |
+| Server-side writes | Confirmed forum follow/unfollow and explicit single-forum check-in are in device validation; other writes stay disabled |
 | TiebaLite parity | Anonymous reading and media: about 85–95%; full product scope: about 52–57% |
 | Distribution | Public SideStore/LiveContainer source backed by tested unsigned GitHub Release IPAs |
 
 ### Release and validation
 
-- **Current alpha:** `v0.55.0-alpha.2` adds the first account-write validation
-  workflow: authoritative per-forum follow state plus confirmed follow/unfollow.
+- **Next unreleased validation build:** The source planned for
+  `v0.56.0-alpha.1` adds authoritative per-forum check-in state and an explicit
+  single-forum check-in action alongside confirmed follow/unfollow. Until that
+  tag passes CI and is published, the app source continues to serve the prior
+  tested alpha.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
   XcodeGen 2.45.4 or newer.
 - **Automated checks:** GitHub Actions runs package tests and an unsigned
   simulator build, validates the app source, and verifies its public IPA hash.
   Authenticated flows never use real credentials in CI. Forum follow/unfollow
-  therefore remains a physical-device validation feature in this alpha.
+  and check-in therefore remain physical-device validation features in this
+  alpha.
 - **App source:** Add [`sidestore-source.json`](https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json)
   to LiveContainer or SideStore. Its latest IPA is published only after the tag's
   package, anonymous integration, and simulator tests all pass.
@@ -97,20 +101,30 @@ experimental or unsupported.
 - **Login and storage:** Login uses a nonpersistent, HTTPS-only Baidu Web view
   with an exact host allowlist. Validated account records are stored in the
   device-only Keychain and can be switched or removed locally.
-- **Forum membership:** The active account can load its paginated followed-forum
-  list. A loaded forum independently reads its authoritative account-specific
-  follow state and exposes confirmed follow/unfollow actions in the toolbar.
+- **Forum account state:** The active account can load its paginated
+  followed-forum list. A loaded forum independently reads authoritative
+  account-specific follow and check-in state, exposes confirmed follow/unfollow,
+  and offers an explicit single-forum check-in action when eligible.
 - **Credential boundary:** Anonymous and authenticated requests use isolated,
-  ephemeral clients. The vault stores BDUSS only. STOKEN is not extracted, and
-  the 26-character `tbs` value is validated, consumed by one write, and never
-  returned to the app model or persisted.
-- **Write safety:** Each write is bound to the expected account UID and forum,
-  identical concurrent requests are coalesced, opposite requests cannot cross,
-  and uncertain failures trigger a read-only state reconciliation rather than a
-  write retry. Both following and unfollowing require explicit confirmation.
-- **Unsupported operations:** Server-side thread favorites, likes, posts,
-  replies, notifications, and moderation remain unavailable until their request
-  contracts and failure recovery have been validated on a disposable account.
+  ephemeral clients. BDUSS is the only credential stored by the vault. STOKEN is
+  not extracted, and the 26-character `tbs` value is validated, made available
+  to at most the immediately following write, and never returned to the app
+  model or persisted.
+- **Write safety:** Each write is bound to the expected account UID and forum.
+  Follow and check-in operations for the same forum cannot overlap, identical
+  concurrent operations are coalesced, and a conflicting call waits for the
+  active write to settle before requesting a read-only reconciliation. It is
+  never queued as a second write. The App starts and applies reconciliation only
+  while the initiating account lease remains readable and current; a later
+  account change discards its result. No uncertain failure retries a write.
+  Already-completed check-in is idempotent, and following, unfollowing, and
+  check-in all require explicit user confirmation. Automatic and batch check-in
+  are not implemented.
+- **Unsupported operations:** Server-side thread favorites remain blocked on
+  safely acquiring and binding the required STOKEN. Thread approval (like) is
+  the next account-write candidate; posts, replies, notifications, and
+  moderation remain unavailable until their request contracts and recovery
+  paths have been validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, protocol constraints, and next milestones. The current weighted
   end-to-end audit estimates 85–95% coverage of anonymous reading and media, or
@@ -133,7 +147,8 @@ normal URLSession certificate validation; global App Transport Security
 exceptions are forbidden. See [`SECURITY.md`](SECURITY.md) before testing an
 account build.
 The account vault persists BDUSS only. It does not extract or store STOKEN or
-the short-lived anti-CSRF value used by a confirmed forum-membership request.
+the short-lived anti-CSRF value made available to at most one confirmed forum
+write.
 
 ## Build
 

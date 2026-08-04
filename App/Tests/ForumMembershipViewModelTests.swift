@@ -193,6 +193,39 @@ final class ForumMembershipViewModelTests: XCTestCase {
     XCTAssertEqual(requestedUserIDs, [1, 2])
   }
 
+  func testSameUserNewRevisionRejectsOldMutationResult() async throws {
+    let oldRevision = try XCTUnwrap(
+      UUID(uuidString: "00000000-0000-0000-0000-000000000011")
+    )
+    let newRevision = try XCTUnwrap(
+      UUID(uuidString: "00000000-0000-0000-0000-000000000012")
+    )
+    let oldSession = session(userID: 1, sessionRevision: oldRevision)
+    let newSession = session(userID: 1, sessionRevision: newRevision)
+    let vault = MembershipVaultSpy(session: oldSession)
+    let service = MembershipServiceSpy(
+      membershipSequences: [
+        1: [
+          .success(membership(userID: 1, isFollowed: false)),
+          .success(membership(userID: 1, isFollowed: false)),
+        ]
+      ],
+      mutations: [1: .success(membership(userID: 1, isFollowed: true))],
+      mutationDelays: [1: 150_000_000]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+
+    let oldMutation = Task { await viewModel.setFollowed(true) }
+    try await waitForMembershipTest { await service.mutationRequestCount() == 1 }
+    await vault.replaceActive(with: newSession)
+    await viewModel.accountSessionDidChange()
+    await oldMutation.value
+
+    XCTAssertEqual(viewModel.state, .ready(isFollowed: false))
+    XCTAssertNil(viewModel.errorMessage)
+  }
+
   private func makeViewModel(
     forumID: Int64 = 100,
     vault: MembershipVaultSpy,
@@ -205,7 +238,11 @@ final class ForumMembershipViewModelTests: XCTestCase {
     )
   }
 
-  private func session(userID: Int64, updatedAt: TimeInterval = 1) -> StoredAccountSession {
+  private func session(
+    userID: Int64,
+    updatedAt: TimeInterval = 1,
+    sessionRevision: UUID = UUID()
+  ) -> StoredAccountSession {
     StoredAccountSession(
       id: userID,
       username: "user-\(userID)",
@@ -213,7 +250,8 @@ final class ForumMembershipViewModelTests: XCTestCase {
       portrait: "portrait-\(userID)",
       bduss: String(repeating: "b", count: 192),
       createdAt: Date(timeIntervalSince1970: 1),
-      updatedAt: Date(timeIntervalSince1970: updatedAt)
+      updatedAt: Date(timeIntervalSince1970: updatedAt),
+      sessionRevision: sessionRevision
     )
   }
 
@@ -290,6 +328,14 @@ private actor MembershipServiceSpy: AccountService {
     return try result.get()
   }
 
+  func forumAccountState(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> ForumAccountStateData {
+    throw MembershipTestFailure(message: "unexpected forum-account-state request")
+  }
+
   func setForumFollowed(
     session: StoredAccountSession,
     forumID: Int64,
@@ -304,6 +350,14 @@ private actor MembershipServiceSpy: AccountService {
       throw MembershipTestFailure(message: "unexpected membership mutation")
     }
     return try result.get()
+  }
+
+  func checkInToForum(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> ForumAccountStateData {
+    throw MembershipTestFailure(message: "unexpected forum-check-in mutation")
   }
 
   func membershipRequestCount() -> Int { membershipUsers.count }

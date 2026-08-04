@@ -10,6 +10,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let appSalt = TiebaFormSigner.appSalt
   static let followClientVersion = "7.2.0.0"
   static let unfollowClientVersion = "11.10.8.6"
+  static let checkInClientVersion = "11.10.8.6"
   static let writeHost = TiebaRequestFactory.serviceHost
 
   let configuration: TiebaClientConfiguration
@@ -112,6 +113,36 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       ],
       userAgent: "bdtb for Android \(clientVersion)",
       clientUserToken: isFollowed ? nil : String(expectedUserID),
+      cookie: "ka=open"
+    )
+  }
+
+  func checkInToForum(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String,
+    tbs: String
+  ) throws -> URLRequest {
+    try validate(credential)
+    try validateIdentity(expectedUserID: expectedUserID, forumID: forumID)
+    let forumName = try normalizedForumName(forumName)
+    guard Self.isValidTBS(tbs) else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+
+    return try signedFormRequest(
+      host: Self.writeHost,
+      path: "/c/c/forum/sign",
+      fields: [
+        ("BDUSS", credential.bduss),
+        ("_client_version", Self.checkInClientVersion),
+        ("fid", String(forumID)),
+        ("kw", forumName),
+        ("tbs", tbs),
+      ],
+      userAgent: "bdtb for Android \(Self.checkInClientVersion)",
+      clientUserToken: String(expectedUserID),
       cookie: "ka=open"
     )
   }
@@ -222,7 +253,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     }
   }
 
-  private func normalizedForumName(_ value: String) throws -> String {
+  func normalizedForumName(_ value: String) throws -> String {
     let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
       .precomposedStringWithCanonicalMapping
     guard

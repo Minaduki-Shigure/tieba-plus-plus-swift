@@ -290,10 +290,10 @@ private enum SessionLeaseState: Sendable {
 
 private struct SessionLease: Equatable, Sendable {
   let userID: Int64
-  let updatedAt: Date
+  let sessionRevision: UUID
 
   init(_ session: StoredAccountSession) {
     userID = session.id
-    updatedAt = session.updatedAt
+    sessionRevision = session.sessionRevision
   }
 }

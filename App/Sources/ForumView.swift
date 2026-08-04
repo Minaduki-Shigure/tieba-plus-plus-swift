@@ -304,6 +304,21 @@ struct ForumView: View {
       .id(ForumScrollTarget.top)
       .listRowSeparator(.hidden)
 
+      if let accountAccess, viewModel.forum.id > 0 {
+        ForumCheckInRow(
+          forumID: viewModel.forum.id,
+          forumName: membershipForumName,
+          access: accountAccess
+        )
+        .id(
+          ForumCheckInTarget(
+            forumID: viewModel.forum.id,
+            forumName: membershipForumName
+          )
+        )
+        .listRowSeparator(.hidden)
+      }
+
       ForEach(viewModel.threads) { thread in
         LocallyFilteredContent(
           visibility: thread.localVisibility,
@@ -355,6 +370,183 @@ struct ForumView: View {
 private struct ForumMembershipTarget: Hashable {
   let forumID: Int64
   let forumName: String
+}
+
+private struct ForumCheckInTarget: Hashable {
+  let forumID: Int64
+  let forumName: String
+}
+
+enum ForumCheckInRowVisibility {
+  static func isVisible(for state: ForumCheckInState) -> Bool {
+    switch state {
+    case .idle, .signedOut:
+      false
+    case .loading, .requiresFollow, .unavailable, .ready, .signedToday, .checking, .failed:
+      true
+    }
+  }
+
+  static func signedStatus(consecutiveDays: Int, rank: Int) -> String {
+    let streak = "今日已签到 · 连续 \(consecutiveDays) 天"
+    return rank > 0 ? "\(streak) · 第 \(rank) 名" : streak
+  }
+}
+
+private struct ForumCheckInRow: View {
+  @StateObject private var viewModel: ForumCheckInViewModel
+  @State private var isConfirmationPresented = false
+
+  init(forumID: Int64, forumName: String, access: AccountAccess) {
+    _viewModel = StateObject(
+      wrappedValue: ForumCheckInViewModel(
+        forumID: forumID,
+        forumName: forumName,
+        access: access
+      )
+    )
+  }
+
+  var body: some View {
+    rowContent
+      .task { await viewModel.loadIfNeeded() }
+      .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+        isConfirmationPresented = false
+        Task { @MainActor in await viewModel.accountSessionDidChange() }
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .forumMembershipDidChange)) {
+        notification in
+        guard let change = ForumMembershipChange(notification) else { return }
+        Task { @MainActor in await viewModel.forumMembershipDidChange(change) }
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .forumCheckInDidChange)) {
+        notification in
+        guard let change = ForumCheckInChange(notification) else { return }
+        Task { @MainActor in await viewModel.forumCheckInDidChange(change) }
+      }
+      .confirmationDialog(
+        "签到 \(viewModel.forumName)吧？",
+        isPresented: $isConfirmationPresented,
+        titleVisibility: .visible
+      ) {
+        Button("签到") {
+          isConfirmationPresented = false
+          Task { @MainActor in await viewModel.checkIn() }
+        }
+        Button("取消", role: .cancel) { isConfirmationPresented = false }
+      } message: {
+        Text("这会使用当前贴吧账户完成签到。")
+      }
+      .alert(
+        "无法完成贴吧签到",
+        isPresented: Binding(
+          get: { viewModel.errorMessage != nil },
+          set: { if !$0 { viewModel.dismissError() } }
+        )
+      ) {
+        Button("好", role: .cancel) { viewModel.dismissError() }
+      } message: {
+        Text(viewModel.errorMessage ?? "无法完成贴吧签到。")
+      }
+  }
+
+  @ViewBuilder
+  private var rowContent: some View {
+    if ForumCheckInRowVisibility.isVisible(for: viewModel.state) {
+      control
+    } else {
+      EmptyView()
+        .frame(height: 0)
+        .listRowInsets(EdgeInsets())
+        .environment(\.defaultMinListRowHeight, 0)
+        .accessibilityHidden(true)
+    }
+  }
+
+  @ViewBuilder
+  private var control: some View {
+    switch viewModel.state {
+    case .idle, .signedOut:
+      EmptyView()
+    case .loading:
+      visibleRow {
+        HStack(spacing: 10) {
+          ProgressView()
+            .controlSize(.small)
+          Text("正在读取签到状态")
+        }
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .combine)
+      }
+    case .requiresFollow:
+      visibleRow {
+        Label("关注后可签到", systemImage: "person.badge.plus")
+          .foregroundStyle(.secondary)
+          .allowsHitTesting(false)
+      }
+    case .unavailable:
+      visibleRow {
+        Label("当前无法签到", systemImage: "checkmark.seal")
+          .foregroundStyle(.secondary)
+          .allowsHitTesting(false)
+      }
+    case .ready:
+      visibleRow {
+        Button {
+          isConfirmationPresented = true
+        } label: {
+          Label("签到", systemImage: "checkmark.seal")
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("forum-check-in-button")
+      }
+    case .signedToday(let consecutiveDays, let rank):
+      visibleRow {
+        Label(
+          ForumCheckInRowVisibility.signedStatus(
+            consecutiveDays: consecutiveDays,
+            rank: rank
+          ),
+          systemImage: "checkmark.seal.fill"
+        )
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+        .allowsHitTesting(false)
+        .accessibilityIdentifier("forum-check-in-status")
+      }
+    case .checking:
+      visibleRow {
+        HStack(spacing: 10) {
+          ProgressView()
+            .controlSize(.small)
+          Text("正在签到")
+        }
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .combine)
+      }
+    case .failed:
+      visibleRow {
+        Button {
+          Task { @MainActor in await viewModel.reload() }
+        } label: {
+          Label("重试读取签到状态", systemImage: "arrow.clockwise")
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("forum-check-in-retry")
+      }
+    }
+  }
+
+  private func visibleRow<Content: View>(
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    content()
+      .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+  }
 }
 
 private struct ForumMembershipToolbarControl: View {

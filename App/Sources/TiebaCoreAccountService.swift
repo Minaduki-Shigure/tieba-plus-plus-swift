@@ -17,6 +17,12 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
     forumID: Int64,
     forumName: String
   ) async throws -> TiebaForumMembership
+  func getForumAccountState(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> TiebaForumAccountState
   func setForumFollowState(
     credential: TiebaBDUSSCredential,
     expectedUserID: Int64,
@@ -24,17 +30,27 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
     forumName: String,
     isFollowed: Bool
   ) async throws -> TiebaForumMembership
+  func checkInToForum(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> TiebaForumAccountState
 }
 
 extension TiebaAuthenticatedClient: TiebaAuthenticatedAccountClient {}
 
 struct TiebaCoreAccountService: AccountService {
   private let client: any TiebaAuthenticatedAccountClient
-  private let followWriteCoordinator: ForumFollowWriteCoordinator
+  private let forumWriteCoordinator: ForumAccountWriteCoordinator
 
   init(client: any TiebaAuthenticatedAccountClient = TiebaAuthenticatedClient()) {
     self.client = client
-    self.followWriteCoordinator = ForumFollowWriteCoordinator(client: client)
+    self.forumWriteCoordinator = ForumAccountWriteCoordinator(client: client)
+  }
+
+  func forumWriteConflictWaiterCount() async -> Int {
+    await forumWriteCoordinator.conflictWaiterCount()
   }
 
   func validate(credential: AccountCredentials) async throws -> ValidatedAccount {
@@ -109,6 +125,28 @@ struct TiebaCoreAccountService: AccountService {
     return Self.membershipData(response)
   }
 
+  func forumAccountState(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> ForumAccountStateData {
+    let response: TiebaForumAccountState
+    do {
+      response = try await client.getForumAccountState(
+        credential: TiebaBDUSSCredential(bduss: session.bduss),
+        expectedUserID: session.id,
+        forumID: forumID,
+        forumName: forumName
+      )
+      try Task.checkCancellation()
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.accountError(error)
+    }
+    return Self.accountStateData(response)
+  }
+
   func setForumFollowed(
     session: StoredAccountSession,
     forumID: Int64,
@@ -117,20 +155,51 @@ struct TiebaCoreAccountService: AccountService {
   ) async throws -> ForumMembershipData {
     let response: TiebaForumMembership
     do {
-      response = try await followWriteCoordinator.setForumFollowed(
+      let result = try await forumWriteCoordinator.perform(
         session: session,
         forumID: forumID,
         forumName: forumName,
-        isFollowed: isFollowed
+        operation: .follow(isFollowed)
       )
+      guard case .membership(let membership) = result else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+      response = membership
     } catch is CancellationError {
       throw CancellationError()
-    } catch ForumFollowWriteCoordinatorError.operationInProgress {
-      throw BrowseError.unavailable("该贴吧的关注状态正在更新，请稍后再试。")
+    } catch ForumAccountWriteCoordinatorError.conflictingOperationSettled {
+      throw BrowseError.unavailable("先前的贴吧账户操作已结束，请重新读取当前状态。")
     } catch {
       throw Self.accountError(error)
     }
     return Self.membershipData(response)
+  }
+
+  func checkInToForum(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> ForumAccountStateData {
+    let response: TiebaForumAccountState
+    do {
+      let result = try await forumWriteCoordinator.perform(
+        session: session,
+        forumID: forumID,
+        forumName: forumName,
+        operation: .checkIn
+      )
+      guard case .accountState(let accountState) = result else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+      response = accountState
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch ForumAccountWriteCoordinatorError.conflictingOperationSettled {
+      throw BrowseError.unavailable("先前的贴吧账户操作已结束，请重新读取当前状态。")
+    } catch {
+      throw Self.accountError(error)
+    }
+    return Self.accountStateData(response)
   }
 
   private static func membershipData(
@@ -141,6 +210,21 @@ struct TiebaCoreAccountService: AccountService {
       forumID: membership.forumID,
       forumName: membership.forumName,
       isFollowed: membership.isFollowed
+    )
+  }
+
+  private static func accountStateData(
+    _ state: TiebaForumAccountState
+  ) -> ForumAccountStateData {
+    ForumAccountStateData(
+      membership: membershipData(state.membership),
+      checkIn: state.checkIn.map {
+        ForumCheckInData(
+          isCheckedIn: $0.isCheckedIn,
+          consecutiveDays: $0.consecutiveDays,
+          rank: $0.rank
+        )
+      }
     )
   }
 
@@ -167,6 +251,10 @@ struct TiebaCoreAccountService: AccountService {
       message = "贴吧返回了无法识别的数据，接口可能已经更新。"
     case .invalidAuthenticatedResponse:
       message = "账户凭据与贴吧响应不一致，请重新登录后再试。"
+    case .forumNotFollowed:
+      message = "请先关注该贴吧后再签到。"
+    case .forumCheckInUnavailable:
+      message = "该贴吧当前无法签到。"
     case .server(let code, _):
       message = "账户请求失败（错误码 \(code)）。"
     @unknown default:
@@ -176,11 +264,54 @@ struct TiebaCoreAccountService: AccountService {
   }
 }
 
-private enum ForumFollowWriteCoordinatorError: Error, Sendable {
-  case operationInProgress
+private enum ForumAccountWriteCoordinatorError: Error, Sendable {
+  case conflictingOperationSettled
 }
 
-private actor ForumFollowWriteCoordinator {
+private enum ForumAccountWriteOperation: Hashable, Sendable {
+  case follow(Bool)
+  case checkIn
+}
+
+private enum ForumAccountWriteResult: Sendable {
+  case membership(TiebaForumMembership)
+  case accountState(TiebaForumAccountState)
+}
+
+private struct ForumAccountWriteIdentity:
+  Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let sessionRevision: UUID
+  let forumName: String
+  private let bduss: String
+
+  init(session: StoredAccountSession, forumName: String) {
+    sessionRevision = session.sessionRevision
+    self.forumName = forumName
+    bduss = session.bduss
+  }
+
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.sessionRevision == rhs.sessionRevision
+      && lhs.forumName == rhs.forumName
+      && lhs.bduss == rhs.bduss
+  }
+
+  var description: String { "ForumAccountWriteIdentity(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(
+      self,
+      children: [
+        "sessionRevision": sessionRevision,
+        "forumName": forumName,
+      ],
+      displayStyle: .struct
+    )
+  }
+}
+
+private actor ForumAccountWriteCoordinator {
   private struct Key: Hashable, Sendable {
     let userID: Int64
     let forumID: Int64
@@ -188,57 +319,82 @@ private actor ForumFollowWriteCoordinator {
 
   private struct Entry: Sendable {
     let id: UUID
-    let sessionUpdatedAt: Date
-    let desiredState: Bool
-    let task: Task<TiebaForumMembership, Error>
+    let identity: ForumAccountWriteIdentity
+    let operation: ForumAccountWriteOperation
+    let task: Task<ForumAccountWriteResult, Error>
   }
 
   private let client: any TiebaAuthenticatedAccountClient
   private var inFlight: [Key: Entry] = [:]
+  private var conflictWaiters = 0
 
   init(client: any TiebaAuthenticatedAccountClient) {
     self.client = client
   }
 
-  func setForumFollowed(
+  func perform(
     session: StoredAccountSession,
     forumID: Int64,
     forumName: String,
-    isFollowed: Bool
-  ) async throws -> TiebaForumMembership {
+    operation: ForumAccountWriteOperation
+  ) async throws -> ForumAccountWriteResult {
     try Task.checkCancellation()
     let expectedUserID = session.id
     let key = Key(userID: expectedUserID, forumID: forumID)
+    let normalizedForumName = forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    let identity = ForumAccountWriteIdentity(
+      session: session,
+      forumName: normalizedForumName
+    )
     if let entry = inFlight[key] {
-      guard entry.sessionUpdatedAt == session.updatedAt else {
-        throw ForumFollowWriteCoordinatorError.operationInProgress
+      if entry.identity == identity, entry.operation == operation {
+        return try await entry.task.value
       }
-      guard entry.desiredState == isFollowed else {
-        throw ForumFollowWriteCoordinatorError.operationInProgress
-      }
-      return try await entry.task.value
+      conflictWaiters += 1
+      defer { conflictWaiters -= 1 }
+      _ = await entry.task.result
+      throw ForumAccountWriteCoordinatorError.conflictingOperationSettled
     }
 
     let client = client
     let credential = TiebaBDUSSCredential(bduss: session.bduss)
     let entryID = UUID()
-    let task = Task.detached {
-      try await client.setForumFollowState(
-        credential: credential,
-        expectedUserID: expectedUserID,
-        forumID: forumID,
-        forumName: forumName,
-        isFollowed: isFollowed
-      )
+    let task = Task.detached { () async throws -> ForumAccountWriteResult in
+      switch operation {
+      case .follow(let isFollowed):
+        return .membership(
+          try await client.setForumFollowState(
+            credential: credential,
+            expectedUserID: expectedUserID,
+            forumID: forumID,
+            forumName: normalizedForumName,
+            isFollowed: isFollowed
+          )
+        )
+      case .checkIn:
+        return .accountState(
+          try await client.checkInToForum(
+            credential: credential,
+            expectedUserID: expectedUserID,
+            forumID: forumID,
+            forumName: normalizedForumName
+          )
+        )
+      }
     }
     inFlight[key] = Entry(
       id: entryID,
-      sessionUpdatedAt: session.updatedAt,
-      desiredState: isFollowed,
+      identity: identity,
+      operation: operation,
       task: task
     )
     defer { clearEntry(for: key, id: entryID) }
     return try await task.value
+  }
+
+  func conflictWaiterCount() -> Int {
+    conflictWaiters
   }
 
   private func clearEntry(for key: Key, id: UUID) {

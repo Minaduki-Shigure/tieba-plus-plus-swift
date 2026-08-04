@@ -38,6 +38,16 @@ protection Keychain enabled, and synchronization disabled. Only nonsecret
 account summaries may leave the vault. Malformed or future-version archives
 must not be overwritten. The stored BDUSS must remain redacted from
 descriptions, debug mirrors, errors, analytics, and logs.
+Archive v2 adds one random, nonsecret session-revision UUID to each account. A
+valid v1 archive is fully decoded and validated before those revisions are
+generated and the migrated archive is written back; invalid legacy data remains
+untouched. The revision stays stable across ordinary reads and account switches,
+but every validated upsert of an existing UID rotates it even when the device
+clock repeats or moves backwards. Account write results, recovery reads, and
+check-in notifications must match both UID and revision before changing current
+session state. The revision may be persisted in the Keychain archive and carried
+in an in-process notification, but must never substitute for or derive from a
+credential.
 Local logout deletes the selected Keychain session; it cannot promise to revoke
 an already issued Baidu server token. Users who suspect token exposure must use
 Baidu's account-security controls to invalidate sessions. A user-confirmed
@@ -49,28 +59,59 @@ independent ephemeral URL sessions. Anonymous request factories have no account
 parameter and must remain credential-free. Authenticated request factories send
 only the fields required by the selected endpoint in the HTTPS request body,
 disable persistent cookie handling and URL credentials, reject all redirects,
-and never retain credentials as client state. The forum-membership compatibility
-request may carry the fixed, noncredential header `Cookie: ka=open`; it must not
-attach a stored cookie jar. Authenticated account, followed-forum,
-membership-probe, and write responses have endpoint-specific transfer limits
-before decoding. MD5 is used only for compatibility with the unofficial
-request-signature protocol, not for password storage or verification.
+and never persist credentials or retain them beyond the active authenticated
+operation. Forum follow/unfollow and check-in writes may carry the fixed,
+noncredential header `Cookie: ka=open`; they must not attach a stored cookie jar.
+Authenticated account, followed-forum, forum-state probe, and write responses
+have endpoint-specific transfer limits before decoding. MD5 is used only for
+compatibility with the unofficial request signature protocol, not for password
+storage or verification.
 
-The membership probe must bind the response UID and forum ID to the requested
-account and forum before accepting `is_like` or `anti.tbs`. The `tbs` value must
-be exactly 26 lowercase hexadecimal bytes, remain inside the authenticated
-client, and be consumed by at most the immediately following confirmed write.
-It must not enter an application model, Keychain archive, log, error, mirror, or
-retry queue. Identical in-flight writes may share one task; opposite writes for
-the same account and forum must not overlap. A transport failure must never
-automatically retry a write and should be followed only by a read-only state
-probe.
+Before any forum write, the fresh FRS probe must bind the response user ID,
+forum ID, normalized forum name, `is_like`, and `anti.tbs` to the requested
+account and forum. The check-in state read and check-in write paths additionally
+validate a present sign user against the exact expected UID, a zero-or-one sign
+state, and nonnegative consecutive-day and rank values. Malformed optional sign
+metadata must not disable otherwise valid membership reads or follow/unfollow.
+The `tbs` value must be exactly 26 lowercase hexadecimal bytes, remain inside
+the authenticated client, and be made available to at most the immediately
+following confirmed write. It must not enter an application model, Keychain
+archive, log, error, mirror, or retry queue.
+
+Single-forum check-in must reject an unfollowed forum or a probe without usable
+sign state. If the FRS probe already reports `is_sign_in = 1`, the operation is
+idempotent and must return that state without sending a write. Otherwise it may
+send exactly one HTTPS POST to `https://tiebac.baidu.com/c/c/forum/sign`. Its
+signed form body contains exactly six fields: `BDUSS`, `_client_version`, `fid`,
+`kw`, `tbs`, and `sign`. `_client_version` is fixed to `11.10.8.6`; the request
+uses the expected UID in `client_user_token`, the static `Cookie: ka=open`, and
+the matching fixed-version user agent. It must not add STOKEN, a stored cookie,
+or any device identifier. The write response is limited to 64 KiB and is
+accepted only when the error code is zero, the returned sign user ID matches the
+expected account, `is_sign_in` is exactly one, and the returned consecutive-day
+and rank values are nonnegative integers.
+
+The authenticated Core client single-flights equivalent check-in calls and
+serializes a different credential or normalized name for the same account and
+forum without sharing its result. The App account-service layer additionally
+coalesces identical operations and makes follow/unfollow and check-in for the
+same account and forum mutually exclusive, including across credential rotation.
+A conflicting App call must wait for the active write to settle, then request
+lease-guarded read-only reconciliation; it must not enqueue or automatically
+start another write. No uncertain write may be automatically retried. The App
+must verify that the initiating account lease is readable and current before
+starting reconciliation and again before applying its result. A lease change or
+Keychain failure before the request prevents it; a change after it starts makes
+the result ineligible to update current state. Follow, unfollow, and check-in all
+require explicit user confirmation. Automatic, scheduled, and batch check-in
+are deliberately unsupported.
 
 STOKEN is neither extracted nor persisted. An endpoint that actually requires
 it remains unsupported until a login flow can verify that BDUSS and STOKEN
-belong to the same returned account. The current unfollow request deliberately
-omits the optional STOKEN and must fail visibly rather than fall back to a second
-write endpoint.
+belong to the same returned account. Server-side thread favorites are therefore
+blocked. The current unfollow and check-in requests deliberately omit STOKEN and
+must fail visibly rather than fall back to a second write endpoint or add device
+metadata.
 
 Anonymous public-profile requests must use the protocol's guest target fields.
 They must not place the target user in the current-account field, attach account
@@ -614,7 +655,10 @@ Automated tests use synthetic fixed-length placeholders only. Real `BDUSS`,
 placed in GitHub Actions secrets or exercised by CI. A write-capable prerelease
 must remain identified as a validation build until its success, explicit server
 failure, uncertain transport failure, account-switch race, and reconciliation
-paths have been exercised manually with a disposable test account.
+paths have been exercised manually with a disposable test account. Check-in
+validation must additionally cover an unfollowed forum, missing sign state,
+already-signed idempotence, returned-UID mismatch, and the same-forum
+follow/check-in exclusion rule.
 
 Report security issues privately to the repository owner rather than opening a
 public issue.

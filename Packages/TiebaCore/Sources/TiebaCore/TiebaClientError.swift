@@ -11,6 +11,8 @@ public enum TiebaClientError: Error, Sendable, Equatable {
   case invalidProtobuf
   case invalidJSON
   case invalidAuthenticatedResponse
+  case forumNotFollowed
+  case forumCheckInUnavailable
   case server(code: Int32, message: String)
 }
 
@@ -37,6 +39,10 @@ extension TiebaClientError: LocalizedError {
       "The Tieba server returned an unreadable JSON response."
     case .invalidAuthenticatedResponse:
       "Tieba returned account or forum data that did not match the authenticated request."
+    case .forumNotFollowed:
+      "The forum must be followed before checking in."
+    case .forumCheckInUnavailable:
+      "Tieba did not advertise check-in state for this forum."
     case .server(let code, let message):
       message.isEmpty ? "Tieba returned error \(code)." : message
     }

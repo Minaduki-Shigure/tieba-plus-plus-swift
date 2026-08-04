@@ -34,6 +34,17 @@ struct ForumMembershipData: Hashable, Sendable {
   let isFollowed: Bool
 }
 
+struct ForumCheckInData: Hashable, Sendable {
+  let isCheckedIn: Bool
+  let consecutiveDays: Int
+  let rank: Int
+}
+
+struct ForumAccountStateData: Hashable, Sendable {
+  let membership: ForumMembershipData
+  let checkIn: ForumCheckInData?
+}
+
 protocol AccountService: Sendable {
   func validate(credential: AccountCredentials) async throws -> ValidatedAccount
   func followedForums(
@@ -46,10 +57,20 @@ protocol AccountService: Sendable {
     forumID: Int64,
     forumName: String
   ) async throws -> ForumMembershipData
+  func forumAccountState(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> ForumAccountStateData
   func setForumFollowed(
     session: StoredAccountSession,
     forumID: Int64,
     forumName: String,
     isFollowed: Bool
   ) async throws -> ForumMembershipData
+  func checkInToForum(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> ForumAccountStateData
 }

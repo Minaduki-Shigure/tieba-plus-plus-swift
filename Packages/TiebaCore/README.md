@@ -1,9 +1,10 @@
 # TiebaCore
 
 `TiebaCore` is the transport and domain layer for Tieba browsing. `TiebaClient`
-is strictly anonymous. `TiebaAuthenticatedClient` is a separate, stateless
-client whose methods require credentials explicitly and expose only `Sendable`
-values to the app.
+is strictly anonymous. `TiebaAuthenticatedClient` is separate, requires
+credentials explicitly, exposes only `Sendable` values to the app, and retains
+only bounded in-flight coordination state for authenticated check-in operations.
+It does not persist credentials or account state.
 
 ```swift
 let client = TiebaClient()
@@ -55,9 +56,14 @@ if let userID = posts.posts[0].author?.id {
 }
 ```
 
-The authenticated client currently supports identity validation and a
-read-only followed-forum list. Account persistence belongs to the app's
-Keychain vault, not this package:
+The authenticated client supports identity validation, followed forums,
+authoritative per-forum follow/check-in state, confirmed follow/unfollow, and
+explicit single-forum check-in. Core single-flights equivalent check-in calls
+and serializes conflicting check-in identities for one account and forum. The
+app's Keychain and account-service layers own persistence, credential-rotation
+leases, and mutual exclusion between follow and check-in. A conflicting App
+call waits for the active write to settle and then reconciles by reading; it is
+not queued as another write:
 
 ```swift
 let authenticatedClient = TiebaAuthenticatedClient()
@@ -67,7 +73,30 @@ let followed = try await authenticatedClient.getFollowedForums(
     credential: credential,
     userID: account.userID
 )
+if let forum = followed.forums.first {
+    let forumState = try await authenticatedClient.getForumAccountState(
+        credential: credential,
+        expectedUserID: account.userID,
+        forumID: forum.id,
+        forumName: forum.name
+    )
+    if forumState.membership.isFollowed,
+       forumState.checkIn?.isCheckedIn == false {
+        _ = try await authenticatedClient.checkInToForum(
+            credential: credential,
+            expectedUserID: account.userID,
+            forumID: forumState.membership.forumID,
+            forumName: forumState.membership.forumName
+        )
+    }
+}
 ```
+
+`getForumMembership` remains available for callers that need only
+`TiebaForumMembership`. `getForumAccountState` returns that membership plus an
+optional `TiebaForumCheckIn` containing the server-authoritative sign state,
+consecutive-day count, and rank. A missing check-in value means the probe did
+not advertise a usable sign state; it is not permission to attempt a write.
 
 ## Wire assumptions
 
@@ -113,6 +142,24 @@ let followed = try await authenticatedClient.getFollowedForums(
   are bounded to 20 topics, 20 unique categories, and 100 unique valid threads.
 - Requests identify as client type `2` and version `12.64.1.1` by default.
 - Account validation and authenticated read requests use version `22.6.5.1`.
+- The authenticated FRS forum-state probe binds the returned user ID, forum ID,
+  normalized forum name, follow state, optional sign-user ID, and 26-character
+  lowercase hexadecimal `tbs` to the request. The `tbs` remains internal and is
+  never returned in a public model or retained by the client.
+- Single-forum check-in first performs a fresh forum-state probe. It rejects an
+  unfollowed forum or missing sign state and sends no write when the server
+  already reports the account as checked in. Otherwise it sends one signed
+  HTTPS POST to `/c/c/forum/sign`; the form contains exactly six fields:
+  `BDUSS`, `_client_version`, `fid`, `kw`, `tbs`, and `sign`.
+  `_client_version` is fixed to `11.10.8.6`, with the expected UID in
+  `client_user_token`, `Cookie: ka=open`, and the matching fixed-version user
+  agent. It sends no STOKEN or device fields, rejects redirects, limits the
+  response to 64 KiB, and never retries a write.
+- Equivalent concurrent check-ins on one client share a single Core task.
+  Different credentials or normalized names for the same account and forum are
+  serialized and never share a result. After an uncertain write failure, a
+  direct Core caller is responsible for a read-only reconciliation only when its
+  credential is still the active account session; the App enforces that lease.
 - The first FRS page is encoded as `pn = 0`, matching aiotieba behavior.
 - PB asks for at least two posts because the upstream endpoint does not honor a
   request size of one consistently.
@@ -148,12 +195,16 @@ let followed = try await authenticatedClient.getFollowedForums(
   disable cookie and credential storage, and put only the endpoint's required
   account fields in the signed HTTPS form body. Their transport rejects every
   redirect rather than replaying a credential-bearing POST.
-- Neither client retains account credentials. Credential values are redacted
-  from their public debug descriptions, and the login response's anti-CSRF
-  value is not exposed by this read-only API.
+- Neither client persists account credentials or retains them beyond an active
+  request or bounded check-in flight. Credential values are redacted from public
+  debug descriptions and mirrors, and the FRS anti-CSRF value is not exposed by
+  the public API.
 
-These are unofficial APIs and may change without notice. Authenticated write
-operations intentionally remain unsupported.
+These are unofficial APIs and may change without notice. Only per-forum
+follow/unfollow and explicit single-forum check-in writes are implemented.
+Automatic or batch check-in, thread favorites, approval, creation,
+notifications, and moderation remain unsupported; thread favorites are blocked
+until the app can safely acquire and bind the required STOKEN.
 
 ## Tests
 
@@ -174,4 +225,6 @@ aiotieba. See `Sources/TiebaProto/NOTICE.md` and `LICENSE.aiotieba`.
 The authenticated form fields and response shapes were independently
 implemented after cross-checking aiotieba commit
 `bae68256fd250d5178e1447899ffa155c77eda38` (Unlicense) and TiebaLite commit
-`5545326b2a8e0d784b2f3dfbcb219c7b121e61c2` (GPL-3.0).
+`5545326b2a8e0d784b2f3dfbcb219c7b121e61c2` (GPL-3.0). The per-forum sign-state
+schema and check-in contract were cross-checked against TiebaLite commit
+`268f388c7824ae2c8f6ed549827a943ec8a7f352` (GPL-3.0).

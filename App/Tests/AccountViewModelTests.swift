@@ -232,7 +232,8 @@ final class AccountViewModelTests: XCTestCase {
   private func session(
     userID: Int64,
     name: String,
-    updatedAt: TimeInterval = 1
+    updatedAt: TimeInterval = 1,
+    sessionRevision: UUID = UUID()
   ) -> StoredAccountSession {
     StoredAccountSession(
       id: userID,
@@ -241,7 +242,8 @@ final class AccountViewModelTests: XCTestCase {
       portrait: "portrait-\(userID)",
       bduss: String(repeating: "b", count: 192),
       createdAt: Date(timeIntervalSince1970: 1),
-      updatedAt: Date(timeIntervalSince1970: updatedAt)
+      updatedAt: Date(timeIntervalSince1970: updatedAt),
+      sessionRevision: sessionRevision
     )
   }
 
@@ -306,6 +308,14 @@ private actor AccountServiceSpy: AccountService {
     throw AccountTestFailure(message: "unexpected forum-membership request")
   }
 
+  func forumAccountState(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> ForumAccountStateData {
+    throw AccountTestFailure(message: "unexpected forum-account-state request")
+  }
+
   func setForumFollowed(
     session: StoredAccountSession,
     forumID: Int64,
@@ -313,6 +323,14 @@ private actor AccountServiceSpy: AccountService {
     isFollowed: Bool
   ) async throws -> ForumMembershipData {
     throw AccountTestFailure(message: "unexpected forum-membership mutation")
+  }
+
+  func checkInToForum(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> ForumAccountStateData {
+    throw AccountTestFailure(message: "unexpected forum-check-in mutation")
   }
 
   func validationCredentialLengths() -> CredentialLengths? {

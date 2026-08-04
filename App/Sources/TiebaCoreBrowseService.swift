@@ -1224,6 +1224,12 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       message = "贴吧返回了无法识别的数据，协议可能已经更新。"
     case .invalidJSON:
       message = "贴吧返回了无法识别的搜索数据，接口可能已经更新。"
+    case .invalidAuthenticatedResponse:
+      message = "贴吧返回了不匹配的账户数据，请重新登录后再试。"
+    case .forumNotFollowed:
+      message = "请先关注该贴吧后再试。"
+    case .forumCheckInUnavailable:
+      message = "该贴吧当前无法签到。"
     case .server(let code, let serverMessage):
       message = serverMessage.isEmpty ? "贴吧返回错误 \(code)。" : serverMessage
     @unknown default:

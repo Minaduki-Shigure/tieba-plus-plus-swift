@@ -5,13 +5,15 @@ import TiebaProto
 struct TiebaForumMembershipContext:
   Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
 {
-  let membership: TiebaForumMembership
+  let state: TiebaForumAccountState
   let tbs: String
+
+  var membership: TiebaForumMembership { state.membership }
 
   var description: String { "TiebaForumMembershipContext(redacted)" }
   var debugDescription: String { description }
   var customMirror: Mirror {
-    Mirror(self, children: ["membership": membership], displayStyle: .struct)
+    Mirror(self, children: ["state": state], displayStyle: .struct)
   }
 }
 
@@ -102,20 +104,73 @@ enum TiebaAuthenticatedDecoder {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
 
+    let membership = TiebaForumMembership(
+      userID: expectedUserID,
+      forumID: forumID,
+      forumName: responseForumName,
+      isFollowed: followValue == 1
+    )
+
     return TiebaForumMembershipContext(
-      membership: TiebaForumMembership(
-        userID: expectedUserID,
-        forumID: forumID,
-        forumName: responseForumName,
-        isFollowed: followValue == 1
-      ),
+      state: TiebaForumAccountState(membership: membership, checkIn: nil),
       tbs: tbs
+    )
+  }
+
+  static func forumAccountState(
+    from response: FrsPageResIdl,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String
+  ) throws -> TiebaForumMembershipContext {
+    let context = try forumMembership(
+      from: response,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      forumName: forumName
+    )
+    let checkIn = try forumCheckInMetadata(
+      from: response,
+      expectedUserID: expectedUserID
+    )
+    return TiebaForumMembershipContext(
+      state: TiebaForumAccountState(
+        membership: context.membership,
+        checkIn: checkIn
+      ),
+      tbs: context.tbs
     )
   }
 
   static func checkForumFollowWriteResponse(_ body: Data) throws {
     let object = try responseObject(from: body)
     try checkServerError(object)
+  }
+
+  static func forumCheckIn(from body: Data, expectedUserID: Int64) throws -> TiebaForumCheckIn {
+    let object = try responseObject(from: body)
+    try checkServerError(object)
+    guard
+      let userInfo = object["user_info"] as? [String: Any],
+      let userID = int64(userInfo["user_id"]),
+      let isCheckedIn = int64(userInfo["is_sign_in"]),
+      let consecutiveDays = int64(userInfo["cont_sign_num"]),
+      let rank = int64(userInfo["user_sign_rank"]),
+      consecutiveDays >= 0,
+      rank >= 0,
+      let consecutiveDays = Int(exactly: consecutiveDays),
+      let rank = Int(exactly: rank)
+    else {
+      throw TiebaClientError.invalidJSON
+    }
+    guard userID == expectedUserID, isCheckedIn == 1 else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    return TiebaForumCheckIn(
+      isCheckedIn: true,
+      consecutiveDays: consecutiveDays,
+      rank: rank
+    )
   }
 
   private static func responseObject(from body: Data) throws -> [String: Any] {
@@ -131,6 +186,30 @@ enum TiebaAuthenticatedDecoder {
     } catch {
       throw TiebaClientError.invalidJSON
     }
+  }
+
+  private static func forumCheckInMetadata(
+    from response: FrsPageResIdl,
+    expectedUserID: Int64
+  ) throws -> TiebaForumCheckIn? {
+    guard response.data.forum.hasSignInInfo else { return nil }
+    let signInfo = response.data.forum.signInInfo
+    guard signInfo.hasUserInfo else { return nil }
+
+    let userInfo = signInfo.userInfo
+    guard
+      userInfo.userID == expectedUserID,
+      userInfo.isSignIn == 0 || userInfo.isSignIn == 1,
+      userInfo.contSignNum >= 0,
+      userInfo.userSignRank >= 0
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    return TiebaForumCheckIn(
+      isCheckedIn: userInfo.isSignIn == 1,
+      consecutiveDays: Int(userInfo.contSignNum),
+      rank: Int(userInfo.userSignRank)
+    )
   }
 
   private static func checkServerError(_ object: [String: Any]) throws {

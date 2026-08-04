@@ -21,6 +21,27 @@ struct StoredAccountSession:
   let bduss: String
   let createdAt: Date
   let updatedAt: Date
+  let sessionRevision: UUID
+
+  init(
+    id: Int64,
+    username: String,
+    displayName: String,
+    portrait: String,
+    bduss: String,
+    createdAt: Date,
+    updatedAt: Date,
+    sessionRevision: UUID = UUID()
+  ) {
+    self.id = id
+    self.username = username
+    self.displayName = displayName
+    self.portrait = portrait
+    self.bduss = bduss
+    self.createdAt = createdAt
+    self.updatedAt = updatedAt
+    self.sessionRevision = sessionRevision
+  }
 
   var credentials: AccountCredentials {
     AccountCredentials(bduss: bduss)

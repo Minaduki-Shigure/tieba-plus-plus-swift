@@ -6,14 +6,56 @@ import TiebaProto
   import FoundationNetworking
 #endif
 
+private struct TiebaForumCheckInResourceKey: Hashable, Sendable {
+  let userID: Int64
+  let forumID: Int64
+}
+
+private struct TiebaForumCheckInIdentity:
+  Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let credential: TiebaBDUSSCredential
+  let forumName: String
+
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.credential.bduss == rhs.credential.bduss && lhs.forumName == rhs.forumName
+  }
+
+  var description: String { "TiebaForumCheckInIdentity(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(self, children: ["forumName": forumName], displayStyle: .struct)
+  }
+}
+
+private struct TiebaForumCheckInFlight:
+  Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let id: UUID
+  let identity: TiebaForumCheckInIdentity
+  let task: Task<TiebaForumAccountState, Error>
+
+  var description: String { "TiebaForumCheckInFlight(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(self, children: ["id": id, "identity": identity], displayStyle: .struct)
+  }
+}
+
 public actor TiebaAuthenticatedClient {
   static let accountResponseMaximumBytes = 512 * 1_024
   static let followedForumsResponseMaximumBytes = 2 * 1_024 * 1_024
   static let forumMembershipResponseMaximumBytes = 512 * 1_024
   static let forumFollowWriteResponseMaximumBytes = 64 * 1_024
+  static let forumCheckInResponseMaximumBytes = 64 * 1_024
 
   private let requestFactory: TiebaAuthenticatedRequestFactory
   private let transport: any TiebaTransport
+  private var forumCheckInFlights = [TiebaForumCheckInResourceKey: TiebaForumCheckInFlight]()
+  private var forumCheckInSharedWaiterCounts = [UUID: Int]()
+  private var forumCheckInConflictWaiters = [
+    TiebaForumCheckInResourceKey: [UUID: CheckedContinuation<Void, Never>]
+  ]()
 
   public init(configuration: TiebaClientConfiguration = .init()) {
     self.requestFactory = TiebaAuthenticatedRequestFactory(configuration: configuration)
@@ -72,8 +114,24 @@ public actor TiebaAuthenticatedClient {
       credential: credential,
       expectedUserID: expectedUserID,
       forumID: forumID,
-      forumName: forumName
+      forumName: forumName,
+      validatesCheckInMetadata: false
     ).membership
+  }
+
+  public func getForumAccountState(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> TiebaForumAccountState {
+    try await getForumMembershipContext(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      forumName: forumName,
+      validatesCheckInMetadata: true
+    ).state
   }
 
   public func setForumFollowState(
@@ -87,7 +145,8 @@ public actor TiebaAuthenticatedClient {
       credential: credential,
       expectedUserID: expectedUserID,
       forumID: forumID,
-      forumName: forumName
+      forumName: forumName,
+      validatesCheckInMetadata: false
     )
     guard context.membership.isFollowed != isFollowed else {
       return context.membership
@@ -114,11 +173,104 @@ public actor TiebaAuthenticatedClient {
     )
   }
 
-  private func getForumMembershipContext(
+  public func checkInToForum(
     credential: TiebaBDUSSCredential,
     expectedUserID: Int64,
     forumID: Int64,
     forumName: String
+  ) async throws -> TiebaForumAccountState {
+    try Task.checkCancellation()
+    let forumName = try requestFactory.normalizedForumName(forumName)
+    let resourceKey = TiebaForumCheckInResourceKey(
+      userID: expectedUserID,
+      forumID: forumID
+    )
+    let identity = TiebaForumCheckInIdentity(
+      credential: credential,
+      forumName: forumName
+    )
+
+    while let flight = forumCheckInFlights[resourceKey] {
+      if flight.identity == identity {
+        registerSharedForumCheckInWaiter(flightID: flight.id)
+        defer { unregisterSharedForumCheckInWaiter(flightID: flight.id) }
+        return try await flight.task.value
+      }
+      try await waitForForumCheckInFlight(
+        resourceKey: resourceKey,
+        flightID: flight.id
+      )
+    }
+
+    try Task.checkCancellation()
+    let flightID = UUID()
+    let task: Task<TiebaForumAccountState, Error> = Task.detached { [self] in
+      try await performForumCheckIn(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        forumName: forumName
+      )
+    }
+    forumCheckInFlights[resourceKey] = TiebaForumCheckInFlight(
+      id: flightID,
+      identity: identity,
+      task: task
+    )
+    defer { clearForumCheckInFlight(resourceKey: resourceKey, flightID: flightID) }
+    return try await task.value
+  }
+
+  private func performForumCheckIn(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> TiebaForumAccountState {
+    let context = try await getForumMembershipContext(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      forumName: forumName,
+      validatesCheckInMetadata: true
+    )
+    guard context.state.membership.isFollowed else {
+      throw TiebaClientError.forumNotFollowed
+    }
+    guard let currentCheckIn = context.state.checkIn else {
+      throw TiebaClientError.forumCheckInUnavailable
+    }
+    guard !currentCheckIn.isCheckedIn else {
+      return context.state
+    }
+
+    let request = try requestFactory.checkInToForum(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      forumName: context.state.membership.forumName,
+      tbs: context.tbs
+    )
+    let body = try await send(
+      request,
+      maximumBodyBytes: Self.forumCheckInResponseMaximumBytes
+    )
+    let checkIn = try TiebaAuthenticatedDecoder.forumCheckIn(
+      from: body,
+      expectedUserID: expectedUserID
+    )
+    return TiebaForumAccountState(
+      membership: context.state.membership,
+      checkIn: checkIn
+    )
+  }
+
+  private func getForumMembershipContext(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String,
+    validatesCheckInMetadata: Bool
   ) async throws -> TiebaForumMembershipContext {
     let request = try requestFactory.forumMembership(
       credential: credential,
@@ -136,12 +288,108 @@ public actor TiebaAuthenticatedClient {
     } catch {
       throw TiebaClientError.invalidProtobuf
     }
-    return try TiebaAuthenticatedDecoder.forumMembership(
-      from: response,
-      expectedUserID: expectedUserID,
-      forumID: forumID,
-      forumName: forumName
+    if validatesCheckInMetadata {
+      return try TiebaAuthenticatedDecoder.forumAccountState(
+        from: response,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        forumName: forumName
+      )
+    } else {
+      return try TiebaAuthenticatedDecoder.forumMembership(
+        from: response,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        forumName: forumName
+      )
+    }
+  }
+
+  private func waitForForumCheckInFlight(
+    resourceKey: TiebaForumCheckInResourceKey,
+    flightID: UUID
+  ) async throws {
+    try Task.checkCancellation()
+    let waiterID = UUID()
+    await withTaskCancellationHandler {
+      await withCheckedContinuation { continuation in
+        guard
+          !Task.isCancelled,
+          forumCheckInFlights[resourceKey]?.id == flightID
+        else {
+          continuation.resume()
+          return
+        }
+        forumCheckInConflictWaiters[resourceKey, default: [:]][waiterID] = continuation
+      }
+    } onCancel: {
+      Task {
+        await self.cancelForumCheckInWaiter(
+          resourceKey: resourceKey,
+          waiterID: waiterID
+        )
+      }
+    }
+    try Task.checkCancellation()
+  }
+
+  func forumCheckInWaiterCounts(
+    expectedUserID: Int64,
+    forumID: Int64
+  ) -> (shared: Int, conflict: Int) {
+    let resourceKey = TiebaForumCheckInResourceKey(
+      userID: expectedUserID,
+      forumID: forumID
     )
+    let shared: Int
+    if let flightID = forumCheckInFlights[resourceKey]?.id {
+      shared = forumCheckInSharedWaiterCounts[flightID] ?? 0
+    } else {
+      shared = 0
+    }
+    return (
+      shared: shared,
+      conflict: forumCheckInConflictWaiters[resourceKey]?.count ?? 0
+    )
+  }
+
+  private func registerSharedForumCheckInWaiter(flightID: UUID) {
+    forumCheckInSharedWaiterCounts[flightID, default: 0] += 1
+  }
+
+  private func unregisterSharedForumCheckInWaiter(flightID: UUID) {
+    guard let count = forumCheckInSharedWaiterCounts[flightID] else { return }
+    if count <= 1 {
+      forumCheckInSharedWaiterCounts.removeValue(forKey: flightID)
+    } else {
+      forumCheckInSharedWaiterCounts[flightID] = count - 1
+    }
+  }
+
+  private func cancelForumCheckInWaiter(
+    resourceKey: TiebaForumCheckInResourceKey,
+    waiterID: UUID
+  ) {
+    guard var waiters = forumCheckInConflictWaiters[resourceKey] else { return }
+    let continuation = waiters.removeValue(forKey: waiterID)
+    if waiters.isEmpty {
+      forumCheckInConflictWaiters.removeValue(forKey: resourceKey)
+    } else {
+      forumCheckInConflictWaiters[resourceKey] = waiters
+    }
+    continuation?.resume()
+  }
+
+  private func clearForumCheckInFlight(
+    resourceKey: TiebaForumCheckInResourceKey,
+    flightID: UUID
+  ) {
+    guard forumCheckInFlights[resourceKey]?.id == flightID else { return }
+    forumCheckInFlights.removeValue(forKey: resourceKey)
+    let waiters = forumCheckInConflictWaiters.removeValue(forKey: resourceKey) ?? [:]
+    for continuation in waiters.values {
+      continuation.resume()
+    }
   }
 
   private func send(_ request: URLRequest, maximumBodyBytes: Int) async throws -> Data {

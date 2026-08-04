@@ -74,3 +74,25 @@ public struct TiebaForumMembership: Sendable, Hashable {
     self.isFollowed = isFollowed
   }
 }
+
+public struct TiebaForumCheckIn: Sendable, Hashable {
+  public let isCheckedIn: Bool
+  public let consecutiveDays: Int
+  public let rank: Int
+
+  public init(isCheckedIn: Bool, consecutiveDays: Int, rank: Int) {
+    self.isCheckedIn = isCheckedIn
+    self.consecutiveDays = consecutiveDays
+    self.rank = rank
+  }
+}
+
+public struct TiebaForumAccountState: Sendable, Hashable {
+  public let membership: TiebaForumMembership
+  public let checkIn: TiebaForumCheckIn?
+
+  public init(membership: TiebaForumMembership, checkIn: TiebaForumCheckIn?) {
+    self.membership = membership
+    self.checkIn = checkIn
+  }
+}
