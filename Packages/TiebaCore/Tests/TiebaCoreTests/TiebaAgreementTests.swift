@@ -1172,7 +1172,7 @@ final class TiebaAgreementTests: XCTestCase, @unchecked Sendable {
     credential: TiebaBDUSSCredential,
     userID: Int64,
     postID: Int64
-  ) -> Task<TiebaAgreementState, Error> {
+  ) -> Task<TiebaAgreementState, Swift.Error> {
     Task {
       try await client.setAgreementState(
         credential: credential,

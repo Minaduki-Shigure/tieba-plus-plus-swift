@@ -1266,6 +1266,8 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     let secondRevision = try XCTUnwrap(
       UUID(uuidString: "00000000-0000-0000-0000-000000000042")
     )
+    let firstSession = session(sessionRevision: firstRevision)
+    let secondSession = session(sessionRevision: secondRevision)
     let target = ContentAgreementTarget(
       kind: .post,
       forumID: 42,
@@ -1284,7 +1286,7 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     let service = TiebaCoreAccountService(client: client)
     let first = Task {
       try await service.setContentAgreed(
-        session: session(sessionRevision: firstRevision),
+        session: firstSession,
         target: target,
         isAgreed: true
       )
@@ -1295,7 +1297,7 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     let second = Task { () -> String? in
       do {
         _ = try await service.setContentAgreed(
-          session: session(sessionRevision: secondRevision),
+          session: secondSession,
           target: target,
           isAgreed: true
         )
