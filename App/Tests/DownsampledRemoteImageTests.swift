@@ -1222,7 +1222,9 @@ final class DownsampledRemoteImageTests: XCTestCase {
     XCTAssertTrue(didEmitHalfway)
     XCTAssertTrue(networkWaiterReceivedProgress)
     await downloader.releaseAll()
-    let networkOutcome = await networkCompletionProbe.waitUntilOutcome()
+    let networkOutcome = await networkCompletionProbe.waitUntilOutcome(
+      timeout: .seconds(10)
+    )
     if networkOutcome == nil { networkTask.cancel() }
     XCTAssertEqual(networkOutcome, .some(.success))
 
