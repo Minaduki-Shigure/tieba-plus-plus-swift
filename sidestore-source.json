@@ -1,0 +1,47 @@
+{
+  "version": 2,
+  "name": "Tieba++",
+  "identifier": "io.github.minaduki.tieba-plus-plus",
+  "sourceURL": "https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json",
+  "subtitle": "面向 iPhone 和 iPad 的原生第三方贴吧客户端",
+  "description": "Tieba++ 的原生 SwiftUI 版本。当前以匿名浏览和媒体阅读为稳定重点，并提供经设备验证的 Web 登录、多账户切换及“我的关注”只读功能。",
+  "iconURL": "https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/App/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
+  "website": "https://github.com/Minaduki-Shigure/tieba-plus-plus-swift",
+  "tintColor": "#125DBE",
+  "featuredApps": [
+    "io.github.minaduki.tieba-plus-plus"
+  ],
+  "apps": [
+    {
+      "name": "Tieba++",
+      "bundleIdentifier": "io.github.minaduki.tieba-plus-plus",
+      "developerName": "Minaduki-Shigure 与社区贡献者",
+      "subtitle": "原生 SwiftUI 第三方贴吧客户端",
+      "localizedDescription": "支持匿名发现、搜索、贴吧与频道浏览、主题与楼中楼阅读、公开用户资料、图片画廊、语音和视频播放。提供本地历史、收藏、过滤和外观设置，并支持经设备验证的 Web 登录、多账户管理与“我的关注”只读列表。",
+      "iconURL": "https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/App/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
+      "tintColor": "#125DBE",
+      "category": "social",
+      "beta": true,
+      "versions": [
+        {
+          "version": "0.54.2",
+          "buildVersion": "57",
+          "buildNumber": "57",
+          "date": "2026-08-04",
+          "localizedDescription": "修复 iOS 18.7.2 上 WebKit 登录完成后的凭据读取兼容问题；受限回退仅用于隔离的 HTTPS 登录流程，账户凭据仍须在线验证后才写入 Keychain。新增经完整 CI 门禁的 GitHub Release IPA 分发。",
+          "downloadURL": "https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/releases/download/v0.54.2-alpha.3/TiebaPlusPlus-SideStore.ipa",
+          "size": 2799886,
+          "sha256": "eaf783214df19e9de5023ff652bcc896047fc7459b672a9d9901866b9e6db282",
+          "minOSVersion": "16.0"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {
+          "NSPhotoLibraryAddUsageDescription": "用于将您选择的贴吧图片保存到系统照片。"
+        }
+      }
+    }
+  ],
+  "news": []
+}

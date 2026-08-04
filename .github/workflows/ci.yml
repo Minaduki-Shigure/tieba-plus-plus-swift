@@ -13,11 +13,40 @@ on:
         default: false
         type: boolean
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  source-validation:
+    name: App source validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Validate source metadata
+        run: ruby Scripts/validate_sidestore_source.rb
+      - name: Verify published IPA
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        run: |
+          set -euo pipefail
+          download_url="$(ruby -rjson -e '
+            source = JSON.parse(File.read("sidestore-source.json"))
+            puts source.dig("apps", 0, "versions", 0, "downloadURL")
+          ')"
+          curl \
+            --fail \
+            --location \
+            --proto '=https' \
+            --retry 3 \
+            --tlsv1.2 \
+            "$download_url" \
+            --output /tmp/TiebaPlusPlus-SideStore.ipa
+          ruby Scripts/validate_sidestore_source.rb \
+            --ipa /tmp/TiebaPlusPlus-SideStore.ipa
+
   core-tests:
     name: Core tests
     runs-on: macos-15

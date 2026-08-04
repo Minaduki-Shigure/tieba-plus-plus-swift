@@ -18,7 +18,8 @@ experimental or unsupported.
 | Local features | Available for history, favorites, filtering, appearance, and media preferences |
 | Accounts | Read-only device-testing milestone; Web login, switching, logout, and followed forums |
 | Server-side writes | Not implemented; following, liking, posting, replying, and moderation stay disabled |
-| Distribution | Unsigned SideStore-compatible IPA produced by GitHub Actions |
+| TiebaLite parity | Anonymous reading and media: about 85–95%; full product scope: about 50–55% |
+| Distribution | Public SideStore/LiveContainer source backed by tested unsigned GitHub Release IPAs |
 
 ### Release and validation
 
@@ -27,8 +28,12 @@ experimental or unsupported.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
   XcodeGen 2.45.4 or newer.
 - **Automated checks:** GitHub Actions runs package tests and an unsigned
-  simulator build. Authenticated flows never use real credentials in CI and
-  still need explicit testing on a physical device.
+  simulator build, validates the app source, and verifies its public IPA hash.
+  Authenticated flows never use real credentials in CI and still need explicit
+  testing on a physical device.
+- **App source:** Add [`sidestore-source.json`](https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json)
+  to LiveContainer or SideStore. Its latest IPA is published only after the tag's
+  package, anonymous integration, and simulator tests all pass.
 - **Login hotfix:** `v0.54.0-alpha.1` can reach Tieba's account page without
   completing because its callback and Cookie matching are too strict.
   `v0.54.1-alpha.1` made that failure explicit and confirmed that iOS 18.7.2
@@ -102,7 +107,10 @@ experimental or unsupported.
   request contracts and failure recovery have been validated on a disposable
   test account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
-  comparison, protocol constraints, and next milestones.
+  comparison, protocol constraints, and next milestones. The current weighted
+  end-to-end audit estimates 85–95% coverage of anonymous reading and media, or
+  50–55% of the full TiebaLite product scope once account writes, creation,
+  notifications, and moderation are included.
 
 ## Architecture
 
@@ -144,9 +152,12 @@ swift test --package-path Packages/TiebaCore
 
 ## Distribution
 
-The initial distribution target is SideStore-compatible self-signing. The
-`Build unsigned IPA` workflow creates an unsigned IPA that must be signed by the
-installer. App Store distribution is not currently a project goal.
+The distribution target is SideStore-compatible self-signing. The public
+[`sidestore-source.json`](https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json)
+can be added directly to LiveContainer or SideStore. Each listed IPA is an
+unsigned GitHub Release asset that must be signed by the installer; its byte size
+and SHA-256 are checked against the source by CI. App Store distribution is not
+currently a project goal.
 
 ## License
 
