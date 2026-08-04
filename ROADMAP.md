@@ -50,6 +50,8 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Strict internal routing for supported Tieba HTTPS, pasted official-scheme, and app links
 - Default-system external HTTPS opening with an optional in-app Safari view
 - Nested replies, images, video links, and voice playback
+- Single-session voice playback with loading/failure state, elapsed progress,
+  seeking, audio-interruption handling, and inactive-scene pausing
 - Responsive one-to-three-column masonry for consecutive post-body image runs
 - Persistent automatic, data-saving, or tap-to-load policy for content media
 - Persistent standard or high-definition quality selection for supported image previews
@@ -143,6 +145,20 @@ single-column. Sanitized 0.5-through-2 aspect ratios feed a deterministic
 shortest-column assignment whose ties choose the lower column. Nonfinite
 proposals or spacing and invalid dimensions are normalized before frame
 calculation.
+
+Voice content uses one application-scoped player rather than one independent
+player per rendered floor. A new control owns a fresh item identity and each
+loaded source owns a fresh session identity. Starting a second control replaces
+the active item, while late progress, completion, failure, or interruption
+events from the replaced session are ignored. The declared public duration is a
+bounded initial fallback; a finite positive AVFoundation duration can replace
+it after loading, and both elapsed time and explicit seeks are clamped before
+presentation. Loading, playing, paused, and generic failure states remain
+separate. Completion returns the same item to zero, while leaving that item,
+backgrounding the scene, an audio interruption, or loss of the active output
+cannot leave an inaccessible player running. This milestone intentionally adds
+no background audio, lock-screen controls, automatic playback, persistent
+audio cache, download, or export path.
 
 Rich-content images first open from the already filtered content array that
 produced the tap, so the local gallery is available without waiting for metadata.

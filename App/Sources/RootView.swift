@@ -19,6 +19,7 @@ struct RootView: View {
   @State private var searchHistoryAction: GlobalSearchHistoryAction?
   @State private var linkErrorMessage: String?
   @Environment(\.scenePhase) private var scenePhase
+  @EnvironmentObject private var voicePlaybackController: VoicePlaybackController
   @AppStorage(AppPreferenceKey.homeShowsRecentForums)
   private var homeShowsRecentForums = true
   @AppStorage(AppPreferenceKey.homeShowsDiscovery)
@@ -338,6 +339,7 @@ struct RootView: View {
     .onChange(of: scenePhase) {
       if $0 != .active {
         searchSuggestionViewModel.cancelAndClear()
+        voicePlaybackController.pauseForInactiveScene()
       }
     }
     .onChange(of: path) { _ in

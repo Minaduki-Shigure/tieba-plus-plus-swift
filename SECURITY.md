@@ -403,6 +403,26 @@ already authorized request keeps that authorization until it finishes. A
 deduplicated transfer may continue only when another active, independently
 authorized waiter still owns it.
 
+Voice playback accepts only an initial HTTPS URL on the exact
+`tiebac.baidu.com/c/p/voice` path, without credentials, an explicit port, or a
+fragment. Its query must contain exactly one bounded, nonempty `voice_md5`
+value and the fixed `play_from=pb_voice_play` value. The application supplies
+no Cookie, Authorization, BDUSS, STOKEN, account identity, device metadata, or
+custom request header when it constructs the AVFoundation item. AVFoundation
+remains subject to the platform's normal TLS and App Transport Security
+handling; no cleartext exception or custom certificate trust is introduced.
+
+One main-actor controller owns the only voice player. Every replacement load
+receives a random session identity, and asynchronous progress, completion,
+failure, and interruption events must match that identity before mutating UI
+state. Server-declared and AVFoundation durations are accepted only as finite
+positive values within a 24-hour presentation bound; elapsed positions and
+seeks are clamped to that duration. An inactive app scene, an audio
+interruption, removal of the current output device, or disappearance of the
+owning control pauses or resets the applicable session. The target declares no
+background-audio mode, and voice content is not downloaded, exported, cached
+persistently, logged, or played automatically.
+
 High-resolution profile-avatar derivation is a source-construction boundary,
 not a remote-media redirect-host allowlist. The untrimmed raw source is limited
 to 4,096 UTF-8 bytes. After surrounding whitespace is removed, a bare source

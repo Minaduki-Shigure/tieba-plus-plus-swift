@@ -90,6 +90,11 @@ corresponding surface or control.
   and shared-thread origin media. Consecutive images in post-like content use a
   one-to-three-column masonry layout based on their actual container width;
   Accessibility Dynamic Type and forum-rule documents remain single-column.
+  Voice posts share one app-scoped spoken-audio player, so starting another
+  voice replaces the previous session. The control exposes loading and failure
+  states, elapsed and resolved duration, and an accessible seek slider; audio
+  pauses when the app becomes inactive, an interruption begins, or an output
+  device is removed.
   Images open immediately in a same-floor gallery with paging and zoom. In an
   ordinary unfiltered thread, the gallery can expand anonymously across floors,
   preserve repeated occurrences, lazily load in both directions, and show the

@@ -5,6 +5,7 @@ import SwiftUI
 struct TiebaPlusPlusApp: App {
   @StateObject private var externalWebPresentation = ExternalWebPresentationModel()
   @StateObject private var contentMediaNetworkMonitor = ContentMediaNetworkMonitor()
+  @StateObject private var voicePlaybackController = VoicePlaybackController()
   @AppStorage(AppPreferenceKey.appearance)
   private var appearance = AppAppearance.system.rawValue
   @AppStorage(AppPreferenceKey.accentColor)
@@ -98,6 +99,7 @@ struct TiebaPlusPlusApp: App {
           externalWebPresentation.requestPresentation(for: url)
         }
       )
+      .environmentObject(voicePlaybackController)
       .background {
         ExternalWebBrowserPresenter(page: externalWebPresentation.page) { pageID in
           externalWebPresentation.dismiss(id: pageID)
