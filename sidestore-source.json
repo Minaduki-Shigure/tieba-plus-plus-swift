@@ -4,7 +4,7 @@
   "identifier": "io.github.minaduki.tieba-plus-plus",
   "sourceURL": "https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json",
   "subtitle": "面向 iPhone 和 iPad 的原生第三方贴吧客户端",
-  "description": "Tieba++ 的原生 SwiftUI 版本。当前以匿名浏览和媒体阅读为稳定重点，并提供经设备验证的 Web 登录、多账户切换及“我的关注”只读功能。",
+  "description": "Tieba++ 的原生 SwiftUI 版本。当前以匿名浏览和媒体阅读为稳定重点，并提供 Web 登录、多账户、“我的关注”，以及需真机验证的贴吧关注与取消关注。",
   "iconURL": "https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/App/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
   "website": "https://github.com/Minaduki-Shigure/tieba-plus-plus-swift",
   "tintColor": "#125DBE",
@@ -17,12 +17,23 @@
       "bundleIdentifier": "io.github.minaduki.tieba-plus-plus",
       "developerName": "Minaduki-Shigure 与社区贡献者",
       "subtitle": "原生 SwiftUI 第三方贴吧客户端",
-      "localizedDescription": "支持匿名发现、搜索、贴吧与频道浏览、主题与楼中楼阅读、公开用户资料、图片画廊、语音和视频播放。提供本地历史、收藏、过滤和外观设置，并支持经设备验证的 Web 登录、多账户管理与“我的关注”只读列表。",
+      "localizedDescription": "支持匿名发现、搜索、贴吧与频道浏览、主题与楼中楼阅读、公开用户资料、图片画廊、语音和视频播放。提供本地历史、收藏、过滤和外观设置，并支持 Web 登录、多账户管理、“我的关注”及实验性的贴吧关注与取消关注。",
       "iconURL": "https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/App/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
       "tintColor": "#125DBE",
       "category": "social",
       "beta": true,
       "versions": [
+        {
+          "version": "0.55.0",
+          "buildVersion": "58",
+          "buildNumber": "58",
+          "date": "2026-08-04",
+          "localizedDescription": "新增账户级贴吧关注状态，以及需显式确认的关注与取消关注。写入前会校验账户 UID、贴吧 ID 和短期 tbs；重复操作会合并，反向操作不会交错，结果不确定时只读回查而不重试写入。本版本仍需真机验证。",
+          "downloadURL": "https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/releases/download/v0.55.0-alpha.2/TiebaPlusPlus-SideStore.ipa",
+          "size": 2841737,
+          "sha256": "f12a774b78971d0ec8248eefa613b594ffbbaf91fef1c23f040c5901a69a3f43",
+          "minOSVersion": "16.0"
+        },
         {
           "version": "0.54.2",
           "buildVersion": "57",
