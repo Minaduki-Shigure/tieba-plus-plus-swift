@@ -783,7 +783,7 @@ final class TiebaThreadAgreementTests: XCTestCase {
       agree.agreeNum = agreeCount
       agree.disagreeNum = disagreeCount
       agree.diffAgreeNum = score
-      agree.hasAgree = rawHasAgree ?? (isAgreed ? 1 : 0)
+      agree.hasAgree_p = rawHasAgree ?? (isAgreed ? 1 : 0)
       thread.agree = agree
     }
 
@@ -986,7 +986,7 @@ private actor ConcurrentThreadAgreementTransport: TiebaTransport {
     var agree = Agree()
     agree.agreeNum = 10
     agree.diffAgreeNum = 10
-    agree.hasAgree = 0
+    agree.hasAgree_p = 0
     var thread = ThreadInfo()
     thread.id = threadID
     thread.firstPostID = firstPostID

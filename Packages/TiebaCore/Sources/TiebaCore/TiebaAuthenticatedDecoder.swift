@@ -220,7 +220,7 @@ enum TiebaAuthenticatedDecoder {
       }
     }
 
-    let rawAgreement = data.thread.agree.hasAgree
+    let rawAgreement = data.thread.agree.hasAgree_p
     guard rawAgreement == 0 || rawAgreement == 1 else {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
