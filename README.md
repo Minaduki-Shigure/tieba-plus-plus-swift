@@ -23,11 +23,9 @@ experimental or unsupported.
 
 ### Release and validation
 
-- **Next unreleased validation build:** The source planned for
-  `v0.56.0-alpha.1` adds authoritative per-forum check-in state and an explicit
-  single-forum check-in action alongside confirmed follow/unfollow. Until that
-  tag passes CI and is published, the app source continues to serve the prior
-  tested alpha.
+- **Current alpha:** `v0.56.0-alpha.1` adds authoritative per-forum check-in
+  state and an explicit single-forum check-in action alongside confirmed
+  follow/unfollow.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
   XcodeGen 2.45.4 or newer.
 - **Automated checks:** GitHub Actions runs package tests and an unsigned
