@@ -111,6 +111,39 @@ final class TiebaAuthenticatedClientTests: XCTestCase {
     }
   }
 
+  func testAuthenticatedResponsesAreBoundedBeforeDecoding() async {
+    let oversizedAccount = TiebaAuthenticatedClient(
+      transport: AuthStubTransport(
+        body: Data(
+          repeating: 0,
+          count: TiebaAuthenticatedClient.accountResponseMaximumBytes + 1
+        )
+      )
+    )
+    await assertError(
+      .responseTooLarge(maximumBytes: TiebaAuthenticatedClient.accountResponseMaximumBytes)
+    ) {
+      _ = try await oversizedAccount.validateAccount(credential: credential())
+    }
+
+    let oversizedForums = TiebaAuthenticatedClient(
+      transport: AuthStubTransport(
+        body: Data(
+          repeating: 0,
+          count: TiebaAuthenticatedClient.followedForumsResponseMaximumBytes + 1
+        )
+      )
+    )
+    await assertError(
+      .responseTooLarge(maximumBytes: TiebaAuthenticatedClient.followedForumsResponseMaximumBytes)
+    ) {
+      _ = try await oversizedForums.getFollowedForums(
+        credential: credential(),
+        userID: 957_339_815
+      )
+    }
+  }
+
   private func credential() -> TiebaBDUSSCredential {
     TiebaBDUSSCredential(bduss: String(repeating: "b", count: 192))
   }

@@ -9,6 +9,7 @@ struct LoginView: View {
   @StateObject private var viewModel: LoginViewModel
   @State private var currentHost = "wappass.baidu.com"
   @State private var webViewID = UUID()
+  @State private var isCapturingCredentials = false
   @State private var validationTask: Task<Void, Never>?
   @State private var validationID: UUID?
 
@@ -27,16 +28,20 @@ struct LoginView: View {
     ZStack {
       SecureTiebaLoginWebView(
         onHostChange: { currentHost = $0 },
+        onCredentialCaptureStateChange: { isCapturingCredentials = $0 },
         onCredentials: complete,
+        onCredentialCaptureFailure: {
+          viewModel.errorMessage = "网页登录已完成，但未能读取安全的账户凭据。请重新加载后再试。"
+        },
         onBlockedNavigation: viewModel.reportBlockedNavigation,
         onLoadFailure: { viewModel.errorMessage = "登录页面加载失败，请稍后重试。" }
       )
       .id(webViewID)
 
-      if viewModel.isValidating {
+      if isCapturingCredentials || viewModel.isValidating {
         ZStack {
           Color(uiColor: .systemBackground).opacity(0.82)
-          ProgressView("正在验证账户")
+          ProgressView(viewModel.isValidating ? "正在验证账户" : "正在完成登录")
         }
       }
     }
@@ -54,10 +59,10 @@ struct LoginView: View {
       }
       ToolbarItem(placement: .cancellationAction) {
         Button("取消") { dismiss() }
-          .disabled(viewModel.isValidating)
+          .disabled(isCapturingCredentials || viewModel.isValidating)
       }
     }
-    .interactiveDismissDisabled(viewModel.isValidating)
+    .interactiveDismissDisabled(isCapturingCredentials || viewModel.isValidating)
     .onDisappear(perform: cancelValidation)
     .alert(
       "登录失败",
@@ -68,6 +73,7 @@ struct LoginView: View {
     ) {
       Button("重新加载") {
         viewModel.clearError()
+        isCapturingCredentials = false
         webViewID = UUID()
       }
       Button("取消", role: .cancel) { viewModel.clearError() }
@@ -78,6 +84,7 @@ struct LoginView: View {
 
   private func complete(_ credentials: AccountCredentials) {
     guard validationTask == nil else { return }
+    isCapturingCredentials = false
     let id = UUID()
     validationID = id
     validationTask = Task {
@@ -95,6 +102,7 @@ struct LoginView: View {
   }
 
   private func cancelValidation() {
+    isCapturingCredentials = false
     validationID = nil
     validationTask?.cancel()
     validationTask = nil

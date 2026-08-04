@@ -5,6 +5,9 @@ import Foundation
 #endif
 
 public actor TiebaAuthenticatedClient {
+  static let accountResponseMaximumBytes = 512 * 1_024
+  static let followedForumsResponseMaximumBytes = 2 * 1_024 * 1_024
+
   private let requestFactory: TiebaAuthenticatedRequestFactory
   private let transport: any TiebaTransport
 
@@ -25,7 +28,10 @@ public actor TiebaAuthenticatedClient {
     credential: TiebaBDUSSCredential
   ) async throws -> TiebaAuthenticatedAccount {
     let request = try requestFactory.validateAccount(credential: credential)
-    let body = try await send(request)
+    let body = try await send(
+      request,
+      maximumBodyBytes: Self.accountResponseMaximumBytes
+    )
     return try TiebaAuthenticatedDecoder.account(from: body)
   }
 
@@ -41,7 +47,10 @@ public actor TiebaAuthenticatedClient {
       page: page,
       pageSize: pageSize
     )
-    let body = try await send(request)
+    let body = try await send(
+      request,
+      maximumBodyBytes: Self.followedForumsResponseMaximumBytes
+    )
     return try TiebaAuthenticatedDecoder.followedForums(
       from: body,
       page: page,
@@ -49,10 +58,13 @@ public actor TiebaAuthenticatedClient {
     )
   }
 
-  private func send(_ request: URLRequest) async throws -> Data {
+  private func send(_ request: URLRequest, maximumBodyBytes: Int) async throws -> Data {
     let response: TiebaHTTPResponse
     do {
-      response = try await transport.send(request)
+      response = try await transport.send(
+        request,
+        maximumBodyBytes: maximumBodyBytes
+      )
     } catch let error as TiebaClientError {
       throw error
     } catch is CancellationError {

@@ -16,8 +16,11 @@ allowed hosts are rejected.
 The login view contains the only app-controlled `WKWebView`. It uses
 `WKWebsiteDataStore.nonPersistent()`, accepts main-frame navigation only on an
 exact first-party host allowlist over HTTPS on the standard port, and captures
-only a structurally valid `BDUSS` Secure cookie after the expected Tieba
-account-page callback. The store is erased when the view is dismantled.
+only a structurally valid Secure `BDUSS_BFESS` or `BDUSS` cookie after an
+expected Tieba `/index/tbwise/` account-page callback. Secure `BDUSS_BFESS` has
+fixed precedence when both names are present. Cookie-store propagation is
+retried a bounded number of times, and exhaustion is reported instead of
+leaving the login flow pending. The store is erased when the view is dismantled.
 The app must never inject JavaScript to read passwords, persist the full cookie
 jar, override a TLS challenge, or enable Web Inspector for this view.
 Camera, microphone, device-motion, and orientation permission requests from the
@@ -40,9 +43,10 @@ independent ephemeral URL sessions. Anonymous request factories have no account
 parameter and must remain credential-free. Authenticated request factories send
 only the fields required by the selected endpoint in the HTTPS request body,
 disable cookies and URL credentials, reject all redirects, and never retain
-credentials as client state. MD5 is used only for compatibility with the
-unofficial request-signature protocol, not for password storage or
-verification.
+credentials as client state. Authenticated account and followed-forum responses
+also have endpoint-specific transfer limits before decoding. MD5 is used only
+for compatibility with the unofficial request-signature protocol, not for
+password storage or verification.
 
 STOKEN is neither extracted nor persisted in this read-only milestone. A future
 feature that requires it must add a login flow that verifies BDUSS and STOKEN

@@ -87,10 +87,15 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   }
 
   private func validate(_ credential: TiebaBDUSSCredential) throws {
-    guard credential.bduss.count == 192 else {
+    let value = credential.bduss
+    guard value.utf8.count == 192 else {
       throw TiebaClientError.invalidArgument("Account credentials have an invalid format.")
     }
-    guard credential.bduss.allSatisfy({ $0.isASCII && !$0.isWhitespace && !$0.isNewline }) else {
+    guard
+      value.unicodeScalars.allSatisfy({ scalar in
+        scalar.value >= 0x21 && scalar.value <= 0x7E
+      })
+    else {
       throw TiebaClientError.invalidArgument("Account credentials have an invalid format.")
     }
   }

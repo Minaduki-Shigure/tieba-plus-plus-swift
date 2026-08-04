@@ -64,6 +64,13 @@ final class TiebaAuthenticatedRequestFactoryTests: XCTestCase {
       )
     )
     XCTAssertThrowsError(
+      try factory.validateAccount(
+        credential: TiebaBDUSSCredential(
+          bduss: String(repeating: "b", count: 191) + "\u{7F}"
+        )
+      )
+    )
+    XCTAssertThrowsError(
       try factory.followedForums(
         credential: credential(), userID: 0, page: 1, pageSize: 50
       )

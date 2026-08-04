@@ -73,10 +73,22 @@ final class SecureTiebaLoginWebViewTests: XCTestCase {
     )
   }
 
-  func testCompletionURLIsRestrictedToTiebaMinePath() throws {
+  func testCompletionURLAcceptsOnlyTiebaAccountPathFamily() throws {
     XCTAssertTrue(
       TiebaLoginNavigationPolicy.isCompletionURL(
         try XCTUnwrap(URL(string: "https://tieba.baidu.com/index/tbwise/mine"))
+      )
+    )
+    XCTAssertTrue(
+      TiebaLoginNavigationPolicy.isCompletionURL(
+        try XCTUnwrap(URL(string: "https://tiebac.baidu.com/index/tbwise"))
+      )
+    )
+    XCTAssertTrue(
+      TiebaLoginNavigationPolicy.isCompletionURL(
+        try XCTUnwrap(
+          URL(string: "https://tieba.baidu.com/index/tbwise/home?source=login#account")
+        )
       )
     )
     XCTAssertFalse(
@@ -91,7 +103,12 @@ final class SecureTiebaLoginWebViewTests: XCTestCase {
     )
     XCTAssertFalse(
       TiebaLoginNavigationPolicy.isCompletionURL(
-        try XCTUnwrap(URL(string: "https://tieba.baidu.com/index/tbwise/mine-redirect"))
+        try XCTUnwrap(URL(string: "https://tieba.baidu.com/index/tbwiseevil/mine"))
+      )
+    )
+    XCTAssertFalse(
+      TiebaLoginNavigationPolicy.isCompletionURL(
+        try XCTUnwrap(URL(string: "https://tieba.baidu.com/INDEX/tbwise/mine"))
       )
     )
   }
@@ -115,6 +132,48 @@ final class SecureTiebaLoginWebViewTests: XCTestCase {
     ]
     let credentials = try XCTUnwrap(TiebaLoginNavigationPolicy.credentials(from: cookies))
     XCTAssertEqual(credentials.bduss.count, 192)
+    XCTAssertEqual(credentials.bduss.first, "b")
+  }
+
+  func testCredentialCapturePrefersSecureBFESSOverBDUSSRegardlessOfExpiry() throws {
+    let credentials = try XCTUnwrap(
+      TiebaLoginNavigationPolicy.credentials(from: [
+        try cookie(
+          name: "BDUSS",
+          value: String(repeating: "b", count: 192),
+          domain: ".baidu.com",
+          expires: Date(timeIntervalSinceNow: 7_200)
+        ),
+        try cookie(
+          name: "BDUSS_BFESS",
+          value: String(repeating: "f", count: 192),
+          domain: "baidu.com",
+          expires: Date(timeIntervalSinceNow: 3_600)
+        ),
+      ])
+    )
+
+    XCTAssertEqual(credentials.bduss.first, "f")
+  }
+
+  func testCredentialCaptureFallsBackFromExpiredBFESSToSecureBDUSS() throws {
+    let credentials = try XCTUnwrap(
+      TiebaLoginNavigationPolicy.credentials(from: [
+        try cookie(
+          name: "BDUSS_BFESS",
+          value: String(repeating: "f", count: 192),
+          domain: ".baidu.com",
+          expires: Date(timeIntervalSinceNow: -60)
+        ),
+        try cookie(
+          name: "BDUSS",
+          value: String(repeating: "b", count: 192),
+          domain: ".baidu.com",
+          expires: nil
+        ),
+      ])
+    )
+
     XCTAssertEqual(credentials.bduss.first, "b")
   }
 
@@ -163,21 +222,69 @@ final class SecureTiebaLoginWebViewTests: XCTestCase {
     )
   }
 
+  func testCredentialRetryPolicyStopsAtItsBound() {
+    var policy = TiebaLoginCredentialRetryPolicy()
+    var delays: [UInt64] = []
+
+    for _ in 0..<5 {
+      guard case .retry(let delay) = policy.evaluate(nil) else {
+        return XCTFail("Expected a bounded retry before exhaustion")
+      }
+      delays.append(delay)
+    }
+    guard case .failed = policy.evaluate(nil) else {
+      return XCTFail("Expected the sixth missing-cookie attempt to fail")
+    }
+
+    XCTAssertEqual(
+      delays,
+      [100_000_000, 200_000_000, 400_000_000, 800_000_000, 1_000_000_000]
+    )
+    XCTAssertEqual(policy.completedAttempts, 6)
+    XCTAssertTrue(policy.isTerminal)
+    guard case .ignored = policy.evaluate(nil) else {
+      return XCTFail("Expected results after exhaustion to be ignored")
+    }
+    XCTAssertEqual(policy.completedAttempts, 6)
+  }
+
+  func testCredentialRetryPolicyStopsImmediatelyAfterCredentialsArrive() {
+    var policy = TiebaLoginCredentialRetryPolicy()
+    guard case .retry = policy.evaluate(nil) else {
+      return XCTFail("Expected the first missing-cookie attempt to retry")
+    }
+
+    let expected = String(repeating: "b", count: 192)
+    guard case .captured(let credentials) = policy.evaluate(AccountCredentials(bduss: expected))
+    else {
+      return XCTFail("Expected credentials to finish the capture")
+    }
+
+    XCTAssertEqual(credentials.bduss, expected)
+    XCTAssertEqual(policy.completedAttempts, 2)
+    XCTAssertTrue(policy.isTerminal)
+    guard case .ignored = policy.evaluate(AccountCredentials(bduss: expected)) else {
+      return XCTFail("Expected late credentials to be ignored")
+    }
+  }
+
   private func cookie(
     name: String,
     value: String,
     domain: String,
     path: String = "/",
     secure: Bool = true,
-    expires: Date = Date(timeIntervalSinceNow: 3_600)
+    expires: Date? = Date(timeIntervalSinceNow: 3_600)
   ) throws -> HTTPCookie {
     var properties: [HTTPCookiePropertyKey: Any] = [
       .name: name,
       .value: value,
       .domain: domain,
       .path: path,
-      .expires: expires,
     ]
+    if let expires {
+      properties[.expires] = expires
+    }
     if secure {
       properties[.secure] = "TRUE"
     }

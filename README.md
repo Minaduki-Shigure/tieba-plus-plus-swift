@@ -22,16 +22,18 @@ experimental or unsupported.
 
 ### Release and validation
 
-- **Current alpha:** `v0.54.0-alpha.1` is the latest tagged build; it adds
-  application-wide coordination between voice and video playback.
+- **Current alpha:** `v0.54.1-alpha.1` is the login hotfix build based on the
+  application-wide voice and video playback coordination from `v0.54.0-alpha.1`.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
   XcodeGen 2.45.4.
 - **Automated checks:** GitHub Actions runs package tests and an unsigned
   simulator build. Authenticated flows never use real credentials in CI and
   still need explicit testing on a physical device.
-- **Known account issue:** In `v0.54.0-alpha.1`, Web login can reach Tieba's
-  account page without completing because the callback and Cookie matching are
-  too strict. This is an application bug, not an additional login step.
+- **Login hotfix:** `v0.54.0-alpha.1` can reach Tieba's account page without
+  completing because its callback and Cookie matching are too strict.
+  `v0.54.1-alpha.1` expands the trusted callback family, supports Secure
+  `BDUSS_BFESS`, retries bounded Cookie propagation, and reports exhaustion;
+  the result still requires confirmation on iOS 18.7.2 hardware.
 
 ### Discovery and forums
 
