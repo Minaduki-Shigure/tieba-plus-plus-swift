@@ -165,7 +165,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
+          trap 'status=$?; echo "::error file=.github/workflows/build-ipa.yml::Release command failed at shell line $LINENO: $BASH_COMMAND (exit $status)"; exit "$status"' ERR
           asset_name="$(basename "$IPA_PATH")"
           if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "Unsupported release tag: $RELEASE_TAG" >&2
@@ -202,7 +203,7 @@ jobs:
 
           verify_asset() {
             local release_json="$1"
-            local asset_count asset_id asset_size asset_digest downloaded_asset
+            local asset_count asset_id asset_size asset_state asset_digest downloaded_asset
             asset_count="$(jq --arg name "$asset_name" '[.assets[] | select(.name == $name)] | length' <<< "$release_json")"
             if [ "$asset_count" -ne 1 ] || [ "$(jq '.assets | length' <<< "$release_json")" -ne 1 ]; then
               echo "Release must contain exactly one $asset_name asset" >&2
@@ -210,7 +211,12 @@ jobs:
             fi
             asset_id="$(jq --arg name "$asset_name" -r '.assets[] | select(.name == $name) | .id' <<< "$release_json")"
             asset_size="$(jq --arg name "$asset_name" -r '.assets[] | select(.name == $name) | .size' <<< "$release_json")"
+            asset_state="$(jq --arg name "$asset_name" -r '.assets[] | select(.name == $name) | .state' <<< "$release_json")"
             asset_digest="$(jq --arg name "$asset_name" -r '.assets[] | select(.name == $name) | .digest // empty' <<< "$release_json")"
+            if [ "$asset_state" != "uploaded" ]; then
+              echo "Release asset state is $asset_state instead of uploaded" >&2
+              return 1
+            fi
             if [ "$asset_size" != "$ipa_size" ]; then
               echo "Release asset size $asset_size does not match built IPA size $ipa_size" >&2
               return 1
@@ -256,42 +262,71 @@ jobs:
               echo "Release $RELEASE_TAG is already published with the expected IPA."
               exit 0
             fi
-
-            asset_total="$(jq '.assets | length' <<< "$release_json")"
-            if [ "$asset_total" -eq 0 ]; then
-              gh release upload "$RELEASE_TAG" \
-                "$IPA_PATH#TiebaPlusPlus unsigned IPA" \
-                --repo "$GITHUB_REPOSITORY"
-            else
-              verify_asset "$release_json"
-            fi
           else
-            release_flags=(--draft --generate-notes --verify-tag)
-            if [[ "$RELEASE_TAG" == *-* ]]; then
-              release_flags+=(--prerelease)
-            fi
-            gh release create "$RELEASE_TAG" \
-              "$IPA_PATH#TiebaPlusPlus unsigned IPA" \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "Tieba++ $RELEASE_TAG" \
-              "${release_flags[@]}"
+            echo "Creating draft release for $RELEASE_TAG"
+            release_json="$(gh api \
+              --method POST \
+              "repos/$GITHUB_REPOSITORY/releases" \
+              -f tag_name="$RELEASE_TAG" \
+              -f target_commitish="$RELEASE_SHA" \
+              -f name="Tieba++ $RELEASE_TAG" \
+              -f body='Unsigned IPA for SideStore or LiveContainer self-signing. See README for supported features and security boundaries.' \
+              -F draft=true \
+              -F prerelease="$expected_prerelease")"
           fi
 
-          release_matches="$(load_release_matches)"
-          if [ "$(jq 'length' <<< "$release_matches")" -ne 1 ]; then
-            echo "Release $RELEASE_TAG was not created uniquely" >&2
+          release_id="$(jq -r '.id' <<< "$release_json")"
+          if [[ ! "$release_id" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Release API did not return a valid release ID" >&2
             exit 1
           fi
-          release_json="$(jq '.[0]' <<< "$release_matches")"
+
+          asset_total="$(jq '.assets | length' <<< "$release_json")"
+          if [ "$asset_total" -eq 1 ] && \
+             [ "$(jq -r '.assets[0].name' <<< "$release_json")" = "$asset_name" ] && \
+             [ "$(jq -r '.assets[0].state' <<< "$release_json")" = "starter" ]; then
+            incomplete_asset_id="$(jq -r '.assets[0].id' <<< "$release_json")"
+            echo "Removing incomplete release asset $incomplete_asset_id before retry"
+            gh api \
+              --method DELETE \
+              "repos/$GITHUB_REPOSITORY/releases/assets/$incomplete_asset_id"
+            release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id")"
+            asset_total="$(jq '.assets | length' <<< "$release_json")"
+          fi
+          if [ "$asset_total" -eq 0 ]; then
+            echo "Uploading $asset_name to draft release $release_id"
+            upload_url="$(jq -r '.upload_url | sub("\\{.*$"; "")' <<< "$release_json")"
+            expected_upload_url="https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets"
+            if [ "$upload_url" != "$expected_upload_url" ]; then
+              echo "Release API returned an unexpected upload URL" >&2
+              exit 1
+            fi
+            gh api \
+              --method POST \
+              -H 'Content-Type: application/octet-stream' \
+              --input "$IPA_PATH" \
+              "${upload_url}?name=${asset_name}" >/dev/null
+          else
+            verify_asset "$release_json"
+          fi
+
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id")"
           verify_asset "$release_json"
           if [ "$(jq -r '.draft' <<< "$release_json")" != "true" ] || \
              [ "$(jq -r '.prerelease' <<< "$release_json")" != "$expected_prerelease" ]; then
             echo "Release state does not match the requested channel" >&2
             exit 1
           fi
-          gh release edit "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --draft=false
+          echo "Publishing verified draft release $release_id"
+          release_json="$(gh api \
+            --method PATCH \
+            "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            -F draft=false)"
+          if [ "$(jq -r '.draft' <<< "$release_json")" != "false" ]; then
+            echo "Release $release_id remained a draft after publishing" >&2
+            exit 1
+          fi
+          verify_asset "$release_json"
 
           {
             echo "### Published unsigned IPA"

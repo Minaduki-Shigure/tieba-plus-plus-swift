@@ -22,7 +22,7 @@ experimental or unsupported.
 
 ### Release and validation
 
-- **Current alpha:** `v0.54.2-alpha.2` is the login compatibility build based on the
+- **Current alpha:** `v0.54.2-alpha.3` is the login compatibility build based on the
   application-wide voice and video playback coordination from `v0.54.0-alpha.1`.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
   XcodeGen 2.45.4 or newer.
