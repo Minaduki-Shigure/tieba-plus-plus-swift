@@ -33,7 +33,7 @@ private struct TiebaForumCheckInFlight:
 {
   let id: UUID
   let identity: TiebaForumCheckInIdentity
-  let task: Task<TiebaForumAccountState, Error>
+  let task: Task<TiebaForumAccountState, Swift.Error>
 
   var description: String { "TiebaForumCheckInFlight(redacted)" }
   var debugDescription: String { description }
@@ -204,7 +204,7 @@ public actor TiebaAuthenticatedClient {
 
     try Task.checkCancellation()
     let flightID = UUID()
-    let task: Task<TiebaForumAccountState, Error> = Task.detached { [self] in
+    let task: Task<TiebaForumAccountState, Swift.Error> = Task.detached { [self] in
       try await performForumCheckIn(
         credential: credential,
         expectedUserID: expectedUserID,
