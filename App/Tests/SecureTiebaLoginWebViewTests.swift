@@ -113,6 +113,36 @@ final class SecureTiebaLoginWebViewTests: XCTestCase {
     )
   }
 
+  func testCredentialCaptureContextRequiresEphemeralStoreAndCompletionURL() throws {
+    let completionURL = try XCTUnwrap(
+      URL(string: "https://tieba.baidu.com/index/tbwise/mine")
+    )
+    XCTAssertTrue(
+      TiebaLoginNavigationPolicy.allowsCredentialCapture(
+        at: completionURL,
+        dataStoreIsPersistent: false
+      )
+    )
+    XCTAssertFalse(
+      TiebaLoginNavigationPolicy.allowsCredentialCapture(
+        at: completionURL,
+        dataStoreIsPersistent: true
+      )
+    )
+    XCTAssertFalse(
+      TiebaLoginNavigationPolicy.allowsCredentialCapture(
+        at: try XCTUnwrap(URL(string: "https://tieba.baidu.com/p/123")),
+        dataStoreIsPersistent: false
+      )
+    )
+    XCTAssertFalse(
+      TiebaLoginNavigationPolicy.allowsCredentialCapture(
+        at: nil,
+        dataStoreIsPersistent: false
+      )
+    )
+  }
+
   func testCredentialCaptureAcceptsOnlyParentDomainBDUSS() throws {
     let unrelated = [
       try cookie(name: "BDUSS", value: String(repeating: "x", count: 192), domain: ".example.com")
@@ -175,6 +205,99 @@ final class SecureTiebaLoginWebViewTests: XCTestCase {
     )
 
     XCTAssertEqual(credentials.bduss.first, "b")
+  }
+
+  func testNonSecureCredentialFallbackRequiresExplicitIsolatedHTTPSPolicy() throws {
+    let nonSecureBDUSS = try cookie(
+      name: "BDUSS",
+      value: String(repeating: "b", count: 192),
+      domain: ".baidu.com",
+      secure: false,
+      expires: nil
+    )
+    XCTAssertNil(TiebaLoginNavigationPolicy.credentials(from: [nonSecureBDUSS]))
+
+    let credentials = try XCTUnwrap(
+      TiebaLoginNavigationPolicy.credentials(
+        from: [nonSecureBDUSS],
+        cookiePolicy: .isolatedHTTPSLoginCompletion
+      )
+    )
+    XCTAssertEqual(credentials.bduss.first, "b")
+
+    let nonSecureBFESS = try cookie(
+      name: "BDUSS_BFESS",
+      value: String(repeating: "f", count: 192),
+      domain: ".baidu.com",
+      secure: false
+    )
+    let preferred = try XCTUnwrap(
+      TiebaLoginNavigationPolicy.credentials(
+        from: [nonSecureBDUSS, nonSecureBFESS],
+        cookiePolicy: .isolatedHTTPSLoginCompletion
+      )
+    )
+    XCTAssertEqual(preferred.bduss.first, "f")
+  }
+
+  func testSecureBDUSSAlwaysPrecedesNewerNonSecureBFESS() throws {
+    let secureBDUSS = try cookie(
+      name: "BDUSS",
+      value: String(repeating: "b", count: 192),
+      domain: ".baidu.com",
+      expires: Date(timeIntervalSinceNow: 3_600)
+    )
+    let nonSecureBFESS = try cookie(
+      name: "BDUSS_BFESS",
+      value: String(repeating: "f", count: 192),
+      domain: ".baidu.com",
+      secure: false,
+      expires: Date(timeIntervalSinceNow: 7_200)
+    )
+
+    for cookies in [[secureBDUSS, nonSecureBFESS], [nonSecureBFESS, secureBDUSS]] {
+      let credentials = try XCTUnwrap(
+        TiebaLoginNavigationPolicy.credentials(
+          from: cookies,
+          cookiePolicy: .isolatedHTTPSLoginCompletion
+        )
+      )
+      XCTAssertEqual(credentials.bduss.first, "b")
+    }
+  }
+
+  func testNonSecureFallbackRetainsDomainPathExpiryAndFormatBoundaries() throws {
+    let validBDUSS = String(repeating: "b", count: 192)
+    let invalidCookies = [
+      try cookie(
+        name: "BDUSS", value: validBDUSS, domain: ".tieba.baidu.com", secure: false
+      ),
+      try cookie(
+        name: "BDUSS", value: validBDUSS, domain: ".baidu.com", path: "/passport",
+        secure: false
+      ),
+      try cookie(
+        name: "BDUSS", value: validBDUSS, domain: ".baidu.com", secure: false,
+        expires: Date(timeIntervalSinceNow: -60)
+      ),
+      try cookie(
+        name: "BDUSS", value: String(repeating: "b", count: 191), domain: ".baidu.com",
+        secure: false
+      ),
+      try cookie(
+        name: "BDUSS", value: String(repeating: "b", count: 191) + " ",
+        domain: ".baidu.com", secure: false
+      ),
+    ]
+
+    for cookie in invalidCookies {
+      XCTAssertNil(
+        TiebaLoginNavigationPolicy.credentials(
+          from: [cookie],
+          cookiePolicy: .isolatedHTTPSLoginCompletion
+        )
+      )
+    }
   }
 
   func testCredentialCaptureRejectsWrongDomainOrMalformedValues() throws {

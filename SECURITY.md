@@ -16,15 +16,21 @@ allowed hosts are rejected.
 The login view contains the only app-controlled `WKWebView`. It uses
 `WKWebsiteDataStore.nonPersistent()`, accepts main-frame navigation only on an
 exact first-party host allowlist over HTTPS on the standard port, and captures
-only a structurally valid Secure `BDUSS_BFESS` or `BDUSS` cookie after an
-expected Tieba `/index/tbwise/` account-page callback. Secure `BDUSS_BFESS` has
-fixed precedence when both names are present. Cookie-store propagation is
+only a structurally valid `BDUSS_BFESS` or `BDUSS` cookie after an expected
+Tieba `/index/tbwise/` account-page callback. Secure candidates always precede
+non-Secure candidates. A non-Secure metadata fallback is permitted only when no
+eligible Secure candidate exists, the current callback is still on the exact
+HTTPS Tieba host and account path, and the WebKit data store is confirmed to be
+nonpersistent. The selected value must still pass the isolated, redirect-free
+`/c/s/login` validation before Keychain storage. Cookie-store propagation is
 retried a bounded number of times, and exhaustion is reported instead of
 leaving the login flow pending. The store is erased when the view is dismantled.
 The app must never inject JavaScript to read passwords, persist the full cookie
 jar, override a TLS challenge, or enable Web Inspector for this view.
 Camera, microphone, device-motion, and orientation permission requests from the
 login page are denied by the WebKit UI delegate.
+No App Transport Security or WebKit exception may allow cleartext content in
+this flow; adding one would invalidate the non-Secure fallback boundary.
 
 Account sessions are a bounded, versioned archive stored as a generic-password
 Keychain item with `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`, data

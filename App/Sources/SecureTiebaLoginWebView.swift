@@ -3,6 +3,20 @@ import SwiftUI
 @preconcurrency import WebKit
 
 enum TiebaLoginNavigationPolicy {
+  enum CredentialCookiePolicy: Sendable {
+    case secureOnly
+    case isolatedHTTPSLoginCompletion
+
+    var allowsNonSecureFallback: Bool {
+      switch self {
+      case .secureOnly:
+        false
+      case .isolatedHTTPSLoginCompletion:
+        true
+      }
+    }
+  }
+
   private static let mainFrameHosts: Set<String> = [
     "wappass.baidu.com",
     "passport.baidu.com",
@@ -31,7 +45,18 @@ enum TiebaLoginNavigationPolicy {
       && (path == "/index/tbwise" || path.hasPrefix("/index/tbwise/"))
   }
 
-  static func credentials(from cookies: [HTTPCookie]) -> AccountCredentials? {
+  static func allowsCredentialCapture(
+    at url: URL?,
+    dataStoreIsPersistent: Bool
+  ) -> Bool {
+    guard !dataStoreIsPersistent, let url else { return false }
+    return isCompletionURL(url)
+  }
+
+  static func credentials(
+    from cookies: [HTTPCookie],
+    cookiePolicy: CredentialCookiePolicy = .secureOnly
+  ) -> AccountCredentials? {
     let now = Date()
     var selected: (value: String, priority: Int, expires: Date)?
 
@@ -52,7 +77,7 @@ enum TiebaLoginNavigationPolicy {
       guard
         domain == "baidu.com",
         cookie.path == "/",
-        cookie.isSecure,
+        cookie.isSecure || cookiePolicy.allowsNonSecureFallback,
         isUnexpired,
         value.utf8.count == 192,
         value.unicodeScalars.allSatisfy({ scalar in
@@ -61,13 +86,14 @@ enum TiebaLoginNavigationPolicy {
       else { continue }
 
       let expires = cookie.expiresDate ?? .distantFuture
+      let priority = (cookie.isSecure ? 2 : 0) + namePriority
       if let current = selected {
         guard
-          namePriority > current.priority
-            || (namePriority == current.priority && expires > current.expires)
+          priority > current.priority
+            || (priority == current.priority && expires > current.expires)
         else { continue }
       }
-      selected = (value, namePriority, expires)
+      selected = (value, priority, expires)
     }
 
     return selected.map { AccountCredentials(bduss: $0.value) }
@@ -268,6 +294,15 @@ struct SecureTiebaLoginWebView: UIViewRepresentable {
     }
 
     private func beginCredentialCapture(in webView: WKWebView) {
+      guard
+        TiebaLoginNavigationPolicy.allowsCredentialCapture(
+          at: webView.url,
+          dataStoreIsPersistent: webView.configuration.websiteDataStore.isPersistent
+        )
+      else {
+        failCredentialCapture()
+        return
+      }
       isCompleting = true
       let id = UUID()
       captureID = id
@@ -291,12 +326,21 @@ struct SecureTiebaLoginWebView: UIViewRepresentable {
     }
 
     private func readCredentials(captureID id: UUID) {
-      guard let webView else {
+      guard
+        let webView,
+        TiebaLoginNavigationPolicy.allowsCredentialCapture(
+          at: webView.url,
+          dataStoreIsPersistent: webView.configuration.websiteDataStore.isPersistent
+        )
+      else {
         failCredentialCapture()
         return
       }
       webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
-        let credentials = TiebaLoginNavigationPolicy.credentials(from: cookies)
+        let credentials = TiebaLoginNavigationPolicy.credentials(
+          from: cookies,
+          cookiePolicy: .isolatedHTTPSLoginCompletion
+        )
         Task { @MainActor [weak self] in
           guard let self, self.isActive, self.captureID == id else { return }
           guard let webView = self.webView else {
@@ -304,10 +348,12 @@ struct SecureTiebaLoginWebView: UIViewRepresentable {
             return
           }
           guard
-            let url = webView.url,
-            TiebaLoginNavigationPolicy.isCompletionURL(url)
+            TiebaLoginNavigationPolicy.allowsCredentialCapture(
+              at: webView.url,
+              dataStoreIsPersistent: webView.configuration.websiteDataStore.isPersistent
+            )
           else {
-            self.resetCredentialCapture(notifyStateChange: true)
+            self.failCredentialCapture()
             return
           }
           guard var retryPolicy = self.retryPolicy else { return }
@@ -340,10 +386,12 @@ struct SecureTiebaLoginWebView: UIViewRepresentable {
                 return
               }
               guard
-                let url = webView.url,
-                TiebaLoginNavigationPolicy.isCompletionURL(url)
+                TiebaLoginNavigationPolicy.allowsCredentialCapture(
+                  at: webView.url,
+                  dataStoreIsPersistent: webView.configuration.websiteDataStore.isPersistent
+                )
               else {
-                self.resetCredentialCapture(notifyStateChange: true)
+                self.failCredentialCapture()
                 return
               }
               self.retryTask = nil
