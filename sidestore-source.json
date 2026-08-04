@@ -4,7 +4,7 @@
   "identifier": "io.github.minaduki.tieba-plus-plus",
   "sourceURL": "https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json",
   "subtitle": "面向 iPhone 和 iPad 的原生第三方贴吧客户端",
-  "description": "Tieba++ 的原生 SwiftUI 版本。当前以匿名浏览和媒体阅读为稳定重点，并提供 Web 登录、多账户、“我的关注”，以及需真机验证的贴吧关注、取消关注与单吧签到。",
+  "description": "Tieba++ 的原生 SwiftUI 版本。当前以匿名浏览和媒体阅读为稳定重点，并提供 Web 登录、多账户、“我的关注”，以及需真机验证的贴吧关注、取消关注、单吧签到与主题点赞。",
   "iconURL": "https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/App/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
   "website": "https://github.com/Minaduki-Shigure/tieba-plus-plus-swift",
   "tintColor": "#125DBE",
@@ -17,12 +17,23 @@
       "bundleIdentifier": "io.github.minaduki.tieba-plus-plus",
       "developerName": "Minaduki-Shigure 与社区贡献者",
       "subtitle": "原生 SwiftUI 第三方贴吧客户端",
-      "localizedDescription": "支持匿名发现、搜索、贴吧与频道浏览、主题与楼中楼阅读、公开用户资料、图片画廊、语音和视频播放。提供本地历史、收藏、过滤和外观设置，并支持 Web 登录、多账户管理、“我的关注”及实验性的贴吧关注、取消关注与单吧签到。",
+      "localizedDescription": "支持匿名发现、搜索、贴吧与频道浏览、主题与楼中楼阅读、公开用户资料、图片画廊、语音和视频播放。提供本地历史、收藏、过滤和外观设置，并支持 Web 登录、多账户管理、“我的关注”及实验性的贴吧关注、取消关注、单吧签到与主题点赞。",
       "iconURL": "https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/App/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
       "tintColor": "#125DBE",
       "category": "social",
       "beta": true,
       "versions": [
+        {
+          "version": "0.57.0",
+          "buildVersion": "60",
+          "buildNumber": "60",
+          "date": "2026-08-05",
+          "localizedDescription": "新增账户级主题点赞状态，以及仅限经验证主题首楼、需显式确认的点赞与取消点赞。写入前严格绑定账户、贴吧、主题和首帖，使用非持久化 Galaxy2 CUID 与新鲜 tbs；重复写入在 Core 与 App 双层合并，账号切换或结果不确定时只读回查，绝不自动重试写入。本版本仍需真机验证。",
+          "downloadURL": "https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/releases/download/v0.57.0-alpha.1/TiebaPlusPlus-SideStore.ipa",
+          "size": 2965784,
+          "sha256": "a7dce18d3fcff99919d0832e3b15c138e56968689a2b68c8ecb5dc3d9456fce9",
+          "minOSVersion": "16.0"
+        },
         {
           "version": "0.56.0",
           "buildVersion": "59",
