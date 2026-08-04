@@ -42,6 +42,15 @@ final class FollowedForumsViewModel: ObservableObject {
     await loadTask?.value
   }
 
+  func accountSessionDidChange() {
+    reload()
+  }
+
+  func forumMembershipDidChange(_ change: ForumMembershipChange) {
+    if let session, session.id != change.accountID { return }
+    reload()
+  }
+
   func loadMoreIfNeeded(current forum: FollowedForumItem) {
     guard
       forum.id == forums.last?.id,

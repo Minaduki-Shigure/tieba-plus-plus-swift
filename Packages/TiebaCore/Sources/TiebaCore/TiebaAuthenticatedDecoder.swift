@@ -1,4 +1,18 @@
 import Foundation
+import TiebaProto
+
+struct TiebaForumMembershipContext:
+  Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let membership: TiebaForumMembership
+  let tbs: String
+
+  var description: String { "TiebaForumMembershipContext(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(self, children: ["membership": membership], displayStyle: .struct)
+  }
+}
 
 enum TiebaAuthenticatedDecoder {
   static func account(from body: Data) throws -> TiebaAuthenticatedAccount {
@@ -51,6 +65,58 @@ enum TiebaAuthenticatedDecoder {
     )
   }
 
+  static func forumMembership(
+    from response: FrsPageResIdl,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String
+  ) throws -> TiebaForumMembershipContext {
+    guard response.error.errorno == 0 else {
+      throw TiebaClientError.server(
+        code: response.error.errorno,
+        message: response.error.errmsg
+      )
+    }
+    guard
+      response.hasData,
+      response.data.hasUser,
+      response.data.hasForum,
+      response.data.hasAnti
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+
+    let expectedForumName = canonicalForumName(forumName)
+    let responseForumName = canonicalForumName(response.data.forum.name)
+    let followValue = response.data.forum.isLike
+    let tbs = response.data.anti.tbs
+    guard
+      response.data.user.id == expectedUserID,
+      response.data.forum.id == forumID,
+      !expectedForumName.isEmpty,
+      responseForumName == expectedForumName,
+      followValue == 0 || followValue == 1,
+      TiebaAuthenticatedRequestFactory.isValidTBS(tbs)
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+
+    return TiebaForumMembershipContext(
+      membership: TiebaForumMembership(
+        userID: expectedUserID,
+        forumID: forumID,
+        forumName: responseForumName,
+        isFollowed: followValue == 1
+      ),
+      tbs: tbs
+    )
+  }
+
+  static func checkForumFollowWriteResponse(_ body: Data) throws {
+    let object = try responseObject(from: body)
+    try checkServerError(object)
+  }
+
   private static func responseObject(from body: Data) throws -> [String: Any] {
     do {
       guard
@@ -67,15 +133,47 @@ enum TiebaAuthenticatedDecoder {
   }
 
   private static func checkServerError(_ object: [String: Any]) throws {
-    guard let rawCode = int64(object["error_code"]) else {
+    var codes = [(Int64, String)]()
+    let nestedError = object["error"] as? [String: Any]
+
+    for key in ["error_code", "errno", "no"] where object[key] != nil {
+      guard let code = int64(object[key]) else {
+        throw TiebaClientError.invalidJSON
+      }
+      codes.append((code, errorMessage(object, nestedError: nestedError)))
+    }
+    if let nestedError, nestedError["errno"] != nil {
+      guard let code = int64(nestedError["errno"]) else {
+        throw TiebaClientError.invalidJSON
+      }
+      codes.append((code, errorMessage(object, nestedError: nestedError)))
+    }
+
+    guard !codes.isEmpty else {
       throw TiebaClientError.invalidJSON
     }
-    guard rawCode == 0 else {
+    if let failure = codes.first(where: { $0.0 != 0 }) {
       throw TiebaClientError.server(
-        code: Int32(clamping: rawCode),
-        message: string(object["error_msg"]) ?? ""
+        code: Int32(clamping: failure.0),
+        message: failure.1
       )
     }
+  }
+
+  private static func errorMessage(
+    _ object: [String: Any],
+    nestedError: [String: Any]?
+  ) -> String {
+    string(object["error_msg"])
+      ?? string(object["errmsg"])
+      ?? string(nestedError?["usermsg"])
+      ?? string(nestedError?["errmsg"])
+      ?? ""
+  }
+
+  private static func canonicalForumName(_ value: String) -> String {
+    value.trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
   }
 
   private static func followedForum(_ object: [String: Any]) -> TiebaFollowedForum? {
@@ -104,12 +202,14 @@ enum TiebaAuthenticatedDecoder {
 
   private static func int64(_ value: Any?) -> Int64? {
     switch value {
+    case is Bool:
+      nil
     case let value as Int64:
       value
     case let value as Int:
       Int64(value)
     case let value as NSNumber:
-      value.int64Value
+      Int64(value.stringValue)
     case let value as String:
       Int64(value)
     default:

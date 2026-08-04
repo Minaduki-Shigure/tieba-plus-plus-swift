@@ -60,3 +60,17 @@ public struct TiebaFollowedForumPage: Sendable, Hashable {
     self.pagination = pagination
   }
 }
+
+public struct TiebaForumMembership: Sendable, Hashable {
+  public let userID: Int64
+  public let forumID: Int64
+  public let forumName: String
+  public let isFollowed: Bool
+
+  public init(userID: Int64, forumID: Int64, forumName: String, isFollowed: Bool) {
+    self.userID = userID
+    self.forumID = forumID
+    self.forumName = forumName
+    self.isFollowed = isFollowed
+  }
+}

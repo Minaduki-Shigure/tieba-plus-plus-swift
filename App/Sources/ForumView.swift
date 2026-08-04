@@ -1,4 +1,5 @@
 import Combine
+import Foundation
 import SwiftUI
 
 private enum ForumScrollTarget: Hashable {
@@ -14,6 +15,7 @@ struct ForumView: View {
 
   @StateObject private var viewModel: ForumViewModel
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.accountAccess) private var accountAccess
 
   init(
     forumName: String,
@@ -72,6 +74,20 @@ struct ForumView: View {
           .accessibilityLabel("吧内搜索")
           .help("吧内搜索")
 
+          if let accountAccess, viewModel.forum.id > 0 {
+            ForumMembershipToolbarControl(
+              forumID: viewModel.forum.id,
+              forumName: membershipForumName,
+              access: accountAccess
+            )
+            .id(
+              ForumMembershipTarget(
+                forumID: viewModel.forum.id,
+                forumName: membershipForumName
+              )
+            )
+          }
+
           LocalFavoriteButton(
             target: .forum(ForumHistorySnapshot(forum: viewModel.forum)),
             repository: favoritesRepository
@@ -98,6 +114,11 @@ struct ForumView: View {
         ForumSortPreferences.save(sort, for: viewModel.forumName)
       }
     }
+  }
+
+  private var membershipForumName: String {
+    let name = viewModel.forum.name.trimmingCharacters(in: .whitespacesAndNewlines)
+    return name.isEmpty ? viewModel.forumName : name
   }
 
   private func forumActionsMenu(proxy: ScrollViewProxy) -> some View {
@@ -328,6 +349,106 @@ struct ForumView: View {
     }
     .listStyle(.plain)
     .refreshable { await viewModel.refresh() }
+  }
+}
+
+private struct ForumMembershipTarget: Hashable {
+  let forumID: Int64
+  let forumName: String
+}
+
+private struct ForumMembershipToolbarControl: View {
+  @StateObject private var viewModel: ForumMembershipViewModel
+  @State private var pendingFollowedState: Bool?
+
+  init(forumID: Int64, forumName: String, access: AccountAccess) {
+    _viewModel = StateObject(
+      wrappedValue: ForumMembershipViewModel(
+        forumID: forumID,
+        forumName: forumName,
+        access: access
+      )
+    )
+  }
+
+  var body: some View {
+    control
+      .task { await viewModel.loadIfNeeded() }
+      .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+        pendingFollowedState = nil
+        Task { @MainActor in await viewModel.accountSessionDidChange() }
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .forumMembershipDidChange)) {
+        notification in
+        guard let change = ForumMembershipChange(notification) else { return }
+        Task { @MainActor in await viewModel.forumMembershipDidChange(change) }
+      }
+      .confirmationDialog(
+        pendingFollowedState == true
+          ? "关注 \(viewModel.forumName)吧？"
+          : "取消关注 \(viewModel.forumName)吧？",
+        isPresented: Binding(
+          get: { pendingFollowedState != nil },
+          set: { if !$0 { pendingFollowedState = nil } }
+        ),
+        titleVisibility: .visible
+      ) {
+        if pendingFollowedState == true {
+          Button("关注") { confirmFollowedState(true) }
+        } else if pendingFollowedState == false {
+          Button("取消关注", role: .destructive) { confirmFollowedState(false) }
+        }
+        Button("取消", role: .cancel) { pendingFollowedState = nil }
+      } message: {
+        Text("这会修改当前贴吧账户的关注列表。")
+      }
+      .alert(
+        "无法更新贴吧关注",
+        isPresented: Binding(
+          get: { viewModel.errorMessage != nil },
+          set: { if !$0 { viewModel.dismissError() } }
+        )
+      ) {
+        Button("好", role: .cancel) { viewModel.dismissError() }
+      } message: {
+        Text(viewModel.errorMessage ?? "无法完成贴吧关注操作。")
+      }
+  }
+
+  @ViewBuilder
+  private var control: some View {
+    switch viewModel.state {
+    case .idle, .signedOut:
+      EmptyView()
+    case .loading, .mutating:
+      ProgressView()
+        .controlSize(.small)
+        .frame(width: 24, height: 24)
+        .accessibilityLabel("正在更新贴吧关注")
+    case .ready(let isFollowed):
+      Button {
+        pendingFollowedState = !isFollowed
+      } label: {
+        Image(systemName: isFollowed ? "star.fill" : "star")
+          .frame(width: 24, height: 24)
+      }
+      .accessibilityLabel(isFollowed ? "取消关注贴吧" : "关注贴吧")
+      .help(isFollowed ? "取消关注贴吧" : "关注贴吧")
+    case .failed:
+      Button {
+        Task { @MainActor in await viewModel.reload() }
+      } label: {
+        Image(systemName: "arrow.clockwise")
+          .frame(width: 24, height: 24)
+      }
+      .accessibilityLabel("重试读取贴吧关注状态")
+      .help("重试读取贴吧关注状态")
+    }
+  }
+
+  private func confirmFollowedState(_ isFollowed: Bool) {
+    pendingFollowedState = nil
+    Task { @MainActor in await viewModel.setFollowed(isFollowed) }
   }
 }
 

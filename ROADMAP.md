@@ -89,12 +89,17 @@ the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 - Ephemeral, HTTPS-only Baidu Web login with an exact host allowlist
 - Device-only Keychain account storage, account switching, and local logout
 - Paginated followed-forum list for the active account
+- Authoritative per-forum account membership state with explicit follow and
+  unfollow confirmation
+- Short-lived `tbs` consumption inside the authenticated client without Keychain
+  persistence or exposure to application models
 - Isolated anonymous and authenticated networking clients
 
 ## Next milestones
 
-1. Real-device validation of login, account switching, and followed forums
-2. Authenticated follow, favorite, and like workflows
+1. Real-device validation of account switching, followed forums, and forum
+   follow/unfollow recovery paths
+2. Authenticated forum check-in, thread favorite, and approval workflows
 3. Post and reply workflows behind explicit confirmation and anti-CSRF tests
 4. Notifications, moderation tools, and broader settings parity
 
@@ -465,10 +470,11 @@ content. Regular-expression rules are intentionally unsupported until a
 bounded or non-backtracking implementation is available.
 
 Each authenticated milestone remains gated on protocol tests, credential
-isolation, and real-device validation. The initial authenticated feature is
-read-only: it validates identity and fetches followed forums. Anonymous
-browsing must continue to work without creating, reading, or storing an account
-session.
+isolation, and real-device validation. The first write milestone probes the
+current account and forum relationship before every requested change, consumes
+the response's short-lived `tbs` only inside the authenticated client, and never
+retries an uncertain write. Anonymous browsing must continue to work without
+creating, reading, or storing an account session.
 
 Search categories load independently so one endpoint failure does not discard
 another category's results. User search uses the credential-free Web endpoint,

@@ -27,6 +27,13 @@ struct FollowedForumPageData: Sendable {
   let hasMore: Bool
 }
 
+struct ForumMembershipData: Hashable, Sendable {
+  let userID: Int64
+  let forumID: Int64
+  let forumName: String
+  let isFollowed: Bool
+}
+
 protocol AccountService: Sendable {
   func validate(credential: AccountCredentials) async throws -> ValidatedAccount
   func followedForums(
@@ -34,4 +41,15 @@ protocol AccountService: Sendable {
     page: Int,
     pageSize: Int
   ) async throws -> FollowedForumPageData
+  func forumMembership(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> ForumMembershipData
+  func setForumFollowed(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String,
+    isFollowed: Bool
+  ) async throws -> ForumMembershipData
 }

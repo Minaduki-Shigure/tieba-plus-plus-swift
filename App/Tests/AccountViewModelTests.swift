@@ -173,6 +173,62 @@ final class AccountViewModelTests: XCTestCase {
     XCTAssertTrue(requests.isEmpty)
   }
 
+  func testFollowedForumRelationshipChangeRestartsFromFirstPage() async throws {
+    let vault = AccountVaultSpy(
+      sessions: [session(userID: 7, name: "active")],
+      activeUserID: 7
+    )
+    let page = FollowedForumPageData(
+      forums: [forum(id: 1, name: "one")],
+      currentPage: 1,
+      hasMore: false
+    )
+    let service = AccountServiceSpy(followedPages: [1: .success(page)])
+    let viewModel = FollowedForumsViewModel(service: service, vault: vault)
+    viewModel.loadIfNeeded()
+    try await waitForAccountState { viewModel.state == .loaded }
+
+    viewModel.forumMembershipDidChange(
+      ForumMembershipChange(accountID: 7, forumID: 1, isFollowed: false)
+    )
+    try await waitForAccountState {
+      await service.followedRequestSnapshot().count == 2 && viewModel.state == .loaded
+    }
+
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 1])
+    XCTAssertEqual(requests.map(\.userID), [7, 7])
+  }
+
+  func testFollowedForumAccountChangeDropsCachedSession() async throws {
+    let vault = AccountVaultSpy(
+      sessions: [
+        session(userID: 7, name: "first"),
+        session(userID: 8, name: "second"),
+      ],
+      activeUserID: 7
+    )
+    let page = FollowedForumPageData(
+      forums: [forum(id: 1, name: "one")],
+      currentPage: 1,
+      hasMore: false
+    )
+    let service = AccountServiceSpy(followedPages: [1: .success(page)])
+    let viewModel = FollowedForumsViewModel(service: service, vault: vault)
+    viewModel.loadIfNeeded()
+    try await waitForAccountState { viewModel.state == .loaded }
+
+    try await vault.switchActive(to: 8)
+    viewModel.accountSessionDidChange()
+    try await waitForAccountState {
+      await service.followedRequestSnapshot().count == 2 && viewModel.state == .loaded
+    }
+
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests.map(\.userID), [7, 8])
+    XCTAssertEqual(requests.map(\.page), [1, 1])
+  }
+
   private func session(
     userID: Int64,
     name: String,
@@ -240,6 +296,23 @@ private actor AccountServiceSpy: AccountService {
       throw AccountTestFailure(message: "unexpected followed-forum page")
     }
     return try result.get()
+  }
+
+  func forumMembership(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> ForumMembershipData {
+    throw AccountTestFailure(message: "unexpected forum-membership request")
+  }
+
+  func setForumFollowed(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String,
+    isFollowed: Bool
+  ) async throws -> ForumMembershipData {
+    throw AccountTestFailure(message: "unexpected forum-membership mutation")
   }
 
   func validationCredentialLengths() -> CredentialLengths? {

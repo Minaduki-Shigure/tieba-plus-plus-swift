@@ -49,13 +49,13 @@ final class AccountViewModel: ObservableObject {
   }
 
   func switchAccount(to userID: Int64) async {
-    await mutate {
+    await mutate(change: .switchAccount, accountID: userID) {
       try await vault.switchActive(to: userID)
     }
   }
 
   func remove(userID: Int64) async {
-    await mutate {
+    await mutate(change: .removeAccount, accountID: userID) {
       try await vault.remove(userID: userID)
     }
   }
@@ -66,7 +66,7 @@ final class AccountViewModel: ObservableObject {
   }
 
   func resetLocalAccounts() async {
-    await mutate {
+    await mutate(change: .resetAccounts) {
       try await vault.removeAll()
     }
   }
@@ -75,7 +75,11 @@ final class AccountViewModel: ObservableObject {
     errorMessage = nil
   }
 
-  private func mutate(_ operation: () async throws -> Void) async {
+  private func mutate(
+    change: AccountSessionChangeKind,
+    accountID: Int64? = nil,
+    _ operation: () async throws -> Void
+  ) async {
     guard !isMutating else { return }
     generation &+= 1
     let requestGeneration = generation
@@ -83,6 +87,7 @@ final class AccountViewModel: ObservableObject {
     defer { isMutating = false }
     do {
       try await operation()
+      AccountChangeNotifications.postSessionChange(change, accountID: accountID)
       let summaries = try await vault.accountSummaries()
       try Task.checkCancellation()
       guard requestGeneration == generation else { return }
@@ -129,6 +134,7 @@ final class LoginViewModel: ObservableObject {
           updatedAt: now
         )
       )
+      AccountChangeNotifications.postSessionChange(.login, accountID: account.userID)
       return true
     } catch is CancellationError {
       return false

@@ -8,7 +8,7 @@ in `Packages/TiebaCore/Sources/TiebaProto/NOTICE.md`.
 ## Status
 
 Tieba++ is an alpha-stage, native SwiftUI client. Anonymous browsing is the
-current stable focus; account support is read-only and still requires device
+current stable focus; account writes remain experimental and require device
 validation. The table below separates what is usable today from what remains
 experimental or unsupported.
 
@@ -16,21 +16,21 @@ experimental or unsupported.
 | --- | --- |
 | Anonymous browsing | Available across discovery, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, and media preferences |
-| Accounts | Read-only device-testing milestone; Web login, switching, logout, and followed forums |
-| Server-side writes | Not implemented; following, liking, posting, replying, and moderation stay disabled |
-| TiebaLite parity | Anonymous reading and media: about 85–95%; full product scope: about 50–55% |
+| Accounts | Web login, switching, logout, followed forums, and experimental per-forum follow state |
+| Server-side writes | Confirmed forum follow/unfollow is in device validation; liking, posting, replying, and moderation stay disabled |
+| TiebaLite parity | Anonymous reading and media: about 85–95%; full product scope: about 52–57% |
 | Distribution | Public SideStore/LiveContainer source backed by tested unsigned GitHub Release IPAs |
 
 ### Release and validation
 
-- **Current alpha:** `v0.54.2-alpha.3` is the login compatibility build based on the
-  application-wide voice and video playback coordination from `v0.54.0-alpha.1`.
+- **Current alpha:** `v0.55.0-alpha.1` adds the first account-write validation
+  workflow: authoritative per-forum follow state plus confirmed follow/unfollow.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
   XcodeGen 2.45.4 or newer.
 - **Automated checks:** GitHub Actions runs package tests and an unsigned
   simulator build, validates the app source, and verifies its public IPA hash.
-  Authenticated flows never use real credentials in CI and still need explicit
-  testing on a physical device.
+  Authenticated flows never use real credentials in CI. Forum follow/unfollow
+  therefore remains a physical-device validation feature in this alpha.
 - **App source:** Add [`sidestore-source.json`](https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json)
   to LiveContainer or SideStore. Its latest IPA is published only after the tag's
   package, anonymous integration, and simulator tests all pass.
@@ -97,20 +97,25 @@ experimental or unsupported.
 - **Login and storage:** Login uses a nonpersistent, HTTPS-only Baidu Web view
   with an exact host allowlist. Validated account records are stored in the
   device-only Keychain and can be switched or removed locally.
-- **Read-only scope:** The active account's paginated followed-forum list is the
-  only authenticated product surface in the current release.
+- **Forum membership:** The active account can load its paginated followed-forum
+  list. A loaded forum independently reads its authoritative account-specific
+  follow state and exposes confirmed follow/unfollow actions in the toolbar.
 - **Credential boundary:** Anonymous and authenticated requests use isolated,
-  ephemeral clients. The current vault stores BDUSS only; STOKEN and anti-CSRF
-  values are neither extracted nor persisted.
-- **Unsupported operations:** Server-side forum following, favorites, likes,
-  posts, replies, notifications, and moderation remain unavailable until their
-  request contracts and failure recovery have been validated on a disposable
-  test account.
+  ephemeral clients. The vault stores BDUSS only. STOKEN is not extracted, and
+  the 26-character `tbs` value is validated, consumed by one write, and never
+  returned to the app model or persisted.
+- **Write safety:** Each write is bound to the expected account UID and forum,
+  identical concurrent requests are coalesced, opposite requests cannot cross,
+  and uncertain failures trigger a read-only state reconciliation rather than a
+  write retry. Both following and unfollowing require explicit confirmation.
+- **Unsupported operations:** Server-side thread favorites, likes, posts,
+  replies, notifications, and moderation remain unavailable until their request
+  contracts and failure recovery have been validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, protocol constraints, and next milestones. The current weighted
   end-to-end audit estimates 85–95% coverage of anonymous reading and media, or
-  50–55% of the full TiebaLite product scope once account writes, creation,
-  notifications, and moderation are included.
+  52–57% of the full TiebaLite product scope once the remaining account writes,
+  creation, notifications, and moderation are included.
 
 ## Architecture
 
@@ -127,8 +132,8 @@ authenticated API clients are separate, ephemeral transports. API traffic uses
 normal URLSession certificate validation; global App Transport Security
 exceptions are forbidden. See [`SECURITY.md`](SECURITY.md) before testing an
 account build.
-The current read-only vault persists BDUSS only; it does not extract or store
-STOKEN or the login response's anti-CSRF value.
+The account vault persists BDUSS only. It does not extract or store STOKEN or
+the short-lived anti-CSRF value used by a confirmed forum-membership request.
 
 ## Build
 

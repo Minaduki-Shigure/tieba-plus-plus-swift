@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 struct FollowedForumsView: View {
@@ -48,7 +49,15 @@ struct FollowedForumsView: View {
     }
     .navigationTitle("我的关注")
     .navigationBarTitleDisplayMode(.inline)
-    .task { viewModel.loadIfNeeded() }
+    .task { await viewModel.refresh() }
+    .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+      Task { @MainActor in viewModel.accountSessionDidChange() }
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .forumMembershipDidChange)) {
+      notification in
+      guard let change = ForumMembershipChange(notification) else { return }
+      Task { @MainActor in viewModel.forumMembershipDidChange(change) }
+    }
     .onDisappear(perform: viewModel.cancel)
   }
 

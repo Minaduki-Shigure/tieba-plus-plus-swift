@@ -48,15 +48,29 @@ Anonymous and authenticated networking are separate clients backed by
 independent ephemeral URL sessions. Anonymous request factories have no account
 parameter and must remain credential-free. Authenticated request factories send
 only the fields required by the selected endpoint in the HTTPS request body,
-disable cookies and URL credentials, reject all redirects, and never retain
-credentials as client state. Authenticated account and followed-forum responses
-also have endpoint-specific transfer limits before decoding. MD5 is used only
-for compatibility with the unofficial request-signature protocol, not for
-password storage or verification.
+disable persistent cookie handling and URL credentials, reject all redirects,
+and never retain credentials as client state. The forum-membership compatibility
+request may carry the fixed, noncredential header `Cookie: ka=open`; it must not
+attach a stored cookie jar. Authenticated account, followed-forum,
+membership-probe, and write responses have endpoint-specific transfer limits
+before decoding. MD5 is used only for compatibility with the unofficial
+request-signature protocol, not for password storage or verification.
 
-STOKEN is neither extracted nor persisted in this read-only milestone. A future
-feature that requires it must add a login flow that verifies BDUSS and STOKEN
-belong to the same returned account before storing or using the pair.
+The membership probe must bind the response UID and forum ID to the requested
+account and forum before accepting `is_like` or `anti.tbs`. The `tbs` value must
+be exactly 26 lowercase hexadecimal bytes, remain inside the authenticated
+client, and be consumed by at most the immediately following confirmed write.
+It must not enter an application model, Keychain archive, log, error, mirror, or
+retry queue. Identical in-flight writes may share one task; opposite writes for
+the same account and forum must not overlap. A transport failure must never
+automatically retry a write and should be followed only by a read-only state
+probe.
+
+STOKEN is neither extracted nor persisted. An endpoint that actually requires
+it remains unsupported until a login flow can verify that BDUSS and STOKEN
+belong to the same returned account. The current unfollow request deliberately
+omits the optional STOKEN and must fail visibly rather than fall back to a second
+write endpoint.
 
 Anonymous public-profile requests must use the protocol's guest target fields.
 They must not place the target user in the current-account field, attach account
@@ -597,9 +611,10 @@ be introduced elsewhere.
 
 Automated tests use synthetic fixed-length placeholders only. Real `BDUSS`,
 `STOKEN`, `tbs`, cookies, passwords, or private account responses must never be
-placed in GitHub Actions secrets or exercised by CI. Authenticated releases need
-manual device validation with a disposable test account before write features
-can be enabled.
+placed in GitHub Actions secrets or exercised by CI. A write-capable prerelease
+must remain identified as a validation build until its success, explicit server
+failure, uncertain transport failure, account-switch race, and reconciliation
+paths have been exercised manually with a disposable test account.
 
 Report security issues privately to the repository owner rather than opening a
 public issue.

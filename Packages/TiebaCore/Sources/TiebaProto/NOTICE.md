@@ -32,9 +32,15 @@ minimal `GeneralTabList` request/response closure used for anonymous forum
 channels, the `PbPageResIdl.DataRes.first_floor_post` field used to preserve
 first-floor topic context, and the `PbPageReqIdl.DataReq.last_pid` field used to
 request replies after a known post are adapted from the same TiebaLite commit.
-Device, account, advertising, write, and reaction fields outside the implemented
-read-only contract are intentionally omitted.
+Device, advertising, account, write, and reaction fields outside the explicitly
+implemented contracts are intentionally omitted.
 
-Only the dependency closure needed by the implemented anonymous endpoints is
-included here. The schemas document an unofficial Baidu Tieba wire protocol and
-do not imply endorsement by or affiliation with Baidu.
+The authenticated forum-membership probe fields
+`FrsPageResIdl.DataRes.user`, `forum.is_like`, and `anti.tbs` are adapted from
+TiebaLite commit `268f388c7824ae2c8f6ed549827a943ec8a7f352`. They are used only
+to bind a short-lived write request to the expected account and forum; `tbs` is
+not exposed by the public model or persisted.
+
+Only the dependency closure needed by the implemented endpoints is included
+here. The schemas document an unofficial Baidu Tieba wire protocol and do not
+imply endorsement by or affiliation with Baidu.

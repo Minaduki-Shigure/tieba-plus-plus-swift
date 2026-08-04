@@ -10,6 +10,7 @@ public enum TiebaClientError: Error, Sendable, Equatable {
   case responseTooLarge(maximumBytes: Int)
   case invalidProtobuf
   case invalidJSON
+  case invalidAuthenticatedResponse
   case server(code: Int32, message: String)
 }
 
@@ -34,6 +35,8 @@ extension TiebaClientError: LocalizedError {
       "The Tieba server returned an unreadable Protocol Buffer response."
     case .invalidJSON:
       "The Tieba server returned an unreadable JSON response."
+    case .invalidAuthenticatedResponse:
+      "Tieba returned account or forum data that did not match the authenticated request."
     case .server(let code, let message):
       message.isEmpty ? "Tieba returned error \(code)." : message
     }

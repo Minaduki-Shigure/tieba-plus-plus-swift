@@ -1,4 +1,6 @@
 import Foundation
+import SwiftProtobuf
+import TiebaProto
 
 #if canImport(FoundationNetworking)
   import FoundationNetworking
@@ -7,6 +9,8 @@ import Foundation
 public actor TiebaAuthenticatedClient {
   static let accountResponseMaximumBytes = 512 * 1_024
   static let followedForumsResponseMaximumBytes = 2 * 1_024 * 1_024
+  static let forumMembershipResponseMaximumBytes = 512 * 1_024
+  static let forumFollowWriteResponseMaximumBytes = 64 * 1_024
 
   private let requestFactory: TiebaAuthenticatedRequestFactory
   private let transport: any TiebaTransport
@@ -58,6 +62,88 @@ public actor TiebaAuthenticatedClient {
     )
   }
 
+  public func getForumMembership(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> TiebaForumMembership {
+    try await getForumMembershipContext(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      forumName: forumName
+    ).membership
+  }
+
+  public func setForumFollowState(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String,
+    isFollowed: Bool
+  ) async throws -> TiebaForumMembership {
+    let context = try await getForumMembershipContext(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      forumName: forumName
+    )
+    guard context.membership.isFollowed != isFollowed else {
+      return context.membership
+    }
+
+    let request = try requestFactory.setForumFollowState(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      forumName: context.membership.forumName,
+      tbs: context.tbs,
+      isFollowed: isFollowed
+    )
+    let body = try await send(
+      request,
+      maximumBodyBytes: Self.forumFollowWriteResponseMaximumBytes
+    )
+    try TiebaAuthenticatedDecoder.checkForumFollowWriteResponse(body)
+    return TiebaForumMembership(
+      userID: context.membership.userID,
+      forumID: context.membership.forumID,
+      forumName: context.membership.forumName,
+      isFollowed: isFollowed
+    )
+  }
+
+  private func getForumMembershipContext(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> TiebaForumMembershipContext {
+    let request = try requestFactory.forumMembership(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      forumName: forumName
+    )
+    let body = try await send(
+      request,
+      maximumBodyBytes: Self.forumMembershipResponseMaximumBytes
+    )
+    let response: FrsPageResIdl
+    do {
+      response = try FrsPageResIdl(serializedBytes: body)
+    } catch {
+      throw TiebaClientError.invalidProtobuf
+    }
+    return try TiebaAuthenticatedDecoder.forumMembership(
+      from: response,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      forumName: forumName
+    )
+  }
+
   private func send(_ request: URLRequest, maximumBodyBytes: Int) async throws -> Data {
     let response: TiebaHTTPResponse
     do {
@@ -79,6 +165,9 @@ public actor TiebaAuthenticatedClient {
 
     guard (200..<300).contains(response.statusCode) else {
       throw TiebaClientError.httpStatus(response.statusCode)
+    }
+    guard response.body.count <= maximumBodyBytes else {
+      throw TiebaClientError.responseTooLarge(maximumBytes: maximumBodyBytes)
     }
     return response.body
   }

@@ -78,6 +78,10 @@ struct TiebaPlusPlusApp: App {
         accountService: accountService,
         startDestination: startDestination
       )
+      .environment(
+        \.accountAccess,
+        AccountAccess(vault: accountVault, service: accountService)
+      )
       .appTextSizeAdjustment(AppTextSizeAdjustment.resolved(textSizeAdjustment))
       .environment(\.appAccentColor, resolvedAccentColor)
       .environment(\.contentFilterRepository, contentFilterRepository)
