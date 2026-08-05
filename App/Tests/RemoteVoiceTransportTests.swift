@@ -200,8 +200,9 @@ final class RemoteVoiceTransportTests: XCTestCase {
     let root = temporaryRoot()
     defer { try? FileManager.default.removeItem(at: root) }
     let transport = makeTransport(temporaryDirectory: root)
+    let pendingURL = voiceURL("pending")
     let task = Task {
-      try await transport.download(from: voiceURL("pending"))
+      try await transport.download(from: pendingURL)
     }
     for _ in 0..<10 {
       await Task.yield()
