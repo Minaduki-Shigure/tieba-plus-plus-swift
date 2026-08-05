@@ -107,10 +107,15 @@ checks the same `userID + sessionRevision` lease before and after every request;
 an account change invalidates all retained pages and discards late results. No
 private message is persisted. A nested notification's `quote_pid` is treated as
 untrusted routing metadata because it is not a stable parent-floor identifier;
-the App must not construct a child route from it. The initial inbox performs no
-background polling, explicit mark-read request, or local badge mutation. An
-implicit server-side unread change caused by list retrieval remains a documented
-real-device validation question.
+the App must not construct a child route from it. Exact child navigation uses a
+separate credential-free PB Floor request with `pid=0`, the positive message
+`post_id` as `spid`, and `pn=1`. The response must contain the exact requested
+thread and child plus one positive server-resolved parent. That parent is locked
+before any adjacent page is accepted. A deleted or missing child fails closed and
+offers only ordinary owning-thread navigation. The inbox performs no background
+polling, explicit mark-read request, or local badge mutation. An implicit server-
+side unread change caused by list retrieval remains a documented real-device
+validation question.
 
 Before any forum write, the fresh FRS probe must bind the response user ID,
 forum ID, normalized forum name, `is_like`, and `anti.tbs` to the requested
@@ -580,6 +585,25 @@ custom request header when it constructs the AVFoundation item. AVFoundation
 remains subject to the platform's normal TLS and App Transport Security
 handling; no cleartext exception or custom certificate trust is introduced.
 
+Voice sharing revalidates that exact URL and uses a separate ephemeral URLSession
+with no Cookie store, URL credential store, cache, authorization field, custom
+header, or account data. It rejects every redirect, every status other than 200,
+`Content-Range`, non-identity `Content-Encoding`, empty responses, and declared
+or observed bodies above 16 MiB. Only default platform server-trust handling is
+allowed. Response MIME and suggested filenames are untrusted and ignored.
+
+The completed local file must have MP3, AMR, AMR-WB, or AAC bytes. AMR and
+AMR-WB storage files are traversed frame by frame with valid padding and frame-
+type lengths to exact EOF. A private extension-hinted copy is then inspected by
+AVFoundation with external media references forbidden; it must be playable,
+contain audio, contain no video, and have a finite positive duration within 24
+hours. The final share filename uses the format's canonical `.mp3`, `.amr`,
+`.awb`, or `.aac` suffix. The system share sheet receives only that validated
+local copy. A unique lease owns the directory until sharing finishes or is
+dismissed, and failure, cancellation, source changes, and view disappearance all
+remove it. Voice export is never placed in a persistent cache or log and requests
+no Photos permission.
+
 Video playback accepts only an initial absolute HTTPS URL whose complete UTF-8
 representation is at most 8,192 bytes and contains no control character. It
 must have a nonempty host and no credentials, explicit port, or fragment. The
@@ -621,8 +645,8 @@ lease and never resumes voice or video automatically. Audio interruptions,
 removal of the current output device, or disappearance of the owning control
 also pause or reset the applicable session. The target does not declare a
 background audio mode, and media is not played automatically or exposed through
-lock-screen controls; voice content is not downloaded, exported, cached
-persistently, or logged.
+lock-screen controls; explicitly shared voice content is temporary and is not
+cached persistently or logged.
 
 High-resolution profile-avatar derivation is a source-construction boundary,
 not a remote-media redirect-host allowlist. The untrimmed raw source is limited

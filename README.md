@@ -76,7 +76,9 @@ experimental or unsupported.
   can be explicitly shared or saved through add-only Photos access.
 - **Playback:** Voice and native AVKit video share one application-wide playback
   coordinator. Starting new media pauses the prior item, inactive scenes pause
-  playback, and playback never resumes implicitly. Picture in Picture is off.
+  playback, and playback never resumes implicitly. Voice files can be explicitly
+  downloaded, validated, and passed to the system share sheet; Picture in Picture
+  is off.
 - **Links and sharing:** Supported Tieba links stay in the native router with
   post and reply context. External HTTPS links use the selected system or Safari
   presentation, while forum and thread sharing emits canonical HTTPS links.
@@ -119,10 +121,11 @@ experimental or unsupported.
   content and inline nested-reply previews remain separate read-only snapshots.
 - **Private inbox:** The account page opens foreground-only ReplyMe and AtMe
   lists with refresh and bounded page-number pagination. Ordinary notifications
-  can reopen the exact post. A nested-reply notification opens its owning thread
-  without guessing the parent floor because the legacy `quote_pid` field is not
-  a stable parent identifier. No background polling, badge clearing, or explicit
-  mark-read request is implemented.
+  can reopen the exact post. A nested-reply notification sends only its child ID
+  to the public floor resolver, validates the returned thread, parent, and child,
+  and opens the exact reply without trusting the ambiguous legacy `quote_pid`
+  field. No background polling, badge clearing, or explicit mark-read request is
+  implemented.
 - **Tieba cloud favorites:** The account page has a separate, read-only cloud
   favorites list with refresh, offset pagination, saved-post navigation, deleted
   thread state, and account-lease isolation. It never uploads, merges, or deletes

@@ -60,6 +60,8 @@ the source metadata is updated to that tested IPA.
   Picture in Picture disabled
 - Single-session voice playback with loading/failure state, elapsed progress,
   seeking, and audio-interruption handling
+- Explicit voice-file sharing through a credential-free, bounded downloader,
+  byte-level format checks, AVFoundation validation, and temporary-file leases
 - Responsive one-to-three-column masonry for consecutive post-body image runs
 - Persistent automatic, data-saving, or tap-to-load policy for content media
 - Persistent standard or high-definition quality selection for supported image previews
@@ -98,6 +100,9 @@ the source metadata is updated to that tested IPA.
   navigation, deleted-thread state, and account-lease isolation
 - Foreground ReplyMe and AtMe inbox with account-lease isolation, refresh,
   bounded pagination, and safe thread navigation
+- Exact nested-notification positioning through the public child-only resolver,
+  with parent locking, bidirectional pagination, history continuity, and an
+  owning-thread fallback when the target is unavailable
 - Authoritative per-forum account membership state with explicit follow and
   unfollow confirmation
 - Authoritative per-forum check-in state and explicitly confirmed single-forum
@@ -127,8 +132,8 @@ the source metadata is updated to that tested IPA.
    state reconciliation and no retry after an uncertain write
 5. Experimental plain-text reply workflows behind explicit risk confirmation,
    anti-CSRF tests, and unknown-outcome handling
-6. Exact nested-notification positioning, broader settings parity, content
-   creation, and moderation tools
+6. Broader settings parity, public user activity, content creation, and
+   moderation tools
 
 The foreground inbox deliberately does not copy TiebaLite's cleartext JSON
 transport or its Android hardware parameters. ReplyMe uses the current HTTPS
@@ -144,10 +149,14 @@ requested page. Positive thread, post, and sender IDs and zero-or-one flags are
 validated before an item is exposed. Ordinary notifications can reopen a stable
 post ID. Nested replies do not trust the legacy `quote_pid` value because public
 clients document it as ambiguously representing either a parent floor or a
-child reply; the first inbox milestone therefore opens the owning thread without
-claiming exact child positioning. It does not poll in the background, clear a
-local badge, or send a mark-read request. Whether list retrieval itself has an
-implicit server-side read effect remains a physical-device validation item.
+child reply. Instead, the app sends `pid=0`, the notification post ID as `spid`,
+and `pn=1` to the public floor resolver, then requires the exact thread and child
+in the response before accepting the server-resolved parent. That parent remains
+locked for earlier and later pages. A successful direct visit records the owning
+parent as local reading progress; a missing target retains an explicit owning-
+thread fallback. The inbox does not poll in the background, clear a local badge,
+or send a mark-read request. Whether list retrieval itself has an implicit
+server-side read effect remains a physical-device validation item.
 
 New Web logins capture one structurally valid BDUSS or BDUSS_BFESS and one
 STOKEN from the same ephemeral Cookie-store snapshot. The app checks the pair
@@ -246,10 +255,19 @@ cancelled exit remains full-screen and keeps cleanup pending. Stale transitions
 cannot tear down a newer session, and another video cannot replace a non-inline
 item.
 
+Voice sharing is an explicit, one-shot export. It uses a separate ephemeral
+credential-free HTTPS session, rejects redirects, non-200 and partial responses,
+non-identity content encoding, and files over 16 MiB. Response MIME and filenames
+are ignored. Supported bytes must identify MP3, AMR, AMR-WB, or AAC; AMR storage
+frames are traversed to exact EOF and the canonical-extension copy must be
+playable, audio-only, and duration-bounded under AVFoundation before the system
+share sheet receives it. The temporary lease is deleted after completion,
+dismissal, cancellation, or failure and never becomes a persistent media cache.
+
 This milestone intentionally adds no background audio, lock-screen controls,
 automatic playback, automatic resume after scene activation, persistent media
-cache, voice download or export, or custom media credentials and headers.
-Picture in Picture and automatic Picture in Picture startup are disabled.
+cache, or custom media credentials and headers. Picture in Picture and automatic
+Picture in Picture startup are disabled.
 
 Rich-content images first open from the already filtered content array that
 produced the tap, so the local gallery is available without waiting for metadata.

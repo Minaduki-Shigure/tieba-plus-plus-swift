@@ -60,6 +60,10 @@ enum VoicePlaybackURLPolicy {
   static let maximumVoiceIdentifierBytes = 512
 
   static func allows(_ url: URL) -> Bool {
+    voiceIdentifier(from: url) != nil
+  }
+
+  static func voiceIdentifier(from url: URL) -> String? {
     guard
       let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
       components.scheme?.lowercased() == "https",
@@ -71,7 +75,7 @@ enum VoicePlaybackURLPolicy {
       components.fragment == nil,
       let queryItems = components.queryItems,
       queryItems.count == 2
-    else { return false }
+    else { return nil }
 
     let voiceIdentifiers = queryItems.filter { $0.name == "voice_md5" }.compactMap(\.value)
     let playSources = queryItems.filter { $0.name == "play_from" }.compactMap(\.value)
@@ -79,12 +83,15 @@ enum VoicePlaybackURLPolicy {
       voiceIdentifiers.count == 1,
       playSources == ["pb_voice_play"],
       queryItems.allSatisfy({ $0.name == "voice_md5" || $0.name == "play_from" })
-    else { return false }
+    else { return nil }
 
     let identifier = voiceIdentifiers[0].trimmingCharacters(in: .whitespacesAndNewlines)
-    return !identifier.isEmpty
-      && identifier.lengthOfBytes(using: .utf8) <= maximumVoiceIdentifierBytes
-      && !identifier.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    guard
+      !identifier.isEmpty,
+      identifier.lengthOfBytes(using: .utf8) <= maximumVoiceIdentifierBytes,
+      !identifier.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    else { return nil }
+    return identifier
   }
 }
 
@@ -789,8 +796,22 @@ struct VoicePlaybackButton: View {
   let duration: Int
 
   @EnvironmentObject private var controller: VoicePlaybackController
+  @StateObject private var exportViewModel: RemoteVoiceExportViewModel
   @State private var itemID = UUID()
   @State private var pendingSeek: TimeInterval?
+  @State private var exportTask: Task<Void, Never>?
+
+  init(
+    url: URL,
+    duration: Int,
+    exporter: any RemoteVoiceExporting = RemoteVoiceExporter.shared
+  ) {
+    self.url = url
+    self.duration = duration
+    _exportViewModel = StateObject(
+      wrappedValue: RemoteVoiceExportViewModel(exporter: exporter)
+    )
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
@@ -821,6 +842,24 @@ struct VoicePlaybackButton: View {
           .fixedSize(horizontal: false, vertical: true)
 
         Spacer(minLength: 0)
+
+        Button(action: startSharing) {
+          ZStack {
+            if exportViewModel.isBusy {
+              ProgressView()
+                .controlSize(.small)
+            } else {
+              Image(systemName: "square.and.arrow.up")
+                .frame(width: 18, height: 18)
+            }
+          }
+          .frame(width: 44, height: 44)
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(exportViewModel.isBusy || !VoicePlaybackURLPolicy.allows(url))
+        .accessibilityLabel(exportViewModel.isBusy ? "正在准备语音" : "分享语音")
+        .help(exportViewModel.isBusy ? "正在准备语音" : "分享语音")
       }
 
       Slider(
@@ -856,11 +895,39 @@ struct VoicePlaybackButton: View {
     .onChange(of: url) { _ in
       controller.stop(itemID: itemID)
       pendingSeek = nil
+      cancelExport()
+    }
+    .sheet(item: $exportViewModel.shareItem, onDismiss: finishDismissedShare) { item in
+      RemoteVoiceActivitySheet(item: item) { completed, errorMessage in
+        exportViewModel.finishSharing(
+          completed: completed,
+          errorMessage: errorMessage
+        )
+      }
+    }
+    .alert("语音分享失败", isPresented: presentsExportError) {
+      Button("好") {
+        exportViewModel.resetTransientState()
+      }
+    } message: {
+      Text(exportViewModel.errorMessage ?? "无法完成语音分享。")
     }
     .onDisappear {
       controller.stop(itemID: itemID)
       pendingSeek = nil
+      cancelExport()
     }
+  }
+
+  private var presentsExportError: Binding<Bool> {
+    Binding(
+      get: { exportViewModel.errorMessage != nil },
+      set: { isPresented in
+        if !isPresented {
+          exportViewModel.resetTransientState()
+        }
+      }
+    )
   }
 
   private var isActive: Bool {
@@ -961,6 +1028,28 @@ struct VoicePlaybackButton: View {
   private func togglePlayback() {
     pendingSeek = nil
     controller.toggle(itemID: itemID, url: url, declaredDuration: duration)
+  }
+
+  private func startSharing() {
+    guard exportTask == nil else { return }
+    exportTask = Task { @MainActor in
+      await exportViewModel.prepareForSharing(from: url)
+      exportTask = nil
+    }
+  }
+
+  private func cancelExport() {
+    exportTask?.cancel()
+    exportTask = nil
+    if exportViewModel.state == .readyToShare {
+      exportViewModel.finishSharing(completed: false, errorMessage: nil)
+    }
+    exportViewModel.resetTransientState()
+  }
+
+  private func finishDismissedShare() {
+    guard exportViewModel.state == .readyToShare else { return }
+    exportViewModel.finishSharing(completed: false, errorMessage: nil)
   }
 
   private func seekEditingChanged(_ isEditing: Bool) {

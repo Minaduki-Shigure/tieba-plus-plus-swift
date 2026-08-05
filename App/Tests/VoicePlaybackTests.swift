@@ -6,13 +6,13 @@ import XCTest
 @MainActor
 final class VoicePlaybackTests: XCTestCase {
   func testURLPolicyAcceptsOnlyBoundedCanonicalVoiceURLs() throws {
-    XCTAssertTrue(
-      VoicePlaybackURLPolicy.allows(
-        try XCTUnwrap(
-          URL(string: "https://tiebac.baidu.com/c/p/voice?voice_md5=abc&play_from=pb_voice_play")
-        )
-      )
+    let canonicalURL = try XCTUnwrap(
+      URL(string: "https://tiebac.baidu.com/c/p/voice?voice_md5=abc&play_from=pb_voice_play")
     )
+    XCTAssertTrue(
+      VoicePlaybackURLPolicy.allows(canonicalURL)
+    )
+    XCTAssertEqual(VoicePlaybackURLPolicy.voiceIdentifier(from: canonicalURL), "abc")
     XCTAssertTrue(
       VoicePlaybackURLPolicy.allows(
         try XCTUnwrap(SecureTiebaURL.voice(md5: "abc&play_from=other"))
