@@ -58,6 +58,11 @@ struct InboxSender: Identifiable, Hashable, Sendable {
   }
 }
 
+enum InboxNavigationTarget: Hashable, Sendable {
+  case thread(TiebaThreadRoute)
+  case comment(threadID: Int64, commentID: Int64)
+}
+
 struct InboxMessage: Identifiable, Hashable, Sendable {
   let id: Int64
   let sender: InboxSender
@@ -75,11 +80,12 @@ struct InboxMessage: Identifiable, Hashable, Sendable {
   let isUnread: Bool
   let threadType: Int
 
-  var threadRoute: TiebaThreadRoute {
-    TiebaThreadRoute(
-      threadID: threadID,
-      postID: isFloorReply ? nil : postID
-    )
+  var navigationTarget: InboxNavigationTarget {
+    if isFloorReply {
+      // quote_pid may name a parent or another reply; resolve postID as spid instead.
+      return .comment(threadID: threadID, commentID: postID)
+    }
+    return .thread(TiebaThreadRoute(threadID: threadID, postID: postID))
   }
 }
 

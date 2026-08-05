@@ -13,11 +13,14 @@ struct CommentsView: View {
   @State private var agreementScopeID = UUID()
   @State private var pendingAgreementChange: PendingContentAgreementChange?
   @State private var agreementErrorMessage: String?
+  @State private var hasRecordedDirectVisit = false
   let service:
     any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
+  private let showsDismissButton: Bool
+  private let recordsOwningThreadVisit: Bool
 
   init(
     threadID: Int64,
@@ -26,12 +29,15 @@ struct CommentsView: View {
       & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
-    searchHistoryRepository: any ForumSearchHistoryRepository
+    searchHistoryRepository: any ForumSearchHistoryRepository,
+    showsDismissButton: Bool = true
   ) {
     self.service = service
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
+    self.showsDismissButton = showsDismissButton
+    self.recordsOwningThreadVisit = false
     _viewModel = StateObject(
       wrappedValue: CommentsViewModel(threadID: threadID, postID: postID, service: service)
     )
@@ -45,17 +51,45 @@ struct CommentsView: View {
       & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
-    searchHistoryRepository: any ForumSearchHistoryRepository
+    searchHistoryRepository: any ForumSearchHistoryRepository,
+    showsDismissButton: Bool = true
   ) {
     self.service = service
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
+    self.showsDismissButton = showsDismissButton
+    self.recordsOwningThreadVisit = false
     _viewModel = StateObject(
       wrappedValue: CommentsViewModel(
         threadID: threadID,
         postID: postID,
         aroundCommentID: commentID,
+        service: service
+      )
+    )
+  }
+
+  init(
+    threadID: Int64,
+    resolvingCommentID commentID: Int64,
+    service: any BrowseService & ForumPostSearchService & UserProfileService
+      & ForumInformationService,
+    historyRepository: any BrowsingHistoryRepository,
+    favoritesRepository: any LocalFavoritesRepository,
+    searchHistoryRepository: any ForumSearchHistoryRepository,
+    showsDismissButton: Bool = true
+  ) {
+    self.service = service
+    self.historyRepository = historyRepository
+    self.favoritesRepository = favoritesRepository
+    self.searchHistoryRepository = searchHistoryRepository
+    self.showsDismissButton = showsDismissButton
+    self.recordsOwningThreadVisit = true
+    _viewModel = StateObject(
+      wrappedValue: CommentsViewModel(
+        threadID: threadID,
+        resolvingCommentID: commentID,
         service: service
       )
     )
@@ -67,7 +101,25 @@ struct CommentsView: View {
       case .idle, .loading:
         ProgressView()
       case .failed(let message):
-        ErrorStateView(message: message, retry: viewModel.reload)
+        VStack(spacing: 16) {
+          ErrorStateView(message: message, retry: viewModel.reload)
+          if recordsOwningThreadVisit {
+            NavigationLink {
+              let route = TiebaThreadRoute(threadID: viewModel.threadID, postID: nil)
+              ThreadView(
+                thread: route.placeholderThread,
+                service: service,
+                historyRepository: historyRepository,
+                favoritesRepository: favoritesRepository,
+                searchHistoryRepository: searchHistoryRepository,
+                linkRoute: route
+              )
+            } label: {
+              Label("查看原帖", systemImage: "doc.text")
+            }
+            .buttonStyle(.bordered)
+          }
+        }
       case .loaded:
         ScrollViewReader { proxy in
           List {
@@ -337,11 +389,16 @@ struct CommentsView: View {
       }
     }
     .toolbar {
-      ToolbarItem(placement: .confirmationAction) {
-        Button("完成") { dismiss() }
+      if showsDismissButton {
+        ToolbarItem(placement: .confirmationAction) {
+          Button("完成") { dismiss() }
+        }
       }
     }
     .task { viewModel.loadIfNeeded() }
+    .task(id: viewModel.state) {
+      await recordDirectVisitIfNeeded()
+    }
     .task(id: viewModel.agreementDescriptorEpoch) {
       guard let contentAgreementStore else { return }
       await contentAgreementStore.replaceDescriptors(
@@ -361,6 +418,52 @@ struct CommentsView: View {
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       Task { @MainActor in viewModel.reload() }
     }
+  }
+
+  private func recordDirectVisitIfNeeded() async {
+    guard
+      recordsOwningThreadVisit,
+      !hasRecordedDirectVisit,
+      !Task.isCancelled,
+      viewModel.state == .loaded,
+      let thread = viewModel.thread,
+      let parentPost = viewModel.parentPost,
+      thread.id == viewModel.threadID,
+      parentPost.threadID == viewModel.threadID
+    else { return }
+    hasRecordedDirectVisit = true
+
+    let existingOptions: ThreadBrowseOptions
+    if
+      let entry = try? await historyRepository.entries(kind: .thread)
+        .first(where: { $0.id == "thread:\(thread.id)" }),
+      case .thread(let snapshot) = entry.target
+    {
+      existingOptions = snapshot.browseOptions
+    } else {
+      existingOptions = ThreadBrowseOptions()
+    }
+    guard !Task.isCancelled else { return }
+    let updatedAt = Date()
+    try? await historyRepository.record(
+      .thread(
+        ThreadHistorySnapshot(
+          thread: thread,
+          resolvedAuthorAvatarURL: thread.authorAvatarURL,
+          browseOptions: existingOptions,
+          lastPostID: parentPost.id,
+          lastFloor: parentPost.floor
+        )
+      ),
+      at: updatedAt
+    )
+    try? await favoritesRepository.updateThreadProgress(
+      threadID: thread.id,
+      postID: parentPost.id,
+      floor: parentPost.floor,
+      options: existingOptions,
+      at: updatedAt
+    )
   }
 
   private var linkedTargetPresented: Binding<Bool> {

@@ -46,27 +46,49 @@ final class TiebaNotificationAccountMappingTests: XCTestCase {
     )
     XCTAssertEqual(message.createdAt, Date(timeIntervalSince1970: 1_700_000_000))
     XCTAssertTrue(message.isFirstPost)
-    XCTAssertEqual(message.threadRoute.threadID, 1_101)
-    XCTAssertEqual(message.threadRoute.postID, 101)
+    guard case .thread(let route) = message.navigationTarget else {
+      return XCTFail("Expected a thread notification target")
+    }
+    XCTAssertEqual(route.threadID, 1_101)
+    XCTAssertEqual(route.postID, 101)
   }
 
-  func testFloorReplyRouteIgnoresQuotedAndMessagePostIDs() throws {
-    let mapped = try TiebaCoreAccountService.inboxPageData(
-      page(
-        userID: 7,
-        kind: .replies,
-        items: [item(postID: 102, isFloorReply: true, isFirstPost: false)],
-        currentPage: 1,
-        hasMore: false
-      ),
-      expectedUserID: 7,
-      expectedKind: .replies,
-      requestedPage: 1
-    )
+  func testFloorReplyRouteUsesMessagePostIDAsCommentIDAndIgnoresQuotedPostID() throws {
+    let quotedPostIDs: [Int64?] = [nil, 91, 103]
+    for (coreKind, inboxKind) in [
+      (TiebaNotificationKind.replies, InboxKind.replies),
+      (.mentions, .mentions),
+    ] {
+      for quotedPostID in quotedPostIDs {
+        let mapped = try TiebaCoreAccountService.inboxPageData(
+          page(
+            userID: 7,
+            kind: coreKind,
+            items: [
+              item(
+                postID: 102,
+                isFloorReply: true,
+                isFirstPost: false,
+                quotedPostID: quotedPostID
+              )
+            ],
+            currentPage: 1,
+            hasMore: false
+          ),
+          expectedUserID: 7,
+          expectedKind: inboxKind,
+          requestedPage: 1
+        )
 
-    let route = try XCTUnwrap(mapped.messages.first).threadRoute
-    XCTAssertEqual(route.threadID, 1_102)
-    XCTAssertNil(route.postID)
+        let message = try XCTUnwrap(mapped.messages.first)
+        guard case .comment(let threadID, let commentID) = message.navigationTarget else {
+          return XCTFail("Expected a nested-reply notification target")
+        }
+        XCTAssertEqual(threadID, 1_102)
+        XCTAssertEqual(commentID, 102)
+        XCTAssertEqual(message.quotedPostID, quotedPostID)
+      }
+    }
   }
 
   func testRejectsCrossAccountKindAndPageResponses() {
@@ -162,6 +184,7 @@ final class TiebaNotificationAccountMappingTests: XCTestCase {
     isFloorReply: Bool,
     isFirstPost: Bool,
     quotedUser: TiebaNotificationSender? = nil,
+    quotedPostID: Int64? = 91,
     timestamp: Int64 = 1_700_000_000
   ) -> TiebaNotificationItem {
     TiebaNotificationItem(
@@ -169,7 +192,7 @@ final class TiebaNotificationAccountMappingTests: XCTestCase {
       quotedUser: quotedUser,
       threadID: 1_000 + postID,
       postID: postID,
-      quotedPostID: 91,
+      quotedPostID: quotedPostID,
       title: "Topic",
       content: "Message",
       quotedContent: "Quoted",

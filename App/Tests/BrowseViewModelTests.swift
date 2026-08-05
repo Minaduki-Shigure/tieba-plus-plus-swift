@@ -1120,6 +1120,16 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(mapped.totalPages, 4)
     XCTAssertEqual(mapped.totalCount, 10)
 
+    let resolved = try TiebaCoreBrowseService.mapCommentPage(
+      response,
+      requestedThreadID: 100,
+      expectedPostID: nil,
+      aroundCommentID: 301,
+      filter: filter
+    )
+    XCTAssertEqual(resolved.parentPost.id, 201)
+    XCTAssertTrue(resolved.comments.contains(where: { $0.id == 301 }))
+
     XCTAssertThrowsError(
       try TiebaCoreBrowseService.mapCommentPage(
         response,
@@ -1136,6 +1146,20 @@ final class BrowseViewModelTests: XCTestCase {
         filter: filter
       )
     )
+    XCTAssertThrowsError(
+      try TiebaCoreBrowseService.mapCommentPage(
+        response,
+        requestedThreadID: 100,
+        expectedPostID: nil,
+        aroundCommentID: 999,
+        filter: filter
+      )
+    ) { error in
+      XCTAssertEqual(
+        error.localizedDescription,
+        "贴吧未返回要定位的楼中楼回复，未显示该响应。"
+      )
+    }
   }
 
   @MainActor
@@ -5170,7 +5194,7 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
-  func testAnchoredCommentsUseResolvedParentPostForSubsequentPages() async throws {
+  func testChildOnlyCommentsUseResolvedParentPostForSubsequentPages() async throws {
     let service = ScriptedBrowseService()
     let firstPage = [Fixtures.comment(id: 8_001), Fixtures.comment(id: 8_002)]
     await service.enqueueComments(
@@ -5201,26 +5225,137 @@ final class BrowseViewModelTests: XCTestCase {
     )
     let viewModel = CommentsViewModel(
       threadID: 8,
-      postID: 800,
-      aroundCommentID: 8_002,
+      resolvingCommentID: 8_002,
       service: service
     )
     viewModel.loadIfNeeded()
     try await waitUntil { viewModel.state == .loaded }
+    XCTAssertEqual(viewModel.parentPost?.id, 800)
+    XCTAssertEqual(viewModel.scrollTargetCommentID, 8_002)
 
     viewModel.loadMoreIfNeeded(current: firstPage[1])
 
     try await waitUntil { viewModel.comments.map(\.id) == [8_001, 8_002, 8_003] }
     XCTAssertEqual(viewModel.totalCount, 5)
-    let anchoredRequests = await service.aroundCommentRequestSnapshot()
+    let resolvingRequests = await service.resolvingCommentRequestSnapshot()
     let normalRequests = await service.commentRequestSnapshot()
     XCTAssertEqual(
-      anchoredRequests,
-      [CommentRequest(threadID: 8, postID: 800, page: 1, commentID: 8_002)]
+      resolvingRequests,
+      [CommentRequest(threadID: 8, postID: 0, page: 1, commentID: 8_002)]
     )
     XCTAssertEqual(
       normalRequests,
       [CommentRequest(threadID: 8, postID: 800, page: 4)]
+    )
+  }
+
+  @MainActor
+  func testChildOnlyCommentsUseResolvedParentPostForPreviousPages() async throws {
+    let service = ScriptedBrowseService()
+    let earlierPage = [Fixtures.comment(id: 8_001), Fixtures.comment(id: 8_002)]
+    let resolvedPage = [Fixtures.comment(id: 8_003), Fixtures.comment(id: 8_004)]
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 8,
+          postID: 800,
+          comments: resolvedPage,
+          currentPage: 3,
+          hasMore: true,
+          hasPrevious: true
+        )
+      )
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 8,
+          postID: 800,
+          comments: earlierPage,
+          currentPage: 2,
+          hasMore: true,
+          hasPrevious: true
+        )
+      )
+    )
+    let viewModel = CommentsViewModel(
+      threadID: 8,
+      resolvingCommentID: 8_004,
+      service: service
+    )
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    viewModel.loadPrevious()
+
+    try await waitUntil {
+      viewModel.comments.map(\.id) == [8_001, 8_002, 8_003, 8_004]
+    }
+    XCTAssertEqual(viewModel.prependRestoreCommentID, 8_003)
+    XCTAssertTrue(viewModel.canLoadPrevious)
+    let resolvingRequests = await service.resolvingCommentRequestSnapshot()
+    let normalRequests = await service.commentRequestSnapshot()
+    XCTAssertEqual(
+      resolvingRequests,
+      [CommentRequest(threadID: 8, postID: 0, page: 1, commentID: 8_004)]
+    )
+    XCTAssertEqual(
+      normalRequests,
+      [CommentRequest(threadID: 8, postID: 800, page: 2)]
+    )
+  }
+
+  @MainActor
+  func testChildOnlyCommentsKeepResolvedParentLockedAcrossRefresh() async throws {
+    let service = ScriptedBrowseService()
+    let target = Fixtures.comment(id: 8_002)
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 8,
+          postID: 800,
+          comments: [target],
+          currentPage: 2,
+          hasMore: false,
+          hasPrevious: true
+        )
+      )
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 8,
+          postID: 801,
+          comments: [target],
+          currentPage: 2,
+          hasMore: false,
+          hasPrevious: true
+        )
+      )
+    )
+    let viewModel = CommentsViewModel(
+      threadID: 8,
+      resolvingCommentID: target.id,
+      service: service
+    )
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    await viewModel.refresh()
+
+    XCTAssertEqual(viewModel.parentPost?.id, 800)
+    XCTAssertEqual(viewModel.comments, [target])
+    XCTAssertEqual(
+      viewModel.refreshError,
+      "贴吧返回的楼中楼归属异常，未显示该响应。"
+    )
+    let requests = await service.resolvingCommentRequestSnapshot()
+    XCTAssertEqual(
+      requests,
+      [
+        CommentRequest(threadID: 8, postID: 0, page: 1, commentID: target.id),
+        CommentRequest(threadID: 8, postID: 0, page: 1, commentID: target.id),
+      ]
     )
   }
 
@@ -5901,6 +6036,7 @@ private actor ScriptedBrowseService: BrowseService {
   private var postRequests: [PostRequest] = []
   private var commentRequests: [CommentRequest] = []
   private var aroundCommentRequests: [CommentRequest] = []
+  private var resolvingCommentRequests: [CommentRequest] = []
 
   private var completedThreadRequests = 0
   private var completedPostRequests = 0
@@ -6074,6 +6210,35 @@ private actor ScriptedBrowseService: BrowseService {
     }
   }
 
+  func comments(
+    threadID: Int64,
+    resolvingCommentID commentID: Int64
+  ) async throws -> CommentPageData {
+    resolvingCommentRequests.append(
+      CommentRequest(
+        threadID: threadID,
+        postID: 0,
+        page: 1,
+        commentID: commentID
+      )
+    )
+    defer { completedCommentRequests += 1 }
+    guard !commentStubs.isEmpty else {
+      throw StubFailure(message: "Unexpected comments request")
+    }
+
+    switch commentStubs.removeFirst() {
+    case .value(let value):
+      return value
+    case .failure(let error):
+      throw error
+    case .suspended(let identifier):
+      return try await withCheckedThrowingContinuation { continuation in
+        pendingComments[identifier] = continuation
+      }
+    }
+  }
+
   func resumeThreads(id: Int, returning value: ThreadPageData) -> Bool {
     guard let continuation = pendingThreads.removeValue(forKey: id) else { return false }
     continuation.resume(returning: value)
@@ -6121,6 +6286,7 @@ private actor ScriptedBrowseService: BrowseService {
   func postRequestSnapshot() -> [PostRequest] { postRequests }
   func commentRequestSnapshot() -> [CommentRequest] { commentRequests }
   func aroundCommentRequestSnapshot() -> [CommentRequest] { aroundCommentRequests }
+  func resolvingCommentRequestSnapshot() -> [CommentRequest] { resolvingCommentRequests }
 
   func threadRequestCount() -> Int { threadRequests.count }
   func forumChannelRequestCount() -> Int { forumChannelRequests.count }

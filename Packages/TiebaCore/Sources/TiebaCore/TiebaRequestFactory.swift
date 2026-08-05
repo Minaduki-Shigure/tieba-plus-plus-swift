@@ -215,6 +215,35 @@ struct TiebaRequestFactory: Sendable {
     }
     try validate(page: page)
 
+    return try commentsRequest(
+      threadID: threadID,
+      postID: postID,
+      commentID: commentID,
+      page: page
+    )
+  }
+
+  func comments(
+    threadID: Int64,
+    resolvingCommentID commentID: Int64
+  ) throws -> URLRequest {
+    try validate(identifier: threadID, name: "Thread ID")
+    try validate(identifier: commentID, name: "Comment ID")
+
+    return try commentsRequest(
+      threadID: threadID,
+      postID: nil,
+      commentID: commentID,
+      page: 1
+    )
+  }
+
+  private func commentsRequest(
+    threadID: Int64,
+    postID: Int64?,
+    commentID: Int64?,
+    page: Int
+  ) throws -> URLRequest {
     var common = CommonReq()
     common.clientType = 2
     common.clientVersion = configuration.clientVersion
@@ -222,7 +251,9 @@ struct TiebaRequestFactory: Sendable {
     var data = PbFloorReqIdl.DataReq()
     data.common = common
     data.kz = threadID
-    data.pid = postID
+    if let postID {
+      data.pid = postID
+    }
     if let commentID {
       data.spid = commentID
     }

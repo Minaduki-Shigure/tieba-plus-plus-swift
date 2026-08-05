@@ -4,6 +4,16 @@ import Foundation
 enum CommentsAnchor: Hashable, Sendable {
   case post(Int64)
   case comment(postID: Int64, commentID: Int64)
+  case resolvingComment(Int64)
+
+  var targetCommentID: Int64? {
+    switch self {
+    case .post:
+      nil
+    case .comment(_, let commentID), .resolvingComment(let commentID):
+      commentID
+    }
+  }
 }
 
 private enum CommentPagePlacement: Equatable {
@@ -70,6 +80,17 @@ final class CommentsViewModel: ObservableObject {
     self.anchor = .comment(postID: postID, commentID: commentID)
     self.service = service
     self.lockedParentPostID = postID > 0 ? postID : nil
+  }
+
+  init(
+    threadID: Int64,
+    resolvingCommentID commentID: Int64,
+    service: any BrowseService
+  ) {
+    self.threadID = threadID
+    self.anchor = .resolvingComment(commentID)
+    self.service = service
+    self.lockedParentPostID = nil
   }
 
   func loadIfNeeded() {
@@ -254,6 +275,19 @@ final class CommentsViewModel: ObservableObject {
               page: page
             )
           }
+        case .resolvingComment(let commentID):
+          if (placement == .before || placement == .after), let lockedParentPostID {
+            response = try await service.comments(
+              threadID: threadID,
+              postID: lockedParentPostID,
+              page: page
+            )
+          } else {
+            response = try await service.comments(
+              threadID: threadID,
+              resolvingCommentID: commentID
+            )
+          }
         }
         try Task.checkCancellation()
         guard generation == loadGeneration else { return }
@@ -332,7 +366,7 @@ final class CommentsViewModel: ObservableObject {
           upsertAgreementDescriptor(response.agreementReadDescriptor)
         }
         if (placement == .replacing || placement == .refreshing),
-          case .comment(_, let commentID) = anchor
+          let commentID = anchor.targetCommentID
         {
           if let target = comments.first(where: { $0.id == commentID }) {
             if target.localVisibility == .hidden {

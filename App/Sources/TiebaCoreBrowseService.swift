@@ -273,6 +273,32 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     )
   }
 
+  func comments(
+    threadID: Int64,
+    resolvingCommentID commentID: Int64
+  ) async throws -> CommentPageData {
+    let response: TiebaCommentPage
+    do {
+      response = try await client.getComments(
+        threadID: threadID,
+        resolvingCommentID: commentID
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    let filter = await contentFilterSnapshot()
+    return try Self.mapCommentPage(
+      response,
+      requestedThreadID: threadID,
+      expectedPostID: nil,
+      requestedPage: 1,
+      aroundCommentID: commentID,
+      filter: filter
+    )
+  }
+
   func searchForums(query: String) async throws -> ForumSearchData {
     let response: TiebaForumSearchResults
     do {
@@ -977,19 +1003,24 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
   static func mapCommentPage(
     _ response: TiebaCommentPage,
     requestedThreadID: Int64,
-    expectedPostID: Int64,
+    expectedPostID: Int64?,
     requestedPage: Int = 1,
     aroundCommentID: Int64? = nil,
     filter: ContentFilterSnapshot
   ) throws -> CommentPageData {
     let parentPost = response.parentPost
+    let hasValidParentAnchor: Bool
+    if let expectedPostID {
+      hasValidParentAnchor = expectedPostID > 0 && expectedPostID == parentPost.id
+    } else {
+      hasValidParentAnchor = aroundCommentID.map({ $0 > 0 }) ?? false
+    }
     guard
       requestedThreadID > 0,
-      expectedPostID > 0,
+      hasValidParentAnchor,
       response.thread.id == requestedThreadID,
       parentPost.id > 0,
-      parentPost.threadID == requestedThreadID,
-      expectedPostID == parentPost.id
+      parentPost.threadID == requestedThreadID
     else {
       throw BrowseError.unavailable("贴吧返回的楼中楼归属异常，未显示该响应。")
     }
@@ -1003,6 +1034,11 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
         seen.insert(comment.id).inserted
       else { return nil }
       return filter.applying(to: mapComment(comment))
+    }
+    if expectedPostID == nil, let aroundCommentID,
+      !comments.contains(where: { $0.id == aroundCommentID })
+    {
+      throw BrowseError.unavailable("贴吧未返回要定位的楼中楼回复，未显示该响应。")
     }
     let mappedThread = mapThread(response.thread)
     let mappedParentPost = filter.applying(to: mapCommentParentPost(parentPost))

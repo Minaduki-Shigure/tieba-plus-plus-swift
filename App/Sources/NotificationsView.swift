@@ -87,15 +87,7 @@ struct NotificationsView: View {
     List {
       ForEach(viewModel.messages) { message in
         NavigationLink {
-          let route = message.threadRoute
-          ThreadView(
-            thread: route.placeholderThread,
-            service: browseService,
-            historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository,
-            linkRoute: route
-          )
+          notificationDestination(for: message)
         } label: {
           NotificationMessageRow(message: message)
         }
@@ -116,6 +108,31 @@ struct NotificationsView: View {
     }
     .listStyle(.plain)
     .refreshable { await viewModel.refresh() }
+  }
+
+  @ViewBuilder
+  private func notificationDestination(for message: InboxMessage) -> some View {
+    switch message.navigationTarget {
+    case .thread(let route):
+      ThreadView(
+        thread: route.placeholderThread,
+        service: browseService,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository,
+        linkRoute: route
+      )
+    case .comment(let threadID, let commentID):
+      CommentsView(
+        threadID: threadID,
+        resolvingCommentID: commentID,
+        service: browseService,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository,
+        showsDismissButton: false
+      )
+    }
   }
 }
 

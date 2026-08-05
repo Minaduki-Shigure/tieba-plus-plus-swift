@@ -83,6 +83,20 @@ final class TiebaRequestFactoryTests: XCTestCase {
     XCTAssertEqual(around.data.pn, 2)
     XCTAssertEqual(around.data.common.bduss, "")
     XCTAssertEqual(around.data.common.stoken, "")
+
+    let resolvingRequest = try factory.comments(
+      threadID: 123_456,
+      resolvingCommentID: 777_888
+    )
+    let resolving = try PbFloorReqIdl(
+      serializedBytes: protobufPayload(from: resolvingRequest)
+    )
+    XCTAssertEqual(resolving.data.kz, 123_456)
+    XCTAssertEqual(resolving.data.pid, 0)
+    XCTAssertEqual(resolving.data.spid, 777_888)
+    XCTAssertEqual(resolving.data.pn, 1)
+    XCTAssertEqual(resolving.data.common.clientType, 2)
+    XCTAssertEqual(resolving.data.common.clientVersion, "12.64.1.1")
   }
 
   func testBrowseSortAndFilterOptionsAreEncoded() throws {
@@ -492,6 +506,12 @@ final class TiebaRequestFactoryTests: XCTestCase {
     )
     XCTAssertThrowsError(
       try factory.comments(threadID: 1, postID: 2, aroundCommentID: 0, page: 1)
+    )
+    XCTAssertThrowsError(
+      try factory.comments(threadID: 0, resolvingCommentID: 3)
+    )
+    XCTAssertThrowsError(
+      try factory.comments(threadID: 1, resolvingCommentID: 0)
     )
     XCTAssertThrowsError(
       try factory.posts(

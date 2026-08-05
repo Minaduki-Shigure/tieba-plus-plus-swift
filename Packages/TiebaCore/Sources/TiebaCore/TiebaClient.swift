@@ -600,6 +600,17 @@ public actor TiebaClient {
     )
   }
 
+  public func getComments(
+    threadID: Int64,
+    resolvingCommentID commentID: Int64
+  ) async throws -> TiebaCommentPage {
+    let request = try requestFactory.comments(
+      threadID: threadID,
+      resolvingCommentID: commentID
+    )
+    return try await commentPage(for: request)
+  }
+
   private func getComments(
     threadID: Int64,
     postID: Int64,
@@ -612,6 +623,10 @@ public actor TiebaClient {
       aroundCommentID: commentID,
       page: page
     )
+    return try await commentPage(for: request)
+  }
+
+  private func commentPage(for request: URLRequest) async throws -> TiebaCommentPage {
     let body = try await send(request)
     let response: PbFloorResIdl = try decode(body)
     try checkServerError(code: response.error.errorno, message: response.error.errmsg)

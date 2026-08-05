@@ -110,6 +110,10 @@ protocol BrowseService: Sendable {
     aroundCommentID commentID: Int64,
     page: Int
   ) async throws -> CommentPageData
+  func comments(
+    threadID: Int64,
+    resolvingCommentID commentID: Int64
+  ) async throws -> CommentPageData
 }
 
 extension BrowseService {

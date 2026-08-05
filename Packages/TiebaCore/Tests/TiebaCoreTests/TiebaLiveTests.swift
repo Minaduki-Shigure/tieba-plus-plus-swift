@@ -455,6 +455,32 @@ final class TiebaLiveTests: XCTestCase {
     )
     XCTAssertEqual(anchoredPage.parentPost.id, 143_493_604_437)
     XCTAssertTrue(anchoredPage.comments.contains(where: { $0.id == comment.id }))
+
+    let resolvedPage = try await client.getComments(
+      threadID: 7_763_274_602,
+      resolvingCommentID: comment.id
+    )
+    XCTAssertEqual(resolvedPage.parentPost.id, 143_493_604_437)
+    XCTAssertTrue(resolvedPage.comments.contains(where: { $0.id == comment.id }))
+  }
+
+  func testAnonymousChildOnlyResolverTargetsKnownLaterPage() async throws {
+    guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
+      throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
+    }
+
+    let client = TiebaClient(
+      configuration: .init(userAgent: "TiebaPlusPlus/0.59 integration-test")
+    )
+    let targetCommentID: Int64 = 152_676_987_419
+    let resolvedPage = try await client.getComments(
+      threadID: 9_916_162_412,
+      resolvingCommentID: targetCommentID
+    )
+
+    XCTAssertEqual(resolvedPage.parentPost.id, 152_445_649_580)
+    XCTAssertGreaterThan(resolvedPage.pagination.currentPage, 1)
+    XCTAssertTrue(resolvedPage.comments.contains(where: { $0.id == targetCommentID }))
   }
 
   func testAnonymousInlineNestedReplyPreview() async throws {
