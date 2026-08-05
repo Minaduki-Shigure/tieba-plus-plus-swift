@@ -176,6 +176,8 @@ protocol UserProfileService: Sendable {
   func userProfile(userID: Int64) async throws -> BrowseUserProfile
   func userThreads(userID: Int64, page: Int, pageSize: Int) async throws
     -> UserThreadPageData
+  func userReplies(userID: Int64, page: Int, pageSize: Int) async throws
+    -> UserReplyPageData
 }
 
 protocol ForumInformationService: Sendable {

@@ -381,6 +381,7 @@ final class TiebaRequestFactoryTests: XCTestCase {
       try factory.comments(threadID: 1, postID: 2, page: 1),
       try factory.userProfile(userID: 957_339_815),
       try factory.userThreads(userID: 957_339_815, page: 1, pageSize: 20),
+      try factory.userReplies(userID: 957_339_815, page: 1, pageSize: 20),
       try factory.forumOverview(forumID: 42),
       try factory.forumModerators(forumID: 42),
       try factory.forumRules(forumID: 42),
@@ -390,15 +391,15 @@ final class TiebaRequestFactoryTests: XCTestCase {
       requests.map(\.url?.path),
       [
         "/c/f/frs/page", "/c/f/frs/generalTabList", "/c/f/pb/page", "/c/f/pb/floor",
-        "/c/u/user/profile", "/c/u/feed/userpost", "/c/f/forum/getforumdetail",
-        "/c/f/forum/getBawuInfo", "/c/f/forum/forumRuleDetail",
+        "/c/u/user/profile", "/c/u/feed/userpost", "/c/u/feed/userpost",
+        "/c/f/forum/getforumdetail", "/c/f/forum/getBawuInfo", "/c/f/forum/forumRuleDetail",
       ]
     )
     XCTAssertEqual(
       requests.map(\.url?.query),
       [
         "cmd=301001", "cmd=309622", "cmd=302001", "cmd=302002", "cmd=303012",
-        "cmd=303002", "cmd=303021", "cmd=301007", "cmd=309690",
+        "cmd=303002", "cmd=303002", "cmd=303021", "cmd=301007", "cmd=309690",
       ]
     )
     for request in requests {
@@ -450,6 +451,33 @@ final class TiebaRequestFactoryTests: XCTestCase {
     XCTAssertEqual(threads.data.isViewCard, 1)
     XCTAssertEqual(threads.data.common.bduss, "")
     XCTAssertEqual(threads.data.common.stoken, "")
+
+    let repliesFactory = TiebaRequestFactory(
+      configuration: .init(clientVersion: "99.99.99")
+    )
+    let repliesRequest = try repliesFactory.userReplies(
+      userID: 957_339_815,
+      page: 3,
+      pageSize: 40
+    )
+    let replies = try UserPostReqIdl(
+      serializedBytes: protobufPayload(from: repliesRequest)
+    )
+    XCTAssertEqual(repliesRequest.url?.path, "/c/u/feed/userpost")
+    XCTAssertEqual(repliesRequest.url?.query, "cmd=303002")
+    XCTAssertEqual(replies.data.uid, 957_339_815)
+    XCTAssertEqual(replies.data.rn, 40)
+    XCTAssertEqual(replies.data.isThread, 0)
+    XCTAssertEqual(replies.data.needContent, 1)
+    XCTAssertEqual(replies.data.pn, 3)
+    XCTAssertEqual(replies.data.isViewCard, 0)
+    XCTAssertEqual(replies.data.common.clientType, 2)
+    XCTAssertEqual(replies.data.common.clientVersion, "8")
+    XCTAssertEqual(replies.data.common.bduss, "")
+    XCTAssertEqual(replies.data.common.stoken, "")
+    XCTAssertEqual(replies.data.common.zID, "")
+    XCTAssertNil(repliesRequest.value(forHTTPHeaderField: "Cookie"))
+    XCTAssertNil(repliesRequest.value(forHTTPHeaderField: "Authorization"))
   }
 
   func testPublicForumMetadataRequestsMatchWireFixtures() throws {
@@ -678,6 +706,18 @@ final class TiebaRequestFactoryTests: XCTestCase {
     )
     XCTAssertThrowsError(try factory.userThreads(userID: 1, page: 0, pageSize: 20))
     XCTAssertThrowsError(try factory.userThreads(userID: 1, page: 1, pageSize: 101))
+    XCTAssertThrowsError(try factory.userReplies(userID: 0, page: 1, pageSize: 20))
+    XCTAssertThrowsError(try factory.userReplies(userID: -1, page: 1, pageSize: 20))
+    XCTAssertThrowsError(try factory.userReplies(userID: 1, page: 0, pageSize: 20))
+    XCTAssertThrowsError(
+      try factory.userReplies(
+        userID: 1,
+        page: Int(Int32.max) + 1,
+        pageSize: 20
+      )
+    )
+    XCTAssertThrowsError(try factory.userReplies(userID: 1, page: 1, pageSize: 0))
+    XCTAssertThrowsError(try factory.userReplies(userID: 1, page: 1, pageSize: 101))
     XCTAssertThrowsError(try factory.forumOverview(forumID: 0))
     XCTAssertThrowsError(try factory.forumModerators(forumID: -1))
     XCTAssertThrowsError(try factory.forumRules(forumID: 0))

@@ -4,6 +4,47 @@ import XCTest
 @testable import TiebaCore
 
 final class TiebaProtoMapperTests: XCTestCase {
+  func testUserReplyMappingBoundsOuterAndInnerCollectionsAndRejectsOverflowingTime() {
+    var data = UserPostResIdl.DataRes()
+    for groupIndex in 0...100 {
+      var group = PostInfoList()
+      group.forumID = 42
+      group.threadID = UInt64(1_000 + groupIndex)
+      group.userID = 957_339_815
+
+      if groupIndex == 0 {
+        group.content = (1...101).map { replyIndex in
+          var reply = PostInfoList.PostInfoContent()
+          reply.postID = UInt64(replyIndex)
+          reply.createTime =
+            replyIndex == 1 ? UInt64.max : UInt64(1_700_000_000 + replyIndex)
+          return reply
+        }
+      } else {
+        var reply = PostInfoList.PostInfoContent()
+        reply.postID = UInt64(10_000 + groupIndex)
+        reply.createTime = 1_700_000_000
+        group.content = [reply]
+      }
+      data.postList.append(group)
+    }
+
+    let page = TiebaProtoMapper.userReplyPage(
+      data,
+      userID: 957_339_815,
+      requestedPage: 1,
+      pageSize: 20
+    )
+
+    XCTAssertEqual(page.replies.count, 199)
+    XCTAssertEqual(page.replies.prefix(100).map(\.postID), (1...100).map { Int64($0) })
+    XCTAssertNil(page.replies.first?.createdAt)
+    XCTAssertNotNil(page.replies[1].createdAt)
+    XCTAssertFalse(page.replies.contains(where: { $0.postID == 101 }))
+    XCTAssertEqual(page.replies.last?.threadID, 1_099)
+    XCTAssertFalse(page.replies.contains(where: { $0.threadID == 1_100 }))
+  }
+
   func testHotThreadRankingMapsServerCategoriesAndRejectsMalformedDuplicates() throws {
     let ranking = TiebaProtoMapper.hotThreadRanking(ProtoFixtures.hotThreadRanking().data)
 

@@ -454,6 +454,84 @@ final class TiebaClientTests: XCTestCase {
     XCTAssertTrue(lastPage.threads.isEmpty)
   }
 
+  func testMapsEveryInnerPublicUserReplyUsingItsOwnIdentityTimeAndType() async throws {
+    let client = TiebaClient(
+      transport: StubTransport(body: try ProtoFixtures.userReplyPage().serializedData())
+    )
+
+    let page = try await client.getUserReplies(
+      userID: 957_339_815,
+      page: 2,
+      pageSize: 20
+    )
+
+    XCTAssertEqual(page.userID, 957_339_815)
+    XCTAssertEqual(page.pagination.currentPage, 2)
+    XCTAssertEqual(page.pagination.pageSize, 20)
+    XCTAssertTrue(page.pagination.hasPrevious)
+    XCTAssertTrue(page.pagination.hasMore)
+    XCTAssertFalse(page.isHidden)
+    XCTAssertEqual(page.replies.map(\.postID), [801, 802, 803])
+    XCTAssertEqual(page.replies.map(\.threadID), [700, 700, 700])
+    XCTAssertEqual(page.replies.map(\.forumID), [42, 42, 42])
+    XCTAssertEqual(
+      page.replies.map(\.createdAt),
+      [
+        Date(timeIntervalSince1970: 1_700_200_001),
+        Date(timeIntervalSince1970: 1_700_200_002),
+        Date(timeIntervalSince1970: 1_700_200_003),
+      ]
+    )
+    XCTAssertEqual(page.replies.map(\.target), [.post, .comment, .unsupported(rawType: 37)])
+    XCTAssertEqual(page.replies[0].content.plainText, "An ordinary floor")
+    XCTAssertEqual(page.replies[1].content.plainText, "A nested replyReference")
+    let mappedLink = page.replies[1].content.fragments.compactMap { fragment -> TiebaLink? in
+      guard case .link(let link) = fragment else { return nil }
+      return link
+    }.first
+    XCTAssertEqual(mappedLink?.url?.absoluteString, "https://tieba.baidu.com/p/700")
+    XCTAssertEqual(page.replies[0].author?.id, 957_339_815)
+    XCTAssertEqual(page.replies[0].author?.preferredName, "Profile User")
+    XCTAssertFalse(page.replies.contains(where: { $0.postID == 999_999 }))
+  }
+
+  func testPublicUserRepliesRejectMismatchedUserAndMapHiddenAndEmptyPages() async throws {
+    let mismatchedClient = TiebaClient(
+      transport: StubTransport(body: try ProtoFixtures.userReplyPage().serializedData())
+    )
+    let mismatched = try await mismatchedClient.getUserReplies(userID: 999, page: 1)
+    XCTAssertTrue(mismatched.replies.isEmpty)
+    XCTAssertTrue(mismatched.pagination.hasMore)
+
+    var hiddenFixture = ProtoFixtures.userReplyPage()
+    hiddenFixture.data.hidePost = 1
+    let hiddenClient = TiebaClient(
+      transport: StubTransport(body: try hiddenFixture.serializedData())
+    )
+    let hidden = try await hiddenClient.getUserReplies(userID: 957_339_815, page: 1)
+    XCTAssertTrue(hidden.isHidden)
+    XCTAssertFalse(hidden.replies.isEmpty)
+
+    let emptyClient = TiebaClient(
+      transport: StubTransport(body: try UserPostResIdl().serializedData())
+    )
+    let empty = try await emptyClient.getUserReplies(userID: 957_339_815, page: 3)
+    XCTAssertTrue(empty.replies.isEmpty)
+    XCTAssertFalse(empty.pagination.hasMore)
+    XCTAssertTrue(empty.pagination.hasPrevious)
+  }
+
+  func testPublicUserRepliesRejectResponseLargerThanFourMiB() async {
+    let maximumBytes = 4 * 1_024 * 1_024
+    let client = TiebaClient(
+      transport: StubTransport(body: Data(count: maximumBytes + 1))
+    )
+
+    await assertClientError(.responseTooLarge(maximumBytes: maximumBytes)) {
+      _ = try await client.getUserReplies(userID: 957_339_815)
+    }
+  }
+
   func testMapsAnonymousForumOverviewModeratorsAndRules() async throws {
     let overviewClient = TiebaClient(
       transport: StubTransport(body: try ProtoFixtures.forumOverview().serializedData())

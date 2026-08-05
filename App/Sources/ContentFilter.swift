@@ -557,6 +557,18 @@ extension ContentFilterSnapshot {
     )
   }
 
+  func visibility(for reply: BrowseUserReply) -> LocalContentVisibility {
+    visibility(
+      isBlocked: blocksKeyword(reply.threadTitle)
+        || blocksKeyword(reply.excerpt)
+        || blocksUser(
+          id: reply.authorID,
+          preferredName: reply.authorName,
+          username: reply.authorUsername
+        )
+    )
+  }
+
   func visibility(
     for result: ForumPostSearchItem,
     hasKnownVideo: Bool = false
@@ -609,6 +621,10 @@ extension ContentFilterSnapshot {
 
   func applying(to parentPost: CommentParentPostContext) -> CommentParentPostContext {
     parentPost.withLocalVisibility(visibility(for: parentPost))
+  }
+
+  func applying(to reply: BrowseUserReply) -> BrowseUserReply {
+    reply.withLocalVisibility(visibility(for: reply))
   }
 
   func applying(

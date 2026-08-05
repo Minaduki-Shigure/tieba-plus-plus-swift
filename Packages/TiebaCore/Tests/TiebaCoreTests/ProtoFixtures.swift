@@ -422,6 +422,88 @@ enum ProtoFixtures {
     return response
   }
 
+  static func userReplyPage() -> UserPostResIdl {
+    var floorText = PostInfoList.PostInfoContent.Abstract()
+    floorText.type = 0
+    floorText.text = "An ordinary floor"
+    var floor = PostInfoList.PostInfoContent()
+    floor.postContent = [floorText]
+    floor.createTime = 1_700_200_001
+    floor.postType = 0
+    floor.postID = 801
+
+    var commentText = PostInfoList.PostInfoContent.Abstract()
+    commentText.type = 0
+    commentText.text = "A nested reply"
+    var commentLink = PostInfoList.PostInfoContent.Abstract()
+    commentLink.type = 1
+    commentLink.text = "Reference"
+    commentLink.link = "https://tieba.baidu.com/p/700"
+    var comment = PostInfoList.PostInfoContent()
+    comment.postContent = [commentText, commentLink]
+    comment.createTime = 1_700_200_002
+    comment.postType = 1
+    comment.postID = 802
+
+    var unsupportedText = PostInfoList.PostInfoContent.Abstract()
+    unsupportedText.type = 0
+    unsupportedText.text = "A future reply type"
+    var unsupported = PostInfoList.PostInfoContent()
+    unsupported.postContent = [unsupportedText]
+    unsupported.createTime = 1_700_200_003
+    unsupported.postType = 37
+    unsupported.postID = 803
+
+    var zeroPostID = floor
+    zeroPostID.postID = 0
+    var overflowingPostID = floor
+    overflowingPostID.postID = UInt64.max
+
+    var validGroup = PostInfoList()
+    validGroup.forumID = 42
+    validGroup.threadID = 700
+    validGroup.postID = 999_999
+    validGroup.createTime = 1
+    validGroup.forumName = "swift"
+    validGroup.title = "A public thread"
+    validGroup.userName = "profile-user"
+    validGroup.userID = 957_339_815
+    validGroup.userPortrait = "profile-portrait?t=1234567890"
+    validGroup.nameShow = "Profile User"
+    validGroup.content = [floor, comment, unsupported, zeroPostID, overflowingPostID]
+
+    var mismatchedUser = validGroup
+    mismatchedUser.threadID = 710
+    mismatchedUser.userID = 123
+    mismatchedUser.content = [floor]
+
+    var zeroThreadID = validGroup
+    zeroThreadID.threadID = 0
+    zeroThreadID.content = [floor]
+
+    var overflowingThreadID = validGroup
+    overflowingThreadID.threadID = UInt64.max
+    overflowingThreadID.content = [floor]
+
+    var overflowingForumID = validGroup
+    overflowingForumID.threadID = 720
+    overflowingForumID.forumID = UInt64.max
+    overflowingForumID.content = [floor]
+
+    var data = UserPostResIdl.DataRes()
+    data.postList = [
+      validGroup,
+      mismatchedUser,
+      zeroThreadID,
+      overflowingThreadID,
+      overflowingForumID,
+    ]
+
+    var response = UserPostResIdl()
+    response.data = data
+    return response
+  }
+
   static func forumOverview() -> GetForumDetailResIdl {
     var forum = GetForumDetailResIdl.DataRes.RecommendForumInfo()
     forum.forumID = 42

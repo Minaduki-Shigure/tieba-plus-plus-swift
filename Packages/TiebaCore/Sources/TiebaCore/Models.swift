@@ -816,6 +816,65 @@ public struct TiebaUserThreadPage: Sendable, Hashable {
   }
 }
 
+public enum TiebaUserReplyTarget: Sendable, Hashable {
+  case post
+  case comment
+  case unsupported(rawType: UInt64)
+}
+
+public struct TiebaUserReply: Sendable, Hashable {
+  public let threadID: Int64
+  public let forumID: Int64
+  public let forumName: String
+  public let threadTitle: String
+  public let postID: Int64
+  public let createdAt: Date?
+  public let content: TiebaContent
+  public let author: TiebaUser?
+  public let target: TiebaUserReplyTarget
+
+  public init(
+    threadID: Int64,
+    forumID: Int64,
+    forumName: String,
+    threadTitle: String,
+    postID: Int64,
+    createdAt: Date?,
+    content: TiebaContent,
+    author: TiebaUser?,
+    target: TiebaUserReplyTarget
+  ) {
+    self.threadID = threadID
+    self.forumID = forumID
+    self.forumName = forumName
+    self.threadTitle = threadTitle
+    self.postID = postID
+    self.createdAt = createdAt
+    self.content = content
+    self.author = author
+    self.target = target
+  }
+}
+
+public struct TiebaUserReplyPage: Sendable, Hashable {
+  public let userID: Int64
+  public let replies: [TiebaUserReply]
+  public let pagination: TiebaPagination
+  public let isHidden: Bool
+
+  public init(
+    userID: Int64,
+    replies: [TiebaUserReply],
+    pagination: TiebaPagination,
+    isHidden: Bool
+  ) {
+    self.userID = userID
+    self.replies = replies
+    self.pagination = pagination
+    self.isHidden = isHidden
+  }
+}
+
 public struct TiebaPostPage: Sendable, Hashable {
   public let forum: TiebaForum
   public let thread: TiebaThread

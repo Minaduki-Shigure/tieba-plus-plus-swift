@@ -503,6 +503,17 @@ private actor UserProfileServiceStub: UserProfileService {
     return response
   }
 
+  func userReplies(userID: Int64, page: Int, pageSize: Int) async throws
+    -> UserReplyPageData
+  {
+    UserReplyPageData(
+      replies: [],
+      currentPage: page,
+      hasMore: false,
+      isHidden: false
+    )
+  }
+
   func resumeThreads(id: Int, returning value: UserThreadPageData) -> Bool {
     guard let continuation = pendingThreads.removeValue(forKey: id) else { return false }
     continuation.resume(returning: value)

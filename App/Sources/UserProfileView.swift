@@ -23,6 +23,20 @@ struct UserProfilePortraitPresentation: Identifiable, Equatable, Sendable {
   }
 }
 
+private enum UserProfileActivity: String, CaseIterable, Hashable, Identifiable, Sendable {
+  case threads
+  case replies
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .threads: "主题"
+    case .replies: "回复"
+    }
+  }
+}
+
 struct UserProfileView: View {
   @Environment(\.contentFilterRepository) private var contentFilterRepository
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
@@ -33,6 +47,8 @@ struct UserProfileView: View {
   let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @StateObject private var viewModel: UserProfileViewModel
+  @StateObject private var repliesViewModel: UserRepliesViewModel
+  @State private var selectedActivity: UserProfileActivity = .threads
   @State private var contentFilterMessage: String?
   @State private var portraitPresentation: UserProfilePortraitPresentation?
 
@@ -50,6 +66,9 @@ struct UserProfileView: View {
     self.searchHistoryRepository = searchHistoryRepository
     _viewModel = StateObject(
       wrappedValue: UserProfileViewModel(userID: userID, service: service)
+    )
+    _repliesViewModel = StateObject(
+      wrappedValue: UserRepliesViewModel(userID: userID, service: service)
     )
   }
 
@@ -103,9 +122,20 @@ struct UserProfileView: View {
       ImageViewer(url: presentation.sourceURL)
     }
     .task { viewModel.loadIfNeeded() }
-    .onDisappear(perform: viewModel.cancel)
+    .task(id: selectedActivity) {
+      if selectedActivity == .replies {
+        repliesViewModel.loadIfNeeded()
+      }
+    }
+    .onDisappear {
+      viewModel.cancel()
+      repliesViewModel.cancel()
+    }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
-      Task { @MainActor in viewModel.reloadThreadsAfterContentFilterChange() }
+      Task { @MainActor in
+        viewModel.reloadThreadsAfterContentFilterChange()
+        repliesViewModel.reloadAfterContentFilterChange()
+      }
     }
   }
 
@@ -130,6 +160,29 @@ struct UserProfileView: View {
       }
 
       Section {
+        Picker("公开动态", selection: $selectedActivity) {
+          ForEach(UserProfileActivity.allCases) { activity in
+            Text(activity.title).tag(activity)
+          }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityLabel("公开动态")
+      }
+      .listRowSeparator(.hidden)
+
+      if selectedActivity == .threads {
+        publicThreadsSection
+      } else {
+        publicRepliesSection
+      }
+    }
+    .environment(\.defaultMinListRowHeight, 1)
+    .listStyle(.plain)
+    .refreshable { await refresh() }
+  }
+
+  private var publicThreadsSection: some View {
+    Section {
         if viewModel.isActivityHidden {
           Label("该用户未公开主题", systemImage: "eye.slash")
             .foregroundStyle(.secondary)
@@ -189,17 +242,126 @@ struct UserProfileView: View {
           LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
             .listRowSeparator(.hidden)
         }
-      } header: {
-        if let profile = viewModel.profile {
-          Text("公开主题 \(profile.threadCount.formatted())")
-        } else {
-          Text("公开主题")
-        }
+    } header: {
+      if let profile = viewModel.profile {
+        Text("公开主题 \(profile.threadCount.formatted())")
+      } else {
+        Text("公开主题")
       }
     }
-    .environment(\.defaultMinListRowHeight, 1)
-    .listStyle(.plain)
-    .refreshable { await viewModel.refresh() }
+  }
+
+  private var publicRepliesSection: some View {
+    Section {
+      switch repliesViewModel.state {
+      case .idle, .loading:
+        HStack {
+          Spacer()
+          ProgressView()
+          Spacer()
+        }
+        .listRowSeparator(.hidden)
+      case .failed(let message):
+        ErrorStateView(message: message, retry: repliesViewModel.reload)
+          .listRowSeparator(.hidden)
+      case .loaded:
+        if repliesViewModel.isActivityHidden {
+          Label("该用户未公开回复", systemImage: "eye.slash")
+            .foregroundStyle(.secondary)
+        } else if repliesViewModel.replies.isEmpty {
+          Label("暂无公开回复", systemImage: "text.bubble")
+            .foregroundStyle(.secondary)
+        } else if !repliesViewModel.hasDisplayableReplies {
+          Label("暂无可显示的公开回复", systemImage: "eye.slash")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
+            .padding(.vertical, 8)
+            .listRowSeparator(.hidden)
+            .accessibilityElement(children: .combine)
+        } else {
+          ForEach(repliesViewModel.displayableReplies) { reply in
+            LocallyFilteredContent(
+              visibility: reply.localVisibility,
+              placeholder: "已屏蔽此公开回复"
+            ) {
+              if let target = reply.navigationTarget {
+                NavigationLink {
+                  userReplyDestination(for: target)
+                } label: {
+                  UserActivityReplyRow(reply: reply)
+                }
+              } else {
+                UserActivityReplyRow(reply: reply)
+              }
+            }
+            .frame(minHeight: 44)
+          }
+        }
+
+        if !repliesViewModel.isActivityHidden, let lastReply = repliesViewModel.replies.last {
+          Color.clear
+            .frame(height: 1)
+            .id(
+              "user-profile-reply-pagination-\(lastReply.id.threadID)-\(lastReply.id.postID)-\(repliesViewModel.replies.count)-\(repliesViewModel.paginationEpoch)"
+            )
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .accessibilityHidden(true)
+            .onAppear { repliesViewModel.loadMoreIfNeeded(current: lastReply) }
+        }
+
+        if repliesViewModel.isLoadingMore {
+          HStack {
+            Spacer()
+            ProgressView()
+            Spacer()
+          }
+          .listRowSeparator(.hidden)
+        } else if let message = repliesViewModel.loadMoreError {
+          LoadMoreErrorView(message: message, retry: repliesViewModel.retryLoadMore)
+            .listRowSeparator(.hidden)
+        }
+      }
+    } header: {
+      if let profile = viewModel.profile {
+        Text("公开回复 \(profile.postCount.formatted())")
+      } else {
+        Text("公开回复")
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func userReplyDestination(for target: UserReplyNavigationTarget) -> some View {
+    switch target {
+    case .thread(let route):
+      ThreadView(
+        thread: route.placeholderThread,
+        service: service,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository,
+        linkRoute: route
+      )
+    case .comment(let threadID, let commentID):
+      CommentsView(
+        threadID: threadID,
+        resolvingCommentID: commentID,
+        service: service,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository,
+        showsDismissButton: false
+      )
+    }
+  }
+
+  private func refresh() async {
+    await viewModel.refresh()
+    if selectedActivity == .replies {
+      await repliesViewModel.refresh()
+    }
   }
 
   private func addUserRule(_ profile: BrowseUserProfile, to list: ContentFilterList) {
@@ -423,5 +585,56 @@ private struct UserActivityThreadRow: View {
 
   var body: some View {
     ThreadSummaryRow(thread: thread, showsForum: true, showsAuthor: false)
+  }
+}
+
+private struct UserActivityReplyRow: View {
+  let reply: BrowseUserReply
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        if !reply.forumName.isEmpty {
+          Text("\(reply.forumName)吧")
+            .font(.caption)
+            .foregroundStyle(.tint)
+            .lineLimit(1)
+        }
+        Text(targetLabel)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        Spacer(minLength: 0)
+        if let createdAt = reply.createdAt {
+          Text(createdAt, style: .relative)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      }
+
+      Text(reply.excerpt.isEmpty ? "（非文字回复）" : reply.excerpt)
+        .font(.body)
+        .foregroundStyle(.primary)
+        .lineLimit(4)
+
+      if !reply.threadTitle.isEmpty {
+        Text(reply.threadTitle)
+          .font(.callout)
+          .foregroundStyle(.secondary)
+          .lineLimit(2)
+      }
+    }
+    .padding(.vertical, 4)
+    .accessibilityElement(children: .combine)
+  }
+
+  private var targetLabel: String {
+    switch reply.target {
+    case .post:
+      "楼层"
+    case .comment:
+      "楼中楼"
+    case .unsupported:
+      "暂不支持定位"
+    }
   }
 }

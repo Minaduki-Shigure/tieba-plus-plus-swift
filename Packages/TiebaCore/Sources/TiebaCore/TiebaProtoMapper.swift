@@ -2,6 +2,9 @@ import Foundation
 import TiebaProto
 
 enum TiebaProtoMapper {
+  private static let maximumUserReplyGroups = 100
+  private static let maximumUserRepliesPerGroup = 100
+
   static func searchSuggestions(_ data: SearchSugResIdl.DataRes) -> [String] {
     var seen = Set<String>()
     var suggestions: [String] = []
@@ -398,6 +401,30 @@ enum TiebaProtoMapper {
     )
   }
 
+  static func userReplyPage(
+    _ data: UserPostResIdl.DataRes,
+    userID: Int64,
+    requestedPage: Int,
+    pageSize: Int
+  ) -> TiebaUserReplyPage {
+    let replies = data.postList.prefix(maximumUserReplyGroups).flatMap {
+      userReplies($0, expectedUserID: userID)
+    }
+    return TiebaUserReplyPage(
+      userID: userID,
+      replies: replies,
+      pagination: TiebaPagination(
+        pageSize: pageSize,
+        currentPage: requestedPage,
+        totalPages: 0,
+        totalCount: 0,
+        hasMore: !data.postList.isEmpty,
+        hasPrevious: requestedPage > 1
+      ),
+      isHidden: data.hidePost != 0
+    )
+  }
+
   static func forumOverview(_ data: GetForumDetailResIdl.DataRes) -> TiebaForumOverview? {
     let proto = data.forumInfo
     guard let forumID = Int64(exactly: proto.forumID), forumID > 0 else { return nil }
@@ -633,6 +660,73 @@ enum TiebaProtoMapper {
       isShared: proto.isShareThread != 0,
       isHidden: false,
       isLive: false
+    )
+  }
+
+  private static func userReplies(
+    _ proto: PostInfoList,
+    expectedUserID: Int64
+  ) -> [TiebaUserReply] {
+    guard
+      let threadID = Int64(exactly: proto.threadID), threadID > 0,
+      let forumID = Int64(exactly: proto.forumID), forumID >= 0,
+      proto.userID == 0 || proto.userID == expectedUserID
+    else { return [] }
+
+    var authorProto = User()
+    authorProto.id = expectedUserID
+    authorProto.name = proto.userName
+    authorProto.nameShow = proto.nameShow
+    authorProto.portrait = proto.userPortrait
+    let author = optionalUser(authorProto)
+
+    return proto.content.prefix(maximumUserRepliesPerGroup).compactMap { item in
+      guard let postID = Int64(exactly: item.postID), postID > 0 else { return nil }
+      let createdAt = Int64(exactly: item.createTime).flatMap { date($0) }
+      let target: TiebaUserReplyTarget
+      switch item.postType {
+      case 0:
+        target = .post
+      case 1:
+        target = .comment
+      default:
+        target = .unsupported(rawType: item.postType)
+      }
+
+      return TiebaUserReply(
+        threadID: threadID,
+        forumID: forumID,
+        forumName: proto.forumName,
+        threadTitle: proto.title,
+        postID: postID,
+        createdAt: createdAt,
+        content: userReplyContent(item.postContent),
+        author: author,
+        target: target
+      )
+    }
+  }
+
+  private static func userReplyContent(
+    _ protos: [PostInfoList.PostInfoContent.Abstract]
+  ) -> TiebaContent {
+    TiebaContent(
+      fragments: protos.map { proto in
+        switch proto.type {
+        case 0, 4:
+          return .text(proto.text)
+        case 1:
+          return .link(
+            TiebaLink(text: proto.text, title: proto.text, url: remoteURL(proto.link))
+          )
+        case 10:
+          let rawDuration = TimeInterval(proto.duringTime) ?? 0
+          let duration = rawDuration.isFinite ? max(0, rawDuration / 1_000) : 0
+          return .voice(TiebaVoice(md5: proto.voiceMd5, duration: duration))
+        default:
+          return .unknown(type: UInt32(bitPattern: proto.type), text: proto.text)
+        }
+      }
     )
   }
 

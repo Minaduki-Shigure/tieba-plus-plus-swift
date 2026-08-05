@@ -82,6 +82,8 @@ the source metadata is updated to that tested IPA.
 - Explicit profile-avatar viewing, sharing, and Photos saving
 - Limited public liked-forum previews with direct forum navigation
 - Paginated public threads on user profiles
+- Lazily paginated public replies on user profiles, with exact ordinary-floor
+  navigation and child-only nested-reply resolution
 - Default-off combined public nickname and username presentation
 - Local case-sensitive literal-keyword and exact UID/name user block/allow lists
 - Placeholder or fully hidden presentation for locally blocked content
@@ -132,7 +134,7 @@ the source metadata is updated to that tested IPA.
    state reconciliation and no retry after an uncertain write
 5. Experimental plain-text reply workflows behind explicit risk confirmation,
    anti-CSRF tests, and unknown-outcome handling
-6. Broader settings parity, public user activity, content creation, and
+6. Broader settings parity, remaining account activity, content creation, and
    moderation tools
 
 The foreground inbox deliberately does not copy TiebaLite's cleartext JSON
@@ -296,11 +298,23 @@ dimensions, and retain the temporary file only until the system consumer
 finishes.
 
 Public profiles use the protocol's guest fields instead of impersonating the
-target user as the current account. The public-theme endpoint ignores its
+target user as the current account. The public-topic endpoint ignores its
 nominal page-size field, so pagination deliberately continues until an empty
-page and deduplicates by thread ID. Tieba's followed-forum list rejects
-anonymous requests, and TiebaLite only presents reply history for the current
-account; neither is exposed as a misleading anonymous profile tab.
+page and deduplicates by thread ID. Public reply activity uses the same endpoint
+through a separate anonymous request whose endpoint-specific client version is
+fixed to `8`; newer global versions currently return an empty, hidden response.
+The request sends only the target UID, page size, page number, content flag, and
+credential-free common data. Each outer thread group can contain several reply
+records, so mapping flattens every inner record and terminates only after an
+empty raw page. Ordinary floors navigate with the inner post ID. Nested replies
+send only the thread and inner child ID to the existing public parent resolver;
+the outer group post ID is never treated as a parent. Unknown post types remain
+visible but have no guessed navigation. TiebaLite presents this history only for
+the current account, while the separately researched guest contract exposes the
+same public data without credentials or account-only fields.
+
+Tieba's followed-forum list still rejects anonymous requests and is not exposed
+as a misleading public-profile tab.
 The profile response may include a small public liked-forum preview. It is
 presented as a preview alongside the server's declared total, never as a full
 list, and an empty preview remains a valid privacy state. The authenticated

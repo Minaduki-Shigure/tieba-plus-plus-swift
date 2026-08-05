@@ -653,6 +653,29 @@ final class TiebaLiveTests: XCTestCase {
     XCTAssertTrue(activity.threads.allSatisfy { $0.id > 0 && $0.forumID > 0 })
   }
 
+  func testAnonymousPublicUserRepliesUseEndpointCompatibleProtocol() async throws {
+    guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
+      throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
+    }
+
+    let userID: Int64 = 4_954_297_652
+    let client = TiebaClient(
+      configuration: .init(userAgent: "TiebaPlusPlus/0.56 integration-test")
+    )
+
+    let activity = try await client.getUserReplies(userID: userID, page: 1, pageSize: 20)
+
+    XCTAssertEqual(activity.userID, userID)
+    XCTAssertEqual(activity.pagination.currentPage, 1)
+    XCTAssertFalse(activity.isHidden)
+    XCTAssertFalse(activity.replies.isEmpty)
+    XCTAssertTrue(
+      activity.replies.allSatisfy {
+        $0.threadID > 0 && $0.postID > 0 && $0.forumID >= 0
+      }
+    )
+  }
+
   func testAnonymousPublicForumOverviewModeratorsAndRules() async throws {
     guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
       throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")

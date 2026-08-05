@@ -452,6 +452,101 @@ struct UserThreadPageData: Sendable {
   let isHidden: Bool
 }
 
+struct BrowseUserReplyID: Hashable, Sendable {
+  let threadID: Int64
+  let postID: Int64
+}
+
+enum BrowseUserReplyTarget: Hashable, Sendable {
+  case post
+  case comment
+  case unsupported(rawType: UInt64)
+}
+
+enum UserReplyNavigationTarget: Hashable, Sendable {
+  case thread(TiebaThreadRoute)
+  case comment(threadID: Int64, commentID: Int64)
+}
+
+struct BrowseUserReply: Identifiable, Hashable, Sendable {
+  let id: BrowseUserReplyID
+  let forumID: Int64
+  let forumName: String
+  let threadTitle: String
+  let excerpt: String
+  let createdAt: Date?
+  let authorID: Int64
+  let authorName: String
+  let authorUsername: String
+  let target: BrowseUserReplyTarget
+  let localVisibility: LocalContentVisibility
+
+  init(
+    threadID: Int64,
+    postID: Int64,
+    forumID: Int64,
+    forumName: String,
+    threadTitle: String,
+    excerpt: String,
+    createdAt: Date?,
+    authorID: Int64,
+    authorName: String,
+    authorUsername: String,
+    target: BrowseUserReplyTarget,
+    localVisibility: LocalContentVisibility = .visible
+  ) {
+    id = BrowseUserReplyID(threadID: threadID, postID: postID)
+    self.forumID = forumID
+    self.forumName = forumName
+    self.threadTitle = threadTitle
+    self.excerpt = excerpt
+    self.createdAt = createdAt
+    self.authorID = authorID
+    self.authorName = authorName
+    self.authorUsername = authorUsername
+    self.target = target
+    self.localVisibility = localVisibility
+  }
+
+  var threadID: Int64 { id.threadID }
+  var postID: Int64 { id.postID }
+
+  var navigationTarget: UserReplyNavigationTarget? {
+    switch target {
+    case .post:
+      return .thread(TiebaThreadRoute(threadID: threadID, postID: postID))
+    case .comment:
+      return .comment(threadID: threadID, commentID: postID)
+    case .unsupported:
+      return nil
+    }
+  }
+
+  func withLocalVisibility(_ visibility: LocalContentVisibility) -> Self {
+    BrowseUserReply(
+      threadID: threadID,
+      postID: postID,
+      forumID: forumID,
+      forumName: forumName,
+      threadTitle: threadTitle,
+      excerpt: excerpt,
+      createdAt: createdAt,
+      authorID: authorID,
+      authorName: authorName,
+      authorUsername: authorUsername,
+      target: target,
+      localVisibility: visibility
+    )
+  }
+}
+
+struct UserReplyPageData: Sendable {
+  let replies: [BrowseUserReply]
+  let currentPage: Int
+  let hasMore: Bool
+  let isHidden: Bool
+}
+
 struct ForumSearchItem: Identifiable, Hashable, Sendable {
   let id: Int64
   let name: String

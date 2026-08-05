@@ -536,6 +536,65 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     )
   }
 
+  func userReplies(userID: Int64, page: Int, pageSize: Int) async throws
+    -> UserReplyPageData
+  {
+    let response: TiebaUserReplyPage
+    do {
+      response = try await client.getUserReplies(
+        userID: userID,
+        page: page,
+        pageSize: pageSize
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    let contentFilter = await contentFilterSnapshot()
+    return Self.mapUserReplyPage(response, applying: contentFilter)
+  }
+
+  static func mapUserReplyPage(
+    _ response: TiebaUserReplyPage,
+    applying filter: ContentFilterSnapshot = .empty
+  ) -> UserReplyPageData {
+    UserReplyPageData(
+      replies: response.replies.map { reply in
+        let mapped = BrowseUserReply(
+          threadID: reply.threadID,
+          postID: reply.postID,
+          forumID: reply.forumID,
+          forumName: reply.forumName,
+          threadTitle: reply.threadTitle,
+          excerpt: summary(for: reply.content),
+          createdAt: reply.createdAt,
+          authorID: reply.author?.id ?? 0,
+          authorName: authorName(reply.author),
+          authorUsername: authorUsername(reply.author),
+          target: mapUserReplyTarget(reply.target)
+        )
+        return filter.applying(to: mapped)
+      },
+      currentPage: response.pagination.currentPage,
+      hasMore: response.pagination.hasMore,
+      isHidden: response.isHidden
+    )
+  }
+
+  private static func mapUserReplyTarget(
+    _ target: TiebaUserReplyTarget
+  ) -> BrowseUserReplyTarget {
+    switch target {
+    case .post:
+      .post
+    case .comment:
+      .comment
+    case .unsupported(let rawType):
+      .unsupported(rawType: rawType)
+    }
+  }
+
   func forumOverview(forumID: Int64) async throws -> BrowseForumOverview {
     let response: TiebaForumOverview
     do {

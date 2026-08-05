@@ -279,6 +279,8 @@ final class BoundedTiebaResponseTaskDelegate: NSObject,
 }
 
 public actor TiebaClient {
+  private static let userRepliesResponseMaximumBytes = 4 * 1_024 * 1_024
+
   private let requestFactory: TiebaRequestFactory
   private let transport: any TiebaTransport
 
@@ -443,6 +445,30 @@ public actor TiebaClient {
     let response: UserPostResIdl = try decode(body)
     try checkServerError(code: response.error.errorno, message: response.error.errmsg)
     return TiebaProtoMapper.userThreadPage(
+      response.data,
+      userID: userID,
+      requestedPage: page,
+      pageSize: pageSize
+    )
+  }
+
+  public func getUserReplies(
+    userID: Int64,
+    page: Int = 1,
+    pageSize: Int = 20
+  ) async throws -> TiebaUserReplyPage {
+    let request = try requestFactory.userReplies(
+      userID: userID,
+      page: page,
+      pageSize: pageSize
+    )
+    let body = try await send(
+      request,
+      maximumBodyBytes: Self.userRepliesResponseMaximumBytes
+    )
+    let response: UserPostResIdl = try decode(body)
+    try checkServerError(code: response.error.errorno, message: response.error.errmsg)
+    return TiebaProtoMapper.userReplyPage(
       response.data,
       userID: userID,
       requestedPage: page,

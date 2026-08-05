@@ -216,6 +216,25 @@ Liked forums embedded in that public response are a bounded preview only. The
 app must not call the login-required full-list endpoint, infer hidden entries,
 or describe an empty or partial preview as the user's complete forum list.
 
+Public reply activity is a separate credential-free request to the public
+UserPost endpoint. Its common data uses only client type 2 and the
+endpoint-specific client version `8`; the body otherwise contains only the
+positive target UID, bounded page size, one-based page number, and
+`need_content=1`. `is_thread` and `is_view_card` remain at their Protobuf zero
+defaults. The request must not include BDUSS, STOKEN, Cookie, Authorization,
+screen dimensions, CUID, or another device identifier. Responses are limited to
+4 MiB, mapping is capped at 100 outer groups and 100 inner records per group,
+and the server's `hide_post` privacy state is preserved.
+
+The response groups activity by owning thread, but each inner content record is
+an independent reply. Its inner positive post ID, creation time, and post type
+are authoritative; the outer group post ID must never be used as a reply ID or
+nested-reply parent. Type zero can navigate to that exact ordinary floor. Type
+one can pass only the thread ID and inner child ID to the existing child-only
+parent resolver. Unknown types remain non-navigable instead of being guessed.
+Pagination ends on an empty raw group list, while duplicate-only or wholly
+unusable mapped pages stop local continuation without rewriting prior results.
+
 Anonymous forum-channel requests may contain only the public forum ID, a
 type-15 general channel's ID/name/default flag, page size and number, independent
 sort value, and the previous page's last thread ID. Server-provided sort menus

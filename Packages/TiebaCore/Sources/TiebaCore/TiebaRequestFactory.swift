@@ -32,6 +32,7 @@ struct TiebaRequestFactory: Sendable {
   static let serviceHost = TiebaEndpointPolicy.protobufHost
   static let webHost = TiebaEndpointPolicy.webHost
   static let multipartBoundary = "-*_r1999"
+  static let userRepliesClientVersion = "8"
 
   let configuration: TiebaClientConfiguration
 
@@ -312,6 +313,31 @@ struct TiebaRequestFactory: Sendable {
     data.pn = UInt32(page)
     data.common = common
     data.isViewCard = 1
+
+    var message = UserPostReqIdl()
+    message.data = data
+    return try request(
+      path: "/c/u/feed/userpost",
+      command: 303_002,
+      protobuf: message.serializedData()
+    )
+  }
+
+  func userReplies(userID: Int64, page: Int, pageSize: Int) throws -> URLRequest {
+    try validate(identifier: userID, name: "User ID")
+    try validate(page: page)
+    try validate(pageSize: pageSize, maximum: 100)
+
+    var common = CommonReq()
+    common.clientType = 2
+    common.clientVersion = Self.userRepliesClientVersion
+
+    var data = UserPostReqIdl.DataReq()
+    data.uid = userID
+    data.rn = UInt32(pageSize)
+    data.needContent = 1
+    data.pn = UInt32(page)
+    data.common = common
 
     var message = UserPostReqIdl()
     message.data = data
