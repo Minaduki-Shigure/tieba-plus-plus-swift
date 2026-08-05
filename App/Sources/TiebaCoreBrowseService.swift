@@ -582,6 +582,93 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     )
   }
 
+  func userRelations(userID: Int64, kind: UserRelationKind, page: Int) async throws
+    -> UserRelationPageData
+  {
+    let coreKind = Self.mapUserRelationKind(kind)
+    let response: TiebaUserRelationPage
+    do {
+      response = try await client.getUserRelations(
+        userID: userID,
+        kind: coreKind,
+        page: page
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    try Self.validateUserRelationPageContext(
+      response,
+      expectedUserID: userID,
+      expectedKind: kind
+    )
+    let contentFilter = await contentFilterSnapshot()
+    return try Self.mapUserRelationPage(
+      response,
+      expectedUserID: userID,
+      expectedKind: kind,
+      applying: contentFilter
+    )
+  }
+
+  static func mapUserRelationPage(
+    _ response: TiebaUserRelationPage,
+    expectedUserID: Int64,
+    expectedKind: UserRelationKind,
+    applying filter: ContentFilterSnapshot = .empty
+  ) throws -> UserRelationPageData {
+    try validateUserRelationPageContext(
+      response,
+      expectedUserID: expectedUserID,
+      expectedKind: expectedKind
+    )
+
+    return UserRelationPageData(
+      users: response.users.map { user in
+        filter.applying(
+          to: BrowseRelatedUser(
+            id: user.id,
+            username: user.username,
+            displayName: user.displayName,
+            portraitURL: SecureTiebaURL.portrait(user.portrait),
+            introduction: user.introduction
+          )
+        )
+      },
+      currentPage: response.pagination.currentPage,
+      totalCount: response.pagination.totalCount,
+      hasMore: response.pagination.hasMore,
+      notice: response.notice,
+      visibilitySwitch: response.visibilitySwitch
+    )
+  }
+
+  private static func validateUserRelationPageContext(
+    _ response: TiebaUserRelationPage,
+    expectedUserID: Int64,
+    expectedKind: UserRelationKind
+  ) throws {
+    guard
+      expectedUserID > 0,
+      response.requestedUserID == expectedUserID,
+      response.kind == mapUserRelationKind(expectedKind)
+    else {
+      throw BrowseError.unavailable("公开用户关系列表响应与请求不匹配。")
+    }
+  }
+
+  private static func mapUserRelationKind(
+    _ kind: UserRelationKind
+  ) -> TiebaUserRelationKind {
+    switch kind {
+    case .following:
+      .following
+    case .followers:
+      .followers
+    }
+  }
+
   private static func mapUserReplyTarget(
     _ target: TiebaUserReplyTarget
   ) -> BrowseUserReplyTarget {
@@ -1414,7 +1501,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     case .invalidProtobuf:
       message = "贴吧返回了无法识别的数据，协议可能已经更新。"
     case .invalidJSON:
-      message = "贴吧返回了无法识别的搜索数据，接口可能已经更新。"
+      message = "贴吧返回了无法识别的数据，接口可能已经更新。"
     case .invalidAuthenticatedResponse:
       message = "贴吧返回了不匹配的账户数据，请重新登录后再试。"
     case .forumNotFollowed:

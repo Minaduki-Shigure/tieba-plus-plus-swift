@@ -84,6 +84,8 @@ the source metadata is updated to that tested IPA.
 - Paginated public threads on user profiles
 - Lazily paginated public replies on user profiles, with exact ordinary-floor
   navigation and child-only nested-reply resolution
+- Read-only public following and follower lists with profile navigation, local
+  filtering, refresh, and endpoint-aware pagination
 - Default-off combined public nickname and username presentation
 - Local case-sensitive literal-keyword and exact UID/name user block/allow lists
 - Placeholder or fully hidden presentation for locally blocked content
@@ -312,6 +314,32 @@ the outer group post ID is never treated as a parent. Unknown post types remain
 visible but have no guessed navigation. TiebaLite presents this history only for
 the current account, while the separately researched guest contract exposes the
 same public data without credentials or account-only fields.
+
+Public following and follower lists are separate anonymous signed-form reads.
+Following uses `POST https://tiebac.baidu.com/c/u/follow/followList`; followers
+uses `POST https://tiebac.baidu.com/c/u/fans/page`. Before signing, either form
+contains exactly `_client_version=22.6.5.1`, one-based `pn`, and the positive
+target `uid`; the final form adds only `sign`, the compatibility MD5 over the
+sorted fields and fixed Tieba suffix. There is no query or protobuf common block,
+and the requests contain no BDUSS, STOKEN, Cookie, Authorization, CUID, IMEI,
+screen, network, or other device field. Each response is limited to 1 MiB. Since
+neither response echoes the target UID, Core labels the result with the requested
+UID and relation kind, and the App validates that request context before
+accepting a page.
+
+The two endpoints have different pagination behavior. Following validates the
+returned page, nonnegative total, bounded list, and binary `has_more`; an observed
+full 20-row page can require one bounded next-page probe even when `has_more=0`,
+while an empty page always stops. Followers validates its nested page object,
+nonnegative counts, binary flags, and bounded list, then follows the server's
+`has_more`; an empty page also stops. Duplicate-only or nonadvancing pages stop
+local continuation without replacing prior rows. Local user filtering uses the
+raw list tail for pagination, so hiding the displayed tail cannot stall loading.
+The returned `follow_list_switch` and `tips_text` are retained only as opaque
+metadata: observed visible and unavailable results can share the same switch, so
+neither value establishes a privacy state. These public lists likewise do not
+establish whether the active account follows, is followed by, or can mutate any
+listed user; this surface deliberately has no relationship write controls.
 
 Tieba's followed-forum list still rejects anonymous requests and is not exposed
 as a misleading public-profile tab.

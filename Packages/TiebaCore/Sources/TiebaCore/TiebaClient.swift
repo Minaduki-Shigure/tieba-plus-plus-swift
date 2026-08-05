@@ -476,6 +476,24 @@ public actor TiebaClient {
     )
   }
 
+  public func getUserRelations(
+    userID: Int64,
+    kind: TiebaUserRelationKind,
+    page: Int = 1
+  ) async throws -> TiebaUserRelationPage {
+    let request = try requestFactory.userRelations(userID: userID, kind: kind, page: page)
+    let body = try await send(
+      request,
+      maximumBodyBytes: TiebaPublicSocialPolicy.maximumResponseBodyBytes
+    )
+    return try TiebaPublicSocialDecoder.page(
+      from: body,
+      requestedUserID: userID,
+      kind: kind,
+      requestedPage: page
+    )
+  }
+
   public func getForumOverview(forumID: Int64) async throws -> TiebaForumOverview {
     let request = try requestFactory.forumOverview(forumID: forumID)
     let body = try await send(request)

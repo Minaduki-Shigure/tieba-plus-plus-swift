@@ -514,6 +514,19 @@ private actor UserProfileServiceStub: UserProfileService {
     )
   }
 
+  func userRelations(userID: Int64, kind: UserRelationKind, page: Int) async throws
+    -> UserRelationPageData
+  {
+    UserRelationPageData(
+      users: [],
+      currentPage: page,
+      totalCount: 0,
+      hasMore: false,
+      notice: "",
+      visibilitySwitch: nil
+    )
+  }
+
   func resumeThreads(id: Int, returning value: UserThreadPageData) -> Bool {
     guard let continuation = pendingThreads.removeValue(forKey: id) else { return false }
     continuation.resume(returning: value)

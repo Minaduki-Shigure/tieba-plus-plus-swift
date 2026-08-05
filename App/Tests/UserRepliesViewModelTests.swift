@@ -304,6 +304,12 @@ private actor UserReplyServiceStub: UserProfileService {
     }
   }
 
+  func userRelations(userID: Int64, kind: UserRelationKind, page: Int) async throws
+    -> UserRelationPageData
+  {
+    throw UserReplyStubError.unexpectedRequest
+  }
+
   func requestSnapshot() -> [UserReplyRequest] { requests }
 
   func failSuspendedRequest(id: Int) {

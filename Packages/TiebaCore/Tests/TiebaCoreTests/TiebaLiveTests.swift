@@ -676,6 +676,42 @@ final class TiebaLiveTests: XCTestCase {
     )
   }
 
+  func testAnonymousPublicUserRelationsUseCredentialFreeSignedForms() async throws {
+    guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
+      throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
+    }
+
+    let configuredUserID = ProcessInfo.processInfo.environment["TIEBA_LIVE_RELATION_USER_ID"]
+      .flatMap { Int64($0) }
+    let userID = configuredUserID ?? 957_339_815
+    guard userID > 0 else {
+      throw XCTSkip("TIEBA_LIVE_RELATION_USER_ID must be a positive decimal UID.")
+    }
+    let client = TiebaClient(
+      configuration: .init(userAgent: "TiebaPlusPlus/0.56 integration-test")
+    )
+
+    for kind in [TiebaUserRelationKind.following, .followers] {
+      let relations = try await client.getUserRelations(userID: userID, kind: kind)
+      XCTAssertEqual(relations.requestedUserID, userID)
+      XCTAssertEqual(relations.kind, kind)
+      XCTAssertEqual(relations.pagination.currentPage, 1)
+      XCTAssertFalse(relations.pagination.hasPrevious)
+      XCTAssertLessThanOrEqual(
+        relations.users.count,
+        TiebaPublicSocialPolicy.maximumResponseUserCount
+      )
+      XCTAssertEqual(Set(relations.users.map(\.id)).count, relations.users.count)
+      XCTAssertTrue(
+        relations.users.allSatisfy {
+          $0.id > 0
+            && !$0.preferredName.isEmpty
+            && !$0.portrait.contains("?")
+        }
+      )
+    }
+  }
+
   func testAnonymousPublicForumOverviewModeratorsAndRules() async throws {
     guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
       throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")

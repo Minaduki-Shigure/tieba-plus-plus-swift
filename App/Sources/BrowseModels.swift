@@ -445,6 +445,74 @@ struct BrowseUserProfile: Identifiable, Sendable, Hashable {
   }
 }
 
+enum UserRelationKind: String, CaseIterable, Identifiable, Hashable, Sendable {
+  case following
+  case followers
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .following:
+      "关注"
+    case .followers:
+      "粉丝"
+    }
+  }
+}
+
+struct BrowseRelatedUser: Identifiable, Hashable, Sendable {
+  let id: Int64
+  let username: String
+  let displayName: String
+  let portraitURL: URL?
+  let introduction: String
+  let localVisibility: LocalContentVisibility
+
+  init(
+    id: Int64,
+    username: String,
+    displayName: String,
+    portraitURL: URL?,
+    introduction: String,
+    localVisibility: LocalContentVisibility = .visible
+  ) {
+    self.id = id
+    self.username = username
+    self.displayName = displayName
+    self.portraitURL = portraitURL
+    self.introduction = introduction
+    self.localVisibility = localVisibility
+  }
+
+  var preferredName: String {
+    let displayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !displayName.isEmpty { return displayName }
+    let username = username.trimmingCharacters(in: .whitespacesAndNewlines)
+    return username.isEmpty ? String(id) : username
+  }
+
+  func withLocalVisibility(_ visibility: LocalContentVisibility) -> Self {
+    BrowseRelatedUser(
+      id: id,
+      username: username,
+      displayName: displayName,
+      portraitURL: portraitURL,
+      introduction: introduction,
+      localVisibility: visibility
+    )
+  }
+}
+
+struct UserRelationPageData: Hashable, Sendable {
+  let users: [BrowseRelatedUser]
+  let currentPage: Int
+  let totalCount: Int
+  let hasMore: Bool
+  let notice: String
+  let visibilitySwitch: Int?
+}
+
 struct UserThreadPageData: Sendable {
   let threads: [BrowseThread]
   let currentPage: Int

@@ -53,6 +53,8 @@ let comments = try await client.getComments(
 if let userID = posts.posts[0].author?.id {
     let profile = try await client.getUserProfile(userID: userID)
     let publicThreads = try await client.getUserThreads(userID: userID)
+    let following = try await client.getUserRelations(userID: userID, kind: .following)
+    let followers = try await client.getUserRelations(userID: userID, kind: .followers)
 }
 ```
 
@@ -137,7 +139,12 @@ not advertise a usable sign state; it is not permission to attempt a write.
 - Public profiles use Profile `303012` with explicit guest fields; public user
   threads use UserPost `303002` and terminate pagination on an empty page. A
   profile's liked-forum array is a limited public preview rather than a complete
-  anonymous followed-forum list.
+  anonymous followed-forum list. Read-only following and follower lists use the
+  HTTPS form endpoints `/c/u/follow/followList` and `/c/u/fans/page`; each signed
+  request contains only fixed client version `22.6.5.1`, one-based page, target
+  UID, and signature, with no account credential or device field. The two
+  endpoints retain their distinct validated pagination semantics and share a
+  1 MiB response limit.
 - Search supports `/mo/q/search/forum`, `/mo/q/search/thread`, and
   `/mo/q/search/user`; global thread search is restricted to topic results and
   supports newest/oldest/relevance sorting with endpoint-specific wire values,

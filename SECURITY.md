@@ -216,6 +216,37 @@ Liked forums embedded in that public response are a bounded preview only. The
 app must not call the login-required full-list endpoint, infer hidden entries,
 or describe an empty or partial preview as the user's complete forum list.
 
+Public following and follower lists are independent credential-free form reads.
+Following must use `POST https://tiebac.baidu.com/c/u/follow/followList`, and
+followers must use `POST https://tiebac.baidu.com/c/u/fans/page`. Before signing,
+either body contains exactly `_client_version=22.6.5.1`, a positive target `uid`,
+and a one-based `pn`; the final body adds only `sign`, the protocol-compatibility
+MD5 over those sorted fields and the fixed suffix. There is no query or protobuf
+common request. Neither endpoint may receive BDUSS, STOKEN, Cookie,
+Authorization, CUID, IMEI, Android ID, model, screen, network, or another device
+or account field. Responses are limited to 1 MiB before decoding.
+
+Neither relation response echoes the target UID. Core must carry the requested
+UID and relation kind as request context, and the App must reject any page whose
+context does not match the active public-profile navigation. Following pages must
+validate the exact returned page, a nonnegative total, binary `has_more`, and a
+bounded raw list. Because an observed full 20-row page can report `has_more=0`
+while another page exists, one bounded continuation probe is allowed for a full
+page; an empty page stops unconditionally. Follower pages must validate the exact
+nested current page, nonnegative pagination values, binary flags, and a bounded
+list, then obey the server's `has_more`; an empty page also stops. Duplicate-only
+or stalled pages must stop local continuation, and local filtering must never
+replace the raw server tail used to trigger pagination.
+
+`follow_list_switch`, `tips_text`, and their follower equivalents are untrusted,
+opaque presentation metadata, not privacy assertions. Visible and unavailable
+samples may return the same switch value, so the App must not synthesize an
+`isHidden` state or claim that a list is public or private from either field. A
+returned public-list row is also not authoritative active-account relationship
+state: it must not create follow, unfollow, mutual-follow, or other account write
+controls. Empty network results and lists emptied by local filtering remain
+distinct UI states without changing those request or privacy boundaries.
+
 Public reply activity is a separate credential-free request to the public
 UserPost endpoint. Its common data uses only client type 2 and the
 endpoint-specific client version `8`; the body otherwise contains only the

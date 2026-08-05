@@ -569,6 +569,19 @@ extension ContentFilterSnapshot {
     )
   }
 
+  func visibility(for user: BrowseRelatedUser) -> LocalContentVisibility {
+    visibility(
+      isBlocked: blocksKeyword(user.displayName)
+        || blocksKeyword(user.username)
+        || blocksKeyword(user.introduction)
+        || blocksUser(
+          id: user.id,
+          preferredName: user.preferredName,
+          username: user.username
+        )
+    )
+  }
+
   func visibility(
     for result: ForumPostSearchItem,
     hasKnownVideo: Bool = false
@@ -625,6 +638,10 @@ extension ContentFilterSnapshot {
 
   func applying(to reply: BrowseUserReply) -> BrowseUserReply {
     reply.withLocalVisibility(visibility(for: reply))
+  }
+
+  func applying(to user: BrowseRelatedUser) -> BrowseRelatedUser {
+    user.withLocalVisibility(visibility(for: user))
   }
 
   func applying(

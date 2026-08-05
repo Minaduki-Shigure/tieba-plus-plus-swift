@@ -51,6 +51,7 @@ struct UserProfileView: View {
   @State private var selectedActivity: UserProfileActivity = .threads
   @State private var contentFilterMessage: String?
   @State private var portraitPresentation: UserProfilePortraitPresentation?
+  @State private var relationKind: UserRelationKind?
 
   init(
     userID: Int64,
@@ -121,6 +122,18 @@ struct UserProfileView: View {
     .fullScreenCover(item: $portraitPresentation) { presentation in
       ImageViewer(url: presentation.sourceURL)
     }
+    .navigationDestination(isPresented: relationsPresented) {
+      if let relationKind {
+        UserRelationsView(
+          userID: viewModel.userID,
+          initialKind: relationKind,
+          service: service,
+          historyRepository: historyRepository,
+          favoritesRepository: favoritesRepository,
+          searchHistoryRepository: searchHistoryRepository
+        )
+      }
+    }
     .task { viewModel.loadIfNeeded() }
     .task(id: selectedActivity) {
       if selectedActivity == .replies {
@@ -151,9 +164,14 @@ struct UserProfileView: View {
   private var profileList: some View {
     List {
       if let profile = viewModel.profile {
-        UserProfileHeader(profile: profile) {
-          portraitPresentation = UserProfilePortraitPresentation(profile: profile)
-        }
+        UserProfileHeader(
+          profile: profile,
+          onOpenPortrait: {
+            portraitPresentation = UserProfilePortraitPresentation(profile: profile)
+          },
+          onOpenFollowing: { relationKind = .following },
+          onOpenFollowers: { relationKind = .followers }
+        )
           .listRowSeparator(.hidden)
 
         likedForumPreview(profile)
@@ -382,6 +400,17 @@ struct UserProfileView: View {
     }
   }
 
+  private var relationsPresented: Binding<Bool> {
+    Binding(
+      get: { relationKind != nil },
+      set: { isPresented in
+        if !isPresented {
+          relationKind = nil
+        }
+      }
+    )
+  }
+
   @ViewBuilder
   private func likedForumPreview(_ profile: BrowseUserProfile) -> some View {
     let totalCount = max(profile.followedForumCount, profile.likedForums.count)
@@ -424,6 +453,8 @@ struct UserProfileView: View {
 private struct UserProfileHeader: View {
   let profile: BrowseUserProfile
   let onOpenPortrait: () -> Void
+  let onOpenFollowing: () -> Void
+  let onOpenFollowers: () -> Void
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
 
   private var displayedName: String {
@@ -482,9 +513,17 @@ private struct UserProfileHeader: View {
       }
 
       HStack(spacing: 0) {
-        stat(title: "关注", value: Int64(profile.followingCount))
+        statButton(
+          title: "关注",
+          value: Int64(profile.followingCount),
+          action: onOpenFollowing
+        )
         Divider().frame(height: 30)
-        stat(title: "粉丝", value: Int64(profile.followerCount))
+        statButton(
+          title: "粉丝",
+          value: Int64(profile.followerCount),
+          action: onOpenFollowers
+        )
         Divider().frame(height: 30)
         stat(title: "获赞", value: profile.totalAgreeCount)
       }
@@ -577,6 +616,21 @@ private struct UserProfileHeader: View {
         .foregroundStyle(.secondary)
     }
     .frame(maxWidth: .infinity)
+  }
+
+  private func statButton(
+    title: String,
+    value: Int64,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      stat(title: title, value: value)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel("\(title) \(max(value, 0).formatted())")
+    .help("查看\(title)列表")
   }
 }
 

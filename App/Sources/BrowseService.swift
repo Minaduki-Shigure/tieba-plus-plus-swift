@@ -178,6 +178,8 @@ protocol UserProfileService: Sendable {
     -> UserThreadPageData
   func userReplies(userID: Int64, page: Int, pageSize: Int) async throws
     -> UserReplyPageData
+  func userRelations(userID: Int64, kind: UserRelationKind, page: Int) async throws
+    -> UserRelationPageData
 }
 
 protocol ForumInformationService: Sendable {

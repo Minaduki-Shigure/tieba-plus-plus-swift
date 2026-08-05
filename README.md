@@ -27,11 +27,12 @@ experimental or unsupported.
   replies and mentions. It uses an HTTPS Protobuf ReplyMe request and a minimal
   signed HTTPS AtMe form, paginates in memory, and discards responses when the
   active account lease changes.
-- **Current main source:** Public user profiles also expose a separate,
-  credential-free reply history. It lazily paginates ordinary floors and nested
-  replies, preserves server privacy state, and uses exact target-aware
-  navigation. It will not enter the public app source until a tagged IPA passes
-  the release checks.
+- **Current main source:** Public user profiles also expose separate,
+  credential-free reply history plus read-only following and follower lists.
+  These surfaces paginate lazily, preserve returned notices without guessing
+  privacy state, and keep local filtering separate from network pagination.
+  They will not enter the public app source until a tagged IPA passes the
+  release checks.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
   XcodeGen 2.45.4 or newer.
 - **Automated checks:** GitHub Actions runs package tests and an unsigned
@@ -63,8 +64,10 @@ experimental or unsupported.
   bounded channel menus with independent cursors.
 - **Public information:** Forum introductions, statistics, rules, moderator
   teams, and credential-free user profiles are available. Profiles include
-  independently paginated public topics and replies; public liked-forum data is
-  presented only as a bounded preview.
+  independently paginated public topics, replies, following, and followers;
+  public liked-forum data is presented only as a bounded preview. Relationship
+  lists are read-only public endpoint snapshots, not proof of the active
+  account's relationship with any listed user.
 
 ### Threads and media
 
