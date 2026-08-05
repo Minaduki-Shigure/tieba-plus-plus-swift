@@ -383,18 +383,18 @@ final class TiebaClientTests: XCTestCase {
 
     let result = try await client.getComments(
       threadID: 100,
-      resolvingCommentID: 301
+      resolvingCommentID: 202
     )
 
     XCTAssertEqual(result.parentPost.id, 201)
-    XCTAssertTrue(result.comments.contains(where: { $0.id == 301 }))
+    XCTAssertTrue(result.comments.contains(where: { $0.id == 202 }))
     let capturedRequest = await transport.lastRequest()
     let request = try XCTUnwrap(capturedRequest)
     let body = try XCTUnwrap(request.httpBody)
     let decoded = try PbFloorReqIdl(serializedBytes: protobufPayload(from: body))
     XCTAssertEqual(decoded.data.kz, 100)
     XCTAssertEqual(decoded.data.pid, 0)
-    XCTAssertEqual(decoded.data.spid, 301)
+    XCTAssertEqual(decoded.data.spid, 202)
     XCTAssertEqual(decoded.data.pn, 1)
   }
 

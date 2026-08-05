@@ -111,11 +111,21 @@ final class RemoteVoiceExportTests: XCTestCase {
     defer { try? FileManager.default.removeItem(at: directory) }
     let fileURL = directory.appendingPathComponent("voice")
     let header = Data("#!AMR\n".utf8)
-    let malformedPayloads = [
-      header + Data([0x04]) + Data(repeating: 0, count: 11),
-      header + Data([0x84]) + Data(repeating: 0, count: 12),
-      header + Data([0x4C]),
-      amrData(frameCount: 1) + Data([0x00]),
+    var truncatedFrame = header
+    truncatedFrame.append(0x04)
+    truncatedFrame.append(Data(repeating: 0, count: 11))
+    var invalidPadding = header
+    invalidPadding.append(0x84)
+    invalidPadding.append(Data(repeating: 0, count: 12))
+    var reservedFrameType = header
+    reservedFrameType.append(0x4C)
+    var trailingByte = amrData(frameCount: 1)
+    trailingByte.append(0x00)
+    let malformedPayloads: [Data] = [
+      truncatedFrame,
+      invalidPadding,
+      reservedFrameType,
+      trailingByte,
     ]
 
     for data in malformedPayloads {
