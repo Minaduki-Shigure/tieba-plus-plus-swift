@@ -436,14 +436,14 @@ private actor UserRelationServiceStub: UserProfileService {
       throw UserRelationStubError.failure
     case .suspended(let id):
       startedSuspensions.insert(id)
-      let waiters = startWaiters.removeValue(forKey: id) ?? []
-      waiters.forEach { $0.resume() }
+      let startedWaiters = startWaiters.removeValue(forKey: id) ?? []
+      startedWaiters.forEach { $0.resume() }
       let response: UserRelationPageData = try await withCheckedThrowingContinuation {
         suspended[id] = $0
       }
       returnedSuspensions.insert(id)
-      let waiters = returnWaiters.removeValue(forKey: id) ?? []
-      waiters.forEach { $0.resume() }
+      let returnedWaiters = returnWaiters.removeValue(forKey: id) ?? []
+      returnedWaiters.forEach { $0.resume() }
       return response
     }
   }
