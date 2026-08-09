@@ -378,7 +378,7 @@ private func textReplyAccountUUID(_ value: UInt8) -> UUID {
   UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, value))
 }
 
-private func assertTextReplyAccountError<T>(
+private func assertTextReplyAccountError<T: Sendable>(
   _ expected: TextReplySubmissionError,
   operation: () async throws -> T,
   file: StaticString = #filePath,

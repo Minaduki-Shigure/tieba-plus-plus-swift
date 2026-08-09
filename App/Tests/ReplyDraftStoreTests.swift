@@ -205,7 +205,7 @@ private func draftTarget(
   )!
 }
 
-private func XCTAssertThrowsErrorAsync<T>(
+private func XCTAssertThrowsErrorAsync<T: Sendable>(
   _ expression: @autoclosure () async throws -> T,
   _ errorHandler: (Error) -> Void,
   file: StaticString = #filePath,

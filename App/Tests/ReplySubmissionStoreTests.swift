@@ -794,9 +794,9 @@ private func replyUUID(_ value: UInt8) -> UUID {
 }
 
 @MainActor
-private func assertReplySubmissionError<T>(
+private func assertReplySubmissionError<T: Sendable>(
   _ expected: TextReplySubmissionError,
-  operation: () async throws -> T,
+  operation: @MainActor () async throws -> T,
   file: StaticString = #filePath,
   line: UInt = #line
 ) async {
