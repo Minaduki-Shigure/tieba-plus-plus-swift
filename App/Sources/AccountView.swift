@@ -166,8 +166,6 @@ struct AccountView: View {
             NavigationLink {
               FollowedForumsView(
                 browseService: browseService,
-                accountService: accountService,
-                vault: vault,
                 historyRepository: historyRepository,
                 favoritesRepository: favoritesRepository,
                 searchHistoryRepository: searchHistoryRepository

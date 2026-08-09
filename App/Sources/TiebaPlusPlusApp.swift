@@ -10,6 +10,7 @@ struct TiebaPlusPlusApp: App {
   @StateObject private var mediaPlaybackCoordinator: MediaPlaybackCoordinator
   @StateObject private var voicePlaybackController: VoicePlaybackController
   @StateObject private var videoPlaybackController: VideoPlaybackController
+  @StateObject private var followedForumsViewModel: FollowedForumsViewModel
   @AppStorage(AppPreferenceKey.appearance)
   private var appearance = AppAppearance.system.rawValue
   @AppStorage(AppPreferenceKey.accentColor)
@@ -56,6 +57,9 @@ struct TiebaPlusPlusApp: App {
     )
     self.accountVault = accountVault
     self.accountService = accountService
+    _followedForumsViewModel = StateObject(
+      wrappedValue: FollowedForumsViewModel(service: accountService, vault: accountVault)
+    )
     self.contentAgreementStore = ContentAgreementStore(
       access: AccountAccess(vault: accountVault, service: accountService)
     )
@@ -136,6 +140,7 @@ struct TiebaPlusPlusApp: App {
       .environmentObject(mediaPlaybackCoordinator)
       .environmentObject(voicePlaybackController)
       .environmentObject(videoPlaybackController)
+      .environmentObject(followedForumsViewModel)
       .background {
         ExternalWebBrowserPresenter(page: externalWebPresentation.page) { pageID in
           externalWebPresentation.dismiss(id: pageID)

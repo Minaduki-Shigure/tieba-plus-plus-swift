@@ -1,35 +1,26 @@
-import Combine
 import SwiftUI
 
 struct FollowedForumsView: View {
   let browseService:
     any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
-  let accountService: any AccountService
-  let vault: any AccountVault
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
 
-  @StateObject private var viewModel: FollowedForumsViewModel
+  @State private var surfaceID = UUID()
+  @EnvironmentObject private var viewModel: FollowedForumsViewModel
 
   init(
     browseService: any BrowseService & ForumPostSearchService & UserProfileService
       & ForumInformationService,
-    accountService: any AccountService,
-    vault: any AccountVault,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository
   ) {
     self.browseService = browseService
-    self.accountService = accountService
-    self.vault = vault
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
-    _viewModel = StateObject(
-      wrappedValue: FollowedForumsViewModel(service: accountService, vault: vault)
-    )
   }
 
   var body: some View {
@@ -47,18 +38,10 @@ struct FollowedForumsView: View {
         forumList
       }
     }
-    .navigationTitle("我的关注")
+    .navigationTitle("关注的贴吧")
     .navigationBarTitleDisplayMode(.inline)
-    .task { await viewModel.refresh() }
-    .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
-      Task { @MainActor in viewModel.accountSessionDidChange() }
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .forumMembershipDidChange)) {
-      notification in
-      guard let change = ForumMembershipChange(notification) else { return }
-      Task { @MainActor in viewModel.forumMembershipDidChange(change) }
-    }
-    .onDisappear(perform: viewModel.cancel)
+    .onAppear { viewModel.fullListSurfaceDidAppear(id: surfaceID) }
+    .onDisappear { viewModel.fullListSurfaceDidDisappear(id: surfaceID) }
   }
 
   private var forumList: some View {

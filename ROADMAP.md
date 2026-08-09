@@ -133,7 +133,8 @@ the source metadata is updated to that tested IPA.
   device-only Keychain v3 storage, account switching, and local logout
 - Explicit current-account shortcut to the existing credential-free public
   profile and its public topic, reply, following, and follower views
-- Paginated followed-forum list for the active account
+- App-scoped, memory-only followed-forum state shared by a six-item logged-in
+  home projection and the active account's complete paginated list
 - Separate read-only Tieba cloud favorites with offset pagination, saved-post
   navigation, deleted-thread state, and account-lease isolation
 - Foreground ReplyMe and AtMe inbox with account-lease isolation, refresh,
@@ -415,7 +416,25 @@ establish whether the active account follows, is followed by, or can mutate any
 listed user; this surface deliberately has no relationship write controls.
 
 Tieba's followed-forum list still rejects anonymous requests and is not exposed
-as a misleading public-profile tab.
+as a misleading public-profile tab. The logged-in home page instead projects at
+most the first six entries from the same app-scoped, memory-only state used by
+the complete paginated list. New requests may start only while the home page or
+complete list is active. Every page reads the active account before transport
+and again after transport, and the result is accepted only while the exact
+`userID + sessionRevision` lease and requested page remain current. Account
+switching, logout, same-UID credential rotation, or a matching forum-membership
+change starts a new state epoch and synchronously removes the prior snapshot;
+an inactive surface remains empty until one of the two eligible surfaces becomes
+active again. Empty and duplicate-only continuation pages stop pagination rather
+than repeatedly advancing the server page number. The shared rows, page state,
+and lease are never persisted or reused across an app restart or account lease.
+These two surfaces are read only and initiate no automatic account operation;
+they do not currently provide pinning, unfollow, or batch check-in controls.
+Opening a forum continues to use the separate, explicitly confirmed
+per-forum membership and check-in workflow. Client-side lease checks prevent a
+late page from being published under another local session, but successful
+private-list retrieval and server-side account binding still require physical-
+device validation.
 The profile response may include a small public liked-forum preview. It is
 presented as a preview alongside the server's declared total, never as a full
 list, and an empty preview remains a valid privacy state. The authenticated

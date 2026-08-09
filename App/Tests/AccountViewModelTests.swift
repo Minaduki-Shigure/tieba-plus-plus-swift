@@ -163,7 +163,7 @@ final class AccountViewModelTests: XCTestCase {
       ]
     )
     let activeSessionReads = await vault.activeSessionReadCount()
-    XCTAssertEqual(activeSessionReads, 1)
+    XCTAssertEqual(activeSessionReads, 4)
   }
 
   func testFollowedForumsWithoutActiveSessionNeverCallsService() async throws {
@@ -178,8 +178,37 @@ final class AccountViewModelTests: XCTestCase {
     }
 
     XCTAssertEqual(viewModel.state, .failed("请先登录账户。"))
+    XCTAssertTrue(viewModel.isSignedOut)
     let requests = await service.followedRequestSnapshot()
     XCTAssertTrue(requests.isEmpty)
+
+    viewModel.accountSessionDidChange(loadImmediately: false)
+    XCTAssertEqual(viewModel.state, .idle)
+    XCTAssertFalse(viewModel.isSignedOut)
+  }
+
+  func testFollowedForumsServiceFailureDoesNotMarkSignedOut() async throws {
+    let vault = AccountVaultSpy(
+      sessions: [session(userID: 7, name: "active")],
+      activeUserID: 7
+    )
+    let service = AccountServiceSpy(
+      followedPages: [
+        1: .failure(AccountTestFailure(message: "network unavailable"))
+      ]
+    )
+    let viewModel = FollowedForumsViewModel(service: service, vault: vault)
+
+    viewModel.loadIfNeeded()
+    try await waitForAccountState {
+      if case .failed = viewModel.state { return true }
+      return false
+    }
+
+    XCTAssertEqual(viewModel.state, .failed("network unavailable"))
+    XCTAssertFalse(viewModel.isSignedOut)
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests, [FollowedRequest(userID: 7, page: 1, pageSize: 50)])
   }
 
   func testFollowedForumRelationshipChangeRestartsFromFirstPage() async throws {
@@ -236,6 +265,208 @@ final class AccountViewModelTests: XCTestCase {
     let requests = await service.followedRequestSnapshot()
     XCTAssertEqual(requests.map(\.userID), [7, 8])
     XCTAssertEqual(requests.map(\.page), [1, 1])
+  }
+
+  func testFollowedForumsDiscardFirstPageWhenSessionRevisionChangesDuringRequest() async throws {
+    let firstRevision = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+    let secondRevision = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+    let sessionBeforeRequest = session(
+      userID: 7,
+      name: "before",
+      sessionRevision: firstRevision
+    )
+    let sessionAfterRequest = session(
+      userID: 7,
+      name: "after",
+      sessionRevision: secondRevision
+    )
+    let vault = AccountVaultSpy(
+      sessions: [sessionAfterRequest],
+      activeUserID: 7,
+      activeSessionScript: [sessionBeforeRequest, sessionAfterRequest]
+    )
+    let page = FollowedForumPageData(
+      forums: [forum(id: 1, name: "stale")],
+      currentPage: 1,
+      hasMore: false
+    )
+    let service = AccountServiceSpy(followedPages: [1: .success(page)])
+    let viewModel = FollowedForumsViewModel(service: service, vault: vault)
+
+    viewModel.loadIfNeeded()
+    try await waitForAccountState {
+      await service.followedRequestSnapshot().count == 1 && viewModel.state == .idle
+    }
+
+    XCTAssertTrue(viewModel.forums.isEmpty)
+    XCTAssertEqual(viewModel.state, .idle)
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests, [FollowedRequest(userID: 7, page: 1, pageSize: 50)])
+    let activeSessionReads = await vault.activeSessionReadCount()
+    XCTAssertEqual(activeSessionReads, 2)
+  }
+
+  func testReplacingSuspendedInitialLoadPreventsCancelledTaskFromCallingService() async {
+    let vault = SuspendedActiveSessionVault(
+      session: session(userID: 7, name: "active")
+    )
+    let page = FollowedForumPageData(
+      forums: [forum(id: 1, name: "stale")],
+      currentPage: 1,
+      hasMore: false
+    )
+    let service = AccountServiceSpy(followedPages: [1: .success(page)])
+    let viewModel = FollowedForumsViewModel(service: service, vault: vault)
+
+    let initialRefresh = Task { await viewModel.refresh() }
+    await vault.waitUntilActiveSessionRequested()
+
+    viewModel.accountSessionDidChange(loadImmediately: false)
+    XCTAssertEqual(viewModel.state, .idle)
+    let released = await vault.releaseActiveSession()
+    XCTAssertTrue(released)
+    await initialRefresh.value
+
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertTrue(requests.isEmpty)
+    XCTAssertEqual(viewModel.state, .idle)
+  }
+
+  func testFollowedForumsDoNotRequestNextPageWhenLeaseChangedBeforeRequest() async throws {
+    let firstRevision = UUID(uuidString: "00000000-0000-0000-0000-000000000011")!
+    let secondRevision = UUID(uuidString: "00000000-0000-0000-0000-000000000012")!
+    let firstSession = session(
+      userID: 7,
+      name: "first",
+      sessionRevision: firstRevision
+    )
+    let rotatedSession = session(
+      userID: 7,
+      name: "rotated",
+      sessionRevision: secondRevision
+    )
+    let vault = AccountVaultSpy(
+      sessions: [rotatedSession],
+      activeUserID: 7,
+      activeSessionScript: [firstSession, firstSession, rotatedSession]
+    )
+    let firstPage = FollowedForumPageData(
+      forums: [forum(id: 1, name: "one")],
+      currentPage: 1,
+      hasMore: true
+    )
+    let service = AccountServiceSpy(followedPages: [1: .success(firstPage)])
+    let viewModel = FollowedForumsViewModel(service: service, vault: vault)
+
+    viewModel.loadIfNeeded()
+    try await waitForAccountState { viewModel.state == .loaded }
+    viewModel.loadMoreIfNeeded(current: try XCTUnwrap(viewModel.forums.last))
+    try await waitForAccountState {
+      await vault.activeSessionReadCount() == 3 && viewModel.state == .idle
+    }
+
+    XCTAssertTrue(viewModel.forums.isEmpty)
+    XCTAssertFalse(viewModel.isLoadingMore)
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests, [FollowedRequest(userID: 7, page: 1, pageSize: 50)])
+  }
+
+  func testFollowedForumsRejectUnexpectedReturnedPageNumber() async throws {
+    let vault = AccountVaultSpy(
+      sessions: [session(userID: 7, name: "active")],
+      activeUserID: 7
+    )
+    let unexpectedPage = FollowedForumPageData(
+      forums: [forum(id: 1, name: "one")],
+      currentPage: 2,
+      hasMore: false
+    )
+    let service = AccountServiceSpy(followedPages: [1: .success(unexpectedPage)])
+    let viewModel = FollowedForumsViewModel(service: service, vault: vault)
+
+    viewModel.loadIfNeeded()
+    try await waitForAccountState {
+      if case .failed = viewModel.state { return true }
+      return false
+    }
+
+    XCTAssertEqual(
+      viewModel.state,
+      .failed("贴吧返回了异常的关注贴吧页码，请重新加载后再试。")
+    )
+    XCTAssertTrue(viewModel.forums.isEmpty)
+    let activeSessionReads = await vault.activeSessionReadCount()
+    XCTAssertEqual(activeSessionReads, 2)
+  }
+
+  func testFollowedForumsStopPaginationWhenNextPageOnlyContainsDuplicates() async throws {
+    let vault = AccountVaultSpy(
+      sessions: [session(userID: 7, name: "active")],
+      activeUserID: 7
+    )
+    let firstPage = FollowedForumPageData(
+      forums: [forum(id: 1, name: "one"), forum(id: 2, name: "two")],
+      currentPage: 1,
+      hasMore: true
+    )
+    let duplicatePage = FollowedForumPageData(
+      forums: [forum(id: 2, name: "duplicate")],
+      currentPage: 2,
+      hasMore: true
+    )
+    let service = AccountServiceSpy(
+      followedPages: [1: .success(firstPage), 2: .success(duplicatePage)]
+    )
+    let viewModel = FollowedForumsViewModel(service: service, vault: vault)
+
+    viewModel.loadIfNeeded()
+    try await waitForAccountState { viewModel.state == .loaded }
+    viewModel.loadMoreIfNeeded(current: try XCTUnwrap(viewModel.forums.last))
+    try await waitForAccountState {
+      await vault.activeSessionReadCount() == 4 && !viewModel.isLoadingMore
+    }
+
+    XCTAssertEqual(viewModel.forums.map(\.name), ["one", "two"])
+    viewModel.loadMoreIfNeeded(current: try XCTUnwrap(viewModel.forums.last))
+    XCTAssertFalse(viewModel.isLoadingMore)
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2])
+  }
+
+  func testFollowedForumsHomeProjectionKeepsFirstSixForumsInOrder() {
+    let forums = (1...8).map { forum(id: Int64($0), name: "forum-\($0)") }
+
+    let visibleForums = FollowedForumsHomeProjection.visibleForums(from: forums)
+
+    XCTAssertEqual(FollowedForumsHomeProjection.maximumForumCount, 6)
+    XCTAssertEqual(visibleForums, Array(forums.prefix(6)))
+  }
+
+  func testFullListSurfaceRegistrationIsIdempotentAndSupportsMultipleSurfaces() {
+    let viewModel = FollowedForumsViewModel(
+      service: AccountServiceSpy(),
+      vault: AccountVaultSpy()
+    )
+    let firstSurfaceID = UUID()
+    let secondSurfaceID = UUID()
+
+    XCTAssertFalse(viewModel.hasActiveFullListSurface)
+    viewModel.fullListSurfaceDidAppear(id: firstSurfaceID)
+    viewModel.fullListSurfaceDidAppear(id: firstSurfaceID)
+    XCTAssertTrue(viewModel.hasActiveFullListSurface)
+    viewModel.fullListSurfaceDidDisappear(id: firstSurfaceID)
+    XCTAssertFalse(viewModel.hasActiveFullListSurface)
+    viewModel.fullListSurfaceDidDisappear(id: firstSurfaceID)
+    XCTAssertFalse(viewModel.hasActiveFullListSurface)
+
+    viewModel.fullListSurfaceDidAppear(id: firstSurfaceID)
+    viewModel.fullListSurfaceDidAppear(id: secondSurfaceID)
+    viewModel.fullListSurfaceDidDisappear(id: firstSurfaceID)
+    XCTAssertTrue(viewModel.hasActiveFullListSurface)
+
+    viewModel.fullListSurfaceDidDisappear(id: secondSurfaceID)
+    XCTAssertFalse(viewModel.hasActiveFullListSurface)
+    viewModel.cancel()
   }
 
   private func session(
@@ -356,11 +587,17 @@ private actor AccountServiceSpy: AccountService {
 private actor AccountVaultSpy: AccountVault {
   private var sessions: [Int64: StoredAccountSession]
   private var activeUserID: Int64?
+  private var activeSessionScript: [StoredAccountSession?]
   private var activeReads = 0
 
-  init(sessions: [StoredAccountSession] = [], activeUserID: Int64? = nil) {
+  init(
+    sessions: [StoredAccountSession] = [],
+    activeUserID: Int64? = nil,
+    activeSessionScript: [StoredAccountSession?] = []
+  ) {
     self.sessions = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
     self.activeUserID = activeUserID
+    self.activeSessionScript = activeSessionScript
   }
 
   func accountSummaries() async throws -> [AccountSummary] {
@@ -381,6 +618,9 @@ private actor AccountVaultSpy: AccountVault {
 
   func activeSession() async throws -> StoredAccountSession? {
     activeReads += 1
+    if !activeSessionScript.isEmpty {
+      return activeSessionScript.removeFirst()
+    }
     return activeUserID.flatMap { sessions[$0] }
   }
 
@@ -411,6 +651,48 @@ private actor AccountVaultSpy: AccountVault {
   func session(userID: Int64) -> StoredAccountSession? { sessions[userID] }
   func sessionCount() -> Int { sessions.count }
   func activeSessionReadCount() -> Int { activeReads }
+}
+
+private actor SuspendedActiveSessionVault: AccountVault {
+  private let storedSession: StoredAccountSession
+  private var activeSessionContinuation: CheckedContinuation<StoredAccountSession?, Never>?
+  private var activeSessionWasRequested = false
+  private var requestWaiters: [CheckedContinuation<Void, Never>] = []
+
+  init(session: StoredAccountSession) {
+    storedSession = session
+  }
+
+  func accountSummaries() async throws -> [AccountSummary] { [] }
+
+  func activeSession() async throws -> StoredAccountSession? {
+    return await withCheckedContinuation { continuation in
+      activeSessionContinuation = continuation
+      activeSessionWasRequested = true
+      let waiters = requestWaiters
+      requestWaiters.removeAll()
+      waiters.forEach { $0.resume() }
+    }
+  }
+
+  func upsert(_ session: StoredAccountSession) async throws {}
+  func switchActive(to userID: Int64) async throws {}
+  func remove(userID: Int64) async throws {}
+  func removeAll() async throws {}
+
+  func waitUntilActiveSessionRequested() async {
+    if activeSessionWasRequested { return }
+    await withCheckedContinuation { continuation in
+      requestWaiters.append(continuation)
+    }
+  }
+
+  func releaseActiveSession() -> Bool {
+    guard let continuation = activeSessionContinuation else { return false }
+    activeSessionContinuation = nil
+    continuation.resume(returning: storedSession)
+    return true
+  }
 }
 
 private actor OutOfOrderSummaryVault: AccountVault {

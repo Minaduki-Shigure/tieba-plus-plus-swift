@@ -62,6 +62,44 @@ final class RootStartupNavigationTests: XCTestCase {
     }
   }
 
+  func testFollowedForumsActivationOnlyKeepsEmptyRootPathActive() {
+    XCTAssertTrue(RootFollowedForumsActivationPolicy.isActive(path: []))
+  }
+
+  func testFollowedForumsActivationTreatsEveryDestinationAsInactive() {
+    let route = TiebaThreadRoute(threadID: 42, postID: 43)
+    let thread = ThreadHistorySnapshot(
+      threadID: 42,
+      forumName: "swift",
+      title: "Swift concurrency"
+    )
+    let destinations: [RootDestination] = [
+      .forum("swift"),
+      .search("query"),
+      .hotTopics,
+      .explore(.personalized),
+      .history,
+      .favorites,
+      .followedForums,
+      .account,
+      .settings,
+      .thread(thread),
+      .linkedThread(route),
+      .user(7),
+    ]
+
+    for destination in destinations {
+      XCTAssertFalse(
+        RootFollowedForumsActivationPolicy.isActive(path: [destination])
+      )
+    }
+    XCTAssertFalse(
+      RootFollowedForumsActivationPolicy.isActive(
+        path: [.forum("swift"), .followedForums]
+      )
+    )
+  }
+
   func testFavoriteForumDestinationIsUnaffectedByThreadOverrides() {
     let forum = ForumHistorySnapshot(
       forumID: 12,

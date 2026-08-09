@@ -21,6 +21,7 @@ struct RootView: View {
   @State private var linkErrorMessage: String?
   @Environment(\.scenePhase) private var scenePhase
   @EnvironmentObject private var mediaPlaybackCoordinator: MediaPlaybackCoordinator
+  @EnvironmentObject private var followedForumsViewModel: FollowedForumsViewModel
   @AppStorage(AppPreferenceKey.homeShowsRecentForums)
   private var homeShowsRecentForums = true
   @AppStorage(AppPreferenceKey.homeShowsDiscovery)
@@ -122,6 +123,8 @@ struct RootView: View {
             }
           }
         }
+
+        followedForumsSection
 
         if homeShowsDiscovery {
           Section("\u{53d1}\u{73b0}") {
@@ -279,6 +282,13 @@ struct RootView: View {
               RootFavoriteNavigation.destination(for: target, overrides: overrides)
             )
           }
+        case .followedForums:
+          FollowedForumsView(
+            browseService: service,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
+          )
         case .account:
           AccountView(
             browseService: service,
@@ -333,6 +343,9 @@ struct RootView: View {
     .onAppear {
       favoritesViewModel.reload()
       recentForumsViewModel.reload()
+      if RootFollowedForumsActivationPolicy.isActive(path: path) {
+        followedForumsViewModel.loadIfNeeded()
+      }
       searchSuggestionViewModel.setEnabled(searchSuggestionsEnabled)
       mediaPlaybackCoordinator.setSceneActive(scenePhase == .active)
     }
@@ -347,9 +360,12 @@ struct RootView: View {
         searchSuggestionViewModel.cancelAndClear()
       }
     }
-    .onChange(of: path) { _ in
+    .onChange(of: path) { path in
       searchSuggestionViewModel.cancelAndClear()
       recentForumsViewModel.reload()
+      if RootFollowedForumsActivationPolicy.isActive(path: path) {
+        followedForumsViewModel.loadIfNeeded()
+      }
     }
     .onDisappear { searchSuggestionViewModel.cancelAndClear() }
     .onReceive(NotificationCenter.default.publisher(for: .localFavoritesDidChange)) { _ in
@@ -357,6 +373,21 @@ struct RootView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: .forumBrowsingHistoryDidChange)) { _ in
       Task { @MainActor in recentForumsViewModel.reload() }
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+      let loadsImmediately = RootFollowedForumsActivationPolicy.isActive(path: path)
+        || followedForumsViewModel.hasActiveFullListSurface
+      followedForumsViewModel.accountSessionDidChange(loadImmediately: loadsImmediately)
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .forumMembershipDidChange)) {
+      notification in
+      guard let change = ForumMembershipChange(notification) else { return }
+      let loadsImmediately = RootFollowedForumsActivationPolicy.isActive(path: path)
+        || followedForumsViewModel.hasActiveFullListSurface
+      followedForumsViewModel.forumMembershipDidChange(
+        change,
+        loadImmediately: loadsImmediately
+      )
     }
     .onOpenURL(perform: openTiebaURL)
     .alert(
@@ -395,6 +426,41 @@ struct RootView: View {
       Button("取消", role: .cancel) { searchHistoryAction = nil }
     } message: {
       Text(searchHistoryActionMessage)
+    }
+  }
+
+  @ViewBuilder
+  private var followedForumsSection: some View {
+    let forums = FollowedForumsHomeProjection.visibleForums(
+      from: followedForumsViewModel.forums
+    )
+    if !forums.isEmpty {
+      Section("关注的贴吧") {
+        ForEach(forums) { forum in
+          Button {
+            path.append(.forum(forum.name))
+          } label: {
+            FollowedForumHomeRow(forum: forum)
+          }
+          .buttonStyle(.plain)
+        }
+
+        NavigationLink(value: RootDestination.followedForums) {
+          Label("查看全部", systemImage: "list.bullet")
+        }
+      }
+    } else if case .failed(let message) = followedForumsViewModel.state,
+      !followedForumsViewModel.isSignedOut
+    {
+      Section("关注的贴吧") {
+        Label(message, systemImage: "exclamationmark.triangle")
+          .foregroundStyle(.secondary)
+        Button {
+          followedForumsViewModel.reload()
+        } label: {
+          Label("重试", systemImage: "arrow.clockwise")
+        }
+      }
     }
   }
 
@@ -660,11 +726,69 @@ enum RootDestination: Hashable {
   case explore(ExploreSection)
   case history
   case favorites
+  case followedForums
   case account
   case settings
   case thread(ThreadHistorySnapshot)
   case linkedThread(TiebaThreadRoute)
   case user(Int64)
+}
+
+enum RootFollowedForumsActivationPolicy {
+  static func isActive(path: [RootDestination]) -> Bool {
+    path.isEmpty
+  }
+}
+
+private struct FollowedForumHomeRow: View {
+  let forum: FollowedForumItem
+
+  var body: some View {
+    HStack(spacing: 12) {
+      Image(systemName: "text.bubble")
+        .frame(width: 36, height: 36)
+        .background(Color.accentColor.opacity(0.12), in: Circle())
+        .foregroundStyle(Color.accentColor)
+        .accessibilityHidden(true)
+
+      VStack(alignment: .leading, spacing: 3) {
+        Text("\(forum.name)吧")
+          .foregroundStyle(.primary)
+          .lineLimit(1)
+
+        if forum.level > 0 || forum.experience > 0 {
+          HStack(spacing: 10) {
+            if forum.level > 0 {
+              Text("等级 \(forum.level)")
+            }
+            if forum.experience > 0 {
+              Text("经验 \(forum.experience.formatted())")
+            }
+          }
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        }
+      }
+
+      Spacer(minLength: 0)
+      Image(systemName: "chevron.right")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.tertiary)
+        .accessibilityHidden(true)
+    }
+    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+    .contentShape(Rectangle())
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("\(forum.name)吧")
+    .accessibilityValue(accessibilityValue)
+  }
+
+  private var accessibilityValue: String {
+    var values = [String]()
+    if forum.level > 0 { values.append("等级 \(forum.level)") }
+    if forum.experience > 0 { values.append("经验 \(forum.experience)") }
+    return values.joined(separator: "，")
+  }
 }
 
 enum RootStartupNavigation {

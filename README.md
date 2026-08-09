@@ -36,6 +36,10 @@ checks.
   Both feeds preserve local filtering and media preferences. Public profiles
   also expose separate reply history plus read-only following and follower lists;
   the account page links the active UID to that same credential-free public view.
+  A logged-in home page also shows at most six forums from the current account's
+  followed-forum list and links to the complete paginated list. Both surfaces
+  share one app-scoped, memory-only snapshot that is discarded when the account
+  session or a forum relationship changes.
   Multi-image galleries can switch between horizontal and vertical one-image
   paging while retaining a stable selected occurrence and bounded zoom state.
   These main-only changes will not enter the public app source until a tagged
@@ -134,10 +138,18 @@ checks.
   negative testing; STOKEN-dependent writes remain blocked. Existing v1/v2
   records migrate without STOKEN and retain their current BDUSS features; they
   must be logged in again before an STOKEN-dependent feature is available.
-- **Forum account state:** The active account can load its paginated
-  followed-forum list. A loaded forum independently reads authoritative
-  account-specific follow and check-in state, exposes confirmed follow/unfollow,
-  and offers an explicit single-forum check-in action when eligible.
+- **Forum account state:** On current `main`, the logged-in home page projects at
+  most six entries from the active account's followed-forum list and can open the
+  complete paginated list. They share one app-scoped, memory-only state. Each
+  page checks the exact `userID + sessionRevision` lease before and after its
+  request; account or forum-membership changes clear the snapshot, and empty or
+  duplicate-only continuation pages stop pagination. New list requests begin
+  only while the home page or complete list is active. These surfaces perform no
+  automatic write, retain nothing across accounts or app restarts, and currently
+  provide no pinning, unfollow, or batch check-in controls. A loaded forum
+  separately reads account-specific follow and check-in state and retains its
+  explicitly confirmed single-forum actions. Successful private-list retrieval
+  still requires physical-device validation and is not asserted by CI fixtures.
 - **Current-account public profile:** The account page can open the active UID in
   the same credential-free public profile used elsewhere, including public
   topics, replies, following, and followers. This is a navigation shortcut, not

@@ -78,6 +78,29 @@ have endpoint-specific transfer limits before decoding. MD5 is used only for
 compatibility with the unofficial request signature protocol, not for password
 storage or verification.
 
+The current, not-yet-tagged `main` implementation of the home followed-forum
+projection and complete followed-forum list shares one application-scoped,
+memory-only state. The home projection exposes at most six rows; only the
+complete list may advance pagination. A new page request may start only while
+the home page or complete list is active. Before each request, the App reads the
+active Keychain session and binds the operation to its exact
+`userID + sessionRevision`; after transport it reads the session again and
+rejects the page unless that same lease and the requested page are still current.
+Logout, account switching, same-UID credential rotation, and a matching forum-
+membership change invalidate the state epoch, clear all rows and cursors, and
+prevent an older response from repopulating them. Empty or duplicate-only
+continuation pages terminate pagination. No row, page cursor, or lease is stored
+across accounts or app launches.
+
+These surfaces are read only: displaying or paginating them must not pin,
+unfollow, check in, or issue any other write automatically, and they currently
+offer no pinning, unfollow, or batch check-in control. The endpoint response does
+not itself establish the active account's identity, so the two-sided lease check
+is protection against stale local publication, not proof that the server honored
+the requested UID. Successful private-list retrieval and server-side account
+binding remain physical-device validation questions; CI may cover only synthetic
+request, pagination, and lease behavior.
+
 The personalized Explore feed is the sole anonymous request that carries a
 stable app-generated identifier. At first launch the app generates an ordinary
 random UUID, stores it in local `UserDefaults`, and sends it only as
