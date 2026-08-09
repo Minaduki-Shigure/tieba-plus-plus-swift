@@ -828,7 +828,13 @@ private func parseMultipart(_ request: URLRequest) throws -> ParsedReplyMultipar
     }
     let header = String(part[..<separatorRange.lowerBound])
     var value = String(part[separatorRange.upperBound...])
-    if value.hasSuffix("\r\n") { value.removeLast(2) }
+    guard
+      let terminatorRange = value.range(of: "\r\n", options: .backwards),
+      terminatorRange.upperBound == value.endIndex
+    else {
+      throw TiebaClientError.transportFailure
+    }
+    value.removeSubrange(terminatorRange)
     let prefix = "Content-Disposition: form-data; name=\""
     guard header.hasPrefix(prefix), header.hasSuffix("\"") else {
       throw TiebaClientError.transportFailure

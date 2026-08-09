@@ -91,7 +91,7 @@ actor FileTextReplyDraftStore: TextReplyDraftRepository {
     archive.drafts.removeAll { $0.key == draft.key }
     archive.drafts.append(draft)
     archive.drafts.sort(by: Self.isMoreRecent)
-    guard archive.drafts.count <= maximumDrafts else {
+    if archive.drafts.count > maximumDrafts {
       archive.drafts = Array(archive.drafts.prefix(maximumDrafts))
       guard archive.drafts.contains(where: { $0.key == draft.key }) else {
         throw TextReplyDraftStoreError.tooManyDrafts
