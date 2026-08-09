@@ -312,17 +312,27 @@ struct ImageZoomPanGestureOverlay: UIViewRepresentable {
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
       guard
         gestureRecognizer === panGestureRecognizer,
-        let configuration,
         let view = gestureRecognizer.view
       else { return true }
+      let velocity = panGestureRecognizer.velocity(in: view)
+      let translation = panGestureRecognizer.translation(in: view)
+      return shouldImagePanBegin(
+        velocity: CGSize(width: velocity.x, height: velocity.y),
+        translation: CGSize(width: translation.x, height: translation.y)
+      )
+    }
+
+    func shouldImagePanBegin(
+      velocity: CGSize,
+      translation: CGSize
+    ) -> Bool {
+      guard let configuration else { return true }
       guard
         configuration.scale.isFinite,
         configuration.scale >= 1,
         configuration.scale <= 5
       else { return true }
       guard ImageZoomGeometry.allowsPanning(at: configuration.scale) else { return false }
-      let velocity = panGestureRecognizer.velocity(in: view)
-      let translation = panGestureRecognizer.translation(in: view)
       return ImageZoomPanOwnershipPolicy.resolve(
         limits: ImageZoomGeometry.panLimits(
           scale: configuration.scale,
@@ -330,8 +340,8 @@ struct ImageZoomPanGestureOverlay: UIViewRepresentable {
           fittedImageSize: configuration.fittedImageSize
         ),
         offset: configuration.offset,
-        velocity: CGSize(width: velocity.x, height: velocity.y),
-        translation: CGSize(width: translation.x, height: translation.y),
+        velocity: velocity,
+        translation: translation,
         displayScale: configuration.displayScale
       ) == .image
     }

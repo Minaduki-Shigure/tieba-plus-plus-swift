@@ -533,7 +533,6 @@ final class ImageGalleryTests: XCTestCase {
     let coordinator = ImageZoomPanGestureOverlay.Coordinator()
     let imagePan = coordinator.panGestureRecognizer
     overlayView.addGestureRecognizer(imagePan)
-    imagePan.setTranslation(CGPoint(x: 20, y: 0), in: overlayView)
     coordinator.update(
       from: panOverlay(
         scale: 2,
@@ -546,7 +545,12 @@ final class ImageGalleryTests: XCTestCase {
     XCTAssertEqual(imagePan.minimumNumberOfTouches, 1)
     XCTAssertEqual(imagePan.maximumNumberOfTouches, 1)
     XCTAssertFalse(imagePan.cancelsTouchesInView)
-    XCTAssertTrue(coordinator.gestureRecognizerShouldBegin(imagePan))
+    XCTAssertTrue(
+      coordinator.shouldImagePanBegin(
+        velocity: .zero,
+        translation: CGSize(width: 20, height: 0)
+      )
+    )
     XCTAssertTrue(
       coordinator.gestureRecognizer(
         imagePan,
@@ -568,7 +572,12 @@ final class ImageGalleryTests: XCTestCase {
         fittedImageSize: overlayView.bounds.size
       )
     )
-    XCTAssertFalse(coordinator.gestureRecognizerShouldBegin(imagePan))
+    XCTAssertFalse(
+      coordinator.shouldImagePanBegin(
+        velocity: .zero,
+        translation: CGSize(width: 20, height: 0)
+      )
+    )
 
     coordinator.update(
       from: panOverlay(
@@ -578,7 +587,12 @@ final class ImageGalleryTests: XCTestCase {
         fittedImageSize: CGSize(width: 2_000, height: 2_000)
       )
     )
-    XCTAssertFalse(coordinator.gestureRecognizerShouldBegin(imagePan))
+    XCTAssertFalse(
+      coordinator.shouldImagePanBegin(
+        velocity: .zero,
+        translation: CGSize(width: 20, height: 0)
+      )
+    )
 
     for invalidScale in [CGFloat.nan, .infinity, 0.5, 6] {
       coordinator.update(
@@ -589,7 +603,12 @@ final class ImageGalleryTests: XCTestCase {
           fittedImageSize: overlayView.bounds.size
         )
       )
-      XCTAssertTrue(coordinator.gestureRecognizerShouldBegin(imagePan))
+      XCTAssertTrue(
+        coordinator.shouldImagePanBegin(
+          velocity: .zero,
+          translation: CGSize(width: 20, height: 0)
+        )
+      )
     }
 
     let pinch = UIPinchGestureRecognizer()
