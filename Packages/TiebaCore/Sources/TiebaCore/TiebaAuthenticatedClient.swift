@@ -1100,7 +1100,9 @@ public actor TiebaAuthenticatedClient {
           threadCloudFavoriteFlights[resourceKey]?.id == flightID
         else {
           continuation.resume(
-            returning: Task.isCancelled ? .cancelled : .completed
+            returning: Task.isCancelled
+              ? TiebaThreadCloudFavoriteWaitOutcome.cancelled
+              : TiebaThreadCloudFavoriteWaitOutcome.completed
           )
           return
         }
@@ -1131,7 +1133,9 @@ public actor TiebaAuthenticatedClient {
           threadCloudFavoriteFlights[resourceKey]?.id == flightID
         else {
           continuation.resume(
-            returning: Task.isCancelled ? .cancelled : .completed
+            returning: Task.isCancelled
+              ? TiebaThreadCloudFavoriteWaitOutcome.cancelled
+              : TiebaThreadCloudFavoriteWaitOutcome.completed
           )
           return
         }
