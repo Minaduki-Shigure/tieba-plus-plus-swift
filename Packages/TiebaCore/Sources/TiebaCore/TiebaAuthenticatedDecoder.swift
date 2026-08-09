@@ -17,6 +17,19 @@ struct TiebaForumMembershipContext:
   }
 }
 
+struct TiebaThreadCloudFavoriteContext:
+  Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let state: TiebaThreadCloudFavoriteState
+  let tbs: String
+
+  var description: String { "TiebaThreadCloudFavoriteContext(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(self, children: ["state": state], displayStyle: .struct)
+  }
+}
+
 enum TiebaAuthenticatedDecoder {
   static func account(from body: Data) throws -> TiebaAuthenticatedAccount {
     let object = try responseObject(from: body)
@@ -123,6 +136,69 @@ enum TiebaAuthenticatedDecoder {
     )
   }
 
+  static func threadCloudFavoriteContext(
+    from response: PbPageResIdl,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64
+  ) throws -> TiebaThreadCloudFavoriteContext {
+    guard response.error.errorno == 0 else {
+      throw TiebaClientError.server(
+        code: response.error.errorno,
+        message: response.error.errmsg
+      )
+    }
+    guard
+      expectedUserID > 0,
+      forumID > 0,
+      threadID > 0,
+      response.hasData,
+      response.data.hasUser,
+      response.data.hasForum,
+      response.data.hasThread,
+      response.data.hasAnti,
+      response.data.user.isLogin == 1,
+      response.data.user.id == expectedUserID,
+      response.data.forum.id == forumID,
+      response.data.thread.id == threadID,
+      response.data.thread.fid == 0 || response.data.thread.fid == forumID,
+      TiebaAuthenticatedRequestFactory.isValidTBS(response.data.anti.tbs)
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+
+    let status = response.data.thread.collectStatus
+    let rawMarkedPostID = response.data.thread.collectMarkPid
+    let markedPostID: Int64?
+    switch status {
+    case 0:
+      guard
+        rawMarkedPostID.isEmpty
+          || (decimalInt64(rawMarkedPostID) == 0)
+      else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+      markedPostID = nil
+    case 1:
+      guard let value = decimalInt64(rawMarkedPostID), value > 0 else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+      markedPostID = value
+    default:
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+
+    return TiebaThreadCloudFavoriteContext(
+      state: TiebaThreadCloudFavoriteState(
+        userID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID,
+        markedPostID: markedPostID
+      ),
+      tbs: response.data.anti.tbs
+    )
+  }
+
   static func forumMembership(
     from response: FrsPageResIdl,
     expectedUserID: Int64,
@@ -198,6 +274,11 @@ enum TiebaAuthenticatedDecoder {
   }
 
   static func checkForumFollowWriteResponse(_ body: Data) throws {
+    let object = try responseObject(from: body)
+    try checkServerError(object)
+  }
+
+  static func checkThreadCloudFavoriteWriteResponse(_ body: Data) throws {
     let object = try responseObject(from: body)
     try checkServerError(object)
   }
@@ -701,6 +782,14 @@ enum TiebaAuthenticatedDecoder {
   private static func canonicalForumName(_ value: String) -> String {
     value.trimmingCharacters(in: .whitespacesAndNewlines)
       .precomposedStringWithCanonicalMapping
+  }
+
+  private static func decimalInt64(_ value: String) -> Int64? {
+    guard
+      !value.isEmpty,
+      value.utf8.allSatisfy({ (0x30...0x39).contains($0) })
+    else { return nil }
+    return Int64(value)
   }
 
   private static func followedForum(_ object: [String: Any]) -> TiebaFollowedForum? {

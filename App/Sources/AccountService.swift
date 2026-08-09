@@ -121,6 +121,44 @@ struct CloudFavoritePage: Hashable, Sendable {
   let hasMore: Bool
 }
 
+struct ThreadCloudFavoriteTarget: Hashable, Sendable {
+  let forumID: Int64
+  let forumName: String
+  let threadID: Int64
+
+  init?(forumID: Int64, forumName: String, threadID: Int64) {
+    let forumName = forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    guard
+      forumID > 0,
+      threadID > 0,
+      !forumName.isEmpty,
+      forumName.count <= 100,
+      !forumName.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
+    else { return nil }
+    self.forumID = forumID
+    self.forumName = forumName
+    self.threadID = threadID
+  }
+}
+
+struct ThreadCloudFavoriteSnapshot: Hashable, Sendable {
+  let markedPostID: Int64?
+
+  var isFavorited: Bool { markedPostID != nil }
+
+  init?(markedPostID: Int64?) {
+    guard markedPostID.map({ $0 > 0 }) ?? true else { return nil }
+    self.markedPostID = markedPostID
+  }
+}
+
+struct ThreadCloudFavoriteData: Hashable, Sendable {
+  let userID: Int64
+  let target: ThreadCloudFavoriteTarget
+  let snapshot: ThreadCloudFavoriteSnapshot
+}
+
 struct ConcernFeedPageData: Hashable, Sendable {
   let userID: Int64
   let threads: [BrowseThread]
@@ -263,6 +301,15 @@ protocol AccountService: Sendable {
     offset: Int,
     pageSize: Int
   ) async throws -> CloudFavoritePage
+  func threadCloudFavorite(
+    session: StoredAccountSession,
+    target: ThreadCloudFavoriteTarget
+  ) async throws -> ThreadCloudFavoriteData
+  func setThreadCloudFavorite(
+    session: StoredAccountSession,
+    target: ThreadCloudFavoriteTarget,
+    markedPostID: Int64?
+  ) async throws -> ThreadCloudFavoriteData
   func concernFeed(
     session: StoredAccountSession,
     pageTag: String?,
@@ -334,6 +381,21 @@ extension AccountService {
     pageSize: Int
   ) async throws -> CloudFavoritePage {
     throw BrowseError.unavailable("当前账户服务不支持读取贴吧收藏。")
+  }
+
+  func threadCloudFavorite(
+    session: StoredAccountSession,
+    target: ThreadCloudFavoriteTarget
+  ) async throws -> ThreadCloudFavoriteData {
+    throw BrowseError.unavailable("当前账户服务不支持读取主题收藏状态。")
+  }
+
+  func setThreadCloudFavorite(
+    session: StoredAccountSession,
+    target: ThreadCloudFavoriteTarget,
+    markedPostID: Int64?
+  ) async throws -> ThreadCloudFavoriteData {
+    throw BrowseError.unavailable("当前账户服务不支持更新主题收藏。")
   }
 
   func notifications(

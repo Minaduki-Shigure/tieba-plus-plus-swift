@@ -43,6 +43,7 @@ struct TiebaPlusPlusApp: App {
   private let accountVault: any AccountVault
   private let accountService: any AccountService
   private let contentAgreementStore: ContentAgreementStore
+  private let threadCloudFavoriteStore: ThreadCloudFavoriteStore
   private let startDestination: AppStartDestination
 
   init() {
@@ -60,9 +61,9 @@ struct TiebaPlusPlusApp: App {
     _followedForumsViewModel = StateObject(
       wrappedValue: FollowedForumsViewModel(service: accountService, vault: accountVault)
     )
-    self.contentAgreementStore = ContentAgreementStore(
-      access: AccountAccess(vault: accountVault, service: accountService)
-    )
+    let accountAccess = AccountAccess(vault: accountVault, service: accountService)
+    self.contentAgreementStore = ContentAgreementStore(access: accountAccess)
+    self.threadCloudFavoriteStore = ThreadCloudFavoriteStore(access: accountAccess)
     let mediaPlaybackCoordinator = MediaPlaybackCoordinator()
     _mediaPlaybackCoordinator = StateObject(wrappedValue: mediaPlaybackCoordinator)
     _voicePlaybackController = StateObject(
@@ -106,6 +107,7 @@ struct TiebaPlusPlusApp: App {
         AccountAccess(vault: accountVault, service: accountService)
       )
       .environment(\.contentAgreementStore, contentAgreementStore)
+      .environment(\.threadCloudFavoriteStore, threadCloudFavoriteStore)
       .appTextSizeAdjustment(AppTextSizeAdjustment.resolved(textSizeAdjustment))
       .environment(\.appAccentColor, resolvedAccentColor)
       .environment(\.contentFilterRepository, contentFilterRepository)

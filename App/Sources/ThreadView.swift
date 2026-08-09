@@ -24,9 +24,13 @@ struct ThreadView: View {
   @State private var agreementScopeID = UUID()
   @State private var pendingAgreementChange: PendingContentAgreementChange?
   @State private var agreementErrorMessage: String?
+  @State private var cloudFavoriteScopeID = UUID()
+  @State private var pendingCloudFavoriteAction: ThreadCloudFavoritePendingAction?
+  @State private var cloudFavoriteErrorMessage: String?
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Environment(\.contentFilterRepository) private var contentFilterRepository
   @Environment(\.contentAgreementStore) private var contentAgreementStore
+  @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
   private let historySnapshot: ThreadHistorySnapshot?
   private let linkRoute: TiebaThreadRoute?
 
@@ -155,6 +159,14 @@ struct ThreadView: View {
 
         LocalFavoriteButton(target: favoriteTarget, repository: favoritesRepository)
 
+        ThreadCloudFavoriteControlSlot(
+          store: threadCloudFavoriteStore,
+          target: threadCloudFavoriteTarget,
+          currentPosition: currentCloudFavoritePosition,
+          requestAction: requestCloudFavoriteAction,
+          retry: retryCloudFavorite
+        )
+
         Button {
           pageInput = viewModel.currentPage > 0 ? String(viewModel.currentPage) : ""
           showsPageJump = true
@@ -202,10 +214,41 @@ struct ThreadView: View {
     } message: {
       Text(pendingAgreementChange?.confirmationMessage ?? "")
     }
+    .confirmationDialog(
+      pendingCloudFavoriteAction?.title ?? "更新贴吧云收藏？",
+      isPresented: cloudFavoriteConfirmationIsPresented,
+      titleVisibility: .visible
+    ) {
+      if let pendingCloudFavoriteAction {
+        if pendingCloudFavoriteAction.isDestructive {
+          Button(pendingCloudFavoriteAction.actionTitle, role: .destructive) {
+            confirmCloudFavoriteAction(pendingCloudFavoriteAction)
+          }
+        } else {
+          Button(pendingCloudFavoriteAction.actionTitle) {
+            confirmCloudFavoriteAction(pendingCloudFavoriteAction)
+          }
+        }
+      }
+      Button("取消", role: .cancel) { pendingCloudFavoriteAction = nil }
+    } message: {
+      Text(pendingCloudFavoriteAction?.message ?? "")
+    }
     .alert("无法更新点赞状态", isPresented: agreementErrorIsPresented) {
       Button("好", role: .cancel) { agreementErrorMessage = nil }
     } message: {
       Text(agreementErrorMessage ?? "无法完成点赞操作。")
+    }
+    .alert("无法更新贴吧云收藏", isPresented: cloudFavoriteErrorIsPresented) {
+      Button("重新读取") {
+        cloudFavoriteErrorMessage = nil
+        if let target = threadCloudFavoriteTarget {
+          retryCloudFavorite(target)
+        }
+      }
+      Button("好", role: .cancel) { cloudFavoriteErrorMessage = nil }
+    } message: {
+      Text(cloudFavoriteErrorMessage ?? "无法完成云收藏操作。")
     }
     .fullScreenCover(
       item: $pictureGalleryRoute,
@@ -245,6 +288,13 @@ struct ThreadView: View {
         viewModel.agreementReadDescriptors,
         for: agreementScopeID
       )
+    }
+    .task(id: threadCloudFavoriteTarget) {
+      guard let threadCloudFavoriteStore, let target = threadCloudFavoriteTarget else {
+        threadCloudFavoriteStore?.deactivate(cloudFavoriteScopeID)
+        return
+      }
+      await threadCloudFavoriteStore.activate(target, for: cloudFavoriteScopeID)
     }
     .task(id: viewModel.state) {
       guard
@@ -298,12 +348,16 @@ struct ThreadView: View {
       }
       cancelPictureGallery()
       pendingAgreementChange = nil
+      pendingCloudFavoriteAction = nil
       contentAgreementStore?.removeScope(agreementScopeID)
+      threadCloudFavoriteStore?.deactivate(cloudFavoriteScopeID)
       viewModel.cancel()
     }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
       pendingAgreementChange = nil
       agreementErrorMessage = nil
+      pendingCloudFavoriteAction = nil
+      cloudFavoriteErrorMessage = nil
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       cancelPictureGallery()
@@ -831,6 +885,31 @@ struct ThreadView: View {
     )
   }
 
+  private var threadCloudFavoriteTarget: ThreadCloudFavoriteTarget? {
+    ThreadCloudFavoriteTarget(
+      forumID: viewModel.thread.forumID,
+      forumName: viewModel.thread.forumName,
+      threadID: viewModel.thread.id
+    )
+  }
+
+  private var currentCloudFavoritePosition: ThreadCloudFavoritePosition? {
+    let threadID = viewModel.thread.id
+    if let visiblePost,
+       let position = ThreadCloudFavoritePosition(post: visiblePost, threadID: threadID)
+    {
+      return position
+    }
+    if let firstPost = viewModel.firstPost,
+       let position = ThreadCloudFavoritePosition(post: firstPost, threadID: threadID)
+    {
+      return position
+    }
+    return viewModel.posts.lazy.compactMap {
+      ThreadCloudFavoritePosition(post: $0, threadID: threadID)
+    }.first
+  }
+
   private var threadAuthorAvatarURL: URL? {
     ThreadAuthorAvatarResolver.resolve(
       thread: viewModel.thread,
@@ -857,6 +936,24 @@ struct ThreadView: View {
     )
   }
 
+  private var cloudFavoriteConfirmationIsPresented: Binding<Bool> {
+    Binding(
+      get: { pendingCloudFavoriteAction != nil },
+      set: { isPresented in
+        if !isPresented { pendingCloudFavoriteAction = nil }
+      }
+    )
+  }
+
+  private var cloudFavoriteErrorIsPresented: Binding<Bool> {
+    Binding(
+      get: { cloudFavoriteErrorMessage != nil },
+      set: { isPresented in
+        if !isPresented { cloudFavoriteErrorMessage = nil }
+      }
+    )
+  }
+
   private func togglePureReadingMode() {
     if !isPureReadingMode {
       pendingAgreementChange = nil
@@ -871,6 +968,7 @@ struct ThreadView: View {
     targetAgreed: Bool
   ) {
     guard !isPureReadingMode else { return }
+    pendingCloudFavoriteAction = nil
     pendingAgreementChange = PendingContentAgreementChange(
       target: target,
       targetAgreed: targetAgreed
@@ -903,6 +1001,41 @@ struct ThreadView: View {
         return
       } catch {
         agreementErrorMessage = error.localizedDescription
+      }
+    }
+  }
+
+  private func requestCloudFavoriteAction(_ action: ThreadCloudFavoritePendingAction) {
+    pendingAgreementChange = nil
+    pendingCloudFavoriteAction = action
+  }
+
+  private func confirmCloudFavoriteAction(_ action: ThreadCloudFavoritePendingAction) {
+    pendingCloudFavoriteAction = nil
+    guard let threadCloudFavoriteStore else { return }
+    Task { @MainActor in
+      do {
+        try await threadCloudFavoriteStore.setMarkedPostID(
+          action.requestedMarkedPostID,
+          for: action.target
+        )
+      } catch is CancellationError {
+        return
+      } catch {
+        cloudFavoriteErrorMessage = error.localizedDescription
+      }
+    }
+  }
+
+  private func retryCloudFavorite(_ target: ThreadCloudFavoriteTarget) {
+    guard let threadCloudFavoriteStore else { return }
+    Task { @MainActor in
+      do {
+        _ = try await threadCloudFavoriteStore.reload(target)
+      } catch is CancellationError {
+        return
+      } catch {
+        cloudFavoriteErrorMessage = error.localizedDescription
       }
     }
   }

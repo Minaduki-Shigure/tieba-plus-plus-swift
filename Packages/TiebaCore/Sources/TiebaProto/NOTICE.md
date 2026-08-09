@@ -60,6 +60,13 @@ The authenticated forum-membership probe fields
 TiebaLite commit `268f388c7824ae2c8f6ed549827a943ec8a7f352`. They are used only
 to bind a short-lived write request to the expected account and forum; `tbs` is
 not exposed by the public model or persisted.
+The `ThreadInfo.collect_status` and `ThreadInfo.collect_mark_pid` fields used to
+read an account-scoped thread cloud-favorite marker, together with the
+`/c/c/post/addstore` and `/c/c/post/rmstore` form contracts used to add, update,
+and remove that marker, are adapted from TiebaLite commit
+`268f388c7824ae2c8f6ed549827a943ec8a7f352`. The authenticated `PbPage`
+response supplies a short-lived `anti.tbs` value for the immediately following
+remove request; it is not exposed by the public model or persisted.
 The minimal `forum.sign_in_info` and nested `SignInfo.user_info` fields used to
 read server-authoritative per-forum check-in state are adapted from the same
 TiebaLite commit.

@@ -14,6 +14,10 @@ private struct ContentAgreementStoreEnvironmentKey: EnvironmentKey {
   static let defaultValue: ContentAgreementStore? = nil
 }
 
+private struct ThreadCloudFavoriteStoreEnvironmentKey: EnvironmentKey {
+  static let defaultValue: ThreadCloudFavoriteStore? = nil
+}
+
 extension EnvironmentValues {
   var accountAccess: AccountAccess? {
     get { self[AccountAccessEnvironmentKey.self] }
@@ -23,6 +27,11 @@ extension EnvironmentValues {
   var contentAgreementStore: ContentAgreementStore? {
     get { self[ContentAgreementStoreEnvironmentKey.self] }
     set { self[ContentAgreementStoreEnvironmentKey.self] = newValue }
+  }
+
+  var threadCloudFavoriteStore: ThreadCloudFavoriteStore? {
+    get { self[ThreadCloudFavoriteStoreEnvironmentKey.self] }
+    set { self[ThreadCloudFavoriteStoreEnvironmentKey.self] = newValue }
   }
 }
 
@@ -169,6 +178,75 @@ struct ThreadAgreementChange: Equatable, Sendable {
   }
 }
 
+struct ThreadCloudFavoriteChange: Equatable, Sendable {
+  let accountID: Int64
+  let sessionRevision: UUID
+  let target: ThreadCloudFavoriteTarget
+  let snapshot: ThreadCloudFavoriteSnapshot
+
+  init(
+    accountID: Int64,
+    sessionRevision: UUID,
+    target: ThreadCloudFavoriteTarget,
+    snapshot: ThreadCloudFavoriteSnapshot
+  ) {
+    self.accountID = accountID
+    self.sessionRevision = sessionRevision
+    self.target = target
+    self.snapshot = snapshot
+  }
+
+  init?(_ notification: Notification) {
+    guard
+      let accountID = accountNotificationInt64(
+        notification.userInfo?[AccountNotificationKey.accountID]
+      ),
+      let sessionRevisionValue = notification.userInfo?[AccountNotificationKey.sessionRevision]
+        as? String,
+      let sessionRevision = UUID(uuidString: sessionRevisionValue),
+      let forumID = accountNotificationInt64(
+        notification.userInfo?[AccountNotificationKey.forumID]
+      ),
+      let forumName = notification.userInfo?[AccountNotificationKey.forumName] as? String,
+      let threadID = accountNotificationInt64(
+        notification.userInfo?[AccountNotificationKey.threadID]
+      ),
+      let isFavorited = accountNotificationInt64(
+        notification.userInfo?[AccountNotificationKey.isFavorited]
+      ),
+      accountID > 0,
+      isFavorited == 0 || isFavorited == 1,
+      let target = ThreadCloudFavoriteTarget(
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID
+      )
+    else { return nil }
+
+    let markedPostID: Int64?
+    if isFavorited == 1 {
+      guard let value = accountNotificationInt64(
+        notification.userInfo?[AccountNotificationKey.markedPostID]
+      ) else { return nil }
+      markedPostID = value
+    } else {
+      guard notification.userInfo?[AccountNotificationKey.markedPostID] == nil else {
+        return nil
+      }
+      markedPostID = nil
+    }
+    guard let snapshot = ThreadCloudFavoriteSnapshot(markedPostID: markedPostID) else {
+      return nil
+    }
+    self.init(
+      accountID: accountID,
+      sessionRevision: sessionRevision,
+      target: target,
+      snapshot: snapshot
+    )
+  }
+}
+
 extension Notification.Name {
   static let accountSessionDidChange = Notification.Name(
     "TiebaPlusPlus.accountSessionDidChange"
@@ -181,6 +259,9 @@ extension Notification.Name {
   )
   static let threadAgreementDidChange = Notification.Name(
     "TiebaPlusPlus.threadAgreementDidChange"
+  )
+  static let threadCloudFavoriteDidChange = Notification.Name(
+    "TiebaPlusPlus.threadCloudFavoriteDidChange"
   )
 }
 
@@ -242,6 +323,25 @@ enum AccountChangeNotifications {
       ]
     )
   }
+
+  static func postThreadCloudFavoriteChange(_ change: ThreadCloudFavoriteChange) {
+    var userInfo: [AnyHashable: Any] = [
+      AccountNotificationKey.accountID: NSNumber(value: change.accountID),
+      AccountNotificationKey.sessionRevision: change.sessionRevision.uuidString,
+      AccountNotificationKey.forumID: NSNumber(value: change.target.forumID),
+      AccountNotificationKey.forumName: change.target.forumName,
+      AccountNotificationKey.threadID: NSNumber(value: change.target.threadID),
+      AccountNotificationKey.isFavorited: NSNumber(value: change.snapshot.isFavorited),
+    ]
+    if let markedPostID = change.snapshot.markedPostID {
+      userInfo[AccountNotificationKey.markedPostID] = NSNumber(value: markedPostID)
+    }
+    NotificationCenter.default.post(
+      name: .threadCloudFavoriteDidChange,
+      object: nil,
+      userInfo: userInfo
+    )
+  }
 }
 
 private enum AccountNotificationKey {
@@ -249,6 +349,7 @@ private enum AccountNotificationKey {
   static let accountID = "accountID"
   static let sessionRevision = "sessionRevision"
   static let forumID = "forumID"
+  static let forumName = "forumName"
   static let isFollowed = "isFollowed"
   static let consecutiveDays = "consecutiveDays"
   static let rank = "rank"
@@ -256,6 +357,8 @@ private enum AccountNotificationKey {
   static let firstPostID = "firstPostID"
   static let isAgreed = "isAgreed"
   static let agreeScore = "agreeScore"
+  static let isFavorited = "isFavorited"
+  static let markedPostID = "markedPostID"
 }
 
 private func accountNotificationInt64(_ value: Any?) -> Int64? {

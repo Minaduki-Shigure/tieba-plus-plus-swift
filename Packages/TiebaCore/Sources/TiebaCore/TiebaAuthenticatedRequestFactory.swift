@@ -15,6 +15,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let notificationClientVersion = "22.6.5.1"
   static let sessionClientVersion = "11.10.8.6"
   static let cloudFavoritesClientVersion = "11.10.8.6"
+  static let threadCloudFavoriteClientVersion = "12.41.7.1"
   static let concernClientVersion = "11.10.8.6"
   static let maximumConcernPageTagBytes = 4_096
   static let writeHost = TiebaRequestFactory.serviceHost
@@ -127,6 +128,130 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       clientUserToken: String(expectedUserID),
       cookie: "ka=open"
     )
+  }
+
+  func threadCloudFavoriteState(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64
+  ) throws -> URLRequest {
+    try validate(credential)
+    try validateAgreementContext(
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      target: nil
+    )
+    try validateConfiguration()
+
+    var common = CommonReq()
+    common.clientType = 2
+    common.clientVersion = configuration.clientVersion
+    common.bduss = credential.bduss
+
+    var data = PbPageReqIdl.DataReq()
+    data.common = common
+    data.kz = threadID
+    data.forumID = forumID
+    data.pn = 1
+    data.rn = 2
+
+    var message = PbPageReqIdl()
+    message.data = data
+    return try protobufRequest(
+      path: "/c/f/pb/page",
+      command: 302_001,
+      message: message
+    )
+  }
+
+  func setThreadCloudFavoriteState(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    tbs: String,
+    markedPostID: Int64?
+  ) throws -> URLRequest {
+    try validateThreadCloudFavoriteWriteArguments(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      markedPostID: markedPostID
+    )
+    guard Self.isValidTBS(tbs) else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+
+    let clientVersion = Self.threadCloudFavoriteClientVersion
+    let fields: [(String, String)]
+    let path: String
+    if let markedPostID {
+      let object: [[String: Any]] = [
+        [
+          "tid": String(threadID),
+          "pid": String(markedPostID),
+          "status": 1,
+        ]
+      ]
+      let jsonData: Data
+      do {
+        jsonData = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+      } catch {
+        throw TiebaClientError.invalidArgument("Unable to encode cloud-favorite marker data.")
+      }
+      guard let data = String(data: jsonData, encoding: .utf8) else {
+        throw TiebaClientError.invalidArgument("Unable to encode cloud-favorite marker data.")
+      }
+      path = "/c/c/post/addstore"
+      fields = [
+        ("BDUSS", credential.bduss),
+        ("_client_version", clientVersion),
+        ("data", data),
+        ("stoken", credential.stoken),
+      ]
+    } else {
+      path = "/c/c/post/rmstore"
+      fields = [
+        ("BDUSS", credential.bduss),
+        ("_client_version", clientVersion),
+        ("fid", String(forumID)),
+        ("stoken", credential.stoken),
+        ("tbs", tbs),
+        ("tid", String(threadID)),
+        ("user_id", String(expectedUserID)),
+      ]
+    }
+
+    return try signedFormRequest(
+      host: Self.writeHost,
+      path: path,
+      fields: fields,
+      userAgent: "bdtb for Android \(clientVersion)",
+      clientUserToken: String(expectedUserID),
+      cookie: "ka=open"
+    )
+  }
+
+  func validateThreadCloudFavoriteWriteArguments(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    markedPostID: Int64?
+  ) throws {
+    try validate(credential)
+    try validateAgreementContext(
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      target: nil
+    )
+    if let markedPostID {
+      try validatePositiveID(markedPostID, name: "Marked post ID")
+    }
   }
 
   func concernFeed(

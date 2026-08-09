@@ -104,11 +104,66 @@ private struct TiebaAgreementAccountTail: Sendable {
   let task: Task<Void, Never>
 }
 
+private struct TiebaThreadCloudFavoriteResourceKey: Hashable, Sendable {
+  let userID: Int64
+  let threadID: Int64
+}
+
+private struct TiebaThreadCloudFavoriteIdentity:
+  Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let credential: TiebaSessionCredential
+  let forumID: Int64
+
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.credential.bduss == rhs.credential.bduss
+      && lhs.credential.stoken == rhs.credential.stoken
+      && lhs.credential.bdussCookieName == rhs.credential.bdussCookieName
+      && lhs.forumID == rhs.forumID
+  }
+
+  var description: String { "TiebaThreadCloudFavoriteIdentity(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(self, children: ["forumID": forumID], displayStyle: .struct)
+  }
+}
+
+private struct TiebaThreadCloudFavoriteFlight:
+  Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let id: UUID
+  let identity: TiebaThreadCloudFavoriteIdentity
+  let markedPostID: Int64?
+  let task: Task<TiebaThreadCloudFavoriteState, Swift.Error>
+
+  var description: String { "TiebaThreadCloudFavoriteFlight(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(
+      self,
+      children: [
+        "id": id,
+        "identity": identity,
+        "markedPostID": markedPostID as Any,
+      ],
+      displayStyle: .struct
+    )
+  }
+}
+
+private enum TiebaThreadCloudFavoriteWaitOutcome: Sendable, Equatable {
+  case completed
+  case cancelled
+}
+
 public actor TiebaAuthenticatedClient {
   static let accountResponseMaximumBytes = 512 * 1_024
   static let webSessionResponseMaximumBytes = 256 * 1_024
   static let followedForumsResponseMaximumBytes = 2 * 1_024 * 1_024
   static let cloudFavoritesResponseMaximumBytes = 2 * 1_024 * 1_024
+  static let threadCloudFavoriteStateResponseMaximumBytes = 4 * 1_024 * 1_024
+  static let threadCloudFavoriteWriteResponseMaximumBytes = 64 * 1_024
   static let concernResponseMaximumBytes = 4 * 1_024 * 1_024
   static let notificationResponseMaximumBytes = 2 * 1_024 * 1_024
   static let forumMembershipResponseMaximumBytes = 512 * 1_024
@@ -131,6 +186,17 @@ public actor TiebaAuthenticatedClient {
   private var agreementSharedWaiterCounts = [UUID: Int]()
   private var agreementConflictWaiterCounts = [TiebaAgreementResourceKey: Int]()
   private var agreementAccountTails = [Int64: TiebaAgreementAccountTail]()
+  private var threadCloudFavoriteFlights = [
+    TiebaThreadCloudFavoriteResourceKey: TiebaThreadCloudFavoriteFlight
+  ]()
+  private var threadCloudFavoriteSharedWaiters = [
+    UUID: [UUID: CheckedContinuation<TiebaThreadCloudFavoriteWaitOutcome, Never>]
+  ]()
+  private var threadCloudFavoriteConflictWaiters = [
+    TiebaThreadCloudFavoriteResourceKey: [
+      UUID: CheckedContinuation<TiebaThreadCloudFavoriteWaitOutcome, Never>
+    ]
+  ]()
 
   public init(configuration: TiebaClientConfiguration = .init()) {
     self.requestFactory = TiebaAuthenticatedRequestFactory(configuration: configuration)
@@ -202,6 +268,86 @@ public actor TiebaAuthenticatedClient {
       offset: offset,
       pageSize: pageSize
     )
+  }
+
+  public func getThreadCloudFavoriteState(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64
+  ) async throws -> TiebaThreadCloudFavoriteState {
+    try await getThreadCloudFavoriteContext(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID
+    ).state
+  }
+
+  public func setThreadCloudFavoriteState(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    markedPostID: Int64?
+  ) async throws -> TiebaThreadCloudFavoriteState {
+    try Task.checkCancellation()
+    try requestFactory.validateThreadCloudFavoriteWriteArguments(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      markedPostID: markedPostID
+    )
+
+    let resourceKey = TiebaThreadCloudFavoriteResourceKey(
+      userID: expectedUserID,
+      threadID: threadID
+    )
+    let identity = TiebaThreadCloudFavoriteIdentity(
+      credential: credential,
+      forumID: forumID
+    )
+    if let flight = threadCloudFavoriteFlights[resourceKey] {
+      if flight.identity == identity, flight.markedPostID == markedPostID {
+        try await waitForSharedThreadCloudFavoriteFlight(
+          resourceKey: resourceKey,
+          flightID: flight.id
+        )
+        return try await flight.task.value
+      }
+
+      try await waitForConflictingThreadCloudFavoriteFlight(
+        resourceKey: resourceKey,
+        flightID: flight.id
+      )
+      return try await getThreadCloudFavoriteState(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID
+      )
+    }
+
+    try Task.checkCancellation()
+    let flightID = UUID()
+    let task: Task<TiebaThreadCloudFavoriteState, Swift.Error> = Task.detached { [self] in
+      try await performThreadCloudFavoriteWrite(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID,
+        markedPostID: markedPostID
+      )
+    }
+    threadCloudFavoriteFlights[resourceKey] = TiebaThreadCloudFavoriteFlight(
+      id: flightID,
+      identity: identity,
+      markedPostID: markedPostID,
+      task: task
+    )
+    defer { clearThreadCloudFavoriteFlight(resourceKey: resourceKey, flightID: flightID) }
+    return try await task.value
   }
 
   public func getConcernFeed(
@@ -760,6 +906,60 @@ public actor TiebaAuthenticatedClient {
     }
   }
 
+  private func performThreadCloudFavoriteWrite(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    markedPostID: Int64?
+  ) async throws -> TiebaThreadCloudFavoriteState {
+    let current = try await getThreadCloudFavoriteContext(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID
+    )
+    guard current.state.markedPostID != markedPostID else { return current.state }
+
+    let request = try requestFactory.setThreadCloudFavoriteState(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      tbs: current.tbs,
+      markedPostID: markedPostID
+    )
+    do {
+      let body = try await send(
+        request,
+        maximumBodyBytes: Self.threadCloudFavoriteWriteResponseMaximumBytes
+      )
+      try TiebaAuthenticatedDecoder.checkThreadCloudFavoriteWriteResponse(body)
+    } catch {
+      guard isUncertainThreadCloudFavoriteWriteError(error) else { throw error }
+      if let reconciled = try? await getThreadCloudFavoriteState(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID
+      ), reconciled.markedPostID == markedPostID {
+        return reconciled
+      }
+      throw error
+    }
+
+    let reconciled = try await getThreadCloudFavoriteState(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID
+    )
+    guard reconciled.markedPostID == markedPostID else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    return reconciled
+  }
+
   private func performForumCheckIn(
     credential: TiebaBDUSSCredential,
     expectedUserID: Int64,
@@ -859,6 +1059,141 @@ public actor TiebaAuthenticatedClient {
     return tip.contains("登录") || tip.lowercased().contains("login")
   }
 
+  private func isUncertainThreadCloudFavoriteWriteError(_ error: Swift.Error) -> Bool {
+    if error is CancellationError { return true }
+    guard let error = error as? TiebaClientError else { return true }
+    switch error {
+    case .invalidArgument, .invalidEndpoint, .server:
+      return false
+    default:
+      return true
+    }
+  }
+
+  func threadCloudFavoriteWaiterCounts(
+    expectedUserID: Int64,
+    threadID: Int64
+  ) -> (shared: Int, conflict: Int) {
+    let resourceKey = TiebaThreadCloudFavoriteResourceKey(
+      userID: expectedUserID,
+      threadID: threadID
+    )
+    let shared = threadCloudFavoriteFlights[resourceKey].flatMap {
+      threadCloudFavoriteSharedWaiters[$0.id]?.count
+    } ?? 0
+    return (
+      shared: shared,
+      conflict: threadCloudFavoriteConflictWaiters[resourceKey]?.count ?? 0
+    )
+  }
+
+  private func waitForSharedThreadCloudFavoriteFlight(
+    resourceKey: TiebaThreadCloudFavoriteResourceKey,
+    flightID: UUID
+  ) async throws {
+    try Task.checkCancellation()
+    let waiterID = UUID()
+    let outcome = await withTaskCancellationHandler {
+      await withCheckedContinuation { continuation in
+        guard
+          !Task.isCancelled,
+          threadCloudFavoriteFlights[resourceKey]?.id == flightID
+        else {
+          continuation.resume(
+            returning: Task.isCancelled ? .cancelled : .completed
+          )
+          return
+        }
+        threadCloudFavoriteSharedWaiters[flightID, default: [:]][waiterID] = continuation
+      }
+    } onCancel: {
+      Task {
+        await self.cancelSharedThreadCloudFavoriteWaiter(
+          flightID: flightID,
+          waiterID: waiterID
+        )
+      }
+    }
+    guard outcome == .completed else { throw CancellationError() }
+    try Task.checkCancellation()
+  }
+
+  private func waitForConflictingThreadCloudFavoriteFlight(
+    resourceKey: TiebaThreadCloudFavoriteResourceKey,
+    flightID: UUID
+  ) async throws {
+    try Task.checkCancellation()
+    let waiterID = UUID()
+    let outcome = await withTaskCancellationHandler {
+      await withCheckedContinuation { continuation in
+        guard
+          !Task.isCancelled,
+          threadCloudFavoriteFlights[resourceKey]?.id == flightID
+        else {
+          continuation.resume(
+            returning: Task.isCancelled ? .cancelled : .completed
+          )
+          return
+        }
+        threadCloudFavoriteConflictWaiters[resourceKey, default: [:]][waiterID] = continuation
+      }
+    } onCancel: {
+      Task {
+        await self.cancelConflictingThreadCloudFavoriteWaiter(
+          resourceKey: resourceKey,
+          waiterID: waiterID
+        )
+      }
+    }
+    guard outcome == .completed else { throw CancellationError() }
+    try Task.checkCancellation()
+  }
+
+  private func cancelSharedThreadCloudFavoriteWaiter(
+    flightID: UUID,
+    waiterID: UUID
+  ) {
+    guard var waiters = threadCloudFavoriteSharedWaiters[flightID] else { return }
+    let continuation = waiters.removeValue(forKey: waiterID)
+    if waiters.isEmpty {
+      threadCloudFavoriteSharedWaiters.removeValue(forKey: flightID)
+    } else {
+      threadCloudFavoriteSharedWaiters[flightID] = waiters
+    }
+    continuation?.resume(returning: .cancelled)
+  }
+
+  private func cancelConflictingThreadCloudFavoriteWaiter(
+    resourceKey: TiebaThreadCloudFavoriteResourceKey,
+    waiterID: UUID
+  ) {
+    guard var waiters = threadCloudFavoriteConflictWaiters[resourceKey] else { return }
+    let continuation = waiters.removeValue(forKey: waiterID)
+    if waiters.isEmpty {
+      threadCloudFavoriteConflictWaiters.removeValue(forKey: resourceKey)
+    } else {
+      threadCloudFavoriteConflictWaiters[resourceKey] = waiters
+    }
+    continuation?.resume(returning: .cancelled)
+  }
+
+  private func clearThreadCloudFavoriteFlight(
+    resourceKey: TiebaThreadCloudFavoriteResourceKey,
+    flightID: UUID
+  ) {
+    guard threadCloudFavoriteFlights[resourceKey]?.id == flightID else { return }
+    threadCloudFavoriteFlights.removeValue(forKey: resourceKey)
+    let sharedWaiters = threadCloudFavoriteSharedWaiters.removeValue(forKey: flightID) ?? [:]
+    let conflictWaiters =
+      threadCloudFavoriteConflictWaiters.removeValue(forKey: resourceKey) ?? [:]
+    for continuation in sharedWaiters.values {
+      continuation.resume(returning: .completed)
+    }
+    for continuation in conflictWaiters.values {
+      continuation.resume(returning: .completed)
+    }
+  }
+
   private func adjustedAgreementScore(_ score: Int, isAgreed: Bool) -> Int {
     let delta = isAgreed ? 1 : -1
     let (adjusted, overflow) = score.addingReportingOverflow(delta)
@@ -955,6 +1290,30 @@ public actor TiebaAuthenticatedClient {
     if agreementAccountTails[userID]?.id == tailID {
       agreementAccountTails.removeValue(forKey: userID)
     }
+  }
+
+  private func getThreadCloudFavoriteContext(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64
+  ) async throws -> TiebaThreadCloudFavoriteContext {
+    let request = try requestFactory.threadCloudFavoriteState(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID
+    )
+    let response: PbPageResIdl = try await sendProtobuf(
+      request,
+      maximumBodyBytes: Self.threadCloudFavoriteStateResponseMaximumBytes
+    )
+    return try TiebaAuthenticatedDecoder.threadCloudFavoriteContext(
+      from: response,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID
+    )
   }
 
   private func getForumMembershipContext(

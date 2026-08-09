@@ -3,7 +3,7 @@
 `TiebaCore` is the transport and domain layer for Tieba browsing. `TiebaClient`
 is strictly anonymous. `TiebaAuthenticatedClient` is separate, requires
 credentials explicitly, exposes only `Sendable` values to the app, and retains
-only bounded in-flight coordination state for authenticated check-in operations.
+only bounded in-flight coordination state for supported authenticated writes.
 It does not persist credentials or account state.
 
 ```swift
@@ -61,10 +61,10 @@ if let userID = posts.posts[0].author?.id {
 
 The authenticated client supports BDUSS-only identity validation, full-session
 UID-consistency probes, followed forums, an account-bound concern feed,
-read-only Tieba cloud favorites, authoritative per-forum follow/check-in state,
-confirmed follow/unfollow, and explicit
-single-forum check-in. Core single-flights equivalent check-in calls
-and serializes conflicting check-in identities for one account and forum. The
+Tieba cloud-favorite reads and guarded thread-detail mutations, authoritative
+per-forum follow/check-in state, confirmed follow/unfollow, and explicit
+single-forum check-in. Core single-flights equivalent check-in and cloud-favorite
+calls and serializes conflicting identities for the same resource. The
 app's Keychain and account-service layers own persistence, credential-rotation
 leases, and mutual exclusion between follow and check-in. A conflicting App
 call waits for the active write to settle and then reconciles by reading; it is
@@ -98,7 +98,7 @@ if let forum = followed.forums.first {
 ```
 
 A newly captured web login can be bound before persistence, then used for the
-read-only cloud-favorites endpoint:
+cloud-favorites list and exact thread state:
 
 ```swift
 let sessionCredential = TiebaSessionCredential(
@@ -112,6 +112,14 @@ let sessionAccount = try await authenticatedClient.validateSession(
 let cloudFavorites = try await authenticatedClient.getCloudFavorites(
     credential: sessionCredential,
     expectedUserID: sessionAccount.userID
+)
+let favoriteForumID: Int64 = 42
+let favoriteThreadID: Int64 = 8_675_309
+let threadFavorite = try await authenticatedClient.getThreadCloudFavoriteState(
+    credential: sessionCredential,
+    expectedUserID: sessionAccount.userID,
+    forumID: favoriteForumID,
+    threadID: favoriteThreadID
 )
 let concern = try await authenticatedClient.getConcernFeed(
     credential: sessionCredential,
@@ -208,6 +216,15 @@ not advertise a usable sign state; it is not permission to attempt a write.
   expected UID in `client_user_token` and only `ka=open` in the Cookie header.
   Responses are limited to 2 MiB. The returned model labels the requesting UID
   as context; the endpoint response itself contains no UID assertion.
+- Thread-detail cloud-favorite state uses an authenticated PB Page read that
+  binds the logged-in UID, forum ID, thread ID, strict collect status, positive
+  marker, and fresh internal `tbs`. Add/update and remove use one signed HTTPS
+  `addstore` or `rmstore` request with fixed version `12.41.7.1`, the exact
+  minimum attributed form fields, no device identifier, and a 64 KiB response
+  limit. A matching pre-read is idempotent. Every sent write is followed by one
+  read-only reconciliation, and an uncertain failure never retries the write.
+  Equivalent operations share one task; conflicting credentials or markers wait
+  and then only reread.
 - The authenticated FRS forum-state probe binds the returned user ID, forum ID,
   normalized forum name, follow state, optional sign-user ID, and 26-character
   lowercase hexadecimal `tbs` to the request. The `tbs` remains internal and is
@@ -263,15 +280,17 @@ not advertise a usable sign state; it is not permission to attempt a write.
   account fields in the signed HTTPS form body. Their transport rejects every
   redirect rather than replaying a credential-bearing POST.
 - Neither client persists account credentials or retains them beyond an active
-  request or bounded check-in flight. Credential values are redacted from public
+  request or bounded write flight. Credential values are redacted from public
   debug descriptions and mirrors, and the FRS anti-CSRF value is not exposed by
   the public API.
 
 These are unofficial APIs and may change without notice. Per-forum
 follow/unfollow, explicit single-forum check-in, and explicit topic, post, and
-subpost approval writes are implemented. Cloud favorites and notifications are
-read-only. Automatic or batch check-in, favorite mutations, creation, replies,
-and moderation remain unsupported.
+subpost approval writes are implemented. Thread-detail cloud-favorite add,
+saved-position update, and removal are experimental validation-build features;
+the paginated cloud list and notifications remain read-only. Automatic or batch
+check-in, list-level favorite deletion or bulk synchronization, creation,
+replies, and moderation remain unsupported.
 
 ## Tests
 

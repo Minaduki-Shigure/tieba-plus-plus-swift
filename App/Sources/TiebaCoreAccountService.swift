@@ -20,6 +20,19 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
     offset: Int,
     pageSize: Int
   ) async throws -> TiebaCloudFavoritePage
+  func getThreadCloudFavoriteState(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64
+  ) async throws -> TiebaThreadCloudFavoriteState
+  func setThreadCloudFavoriteState(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    markedPostID: Int64?
+  ) async throws -> TiebaThreadCloudFavoriteState
   func getConcernFeed(
     credential: TiebaSessionCredential,
     expectedUserID: Int64,
@@ -140,6 +153,25 @@ extension TiebaAuthenticatedAccountClient {
     throw TiebaClientError.invalidAuthenticatedResponse
   }
 
+  func getThreadCloudFavoriteState(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64
+  ) async throws -> TiebaThreadCloudFavoriteState {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
+  func setThreadCloudFavoriteState(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    markedPostID: Int64?
+  ) async throws -> TiebaThreadCloudFavoriteState {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
   func getNotifications(
     credential: TiebaBDUSSCredential,
     expectedUserID: Int64,
@@ -229,6 +261,7 @@ extension TiebaAuthenticatedClient: TiebaAuthenticatedAccountClient {}
 struct TiebaCoreAccountService: AccountService {
   private let client: any TiebaAuthenticatedAccountClient
   private let contentFilterRepository: any ContentFilterRepository
+  private let threadCloudFavoriteWriteCoordinator: ThreadCloudFavoriteWriteCoordinator
   private let forumWriteCoordinator: ForumAccountWriteCoordinator
   private let threadAgreementWriteCoordinator: ThreadAgreementWriteCoordinator
   private let contentAgreementWriteCoordinator: ContentAgreementWriteCoordinator
@@ -239,6 +272,7 @@ struct TiebaCoreAccountService: AccountService {
   ) {
     self.client = client
     self.contentFilterRepository = contentFilterRepository
+    self.threadCloudFavoriteWriteCoordinator = ThreadCloudFavoriteWriteCoordinator(client: client)
     self.forumWriteCoordinator = ForumAccountWriteCoordinator(client: client)
     self.threadAgreementWriteCoordinator = ThreadAgreementWriteCoordinator(client: client)
     self.contentAgreementWriteCoordinator = ContentAgreementWriteCoordinator(client: client)
@@ -246,6 +280,10 @@ struct TiebaCoreAccountService: AccountService {
 
   func forumWriteConflictWaiterCount() async -> Int {
     await forumWriteCoordinator.conflictWaiterCount()
+  }
+
+  func threadCloudFavoriteWriteConflictWaiterCount() async -> Int {
+    await threadCloudFavoriteWriteCoordinator.conflictWaiterCount()
   }
 
   func threadAgreementWriteConflictWaiterCount() async -> Int {
@@ -325,6 +363,79 @@ struct TiebaCoreAccountService: AccountService {
       nextOffset: response.hasMore ? response.nextOffset : nil,
       hasMore: response.hasMore
     )
+  }
+
+  func threadCloudFavorite(
+    session: StoredAccountSession,
+    target: ThreadCloudFavoriteTarget
+  ) async throws -> ThreadCloudFavoriteData {
+    guard session.id > 0, let credentials = session.credentials else {
+      throw BrowseError.unavailable("此账户需要重新登录，才能安全读取主题收藏状态。")
+    }
+    let response: TiebaThreadCloudFavoriteState
+    do {
+      response = try await client.getThreadCloudFavoriteState(
+        credential: Self.coreSessionCredential(credentials),
+        expectedUserID: session.id,
+        forumID: target.forumID,
+        threadID: target.threadID
+      )
+      try Task.checkCancellation()
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.accountError(error)
+    }
+    return try Self.threadCloudFavoriteData(
+      response,
+      expectedUserID: session.id,
+      expectedTarget: target
+    )
+  }
+
+  func setThreadCloudFavorite(
+    session: StoredAccountSession,
+    target: ThreadCloudFavoriteTarget,
+    markedPostID: Int64?
+  ) async throws -> ThreadCloudFavoriteData {
+    guard ThreadCloudFavoriteSnapshot(markedPostID: markedPostID) != nil else {
+      throw BrowseError.unavailable("收藏楼层标识无效。")
+    }
+    guard session.id > 0, let credentials = session.credentials else {
+      throw BrowseError.unavailable("此账户需要重新登录，才能安全更新主题收藏。")
+    }
+
+    let outcome: ThreadCloudFavoriteWriteOutcome
+    do {
+      outcome = try await threadCloudFavoriteWriteCoordinator.perform(
+        session: session,
+        credential: Self.coreSessionCredential(credentials),
+        target: target,
+        markedPostID: markedPostID
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch let error as BrowseError {
+      throw error
+    } catch {
+      throw Self.accountError(error)
+    }
+    let data = try Self.threadCloudFavoriteData(
+      outcome.state,
+      expectedUserID: session.id,
+      expectedTarget: target
+    )
+    guard data.snapshot.markedPostID == markedPostID else {
+      switch outcome {
+      case .mutated:
+        throw BrowseError.unavailable("贴吧没有确认新的主题收藏状态，请重新加载后再试。")
+      case .reconciled:
+        throw BrowseError.unavailable(
+          "先前的云端收藏操作已结束，已重新读取当前状态；请确认后再操作。"
+        )
+      }
+    }
+    return data
   }
 
   func concernFeed(
@@ -719,6 +830,27 @@ struct TiebaCoreAccountService: AccountService {
     return Date(timeIntervalSince1970: TimeInterval(timestamp))
   }
 
+  private static func threadCloudFavoriteData(
+    _ state: TiebaThreadCloudFavoriteState,
+    expectedUserID: Int64,
+    expectedTarget: ThreadCloudFavoriteTarget
+  ) throws -> ThreadCloudFavoriteData {
+    guard
+      expectedUserID > 0,
+      state.userID == expectedUserID,
+      state.forumID == expectedTarget.forumID,
+      state.threadID == expectedTarget.threadID,
+      let snapshot = ThreadCloudFavoriteSnapshot(markedPostID: state.markedPostID)
+    else {
+      throw BrowseError.unavailable("贴吧返回了不匹配的主题收藏状态，请重新加载后再试。")
+    }
+    return ThreadCloudFavoriteData(
+      userID: state.userID,
+      target: expectedTarget,
+      snapshot: snapshot
+    )
+  }
+
   static func inboxPageData(
     _ page: TiebaNotificationPage,
     expectedUserID: Int64,
@@ -1030,6 +1162,150 @@ struct TiebaCoreAccountService: AccountService {
       message = "账户请求失败，请稍后重试。"
     }
     return .unavailable(message)
+  }
+}
+
+private enum ThreadCloudFavoriteWriteOutcome: Sendable {
+  case mutated(TiebaThreadCloudFavoriteState)
+  case reconciled(TiebaThreadCloudFavoriteState)
+
+  var state: TiebaThreadCloudFavoriteState {
+    switch self {
+    case .mutated(let state), .reconciled(let state): state
+    }
+  }
+}
+
+private struct ThreadCloudFavoriteWriteIdentity:
+  Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let sessionRevision: UUID
+  let forumName: String
+  private let bduss: String
+  private let stoken: String
+  private let cookieName: TiebaBDUSSCookieName
+
+  init(
+    session: StoredAccountSession,
+    credential: TiebaSessionCredential,
+    target: ThreadCloudFavoriteTarget
+  ) {
+    sessionRevision = session.sessionRevision
+    forumName = target.forumName
+    bduss = credential.bduss
+    stoken = credential.stoken
+    cookieName = credential.bdussCookieName
+  }
+
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.sessionRevision == rhs.sessionRevision
+      && lhs.forumName == rhs.forumName
+      && lhs.bduss == rhs.bduss
+      && lhs.stoken == rhs.stoken
+      && lhs.cookieName == rhs.cookieName
+  }
+
+  var description: String { "ThreadCloudFavoriteWriteIdentity(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(
+      self,
+      children: [
+        "sessionRevision": sessionRevision,
+        "forumName": forumName,
+      ],
+      displayStyle: .struct
+    )
+  }
+}
+
+private actor ThreadCloudFavoriteWriteCoordinator {
+  private struct Key: Hashable, Sendable {
+    let userID: Int64
+    let forumID: Int64
+    let threadID: Int64
+
+    init(userID: Int64, target: ThreadCloudFavoriteTarget) {
+      self.userID = userID
+      forumID = target.forumID
+      threadID = target.threadID
+    }
+  }
+
+  private struct Entry: Sendable {
+    let id: UUID
+    let identity: ThreadCloudFavoriteWriteIdentity
+    let markedPostID: Int64?
+    let task: Task<TiebaThreadCloudFavoriteState, Error>
+  }
+
+  private let client: any TiebaAuthenticatedAccountClient
+  private var inFlight: [Key: Entry] = [:]
+  private var conflictWaiters = 0
+
+  init(client: any TiebaAuthenticatedAccountClient) {
+    self.client = client
+  }
+
+  func perform(
+    session: StoredAccountSession,
+    credential: TiebaSessionCredential,
+    target: ThreadCloudFavoriteTarget,
+    markedPostID: Int64?
+  ) async throws -> ThreadCloudFavoriteWriteOutcome {
+    try Task.checkCancellation()
+    let key = Key(userID: session.id, target: target)
+    let identity = ThreadCloudFavoriteWriteIdentity(
+      session: session,
+      credential: credential,
+      target: target
+    )
+    if let entry = inFlight[key] {
+      if entry.identity == identity, entry.markedPostID == markedPostID {
+        return .mutated(try await entry.task.value)
+      }
+      conflictWaiters += 1
+      defer { conflictWaiters -= 1 }
+      _ = await entry.task.result
+      try Task.checkCancellation()
+      let reconciled = try await client.getThreadCloudFavoriteState(
+        credential: credential,
+        expectedUserID: session.id,
+        forumID: target.forumID,
+        threadID: target.threadID
+      )
+      return .reconciled(reconciled)
+    }
+
+    let client = client
+    let expectedUserID = session.id
+    let entryID = UUID()
+    let task = Task.detached { () async throws -> TiebaThreadCloudFavoriteState in
+      try await client.setThreadCloudFavoriteState(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        forumID: target.forumID,
+        threadID: target.threadID,
+        markedPostID: markedPostID
+      )
+    }
+    inFlight[key] = Entry(
+      id: entryID,
+      identity: identity,
+      markedPostID: markedPostID,
+      task: task
+    )
+    defer { clearEntry(for: key, id: entryID) }
+    return .mutated(try await task.value)
+  }
+
+  func conflictWaiterCount() -> Int {
+    conflictWaiters
+  }
+
+  private func clearEntry(for key: Key, id: UUID) {
+    guard inFlight[key]?.id == id else { return }
+    inFlight.removeValue(forKey: key)
   }
 }
 

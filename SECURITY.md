@@ -172,8 +172,41 @@ expected UID in `client_user_token`, and only `ka=open` in the Cookie header. No
 limited to 2 MiB. Core carries the request's expected UID as request context; it
 is not a UID assertion from the response, which has no identity field. The App
 checks `userID + sessionRevision` before and after every page request. Cloud
-favorites remain in memory and separate from local favorites. Add, remove, bulk
-sync, and saved-position writes are not implemented.
+favorites remain in memory and separate from local favorites. The list itself
+does not offer delete or bulk synchronization controls.
+
+A thread-detail cloud-favorite overlay is a separate full-session workflow. Its
+authenticated PB Page read must bind the response's logged-in user, forum, and
+thread to the exact expected UID, forum ID, and thread ID. It accepts only
+`collect_status = 0` with an empty or zero marker, or `collect_status = 1` with
+one positive decimal `collect_mark_pid`; every other combination fails closed.
+The same response must contain a valid 26-character `anti.tbs`, which stays
+inside Core and is never included in an App model, notification, log, mirror, or
+persistent store. Responses are limited to 4 MiB.
+
+Adding or updating a cloud favorite may send one signed HTTPS form to
+`https://tiebac.baidu.com/c/c/post/addstore`. Before `sign`, the form contains
+exactly `BDUSS`, `_client_version=12.41.7.1`, `data`, and `stoken`; `data` is a
+structured JSON array containing one object with the exact decimal thread and
+post IDs plus `status=1`. Removing one may instead send one signed form to
+`https://tiebac.baidu.com/c/c/post/rmstore` containing exactly `BDUSS`, the same
+fixed `_client_version`, `fid`, `stoken`, the fresh `tbs`, `tid`, `user_id`, and
+`sign`. Both requests use `client_user_token=<expected UID>`, only `ka=open` in
+the Cookie header, the matching fixed-version user agent, HTTPS, no redirects,
+and a 64 KiB response limit. They must not add a credential Cookie, CUID, IMEI,
+Android ID, IDFV, model, screen, location, or another device or telemetry field.
+
+Every mutation starts with the strict state read and returns without writing if
+the requested marker is already present. Otherwise it sends at most one write
+and always performs a read-only state reconciliation, including after a nominal
+success. An uncertain transport or response failure may trigger exactly one
+read-only reconciliation and must never retry the write; only the exact requested
+marker confirms success. Identical operations may share one flight. A conflicting
+operation waits for the active flight and then only rereads, requiring a new
+explicit confirmation before any later write. The App additionally binds every
+entry and operation to `userID + sessionRevision`, rejects late results after an
+account change, keeps only a bounded memory cache, and requires separate explicit
+confirmation for add, saved-position update, and destructive removal.
 
 Private ReplyMe and AtMe lists are foreground-only authenticated reads. ReplyMe
 must use `https://tiebac.baidu.com/c/u/feed/replyme?cmd=303007` with a Protobuf
@@ -290,10 +323,11 @@ STOKEN is available only through a validated complete session and only to an
 endpoint whose contract explicitly requires it. The current unfollow, check-in,
 and content-approval requests deliberately omit STOKEN and must fail visibly
 rather than fall back to a second write endpoint or add hardware-derived device
-metadata. Before any STOKEN-dependent write is enabled, disposable-account tests
-must prove the behavior of valid, random, cross-account, and expired STOKEN
-pairs; a read-only identity or favorites response is not sufficient evidence for
-safe write behavior.
+metadata. Thread-detail cloud-favorite changes are the first experimental
+STOKEN-dependent writes and remain validation-build only. Before they are
+eligible for a public release, disposable-account tests must prove the behavior
+of valid, random, cross-account, and expired STOKEN pairs; a read-only identity
+or favorites response is not sufficient evidence for safe write behavior.
 
 Anonymous public-profile requests must use the protocol's guest target fields.
 They must not place the target user in the current-account field, attach account
@@ -930,7 +964,13 @@ new account, signed-out browsing makes no authenticated call, inline previews
 remain static, and complete-page parent and child controls both require explicit
 confirmation. Check-in validation must additionally cover an unfollowed forum,
 missing sign state, already-signed idempotence, returned-UID mismatch, and the
-same-forum follow/check-in exclusion rule.
+same-forum follow/check-in exclusion rule. Cloud-favorite validation must cover
+add, saved-position update, remove, an already-matching no-write result, malformed
+or mismatched PB state, valid/random/cross-account/expired STOKEN, a known server
+failure, an uncertain write followed by exactly one readback and no second write,
+nominal success followed by mandatory readback, identical-operation sharing,
+conflicting-operation read-only reconciliation, logout, same-UID session
+rotation, and a switch to another UID while either read or write is in flight.
 
 Report security issues privately to the repository owner rather than opening a
 public issue.

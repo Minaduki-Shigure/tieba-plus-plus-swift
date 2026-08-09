@@ -17,9 +17,9 @@ checks.
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, and media preferences |
-| Accounts | Current `main` supports bound Web login, switching, logout, followed forums, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox, read-only Tieba cloud favorites, per-forum state, and experimental content approval |
-| Server-side writes | Confirmed forum follow/unfollow, check-in, and content approval are in device validation; other writes stay disabled |
-| TiebaLite parity | Anonymous reading and media: about 90–95%; full product scope: about 65–68% |
+| Accounts | Current `main` supports bound Web login, switching, logout, followed forums, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox, Tieba cloud favorites, per-forum state, and experimental content approval |
+| Server-side writes | Confirmed forum follow/unfollow, check-in, content approval, and thread-detail cloud-favorite changes are in device validation; other writes stay disabled |
+| TiebaLite parity | Anonymous reading and media: about 90–95%; full product scope: about 66–69% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.59.0-alpha.1` (build 62); later `main` features require a tagged release |
 
 ### Release and validation
@@ -44,7 +44,11 @@ checks.
   active account's followed forums. This filtering is local: the anonymous
   recommendation request receives no account, credential, lease, or forum ID.
   Multi-image galleries can switch between horizontal and vertical one-image
-  paging while retaining a stable selected occurrence and bounded zoom state.
+  paging while retaining a stable selected occurrence and bounded zoom state. A
+  logged-in thread can also read its account-bound Tieba cloud-favorite state and,
+  after explicit confirmation, add it at the last visible floor, update the saved
+  floor, or remove it. Every mutation is followed by a read-only reconciliation;
+  an uncertain write is never retried.
   These main-only changes will not enter the public app source until a tagged
   IPA passes the release checks.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
@@ -52,9 +56,9 @@ checks.
 - **Automated checks:** GitHub Actions runs package tests and an unsigned
   simulator build, validates the app source, and verifies its public IPA hash.
   Authenticated flows never use real credentials in CI. Login binding, cloud
-  favorites, followed-forum recommendation filtering, concern-feed, and inbox
-  contracts are covered by fixtures, while
-  successful private-list reads, forum follow/unfollow, check-in, and
+  favorite reads and mutations, followed-forum recommendation filtering,
+  concern-feed, and inbox contracts are covered by fixtures, while successful
+  private reads and forum follow/unfollow, check-in, cloud-favorite changes, and
   topic/post/subpost content approval remain physical-device validation features
   in this alpha.
 - **App source:** Add [`sidestore-source.json`](https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json)
@@ -142,7 +146,8 @@ checks.
   Cookie-store snapshot, requires independent app and Web probes to return the
   same UID, and stores the same-snapshot pair in the device-only Keychain.
   Whether both probes reject a wrong STOKEN still requires disposable-account
-  negative testing; STOKEN-dependent writes remain blocked. Existing v1/v2
+  negative testing; STOKEN-dependent writes remain validation-build features.
+  Existing v1/v2
   records migrate without STOKEN and retain their current BDUSS features; they
   must be logged in again before an STOKEN-dependent feature is available.
 - **Forum account state:** On current `main`, the logged-in home page projects at
@@ -184,9 +189,12 @@ checks.
   exact minimum signed-field set still require physical-device validation.
 - **Tieba cloud favorites:** The account page has a separate, read-only cloud
   favorites list with refresh, offset pagination, saved-post navigation, deleted
-  thread state, and account-lease isolation. It never uploads, merges, or deletes
-  the independent local favorites archive. Successful authenticated retrieval
-  over the minimal HTTPS contract still requires physical-device validation.
+  thread state, and account-lease isolation. A logged-in thread separately reads
+  its exact cloud state and offers explicitly confirmed add, saved-floor update,
+  and removal controls. These operations never upload, merge, or delete the
+  independent local favorites archive. Successful authenticated reads and writes
+  over the minimal HTTPS contracts still require disposable-account device
+  validation.
 - **Credential boundary:** Anonymous and authenticated requests use isolated,
   ephemeral clients. The vault stores only the same-snapshot BDUSS/STOKEN pair
   accepted by the UID-consistency probes and its actual BDUSS Cookie name;
@@ -204,25 +212,25 @@ checks.
   Follow and check-in operations for the same forum cannot overlap, identical
   concurrent forum operations are coalesced, and both Core and the account
   service coalesce the same account, complete content target, and requested
-  approval state. A conflicting call waits for the active write to settle before
-  requesting read-only reconciliation; it is never queued as a second write. The
+  approval or cloud-favorite state. A conflicting call waits for the active
+  write to settle before requesting read-only reconciliation; it is never queued
+  as a second write. The
   App starts and applies reconciliation only while the initiating account lease
   remains readable and current; a later account change discards its result. No
   uncertain failure retries a write. Already-completed check-in and matching
   content state are idempotent. All supported writes require explicit user
   confirmation. Automatic and batch check-in are not implemented.
-- **Unsupported operations:** Cloud-favorite add, remove, and saved-position
-  updates remain disabled until their state reconciliation has been validated on
-  a disposable account. Disagreement and other reaction types, thread or reply
-  creation, notification replies, background notification polling, and
-  moderation remain unavailable until their request contracts and recovery
-  paths have been validated on a disposable account.
+- **Unsupported operations:** Direct deletion from the cloud-favorites list,
+  bulk cloud/local synchronization, disagreement and other reaction types,
+  thread or reply creation, notification replies, background notification
+  polling, and moderation remain unavailable until their request contracts and
+  recovery paths have been validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, auditable weighting, protocol constraints, and next milestones.
-  The current `main` audit totals 65–68 of 100 weighted points; its anonymous
+  The current `main` audit totals 66–69 of 100 weighted points; its anonymous
   reading and media subtotal is about 90–95%. The largest remaining gaps are
-  cloud-favorite mutations, post/reply creation, background unread handling,
-  broader settings, and moderation.
+  post/reply creation, background unread handling, broader settings, remaining
+  cloud-favorite list actions, and moderation.
 
 ## Architecture
 

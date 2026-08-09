@@ -213,6 +213,27 @@ public struct TiebaCloudFavoritePage: Sendable, Hashable {
   public var nextOffset: Int { offset + pageSize }
 }
 
+public struct TiebaThreadCloudFavoriteState: Sendable, Hashable {
+  public let userID: Int64
+  public let forumID: Int64
+  public let threadID: Int64
+  public let markedPostID: Int64?
+
+  public init(
+    userID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    markedPostID: Int64?
+  ) {
+    self.userID = userID
+    self.forumID = forumID
+    self.threadID = threadID
+    self.markedPostID = markedPostID
+  }
+
+  public var isFavorited: Bool { markedPostID != nil }
+}
+
 public enum TiebaNotificationKind: Sendable, Hashable {
   case replies
   case mentions

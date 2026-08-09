@@ -20,9 +20,9 @@ versioned separately and currently serves `v0.59.0-alpha.1` (build 62).
 | Media rendering, playback, and export | 15 | 13–14 | Images, galleries, video, voice, sharing, saving, and media policy are implemented; broader format and cache parity remain |
 | Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, and media preferences are implemented; TiebaLite's wider settings and customization surface remains |
 | Account, session, and private read flows | 15 | 8 | Login, switching, followed forums, cloud favorites, inbox, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
-| Server writes, creation, and social actions | 15 | 2 | Follow/unfollow, check-in, and approval have guarded implementations; cloud-favorite mutations, posting, replying, and most reactions remain unavailable |
+| Server writes, creation, and social actions | 15 | 3 | Follow/unfollow, check-in, approval, and thread-detail cloud-favorite mutations have guarded implementations; posting, replying, list-level cloud actions, and most reactions remain unavailable |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
-| **Total** | **100** | **65–68** | Current full-product estimate |
+| **Total** | **100** | **66–69** | Current full-product estimate |
 
 The first three rows form the anonymous reading-and-media subtotal: 49–52 of 55
 points, or roughly 90–95%. Concern raises the private-read area but receives only
@@ -138,7 +138,8 @@ the source metadata is updated to that tested IPA.
   home projection, the active account's complete paginated list, and a selected
   default-off followed-forum recommendation filter
 - Separate read-only Tieba cloud favorites with offset pagination, saved-post
-  navigation, deleted-thread state, and account-lease isolation
+  navigation, deleted-thread state, and account-lease isolation, plus confirmed
+  thread-detail add, saved-floor update, and removal with read-only reconciliation
 - Foreground ReplyMe and AtMe inbox with account-lease isolation, refresh,
   bounded pagination, and safe thread navigation
 - Exact nested-notification positioning through the public child-only resolver,
@@ -172,8 +173,9 @@ the source metadata is updated to that tested IPA.
 4. Real-device validation of the account-bound concern request, including the
    signed-field deletion matrix, empty-account and expired-session envelopes,
    cursor replay, and whether list retrieval changes recommendation state
-5. Explicit cloud-favorite add/remove and saved-position updates with fresh
-   state reconciliation and no retry after an uncertain write
+5. Real-device validation of explicit cloud-favorite add/remove and saved-floor
+   updates, including STOKEN rejection, idempotence, uncertain-write readback,
+   concurrency, session rotation, and account switching
 6. Experimental plain-text reply workflows behind explicit risk confirmation,
    anti-CSRF tests, and unknown-outcome handling
 7. Broader settings parity, zoomed-image edge handoff, local-to-remote zoom
@@ -226,8 +228,13 @@ proved server invariant. Keychain v1 and v2
 records migrate to v3 without inventing an STOKEN; existing BDUSS-only features
 continue to work, while cloud favorites require an explicit re-login. The cloud
 list uses an HTTPS-only, signed minimal form and returns no credential to the
-application model. Its rows remain separate from local favorites, and a
-`userID + sessionRevision` lease discards late pages after account changes.
+application model. A thread-detail overlay separately binds the authenticated
+state to the exact UID, forum, thread, and positive saved post. Adding, updating,
+or removing that state requires explicit confirmation, at most one write, and a
+read-only reconciliation even after an apparently successful response. An
+uncertain write is never retried. Both surfaces remain separate from local
+favorites, and a `userID + sessionRevision` lease discards late pages and
+mutation results after account changes.
 
 Tieba's anonymous post endpoint does not currently honor its nominal numeric
 floor-jump fields. The app therefore restores a stable post ID and offers page
