@@ -15,9 +15,9 @@ struct ReplyComposerView: View {
     Group {
       if let submissionStore {
         ReplyComposerContentView(
+          entry: submissionStore.entry(for: context.target),
           context: context,
           store: submissionStore,
-          entry: submissionStore.entry(for: context.target),
           scopeID: scopeID,
           verifyVisibility: verifyVisibility,
           onConfirmed: onConfirmed

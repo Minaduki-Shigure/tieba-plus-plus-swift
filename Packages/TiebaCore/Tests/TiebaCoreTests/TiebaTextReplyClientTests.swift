@@ -501,6 +501,7 @@ private actor TextReplyStateTransport: TiebaTransport {
   private let behavior: Behavior
   private let blocksWrites: Bool
   private let blocksPreflight: Bool
+  private let firstPostID: Int64
   private var writeCount = 0
   private var pageReadCount = 0
   private var floorReadCount = 0
@@ -514,12 +515,14 @@ private actor TextReplyStateTransport: TiebaTransport {
     target: TiebaTextReplyTarget,
     behavior: Behavior = .success,
     blocksWrites: Bool = false,
-    blocksPreflight: Bool = false
+    blocksPreflight: Bool = false,
+    firstPostID: Int64 = 4_004
   ) {
     self.target = target
     self.behavior = behavior
     self.blocksWrites = blocksWrites
     self.blocksPreflight = blocksPreflight
+    self.firstPostID = firstPostID
   }
 
   func send(_ request: URLRequest) async throws -> TiebaHTTPResponse {

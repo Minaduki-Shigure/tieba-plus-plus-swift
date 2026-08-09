@@ -298,7 +298,7 @@ enum TextReplyReceipt: Hashable, Codable, Sendable {
 
   func belongs(to target: TextReplyTarget) -> Bool {
     guard isValid else { return false }
-    switch (target.destination, self) {
+    return switch (target.destination, self) {
     case (.thread(let firstPostID), .post(let postID)):
       postID != firstPostID
     case (.post(let expectedParent), .subpost(let parentPostID, _)):
