@@ -18,6 +18,10 @@ private struct ThreadCloudFavoriteStoreEnvironmentKey: EnvironmentKey {
   static let defaultValue: ThreadCloudFavoriteStore? = nil
 }
 
+private struct TextReplySubmissionStoreEnvironmentKey: EnvironmentKey {
+  static let defaultValue: TextReplySubmissionStore? = nil
+}
+
 extension EnvironmentValues {
   var accountAccess: AccountAccess? {
     get { self[AccountAccessEnvironmentKey.self] }
@@ -32,6 +36,11 @@ extension EnvironmentValues {
   var threadCloudFavoriteStore: ThreadCloudFavoriteStore? {
     get { self[ThreadCloudFavoriteStoreEnvironmentKey.self] }
     set { self[ThreadCloudFavoriteStoreEnvironmentKey.self] = newValue }
+  }
+
+  var textReplySubmissionStore: TextReplySubmissionStore? {
+    get { self[TextReplySubmissionStoreEnvironmentKey.self] }
+    set { self[TextReplySubmissionStoreEnvironmentKey.self] = newValue }
   }
 }
 

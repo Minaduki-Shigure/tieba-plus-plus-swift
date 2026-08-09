@@ -1,0 +1,7 @@
+// tbclient.AccessState
+syntax = "proto3";
+
+message AccessState {
+    string type = 1;
+    string token = 2;
+}

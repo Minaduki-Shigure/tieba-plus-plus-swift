@@ -2,6 +2,9 @@
   "invocations": [
     {
       "protoFiles": [
+        "AccessState.proto",
+        "AddPostReqIdl.proto",
+        "AddPostResIdl.proto",
         "Agree.proto",
         "Anti.proto",
         "CommonReq.proto",
@@ -30,6 +33,8 @@
         "PersonalizedResIdl.proto",
         "PollInfo.proto",
         "Post.proto",
+        "PostAntiInfo.proto",
+        "PostAntiStat.proto",
         "PostInfoList.proto",
         "ProfileReqIdl.proto",
         "ProfileResIdl.proto",
@@ -42,12 +47,15 @@
         "SortButton.proto",
         "SubPostList.proto",
         "ThreadInfo.proto",
+        "Toast.proto",
         "User.proto",
         "UserLikeReqIdl.proto",
         "UserLikeResIdl.proto",
         "UserPostReqIdl.proto",
         "UserPostResIdl.proto",
         "VideoInfo.proto",
+        "VcodeInfo.proto",
+        "VcodeExtra.proto",
         "Voice.proto"
       ],
       "protoPath": "Protos",

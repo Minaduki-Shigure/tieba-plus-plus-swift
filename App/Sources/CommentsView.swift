@@ -14,6 +14,8 @@ struct CommentsView: View {
   @State private var pendingAgreementChange: PendingContentAgreementChange?
   @State private var agreementErrorMessage: String?
   @State private var hasRecordedDirectVisit = false
+  @State private var replyComposerContext: TextReplyComposerContext?
+  @State private var pendingConfirmedThreadRoute: TiebaThreadRoute?
   let service:
     any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
@@ -140,7 +142,10 @@ struct CommentsView: View {
                   openMentionedUser: openMentionedUser,
                   openTiebaLink: openTiebaLink,
                   requestAgreementChange: requestAgreementChange,
-                  retryAgreement: retryAgreement
+                  retryAgreement: retryAgreement,
+                  requestReply: parentReplyContext.map { context in
+                    { replyComposerContext = context }
+                  }
                 )
               }
               .id(CommentsListItemID.parentPost(parentPost.id))
@@ -206,6 +211,17 @@ struct CommentsView: View {
                         requestChange: requestAgreementChange,
                         retry: retryAgreement
                       )
+
+                      if let context = replyContext(for: comment) {
+                        Button {
+                          replyComposerContext = context
+                        } label: {
+                          Image(systemName: "arrowshape.turn.up.left")
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("回复 \(context.replyingToName ?? "此用户")")
+                        .help("回复此条")
+                      }
                     }
                     BrowseContentView(
                       contents: comment.contents,
@@ -220,6 +236,13 @@ struct CommentsView: View {
                         UIPasteboard.general.string = copyText
                       } label: {
                         Label("复制此条回复", systemImage: "doc.on.doc")
+                      }
+                    }
+                    if let context = replyContext(for: comment) {
+                      Button {
+                        replyComposerContext = context
+                      } label: {
+                        Label("回复此条", systemImage: "arrowshape.turn.up.left")
                       }
                     }
                   }
@@ -341,41 +364,7 @@ struct CommentsView: View {
       Text(agreementErrorMessage ?? "无法完成点赞操作。")
     }
     .safeAreaInset(edge: .bottom, spacing: 0) {
-      if let message = viewModel.positionNotice {
-        HStack(spacing: 10) {
-          Image(systemName: "location.slash")
-            .foregroundStyle(.secondary)
-          Text(message)
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-          Spacer(minLength: 0)
-          Button(action: viewModel.dismissPositionNotice) {
-            Image(systemName: "xmark.circle.fill")
-          }
-          .buttonStyle(.plain)
-          .accessibilityLabel("关闭")
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.regularMaterial)
-      } else if let message = viewModel.refreshError {
-        HStack(spacing: 10) {
-          Image(systemName: "exclamationmark.triangle")
-            .foregroundStyle(.secondary)
-          Text(message)
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-          Spacer(minLength: 0)
-          Button(action: viewModel.dismissRefreshError) {
-            Image(systemName: "xmark.circle.fill")
-          }
-          .buttonStyle(.plain)
-          .accessibilityLabel("关闭")
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.regularMaterial)
-      }
+      commentsBottomInset
     }
     .navigationDestination(isPresented: linkedTargetPresented) {
       if let linkedTarget {
@@ -385,6 +374,15 @@ struct CommentsView: View {
           historyRepository: historyRepository,
           favoritesRepository: favoritesRepository,
           searchHistoryRepository: searchHistoryRepository
+        )
+      }
+    }
+    .navigationDestination(isPresented: replyComposerPresented) {
+      if let replyComposerContext {
+        ReplyComposerView(
+          context: replyComposerContext,
+          verifyVisibility: verifyReplyVisibility,
+          onConfirmed: handleConfirmedReply
         )
       }
     }
@@ -417,6 +415,14 @@ struct CommentsView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       Task { @MainActor in viewModel.reload() }
+    }
+    .onChange(of: replyComposerContext) { context in
+      guard context == nil, let route = pendingConfirmedThreadRoute else { return }
+      pendingConfirmedThreadRoute = nil
+      Task { @MainActor in
+        await Task.yield()
+        linkedTarget = .thread(route)
+      }
     }
   }
 
@@ -473,6 +479,174 @@ struct CommentsView: View {
         if !isPresented { linkedTarget = nil }
       }
     )
+  }
+
+  private var replyComposerPresented: Binding<Bool> {
+    Binding(
+      get: { replyComposerContext != nil },
+      set: { isPresented in
+        if !isPresented { replyComposerContext = nil }
+      }
+    )
+  }
+
+  private var parentReplyContext: TextReplyComposerContext? {
+    guard let thread = viewModel.thread, let parentPost = viewModel.parentPost else {
+      return nil
+    }
+    return TextReplyComposerContext(thread: thread, parentPost: parentPost)
+  }
+
+  private func replyContext(for comment: BrowseComment) -> TextReplyComposerContext? {
+    guard
+      let thread = viewModel.thread,
+      let parentPostID = viewModel.parentPost?.id
+    else { return nil }
+    return TextReplyComposerContext(
+      thread: thread,
+      parentPostID: parentPostID,
+      comment: comment
+    )
+  }
+
+  @ViewBuilder
+  private var commentsBottomInset: some View {
+    VStack(spacing: 0) {
+      if let message = viewModel.positionNotice {
+        HStack(spacing: 10) {
+          Image(systemName: "location.slash")
+            .foregroundStyle(.secondary)
+          Text(message)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+          Spacer(minLength: 0)
+          Button(action: viewModel.dismissPositionNotice) {
+            Image(systemName: "xmark.circle.fill")
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("关闭")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+      } else if let message = viewModel.refreshError {
+        HStack(spacing: 10) {
+          Image(systemName: "exclamationmark.triangle")
+            .foregroundStyle(.secondary)
+          Text(message)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+          Spacer(minLength: 0)
+          Button(action: viewModel.dismissRefreshError) {
+            Image(systemName: "xmark.circle.fill")
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("关闭")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+      }
+
+      if let context = parentReplyContext {
+        Divider()
+        Button {
+          replyComposerContext = context
+        } label: {
+          HStack(spacing: 10) {
+            Image(systemName: "bubble.left")
+            Text(context.composerTitle)
+              .lineLimit(1)
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+              .font(.caption.weight(.semibold))
+              .foregroundStyle(.tertiary)
+          }
+          .contentShape(Rectangle())
+          .padding(.horizontal, 14)
+          .frame(minHeight: 46)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("comments-reply-parent")
+      }
+    }
+    .background(.regularMaterial)
+  }
+
+  private func verifyReplyVisibility(_ receipt: TextReplyReceipt) async throws
+    -> TextReplyVisibilityConfirmation?
+  {
+    switch receipt {
+    case .post(let postID):
+      guard let thread = viewModel.thread else { return nil }
+      let verifier = ThreadViewModel(thread: thread, service: service)
+      guard
+        let post = await verifier.verifyAndRelocateAcceptedReply(postID: postID),
+        post.id == postID,
+        post.threadID == viewModel.threadID,
+        post.id != thread.firstPostID,
+        post.floor > 1,
+        let content = TextReplyVisibilityProof.exactPlainText(from: post.contents)
+      else { return nil }
+      return TextReplyVisibilityConfirmation(
+        created: .post(postID: post.id, floor: post.floor),
+        authorUserID: post.authorID,
+        content: content
+      )
+    case .subpost(let parentPostID, let subpostID):
+      let expectedNestedReplyUserID: Int64?
+      if
+        let context = replyComposerContext,
+        case .subpost(let expectedParentPostID, let targetSubpostID) =
+          context.target.destination
+      {
+        guard
+          expectedParentPostID == parentPostID,
+          let targetComment = viewModel.comments.first(where: { $0.id == targetSubpostID }),
+          targetComment.parentPostID == parentPostID,
+          targetComment.authorID > 0
+        else { return nil }
+        expectedNestedReplyUserID = targetComment.authorID
+      } else {
+        expectedNestedReplyUserID = nil
+      }
+      guard
+        parentPostID == viewModel.parentPost?.id,
+        let comment = await viewModel.verifyAndRelocateAcceptedReply(commentID: subpostID),
+        comment.id == subpostID,
+        comment.threadID == viewModel.threadID,
+        comment.parentPostID == parentPostID
+      else { return nil }
+      let content: String?
+      if let expectedNestedReplyUserID {
+        content = TextReplyVisibilityProof.exactNestedReplyBody(
+          from: comment,
+          expectedReplyToUserID: expectedNestedReplyUserID
+        )
+      } else {
+        content = TextReplyVisibilityProof.exactPlainText(from: comment.contents)
+      }
+      guard let content else { return nil }
+      return TextReplyVisibilityConfirmation(
+        created: .subpost(parentPostID: parentPostID, subpostID: subpostID),
+        authorUserID: comment.authorID,
+        content: content
+      )
+    }
+  }
+
+  private func handleConfirmedReply(_ created: CreatedTextReply) {
+    switch created {
+    case .post(let postID, _):
+      guard postID > 0 else { return }
+      pendingConfirmedThreadRoute = TiebaThreadRoute(
+        threadID: viewModel.threadID,
+        postID: postID
+      )
+    case .subpost(let parentPostID, let subpostID):
+      guard parentPostID == viewModel.parentPost?.id else { return }
+      if viewModel.scrollTargetCommentID != subpostID {
+        viewModel.relocateAfterConfirmedReply(commentID: subpostID)
+      }
+    }
   }
 
   private var agreementConfirmationIsPresented: Binding<Bool> {

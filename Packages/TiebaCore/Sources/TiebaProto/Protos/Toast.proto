@@ -1,0 +1,13 @@
+// Minimal response-only subset of tbclient.Toast.
+syntax = "proto3";
+
+message Toast {
+    message Content {
+        string text = 1;
+        int32 has_color = 2;
+    }
+    int32 icon_type = 1;
+    repeated Content content = 2;
+    string url = 3;
+    string background = 4;
+}

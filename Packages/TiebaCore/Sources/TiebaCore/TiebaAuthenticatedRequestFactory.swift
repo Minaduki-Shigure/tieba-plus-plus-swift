@@ -16,6 +16,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let sessionClientVersion = "11.10.8.6"
   static let cloudFavoritesClientVersion = "11.10.8.6"
   static let threadCloudFavoriteClientVersion = "12.41.7.1"
+  static let textReplyClientVersion = "12.35.1.0"
   static let concernClientVersion = "11.10.8.6"
   static let maximumConcernPageTagBytes = 4_096
   static let writeHost = TiebaRequestFactory.serviceHost
@@ -252,6 +253,164 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     if let markedPostID {
       try validatePositiveID(markedPostID, name: "Marked post ID")
     }
+  }
+
+  func validateTextReplyArguments(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    submission: TiebaTextReplySubmission
+  ) throws -> String {
+    try validate(credential)
+    try validateAgreementContext(
+      expectedUserID: expectedUserID,
+      forumID: submission.forumID,
+      threadID: submission.threadID,
+      target: nil
+    )
+    switch submission.target {
+    case .thread(let firstPostID):
+      try validatePositiveID(firstPostID, name: "First post ID")
+    case .post(let postID):
+      try validatePositiveID(postID, name: "Post ID")
+    case .subpost(let parentPostID, let subpostID):
+      try validatePositiveID(parentPostID, name: "Parent post ID")
+      try validatePositiveID(subpostID, name: "Subpost ID")
+      guard parentPostID != subpostID else {
+        throw TiebaClientError.invalidArgument(
+          "Parent post ID and subpost ID must be different."
+        )
+      }
+    }
+    guard TiebaTextReplyContentPolicy.isValid(submission.content) else {
+      throw TiebaClientError.invalidArgument(
+        "Reply content is empty, too large, contains unsupported control characters, or contains a Tieba rich-content marker."
+      )
+    }
+    return try normalizedForumName(submission.forumName)
+  }
+
+  func textReply(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    submission: TiebaTextReplySubmission,
+    normalizedForumName: String,
+    tbs: String,
+    accountDisplayName: String,
+    replyUserID: Int64?,
+    replyUserDisplayName: String?,
+    replyUserPortrait: String?
+  ) throws -> URLRequest {
+    let validatedForumName = try validateTextReplyArguments(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      submission: submission
+    )
+    guard validatedForumName == normalizedForumName else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    guard Self.isValidTBS(tbs) else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    let accountDisplayName = try validatedReplyMetadata(
+      accountDisplayName,
+      name: "Account display name",
+      maximumBytes: 512,
+      allowsEmpty: false
+    )
+
+    var common = CommonReq()
+    common.clientType = 2
+    common.clientVersion = Self.textReplyClientVersion
+    common.bduss = credential.bduss
+    common.stoken = credential.stoken
+    common.tbs = tbs
+
+    var data = AddPostReqIdl.DataReq()
+    data.common = common
+    data.anonymous = "1"
+    data.canNoForum = "0"
+    data.isFeedback = "0"
+    data.takephotoNum = "0"
+    data.entranceType = "0"
+    data.vcodeTag = "12"
+    data.newVcode = "1"
+    data.fid = String(submission.forumID)
+    data.kw = normalizedForumName
+    data.isBarrage = "0"
+    data.isTwzhiboThread = "0"
+    data.floorNum = "0"
+    data.isAd = "0"
+    data.isAddition = "0"
+    data.isGiftpost = "0"
+    data.nameShow = accountDisplayName
+    data.isPictxt = "0"
+    data.showCustomFigure = 0
+    data.isShowBless = 0
+    data.tid = String(submission.threadID)
+
+    switch submission.target {
+    case .thread:
+      guard replyUserID == nil, replyUserDisplayName == nil, replyUserPortrait == nil else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+      data.content = submission.content
+      data.barrageTime = "0"
+      data.postFrom = "13"
+      data.vFid = ""
+      data.vFname = ""
+    case .post(let postID):
+      guard
+        let replyUserID,
+        replyUserID > 0,
+        replyUserDisplayName == nil,
+        replyUserPortrait == nil
+      else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+      data.content = submission.content
+      data.replyUid = String(replyUserID)
+      data.quoteID = String(postID)
+      data.repostid = String(postID)
+      data.postFrom = "0"
+    case .subpost(let parentPostID, let subpostID):
+      guard let replyUserID, replyUserID > 0, let replyUserDisplayName else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+      let displayName = try validatedReplyMetadata(
+        replyUserDisplayName,
+        name: "Reply-user display name",
+        maximumBytes: 512,
+        allowsEmpty: false
+      )
+      let portrait = try validatedReplyMetadata(
+        replyUserPortrait ?? "",
+        name: "Reply-user portrait",
+        maximumBytes: 2_048,
+        allowsEmpty: false
+      )
+      data.content = "回复 #(reply, \(portrait), \(displayName)) :\(submission.content)"
+      data.replyUid = String(replyUserID)
+      data.quoteID = String(parentPostID)
+      data.repostid = String(parentPostID)
+      data.subPostID = String(subpostID)
+    }
+
+    var message = AddPostReqIdl()
+    message.data = data
+    return try authenticatedProtobufWriteRequest(
+      path: "/c/c/post/add",
+      command: 309_731,
+      message: message,
+      fields: [
+        ("BDUSS", credential.bduss),
+        ("_client_type", "2"),
+        ("_client_version", Self.textReplyClientVersion),
+        ("stoken", credential.stoken),
+      ],
+      userAgent: "bdtb for Android \(Self.textReplyClientVersion)",
+      clientUserToken: String(expectedUserID),
+      cookie: "ka=open"
+    )
   }
 
   func concernFeed(
@@ -826,6 +985,54 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     return request
   }
 
+  private func authenticatedProtobufWriteRequest<Message: SwiftProtobuf.Message>(
+    path: String,
+    command: Int,
+    message: Message,
+    fields: [(String, String)],
+    userAgent: String,
+    clientUserToken: String,
+    cookie: String
+  ) throws -> URLRequest {
+    try validateConfiguration()
+    let signedFields = fields.sorted {
+      $0.0 == $1.0 ? $0.1 < $1.1 : $0.0 < $1.0
+    } + [("sign", Self.signature(for: fields))]
+    var components = URLComponents()
+    components.scheme = "https"
+    components.host = Self.writeHost
+    components.path = path
+    components.queryItems = [
+      URLQueryItem(name: "cmd", value: String(command)),
+      URLQueryItem(name: "format", value: "protobuf"),
+    ]
+    guard let url = components.url, Self.allows(url, expectedHost: Self.writeHost) else {
+      throw TiebaClientError.invalidEndpoint
+    }
+
+    var request = URLRequest(
+      url: url,
+      cachePolicy: .reloadIgnoringLocalCacheData,
+      timeoutInterval: configuration.requestTimeout
+    )
+    request.httpMethod = "POST"
+    request.httpShouldHandleCookies = false
+    request.httpBody = TiebaRequestFactory.multipartBody(
+      fields: signedFields,
+      protobuf: try message.serializedData()
+    )
+    request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+    request.setValue("protobuf", forHTTPHeaderField: "x_bd_data_type")
+    request.setValue(clientUserToken, forHTTPHeaderField: "client_user_token")
+    request.setValue(cookie, forHTTPHeaderField: "Cookie")
+    request.setValue(
+      "multipart/form-data; boundary=\(TiebaRequestFactory.multipartBoundary)",
+      forHTTPHeaderField: "Content-Type"
+    )
+    request.setValue("gzip", forHTTPHeaderField: "Accept-Encoding")
+    return request
+  }
+
   static func isValidConcernPageTag(_ value: String) -> Bool {
     let bytes = value.utf8
     guard !bytes.isEmpty, bytes.count <= maximumConcernPageTagBytes else { return false }
@@ -959,6 +1166,23 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       throw TiebaClientError.invalidArgument(
         "Forum name must contain between 1 and 100 non-control characters."
       )
+    }
+    return value
+  }
+
+  private func validatedReplyMetadata(
+    _ rawValue: String,
+    name: String,
+    maximumBytes: Int,
+    allowsEmpty: Bool
+  ) throws -> String {
+    let value = rawValue.precomposedStringWithCanonicalMapping
+    guard
+      (allowsEmpty || !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty),
+      value.utf8.count <= maximumBytes,
+      !value.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
     }
     return value
   }

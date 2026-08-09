@@ -310,6 +310,10 @@ protocol AccountService: Sendable {
     target: ThreadCloudFavoriteTarget,
     markedPostID: Int64?
   ) async throws -> ThreadCloudFavoriteData
+  func submitTextReply(
+    session: StoredAccountSession,
+    submission: TextReplySubmission
+  ) async throws -> TextReplyResult
   func concernFeed(
     session: StoredAccountSession,
     pageTag: String?,
@@ -396,6 +400,13 @@ extension AccountService {
     markedPostID: Int64?
   ) async throws -> ThreadCloudFavoriteData {
     throw BrowseError.unavailable("当前账户服务不支持更新主题收藏。")
+  }
+
+  func submitTextReply(
+    session: StoredAccountSession,
+    submission: TextReplySubmission
+  ) async throws -> TextReplyResult {
+    throw TextReplySubmissionError.unavailable
   }
 
   func notifications(

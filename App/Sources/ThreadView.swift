@@ -27,6 +27,7 @@ struct ThreadView: View {
   @State private var cloudFavoriteScopeID = UUID()
   @State private var pendingCloudFavoriteAction: ThreadCloudFavoritePendingAction?
   @State private var cloudFavoriteErrorMessage: String?
+  @State private var replyComposerContext: TextReplyComposerContext?
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Environment(\.contentFilterRepository) private var contentFilterRepository
   @Environment(\.contentAgreementStore) private var contentAgreementStore
@@ -85,45 +86,7 @@ struct ThreadView: View {
       }
     }
     .safeAreaInset(edge: .bottom, spacing: 0) {
-      if let message = viewModel.jumpError {
-        if viewModel.canRetryJump {
-          LoadMoreErrorView(message: message, retry: viewModel.retryJump)
-            .padding(.horizontal, 12)
-            .background(.regularMaterial)
-        } else {
-          HStack(spacing: 10) {
-            Text(message)
-              .font(.footnote)
-              .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-            Button(action: viewModel.dismissJumpError) {
-              Image(systemName: "xmark.circle.fill")
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("关闭")
-          }
-          .padding(.horizontal, 14)
-          .padding(.vertical, 10)
-          .background(.regularMaterial)
-        }
-      } else if let message = viewModel.positionNotice {
-        HStack(spacing: 10) {
-          Image(systemName: "location.slash")
-            .foregroundStyle(.secondary)
-          Text(message)
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-          Spacer(minLength: 0)
-          Button(action: viewModel.dismissPositionNotice) {
-            Image(systemName: "xmark.circle.fill")
-          }
-          .buttonStyle(.plain)
-          .accessibilityLabel("关闭")
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(.regularMaterial)
-      }
+      threadBottomInset
     }
     .toolbar {
       ToolbarItem(placement: .principal) {
@@ -377,6 +340,15 @@ struct ThreadView: View {
         )
       }
     }
+    .navigationDestination(isPresented: replyComposerPresented) {
+      if let replyComposerContext {
+        ReplyComposerView(
+          context: replyComposerContext,
+          verifyVisibility: verifyReplyVisibility,
+          onConfirmed: handleConfirmedReply
+        )
+      }
+    }
     .sheet(item: $commentsRoute) { route in
       NavigationStack {
         switch route {
@@ -415,6 +387,15 @@ struct ThreadView: View {
     )
   }
 
+  private var replyComposerPresented: Binding<Bool> {
+    Binding(
+      get: { replyComposerContext != nil },
+      set: { isPresented in
+        if !isPresented { replyComposerContext = nil }
+      }
+    )
+  }
+
   private func openMentionedUser(_ userID: Int64) {
     guard userID > 0 else { return }
     linkedTarget = .user(userID)
@@ -422,6 +403,141 @@ struct ThreadView: View {
 
   private func openTiebaLink(_ target: TiebaLinkTarget) {
     linkedTarget = target
+  }
+
+  @ViewBuilder
+  private var threadBottomInset: some View {
+    VStack(spacing: 0) {
+      if let message = viewModel.jumpError {
+        if viewModel.canRetryJump {
+          LoadMoreErrorView(message: message, retry: viewModel.retryJump)
+            .padding(.horizontal, 12)
+        } else {
+          HStack(spacing: 10) {
+            Text(message)
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Button(action: viewModel.dismissJumpError) {
+              Image(systemName: "xmark.circle.fill")
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("关闭")
+          }
+          .padding(.horizontal, 14)
+          .padding(.vertical, 10)
+        }
+      } else if let message = viewModel.positionNotice {
+        HStack(spacing: 10) {
+          Image(systemName: "location.slash")
+            .foregroundStyle(.secondary)
+          Text(message)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+          Spacer(minLength: 0)
+          Button(action: viewModel.dismissPositionNotice) {
+            Image(systemName: "xmark.circle.fill")
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("关闭")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+      }
+
+      if !isPureReadingMode, let context = topicReplyContext {
+        Divider()
+        Button {
+          replyComposerContext = context
+        } label: {
+          HStack(spacing: 10) {
+            Image(systemName: "bubble.left")
+            Text("回复主题")
+              .lineLimit(1)
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+              .font(.caption.weight(.semibold))
+              .foregroundStyle(.tertiary)
+          }
+          .contentShape(Rectangle())
+          .padding(.horizontal, 14)
+          .frame(minHeight: 46)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("thread-reply-topic")
+      }
+    }
+    .background(.regularMaterial)
+  }
+
+  private var topicReplyContext: TextReplyComposerContext? {
+    guard let firstPost = viewModel.firstPost else { return nil }
+    return TextReplyComposerContext(thread: viewModel.thread, firstPost: firstPost)
+  }
+
+  private func requestReply(to post: BrowsePost) {
+    guard !isPureReadingMode else { return }
+    if
+      let firstPost = viewModel.firstPost,
+      firstPost.id == post.id,
+      let context = TextReplyComposerContext(thread: viewModel.thread, firstPost: firstPost)
+    {
+      replyComposerContext = context
+    } else {
+      replyComposerContext = TextReplyComposerContext(thread: viewModel.thread, post: post)
+    }
+  }
+
+  private func verifyReplyVisibility(_ receipt: TextReplyReceipt) async throws
+    -> TextReplyVisibilityConfirmation?
+  {
+    switch receipt {
+    case .post(let postID):
+      guard
+        let post = await viewModel.verifyAndRelocateAcceptedReply(postID: postID),
+        post.id == postID,
+        post.threadID == viewModel.thread.id,
+        post.id != viewModel.thread.firstPostID,
+        post.floor > 1,
+        let content = TextReplyVisibilityProof.exactPlainText(from: post.contents)
+      else { return nil }
+      return TextReplyVisibilityConfirmation(
+        created: .post(postID: post.id, floor: post.floor),
+        authorUserID: post.authorID,
+        content: content
+      )
+    case .subpost(let parentPostID, let subpostID):
+      guard
+        let comment = try await viewModel.verifyAcceptedSubpost(
+          parentPostID: parentPostID,
+          subpostID: subpostID
+        ),
+        comment.id == subpostID,
+        comment.threadID == viewModel.thread.id,
+        comment.parentPostID == parentPostID,
+        let content = TextReplyVisibilityProof.exactPlainText(from: comment.contents)
+      else { return nil }
+      return TextReplyVisibilityConfirmation(
+        created: .subpost(parentPostID: parentPostID, subpostID: subpostID),
+        authorUserID: comment.authorID,
+        content: content
+      )
+    }
+  }
+
+  private func handleConfirmedReply(_ created: CreatedTextReply) {
+    switch created {
+    case .post(let postID, _):
+      if viewModel.scrollTargetPostID != postID {
+        viewModel.relocateAfterConfirmedReply(postID: postID)
+      }
+    case .subpost(let parentPostID, let subpostID):
+      commentsRoute = CommentsRoute(
+        threadID: viewModel.thread.id,
+        postID: parentPostID,
+        commentID: subpostID
+      )
+    }
   }
 
   private var optionsBar: some View {
@@ -509,6 +625,9 @@ struct ThreadView: View {
                     openTiebaLink: openTiebaLink,
                     requestAgreementChange: requestAgreementChange,
                     retryAgreement: retryAgreement,
+                    requestReply: isPureReadingMode ? nil : {
+                      requestReply(to: firstPost)
+                    },
                     openComments: { commentID in
                       commentsRoute = CommentsRoute(
                         threadID: firstPost.threadID,
@@ -587,6 +706,9 @@ struct ThreadView: View {
                     openTiebaLink: openTiebaLink,
                     requestAgreementChange: requestAgreementChange,
                     retryAgreement: retryAgreement,
+                    requestReply: isPureReadingMode ? nil : {
+                      requestReply(to: post)
+                    },
                     openComments: { commentID in
                       commentsRoute = CommentsRoute(
                         threadID: post.threadID,
@@ -1217,6 +1339,7 @@ private struct PostView: View {
   let openTiebaLink: (TiebaLinkTarget) -> Void
   let requestAgreementChange: (ContentAgreementTarget, Bool) -> Void
   let retryAgreement: (ContentAgreementTarget) -> Void
+  let requestReply: (() -> Void)?
   let openComments: (Int64?) -> Void
 
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
@@ -1280,6 +1403,14 @@ private struct PostView: View {
           Label("复制本楼内容", systemImage: "doc.on.doc")
         }
       }
+      if let requestReply {
+        Button(action: requestReply) {
+          Label(
+            post.floor == 1 ? "回复主题" : "回复本楼",
+            systemImage: "arrowshape.turn.up.left"
+          )
+        }
+      }
     }
   }
 
@@ -1309,6 +1440,15 @@ private struct PostView: View {
         requestChange: requestAgreementChange,
         retry: retryAgreement
       )
+
+      if let requestReply {
+        Button(action: requestReply) {
+          Image(systemName: "arrowshape.turn.up.left")
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(post.floor == 1 ? "回复主题" : "回复第 \(post.floor) 楼")
+        .help(post.floor == 1 ? "回复主题" : "回复本楼")
+      }
     }
   }
 

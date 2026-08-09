@@ -14,6 +14,9 @@ public enum TiebaClientError: Error, Sendable, Equatable {
   case forumNotFollowed
   case forumCheckInUnavailable
   case threadAgreementWriteConflict
+  case replyChallengeRequired(message: String)
+  case replyOutcomeUnknown
+  case replySubmissionIDConflict
   case server(code: Int32, message: String)
 }
 
@@ -46,6 +49,14 @@ extension TiebaClientError: LocalizedError {
       "Tieba did not advertise check-in state for this forum."
     case .threadAgreementWriteConflict:
       "A conflicting thread agreement operation completed; read the current state before retrying."
+    case .replyChallengeRequired(let message):
+      message.isEmpty
+        ? "Tieba requires additional verification before this reply can be submitted."
+        : message
+    case .replyOutcomeUnknown:
+      "The reply may have been submitted, but Tieba did not return a verifiable receipt."
+    case .replySubmissionIDConflict:
+      "The reply submission identifier was already used for a different request."
     case .server(let code, let message):
       message.isEmpty ? "Tieba returned error \(code)." : message
     }

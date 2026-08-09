@@ -67,6 +67,19 @@ and remove that marker, are adapted from TiebaLite commit
 `268f388c7824ae2c8f6ed549827a943ec8a7f352`. The authenticated `PbPage`
 response supplies a short-lived `anti.tbs` value for the immediately following
 remove request; it is not exposed by the public model or persisted.
+The minimal `AddPostReqIdl` and `AddPostResIdl` schemas, their response-only
+anti-abuse dependency closure, and the three plain-text reply field layouts for
+`/c/c/post/add?cmd=309731&format=protobuf` are adapted from TiebaLite commit
+`268f388c7824ae2c8f6ed549827a943ec8a7f352`, specifically
+`AddPostRequestData.proto`, `AddPostResponseData.proto`, `ReplyPage.kt`, and
+`MixedTiebaApiImpl.kt`. The request uses the observed `12.35.1.0` protocol
+version and a short-lived `anti.tbs` value from an immediately preceding,
+account-bound `PbPage` or `PbFloor` read. Android hardware, installation,
+location, advertising, OAID, ZID, and screen fields are deliberately omitted.
+User-supplied Tieba rich-content markers are rejected; the only marker emitted
+by this implementation is the protocol-owned nested-reply prefix derived from
+the freshly read target user. A valid server receipt is followed only by an
+exact-ID readback and is never retried as a write.
 The minimal `forum.sign_in_info` and nested `SignInfo.user_info` fields used to
 read server-authoritative per-forum check-in state are adapted from the same
 TiebaLite commit.

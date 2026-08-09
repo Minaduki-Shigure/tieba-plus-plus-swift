@@ -1,0 +1,40 @@
+// tbclient.AddPost.AddPostReqIdl
+syntax = "proto3";
+
+import "CommonReq.proto";
+
+message AddPostReqIdl {
+    message DataReq {
+        CommonReq common = 1;
+        string anonymous = 6;
+        string can_no_forum = 7;
+        string is_feedback = 8;
+        string takephoto_num = 9;
+        string entrance_type = 10;
+        string vcode_tag = 16;
+        string new_vcode = 18;
+        string content = 19;
+        optional string reply_uid = 20;
+        string fid = 26;
+        optional string v_fid = 28;
+        optional string v_fname = 29;
+        string kw = 30;
+        optional string is_barrage = 31;
+        optional string barrage_time = 32;
+        string tid = 45;
+        optional string quote_id = 46;
+        optional string is_twzhibo_thread = 47;
+        optional string floor_num = 48;
+        optional string repostid = 49;
+        optional string sub_post_id = 50;
+        string is_ad = 51;
+        optional string is_addition = 52;
+        optional string is_giftpost = 53;
+        optional string post_from = 55;
+        string name_show = 58;
+        string is_pictxt = 60;
+        optional int32 show_custom_figure = 64;
+        optional int32 is_show_bless = 67;
+    }
+    DataReq data = 1;
+}

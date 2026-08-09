@@ -33,6 +33,11 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
     threadID: Int64,
     markedPostID: Int64?
   ) async throws -> TiebaThreadCloudFavoriteState
+  func submitTextReply(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    submission: TiebaTextReplySubmission
+  ) async throws -> TiebaTextReplyResult
   func getConcernFeed(
     credential: TiebaSessionCredential,
     expectedUserID: Int64,
@@ -169,6 +174,14 @@ extension TiebaAuthenticatedAccountClient {
     threadID: Int64,
     markedPostID: Int64?
   ) async throws -> TiebaThreadCloudFavoriteState {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
+  func submitTextReply(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    submission: TiebaTextReplySubmission
+  ) async throws -> TiebaTextReplyResult {
     throw TiebaClientError.invalidAuthenticatedResponse
   }
 
@@ -363,6 +376,59 @@ struct TiebaCoreAccountService: AccountService {
       nextOffset: response.hasMore ? response.nextOffset : nil,
       hasMore: response.hasMore
     )
+  }
+
+  func submitTextReply(
+    session: StoredAccountSession,
+    submission: TextReplySubmission
+  ) async throws -> TextReplyResult {
+    guard session.id > 0, let credentials = session.credentials else {
+      throw TextReplySubmissionError.fullCredentialsRequired
+    }
+    let coreTarget = Self.coreTextReplyTarget(submission.target.destination)
+    let coreSubmission = TiebaTextReplySubmission(
+      submissionID: submission.id,
+      forumID: submission.target.forumID,
+      forumName: submission.target.forumName,
+      threadID: submission.target.threadID,
+      target: coreTarget,
+      content: submission.content
+    )
+    let response: TiebaTextReplyResult
+    do {
+      response = try await client.submitTextReply(
+        credential: Self.coreSessionCredential(credentials),
+        expectedUserID: session.id,
+        submission: coreSubmission
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch let error as TiebaClientError {
+      throw Self.textReplyError(error)
+    } catch {
+      throw TextReplySubmissionError.unavailable
+    }
+
+    guard
+      response.submissionID == submission.id,
+      response.userID == session.id,
+      response.forumID == submission.target.forumID,
+      response.threadID == submission.target.threadID,
+      response.target == coreTarget,
+      let outcome = Self.textReplyOutcome(
+        response.outcome,
+        expectedTarget: submission.target
+      ),
+      let result = TextReplyResult(
+        submissionID: response.submissionID,
+        userID: response.userID,
+        target: submission.target,
+        outcome: outcome
+      )
+    else {
+      throw TextReplySubmissionError.outcomeUnknown
+    }
+    return result
   }
 
   func threadCloudFavorite(
@@ -1115,6 +1181,68 @@ struct TiebaCoreAccountService: AccountService {
     }
   }
 
+  private static func coreTextReplyTarget(
+    _ target: TextReplyTarget.Destination
+  ) -> TiebaTextReplyTarget {
+    switch target {
+    case .thread(let firstPostID):
+      .thread(firstPostID: firstPostID)
+    case .post(let postID):
+      .post(postID: postID)
+    case .subpost(let parentPostID, let subpostID):
+      .subpost(parentPostID: parentPostID, subpostID: subpostID)
+    }
+  }
+
+  private static func textReplyOutcome(
+    _ outcome: TiebaTextReplyOutcome,
+    expectedTarget: TextReplyTarget
+  ) -> TextReplyOutcome? {
+    let mapped: TextReplyOutcome
+    switch outcome {
+    case .confirmed(let created):
+      let mappedCreated: CreatedTextReply = switch created {
+      case .post(let postID, let floor):
+        .post(postID: postID, floor: floor)
+      case .subpost(let parentPostID, let subpostID):
+        .subpost(parentPostID: parentPostID, subpostID: subpostID)
+      }
+      mapped = .confirmed(mappedCreated)
+    case .acceptedAwaitingVisibility(let receipt):
+      let mappedReceipt: TextReplyReceipt = switch receipt {
+      case .post(let postID):
+        .post(postID: postID)
+      case .subpost(let parentPostID, let subpostID):
+        .subpost(parentPostID: parentPostID, subpostID: subpostID)
+      }
+      mapped = .acceptedAwaitingVisibility(mappedReceipt)
+    }
+
+    switch mapped {
+    case .confirmed(let created):
+      return created.belongs(to: expectedTarget) ? mapped : nil
+    case .acceptedAwaitingVisibility(let receipt):
+      return receipt.belongs(to: expectedTarget) ? mapped : nil
+    }
+  }
+
+  private static func textReplyError(_ error: TiebaClientError) -> TextReplySubmissionError {
+    switch error {
+    case .invalidArgument:
+      .invalidSubmission
+    case .replyChallengeRequired:
+      .challengeRequired
+    case .replyOutcomeUnknown:
+      .outcomeUnknown
+    case .replySubmissionIDConflict:
+      .submissionConflict
+    case .server(let code, _):
+      .server(code: code)
+    default:
+      .unavailable
+    }
+  }
+
   private static func corePostLocation(
     _ location: ThreadPostLocation?
   ) -> TiebaPostLocation? {
@@ -1156,6 +1284,8 @@ struct TiebaCoreAccountService: AccountService {
       message = "该贴吧当前无法签到。"
     case .threadAgreementWriteConflict:
       message = "先前的主题点赞操作已结束，请重新读取当前状态。"
+    case .replyChallengeRequired, .replyOutcomeUnknown, .replySubmissionIDConflict:
+      message = "账户请求失败，请稍后重试。"
     case .server(let code, _):
       message = "账户请求失败（错误码 \(code)）。"
     @unknown default:

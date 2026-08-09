@@ -20,9 +20,9 @@ versioned separately and currently serves `v0.59.0-alpha.1` (build 62).
 | Media rendering, playback, and export | 15 | 13–14 | Images, galleries, video, voice, sharing, saving, and media policy are implemented; broader format and cache parity remain |
 | Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, and media preferences are implemented; TiebaLite's wider settings and customization surface remains |
 | Account, session, and private read flows | 15 | 8 | Login, switching, followed forums, cloud favorites, inbox, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
-| Server writes, creation, and social actions | 15 | 3 | Follow/unfollow, check-in, approval, and thread-detail cloud-favorite mutations have guarded implementations; posting, replying, list-level cloud actions, and most reactions remain unavailable |
+| Server writes, creation, and social actions | 15 | 4–5 | Follow/unfollow, check-in, approval, thread-detail cloud-favorite mutations, and three plain-text reply targets have guarded implementations; real reply success, new topics, rich media, list-level cloud actions, and most reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
-| **Total** | **100** | **66–69** | Current full-product estimate |
+| **Total** | **100** | **67–71** | Current full-product estimate |
 
 The first three rows form the anonymous reading-and-media subtotal: 49–52 of 55
 points, or roughly 90–95%. Concern raises the private-read area but receives only
@@ -152,6 +152,11 @@ the source metadata is updated to that tested IPA.
 - Account-bound approval and cancellation on the canonical topic, ordinary
   floors, and both parent and child items in a full nested-reply page, with
   explicit confirmation and lease-guarded read-only recovery
+- Experimental native plain-text composers for replying to the topic, an
+  ordinary floor, or a specific nested reply including one under the canonical
+  first floor, with exact target rebinding, account-level write serialization,
+  persistent per-target drafts, strict challenge/accepted/unknown states, and
+  exact-PID readback without write retry
 - Page-shaped authenticated approval overlays that mirror the anonymous post
   and nested-reply requests, batch the currently retained targets, and refresh
   a full nested-reply page even when its target set is unchanged
@@ -176,10 +181,13 @@ the source metadata is updated to that tested IPA.
 5. Real-device validation of explicit cloud-favorite add/remove and saved-floor
    updates, including STOKEN rejection, idempotence, uncertain-write readback,
    concurrency, session rotation, and account switching
-6. Experimental plain-text reply workflows behind explicit risk confirmation,
-   anti-CSRF tests, and unknown-outcome handling
+6. Disposable-account validation of all three plain-text reply targets,
+   including minimum-field deletion, missing/random/expired/cross-account
+   STOKEN and TBS, challenge and permission failures, post-dispatch loss,
+   exact-PID visibility, account rotation, and duplicate-send prevention
 7. Broader settings parity, zoomed-image edge handoff, local-to-remote zoom
-   continuity, remaining account activity, content creation, and moderation tools
+   continuity, remaining account activity, new-topic and rich-media creation,
+   and moderation tools
 
 The foreground inbox deliberately does not copy TiebaLite's cleartext JSON
 transport or its Android hardware parameters. ReplyMe uses the current HTTPS
@@ -725,6 +733,44 @@ additionally requires authoritative per-forum sign state and rejects an
 unfollowed forum. All writes require explicit user confirmation and perform no
 write when the server already reports the requested state. Anonymous browsing
 must continue to work without creating, reading, or storing an account session.
+
+Plain-text replies use HTTPS protobuf command `309731` with client version
+`12.35.1.0`. Topic replies, ordinary-floor replies, and replies to a specific
+nested reply share one endpoint but have distinct `post_from`, parent, quoted,
+and subpost fields. A nested reply alone receives the protocol-owned `reply`
+marker, built from the freshly read target identity; user-supplied rich-content
+markers are rejected. The minimal request contains BDUSS, STOKEN, fresh TBS,
+fixed client metadata, and the required business fields, but no IMEI, Android
+ID, OAID, ZID, installation history, screen, location, or advertising identifier.
+If a real device proves those omitted fingerprint fields mandatory, the feature
+remains gated rather than adopting an Android device-identity chain.
+
+The canonical first post remains reserved as the topic target: replying to that
+parent uses `thread(firstPostID)`, and `post(firstPostID)` is invalid. Its child
+replies are still independent nested targets and use
+`subpost(parentPostID: firstPostID, subpostID: ...)`.
+
+Before a reply write, Core binds the exact account, forum, thread, first floor,
+parent, and optional child through authenticated PB Page/Floor responses. One
+account has one reply-write tail; an identical submission UUID shares its owner,
+while a different payload reusing that UUID is rejected. Cancellation before
+dispatch guarantees zero write. After dispatch, the owner continues even if its
+caller or view disappears. A valid returned PID is read exactly once: a matching
+author, body, parent, and marker confirms success; a genuinely absent PID becomes
+accepted-awaiting-visibility; any visible mismatch or lost receipt becomes an
+unknown outcome. Neither case resends the write.
+
+The App binds each composer to `userID + sessionRevision` and stores its exact
+draft by account, forum, thread, first post, and reply target. The bounded atomic
+archive contains no credential, TBS, or author metadata and is excluded from
+backup with iOS file protection. A non-sendable submission marker must be
+persisted before dispatch; a crash or indeterminate failure after that boundary
+reopens as unknown rather than editable. Confirmed success clears the draft only
+after a terminal receipt is persisted. Accepted, unknown, and challenge states
+remain non-sendable across navigation and restart; a challenge for one session
+can be unlocked only by an explicit new login. Composer navigation uses the
+native stack without a custom back gesture, including cancellation of an
+interactive edge swipe.
 
 Search categories load independently so one endpoint failure does not discard
 another category's results. User search uses the credential-free Web endpoint,

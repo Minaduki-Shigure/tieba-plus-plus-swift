@@ -75,6 +75,64 @@ final class ThreadViewModel: ObservableObject {
     reload(location: initialLocation)
   }
 
+  func relocateAfterConfirmedReply(postID: Int64) {
+    guard postID > 0 else { return }
+    prepareForReplyRelocation()
+    reload(location: .postID(postID))
+  }
+
+  func verifyAndRelocateAcceptedReply(postID: Int64) async -> BrowsePost? {
+    guard postID > 0 else { return nil }
+    prepareForReplyRelocation()
+    reload(location: .postID(postID))
+    await loadTask?.value
+    guard state == .loaded else { return nil }
+    return post(withID: postID)
+  }
+
+  func verifyAcceptedSubpost(
+    parentPostID: Int64,
+    subpostID: Int64
+  ) async throws -> BrowseComment? {
+    guard
+      parentPostID > 0,
+      subpostID > 0,
+      parentPostID != subpostID
+    else { return nil }
+    let response = try await service.comments(
+      threadID: thread.id,
+      postID: parentPostID,
+      aroundCommentID: subpostID,
+      page: 1
+    )
+    guard
+      response.parentPost.id == parentPostID,
+      response.parentPost.threadID == thread.id
+    else { return nil }
+    if let responseThread = response.thread {
+      let forumConflicts = thread.forumID > 0 && responseThread.forumID > 0
+        && thread.forumID != responseThread.forumID
+      guard responseThread.id == thread.id, !forumConflicts else { return nil }
+    }
+    let matches = response.comments.filter {
+      $0.id == subpostID
+        && $0.threadID == thread.id
+        && $0.parentPostID == parentPostID
+    }
+    guard matches.count == 1 else { return nil }
+    return matches[0]
+  }
+
+  private func prepareForReplyRelocation() {
+    if options.sort == .hot {
+      options.sort = .ascending
+    }
+    if options.onlyThreadAuthor {
+      options.onlyThreadAuthor = false
+    }
+    initialLocation = nil
+  }
+
   private func reload(location: ThreadPostLocation?) {
     invalidateCurrentLoad()
     currentPage = 0

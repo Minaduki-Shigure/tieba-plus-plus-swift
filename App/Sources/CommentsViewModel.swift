@@ -60,12 +60,14 @@ final class CommentsViewModel: ObservableObject {
   private var loadTask: Task<Void, Never>?
   private var loadGeneration = 0
   private var lockedParentPostID: Int64?
+  private var activeAnchor: CommentsAnchor
   private var indexedParentAgreementTarget: ContentAgreementTarget?
   private var agreementTargetsByCommentID: [Int64: ContentAgreementTarget] = [:]
 
   init(threadID: Int64, postID: Int64, service: any BrowseService) {
     self.threadID = threadID
     self.anchor = .post(postID)
+    self.activeAnchor = .post(postID)
     self.service = service
     self.lockedParentPostID = postID > 0 ? postID : nil
   }
@@ -78,6 +80,7 @@ final class CommentsViewModel: ObservableObject {
   ) {
     self.threadID = threadID
     self.anchor = .comment(postID: postID, commentID: commentID)
+    self.activeAnchor = .comment(postID: postID, commentID: commentID)
     self.service = service
     self.lockedParentPostID = postID > 0 ? postID : nil
   }
@@ -89,6 +92,7 @@ final class CommentsViewModel: ObservableObject {
   ) {
     self.threadID = threadID
     self.anchor = .resolvingComment(commentID)
+    self.activeAnchor = .resolvingComment(commentID)
     self.service = service
     self.lockedParentPostID = nil
   }
@@ -98,7 +102,39 @@ final class CommentsViewModel: ObservableObject {
     reload()
   }
 
+  func waitForCurrentLoad() async {
+    await loadTask?.value
+  }
+
   func reload() {
+    reload(anchorOverride: nil)
+  }
+
+  func relocateAfterConfirmedReply(commentID: Int64) {
+    guard
+      commentID > 0,
+      let parentPostID = lockedParentPostID,
+      parentPostID > 0
+    else { return }
+    reload(anchorOverride: .comment(postID: parentPostID, commentID: commentID))
+  }
+
+  func verifyAndRelocateAcceptedReply(commentID: Int64) async -> BrowseComment? {
+    guard
+      commentID > 0,
+      let parentPostID = lockedParentPostID,
+      parentPostID > 0
+    else { return nil }
+    reload(anchorOverride: .comment(postID: parentPostID, commentID: commentID))
+    await loadTask?.value
+    guard state == .loaded else { return nil }
+    return comments.first(where: { $0.id == commentID && $0.parentPostID == parentPostID })
+  }
+
+  private func reload(anchorOverride: CommentsAnchor?) {
+    if let anchorOverride {
+      activeAnchor = anchorOverride
+    }
     invalidateCurrentLoad()
     lowestLoadedPage = 0
     highestLoadedPage = 0
@@ -119,7 +155,7 @@ final class CommentsViewModel: ObservableObject {
     comments = []
     replaceAgreementDescriptors(with: [])
     state = .loading
-    load(page: 1, placement: .replacing)
+    load(page: 1, placement: .replacing, anchorOverride: anchorOverride)
   }
 
   func loadMoreIfNeeded(current comment: BrowseComment) {
@@ -222,11 +258,15 @@ final class CommentsViewModel: ObservableObject {
     agreementTargetsByCommentID[commentID]
   }
 
-  private func load(page: Int, placement: CommentPagePlacement) {
+  private func load(
+    page: Int,
+    placement: CommentPagePlacement,
+    anchorOverride: CommentsAnchor? = nil
+  ) {
     guard loadTask == nil else { return }
     let service = service
     let threadID = threadID
-    let anchor = anchor
+    let anchor = anchorOverride ?? activeAnchor
     let lockedParentPostID = lockedParentPostID
     loadGeneration &+= 1
     let generation = loadGeneration

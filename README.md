@@ -18,8 +18,8 @@ checks.
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, and media preferences |
 | Accounts | Current `main` supports bound Web login, switching, logout, followed forums, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox, Tieba cloud favorites, per-forum state, and experimental content approval |
-| Server-side writes | Confirmed forum follow/unfollow, check-in, content approval, and thread-detail cloud-favorite changes are in device validation; other writes stay disabled |
-| TiebaLite parity | Anonymous reading and media: about 90–95%; full product scope: about 66–69% |
+| Server-side writes | Guarded forum follow/unfollow, check-in, content approval, thread-detail cloud-favorite changes, and plain-text topic/floor/nested replies are in device validation; other writes stay disabled |
+| TiebaLite parity | Anonymous reading and media: about 90–95%; full product scope: about 67–71% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.59.0-alpha.1` (build 62); later `main` features require a tagged release |
 
 ### Release and validation
@@ -48,7 +48,11 @@ checks.
   logged-in thread can also read its account-bound Tieba cloud-favorite state and,
   after explicit confirmation, add it at the last visible floor, update the saved
   floor, or remove it. Every mutation is followed by a read-only reconciliation;
-  an uncertain write is never retried.
+  an uncertain write is never retried. Logged-in thread and full nested-reply
+  pages also expose experimental, draft-backed plain-text composers for replying
+  to the topic, an ordinary floor, or a specific nested reply. The write is sent
+  at most once, a valid server PID is read back by exact identity, and challenge,
+  accepted-but-not-yet-visible, and unknown outcomes remain distinct.
   These main-only changes will not enter the public app source until a tagged
   IPA passes the release checks.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
@@ -57,10 +61,10 @@ checks.
   simulator build, validates the app source, and verifies its public IPA hash.
   Authenticated flows never use real credentials in CI. Login binding, cloud
   favorite reads and mutations, followed-forum recommendation filtering,
-  concern-feed, and inbox contracts are covered by fixtures, while successful
-  private reads and forum follow/unfollow, check-in, cloud-favorite changes, and
-  topic/post/subpost content approval remain physical-device validation features
-  in this alpha.
+  concern-feed, inbox, and plain-text reply contracts are covered by fixtures,
+  while successful private reads and forum follow/unfollow, check-in,
+  cloud-favorite changes, topic/post/subpost content approval, and real reply
+  creation remain physical-device validation features in this alpha.
 - **App source:** Add [`sidestore-source.json`](https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json)
   to LiveContainer or SideStore. Its latest IPA is published only after the tag's
   package, anonymous integration, and simulator tests all pass.
@@ -195,6 +199,19 @@ checks.
   independent local favorites archive. Successful authenticated reads and writes
   over the minimal HTTPS contracts still require disposable-account device
   validation.
+- **Plain-text replies:** Current `main` can reply to a topic, an ordinary floor,
+  or a specific nested reply, including one under the canonical first floor,
+  from native, draft-backed composers. Replying to the first-floor parent itself
+  remains a topic reply rather than an ordinary-floor reply. Targets are rebuilt
+  only from validated page models and rebound by an authenticated PB
+  Page/Floor read before the single write. Drafts are isolated by account and
+  exact target and protected on disk. A non-resendable pending marker must be
+  persisted before the network write; challenge, accepted-but-not-visible, and
+  unknown outcomes remain blocked so reopening a composer cannot silently resend
+  them. A challenge remains blocked for the same `sessionRevision`; only an
+  explicit new login can start a fresh attempt. The request deliberately omits
+  Android device fingerprints and therefore remains a disposable-account
+  validation feature.
 - **Credential boundary:** Anonymous and authenticated requests use isolated,
   ephemeral clients. The vault stores only the same-snapshot BDUSS/STOKEN pair
   accepted by the UID-consistency probes and its actual BDUSS Cookie name;
@@ -217,20 +234,24 @@ checks.
   as a second write. The
   App starts and applies reconciliation only while the initiating account lease
   remains readable and current; a later account change discards its result. No
-  uncertain failure retries a write. Already-completed check-in and matching
-  content state are idempotent. All supported writes require explicit user
-  confirmation. Automatic and batch check-in are not implemented.
+  uncertain failure retries a write. Reply submissions additionally serialize
+  per account, share only an identical submission UUID, and permit cancellation
+  to stop the owner only before write dispatch. Once dispatched, the owner
+  finishes receipt parsing and exact-ID readback even if its view disappears.
+  Already-completed check-in and matching content state are idempotent. All
+  supported writes require explicit user confirmation. Automatic and batch
+  check-in are not implemented.
 - **Unsupported operations:** Direct deletion from the cloud-favorites list,
   bulk cloud/local synchronization, disagreement and other reaction types,
-  thread or reply creation, notification replies, background notification
-  polling, and moderation remain unavailable until their request contracts and
-  recovery paths have been validated on a disposable account.
+  new-thread creation, rich-media replies, notification replies, background
+  notification polling, and moderation remain unavailable until their request
+  contracts and recovery paths have been validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, auditable weighting, protocol constraints, and next milestones.
-  The current `main` audit totals 66–69 of 100 weighted points; its anonymous
+  The current `main` audit totals 67–71 of 100 weighted points; its anonymous
   reading and media subtotal is about 90–95%. The largest remaining gaps are
-  post/reply creation, background unread handling, broader settings, remaining
-  cloud-favorite list actions, and moderation.
+  new-thread and rich-media creation, background unread handling, broader
+  settings, remaining cloud-favorite list actions, and moderation.
 
 ## Architecture
 

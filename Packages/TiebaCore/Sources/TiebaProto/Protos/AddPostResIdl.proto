@@ -1,0 +1,26 @@
+// tbclient.AddPost.AddPostResIdl
+syntax = "proto3";
+
+import "Error.proto";
+import "PostAntiInfo.proto";
+import "PostAntiStat.proto";
+import "Toast.proto";
+import "VcodeInfo.proto";
+
+message AddPostResIdl {
+    message DataRes {
+        string opgroup = 1;
+        string tid = 2;
+        string pid = 3;
+        string msg = 5;
+        string pre_msg = 6;
+        string color_msg = 7;
+        PostAntiInfo info = 14;
+        PostAntiStat anti_stat = 15;
+        VcodeInfo anti = 17;
+        string ext_msg = 18;
+        Toast toast = 19;
+    }
+    Error error = 1;
+    DataRes data = 2;
+}

@@ -13,6 +13,7 @@ struct CommentParentPostView: View {
   let openTiebaLink: (TiebaLinkTarget) -> Void
   let requestAgreementChange: (ContentAgreementTarget, Bool) -> Void
   let retryAgreement: (ContentAgreementTarget) -> Void
+  let requestReply: (() -> Void)?
 
   @Environment(\.contentAgreementStore) private var contentAgreementStore
 
@@ -43,6 +44,19 @@ struct CommentParentPostView: View {
           requestChange: requestAgreementChange,
           retry: retryAgreement
         )
+
+        if let requestReply {
+          Button(action: requestReply) {
+            Image(systemName: "arrowshape.turn.up.left")
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel(
+            post.floor == 1
+              ? "回复主题"
+              : (post.floor > 1 ? "回复第 \(post.floor) 楼" : "回复父楼")
+          )
+          .help(post.floor == 1 ? "回复主题" : "回复父楼")
+        }
       }
 
       BrowseContentView(
@@ -58,6 +72,14 @@ struct CommentParentPostView: View {
           UIPasteboard.general.string = copyText
         } label: {
           Label("复制父楼内容", systemImage: "doc.on.doc")
+        }
+      }
+      if let requestReply {
+        Button(action: requestReply) {
+          Label(
+            post.floor == 1 ? "回复主题" : "回复父楼",
+            systemImage: "arrowshape.turn.up.left"
+          )
         }
       }
     }
