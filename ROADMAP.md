@@ -198,8 +198,8 @@ the source metadata is updated to that tested IPA.
    including minimum-field deletion, missing/random/expired/cross-account
    STOKEN and TBS, challenge and permission failures, post-dispatch loss,
    exact-PID visibility, account rotation, and duplicate-send prevention
-7. Broader settings parity, zoomed-image edge handoff, remaining account
-   activity, new-topic and rich-media creation, and moderation tools
+7. Broader settings parity, remaining account activity, new-topic and rich-media
+   creation, and moderation tools
 
 The foreground inbox deliberately does not copy TiebaLite's cleartext JSON
 transport or its Android hardware parameters. ReplyMe uses the current HTTPS
@@ -404,10 +404,16 @@ Existing destination state wins. Context or local-snapshot replacement, or
 disabling remote loading, clears the migration chain and zoom cache; neither is
 persisted.
 At most the current controller plus two neighbors on either side stay in the
-normal cache, reduced to adjacent controllers after a memory warning. While the
-current image is enlarged, its pan gesture suspends the parent page scroll;
-returning to identity scale restores paging. Unlike TiebaLite, a drag at the
-enlarged image's pan boundary does not yet hand off to the parent pager.
+normal cache, reduced to adjacent controllers after a memory warning. Once a
+one-finger drag exceeds the system movement threshold, the native pan
+recognizer's dominant axis and direction plus the enlarged image's current pan
+boundary assign the complete gesture to image panning or the native pager. An
+image-owned drag remains owned until lift or cancellation even when it reaches
+the boundary; a subsequent outward drag at that boundary pages, while an inward
+drag pans back into the image. Two-finger gestures stay with zooming and never
+page. The same policy is applied symmetrically to horizontal and vertical
+paging. XCTest covers the pixel-scale edge policy and recognizer hierarchy;
+continuous touch competition remains a device-validation gate.
 Interactive and programmatic transitions coalesce pending migration, list, and
 selection updates, then apply them atomically after the active transition
 resolves, so whole-thread prepend or append loading cannot replace a newer

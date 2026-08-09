@@ -90,18 +90,46 @@ enum ImageZoomGeometry {
   ) -> CGSize {
     let scale = clampedScale(scale)
     guard scale > 1 else { return .zero }
-
-    let viewportWidth = max(0, viewportSize.width)
-    let viewportHeight = max(0, viewportSize.height)
-    let fittedImageSize = fittedImageSize ?? CGSize(
-      width: viewportWidth,
-      height: viewportHeight
-    )
-    let horizontalLimit = max(0, fittedImageSize.width * scale - viewportWidth) / 2
-    let verticalLimit = max(0, fittedImageSize.height * scale - viewportHeight) / 2
+    guard let limits = panLimits(
+      scale: scale,
+      viewportSize: viewportSize,
+      fittedImageSize: fittedImageSize
+    ) else { return .zero }
     return CGSize(
-      width: min(max(offset.width, -horizontalLimit), horizontalLimit),
-      height: min(max(offset.height, -verticalLimit), verticalLimit)
+      width: min(max(offset.width, -limits.horizontal), limits.horizontal),
+      height: min(max(offset.height, -limits.vertical), limits.vertical)
+    )
+  }
+
+  static func panLimits(
+    scale: CGFloat,
+    viewportSize: CGSize,
+    fittedImageSize: CGSize? = nil
+  ) -> ImageZoomPanLimits? {
+    guard
+      scale.isFinite,
+      scale >= 1,
+      scale <= 5,
+      viewportSize.width.isFinite,
+      viewportSize.height.isFinite,
+      viewportSize.width > 0,
+      viewportSize.height > 0
+    else { return nil }
+
+    let fittedImageSize = fittedImageSize ?? viewportSize
+    guard
+      fittedImageSize.width.isFinite,
+      fittedImageSize.height.isFinite,
+      fittedImageSize.width > 0,
+      fittedImageSize.height > 0
+    else { return nil }
+
+    let scaledWidth = fittedImageSize.width * scale
+    let scaledHeight = fittedImageSize.height * scale
+    guard scaledWidth.isFinite, scaledHeight.isFinite else { return nil }
+    return ImageZoomPanLimits(
+      horizontal: max(0, scaledWidth - viewportSize.width) / 2,
+      vertical: max(0, scaledHeight - viewportSize.height) / 2
     )
   }
 
@@ -122,6 +150,254 @@ enum ImageZoomGeometry {
       return CGSize(width: viewportWidth, height: viewportWidth / imageAspectRatio)
     }
     return CGSize(width: viewportHeight * imageAspectRatio, height: viewportHeight)
+  }
+}
+
+struct ImageZoomPanLimits: Equatable, Sendable {
+  let horizontal: CGFloat
+  let vertical: CGFloat
+}
+
+enum ImageZoomPanOwnership: Equatable, Sendable {
+  case image
+  case pager
+}
+
+enum ImageZoomPanOwnershipPolicy {
+  static func resolve(
+    limits: ImageZoomPanLimits?,
+    offset: CGSize,
+    velocity: CGSize,
+    translation: CGSize,
+    displayScale: CGFloat
+  ) -> ImageZoomPanOwnership {
+    guard
+      let limits,
+      isFinite(offset),
+      isFinite(velocity),
+      isFinite(translation),
+      limits.horizontal.isFinite,
+      limits.vertical.isFinite,
+      limits.horizontal >= 0,
+      limits.vertical >= 0,
+      displayScale.isFinite,
+      displayScale > 0
+    else { return .image }
+
+    let movement: CGSize
+    if velocity.width != 0 || velocity.height != 0 {
+      movement = velocity
+    } else if translation.width != 0 || translation.height != 0 {
+      movement = translation
+    } else {
+      return .image
+    }
+
+    // TiebaLite resolves equal movement to the vertical axis.
+    let usesHorizontalAxis = abs(movement.width) > abs(movement.height)
+    let limit = usesHorizontalAxis ? limits.horizontal : limits.vertical
+    let primaryOffset = usesHorizontalAxis ? offset.width : offset.height
+    let primaryMovement = usesHorizontalAxis ? movement.width : movement.height
+    // zoomimage classifies scroll edges after Kotlin roundToInt pixel rounding.
+    guard
+      let lowerBound = kotlinRoundedPixel(-limit, displayScale: displayScale),
+      let upperBound = kotlinRoundedPixel(limit, displayScale: displayScale),
+      let roundedOffset = kotlinRoundedPixel(primaryOffset, displayScale: displayScale)
+    else { return .image }
+    guard lowerBound != upperBound else { return .pager }
+
+    let movesPastPositiveEdge = primaryMovement > 0 && roundedOffset >= upperBound
+    let movesPastNegativeEdge = primaryMovement < 0 && roundedOffset <= lowerBound
+    return movesPastPositiveEdge || movesPastNegativeEdge ? .pager : .image
+  }
+
+  private static func isFinite(_ size: CGSize) -> Bool {
+    size.width.isFinite && size.height.isFinite
+  }
+
+  private static func kotlinRoundedPixel(
+    _ pointValue: CGFloat,
+    displayScale: CGFloat
+  ) -> Int? {
+    let pixelValue = pointValue * displayScale
+    guard pixelValue.isFinite else { return nil }
+    let rounded = floor(pixelValue + 0.5)
+    guard
+      rounded.isFinite,
+      rounded >= CGFloat(Int32.min),
+      rounded <= CGFloat(Int32.max)
+    else { return nil }
+    return Int(rounded)
+  }
+}
+
+@MainActor
+struct ImageZoomPanGestureOverlay: UIViewRepresentable {
+  let scale: CGFloat
+  let offset: CGSize
+  let viewportSize: CGSize
+  let fittedImageSize: CGSize
+  let displayScale: CGFloat
+  let onChanged: (CGSize) -> Void
+  let onEnded: (CGSize) -> Void
+
+  func makeCoordinator() -> Coordinator {
+    Coordinator()
+  }
+
+  func makeUIView(context: Context) -> UIView {
+    let view = UIView()
+    view.backgroundColor = .clear
+    view.isOpaque = false
+    view.isAccessibilityElement = false
+    view.accessibilityElementsHidden = true
+    view.addGestureRecognizer(context.coordinator.panGestureRecognizer)
+    context.coordinator.update(from: self)
+    return view
+  }
+
+  func updateUIView(_ view: UIView, context: Context) {
+    context.coordinator.update(from: self)
+  }
+
+  static func dismantleUIView(
+    _ view: UIView,
+    coordinator: Coordinator
+  ) {
+    view.removeGestureRecognizer(coordinator.panGestureRecognizer)
+    coordinator.detach()
+  }
+
+  @MainActor
+  final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+    private struct Configuration {
+      let scale: CGFloat
+      let offset: CGSize
+      let viewportSize: CGSize
+      let fittedImageSize: CGSize
+      let displayScale: CGFloat
+      let onChanged: (CGSize) -> Void
+      let onEnded: (CGSize) -> Void
+    }
+
+    private var configuration: Configuration?
+    private var lastImageTranslation = CGSize.zero
+
+    lazy var panGestureRecognizer: UIPanGestureRecognizer = {
+      let recognizer = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
+      recognizer.minimumNumberOfTouches = 1
+      recognizer.maximumNumberOfTouches = 1
+      recognizer.cancelsTouchesInView = false
+      recognizer.delegate = self
+      return recognizer
+    }()
+
+    func update(from overlay: ImageZoomPanGestureOverlay) {
+      configuration = Configuration(
+        scale: overlay.scale,
+        offset: overlay.offset,
+        viewportSize: overlay.viewportSize,
+        fittedImageSize: overlay.fittedImageSize,
+        displayScale: overlay.displayScale,
+        onChanged: overlay.onChanged,
+        onEnded: overlay.onEnded
+      )
+    }
+
+    func detach() {
+      configuration = nil
+      lastImageTranslation = .zero
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+      guard
+        gestureRecognizer === panGestureRecognizer,
+        let configuration,
+        let view = gestureRecognizer.view
+      else { return true }
+      guard
+        configuration.scale.isFinite,
+        configuration.scale >= 1,
+        configuration.scale <= 5
+      else { return true }
+      guard ImageZoomGeometry.allowsPanning(at: configuration.scale) else { return false }
+      let velocity = panGestureRecognizer.velocity(in: view)
+      let translation = panGestureRecognizer.translation(in: view)
+      return ImageZoomPanOwnershipPolicy.resolve(
+        limits: ImageZoomGeometry.panLimits(
+          scale: configuration.scale,
+          viewportSize: configuration.viewportSize,
+          fittedImageSize: configuration.fittedImageSize
+        ),
+        offset: configuration.offset,
+        velocity: CGSize(width: velocity.x, height: velocity.y),
+        translation: CGSize(width: translation.x, height: translation.y),
+        displayScale: configuration.displayScale
+      ) == .image
+    }
+
+    func gestureRecognizer(
+      _ gestureRecognizer: UIGestureRecognizer,
+      shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+      guard gestureRecognizer === panGestureRecognizer else { return false }
+      return !isEnclosingPagerPan(otherGestureRecognizer, from: gestureRecognizer.view)
+    }
+
+    func gestureRecognizer(
+      _ gestureRecognizer: UIGestureRecognizer,
+      shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+      guard gestureRecognizer === panGestureRecognizer else { return false }
+      return isEnclosingPagerPan(otherGestureRecognizer, from: gestureRecognizer.view)
+    }
+
+    @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
+      guard let configuration, let view = recognizer.view else { return }
+      let translation = recognizer.translation(in: view)
+      let translationSize = CGSize(width: translation.x, height: translation.y)
+      switch recognizer.state {
+      case .began, .changed:
+        lastImageTranslation = translationSize
+        configuration.onChanged(translationSize)
+      case .ended:
+        configuration.onEnded(translationSize)
+        lastImageTranslation = .zero
+      case .cancelled:
+        configuration.onEnded(lastImageTranslation)
+        lastImageTranslation = .zero
+      case .possible, .failed:
+        break
+      @unknown default:
+        break
+      }
+    }
+
+    private func isEnclosingPagerPan(
+      _ gestureRecognizer: UIGestureRecognizer,
+      from view: UIView?
+    ) -> Bool {
+      guard
+        let view,
+        let scrollView = gestureRecognizer.view as? UIScrollView,
+        gestureRecognizer === scrollView.panGestureRecognizer,
+        view.isDescendant(of: scrollView),
+        let pageViewController = enclosingPageViewController(from: scrollView),
+        pageViewController.view.subviews.contains(where: { $0 === scrollView })
+      else { return false }
+      return true
+    }
+
+    private func enclosingPageViewController(from view: UIView) -> UIPageViewController? {
+      var responder: UIResponder? = view
+      while let currentResponder = responder {
+        if let pageViewController = currentResponder as? UIPageViewController {
+          return pageViewController
+        }
+        responder = currentResponder.next
+      }
+      return nil
+    }
   }
 }
 
@@ -503,6 +779,7 @@ struct ZoomableRemoteImage: View {
   let item: ImageGalleryItem
   let onZoomStateChange: (ImageGalleryItem.ID, ImageGalleryZoomState) -> Void
 
+  @Environment(\.displayScale) private var displayScale
   @State private var scale: CGFloat
   @State private var committedScale: CGFloat
   @State private var offset: CGSize
@@ -540,11 +817,35 @@ struct ZoomableRemoteImage: View {
             .scaledToFit()
             .scaleEffect(scale)
             .offset(offset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
-            .highPriorityGesture(
-              panGesture(viewportSize: proxy.size, imagePixelSize: pixelSize),
-              including: ImageZoomGeometry.allowsPanning(at: scale) ? .all : .subviews
-            )
+            .overlay {
+              ImageZoomPanGestureOverlay(
+                scale: scale,
+                offset: offset,
+                viewportSize: proxy.size,
+                fittedImageSize: fittedImageSize(
+                  in: proxy.size,
+                  imagePixelSize: pixelSize
+                ),
+                displayScale: displayScale,
+                onChanged: { translation in
+                  updatePan(
+                    translation: translation,
+                    viewportSize: proxy.size,
+                    imagePixelSize: pixelSize
+                  )
+                },
+                onEnded: { translation in
+                  endPan(
+                    translation: translation,
+                    viewportSize: proxy.size,
+                    imagePixelSize: pixelSize
+                  )
+                }
+              )
+              .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
             .simultaneousGesture(
               magnificationGesture(viewportSize: proxy.size, imagePixelSize: pixelSize)
             )
@@ -614,30 +915,50 @@ struct ZoomableRemoteImage: View {
       }
   }
 
-  private func panGesture(
+  private func updatePan(
+    translation: CGSize,
     viewportSize: CGSize,
     imagePixelSize: CGSize
-  ) -> some Gesture {
-    DragGesture()
-      .onChanged { value in
-        offset = ImageZoomGeometry.clampedOffset(
-          CGSize(
-            width: committedOffset.width + value.translation.width,
-            height: committedOffset.height + value.translation.height
-          ),
-          scale: scale,
-          viewportSize: viewportSize,
-          fittedImageSize: fittedImageSize(
-            in: viewportSize,
-            imagePixelSize: imagePixelSize
-          )
-        )
-        publishZoomState()
-      }
-      .onEnded { _ in
-        committedOffset = offset
-        publishZoomState()
-      }
+  ) {
+    offset = resolvedPanOffset(
+      translation: translation,
+      viewportSize: viewportSize,
+      imagePixelSize: imagePixelSize
+    )
+    publishZoomState()
+  }
+
+  private func endPan(
+    translation: CGSize,
+    viewportSize: CGSize,
+    imagePixelSize: CGSize
+  ) {
+    offset = resolvedPanOffset(
+      translation: translation,
+      viewportSize: viewportSize,
+      imagePixelSize: imagePixelSize
+    )
+    committedOffset = offset
+    publishZoomState()
+  }
+
+  private func resolvedPanOffset(
+    translation: CGSize,
+    viewportSize: CGSize,
+    imagePixelSize: CGSize
+  ) -> CGSize {
+    ImageZoomGeometry.clampedOffset(
+      CGSize(
+        width: committedOffset.width + translation.width,
+        height: committedOffset.height + translation.height
+      ),
+      scale: scale,
+      viewportSize: viewportSize,
+      fittedImageSize: fittedImageSize(
+        in: viewportSize,
+        imagePixelSize: imagePixelSize
+      )
+    )
   }
 
   private func toggleZoom(viewportSize: CGSize, imagePixelSize: CGSize) {

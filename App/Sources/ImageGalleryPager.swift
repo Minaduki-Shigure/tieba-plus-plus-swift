@@ -357,10 +357,6 @@ struct ImageGalleryZoomState: Equatable {
     self.scale = scale
     self.offset = ImageZoomGeometry.allowsPanning(at: scale) ? offset : .zero
   }
-
-  var isZoomed: Bool {
-    ImageZoomGeometry.allowsPanning(at: scale)
-  }
 }
 
 @MainActor
@@ -417,12 +413,6 @@ final class ImageGalleryZoomStateStore: ObservableObject {
   func retainOnly(_ validIDs: Set<ImageGalleryItem.ID>) {
     states = states.filter { validIDs.contains($0.key) }
     recency.removeAll(where: { !validIDs.contains($0) })
-  }
-
-  func zoomedIDs(in validIDs: Set<ImageGalleryItem.ID>) -> Set<ImageGalleryItem.ID> {
-    Set(states.compactMap { id, state in
-      validIDs.contains(id) && state.isZoomed ? id : nil
-    })
   }
 
   private func removeDuplicateRecencyEntries() {
@@ -503,7 +493,6 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
     private var snapshot = ImageGalleryPagerSnapshot(items: [], requestedSelection: nil)
     private var pendingUpdate: ImageGalleryPagerUpdate?
     private var controllers = [ImageGalleryItem.ID: ImageGalleryPageHostingController]()
-    private var zoomedIDs = Set<ImageGalleryItem.ID>()
     private var transitioningIDs = Set<ImageGalleryItem.ID>()
     private var isInteractiveTransition = false
     private var interactiveStartingSelection: ImageGalleryItem.ID?
@@ -539,6 +528,7 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       pageViewController.onAccessibilityScroll = { [weak self] direction in
         self?.handleAccessibilityScroll(direction) ?? false
       }
+      configurePagingGesture()
     }
 
     func detach() {
@@ -555,7 +545,6 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       accessibilityPageDescriptions.removeAll()
       snapshot = ImageGalleryPagerSnapshot(items: [], requestedSelection: nil)
       controllers.removeAll()
-      zoomedIDs.removeAll()
       transitioningIDs.removeAll()
       zoomStateStore = nil
     }
@@ -640,7 +629,7 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       if let selectionToPublish = resolution.selectionToPublish {
         onSelectionChange(selectionToPublish)
       }
-      updatePagingAvailability()
+      configurePagingGesture()
       pruneControllers(around: currentVisibleID)
     }
 
@@ -670,7 +659,7 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
           direction: .forward,
           animated: false
         )
-        updatePagingAvailability()
+        configurePagingGesture()
         pruneControllers(around: nil)
         return
       }
@@ -683,7 +672,7 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
           pageViewController.dataSource = nil
           pageViewController.dataSource = self
         }
-        updatePagingAvailability()
+        configurePagingGesture()
         pruneControllers(around: targetID)
         return
       }
@@ -710,7 +699,7 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
         } else {
           self.recoverFromInterruptedProgrammaticTransition()
         }
-        self.updatePagingAvailability()
+        self.configurePagingGesture()
         if
           let announcementID = self.accessibilityAnnouncementID,
           self.programmaticTargetID == nil,
@@ -794,7 +783,7 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       if let reconciledSelection, accessibilityAnnouncementID == reconciledSelection {
         postAccessibilityPageScrolled(for: reconciledSelection)
       }
-      updatePagingAvailability()
+      configurePagingGesture()
       pruneControllers(around: reconciledSelection)
     }
 
@@ -805,7 +794,6 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
         destinationWins: Set(controllers.keys)
       )
       zoomStateStore?.retainOnly(validIDs)
-      zoomedIDs = zoomStateStore?.zoomedIDs(in: validIDs) ?? []
       if let accessibilityAnnouncementID {
         let mappedID = update.migration.destination(for: accessibilityAnnouncementID)
         self.accessibilityAnnouncementID = validIDs.contains(mappedID) ? mappedID : nil
@@ -871,7 +859,6 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       }
       for id in invalidIDs {
         controllers[id] = nil
-        zoomedIDs.remove(id)
       }
     }
 
@@ -885,7 +872,6 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       if let programmaticTargetID { retainedIDs.insert(programmaticTargetID) }
       if let visibleID = currentVisibleID { retainedIDs.insert(visibleID) }
       controllers = controllers.filter { retainedIDs.contains($0.key) }
-      zoomedIDs.formIntersection(retainedIDs)
     }
 
     private func zoomStateDidChange(
@@ -894,20 +880,13 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
     ) {
       guard snapshot.contains(itemID) else { return }
       zoomStateStore?.update(state, for: itemID)
-      if state.isZoomed {
-        zoomedIDs.insert(itemID)
-      } else {
-        zoomedIDs.remove(itemID)
-      }
-      if itemID == currentVisibleID {
-        updatePagingAvailability()
-      }
     }
 
-    private func updatePagingAvailability() {
-      guard let pageViewController else { return }
-      let isCurrentImageZoomed = currentVisibleID.map(zoomedIDs.contains) ?? false
-      pageViewController.pagingScrollView?.isScrollEnabled = !isCurrentImageZoomed
+    private func configurePagingGesture() {
+      guard let pagingScrollView = pageViewController?.pagingScrollView else { return }
+      pagingScrollView.isScrollEnabled = true
+      pagingScrollView.isDirectionalLockEnabled = true
+      pagingScrollView.panGestureRecognizer.maximumNumberOfTouches = 1
     }
 
     private func handleAccessibilityScroll(

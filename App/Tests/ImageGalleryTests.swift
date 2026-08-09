@@ -186,6 +186,291 @@ final class ImageGalleryTests: XCTestCase {
     )
   }
 
+  func testZoomGeometryExposesTheSameValidatedPanLimitsUsedForClamping() {
+    let viewport = CGSize(width: 200, height: 200)
+    let fittedImage = CGSize(width: 200, height: 100)
+
+    XCTAssertEqual(
+      ImageZoomGeometry.panLimits(
+        scale: 2,
+        viewportSize: viewport,
+        fittedImageSize: fittedImage
+      ),
+      ImageZoomPanLimits(horizontal: 100, vertical: 0)
+    )
+    XCTAssertEqual(
+      ImageZoomGeometry.panLimits(
+        scale: 1,
+        viewportSize: viewport,
+        fittedImageSize: fittedImage
+      ),
+      ImageZoomPanLimits(horizontal: 0, vertical: 0)
+    )
+    XCTAssertNil(
+      ImageZoomGeometry.panLimits(
+        scale: 2,
+        viewportSize: .zero,
+        fittedImageSize: fittedImage
+      )
+    )
+    XCTAssertNil(
+      ImageZoomGeometry.panLimits(
+        scale: 2,
+        viewportSize: viewport,
+        fittedImageSize: CGSize(width: .infinity, height: 100)
+      )
+    )
+    for invalidScale in [CGFloat.nan, .infinity, 0.5, 6] {
+      XCTAssertNil(
+        ImageZoomGeometry.panLimits(
+          scale: invalidScale,
+          viewportSize: viewport,
+          fittedImageSize: fittedImage
+        )
+      )
+    }
+  }
+
+  func testPanOwnershipKeepsInteriorGestureWithImageForItsWholeLifetime() {
+    let limits = ImageZoomPanLimits(horizontal: 100, vertical: 50)
+
+    XCTAssertEqual(
+      panOwnership(limits: limits, offset: .zero, velocity: CGSize(width: 30, height: 1)),
+      .image
+    )
+    XCTAssertEqual(
+      panOwnership(
+        limits: limits,
+        offset: .zero,
+        velocity: .zero,
+        translation: CGSize(width: 1_000, height: 0)
+      ),
+      .image
+    )
+    XCTAssertEqual(
+      panOwnership(limits: limits, offset: .zero, velocity: CGSize(width: 1, height: -30)),
+      .image
+    )
+  }
+
+  func testPanOwnershipYieldsOnlyForOutwardMovementAtCurrentEdge() {
+    let limits = ImageZoomPanLimits(horizontal: 100, vertical: 50)
+
+    XCTAssertEqual(
+      panOwnership(
+        limits: limits,
+        offset: CGSize(width: 100, height: 0),
+        velocity: CGSize(width: 20, height: 0)
+      ),
+      .pager
+    )
+    XCTAssertEqual(
+      panOwnership(
+        limits: limits,
+        offset: CGSize(width: 100, height: 0),
+        velocity: CGSize(width: -20, height: 0)
+      ),
+      .image
+    )
+    XCTAssertEqual(
+      panOwnership(
+        limits: limits,
+        offset: CGSize(width: -100, height: 0),
+        velocity: CGSize(width: -20, height: 0)
+      ),
+      .pager
+    )
+    XCTAssertEqual(
+      panOwnership(
+        limits: limits,
+        offset: CGSize(width: -100, height: 0),
+        velocity: CGSize(width: 20, height: 0)
+      ),
+      .image
+    )
+    XCTAssertEqual(
+      panOwnership(
+        limits: limits,
+        offset: CGSize(width: 0, height: 50),
+        velocity: CGSize(width: 0, height: 20)
+      ),
+      .pager
+    )
+    XCTAssertEqual(
+      panOwnership(
+        limits: limits,
+        offset: CGSize(width: 0, height: -50),
+        velocity: CGSize(width: 0, height: -20)
+      ),
+      .pager
+    )
+  }
+
+  func testPanOwnershipMatchesTiebaLiteAxisAndRoundedEdgeRules() {
+    let limits = ImageZoomPanLimits(horizontal: 100.2, vertical: 50)
+
+    // Equal movement resolves vertically, so the horizontal edge does not yield.
+    XCTAssertEqual(
+      panOwnership(
+        limits: limits,
+        offset: CGSize(width: 100.2, height: 0),
+        velocity: CGSize(width: 10, height: 10)
+      ),
+      .image
+    )
+    XCTAssertEqual(
+      panOwnership(
+        limits: limits,
+        offset: CGSize(width: 100.2, height: 0),
+        velocity: CGSize(width: 11, height: 10)
+      ),
+      .pager
+    )
+    XCTAssertEqual(
+      panOwnership(
+        limits: limits,
+        offset: CGSize(width: 99.6, height: 0),
+        velocity: CGSize(width: 20, height: 0),
+        displayScale: 1
+      ),
+      .pager
+    )
+    XCTAssertEqual(
+      panOwnership(
+        limits: limits,
+        offset: CGSize(width: 99.6, height: 0),
+        velocity: CGSize(width: 20, height: 0),
+        displayScale: 3
+      ),
+      .image
+    )
+    XCTAssertEqual(
+      panOwnership(
+        limits: limits,
+        offset: CGSize(width: 100.2, height: 0),
+        velocity: CGSize(width: 20, height: 0),
+        displayScale: 3
+      ),
+      .pager
+    )
+    XCTAssertEqual(
+      panOwnership(
+        limits: ImageZoomPanLimits(horizontal: 100.8, vertical: 50),
+        offset: CGSize(width: 100.4, height: 0),
+        velocity: CGSize(width: 20, height: 0),
+        displayScale: 1
+      ),
+      .image
+    )
+    XCTAssertEqual(
+      panOwnership(
+        limits: ImageZoomPanLimits(horizontal: 100.5, vertical: 50),
+        offset: CGSize(width: -100.4, height: 0),
+        velocity: CGSize(width: -20, height: 0),
+        displayScale: 1
+      ),
+      .pager
+    )
+    for displayScale in [CGFloat(1), 2, 3] {
+      XCTAssertEqual(
+        panOwnership(
+          limits: ImageZoomPanLimits(horizontal: 0.4, vertical: 50),
+          offset: .zero,
+          velocity: CGSize(width: 20, height: 0),
+          displayScale: displayScale
+        ),
+        displayScale == 1 ? .pager : .image
+      )
+    }
+  }
+
+  func testPanOwnershipFailsClosedForMissingOrInvalidState() {
+    let limits = ImageZoomPanLimits(horizontal: 100, vertical: 50)
+
+    XCTAssertEqual(
+      panOwnership(limits: nil, offset: .zero, velocity: CGSize(width: 20, height: 0)),
+      .image
+    )
+    XCTAssertEqual(
+      panOwnership(
+        limits: limits,
+        offset: CGSize(width: .nan, height: 0),
+        velocity: CGSize(width: 20, height: 0)
+      ),
+      .image
+    )
+    XCTAssertEqual(
+      panOwnership(
+        limits: ImageZoomPanLimits(horizontal: -1, vertical: 50),
+        offset: .zero,
+        velocity: CGSize(width: 20, height: 0)
+      ),
+      .image
+    )
+    XCTAssertEqual(
+      panOwnership(limits: limits, offset: .zero, velocity: .zero),
+      .image
+    )
+    XCTAssertEqual(
+      panOwnership(
+        limits: limits,
+        offset: .zero,
+        velocity: CGSize(width: .nan, height: 0),
+        translation: CGSize(width: 20, height: 0)
+      ),
+      .image
+    )
+    XCTAssertEqual(
+      panOwnership(
+        limits: limits,
+        offset: .zero,
+        velocity: CGSize(width: 20, height: 0),
+        translation: CGSize(width: .infinity, height: 0)
+      ),
+      .image
+    )
+    XCTAssertEqual(
+      panOwnership(
+        limits: ImageZoomPanLimits(horizontal: 3_000_000_000, vertical: 50),
+        offset: CGSize(width: 3_000_000_000, height: 0),
+        velocity: CGSize(width: 20, height: 0)
+      ),
+      .image
+    )
+    XCTAssertEqual(
+      panOwnership(
+        limits: limits,
+        offset: .zero,
+        velocity: CGSize(width: 20, height: 0),
+        displayScale: .nan
+      ),
+      .image
+    )
+  }
+
+  func testPanOwnershipPrefersVelocityOverConflictingTranslation() {
+    let limits = ImageZoomPanLimits(horizontal: 100, vertical: 50)
+
+    XCTAssertEqual(
+      panOwnership(
+        limits: limits,
+        offset: CGSize(width: 100, height: 0),
+        velocity: CGSize(width: -20, height: 0),
+        translation: CGSize(width: 200, height: 0)
+      ),
+      .image
+    )
+    XCTAssertEqual(
+      panOwnership(
+        limits: limits,
+        offset: CGSize(width: 100, height: 0),
+        velocity: CGSize(width: 20, height: 0),
+        translation: CGSize(width: -200, height: 0)
+      ),
+      .pager
+    )
+  }
+
   @MainActor
   func testPagingAxisUsesStableModeLabelsIconsAndOrientations() {
     XCTAssertEqual(ImageGalleryPagingAxis.allCases, [.horizontal, .vertical])
@@ -211,6 +496,119 @@ final class ImageGalleryTests: XCTestCase {
     XCTAssertEqual(ImageGalleryPagingAxis.vertical.transitionDirection(for: .previous), .reverse)
     XCTAssertNil(ImageGalleryPagingAxis.horizontal.transitionDirection(for: .up))
     XCTAssertNil(ImageGalleryPagingAxis.vertical.transitionDirection(for: .left))
+  }
+
+  @MainActor
+  func testCoordinatorKeepsNativePagerEnabledForSingleFingerEdgeDrags() throws {
+    let pageViewController = ImageGalleryPageViewController(
+      transitionStyle: .scroll,
+      navigationOrientation: .horizontal,
+      options: nil
+    )
+    let pagingScrollView = try XCTUnwrap(pageViewController.pagingScrollView)
+    pagingScrollView.isScrollEnabled = false
+    pagingScrollView.isDirectionalLockEnabled = false
+    pagingScrollView.panGestureRecognizer.maximumNumberOfTouches = 4
+
+    let coordinator = ImageGalleryPager.Coordinator()
+    coordinator.attach(to: pageViewController, axis: .horizontal)
+
+    XCTAssertTrue(pagingScrollView.isScrollEnabled)
+    XCTAssertTrue(pagingScrollView.isDirectionalLockEnabled)
+    XCTAssertEqual(pagingScrollView.panGestureRecognizer.maximumNumberOfTouches, 1)
+    coordinator.detach()
+  }
+
+  @MainActor
+  func testImagePanRecognizerArbitratesWithItsEnclosingPager() throws {
+    let pageViewController = ImageGalleryPageViewController(
+      transitionStyle: .scroll,
+      navigationOrientation: .horizontal,
+      options: nil
+    )
+    let pagingScrollView = try XCTUnwrap(pageViewController.pagingScrollView)
+    let overlayView = UIView(frame: CGRect(x: 0, y: 0, width: 200, height: 200))
+    pagingScrollView.addSubview(overlayView)
+
+    let coordinator = ImageZoomPanGestureOverlay.Coordinator()
+    let imagePan = coordinator.panGestureRecognizer
+    overlayView.addGestureRecognizer(imagePan)
+    imagePan.setTranslation(CGPoint(x: 20, y: 0), in: overlayView)
+    coordinator.update(
+      from: panOverlay(
+        scale: 2,
+        offset: .zero,
+        viewportSize: overlayView.bounds.size,
+        fittedImageSize: overlayView.bounds.size
+      )
+    )
+
+    XCTAssertEqual(imagePan.minimumNumberOfTouches, 1)
+    XCTAssertEqual(imagePan.maximumNumberOfTouches, 1)
+    XCTAssertFalse(imagePan.cancelsTouchesInView)
+    XCTAssertTrue(coordinator.gestureRecognizerShouldBegin(imagePan))
+    XCTAssertTrue(
+      coordinator.gestureRecognizer(
+        imagePan,
+        shouldBeRequiredToFailBy: pagingScrollView.panGestureRecognizer
+      )
+    )
+    XCTAssertFalse(
+      coordinator.gestureRecognizer(
+        imagePan,
+        shouldRecognizeSimultaneouslyWith: pagingScrollView.panGestureRecognizer
+      )
+    )
+
+    coordinator.update(
+      from: panOverlay(
+        scale: 2,
+        offset: CGSize(width: 100, height: 0),
+        viewportSize: overlayView.bounds.size,
+        fittedImageSize: overlayView.bounds.size
+      )
+    )
+    XCTAssertFalse(coordinator.gestureRecognizerShouldBegin(imagePan))
+
+    coordinator.update(
+      from: panOverlay(
+        scale: 1.001,
+        offset: .zero,
+        viewportSize: CGSize(width: 2_000, height: 2_000),
+        fittedImageSize: CGSize(width: 2_000, height: 2_000)
+      )
+    )
+    XCTAssertFalse(coordinator.gestureRecognizerShouldBegin(imagePan))
+
+    for invalidScale in [CGFloat.nan, .infinity, 0.5, 6] {
+      coordinator.update(
+        from: panOverlay(
+          scale: invalidScale,
+          offset: .zero,
+          viewportSize: overlayView.bounds.size,
+          fittedImageSize: overlayView.bounds.size
+        )
+      )
+      XCTAssertTrue(coordinator.gestureRecognizerShouldBegin(imagePan))
+    }
+
+    let pinch = UIPinchGestureRecognizer()
+    overlayView.addGestureRecognizer(pinch)
+    XCTAssertTrue(
+      coordinator.gestureRecognizer(
+        imagePan,
+        shouldRecognizeSimultaneouslyWith: pinch
+      )
+    )
+
+    let unrelatedScrollView = UIScrollView()
+    XCTAssertFalse(
+      coordinator.gestureRecognizer(
+        imagePan,
+        shouldBeRequiredToFailBy: unrelatedScrollView.panGestureRecognizer
+      )
+    )
+    coordinator.detach()
   }
 
   func testPagerSnapshotPreservesStableSelectionAcrossPrependAndAppend() throws {
@@ -816,6 +1214,40 @@ final class ImageGalleryTests: XCTestCase {
 
   private func url(_ value: String) throws -> URL {
     try XCTUnwrap(URL(string: value))
+  }
+
+  private func panOwnership(
+    limits: ImageZoomPanLimits?,
+    offset: CGSize,
+    velocity: CGSize,
+    translation: CGSize = .zero,
+    displayScale: CGFloat = 1
+  ) -> ImageZoomPanOwnership {
+    ImageZoomPanOwnershipPolicy.resolve(
+      limits: limits,
+      offset: offset,
+      velocity: velocity,
+      translation: translation,
+      displayScale: displayScale
+    )
+  }
+
+  @MainActor
+  private func panOverlay(
+    scale: CGFloat,
+    offset: CGSize,
+    viewportSize: CGSize,
+    fittedImageSize: CGSize
+  ) -> ImageZoomPanGestureOverlay {
+    ImageZoomPanGestureOverlay(
+      scale: scale,
+      offset: offset,
+      viewportSize: viewportSize,
+      fittedImageSize: fittedImageSize,
+      displayScale: 3,
+      onChanged: { _ in },
+      onEnded: { _ in }
+    )
   }
 }
 

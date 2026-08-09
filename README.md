@@ -126,6 +126,15 @@ checks.
 - **Images:** Responsive image groups open in a zoomable gallery with horizontal
   or vertical one-image paging. Switching direction retains the current image
   and its bounded in-memory zoom state while the occurrence ID remains stable.
+  After a one-finger drag passes the system movement threshold, the gallery
+  assigns that complete gesture to either image panning or the native pager from
+  the native pan recognizer's dominant axis and direction plus the current pan
+  boundary. A drag that starts inside the image remains an image pan even if it
+  reaches the boundary; the next outward drag pages, while an inward drag
+  continues panning. Two-finger gestures never page, and the rule is symmetric
+  in horizontal and vertical paging modes. XCTest covers the ownership policy
+  and recognizer hierarchy; continuous touch competition remains a device test
+  gate for the next IPA.
   Within the same gallery context, an explicit one-to-one occurrence migration
   also carries scale and clamped offset when whole-thread metadata first replaces
   a local placeholder with the currently unique `(pictureID, postID)` remote

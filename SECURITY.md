@@ -941,6 +941,19 @@ If an interactive or programmatic page transition is active, migration, list,
 selection, and accessibility metadata changes are coalesced and applied atomically
 only after that transition resolves; stale pending work is discarded on reset.
 
+Zoomed-image paging uses one gesture owner for the lifetime of each touch
+sequence. After a one-finger drag exceeds the system movement threshold, the
+native pan recognizer's dominant axis and direction plus the current clamped
+image boundary decide whether the image pan or native pager owns it. An
+image-owned drag must not transfer to the pager merely because it reaches a
+boundary; ownership changes only after lift or cancellation, so the next
+outward drag may page while an inward drag continues panning. Two-finger input
+is reserved for image zooming and must never start paging. These rules apply
+symmetrically to horizontal and vertical modes; axis changes rebuild the pager
+rather than reassigning an in-flight gesture. Pixel-scale edge classification
+and recognizer hierarchy are XCTest-covered; real touch sequencing is a device
+validation requirement before release.
+
 Gallery progress is derived only from the existing credential-free image
 download's observed and declared byte counts. Transfer limits are evaluated
 before a progress event is published. A percentage is available only while the
