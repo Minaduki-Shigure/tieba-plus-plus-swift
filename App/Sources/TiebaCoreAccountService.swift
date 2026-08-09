@@ -50,6 +50,10 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
     kind: TiebaNotificationKind,
     page: Int
   ) async throws -> TiebaNotificationPage
+  func getInboxUnreadSummary(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64
+  ) async throws -> TiebaInboxUnreadSummary
   func getForumMembership(
     credential: TiebaBDUSSCredential,
     expectedUserID: Int64,
@@ -191,6 +195,13 @@ extension TiebaAuthenticatedAccountClient {
     kind: TiebaNotificationKind,
     page: Int
   ) async throws -> TiebaNotificationPage {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
+  func getInboxUnreadSummary(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64
+  ) async throws -> TiebaInboxUnreadSummary {
     throw TiebaClientError.invalidAuthenticatedResponse
   }
 
@@ -603,6 +614,26 @@ struct TiebaCoreAccountService: AccountService {
     }
   }
 
+  func inboxUnreadSummary(
+    session: StoredAccountSession
+  ) async throws -> InboxUnreadSummary {
+    let response: TiebaInboxUnreadSummary
+    do {
+      response = try await client.getInboxUnreadSummary(
+        credential: TiebaBDUSSCredential(bduss: session.bduss),
+        expectedUserID: session.id
+      )
+      try Task.checkCancellation()
+      return try Self.inboxUnreadSummaryData(response, expectedUserID: session.id)
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch let error as BrowseError {
+      throw error
+    } catch {
+      throw Self.accountError(error)
+    }
+  }
+
   func forumMembership(
     session: StoredAccountSession,
     forumID: Int64,
@@ -974,6 +1005,25 @@ struct TiebaCoreAccountService: AccountService {
       messages: messages,
       currentPage: page.pagination.currentPage,
       hasMore: page.pagination.hasMore
+    )
+  }
+
+  static func inboxUnreadSummaryData(
+    _ summary: TiebaInboxUnreadSummary,
+    expectedUserID: Int64
+  ) throws -> InboxUnreadSummary {
+    guard summary.userID == expectedUserID, expectedUserID > 0 else {
+      throw BrowseError.unavailable("贴吧返回了不匹配的未读消息摘要，请重新加载后再试。")
+    }
+    let counts = [summary.replyCount, summary.mentionCount, summary.fanCount]
+    guard counts.allSatisfy({ (0...Int(Int32.max)).contains($0) }) else {
+      throw BrowseError.unavailable("贴吧返回了无效的未读消息计数，请重新加载后再试。")
+    }
+    return InboxUnreadSummary(
+      userID: summary.userID,
+      replyCount: summary.replyCount,
+      mentionCount: summary.mentionCount,
+      fanCount: summary.fanCount
     )
   }
 

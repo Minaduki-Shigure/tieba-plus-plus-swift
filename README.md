@@ -17,9 +17,9 @@ checks.
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, and media preferences |
-| Accounts | Current `main` supports bound Web login, switching, logout, followed forums, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with authoritative reply actions, Tieba cloud favorites, per-forum state, and experimental content approval |
+| Accounts | Current `main` supports bound Web login, switching, logout, followed forums, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, and experimental content approval |
 | Server-side writes | Guarded forum follow/unfollow, check-in, content approval, thread-detail and verified list-level cloud-favorite changes, and plain-text topic/floor/nested replies are in device validation; other writes stay disabled |
-| TiebaLite parity | Anonymous reading and media: about 90–95%; full product scope: about 68–72% |
+| TiebaLite parity | Anonymous reading and media: about 90–95%; full product scope: about 69–73% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.59.0-alpha.1` (build 62); later `main` features require a tagged release |
 
 ### Release and validation
@@ -61,6 +61,9 @@ checks.
   active account lease before opening that same composer. The notification's
   legacy `quote_pid` and display payload never become a write target; failed
   relocation or a changed session opens no composer and dispatches no write.
+  The account page also reads TiebaLite's reply-plus-mention summary on demand
+  and displays it beside the message entry. This summary is memory-only, bound
+  to the exact account lease, and never cleared locally when the entry opens.
   These main-only changes will not enter the public app source until a tagged
   IPA passes the release checks.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
@@ -69,8 +72,9 @@ checks.
   simulator build, validates the app source, and verifies its public IPA hash.
   Authenticated flows never use real credentials in CI. Login binding, cloud
   favorite reads and mutations, including verified list deletion, followed-forum recommendation filtering,
-  concern-feed, inbox navigation and reply-action rebinding, and plain-text reply
-  contracts are covered by fixtures, while successful private reads, forum
+  concern-feed, inbox summary, inbox navigation and reply-action rebinding, and
+  plain-text reply contracts are covered by fixtures, while successful private
+  reads, forum
   follow/unfollow, check-in, cloud-favorite changes, topic/post/subpost content
   approval, and real reply creation remain physical-device validation features
   in this alpha.
@@ -198,8 +202,13 @@ checks.
   message title, body, forum label, and `quote_pid` never participate in the write
   target. A missing or mismatched target, cancellation, or account change leaves
   the fallback navigation available but opens no composer and sends no write. No
-  background polling, badge clearing, or explicit mark-read request is
-  implemented.
+  background polling or explicit mark-read request is implemented. The account
+  page separately requests a foreground unread summary and shows the sum of
+  `replyme + atme` beside the message entry; the optional `fans` count is parsed
+  but is not included in that badge. A zero count is hidden and larger counts
+  are capped visually while accessibility retains the exact value. The badge is
+  never cleared locally when the inbox opens and is discarded on logout,
+  account switching, or same-UID credential rotation.
 - **Concern feed:** Logged-in Explore adds a foreground-only concern channel.
   Page-style preloading cannot start it: the request begins only after the user
   selects the channel. Refresh replaces the snapshot; load-more preserves the
@@ -269,7 +278,7 @@ checks.
   validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, auditable weighting, protocol constraints, and next milestones.
-  The current `main` audit totals 68–72 of 100 weighted points; its anonymous
+  The current `main` audit totals 69–73 of 100 weighted points; its anonymous
   reading and media subtotal is about 90–95%. The largest remaining gaps are
   new-thread and rich-media creation, background unread handling, broader
   settings, unresolvable cloud-favorite rows, and moderation.

@@ -13,6 +13,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let checkInClientVersion = "11.10.8.6"
   static let agreementClientVersion = "22.6.5.1"
   static let notificationClientVersion = "22.6.5.1"
+  static let inboxUnreadSummaryClientVersion = "8.2.2"
   static let sessionClientVersion = "11.10.8.6"
   static let cloudFavoritesClientVersion = "11.10.8.6"
   static let threadCloudFavoriteClientVersion = "12.41.7.1"
@@ -538,6 +539,26 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
         ]
       )
     }
+  }
+
+  func inboxUnreadSummary(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64
+  ) throws -> URLRequest {
+    try validate(credential)
+    guard expectedUserID > 0 else {
+      throw TiebaClientError.invalidArgument("Expected user ID must be positive.")
+    }
+
+    return try signedFormRequest(
+      path: "/c/s/msg",
+      fields: [
+        ("BDUSS", credential.bduss),
+        ("_client_version", Self.inboxUnreadSummaryClientVersion),
+        ("bookmark", "1"),
+      ],
+      userAgent: "bdtb for Android \(Self.inboxUnreadSummaryClientVersion)"
+    )
   }
 
   func forumMembership(

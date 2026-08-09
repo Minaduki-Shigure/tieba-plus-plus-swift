@@ -11,6 +11,7 @@ struct AccountView: View {
 
   @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
   @StateObject private var viewModel: AccountViewModel
+  @StateObject private var unreadSummaryViewModel: InboxUnreadSummaryViewModel
   @State private var showsLogin = false
   @State private var confirmsLogout = false
   @State private var confirmsReset = false
@@ -31,6 +32,9 @@ struct AccountView: View {
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
     _viewModel = StateObject(wrappedValue: AccountViewModel(vault: vault))
+    _unreadSummaryViewModel = StateObject(
+      wrappedValue: InboxUnreadSummaryViewModel(service: accountService, vault: vault)
+    )
   }
 
   var body: some View {
@@ -62,7 +66,14 @@ struct AccountView: View {
         .help("添加账户")
       }
     }
-    .task { await viewModel.loadIfNeeded() }
+    .task {
+      unreadSummaryViewModel.loadIfNeeded()
+      await viewModel.loadIfNeeded()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+      unreadSummaryViewModel.accountSessionDidChange()
+    }
+    .onDisappear(perform: unreadSummaryViewModel.cancel)
     .sheet(isPresented: $showsLogin) {
       NavigationStack {
         LoginView(service: accountService, vault: vault) {
@@ -185,7 +196,7 @@ struct AccountView: View {
                 searchHistoryRepository: searchHistoryRepository
               )
             } label: {
-              Label("消息", systemImage: "bell")
+              messageNavigationLabel
             }
 
             if activeAccount.hasFullCredentials {
@@ -218,7 +229,132 @@ struct AccountView: View {
       }
     }
     .listStyle(.insetGrouped)
-    .refreshable { await viewModel.reload() }
+    .refreshable {
+      await viewModel.reload()
+      await unreadSummaryViewModel.refresh()
+    }
+  }
+
+  private var unreadBadgePresentation: InboxUnreadBadgePresentation {
+    guard
+      let activeUserID = viewModel.activeAccount?.id,
+      let summary = unreadSummaryViewModel.summary,
+      let presentation = InboxUnreadBadgePresentation(
+        summary: summary,
+        activeUserID: activeUserID
+      )
+    else { return .empty }
+    return presentation
+  }
+
+  private var hasUnreadSummaryAccountMismatch: Bool {
+    guard
+      let activeUserID = viewModel.activeAccount?.id,
+      let summary = unreadSummaryViewModel.summary
+    else { return false }
+    return summary.userID != activeUserID
+  }
+
+  private var messageNavigationLabel: some View {
+    let presentation = unreadBadgePresentation
+    return HStack(spacing: 10) {
+      Label("消息", systemImage: "bell")
+      Spacer(minLength: 8)
+      if let badgeText = presentation.badgeText {
+        Text(badgeText)
+          .font(.caption2.weight(.semibold))
+          .monospacedDigit()
+          .foregroundStyle(.white)
+          .lineLimit(1)
+          .padding(.horizontal, 7)
+          .frame(minWidth: 24, minHeight: 20)
+          .background(Color.red, in: Capsule())
+          .accessibilityHidden(true)
+      }
+      if unreadSummaryViewModel.state == .loading
+        || (hasUnreadSummaryAccountMismatch && viewModel.isMutating)
+      {
+        ProgressView()
+          .controlSize(.small)
+          .frame(minWidth: 24, minHeight: 20)
+          .accessibilityHidden(true)
+      } else if unreadSummaryViewModel.state.isFailed || hasUnreadSummaryAccountMismatch {
+        Image(systemName: "exclamationmark.triangle.fill")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .frame(minWidth: 24, minHeight: 20)
+          .accessibilityHidden(true)
+      }
+    }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("消息")
+    .accessibilityValue(messageAccessibilityValue)
+  }
+
+  private var messageAccessibilityValue: String {
+    if hasUnreadSummaryAccountMismatch {
+      return viewModel.isMutating ? "正在切换账户" : "账户状态已变化，请重新加载"
+    }
+    if unreadSummaryViewModel.state.isFailed {
+      guard unreadSummaryViewModel.summary != nil else {
+        return "未读回复和提及暂不可用"
+      }
+      return unreadBadgePresentation.accessibilityValue(refreshFailed: true)
+    }
+    switch unreadSummaryViewModel.state {
+    case .loading:
+      return unreadSummaryViewModel.summary == nil
+        ? "正在读取未读回复和提及"
+        : "\(unreadBadgePresentation.accessibilityValue)，正在更新"
+    case .failed:
+      return "未读回复和提及暂不可用"
+    case .idle:
+      return "未读回复和提及尚未读取"
+    case .loaded:
+      return unreadBadgePresentation.accessibilityValue
+    }
+  }
+}
+
+struct InboxUnreadBadgePresentation: Equatable, Sendable {
+  static let empty = InboxUnreadBadgePresentation(replyCount: 0, mentionCount: 0)
+
+  let count: Int
+
+  init(summary: InboxUnreadSummary) {
+    self.init(replyCount: summary.replyCount, mentionCount: summary.mentionCount)
+  }
+
+  init?(summary: InboxUnreadSummary, activeUserID: Int64) {
+    guard summary.userID == activeUserID else { return nil }
+    self.init(summary: summary)
+  }
+
+  init(replyCount: Int, mentionCount: Int) {
+    let replyCount = max(replyCount, 0)
+    let mentionCount = max(mentionCount, 0)
+    let sum = replyCount.addingReportingOverflow(mentionCount)
+    count = sum.overflow ? Int.max : sum.partialValue
+  }
+
+  var badgeText: String? {
+    guard count > 0 else { return nil }
+    return count > 99 ? "99+" : String(count)
+  }
+
+  var accessibilityValue: String {
+    count == 0 ? "没有未读回复或提及" : "\(count) 条未读回复或提及"
+  }
+
+  func accessibilityValue(refreshFailed: Bool) -> String {
+    refreshFailed ? "\(accessibilityValue)，当前更新失败" : accessibilityValue
+  }
+}
+
+private extension LoadState {
+  var isFailed: Bool {
+    if case .failed = self { return true }
+    return false
   }
 }
 

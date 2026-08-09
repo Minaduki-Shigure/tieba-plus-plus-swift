@@ -249,10 +249,21 @@ separate credential-free PB Floor request with `pid=0`, the positive message
 `post_id` as `spid`, and `pn=1`. The response must contain the exact requested
 thread and child plus one positive server-resolved parent. That parent is locked
 before any adjacent page is accepted. A deleted or missing child fails closed and
-offers only ordinary owning-thread navigation. The inbox performs no background
-polling, explicit mark-read request, or local badge mutation. An implicit server-
-side unread change caused by list retrieval remains a documented real-device
-validation question.
+offers only ordinary owning-thread navigation.
+
+The foreground unread summary uses a separate signed HTTPS `/c/s/msg` form that
+contains only BDUSS, `_client_version=8.2.2`, `bookmark=1`, and `sign`. It sends
+no Cookie, STOKEN, client UID header, CUID, hardware identifier, model, screen
+metadata, or telemetry. The response is capped at 64 KiB and must contain a zero
+error code plus bounded nonnegative integer `replyme` and `atme` values;
+`fans` is optional, is validated when present, and is not included in the badge.
+Because the envelope does not independently identify the account, its UID is
+request context rather than server proof. The App checks the same
+`userID + sessionRevision` lease before and after the request and synchronously clears the
+snapshot on logout, switching, or same-UID credential rotation. The inbox
+performs no background polling, explicit mark-read request, or local badge
+clearing. An implicit server-side unread change caused by summary or list
+retrieval remains a documented real-device validation question.
 
 Before any forum write, the fresh FRS probe must bind the response user ID,
 forum ID, normalized forum name, `is_like`, and `anti.tbs` to the requested

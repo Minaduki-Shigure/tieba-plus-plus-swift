@@ -256,6 +256,7 @@ public actor TiebaAuthenticatedClient {
   static let threadCloudFavoriteWriteResponseMaximumBytes = 64 * 1_024
   static let concernResponseMaximumBytes = 4 * 1_024 * 1_024
   static let notificationResponseMaximumBytes = 2 * 1_024 * 1_024
+  static let inboxUnreadSummaryResponseMaximumBytes = 64 * 1_024
   static let forumMembershipResponseMaximumBytes = 512 * 1_024
   static let forumFollowWriteResponseMaximumBytes = 64 * 1_024
   static let forumCheckInResponseMaximumBytes = 64 * 1_024
@@ -618,6 +619,24 @@ public actor TiebaAuthenticatedClient {
         requestedPage: page
       )
     }
+  }
+
+  public func getInboxUnreadSummary(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64
+  ) async throws -> TiebaInboxUnreadSummary {
+    let request = try requestFactory.inboxUnreadSummary(
+      credential: credential,
+      expectedUserID: expectedUserID
+    )
+    let body = try await send(
+      request,
+      maximumBodyBytes: Self.inboxUnreadSummaryResponseMaximumBytes
+    )
+    return try TiebaInboxUnreadSummaryDecoder.summary(
+      from: body,
+      expectedUserID: expectedUserID
+    )
   }
 
   public func getForumMembership(

@@ -201,7 +201,8 @@ not advertise a usable sign state; it is not permission to attempt a write.
   opaque cursor. A zero-error login-prompt envelope requires the independent
   same-UID session probes before it is accepted as an empty page.
 - Requests identify as client type `2` and version `12.64.1.1` by default.
-- Account validation and authenticated read requests use version `22.6.5.1`.
+- Account validation and several authenticated reads use version `22.6.5.1`;
+  endpoint-specific exceptions are documented below.
 - Full-session validation signs an HTTPS `/c/s/login` request containing the
   192-byte BDUSS and 64-byte STOKEN, then independently reads
   `https://tieba.baidu.com/mo/q/newmoindex?need_user=1` with only the captured
@@ -290,13 +291,22 @@ not advertise a usable sign state; it is not permission to attempt a write.
   debug descriptions and mirrors, and the FRS anti-CSRF value is not exposed by
   the public API.
 
+The account unread summary uses `POST https://tiebac.baidu.com/c/s/msg` with a
+signed form restricted to BDUSS, `_client_version=8.2.2`, and `bookmark=1` plus
+the generated signature. It sends no Cookie, STOKEN, UID header, or Android
+device and telemetry fields. The JSON body is limited to 64 KiB and strictly
+decodes bounded integer `replyme`, `atme`, and optional `fans` values. The
+returned UID is explicitly the caller's expected-UID context because this
+response does not independently prove an account identity; the application must
+still bind the result to its current session lease.
+
 These are unofficial APIs and may change without notice. Per-forum
 follow/unfollow, explicit single-forum check-in, and explicit topic, post, and
 subpost approval writes are implemented. Thread-detail cloud-favorite add,
 saved-position update, and removal plus verified single-item list removal are
 experimental validation-build features; notifications remain read-only.
 Automatic or batch check-in, unverified list deletion, bulk synchronization,
-creation, replies, and moderation remain unsupported.
+new-topic creation, rich-media replies, and moderation remain unsupported.
 
 ## Tests
 

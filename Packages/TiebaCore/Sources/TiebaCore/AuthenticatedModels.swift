@@ -239,6 +239,32 @@ public enum TiebaNotificationKind: Sendable, Hashable {
   case mentions
 }
 
+public struct TiebaInboxUnreadSummary: Sendable, Hashable {
+  public let userID: Int64
+  public let replyCount: Int
+  public let mentionCount: Int
+  public let fanCount: Int
+
+  public init(
+    userID: Int64,
+    replyCount: Int,
+    mentionCount: Int,
+    fanCount: Int = 0
+  ) {
+    self.userID = userID
+    self.replyCount = replyCount
+    self.mentionCount = mentionCount
+    self.fanCount = fanCount
+  }
+
+  public var totalCount: Int {
+    let replyCount = max(replyCount, 0)
+    let mentionCount = max(mentionCount, 0)
+    let sum = replyCount.addingReportingOverflow(mentionCount)
+    return sum.overflow ? Int.max : sum.partialValue
+  }
+}
+
 public struct TiebaNotificationSender: Identifiable, Sendable, Hashable {
   public let id: Int64
   public let username: String

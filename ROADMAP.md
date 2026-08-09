@@ -19,15 +19,16 @@ versioned separately and currently serves `v0.59.0-alpha.1` (build 62).
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 13–14 | Images, galleries, video, voice, sharing, saving, and media policy are implemented; broader format and cache parity remain |
 | Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, and media preferences are implemented; TiebaLite's wider settings and customization surface remains |
-| Account, session, and private read flows | 15 | 8 | Login, switching, followed forums, cloud favorites, inbox, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
+| Account, session, and private read flows | 15 | 9 | Login, switching, followed forums, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 5–6 | Follow/unfollow, check-in, approval, verified list/thread-detail cloud-favorite mutations, and three plain-text reply targets have guarded implementations; real reply success, new topics, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
-| **Total** | **100** | **68–72** | Current full-product estimate |
+| **Total** | **100** | **69–73** | Current full-product estimate |
 
 The first three rows form the anonymous reading-and-media subtotal: 49–52 of 55
-points, or roughly 90–95%. Concern raises the private-read area but receives only
-partial credit until its minimum request fields, empty/expired envelopes, cursor
-replay, and possible seen-state effects are validated on a disposable account.
+points, or roughly 90–95%. Concern and the foreground unread summary raise the
+private-read area but receive only partial credit until their minimum request
+fields, empty/expired envelopes, cursor replay where applicable, and possible
+seen-state effects are validated on a disposable account.
 
 ## Available
 
@@ -144,6 +145,9 @@ the source metadata is updated to that tested IPA.
 - Foreground ReplyMe and AtMe inbox with account-lease isolation, refresh,
   bounded pagination, safe thread navigation, and explicit reply actions bound
   to the active account lease
+- Foreground, memory-only reply-plus-mention summary beside the account page's
+  message entry, with exact account-lease isolation, no local clearing, a
+  privacy-minimized signed HTTPS form, and no background polling
 - Exact nested-notification positioning through the public child-only resolver,
   with parent locking, bidirectional pagination, history continuity, and an
   owning-thread fallback when the target is unavailable; a reply action opens the
@@ -177,10 +181,11 @@ the source metadata is updated to that tested IPA.
    nested-reply approval/cancellation, plus single-forum check-in success,
    idempotent, server-error, uncertain-failure, and read-only reconciliation
    paths, followed by account switching and follow recovery checks
-3. Real-device validation of the minimal HTTPS ReplyMe and AtMe requests,
-   including whether opening a list changes server unread state, plus ordinary
-   post and child-reply action relocation, unavailable targets, and account
-   switching before composer presentation
+3. Real-device validation of the minimal HTTPS ReplyMe, AtMe, and `/c/s/msg`
+   summary requests, including the summary field-deletion matrix, count parity,
+   and whether either summary or list retrieval changes server unread state,
+   plus ordinary post and child-reply action relocation, unavailable targets,
+   and account switching before composer presentation
 4. Real-device validation of the account-bound concern request, including the
    signed-field deletion matrix, empty-account and expired-session envelopes,
    cursor replay, and whether list retrieval changes recommendation state
@@ -224,9 +229,15 @@ match before opening the existing composer. A missing or mismatched target,
 cancellation, or session change opens no composer and sends no write; normal
 fallback navigation remains available. Once presented, the existing draft,
 explicit confirmation, authenticated target rebinding, and non-retry outcome
-rules apply unchanged. The inbox does not poll in the background, clear a local
-badge, or send a mark-read request. Whether list retrieval itself has an implicit
-server-side read effect remains a physical-device validation item.
+rules apply unchanged. A separate `/c/s/msg` request reads a bounded
+`replyme + atme` count for the account-page badge. Its form contains only BDUSS,
+client version, `bookmark`, and signature; it sends no Cookie, STOKEN, UID
+header, or device identifier. The response does not prove a UID, so Core labels
+it with the requested UID and the App checks the exact
+`userID + sessionRevision` lease before and after the request. The inbox does not poll in
+the background, clear the badge locally, or send a mark-read request. Whether
+summary or list retrieval has an implicit server-side read effect remains a
+physical-device validation item.
 
 The concern feed uses HTTPS protobuf command `309474` only after the user selects
 its Explore channel; page-style TabView preloading and inactive account changes

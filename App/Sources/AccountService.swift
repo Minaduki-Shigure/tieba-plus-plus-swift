@@ -97,6 +97,20 @@ struct InboxPage: Hashable, Sendable {
   let hasMore: Bool
 }
 
+struct InboxUnreadSummary: Hashable, Sendable {
+  let userID: Int64
+  let replyCount: Int
+  let mentionCount: Int
+  let fanCount: Int
+
+  var totalCount: Int {
+    let replyCount = max(replyCount, 0)
+    let mentionCount = max(mentionCount, 0)
+    let sum = replyCount.addingReportingOverflow(mentionCount)
+    return sum.overflow ? Int.max : sum.partialValue
+  }
+}
+
 struct CloudFavoriteThread: Identifiable, Hashable, Sendable {
   let id: Int64
   let title: String
@@ -296,6 +310,9 @@ protocol AccountService: Sendable {
     kind: InboxKind,
     page: Int
   ) async throws -> InboxPage
+  func inboxUnreadSummary(
+    session: StoredAccountSession
+  ) async throws -> InboxUnreadSummary
   func cloudFavorites(
     session: StoredAccountSession,
     offset: Int,
@@ -415,6 +432,12 @@ extension AccountService {
     page: Int
   ) async throws -> InboxPage {
     throw BrowseError.unavailable("当前账户服务不支持读取消息。")
+  }
+
+  func inboxUnreadSummary(
+    session: StoredAccountSession
+  ) async throws -> InboxUnreadSummary {
+    throw BrowseError.unavailable("当前账户服务不支持读取未读消息摘要。")
   }
 
   func threadAgreement(
