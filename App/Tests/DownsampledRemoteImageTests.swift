@@ -839,8 +839,13 @@ final class DownsampledRemoteImageTests: XCTestCase {
     XCTAssertTrue(secondWaiterReceivedFortyPercent)
 
     await downloader.releaseAll()
-    let firstOutcome = await firstCompletionProbe.waitUntilOutcome()
-    let secondOutcome = await secondCompletionProbe.waitUntilOutcome()
+    async let firstCompletion = firstCompletionProbe.waitUntilOutcome(
+      timeout: .seconds(10)
+    )
+    async let secondCompletion = secondCompletionProbe.waitUntilOutcome(
+      timeout: .seconds(10)
+    )
+    let (firstOutcome, secondOutcome) = await (firstCompletion, secondCompletion)
     if firstOutcome == nil { firstTask.cancel() }
     if secondOutcome == nil { secondTask.cancel() }
     XCTAssertEqual(firstOutcome, .some(.success))
