@@ -939,7 +939,7 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
 }
 
 @MainActor
-final class ImageGalleryPageViewController: UIPageViewController {
+class ImageGalleryPageViewController: UIPageViewController {
   var onAccessibilityScroll: ((UIAccessibilityScrollDirection) -> Bool)?
 
   var pagingScrollView: UIScrollView? {

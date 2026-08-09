@@ -582,7 +582,7 @@ final class ImageGalleryTests: XCTestCase {
   }
 
   @MainActor
-  func testCoordinatorDefersMigrationUntilInteractiveTransitionFinishes() async throws {
+  func testCoordinatorDefersMigrationUntilInteractiveTransitionFinishes() throws {
     let localFirstID = ImageGalleryItem.ID.local(postID: 1, contentOffset: 0)
     let localSecondID = ImageGalleryItem.ID.local(postID: 1, contentOffset: 1)
     let remoteFirstID = ImageGalleryItem.ID.remote(
@@ -605,7 +605,7 @@ final class ImageGalleryTests: XCTestCase {
     ]
     let store = ImageGalleryZoomStateStore()
     let coordinator = ImageGalleryPager.Coordinator()
-    let pageViewController = ImageGalleryPageViewController(
+    let pageViewController = ControllableImageGalleryPageViewController(
       transitionStyle: .scroll,
       navigationOrientation: .horizontal,
       options: nil
@@ -625,7 +625,8 @@ final class ImageGalleryTests: XCTestCase {
         if let id { publishedSelections.append(id) }
       }
     )
-    for _ in 0..<5 { await Task.yield() }
+    XCTAssertEqual(pageViewController.pendingProgrammaticCompletionCount, 1)
+    XCTAssertTrue(pageViewController.completeNextProgrammaticTransition(completed: true))
 
     let sourceState = ImageGalleryZoomState(
       scale: 2,
@@ -668,7 +669,8 @@ final class ImageGalleryTests: XCTestCase {
     pageViewController.setViewControllers(
       [pendingController],
       direction: .forward,
-      animated: false
+      animated: false,
+      completion: nil
     )
     coordinator.pageViewController(
       pageViewController,
@@ -680,7 +682,104 @@ final class ImageGalleryTests: XCTestCase {
     XCTAssertEqual(store.state(for: localFirstID), .identity)
     XCTAssertEqual(store.state(for: remoteFirstID), sourceState)
     XCTAssertEqual(publishedSelections, [remoteSecondID])
+    XCTAssertTrue(pageViewController.completeNextProgrammaticTransition(completed: true))
     coordinator.detach()
+  }
+
+  @MainActor
+  func testCoordinatorDrainsMigrationAfterCompletedOrInterruptedProgrammaticTransition() throws {
+    let localFirstID = ImageGalleryItem.ID.local(postID: 1, contentOffset: 0)
+    let localSecondID = ImageGalleryItem.ID.local(postID: 1, contentOffset: 1)
+    let remoteFirstID = ImageGalleryItem.ID.remote(
+      overallIndex: 1,
+      pictureID: "first",
+      postID: 1
+    )
+    let remoteSecondID = ImageGalleryItem.ID.remote(
+      overallIndex: 2,
+      pictureID: "second",
+      postID: 1
+    )
+    let localItems = [
+      try item(id: localFirstID, value: 1),
+      try item(id: localSecondID, value: 2),
+    ]
+    let remoteItems = [
+      try item(id: remoteFirstID, value: 1),
+      try item(id: remoteSecondID, value: 2),
+    ]
+    let sourceState = ImageGalleryZoomState(
+      scale: 2,
+      offset: CGSize(width: 8, height: -4)
+    )
+
+    for completed in [true, false] {
+      let store = ImageGalleryZoomStateStore()
+      let coordinator = ImageGalleryPager.Coordinator()
+      let pageViewController = ControllableImageGalleryPageViewController(
+        transitionStyle: .scroll,
+        navigationOrientation: .horizontal,
+        options: nil
+      )
+      coordinator.attach(to: pageViewController, axis: .horizontal)
+      coordinator.receive(
+        ImageGalleryPagerUpdate(
+          snapshot: ImageGalleryPagerSnapshot(
+            items: localItems,
+            requestedSelection: localFirstID
+          ),
+          accessibilityPageDescriptions: [:]
+        ),
+        zoomStateStore: store,
+        onSelectionChange: { _ in }
+      )
+      XCTAssertTrue(pageViewController.completeNextProgrammaticTransition(completed: true))
+      store.update(sourceState, for: localSecondID)
+
+      coordinator.receive(
+        ImageGalleryPagerUpdate(
+          snapshot: ImageGalleryPagerSnapshot(
+            items: localItems,
+            requestedSelection: localSecondID
+          ),
+          accessibilityPageDescriptions: [:]
+        ),
+        zoomStateStore: store,
+        onSelectionChange: { _ in }
+      )
+      XCTAssertEqual(pageViewController.pendingProgrammaticCompletionCount, 1)
+      coordinator.receive(
+        ImageGalleryPagerUpdate(
+          snapshot: ImageGalleryPagerSnapshot(
+            items: remoteItems,
+            requestedSelection: remoteSecondID
+          ),
+          idMigrations: [
+            localFirstID: remoteFirstID,
+            localSecondID: remoteSecondID,
+          ],
+          accessibilityPageDescriptions: [:]
+        ),
+        zoomStateStore: store,
+        onSelectionChange: { _ in }
+      )
+
+      XCTAssertEqual(store.state(for: localSecondID), sourceState)
+      XCTAssertEqual(store.state(for: remoteSecondID), .identity)
+      XCTAssertTrue(
+        pageViewController.completeNextProgrammaticTransition(completed: completed)
+      )
+      XCTAssertEqual(store.state(for: localSecondID), .identity)
+      XCTAssertEqual(store.state(for: remoteSecondID), sourceState)
+
+      if completed {
+        XCTAssertEqual(pageViewController.pendingProgrammaticCompletionCount, 1)
+        XCTAssertTrue(pageViewController.completeNextProgrammaticTransition(completed: true))
+      } else {
+        XCTAssertEqual(pageViewController.pendingProgrammaticCompletionCount, 0)
+      }
+      coordinator.detach()
+    }
   }
 
   func testIdentityZoomStateDropsOffset() {
@@ -717,5 +816,41 @@ final class ImageGalleryTests: XCTestCase {
 
   private func url(_ value: String) throws -> URL {
     try XCTUnwrap(URL(string: value))
+  }
+}
+
+@MainActor
+private final class ControllableImageGalleryPageViewController:
+  ImageGalleryPageViewController
+{
+  private var programmaticCompletions = [((Bool) -> Void)]()
+
+  var pendingProgrammaticCompletionCount: Int {
+    programmaticCompletions.count
+  }
+
+  override func setViewControllers(
+    _ viewControllers: [UIViewController]?,
+    direction: UIPageViewController.NavigationDirection,
+    animated: Bool,
+    completion: ((Bool) -> Void)?
+  ) {
+    // Install the visible controller synchronously; the test drives completion separately.
+    super.setViewControllers(
+      viewControllers,
+      direction: direction,
+      animated: false,
+      completion: nil
+    )
+    if let completion {
+      programmaticCompletions.append(completion)
+    }
+  }
+
+  @discardableResult
+  func completeNextProgrammaticTransition(completed: Bool) -> Bool {
+    guard !programmaticCompletions.isEmpty else { return false }
+    programmaticCompletions.removeFirst()(completed)
+    return true
   }
 }
