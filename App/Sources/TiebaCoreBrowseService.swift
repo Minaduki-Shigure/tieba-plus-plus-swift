@@ -3,7 +3,7 @@ import TiebaCore
 
 struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchService,
   SearchSuggestionService, HotTopicService, HotThreadService, UserProfileService,
-  ForumInformationService, ThreadPictureGalleryService
+  PersonalizedFeedService, ForumInformationService, ThreadPictureGalleryService
 {
   private let client: TiebaClient
   private let contentFilterRepository: any ContentFilterRepository
@@ -454,6 +454,30 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       topics: response.topics.map(Self.mapHotTopic),
       categories: response.categories.map(Self.mapHotThreadCategory),
       items: response.items.map { Self.mapHotThreadRankItem($0, applying: filter) }
+    )
+  }
+
+  func personalizedThreads(page: Int) async throws -> PersonalizedFeedPageData {
+    let response: TiebaPersonalizedPage
+    do {
+      response = try await client.getPersonalizedThreads(page: page)
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    let filter = await contentFilterSnapshot()
+    return PersonalizedFeedPageData(
+      items: response.items.map { item in
+        PersonalizedFeedItem(
+          thread: filter.applying(to: Self.mapThread(item.thread)),
+          feedbackReasons: item.reasons.map {
+            PersonalizedFeedbackReason(id: $0.id, title: $0.title, extra: $0.extra)
+          }
+        )
+      },
+      currentPage: response.currentPage,
+      hasMore: response.hasMore
     )
   }
 

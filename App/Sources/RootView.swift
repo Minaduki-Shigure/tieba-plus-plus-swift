@@ -5,7 +5,8 @@ import SwiftUI
 struct RootView: View {
   let service:
     any BrowseService & SearchService & ForumPostSearchService & HotTopicService & HotThreadService
-      & UserProfileService & ForumInformationService & SearchSuggestionService
+      & PersonalizedFeedService & UserProfileService & ForumInformationService
+      & SearchSuggestionService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
@@ -39,7 +40,7 @@ struct RootView: View {
 
   init(
     service: any BrowseService & SearchService & ForumPostSearchService & HotTopicService
-      & HotThreadService & UserProfileService & ForumInformationService
+      & HotThreadService & PersonalizedFeedService & UserProfileService & ForumInformationService
       & SearchSuggestionService,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
@@ -124,8 +125,8 @@ struct RootView: View {
 
         if homeShowsDiscovery {
           Section("\u{53d1}\u{73b0}") {
-            NavigationLink(value: RootDestination.hotThreads) {
-              Label("帖子热榜", systemImage: "chart.bar.fill")
+            NavigationLink(value: RootDestination.explore(.personalized)) {
+              Label("发现", systemImage: "sparkles")
             }
 
             NavigationLink(value: RootDestination.hotTopics) {
@@ -249,8 +250,9 @@ struct RootView: View {
             favoritesRepository: favoritesRepository,
             searchHistoryRepository: searchHistoryRepository
           )
-        case .hotThreads:
-          HotThreadListView(
+        case .explore(let section):
+          ExploreView(
+            initialSection: section,
             service: service,
             historyRepository: historyRepository,
             favoritesRepository: favoritesRepository,
@@ -653,7 +655,7 @@ enum RootDestination: Hashable {
   case forum(String)
   case search(String)
   case hotTopics
-  case hotThreads
+  case explore(ExploreSection)
   case history
   case favorites
   case account
@@ -669,7 +671,7 @@ enum RootStartupNavigation {
     case .home:
       []
     case .hotThreads:
-      [.hotThreads]
+      [.explore(.hot)]
     case .hotTopics:
       [.hotTopics]
     case .favorites:

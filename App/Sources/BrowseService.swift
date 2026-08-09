@@ -172,6 +172,10 @@ protocol HotThreadService: Sendable {
   func hotThreads(categoryCode: String) async throws -> HotThreadFeedData
 }
 
+protocol PersonalizedFeedService: Sendable {
+  func personalizedThreads(page: Int) async throws -> PersonalizedFeedPageData
+}
+
 protocol UserProfileService: Sendable {
   func userProfile(userID: Int64) async throws -> BrowseUserProfile
   func userThreads(userID: Int64, page: Int, pageSize: Int) async throws

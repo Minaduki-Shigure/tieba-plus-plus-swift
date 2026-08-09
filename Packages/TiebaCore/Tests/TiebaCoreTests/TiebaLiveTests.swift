@@ -4,6 +4,34 @@ import XCTest
 @testable import TiebaCore
 
 final class TiebaLiveTests: XCTestCase {
+  func testAnonymousPersonalizedFeedUsesAppScopedUUIDAndPaginates() async throws {
+    guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
+      throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
+    }
+
+    let client = TiebaClient(
+      configuration: .init(
+        userAgent: "TiebaPlusPlus/0.60 integration-test",
+        personalizedCUID: "28f1c3b4-786a-4abd-8e41-65339f4a2d5f"
+      )
+    )
+    let firstPage = try await client.getPersonalizedThreads()
+
+    XCTAssertEqual(firstPage.currentPage, 1)
+    XCTAssertFalse(firstPage.items.isEmpty)
+    XCTAssertEqual(Set(firstPage.items.map(\.id)).count, firstPage.items.count)
+    XCTAssertTrue(firstPage.items.allSatisfy {
+      $0.id > 0 && $0.thread.forumID > 0 && !$0.thread.forumName.isEmpty
+    })
+
+    guard firstPage.hasMore else { return }
+    let secondPage = try await client.getPersonalizedThreads(page: 2)
+    XCTAssertEqual(secondPage.currentPage, 2)
+    XCTAssertFalse(secondPage.items.isEmpty)
+    let firstIDs = Set(firstPage.items.map(\.id))
+    XCTAssertTrue(secondPage.items.contains { !firstIDs.contains($0.id) })
+  }
+
   func testAnonymousPicturePageMatchesPBImageCursor() async throws {
     guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
       throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")

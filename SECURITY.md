@@ -78,6 +78,22 @@ have endpoint-specific transfer limits before decoding. MD5 is used only for
 compatibility with the unofficial request signature protocol, not for password
 storage or verification.
 
+The personalized Explore feed is the sole anonymous request that carries a
+stable app-generated identifier. At first launch the app generates an ordinary
+random UUID, stores it in local `UserDefaults`, and sends it only as
+`CommonReq.cuid` to the HTTPS `309264` personalized endpoint. This value is
+nonsecret and must never be derived from IDFV, hardware, an account, a login
+cookie, IMEI, OAID, Android ID, network address, model, screen dimensions, or
+location. The request must not add Cookie, Authorization, BDUSS, STOKEN,
+`client_user_token`, an outer signature, or a CUID header. The UUID remains
+stable so refresh and later pages share one recommendation session; malformed
+stored values are replaced locally. Responses are limited to 4 MiB. Raw full
+pages may continue, but an empty page stops immediately. A refresh may traverse
+duplicate-only pages up to the page frontier already reached by that client;
+beyond it, at most one additional duplicate-only page may advance before a
+second stops the request chain. Recommendation feedback is a separate server
+write and remains disabled.
+
 Read-only cloud favorites require a complete v3 session. They use one signed
 HTTPS POST to `https://tiebac.baidu.com/c/f/post/threadstore` containing exactly
 `BDUSS`, `_client_version`, `offset`, `rn`, `stoken`, `user_id`, and `sign`, the

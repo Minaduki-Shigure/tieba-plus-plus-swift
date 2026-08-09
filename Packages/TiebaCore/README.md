@@ -8,6 +8,7 @@ It does not persist credentials or account state.
 
 ```swift
 let client = TiebaClient()
+let personalized = try await client.getPersonalizedThreads()
 let hotThreads = try await client.getHotThreadRanking()
 if let category = hotThreads.categories.first {
     let categoryRanking = try await client.getHotThreadRanking(categoryCode: category.code)
@@ -166,6 +167,16 @@ not advertise a usable sign state; it is not permission to attempt a write.
   cursor, or load-more contract. Category titles remain bound to their exact
   server codes rather than being inferred from those codes. Mapped collections
   are bounded to 20 topics, 20 unique categories, and 100 unique valid threads.
+- Personalized discovery uses protobuf command `309264`, fixed client version
+  `12.52.1.0`, and one stable random UUID supplied as `CommonReq.cuid`. The UUID
+  is not a hardware or account identifier; the app persists its generated value
+  only to keep refresh and page requests in one recommendation session. No
+  Cookie, credential, client ID, signature, IMEI, OAID, Android ID, IDFV,
+  location, screen, model, or brand field is sent. Responses are limited to
+  4 MiB. Because the endpoint has no authoritative `has_more`, a raw page count
+  of at least 11 allows continuation. The App stops an empty page immediately,
+  traverses the server pages reached before a refresh, and then permits only one
+  additional duplicate-only overlap page.
 - Requests identify as client type `2` and version `12.64.1.1` by default.
 - Account validation and authenticated read requests use version `22.6.5.1`.
 - Full-session validation signs an HTTPS `/c/s/login` request containing the
@@ -229,8 +240,9 @@ not advertise a usable sign state; it is not permission to attempt a write.
   removing the corresponding content fragments.
 - Browsing bodies use the endpoint's multipart `data` part and Protocol Buffer
   payload. Search requests use percent-encoded GET query items and JSON.
-- Anonymous requests contain no Cookie, Authorization, BDUSS, STOKEN, device
-  identifier, or TLS override.
+- Anonymous requests contain no Cookie, Authorization, BDUSS, STOKEN,
+  hardware-derived identifier, or TLS override. Personalized discovery's one
+  documented app-generated random UUID is the only stable anonymous session ID.
 - Authenticated requests use a separate request factory and ephemeral transport,
   disable cookie and credential storage, and put only the endpoint's required
   account fields in the signed HTTPS form body. Their transport rejects every

@@ -11,17 +11,20 @@ public struct TiebaClientConfiguration: Sendable, Hashable {
   public var authenticatedClientVersion: String
   public var userAgent: String
   public var requestTimeout: TimeInterval
+  public var personalizedCUID: String
 
   public init(
     clientVersion: String = "12.64.1.1",
     authenticatedClientVersion: String = "22.6.5.1",
     userAgent: String = "TiebaPlusPlus/0.56 (iOS)",
-    requestTimeout: TimeInterval = 30
+    requestTimeout: TimeInterval = 30,
+    personalizedCUID: String = UUID().uuidString.lowercased()
   ) {
     self.clientVersion = clientVersion
     self.authenticatedClientVersion = authenticatedClientVersion
     self.userAgent = userAgent
     self.requestTimeout = requestTimeout
+    self.personalizedCUID = personalizedCUID
   }
 }
 
@@ -280,6 +283,7 @@ final class BoundedTiebaResponseTaskDelegate: NSObject,
 
 public actor TiebaClient {
   private static let userRepliesResponseMaximumBytes = 4 * 1_024 * 1_024
+  private static let personalizedResponseMaximumBytes = 4 * 1_024 * 1_024
 
   private let requestFactory: TiebaRequestFactory
   private let transport: any TiebaTransport
@@ -317,6 +321,21 @@ public actor TiebaClient {
     let response: FrsPageResIdl = try decode(body)
     try checkServerError(code: response.error.errorno, message: response.error.errmsg)
     return TiebaProtoMapper.threadPage(response.data)
+  }
+
+  public func getPersonalizedThreads(page: Int = 1) async throws -> TiebaPersonalizedPage {
+    let request = try requestFactory.personalizedThreads(page: page)
+    let body = try await send(
+      request,
+      maximumBodyBytes: Self.personalizedResponseMaximumBytes
+    )
+    let response: PersonalizedResIdl = try decode(body)
+    try checkServerError(code: response.error.errorno, message: response.error.errmsg)
+    return TiebaProtoMapper.personalizedPage(
+      response.data,
+      requestedPage: page,
+      pageSize: TiebaRequestFactory.personalizedPageSize
+    )
   }
 
   public func getForumChannelThreads(

@@ -20,6 +20,26 @@ final class AppPreferencesTests: XCTestCase {
     XCTAssertEqual(AppStartDestination.resolved("future-value"), .home)
   }
 
+  func testPersonalizedRecommendationIdentityIsStableAndRepairsInvalidStorage() throws {
+    let suiteName = "AppPreferencesTests.personalized.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    let first = PersonalizedRecommendationIdentity.current(defaults: defaults)
+    let second = PersonalizedRecommendationIdentity.current(defaults: defaults)
+    XCTAssertEqual(first, second)
+    XCTAssertEqual(UUID(uuidString: first)?.uuidString.lowercased(), first)
+    XCTAssertEqual(
+      defaults.string(forKey: AppPreferenceKey.personalizedRecommendationCUID),
+      first
+    )
+
+    defaults.set("not-a-uuid", forKey: AppPreferenceKey.personalizedRecommendationCUID)
+    let repaired = PersonalizedRecommendationIdentity.current(defaults: defaults)
+    XCTAssertNotEqual(repaired, "not-a-uuid")
+    XCTAssertEqual(UUID(uuidString: repaired)?.uuidString.lowercased(), repaired)
+  }
+
   func testHomeStartDestinationUsesStableValuesTitlesAndOrdering() {
     XCTAssertEqual(
       AppStartDestination.allCases,

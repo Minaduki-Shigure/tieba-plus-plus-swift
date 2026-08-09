@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 struct HotThreadListView: View {
@@ -7,6 +8,7 @@ struct HotThreadListView: View {
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
+  let showsNavigationTitle: Bool
 
   @StateObject private var viewModel: HotThreadListViewModel
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -17,12 +19,14 @@ struct HotThreadListView: View {
       & UserProfileService & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
-    searchHistoryRepository: any ForumSearchHistoryRepository
+    searchHistoryRepository: any ForumSearchHistoryRepository,
+    showsNavigationTitle: Bool = true
   ) {
     self.service = service
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
+    self.showsNavigationTitle = showsNavigationTitle
     _viewModel = StateObject(wrappedValue: HotThreadListViewModel(service: service))
   }
 
@@ -34,8 +38,7 @@ struct HotThreadListView: View {
         initialState
       }
     }
-    .navigationTitle("帖子热榜")
-    .navigationBarTitleDisplayMode(.inline)
+    .modifier(HotThreadNavigationTitleModifier(isEnabled: showsNavigationTitle))
     .safeAreaInset(edge: .top, spacing: 0) {
       if viewModel.hasLoadedInitialSnapshot {
         categoryTabs
@@ -43,6 +46,9 @@ struct HotThreadListView: View {
     }
     .task { viewModel.loadIfNeeded() }
     .onDisappear(perform: viewModel.cancel)
+    .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
+      viewModel.reloadForContentFilterChange()
+    }
     .alert(
       "刷新失败",
       isPresented: Binding(
@@ -243,6 +249,21 @@ struct HotThreadListView: View {
     }
     .background(.regularMaterial)
     .overlay(alignment: .bottom) { Divider() }
+  }
+}
+
+private struct HotThreadNavigationTitleModifier: ViewModifier {
+  let isEnabled: Bool
+
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if isEnabled {
+      content
+        .navigationTitle("帖子热榜")
+        .navigationBarTitleDisplayMode(.inline)
+    } else {
+      content
+    }
   }
 }
 

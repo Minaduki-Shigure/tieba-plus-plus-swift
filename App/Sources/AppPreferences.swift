@@ -22,6 +22,29 @@ enum AppPreferenceKey {
     "TiebaPlusPlus.favoriteThreadsOpenOnlyAuthor"
   static let favoriteThreadsOpenDescending =
     "TiebaPlusPlus.favoriteThreadsOpenDescending"
+  static let personalizedRecommendationCUID =
+    "TiebaPlusPlus.personalizedRecommendationCUID"
+}
+
+enum PersonalizedRecommendationIdentity {
+  static func current(defaults: UserDefaults = .standard) -> String {
+    if
+      let rawValue = defaults.string(forKey: AppPreferenceKey.personalizedRecommendationCUID),
+      rawValue.utf8.count == 36,
+      let value = UUID(uuidString: rawValue),
+      value.uuidString.caseInsensitiveCompare(rawValue) == .orderedSame
+    {
+      let normalized = value.uuidString.lowercased()
+      if normalized != rawValue {
+        defaults.set(normalized, forKey: AppPreferenceKey.personalizedRecommendationCUID)
+      }
+      return normalized
+    }
+
+    let generated = UUID().uuidString.lowercased()
+    defaults.set(generated, forKey: AppPreferenceKey.personalizedRecommendationCUID)
+    return generated
+  }
 }
 
 enum AppTextSizeAdjustment: Int, CaseIterable, Hashable, Identifiable, Sendable {

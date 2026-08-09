@@ -12,6 +12,9 @@ the source metadata is updated to that tested IPA.
 
 - Anonymous hot-thread ranking with an embedded hot-topic preview,
   server-defined categories, and snapshot refresh
+- Anonymous personalized thread feed as the default Explore channel, with pull
+  refresh, integer pagination, duplicate and stalled-page termination, local
+  filtering, and one app-scoped random recommendation UUID
 - Ranked anonymous hot-topic discovery with images and discussion counts
 - Hot-topic details with related forums and cursor-aware thread pagination
 - Categorized anonymous forum, thread, and user search
@@ -95,7 +98,7 @@ the source metadata is updated to that tested IPA.
 - Saved-thread reading-position and browse-mode restoration
 - Default-off only-author and descending overrides for locally saved threads
 - Home-screen shortcuts for locally saved forums
-- HTTPS-only, credential-free anonymous requests
+- HTTPS-only anonymous requests with no account credentials or hardware-derived identifiers
 - Ephemeral, HTTPS-only Baidu Web login with an exact host allowlist
 - Same-snapshot BDUSS/STOKEN capture, independent same-UID session binding,
   device-only Keychain v3 storage, account switching, and local logout
@@ -132,11 +135,13 @@ the source metadata is updated to that tested IPA.
    paths, followed by account switching and follow recovery checks
 3. Real-device validation of the minimal HTTPS ReplyMe and AtMe requests,
    including whether opening a list changes server unread state
-4. Explicit cloud-favorite add/remove and saved-position updates with fresh
+4. Minimal HTTPS account-bound concern feed with opaque cursor validation,
+   per-session request timestamps, and account-switch result isolation
+5. Explicit cloud-favorite add/remove and saved-position updates with fresh
    state reconciliation and no retry after an uncertain write
-5. Experimental plain-text reply workflows behind explicit risk confirmation,
+6. Experimental plain-text reply workflows behind explicit risk confirmation,
    anti-CSRF tests, and unknown-outcome handling
-6. Broader settings parity, remaining account activity, content creation, and
+7. Broader settings parity, remaining account activity, content creation, and
    moderation tools
 
 The foreground inbox deliberately does not copy TiebaLite's cleartext JSON
@@ -675,6 +680,27 @@ so the app treats it as a share only when `is_share_thread == 1` and the origin
 has a positive, distinct thread ID. Pagination may omit the repeated origin
 object; a loaded card remains until a replacing first-page response says it is
 absent. Opening the origin reuses the normal anonymous thread workflow.
+
+Explore's default personalized channel uses HTTPS protobuf command `309264`.
+The minimal request contains client type `2`, endpoint-compatible version
+`12.52.1.0`, load type, one-based page, target count `11`, two public mode flags,
+and one ordinary UUID in `CommonReq.cuid`. Live field-deletion probes established that
+omitting only this UUID returns a successful but empty response, while adding it
+returns real recommendations without Cookie, account ID, signature, client ID,
+IMEI, OAID, Android ID, IDFV, location, screen, model, or brand data. The app
+generates the UUID independently, stores it only in local preferences, and reuses
+it across launches so refresh and pagination remain one recommendation session.
+It is not hardware- or account-derived. The response has no authoritative
+`has_more`; a raw page of at least 11 items permits one continuation, while an
+empty page stops. After refresh preserves older rows and resets the server page
+number, duplicate-only pages may traverse the highest page reached before that
+refresh. Beyond that frontier, one additional duplicate-only page is allowed to
+advance past overlap; a second consecutive duplicate-only page stops. Ads, live cards, invalid identities, and
+duplicate threads are discarded before UI mapping. Refresh prepends new unique
+items, the retained window is bounded, and local filtering never replaces the
+raw server count used for continuation. Recommendation reasons are retained for
+future protocol work, but the legacy dislike endpoint is a separate write and is
+not exposed by this read-only milestone.
 
 Anonymous poll cards are read-only. Current post responses place an ordinary
 thread's poll in its mirrored `origin_thread_info`, while that same field belongs

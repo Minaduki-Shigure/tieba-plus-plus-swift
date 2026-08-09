@@ -14,11 +14,11 @@ experimental or unsupported.
 
 | Area | Current state |
 | --- | --- |
-| Anonymous browsing | Available across discovery, search, forums, threads, replies, profiles, and media |
+| Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, and media preferences |
 | Accounts | Bound Web login, switching, logout, followed forums, read-only Tieba cloud favorites, a foreground ReplyMe/AtMe inbox, per-forum state, and experimental content approval |
 | Server-side writes | Confirmed forum follow/unfollow, check-in, and content approval are in device validation; other writes stay disabled |
-| TiebaLite parity | Anonymous reading and media: about 85–95%; full product scope: about 58–63% |
+| TiebaLite parity | Anonymous reading and media: about 90–95%; full product scope: about 62–66% |
 | Distribution | Public SideStore/LiveContainer source backed by tested unsigned GitHub Release IPAs |
 
 ### Release and validation
@@ -27,10 +27,12 @@ experimental or unsupported.
   replies and mentions. It uses an HTTPS Protobuf ReplyMe request and a minimal
   signed HTTPS AtMe form, paginates in memory, and discards responses when the
   active account lease changes.
-- **Current main source:** Public user profiles also expose separate,
-  credential-free reply history plus read-only following and follower lists.
-  These surfaces paginate lazily, preserve returned notices without guessing
-  privacy state, and keep local filtering separate from network pagination.
+- **Current main source:** Explore now opens on a credential-free personalized
+  thread feed beside the existing hot ranking. It refreshes and paginates with
+  duplicate and stalled-page protection, preserves local filtering and media
+  preferences, and sends only one app-generated random UUID as its stable
+  recommendation-session identifier. Public profiles also expose separate reply
+  history plus read-only following and follower lists.
   They will not enter the public app source until a tagged IPA passes the
   release checks.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
@@ -54,8 +56,9 @@ experimental or unsupported.
 
 ### Discovery and forums
 
-- **Discovery:** Anonymous post rankings, hot-topic previews, category snapshots,
-  topic details, related forums, and cursor-aware topic pagination are available.
+- **Discovery:** A pageable anonymous personalized feed, post rankings, hot-topic
+  previews, category snapshots, topic details, related forums, and cursor-aware
+  topic pagination are available. Recommendation dislike feedback remains disabled.
 - **Search:** Forum, thread, and user search are separated by category. Global
   and per-forum post search provide the supported sort and content filters,
   local history, and optional credential-free suggestions.
@@ -148,7 +151,10 @@ experimental or unsupported.
   the immediately following write, and never returned to the app model or
   persisted. Content approval's mandatory `cuid` is a random
   client-lifetime Galaxy2 identifier (`32HEX|V` plus an 8-character Helios
-  checksum); it is not hardware-derived or persisted.
+  checksum); it is not hardware-derived or persisted. Personalized discovery
+  separately uses one nonsecret random UUID stored in local preferences. It is
+  not derived from hardware, IDFV, an account, or a credential and is sent only
+  in that anonymous feed's Protobuf `cuid` field.
 - **Write safety:** Each write is bound to the expected account UID and forum.
   Follow and check-in operations for the same forum cannot overlap, identical
   concurrent forum operations are coalesced, and both Core and the account
@@ -168,8 +174,8 @@ experimental or unsupported.
   paths have been validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, protocol constraints, and next milestones. The current weighted
-  end-to-end audit estimates 85–95% coverage of anonymous reading and media, or
-  58–63% of the full TiebaLite product scope once the remaining account writes,
+  end-to-end audit estimates 90–95% coverage of anonymous reading and media, or
+  62–66% of the full TiebaLite product scope once the remaining concern feed, account writes,
   creation, background messaging, and moderation are included.
 
 ## Architecture

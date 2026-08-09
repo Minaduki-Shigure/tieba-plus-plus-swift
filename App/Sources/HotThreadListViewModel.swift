@@ -35,6 +35,11 @@ final class HotThreadListViewModel: ObservableObject {
     startRequest(kind: .replacement)
   }
 
+  func reloadForContentFilterChange() {
+    guard hasLoadedInitialSnapshot else { return }
+    startRequest(kind: .replacement)
+  }
+
   func selectCategory(_ category: HotThreadCategory) {
     guard let advertised = categories.first(where: { $0.code == category.code }) else { return }
     guard advertised.code != selectedCategory.code else { return }

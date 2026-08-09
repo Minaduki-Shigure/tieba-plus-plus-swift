@@ -1,0 +1,29 @@
+// tbclient.PersonalizedResIdl
+syntax = "proto3";
+
+import "Error.proto";
+import "ThreadInfo.proto";
+
+message PersonalizedResIdl {
+    message DislikeReason {
+        string reason = 1;
+        uint32 id = 2;
+        string extra = 3;
+    }
+
+    message ThreadPersonalized {
+        uint64 tid = 1;
+        string weight = 2;
+        string source = 3;
+        repeated DislikeReason dislike_resource = 5;
+        string extra = 6;
+    }
+
+    message DataRes {
+        repeated ThreadInfo thread_list = 2;
+        repeated ThreadPersonalized thread_personalized = 7;
+    }
+
+    Error error = 1;
+    DataRes data = 2;
+}

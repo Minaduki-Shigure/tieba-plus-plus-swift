@@ -782,6 +782,66 @@ final class TiebaRequestFactoryTests: XCTestCase {
     XCTAssertEqual(decoded.data.common.zID, "")
   }
 
+  func testPersonalizedRequestUsesMinimalCredentialFreeWireContract() throws {
+    let cuid = "28f1c3b4-786a-4abd-8e41-65339f4a2d5f"
+    let factory = TiebaRequestFactory(
+      configuration: .init(personalizedCUID: cuid)
+    )
+    let request = try factory.personalizedThreads(page: 2)
+    let payload = try protobufPayload(from: request)
+    let decoded = try PersonalizedReqIdl(serializedBytes: payload)
+
+    XCTAssertEqual(request.url?.scheme, "https")
+    XCTAssertEqual(request.url?.host, "tiebac.baidu.com")
+    XCTAssertEqual(request.url?.path, "/c/f/excellent/personalized")
+    XCTAssertEqual(request.url?.query, "cmd=309264")
+    XCTAssertEqual(request.httpMethod, "POST")
+    XCTAssertFalse(request.httpShouldHandleCookies)
+    XCTAssertEqual(request.value(forHTTPHeaderField: "x_bd_data_type"), "protobuf")
+    XCTAssertEqual(
+      Set(request.allHTTPHeaderFields?.keys.map { $0.lowercased() } ?? []),
+      Set(["accept-encoding", "content-type", "user-agent", "x_bd_data_type"])
+    )
+    XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+    XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+
+    XCTAssertEqual(decoded.data.pn, 2)
+    XCTAssertEqual(decoded.data.loadType, 2)
+    XCTAssertEqual(decoded.data.pageThreadCount, 11)
+    XCTAssertEqual(decoded.data.qType, 1)
+    XCTAssertEqual(decoded.data.newNetType, 1)
+    XCTAssertEqual(decoded.data.common.clientType, 2)
+    XCTAssertEqual(decoded.data.common.clientVersion, "12.52.1.0")
+    XCTAssertEqual(decoded.data.common.cuid, cuid)
+    XCTAssertEqual(decoded.data.common.netType, 1)
+    XCTAssertEqual(decoded.data.common.personalizedRecSwitch, 1)
+    XCTAssertEqual(decoded.data.common.clientID, "")
+    XCTAssertEqual(decoded.data.common.phoneImei, "")
+    XCTAssertEqual(decoded.data.common.timestamp, 0)
+    XCTAssertEqual(decoded.data.common.bduss, "")
+    XCTAssertEqual(decoded.data.common.stoken, "")
+    XCTAssertEqual(decoded.data.common.zID, "")
+    XCTAssertEqual(decoded.data.common.model, "")
+    XCTAssertEqual(decoded.data.common.brand, "")
+    XCTAssertEqual(decoded.data.common.androidID, "")
+  }
+
+  func testPersonalizedRequestRefreshAndPageValidation() throws {
+    let first = try PersonalizedReqIdl(
+      serializedBytes: protobufPayload(from: factory.personalizedThreads(page: 1))
+    )
+    XCTAssertEqual(first.data.pn, 1)
+    XCTAssertEqual(first.data.loadType, 1)
+
+    XCTAssertThrowsError(try factory.personalizedThreads(page: 0))
+    XCTAssertThrowsError(try factory.personalizedThreads(page: Int(Int32.max) + 1))
+    XCTAssertThrowsError(
+      try TiebaRequestFactory(
+        configuration: .init(personalizedCUID: "not-a-uuid")
+      ).personalizedThreads(page: 1)
+    )
+  }
+
   func testHotThreadRankingRequestPassesUnknownCategoryAndRejectsInvalidCodes() throws {
     let unknownRequest = try factory.hotThreadRanking(categoryCode: " server-37 ")
     let unknown = try HotThreadListReqIdl(

@@ -26,6 +26,8 @@
         "PbFloorResIdl.proto",
         "PbPageReqIdl.proto",
         "PbPageResIdl.proto",
+        "PersonalizedReqIdl.proto",
+        "PersonalizedResIdl.proto",
         "PollInfo.proto",
         "Post.proto",
         "PostInfoList.proto",

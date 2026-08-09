@@ -33,6 +33,8 @@ struct TiebaRequestFactory: Sendable {
   static let webHost = TiebaEndpointPolicy.webHost
   static let multipartBoundary = "-*_r1999"
   static let userRepliesClientVersion = "8"
+  static let personalizedClientVersion = "12.52.1.0"
+  static let personalizedPageSize = 11
 
   let configuration: TiebaClientConfiguration
 
@@ -448,6 +450,45 @@ struct TiebaRequestFactory: Sendable {
     return try request(
       path: "/c/f/forum/hotThreadList",
       command: 309_661,
+      protobuf: message.serializedData()
+    )
+  }
+
+  func personalizedThreads(page: Int) throws -> URLRequest {
+    try validate(page: page)
+    let rawCUID = configuration.personalizedCUID.trimmingCharacters(
+      in: .whitespacesAndNewlines
+    )
+    guard
+      rawCUID.utf8.count == 36,
+      let parsedCUID = UUID(uuidString: rawCUID),
+      parsedCUID.uuidString.caseInsensitiveCompare(rawCUID) == .orderedSame
+    else {
+      throw TiebaClientError.invalidArgument(
+        "Personalized recommendation identifier must be a canonical UUID."
+      )
+    }
+
+    var common = CommonReq()
+    common.clientType = 2
+    common.clientVersion = Self.personalizedClientVersion
+    common.cuid = parsedCUID.uuidString.lowercased()
+    common.netType = 1
+    common.personalizedRecSwitch = 1
+
+    var data = PersonalizedReqIdl.DataReq()
+    data.common = common
+    data.loadType = page == 1 ? 1 : 2
+    data.pageThreadCount = UInt32(Self.personalizedPageSize)
+    data.pn = UInt32(page)
+    data.qType = 1
+    data.newNetType = 1
+
+    var message = PersonalizedReqIdl()
+    message.data = data
+    return try request(
+      path: "/c/f/excellent/personalized",
+      command: 309_264,
       protobuf: message.serializedData()
     )
   }

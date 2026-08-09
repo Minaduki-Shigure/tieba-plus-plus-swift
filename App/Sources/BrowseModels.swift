@@ -899,6 +899,25 @@ struct HotThreadFeedData: Hashable, Sendable {
   let items: [HotThreadRankItem]
 }
 
+struct PersonalizedFeedbackReason: Identifiable, Hashable, Sendable {
+  let id: UInt32
+  let title: String
+  let extra: String
+}
+
+struct PersonalizedFeedItem: Identifiable, Hashable, Sendable {
+  var id: Int64 { thread.id }
+
+  let thread: BrowseThread
+  let feedbackReasons: [PersonalizedFeedbackReason]
+}
+
+struct PersonalizedFeedPageData: Hashable, Sendable {
+  let items: [PersonalizedFeedItem]
+  let currentPage: Int
+  let hasMore: Bool
+}
+
 enum BrowseThreadKind: Hashable, Sendable {
   case article
   case album

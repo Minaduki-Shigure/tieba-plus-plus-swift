@@ -162,6 +162,27 @@ final class HotThreadViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testContentFilterReloadReplacesLoadedSnapshotInCurrentCategory() async throws {
+    let service = ScriptedHotThreadService()
+    await service.enqueue(
+      .value(HotThreadFixtures.feed(items: [HotThreadFixtures.item(id: 1)]))
+    )
+    await service.enqueue(
+      .value(HotThreadFixtures.feed(items: [HotThreadFixtures.item(id: 2)]))
+    )
+    let viewModel = HotThreadListViewModel(service: service)
+    viewModel.loadIfNeeded()
+    try await hotThreadWaitUntil { viewModel.items.map(\.id) == [1] }
+
+    viewModel.reloadForContentFilterChange()
+    try await hotThreadWaitUntil { viewModel.items.map(\.id) == [2] }
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    let requests = await service.requestSnapshot()
+    XCTAssertEqual(requests, ["all", "all"])
+  }
+
+  @MainActor
   func testSameAndUnadvertisedCategoriesDoNotRequest() async throws {
     let service = ScriptedHotThreadService()
     let sports = HotThreadFixtures.category(serverID: 2, code: "sports", title: "体育")

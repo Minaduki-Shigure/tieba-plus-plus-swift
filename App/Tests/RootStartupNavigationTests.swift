@@ -4,10 +4,16 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class RootStartupNavigationTests: XCTestCase {
+  func testExploreSectionsKeepStableOrderAndTitles() {
+    XCTAssertEqual(ExploreSection.allCases, [.personalized, .hot])
+    XCTAssertEqual(ExploreSection.allCases.map(\.rawValue), ["personalized", "hot"])
+    XCTAssertEqual(ExploreSection.allCases.map(\.title), ["推荐", "热门"])
+  }
+
   func testStartDestinationCreatesExpectedInitialPath() {
     let cases: [(destination: AppStartDestination, expected: [RootDestination])] = [
       (.home, []),
-      (.hotThreads, [.hotThreads]),
+      (.hotThreads, [.explore(.hot)]),
       (.hotTopics, [.hotTopics]),
       (.favorites, [.favorites]),
       (.history, [.history]),

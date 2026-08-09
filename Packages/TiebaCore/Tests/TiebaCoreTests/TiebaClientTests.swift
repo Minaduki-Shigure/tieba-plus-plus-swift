@@ -100,6 +100,79 @@ final class TiebaClientTests: XCTestCase {
     }
   }
 
+  func testPersonalizedClientMapsAndFiltersFeedWithoutEndingRawFullPage() async throws {
+    var response = PersonalizedResIdl()
+    response.data.threadList = [
+      personalizedThread(id: 100, forumID: 10, forumName: "swift"),
+      personalizedThread(id: 100, forumID: 10, forumName: "swift"),
+      personalizedThread(id: 101, threadID: 102, forumID: 10, forumName: "swift"),
+      personalizedThread(id: 103, forumID: 10, forumName: "swift", isAd: true),
+      personalizedThread(id: 104, forumID: 10, forumName: "swift", isLive: true),
+      personalizedThread(id: 105, forumID: 0, forumName: ""),
+      personalizedThread(id: 106, forumID: 10, forumName: "swift"),
+      personalizedThread(id: 107, forumID: 11, forumName: "ios"),
+      personalizedThread(id: 108, forumID: 12, forumName: "xcode"),
+      personalizedThread(id: 109, forumID: 13, forumName: "mac"),
+      personalizedThread(id: 110, forumID: 14, forumName: "mobile"),
+    ]
+    var metadata = PersonalizedResIdl.ThreadPersonalized()
+    metadata.tid = 100
+    var reason = PersonalizedResIdl.DislikeReason()
+    reason.id = 7
+    reason.reason = "不感兴趣"
+    reason.extra = "opaque"
+    metadata.dislikeResource = [reason, reason]
+    response.data.threadPersonalized = [metadata]
+
+    let transport = CapturingTransport(body: try response.serializedData())
+    let client = TiebaClient(transport: transport)
+    let result = try await client.getPersonalizedThreads(page: 2)
+
+    XCTAssertEqual(result.currentPage, 2)
+    XCTAssertTrue(result.hasMore)
+    XCTAssertEqual(result.items.map(\.id), [100, 106, 107, 108, 109, 110])
+    XCTAssertEqual(result.items.first?.thread.forumName, "swift")
+    XCTAssertEqual(result.items.first?.thread.author?.preferredName, "Author 100")
+    XCTAssertEqual(result.items.first?.reasons, [
+      TiebaRecommendationReason(id: 7, title: "不感兴趣", extra: "opaque")
+    ])
+
+    let capturedRequest = await transport.lastRequest()
+    let request = try XCTUnwrap(capturedRequest)
+    let decoded = try PersonalizedReqIdl(
+      serializedBytes: protobufPayload(from: try XCTUnwrap(request.httpBody))
+    )
+    XCTAssertEqual(decoded.data.pn, 2)
+    XCTAssertEqual(decoded.data.loadType, 2)
+  }
+
+  func testPersonalizedClientStopsAfterShortPageAndMapsServerError() async throws {
+    var short = PersonalizedResIdl()
+    short.data.threadList = [personalizedThread(id: 1, forumID: 2, forumName: "swift")]
+    let page = try await TiebaClient(
+      transport: StubTransport(body: try short.serializedData())
+    ).getPersonalizedThreads()
+    XCTAssertFalse(page.hasMore)
+    XCTAssertEqual(page.items.map(\.id), [1])
+
+    var failure = PersonalizedResIdl()
+    failure.error.errorno = 4
+    failure.error.errmsg = "feed unavailable"
+    let failedClient = TiebaClient(
+      transport: StubTransport(body: try failure.serializedData())
+    )
+    await assertClientError(.server(code: 4, message: "feed unavailable")) {
+      _ = try await failedClient.getPersonalizedThreads()
+    }
+
+    let oversizedClient = TiebaClient(
+      transport: StubTransport(body: Data(repeating: 0, count: 4 * 1_024 * 1_024 + 1))
+    )
+    await assertClientError(.responseTooLarge(maximumBytes: 4 * 1_024 * 1_024)) {
+      _ = try await oversizedClient.getPersonalizedThreads()
+    }
+  }
+
   func testMapsForumChannelPageAndCursor() async throws {
     let transport = CapturingTransport(
       body: try ProtoFixtures.forumChannelPage().serializedData()
@@ -715,6 +788,30 @@ final class TiebaClientTests: XCTestCase {
     } catch {
       XCTFail("Unexpected error: \(error)")
     }
+  }
+
+  private func personalizedThread(
+    id: Int64,
+    threadID: Int64? = nil,
+    forumID: Int64,
+    forumName: String,
+    isAd: Bool = false,
+    isLive: Bool = false
+  ) -> ThreadInfo {
+    var thread = ThreadInfo()
+    thread.id = id
+    thread.threadID = threadID ?? id
+    thread.firstPostID = id + 1_000
+    thread.fid = forumID
+    thread.fname = forumName
+    thread.title = "Thread \(id)"
+    thread.replyNum = 5
+    thread.viewNum = 20
+    thread.isAd = isAd ? 1 : 0
+    thread.alaInfo = isLive ? Data([0x08, 0x01]) : Data()
+    thread.author.id = id + 2_000
+    thread.author.nameShow = "Author \(id)"
+    return thread
   }
 }
 

@@ -26,6 +26,14 @@ The minimal `HotThreadList` request/response and `RecommendTopicList` schemas,
 together with the `FrsTabInfo.tab_code`, `ThreadInfo.thread_id`, and
 `ThreadInfo.hot_num` fields used for the anonymous server-defined hot ranking,
 are adapted from the same TiebaLite commit.
+The minimal `PersonalizedReqIdl` and `PersonalizedResIdl` schemas, together with
+the `ThreadInfo.ala_info` marker used to exclude live cards, are adapted from
+TiebaLite commit `268f388c7824ae2c8f6ed549827a943ec8a7f352`, specifically its
+`Personalized.proto` dependency closure. Account, advertising, Android device,
+location, and screen fields are omitted. The implemented anonymous request uses
+only the endpoint business fields and one app-generated random UUID in
+`CommonReq.cuid`; live protocol probes confirmed that no account credential or
+hardware-derived identifier is required.
 The minimal `SearchSug` request/response schemas used for anonymous search
 suggestions are also adapted from the same TiebaLite commit. The request's
 `CommonReq` field is deliberately omitted because this endpoint accepts the

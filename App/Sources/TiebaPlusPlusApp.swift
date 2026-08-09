@@ -29,7 +29,8 @@ struct TiebaPlusPlusApp: App {
   private var externalWebOpenMode = ExternalWebOpenMode.defaultValue.rawValue
   private let service:
     any BrowseService & SearchService & ForumPostSearchService & HotTopicService & HotThreadService
-      & UserProfileService & ForumInformationService & SearchSuggestionService
+      & PersonalizedFeedService & UserProfileService & ForumInformationService
+      & SearchSuggestionService
   private let contentFilterRepository: any ContentFilterRepository
   private let historyRepository: any BrowsingHistoryRepository = FileBrowsingHistoryStore.live()
   private let favoritesRepository: any LocalFavoritesRepository = FileLocalFavoritesStore.live()
@@ -63,7 +64,13 @@ struct TiebaPlusPlusApp: App {
     )
     let contentFilterRepository = FileContentFilterStore.live()
     self.contentFilterRepository = contentFilterRepository
+    let browseClient = TiebaClient(
+      configuration: TiebaClientConfiguration(
+        personalizedCUID: PersonalizedRecommendationIdentity.current()
+      )
+    )
     self.service = TiebaCoreBrowseService(
+      client: browseClient,
       contentFilterRepository: contentFilterRepository
     )
   }
