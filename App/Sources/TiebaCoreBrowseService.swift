@@ -219,6 +219,28 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     )
   }
 
+  func resolveThreadIdentity(
+    threadID: Int64,
+    expectedForumName: String
+  ) async throws -> BrowseThreadIdentity {
+    let response: TiebaThreadIdentity
+    do {
+      response = try await client.resolveThreadIdentity(
+        threadID: threadID,
+        expectedForumName: expectedForumName
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    return BrowseThreadIdentity(
+      threadID: response.threadID,
+      forumID: response.forumID,
+      forumName: response.forumName
+    )
+  }
+
   func comments(threadID: Int64, postID: Int64, page: Int) async throws -> CommentPageData {
     let response: TiebaCommentPage
     do {

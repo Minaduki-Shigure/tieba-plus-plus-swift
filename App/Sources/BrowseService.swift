@@ -103,6 +103,10 @@ protocol BrowseService: Sendable {
     options: ThreadBrowseOptions,
     location: ThreadPostLocation?
   ) async throws -> PostPageData
+  func resolveThreadIdentity(
+    threadID: Int64,
+    expectedForumName: String
+  ) async throws -> BrowseThreadIdentity
   func comments(threadID: Int64, postID: Int64, page: Int) async throws -> CommentPageData
   func comments(
     threadID: Int64,
@@ -117,6 +121,13 @@ protocol BrowseService: Sendable {
 }
 
 extension BrowseService {
+  func resolveThreadIdentity(
+    threadID: Int64,
+    expectedForumName: String
+  ) async throws -> BrowseThreadIdentity {
+    throw BrowseError.unavailable("当前浏览服务无法验证主题所属贴吧。")
+  }
+
   func forumChannelThreads(
     forumID: Int64,
     forumName: String,

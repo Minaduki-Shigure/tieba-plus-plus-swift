@@ -50,6 +50,30 @@ private struct ThreadCloudFavoriteSessionLease: Hashable, Sendable {
   }
 }
 
+struct ThreadCloudFavoriteSessionExpectation: Hashable, Sendable {
+  let userID: Int64
+  let sessionRevision: UUID
+
+  init(userID: Int64, sessionRevision: UUID) {
+    self.userID = userID
+    self.sessionRevision = sessionRevision
+  }
+
+  fileprivate var lease: ThreadCloudFavoriteSessionLease {
+    ThreadCloudFavoriteSessionLease(
+      userID: userID,
+      sessionRevision: sessionRevision
+    )
+  }
+}
+
+private extension ThreadCloudFavoriteSessionLease {
+  init(userID: Int64, sessionRevision: UUID) {
+    self.userID = userID
+    self.sessionRevision = sessionRevision
+  }
+}
+
 @MainActor
 final class ThreadCloudFavoriteStore {
   private struct ReadFlight {
@@ -163,7 +187,70 @@ final class ThreadCloudFavoriteStore {
   func reload(
     _ target: ThreadCloudFavoriteTarget
   ) async throws -> ThreadCloudFavoriteSnapshot? {
+    try await reload(target, expectedLease: nil)
+  }
+
+  @discardableResult
+  func removeCloudFavorite(
+    _ target: ThreadCloudFavoriteTarget,
+    expectedSession: ThreadCloudFavoriteSessionExpectation
+  ) async throws -> ThreadCloudFavoriteSnapshot {
+    try Task.checkCancellation()
+    guard expectedSession.userID > 0 else { throw CancellationError() }
+
+    guard
+      let current = try await reload(target, expectedLease: expectedSession.lease)
+    else { throw CancellationError() }
+    try Task.checkCancellation()
+    guard current.isFavorited else { return current }
+
+    let removed: ThreadCloudFavoriteSnapshot
+    do {
+      removed = try await setMarkedPostID(
+        nil,
+        for: target,
+        requiredLease: expectedSession.lease
+      )
+    } catch {
+      if Task.isCancelled { throw CancellationError() }
+      do {
+        guard
+          let reconciled = try await reload(target, expectedLease: expectedSession.lease)
+        else { throw CancellationError() }
+        if !reconciled.isFavorited {
+          AccountChangeNotifications.postThreadCloudFavoriteChange(
+            ThreadCloudFavoriteChange(
+              accountID: expectedSession.userID,
+              sessionRevision: expectedSession.sessionRevision,
+              target: target,
+              snapshot: reconciled
+            )
+          )
+          return reconciled
+        }
+      } catch is CancellationError {
+        throw CancellationError()
+      } catch {
+        throw BrowseError.unavailable(
+          "云端收藏结果尚未确认；再次操作时会先重新读取状态，不会自动重发删除请求。"
+        )
+      }
+      throw error
+    }
+    guard !removed.isFavorited else {
+      throw BrowseError.unavailable("贴吧没有确认移除云端收藏，请重新读取当前状态。")
+    }
+    return removed
+  }
+
+  private func reload(
+    _ target: ThreadCloudFavoriteTarget,
+    expectedLease: ThreadCloudFavoriteSessionLease?
+  ) async throws -> ThreadCloudFavoriteSnapshot? {
     if let flight = readFlights[target] {
+      if let expectedLease, flight.lease != expectedLease {
+        throw CancellationError()
+      }
       return try await flight.task.value
     }
 
@@ -185,6 +272,9 @@ final class ThreadCloudFavoriteStore {
       throw error
     }
     let lease = ThreadCloudFavoriteSessionLease(session)
+    if let expectedLease, lease != expectedLease {
+      throw CancellationError()
+    }
     guard requestGeneration == generation || generationMatches(lease: lease) else {
       throw CancellationError()
     }
@@ -254,11 +344,22 @@ final class ThreadCloudFavoriteStore {
     _ markedPostID: Int64?,
     for target: ThreadCloudFavoriteTarget
   ) async throws -> ThreadCloudFavoriteSnapshot {
+    try await setMarkedPostID(markedPostID, for: target, requiredLease: nil)
+  }
+
+  private func setMarkedPostID(
+    _ markedPostID: Int64?,
+    for target: ThreadCloudFavoriteTarget,
+    requiredLease: ThreadCloudFavoriteSessionLease?
+  ) async throws -> ThreadCloudFavoriteSnapshot {
     guard markedPostID.map({ $0 > 0 }) ?? true else {
       throw BrowseError.unavailable("云端收藏位置无效，请滚动到有效楼层后再试。")
     }
 
     if let flight = mutationFlights[target] {
+      if let requiredLease, flight.lease != requiredLease {
+        throw CancellationError()
+      }
       let entryLease = entries[target]?.lease
       if flight.lease == entryLease, generationMatches(lease: flight.lease) {
         if flight.requestedMarkedPostID == markedPostID {
@@ -270,7 +371,7 @@ final class ThreadCloudFavoriteStore {
           waitingGeneration == generation,
           generationMatches(lease: flight.lease)
         else { throw CancellationError() }
-        let current = try await reload(target)
+        let current = try await reload(target, expectedLease: flight.lease)
         if let current, current.markedPostID == markedPostID {
           return current
         }
@@ -281,7 +382,8 @@ final class ThreadCloudFavoriteStore {
     let entry = entry(for: target)
     guard
       case .ready(let previous) = entry.state,
-      let expectedLease = entry.lease
+      let expectedLease = entry.lease,
+      requiredLease == nil || requiredLease == expectedLease
     else {
       throw BrowseError.unavailable("请先读取当前云端收藏状态。")
     }
@@ -308,6 +410,7 @@ final class ThreadCloudFavoriteStore {
       entry.lease == expectedLease,
       generationMatches(lease: expectedLease)
     else { throw CancellationError() }
+    try Task.checkCancellation()
 
     readFlights[target]?.task.cancel()
     readFlights.removeValue(forKey: target)
@@ -323,6 +426,7 @@ final class ThreadCloudFavoriteStore {
       guard let self else { throw CancellationError() }
       defer { finishMutationFlight(target: target, id: operationID) }
       do {
+        try Task.checkCancellation()
         let data = try await service.setThreadCloudFavorite(
           session: session,
           target: target,

@@ -522,6 +522,18 @@ public struct TiebaForumRules: Sendable, Hashable {
   }
 }
 
+public struct TiebaThreadIdentity: Sendable, Hashable {
+  public let threadID: Int64
+  public let forumID: Int64
+  public let forumName: String
+
+  public init(threadID: Int64, forumID: Int64, forumName: String) {
+    self.threadID = threadID
+    self.forumID = forumID
+    self.forumName = forumName
+  }
+}
+
 public struct TiebaThread: Identifiable, Sendable, Hashable {
   public let id: Int64
   public let firstPostID: Int64

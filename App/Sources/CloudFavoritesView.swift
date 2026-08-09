@@ -2,29 +2,108 @@ import Combine
 import Foundation
 import SwiftUI
 
+struct CloudFavoriteRemovalIntent: Identifiable, Equatable, Sendable {
+  let id: UUID
+  let lease: CloudFavoritesSessionLease
+  let thread: CloudFavoriteThread
+
+  init(lease: CloudFavoritesSessionLease, thread: CloudFavoriteThread) {
+    id = UUID()
+    self.lease = lease
+    self.thread = thread
+  }
+
+  var title: String {
+    let value = thread.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    return value.isEmpty ? "帖子 \(thread.id)" : value
+  }
+}
+
+struct CloudFavoriteRemovalFailure: Equatable, Sendable {
+  let threadID: Int64
+  let message: String
+}
+
+struct CloudFavoriteTargetResolver: Sendable {
+  let service: any BrowseService
+
+  func resolve(_ favorite: CloudFavoriteThread) async throws -> ThreadCloudFavoriteTarget {
+    let resolved: BrowseThreadIdentity
+    do {
+      resolved = try await service.resolveThreadIdentity(
+        threadID: favorite.id,
+        expectedForumName: favorite.forumName
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw BrowseError.unavailable(
+        "无法确认该主题所属的贴吧，因此没有发送删除请求。主题若已被彻底删除，暂时无法安全移除。"
+      )
+    }
+
+    let expectedForumName = Self.canonicalForumName(favorite.forumName)
+    let resolvedForumName = Self.canonicalForumName(resolved.forumName)
+    guard
+      resolved.threadID == favorite.id,
+      resolved.forumID > 0,
+      !resolvedForumName.isEmpty,
+      expectedForumName.isEmpty || resolvedForumName == expectedForumName,
+      let target = ThreadCloudFavoriteTarget(
+        forumID: resolved.forumID,
+        forumName: resolvedForumName,
+        threadID: favorite.id
+      )
+    else {
+      throw BrowseError.unavailable(
+        "无法验证该主题与所属贴吧的对应关系，因此没有发送删除请求。"
+      )
+    }
+    return target
+  }
+
+  private static func canonicalForumName(_ value: String) -> String {
+    value.trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+  }
+}
+
 @MainActor
 final class CloudFavoritesViewModel: ObservableObject {
   @Published private(set) var threads: [CloudFavoriteThread] = []
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
   @Published private(set) var loadMoreError: String?
+  @Published private(set) var pendingRemoval: CloudFavoriteRemovalIntent?
+  @Published private(set) var removingThreadID: Int64?
+  @Published private(set) var removalFailure: CloudFavoriteRemovalFailure?
 
   private let service: any AccountService
   private let vault: any AccountVault
+  private let targetResolver: CloudFavoriteTargetResolver?
+  private let cloudFavoriteStore: ThreadCloudFavoriteStore?
   private let pageSize: Int
   private var nextOffset: Int? = 0
   private var hasMore = true
   private var loadedLease: CloudFavoritesSessionLease?
   private var loadTask: Task<Void, Never>?
+  private var removalTask: Task<Void, Never>?
+  private var removalOperationID: UUID?
+  private var removalTarget: ThreadCloudFavoriteTarget?
+  private var reloadAfterRemoval = false
   private var epoch = 0
 
   init(
     service: any AccountService,
     vault: any AccountVault,
+    browseService: (any BrowseService)? = nil,
+    cloudFavoriteStore: ThreadCloudFavoriteStore? = nil,
     pageSize: Int = 30
   ) {
     self.service = service
     self.vault = vault
+    self.targetResolver = browseService.map(CloudFavoriteTargetResolver.init(service:))
+    self.cloudFavoriteStore = cloudFavoriteStore
     self.pageSize = min(max(pageSize, 1), 100)
   }
 
@@ -34,10 +113,22 @@ final class CloudFavoritesViewModel: ObservableObject {
   }
 
   func reload() {
+    guard removalTask == nil else {
+      reloadAfterRemoval = true
+      return
+    }
+    pendingRemoval = nil
     beginNewEpoch(loadImmediately: true)
   }
 
   func refresh() async {
+    if let removalTask {
+      reloadAfterRemoval = true
+      await removalTask.value
+      let task = loadTask
+      await task?.value
+      return
+    }
     reload()
     let task = loadTask
     await task?.value
@@ -45,6 +136,138 @@ final class CloudFavoritesViewModel: ObservableObject {
 
   func accountSessionDidChange() {
     // Remove the previous account's data before starting the replacement request.
+    invalidateRemoval()
+    beginNewEpoch(loadImmediately: true)
+  }
+
+  func requestRemoval(of thread: CloudFavoriteThread) {
+    guard
+      removingThreadID == nil,
+      let loadedLease,
+      threads.contains(thread),
+      targetResolver != nil,
+      cloudFavoriteStore != nil
+    else {
+      if targetResolver == nil || cloudFavoriteStore == nil {
+        removalFailure = CloudFavoriteRemovalFailure(
+          threadID: thread.id,
+          message: "当前页面无法安全更新贴吧云收藏，请重新打开后再试。"
+        )
+      }
+      return
+    }
+    removalFailure = nil
+    pendingRemoval = CloudFavoriteRemovalIntent(lease: loadedLease, thread: thread)
+  }
+
+  func cancelPendingRemoval() {
+    pendingRemoval = nil
+  }
+
+  func confirmPendingRemoval() {
+    guard
+      removalTask == nil,
+      let intent = pendingRemoval,
+      loadedLease == intent.lease,
+      threads.contains(intent.thread),
+      let targetResolver,
+      let cloudFavoriteStore
+    else {
+      pendingRemoval = nil
+      return
+    }
+
+    pendingRemoval = nil
+    removalFailure = nil
+    reloadAfterRemoval = false
+    let operationID = UUID()
+    removalOperationID = operationID
+    removingThreadID = intent.thread.id
+    let vault = vault
+
+    removalTask = Task { [weak self] in
+      guard let self else { return }
+      do {
+        try await Self.requireCurrentLease(intent.lease, vault: vault)
+        guard loadedLease == intent.lease, threads.contains(intent.thread) else {
+          throw CancellationError()
+        }
+
+        let target = try await targetResolver.resolve(intent.thread)
+        try Task.checkCancellation()
+        try await Self.requireCurrentLease(intent.lease, vault: vault)
+        guard loadedLease == intent.lease, threads.contains(intent.thread) else {
+          throw CancellationError()
+        }
+        removalTarget = target
+
+        let snapshot = try await cloudFavoriteStore.removeCloudFavorite(
+          target,
+          expectedSession: ThreadCloudFavoriteSessionExpectation(
+            userID: intent.lease.userID,
+            sessionRevision: intent.lease.sessionRevision
+          )
+        )
+        try Task.checkCancellation()
+        guard !snapshot.isFavorited else {
+          throw BrowseError.unavailable("贴吧没有确认移除云端收藏，请重新读取当前状态。")
+        }
+        guard
+          removalOperationID == operationID,
+          loadedLease == intent.lease,
+          threads.contains(intent.thread)
+        else { throw CancellationError() }
+
+        finishRemoval(operationID: operationID)
+        beginNewEpoch(loadImmediately: true)
+      } catch is CancellationError {
+        guard removalOperationID == operationID else { return }
+        guard !Task.isCancelled, loadedLease == intent.lease else {
+          finishRemoval(operationID: operationID)
+          return
+        }
+        finishRemoval(operationID: operationID)
+        removalFailure = CloudFavoriteRemovalFailure(
+          threadID: intent.thread.id,
+          message: "云端收藏结果尚未确认；再次操作时会先重新读取状态，不会自动重发删除请求。"
+        )
+        if reloadAfterRemoval {
+          reloadAfterRemoval = false
+          beginNewEpoch(loadImmediately: true)
+        }
+      } catch {
+        guard removalOperationID == operationID, loadedLease == intent.lease else { return }
+        finishRemoval(operationID: operationID)
+        removalFailure = CloudFavoriteRemovalFailure(
+          threadID: intent.thread.id,
+          message: error.localizedDescription
+        )
+        if reloadAfterRemoval {
+          reloadAfterRemoval = false
+          beginNewEpoch(loadImmediately: true)
+        }
+      }
+    }
+  }
+
+  func clearRemovalFailure() {
+    removalFailure = nil
+  }
+
+  func threadCloudFavoriteDidChange(_ change: ThreadCloudFavoriteChange) {
+    guard let loadedLease, loadedLease.matches(change) else { return }
+    if
+      removingThreadID == change.target.threadID,
+      removalTarget == change.target,
+      !change.snapshot.isFavorited
+    {
+      reloadAfterRemoval = true
+      return
+    }
+    if removalTask != nil {
+      reloadAfterRemoval = true
+      return
+    }
     beginNewEpoch(loadImmediately: true)
   }
 
@@ -72,6 +295,7 @@ final class CloudFavoritesViewModel: ObservableObject {
 
   func cancel() {
     invalidateTask()
+    pendingRemoval = nil
     isLoadingMore = false
     if state == .loading {
       state = threads.isEmpty ? .idle : .loaded
@@ -80,6 +304,7 @@ final class CloudFavoritesViewModel: ObservableObject {
 
   private func beginNewEpoch(loadImmediately: Bool) {
     invalidateTask()
+    pendingRemoval = nil
     nextOffset = 0
     hasMore = true
     loadedLease = nil
@@ -179,6 +404,41 @@ final class CloudFavoritesViewModel: ObservableObject {
     loadTask = nil
   }
 
+  private func invalidateRemoval() {
+    removalTask?.cancel()
+    removalTask = nil
+    removalOperationID = nil
+    removalTarget = nil
+    removingThreadID = nil
+    pendingRemoval = nil
+    removalFailure = nil
+    reloadAfterRemoval = false
+  }
+
+  private func finishRemoval(operationID: UUID) {
+    guard removalOperationID == operationID else { return }
+    removalTask = nil
+    removalOperationID = nil
+    removalTarget = nil
+    removingThreadID = nil
+  }
+
+  private static func requireCurrentLease(
+    _ expected: CloudFavoritesSessionLease,
+    vault: any AccountVault
+  ) async throws {
+    guard try await currentLease(vault: vault) == expected else {
+      throw CancellationError()
+    }
+  }
+
+  private static func currentLease(
+    vault: any AccountVault
+  ) async throws -> CloudFavoritesSessionLease? {
+    let session = try await vault.activeSession()
+    return session.map(CloudFavoritesSessionLease.init)
+  }
+
   private static func merge(
     _ existing: [CloudFavoriteThread],
     _ newItems: [CloudFavoriteThread]
@@ -227,7 +487,7 @@ final class CloudFavoritesViewModel: ObservableObject {
   }
 }
 
-private struct CloudFavoritesSessionLease: Equatable, Sendable {
+struct CloudFavoritesSessionLease: Equatable, Sendable {
   let userID: Int64
   let sessionRevision: UUID
 
@@ -238,6 +498,10 @@ private struct CloudFavoritesSessionLease: Equatable, Sendable {
 
   func matches(_ session: StoredAccountSession) -> Bool {
     userID == session.id && sessionRevision == session.sessionRevision
+  }
+
+  func matches(_ change: ThreadCloudFavoriteChange) -> Bool {
+    userID == change.accountID && sessionRevision == change.sessionRevision
   }
 }
 
@@ -255,6 +519,7 @@ struct CloudFavoritesView: View {
       & ForumInformationService,
     accountService: any AccountService,
     vault: any AccountVault,
+    cloudFavoriteStore: ThreadCloudFavoriteStore? = nil,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository
@@ -264,7 +529,12 @@ struct CloudFavoritesView: View {
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
     _viewModel = StateObject(
-      wrappedValue: CloudFavoritesViewModel(service: accountService, vault: vault)
+      wrappedValue: CloudFavoritesViewModel(
+        service: accountService,
+        vault: vault,
+        browseService: browseService,
+        cloudFavoriteStore: cloudFavoriteStore
+      )
     )
   }
 
@@ -289,26 +559,59 @@ struct CloudFavoritesView: View {
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
       viewModel.accountSessionDidChange()
     }
+    .onReceive(NotificationCenter.default.publisher(for: .threadCloudFavoriteDidChange)) {
+      notification in
+      guard let change = ThreadCloudFavoriteChange(notification) else { return }
+      viewModel.threadCloudFavoriteDidChange(change)
+    }
+    .confirmationDialog(
+      "从贴吧云收藏移除？",
+      isPresented: Binding(
+        get: { viewModel.pendingRemoval != nil },
+        set: { if !$0 { viewModel.cancelPendingRemoval() } }
+      ),
+      titleVisibility: .visible
+    ) {
+      Button("移除", role: .destructive) {
+        viewModel.confirmPendingRemoval()
+      }
+      Button("取消", role: .cancel) {
+        viewModel.cancelPendingRemoval()
+      }
+    } message: {
+      if let intent = viewModel.pendingRemoval {
+        Text("将从当前贴吧账户移除“\(intent.title)”。此操作会先重新验证主题与所属贴吧。")
+      }
+    }
+    .alert(
+      "无法移除云端收藏",
+      isPresented: Binding(
+        get: { viewModel.removalFailure != nil },
+        set: { if !$0 { viewModel.clearRemovalFailure() } }
+      )
+    ) {
+      Button("好", role: .cancel) { viewModel.clearRemovalFailure() }
+    } message: {
+      Text(viewModel.removalFailure?.message ?? "无法确认云端收藏状态。")
+    }
     .onDisappear(perform: viewModel.cancel)
   }
 
   private var favoriteList: some View {
     List {
       ForEach(viewModel.threads) { thread in
-        NavigationLink {
-          let route = thread.threadRoute
-          ThreadView(
-            thread: route.placeholderThread,
-            service: browseService,
-            historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository,
-            linkRoute: route
-          )
-        } label: {
-          CloudFavoriteThreadRow(thread: thread)
-        }
-        .onAppear { viewModel.loadMoreIfNeeded(current: thread) }
+        favoriteRow(thread)
+          .onAppear { viewModel.loadMoreIfNeeded(current: thread) }
+          .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) {
+              viewModel.requestRemoval(of: thread)
+            } label: {
+              Label("移除", systemImage: "trash")
+            }
+            .disabled(viewModel.removingThreadID != nil)
+            .accessibilityIdentifier("cloud-favorite-remove-\(thread.id)")
+          }
+          .disabled(viewModel.removingThreadID != nil)
       }
 
       if viewModel.isLoadingMore {
@@ -326,10 +629,38 @@ struct CloudFavoritesView: View {
     .listStyle(.plain)
     .refreshable { await viewModel.refresh() }
   }
+
+  @ViewBuilder
+  private func favoriteRow(_ thread: CloudFavoriteThread) -> some View {
+    if thread.isDeleted {
+      CloudFavoriteThreadRow(
+        thread: thread,
+        isRemoving: viewModel.removingThreadID == thread.id
+      )
+    } else {
+      NavigationLink {
+        let route = thread.threadRoute
+        ThreadView(
+          thread: route.placeholderThread,
+          service: browseService,
+          historyRepository: historyRepository,
+          favoritesRepository: favoritesRepository,
+          searchHistoryRepository: searchHistoryRepository,
+          linkRoute: route
+        )
+      } label: {
+        CloudFavoriteThreadRow(
+          thread: thread,
+          isRemoving: viewModel.removingThreadID == thread.id
+        )
+      }
+    }
+  }
 }
 
 private struct CloudFavoriteThreadRow: View {
   let thread: CloudFavoriteThread
+  let isRemoving: Bool
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -339,7 +670,11 @@ private struct CloudFavoriteThreadRow: View {
           .foregroundStyle(thread.isDeleted ? Color.secondary : Color.primary)
           .lineLimit(2)
         Spacer(minLength: 0)
-        if thread.isDeleted {
+        if isRemoving {
+          ProgressView()
+            .controlSize(.small)
+            .accessibilityLabel("正在移除云端收藏")
+        } else if thread.isDeleted {
           Label("已删除", systemImage: "trash")
             .font(.caption)
             .foregroundStyle(.secondary)

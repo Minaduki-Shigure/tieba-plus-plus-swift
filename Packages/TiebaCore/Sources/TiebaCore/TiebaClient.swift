@@ -406,6 +406,29 @@ public actor TiebaClient {
     return TiebaProtoMapper.postPage(response.data)
   }
 
+  public func resolveThreadIdentity(
+    threadID: Int64,
+    expectedForumName: String = ""
+  ) async throws -> TiebaThreadIdentity {
+    let request = try requestFactory.posts(
+      threadID: threadID,
+      page: 1,
+      pageSize: 2,
+      sort: .ascending,
+      onlyThreadAuthor: false,
+      includeComments: false,
+      commentsSortedByAgree: true,
+      commentPageSize: 4
+    )
+    let body = try await send(request)
+    let response: PbPageResIdl = try decode(body)
+    return try TiebaThreadIdentityDecoder.identity(
+      from: response,
+      expectedThreadID: threadID,
+      expectedForumName: expectedForumName
+    )
+  }
+
   public func getPicturePage(
     forumID: Int64,
     forumName: String,

@@ -9,6 +9,7 @@ struct AccountView: View {
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
 
+  @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
   @StateObject private var viewModel: AccountViewModel
   @State private var showsLogin = false
   @State private var confirmsLogout = false
@@ -193,6 +194,7 @@ struct AccountView: View {
                   browseService: browseService,
                   accountService: accountService,
                   vault: vault,
+                  cloudFavoriteStore: threadCloudFavoriteStore,
                   historyRepository: historyRepository,
                   favoritesRepository: favoritesRepository,
                   searchHistoryRepository: searchHistoryRepository
