@@ -4,7 +4,7 @@
   "identifier": "io.github.minaduki.tieba-plus-plus",
   "sourceURL": "https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json",
   "subtitle": "面向 iPhone 和 iPad 的原生第三方贴吧客户端",
-  "description": "Tieba++ 的原生 SwiftUI 版本。当前以匿名浏览和媒体阅读为稳定重点，并提供 Web 登录、多账户、“我的关注”、前台消息中心，以及需真机验证的贴吧关注、取消关注、单吧签到与主题、楼层和楼中楼点赞。",
+  "description": "Tieba++ 的原生 SwiftUI 版本。可将此源添加到 LiveContainer 或 SideStore，获取经 CI 验证、由安装器自签名的 GitHub Release IPA。当前以匿名浏览和媒体阅读为稳定重点，并提供 Web 登录、多账户、“我的关注”、前台消息中心，以及需真机验证的贴吧关注、取消关注、单吧签到与主题、楼层和楼中楼点赞。",
   "iconURL": "https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/App/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
   "website": "https://github.com/Minaduki-Shigure/tieba-plus-plus-swift",
   "tintColor": "#125DBE",
