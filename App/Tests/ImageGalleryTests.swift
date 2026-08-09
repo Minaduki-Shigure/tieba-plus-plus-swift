@@ -217,7 +217,7 @@ final class ImageGalleryTests: XCTestCase {
       ImageZoomGeometry.panLimits(
         scale: 2,
         viewportSize: viewport,
-        fittedImageSize: CGSize(width: .infinity, height: 100)
+        fittedImageSize: CGSize(width: CGFloat.infinity, height: 100)
       )
     )
     for invalidScale in [CGFloat.nan, .infinity, 0.5, 6] {
@@ -394,7 +394,7 @@ final class ImageGalleryTests: XCTestCase {
     XCTAssertEqual(
       panOwnership(
         limits: limits,
-        offset: CGSize(width: .nan, height: 0),
+        offset: CGSize(width: CGFloat.nan, height: 0),
         velocity: CGSize(width: 20, height: 0)
       ),
       .image
@@ -415,7 +415,7 @@ final class ImageGalleryTests: XCTestCase {
       panOwnership(
         limits: limits,
         offset: .zero,
-        velocity: CGSize(width: .nan, height: 0),
+        velocity: CGSize(width: CGFloat.nan, height: 0),
         translation: CGSize(width: 20, height: 0)
       ),
       .image
@@ -425,7 +425,7 @@ final class ImageGalleryTests: XCTestCase {
         limits: limits,
         offset: .zero,
         velocity: CGSize(width: 20, height: 0),
-        translation: CGSize(width: .infinity, height: 0)
+        translation: CGSize(width: CGFloat.infinity, height: 0)
       ),
       .image
     )
