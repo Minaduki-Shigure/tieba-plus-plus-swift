@@ -703,7 +703,7 @@ private actor ReplySubmissionDraftRepository: TextReplyDraftRepository {
 
   func draft(for key: TextReplyDraftKey) async throws -> TextReplyDraft? {
     reads += 1
-    values[key]
+    return values[key]
   }
 
   func save(_ draft: TextReplyDraft) async throws {
