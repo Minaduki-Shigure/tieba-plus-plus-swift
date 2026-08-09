@@ -39,7 +39,8 @@ the source metadata is updated to that tested IPA.
   server-defined categories, and snapshot refresh
 - Anonymous personalized thread feed as the default Explore channel, with pull
   refresh, integer pagination, duplicate and stalled-page termination, local
-  filtering, and one app-scoped random recommendation UUID
+  filtering, one app-scoped random recommendation UUID, and a default-off option
+  to retain only forums in the active account's verified-complete followed list
 - Foreground account-bound concern feed shown only for a saved account, with
   explicit-selection activation, opaque cursor pagination, per-session in-memory
   timestamps, local filtering, and UID-plus-session-revision isolation
@@ -134,7 +135,8 @@ the source metadata is updated to that tested IPA.
 - Explicit current-account shortcut to the existing credential-free public
   profile and its public topic, reply, following, and follower views
 - App-scoped, memory-only followed-forum state shared by a six-item logged-in
-  home projection and the active account's complete paginated list
+  home projection, the active account's complete paginated list, and a selected
+  default-off followed-forum recommendation filter
 - Separate read-only Tieba cloud favorites with offset pagination, saved-post
   navigation, deleted-thread state, and account-lease isolation
 - Foreground ReplyMe and AtMe inbox with account-lease isolation, refresh,
@@ -418,18 +420,22 @@ listed user; this surface deliberately has no relationship write controls.
 Tieba's followed-forum list still rejects anonymous requests and is not exposed
 as a misleading public-profile tab. The logged-in home page instead projects at
 most the first six entries from the same app-scoped, memory-only state used by
-the complete paginated list. New requests may start only while the home page or
-complete list is active. Every page reads the active account before transport
-and again after transport, and the result is accepted only while the exact
+the complete paginated list. A selected, default-off recommendation filter may
+also request completion of that shared index. New requests may start only while
+the home page, complete list, or selected filtered recommendation page is active.
+Every page reads the active account before transport and again after transport,
+and the result is accepted only while the exact
 `userID + sessionRevision` lease and requested page remain current. Account
 switching, logout, same-UID credential rotation, or a matching forum-membership
 change starts a new state epoch and synchronously removes the prior snapshot;
-an inactive surface remains empty until one of the two eligible surfaces becomes
-active again. Empty and duplicate-only continuation pages stop pagination rather
-than repeatedly advancing the server page number. The shared rows, page state,
-and lease are never persisted or reused across an app restart or account lease.
-These two surfaces are read only and initiate no automatic account operation;
-they do not currently provide pinning, unfollow, or batch check-in controls.
+an inactive surface remains empty until an eligible surface becomes active again.
+Only an explicit server end publishes the complete forum-ID set. Empty or
+duplicate-only continuations, invalid data, service failures, more than 100
+pages, or more than 5,000 retained forums fail closed rather than publishing a
+partial allowlist. The shared rows, page state, and lease are never persisted or
+reused across an app restart or account lease. These surfaces are read only and
+initiate no automatic account operation; they do not currently provide pinning,
+unfollow, or batch check-in controls.
 Opening a forum continues to use the separate, explicitly confirmed
 per-forum membership and check-in workflow. Client-side lease checks prevent a
 late page from being published under another local session, but successful
@@ -782,12 +788,19 @@ It is not hardware- or account-derived. The response has no authoritative
 empty page stops. After refresh preserves older rows and resets the server page
 number, duplicate-only pages may traverse the highest page reached before that
 refresh. Beyond that frontier, one additional duplicate-only page is allowed to
-advance past overlap; a second consecutive duplicate-only page stops. Ads, live cards, invalid identities, and
-duplicate threads are discarded before UI mapping. Refresh prepends new unique
-items, the retained window is bounded, and local filtering never replaces the
-raw server count used for continuation. Recommendation reasons are retained for
-future protocol work, but the legacy dislike endpoint is a separate write and is
-not exposed by this read-only milestone.
+advance past overlap; a second consecutive duplicate-only page stops. When the
+default-off followed-forum option is selected, the app first waits for the exact
+active-session index to become complete, then matches returned threads locally
+by stable forum ID. Waiting, signed-out, empty, or failed indexes issue no
+recommendation request and never fall open. One user action automatically scans
+at most five filtered pages before presenting an explicit continue action; raw
+page and item progress remain independent from visible local filtering. Ads,
+live cards, invalid identities, and duplicate threads are discarded before UI
+mapping. Refresh prepends new unique items, the retained window is bounded, and
+local filtering never replaces the raw server count used for continuation.
+Recommendation reasons are retained for future protocol work, but the legacy
+dislike endpoint is a separate write and is not exposed by this read-only
+milestone.
 
 Anonymous poll cards are read-only. Current post responses place an ordinary
 thread's poll in its mirrored `origin_thread_info`, while that same field belongs

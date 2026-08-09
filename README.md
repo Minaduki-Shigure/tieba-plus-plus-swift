@@ -17,7 +17,7 @@ checks.
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, and media preferences |
-| Accounts | Current `main` supports bound Web login, switching, logout, followed forums, a foreground concern feed and ReplyMe/AtMe inbox, read-only Tieba cloud favorites, per-forum state, and experimental content approval |
+| Accounts | Current `main` supports bound Web login, switching, logout, followed forums, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox, read-only Tieba cloud favorites, per-forum state, and experimental content approval |
 | Server-side writes | Confirmed forum follow/unfollow, check-in, and content approval are in device validation; other writes stay disabled |
 | TiebaLite parity | Anonymous reading and media: about 90–95%; full product scope: about 65–68% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.59.0-alpha.1` (build 62); later `main` features require a tagged release |
@@ -39,7 +39,10 @@ checks.
   A logged-in home page also shows at most six forums from the current account's
   followed-forum list and links to the complete paginated list. Both surfaces
   share one app-scoped, memory-only snapshot that is discarded when the account
-  session or a forum relationship changes.
+  session or a forum relationship changes. A default-off setting can reuse a
+  verified-complete snapshot to show personalized recommendations only from the
+  active account's followed forums. This filtering is local: the anonymous
+  recommendation request receives no account, credential, lease, or forum ID.
   Multi-image galleries can switch between horizontal and vertical one-image
   paging while retaining a stable selected occurrence and bounded zoom state.
   These main-only changes will not enter the public app source until a tagged
@@ -49,7 +52,8 @@ checks.
 - **Automated checks:** GitHub Actions runs package tests and an unsigned
   simulator build, validates the app source, and verifies its public IPA hash.
   Authenticated flows never use real credentials in CI. Login binding, cloud
-  favorites, concern-feed, and inbox contracts are covered by fixtures, while
+  favorites, followed-forum recommendation filtering, concern-feed, and inbox
+  contracts are covered by fixtures, while
   successful private-list reads, forum follow/unfollow, check-in, and
   topic/post/subpost content approval remain physical-device validation features
   in this alpha.
@@ -69,9 +73,11 @@ checks.
 - **Discovery:** On current `main`, a pageable anonymous personalized feed, an
   explicitly selected account-bound concern feed, post rankings, hot-topic
   previews, category snapshots, topic details, related forums, and cursor-aware
-  topic pagination are available. The personalized and concern feeds are not in
-  the public `v0.59.0-alpha.1` IPA. Recommendation dislike feedback remains
-  disabled.
+  topic pagination are available. The personalized feed has a default-off
+  setting that locally retains only threads whose stable forum ID occurs in the
+  active account's complete followed-forum index. The personalized and concern
+  feeds are not in the public `v0.59.0-alpha.1` IPA. Recommendation dislike
+  feedback remains disabled.
 - **Search:** Forum, thread, and user search are separated by category. Global
   and per-forum post search provide the supported sort and content filters,
   local history, and optional credential-free suggestions.
@@ -120,7 +126,8 @@ checks.
   and can apply explicit only-author or descending overrides.
 - **Filtering:** Local literal-keyword, exact user block/allow, and video-topic
   filters cover list, profile, floor, nested-reply, and shared-origin surfaces
-  without modifying network pagination.
+  without modifying network pagination. A separate default-off recommendation
+  filter matches the active account's followed forums by stable forum ID.
 - **Appearance:** System, light, and dark themes, a bounded accent palette,
   Dynamic Type-relative text sizing, compact previews, and optional combined
   nickname/username presentation are persistent local controls.
@@ -140,13 +147,16 @@ checks.
   must be logged in again before an STOKEN-dependent feature is available.
 - **Forum account state:** On current `main`, the logged-in home page projects at
   most six entries from the active account's followed-forum list and can open the
-  complete paginated list. They share one app-scoped, memory-only state. Each
+  complete paginated list. A selected, default-off recommendation filter is a
+  third consumer of the same app-scoped, memory-only state. It publishes an
+  allowlist only after the server explicitly ends pagination; partial, stalled,
+  invalid, over-limit, signed-out, and failed results remain unavailable. Each
   page checks the exact `userID + sessionRevision` lease before and after its
-  request; account or forum-membership changes clear the snapshot, and empty or
-  duplicate-only continuation pages stop pagination. New list requests begin
-  only while the home page or complete list is active. These surfaces perform no
-  automatic write, retain nothing across accounts or app restarts, and currently
-  provide no pinning, unfollow, or batch check-in controls. A loaded forum
+  request; account or forum-membership changes clear the snapshot. New list
+  requests begin only while the home page, complete list, or selected filtered
+  recommendation page is active. These surfaces perform no automatic write,
+  retain nothing across accounts or app restarts, and currently provide no
+  pinning, unfollow, or batch check-in controls. A loaded forum
   separately reads account-specific follow and check-in state and retains its
   explicitly confirmed single-forum actions. Successful private-list retrieval
   still requires physical-device validation and is not asserted by CI fixtures.

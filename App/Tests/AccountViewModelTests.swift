@@ -128,9 +128,15 @@ final class AccountViewModelTests: XCTestCase {
     XCTAssertEqual(count, 0)
   }
 
-  func testFollowedForumPaginationReusesSessionAndDeduplicatesForums() async throws {
+  func testFollowedForumIndexRemainsPartialUntilCompleteSurfaceReachesServerEnd() async throws {
+    let revision = UUID(uuidString: "00000000-0000-0000-0000-000000000101")!
+    let activeSession = session(
+      userID: 7,
+      name: "active",
+      sessionRevision: revision
+    )
     let vault = AccountVaultSpy(
-      sessions: [session(userID: 7, name: "active")],
+      sessions: [activeSession],
       activeUserID: 7
     )
     let firstPage = FollowedForumPageData(
@@ -143,17 +149,35 @@ final class AccountViewModelTests: XCTestCase {
       currentPage: 2,
       hasMore: false
     )
-    let service = AccountServiceSpy(followedPages: [1: .success(firstPage), 2: .success(secondPage)])
+    let service = AccountServiceSpy(
+      followedPages: [1: .success(firstPage), 2: .success(secondPage)]
+    )
     let viewModel = FollowedForumsViewModel(service: service, vault: vault)
 
     viewModel.loadIfNeeded()
-    try await waitForAccountState { viewModel.state == .loaded }
+    try await waitForAccountState { viewModel.indexState == .partial }
     XCTAssertEqual(viewModel.forums.map(\.id), [1, 2])
+    XCTAssertEqual(viewModel.indexState, .partial)
+    let initialRequests = await service.followedRequestSnapshot()
+    XCTAssertEqual(initialRequests.map(\.page), [1])
 
-    viewModel.loadMoreIfNeeded(current: try XCTUnwrap(viewModel.forums.last))
-    try await waitForAccountState { viewModel.forums.map(\.id) == [1, 2, 3] }
+    let surfaceID = UUID()
+    viewModel.completeIndexSurfaceDidAppear(id: surfaceID)
+    try await waitForAccountState {
+      if case .ready = viewModel.indexState { return true }
+      return false
+    }
 
     XCTAssertEqual(viewModel.forums.map(\.name), ["one", "two", "three"])
+    XCTAssertEqual(
+      viewModel.indexState,
+      .ready(
+        FollowedForumIndexSnapshot(
+          lease: FollowedForumsSessionLease(activeSession),
+          forumIDs: [1, 2, 3]
+        )
+      )
+    )
     let requests = await service.followedRequestSnapshot()
     XCTAssertEqual(
       requests,
@@ -164,6 +188,7 @@ final class AccountViewModelTests: XCTestCase {
     )
     let activeSessionReads = await vault.activeSessionReadCount()
     XCTAssertEqual(activeSessionReads, 4)
+    viewModel.completeIndexSurfaceDidDisappear(id: surfaceID)
   }
 
   func testFollowedForumsWithoutActiveSessionNeverCallsService() async throws {
@@ -178,12 +203,14 @@ final class AccountViewModelTests: XCTestCase {
     }
 
     XCTAssertEqual(viewModel.state, .failed("请先登录账户。"))
+    XCTAssertEqual(viewModel.indexState, .signedOut)
     XCTAssertTrue(viewModel.isSignedOut)
     let requests = await service.followedRequestSnapshot()
     XCTAssertTrue(requests.isEmpty)
 
     viewModel.accountSessionDidChange(loadImmediately: false)
     XCTAssertEqual(viewModel.state, .idle)
+    XCTAssertEqual(viewModel.indexState, .idle)
     XCTAssertFalse(viewModel.isSignedOut)
   }
 
@@ -206,9 +233,72 @@ final class AccountViewModelTests: XCTestCase {
     }
 
     XCTAssertEqual(viewModel.state, .failed("network unavailable"))
+    XCTAssertEqual(viewModel.indexState, .failed("network unavailable"))
     XCTAssertFalse(viewModel.isSignedOut)
     let requests = await service.followedRequestSnapshot()
     XCTAssertEqual(requests, [FollowedRequest(userID: 7, page: 1, pageSize: 50)])
+  }
+
+  func testCompleteIndexFailureDoesNotPublishPartialIDsAndRetriesSamePage() async throws {
+    let revision = UUID(uuidString: "00000000-0000-0000-0000-000000000102")!
+    let activeSession = session(
+      userID: 7,
+      name: "active",
+      sessionRevision: revision
+    )
+    let vault = AccountVaultSpy(sessions: [activeSession], activeUserID: 7)
+    let firstPage = FollowedForumPageData(
+      forums: [forum(id: 1, name: "one")],
+      currentPage: 1,
+      hasMore: true
+    )
+    let secondPage = FollowedForumPageData(
+      forums: [forum(id: 2, name: "two")],
+      currentPage: 2,
+      hasMore: false
+    )
+    let service = AccountServiceSpy(
+      followedPages: [
+        1: .success(firstPage),
+        2: .failure(AccountTestFailure(message: "page two unavailable")),
+      ]
+    )
+    let viewModel = FollowedForumsViewModel(service: service, vault: vault)
+    let surfaceID = UUID()
+
+    viewModel.completeIndexSurfaceDidAppear(id: surfaceID)
+    try await waitForAccountState {
+      viewModel.indexState == .failed("page two unavailable")
+    }
+
+    XCTAssertEqual(viewModel.forums.map(\.id), [1])
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.loadMoreError, "page two unavailable")
+    if case .ready = viewModel.indexState {
+      XCTFail("A failed catalog must not publish a partial followed-forum index")
+    }
+    let failedRequests = await service.followedRequestSnapshot()
+    XCTAssertEqual(failedRequests.map(\.page), [1, 2])
+
+    await service.setFollowedPageResult(.success(secondPage), for: 2)
+    viewModel.retryCompleteIndex()
+    try await waitForAccountState {
+      if case .ready = viewModel.indexState { return true }
+      return false
+    }
+
+    let retriedRequests = await service.followedRequestSnapshot()
+    XCTAssertEqual(retriedRequests.map(\.page), [1, 2, 2])
+    XCTAssertEqual(
+      viewModel.indexState,
+      .ready(
+        FollowedForumIndexSnapshot(
+          lease: FollowedForumsSessionLease(activeSession),
+          forumIDs: [1, 2]
+        )
+      )
+    )
+    viewModel.completeIndexSurfaceDidDisappear(id: surfaceID)
   }
 
   func testFollowedForumRelationshipChangeRestartsFromFirstPage() async throws {
@@ -300,10 +390,63 @@ final class AccountViewModelTests: XCTestCase {
 
     XCTAssertTrue(viewModel.forums.isEmpty)
     XCTAssertEqual(viewModel.state, .idle)
+    XCTAssertEqual(viewModel.indexState, .idle)
     let requests = await service.followedRequestSnapshot()
     XCTAssertEqual(requests, [FollowedRequest(userID: 7, page: 1, pageSize: 50)])
     let activeSessionReads = await vault.activeSessionReadCount()
     XCTAssertEqual(activeSessionReads, 2)
+  }
+
+  func testCompleteIndexDiscardsAutomaticPaginationWhenSameUserRevisionRotates() async throws {
+    let firstRevision = UUID(uuidString: "00000000-0000-0000-0000-000000000021")!
+    let secondRevision = UUID(uuidString: "00000000-0000-0000-0000-000000000022")!
+    let firstSession = session(
+      userID: 7,
+      name: "first",
+      sessionRevision: firstRevision
+    )
+    let rotatedSession = session(
+      userID: 7,
+      name: "rotated",
+      sessionRevision: secondRevision
+    )
+    let vault = AccountVaultSpy(
+      sessions: [rotatedSession],
+      activeUserID: 7,
+      activeSessionScript: [firstSession, firstSession, firstSession, rotatedSession]
+    )
+    let firstPage = FollowedForumPageData(
+      forums: [forum(id: 1, name: "one")],
+      currentPage: 1,
+      hasMore: true
+    )
+    let secondPage = FollowedForumPageData(
+      forums: [forum(id: 2, name: "stale")],
+      currentPage: 2,
+      hasMore: false
+    )
+    let service = AccountServiceSpy(
+      followedPages: [1: .success(firstPage), 2: .success(secondPage)]
+    )
+    let viewModel = FollowedForumsViewModel(service: service, vault: vault)
+    let surfaceID = UUID()
+
+    viewModel.completeIndexSurfaceDidAppear(id: surfaceID)
+    try await waitForAccountState {
+      let requestCount = await service.followedRequestSnapshot().count
+      let activeSessionReads = await vault.activeSessionReadCount()
+      return requestCount == 2
+        && activeSessionReads == 4
+        && viewModel.state == .idle
+    }
+
+    XCTAssertTrue(viewModel.forums.isEmpty)
+    XCTAssertEqual(viewModel.indexState, .idle)
+    XCTAssertFalse(viewModel.isLoadingMore)
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2])
+    XCTAssertEqual(requests.map(\.userID), [7, 7])
+    viewModel.completeIndexSurfaceDidDisappear(id: surfaceID)
   }
 
   func testReplacingSuspendedInitialLoadPreventsCancelledTaskFromCallingService() async {
@@ -323,6 +466,7 @@ final class AccountViewModelTests: XCTestCase {
 
     viewModel.accountSessionDidChange(loadImmediately: false)
     XCTAssertEqual(viewModel.state, .idle)
+    XCTAssertEqual(viewModel.indexState, .idle)
     let released = await vault.releaseActiveSession()
     XCTAssertTrue(released)
     await initialRefresh.value
@@ -366,6 +510,7 @@ final class AccountViewModelTests: XCTestCase {
     }
 
     XCTAssertTrue(viewModel.forums.isEmpty)
+    XCTAssertEqual(viewModel.indexState, .idle)
     XCTAssertFalse(viewModel.isLoadingMore)
     let requests = await service.followedRequestSnapshot()
     XCTAssertEqual(requests, [FollowedRequest(userID: 7, page: 1, pageSize: 50)])
@@ -394,12 +539,45 @@ final class AccountViewModelTests: XCTestCase {
       viewModel.state,
       .failed("贴吧返回了异常的关注贴吧页码，请重新加载后再试。")
     )
+    XCTAssertEqual(
+      viewModel.indexState,
+      .failed("贴吧返回了异常的关注贴吧页码，请重新加载后再试。")
+    )
     XCTAssertTrue(viewModel.forums.isEmpty)
     let activeSessionReads = await vault.activeSessionReadCount()
     XCTAssertEqual(activeSessionReads, 2)
   }
 
-  func testFollowedForumsStopPaginationWhenNextPageOnlyContainsDuplicates() async throws {
+  func testCompleteIndexFailsClosedWhenFirstPageIsEmptyButClaimsMore() async throws {
+    let vault = AccountVaultSpy(
+      sessions: [session(userID: 7, name: "active")],
+      activeUserID: 7
+    )
+    let emptyPage = FollowedForumPageData(
+      forums: [],
+      currentPage: 1,
+      hasMore: true
+    )
+    let service = AccountServiceSpy(followedPages: [1: .success(emptyPage)])
+    let viewModel = FollowedForumsViewModel(service: service, vault: vault)
+    let surfaceID = UUID()
+
+    viewModel.completeIndexSurfaceDidAppear(id: surfaceID)
+    try await waitForAccountState {
+      if case .failed = viewModel.indexState { return true }
+      return false
+    }
+
+    let expectedMessage = "关注贴吧分页未取得进展，请重新加载后再试。"
+    XCTAssertEqual(viewModel.indexState, .failed(expectedMessage))
+    XCTAssertEqual(viewModel.state, .failed(expectedMessage))
+    XCTAssertTrue(viewModel.forums.isEmpty)
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1])
+    viewModel.completeIndexSurfaceDidDisappear(id: surfaceID)
+  }
+
+  func testCompleteIndexFailsClosedWhenNextPageOnlyContainsDuplicates() async throws {
     let vault = AccountVaultSpy(
       sessions: [session(userID: 7, name: "active")],
       activeUserID: 7
@@ -418,19 +596,110 @@ final class AccountViewModelTests: XCTestCase {
       followedPages: [1: .success(firstPage), 2: .success(duplicatePage)]
     )
     let viewModel = FollowedForumsViewModel(service: service, vault: vault)
+    let surfaceID = UUID()
 
-    viewModel.loadIfNeeded()
-    try await waitForAccountState { viewModel.state == .loaded }
-    viewModel.loadMoreIfNeeded(current: try XCTUnwrap(viewModel.forums.last))
+    viewModel.completeIndexSurfaceDidAppear(id: surfaceID)
     try await waitForAccountState {
-      await vault.activeSessionReadCount() == 4 && !viewModel.isLoadingMore
+      if case .failed = viewModel.indexState { return true }
+      return false
     }
 
+    let expectedMessage = "关注贴吧分页未取得进展，请重新加载后再试。"
     XCTAssertEqual(viewModel.forums.map(\.name), ["one", "two"])
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.indexState, .failed(expectedMessage))
+    XCTAssertEqual(viewModel.loadMoreError, expectedMessage)
     viewModel.loadMoreIfNeeded(current: try XCTUnwrap(viewModel.forums.last))
     XCTAssertFalse(viewModel.isLoadingMore)
     let requests = await service.followedRequestSnapshot()
     XCTAssertEqual(requests.map(\.page), [1, 2])
+    viewModel.completeIndexSurfaceDidDisappear(id: surfaceID)
+  }
+
+  func testCompleteIndexFailsClosedAtPageLimitWhenServerClaimsMore() async throws {
+    let vault = AccountVaultSpy(
+      sessions: [session(userID: 7, name: "active")],
+      activeUserID: 7
+    )
+    let pages: [Int: Result<FollowedForumPageData, AccountTestFailure>] = Dictionary(
+      uniqueKeysWithValues: (1...FollowedForumsViewModel.maximumCatalogPageCount).map { page in
+        (
+          page,
+          .success(
+            FollowedForumPageData(
+              forums: [forum(id: Int64(page), name: "forum-\(page)")],
+              currentPage: page,
+              hasMore: true
+            )
+          )
+        )
+      }
+    )
+    let service = AccountServiceSpy(followedPages: pages)
+    let viewModel = FollowedForumsViewModel(service: service, vault: vault)
+    let surfaceID = UUID()
+
+    viewModel.completeIndexSurfaceDidAppear(id: surfaceID)
+    try await waitForAccountState(timeout: 5) {
+      if case .failed = viewModel.indexState { return true }
+      return false
+    }
+
+    let expectedMessage = "关注贴吧数量超过当前安全读取上限，请稍后重新加载。"
+    XCTAssertEqual(viewModel.indexState, .failed(expectedMessage))
+    XCTAssertEqual(
+      viewModel.forums.count,
+      FollowedForumsViewModel.maximumCatalogPageCount
+    )
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(
+      requests.map(\.page),
+      Array(1...FollowedForumsViewModel.maximumCatalogPageCount)
+    )
+    viewModel.completeIndexSurfaceDidDisappear(id: surfaceID)
+  }
+
+  func testCompleteIndexFailsClosedAtRetainedForumLimitWhenServerClaimsMore() async throws {
+    let vault = AccountVaultSpy(
+      sessions: [session(userID: 7, name: "active")],
+      activeUserID: 7
+    )
+    let forumsPerPage = 100
+    let pageCount = FollowedForumsViewModel.maximumRetainedForums / forumsPerPage
+    let pages: [Int: Result<FollowedForumPageData, AccountTestFailure>] = Dictionary(
+      uniqueKeysWithValues: (1...pageCount).map { page in
+        let firstID = (page - 1) * forumsPerPage + 1
+        let forums = (firstID..<(firstID + forumsPerPage)).map { identifier in
+          forum(id: Int64(identifier), name: "forum-\(identifier)")
+        }
+        return (
+          page,
+          .success(
+            FollowedForumPageData(
+              forums: forums,
+              currentPage: page,
+              hasMore: true
+            )
+          )
+        )
+      }
+    )
+    let service = AccountServiceSpy(followedPages: pages)
+    let viewModel = FollowedForumsViewModel(service: service, vault: vault)
+    let surfaceID = UUID()
+
+    viewModel.completeIndexSurfaceDidAppear(id: surfaceID)
+    try await waitForAccountState(timeout: 5) {
+      if case .failed = viewModel.indexState { return true }
+      return false
+    }
+
+    let expectedMessage = "关注贴吧数量超过当前安全读取上限，请稍后重新加载。"
+    XCTAssertEqual(viewModel.indexState, .failed(expectedMessage))
+    XCTAssertEqual(viewModel.forums.count, FollowedForumsViewModel.maximumRetainedForums)
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), Array(1...pageCount))
+    viewModel.completeIndexSurfaceDidDisappear(id: surfaceID)
   }
 
   func testFollowedForumsHomeProjectionKeepsFirstSixForumsInOrder() {
@@ -467,6 +736,59 @@ final class AccountViewModelTests: XCTestCase {
     viewModel.fullListSurfaceDidDisappear(id: secondSurfaceID)
     XCTAssertFalse(viewModel.hasActiveFullListSurface)
     viewModel.cancel()
+  }
+
+  func testCompleteIndexSurfaceRegistrationIsIdempotentAndStopsAfterLastConsumerLeaves()
+    async throws
+  {
+    let activeSession = session(userID: 7, name: "active")
+    let vault = SuspendedActiveSessionReadVault(
+      session: activeSession,
+      suspendedReadNumber: 3
+    )
+    addTeardownBlock { _ = await vault.releaseSuspendedRead() }
+    let firstPage = FollowedForumPageData(
+      forums: [forum(id: 1, name: "one")],
+      currentPage: 1,
+      hasMore: true
+    )
+    let secondPage = FollowedForumPageData(
+      forums: [forum(id: 2, name: "must-not-load")],
+      currentPage: 2,
+      hasMore: false
+    )
+    let service = AccountServiceSpy(
+      followedPages: [1: .success(firstPage), 2: .success(secondPage)]
+    )
+    let viewModel = FollowedForumsViewModel(service: service, vault: vault)
+    let firstSurfaceID = UUID()
+    let secondSurfaceID = UUID()
+
+    XCTAssertFalse(viewModel.hasActiveCompleteIndexSurface)
+    viewModel.completeIndexSurfaceDidAppear(id: firstSurfaceID)
+    viewModel.completeIndexSurfaceDidAppear(id: firstSurfaceID)
+    viewModel.completeIndexSurfaceDidAppear(id: secondSurfaceID)
+    await vault.waitUntilReadIsSuspended()
+    XCTAssertEqual(viewModel.forums.map(\.id), [1])
+    XCTAssertEqual(viewModel.indexState, .loading)
+    XCTAssertTrue(viewModel.hasActiveCompleteIndexSurface)
+
+    viewModel.completeIndexSurfaceDidDisappear(id: firstSurfaceID)
+    XCTAssertTrue(viewModel.hasActiveCompleteIndexSurface)
+    viewModel.completeIndexSurfaceDidDisappear(id: firstSurfaceID)
+    XCTAssertTrue(viewModel.hasActiveCompleteIndexSurface)
+    viewModel.completeIndexSurfaceDidDisappear(id: secondSurfaceID)
+    XCTAssertFalse(viewModel.hasActiveCompleteIndexSurface)
+
+    let resumed = await vault.releaseSuspendedRead()
+    XCTAssertTrue(resumed)
+    try await waitForAccountState {
+      viewModel.state == .loaded && viewModel.indexState == .partial
+    }
+
+    XCTAssertEqual(viewModel.forums.map(\.id), [1])
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1])
   }
 
   private func session(
@@ -510,7 +832,7 @@ private struct AccountTestFailure: LocalizedError, Sendable {
 
 private actor AccountServiceSpy: AccountService {
   private let validation: Result<ValidatedAccount, AccountTestFailure>
-  private let followedPages: [Int: Result<FollowedForumPageData, AccountTestFailure>]
+  private var followedPages: [Int: Result<FollowedForumPageData, AccountTestFailure>]
   private var validatedBDUSSLength: Int?
   private var validatedSTOKENLength: Int?
   private var followedRequests: [FollowedRequest] = []
@@ -579,6 +901,13 @@ private actor AccountServiceSpy: AccountService {
   func validationCredentialLengths() -> CredentialLengths? {
     guard let validatedBDUSSLength, let validatedSTOKENLength else { return nil }
     return CredentialLengths(bduss: validatedBDUSSLength, stoken: validatedSTOKENLength)
+  }
+
+  func setFollowedPageResult(
+    _ result: Result<FollowedForumPageData, AccountTestFailure>,
+    for page: Int
+  ) {
+    followedPages[page] = result
   }
 
   func followedRequestSnapshot() -> [FollowedRequest] { followedRequests }
@@ -651,6 +980,53 @@ private actor AccountVaultSpy: AccountVault {
   func session(userID: Int64) -> StoredAccountSession? { sessions[userID] }
   func sessionCount() -> Int { sessions.count }
   func activeSessionReadCount() -> Int { activeReads }
+}
+
+private actor SuspendedActiveSessionReadVault: AccountVault {
+  private let storedSession: StoredAccountSession
+  private let suspendedReadNumber: Int
+  private var activeReads = 0
+  private var suspendedReadContinuation: CheckedContinuation<StoredAccountSession?, Never>?
+  private var suspendedReadWasRequested = false
+  private var suspendedReadWaiters: [CheckedContinuation<Void, Never>] = []
+
+  init(session: StoredAccountSession, suspendedReadNumber: Int) {
+    storedSession = session
+    self.suspendedReadNumber = suspendedReadNumber
+  }
+
+  func accountSummaries() async throws -> [AccountSummary] { [] }
+
+  func activeSession() async throws -> StoredAccountSession? {
+    activeReads += 1
+    guard activeReads == suspendedReadNumber else { return storedSession }
+    return await withCheckedContinuation { continuation in
+      suspendedReadContinuation = continuation
+      suspendedReadWasRequested = true
+      let waiters = suspendedReadWaiters
+      suspendedReadWaiters.removeAll()
+      waiters.forEach { $0.resume() }
+    }
+  }
+
+  func upsert(_ session: StoredAccountSession) async throws {}
+  func switchActive(to userID: Int64) async throws {}
+  func remove(userID: Int64) async throws {}
+  func removeAll() async throws {}
+
+  func waitUntilReadIsSuspended() async {
+    if suspendedReadWasRequested { return }
+    await withCheckedContinuation { continuation in
+      suspendedReadWaiters.append(continuation)
+    }
+  }
+
+  func releaseSuspendedRead() -> Bool {
+    guard let continuation = suspendedReadContinuation else { return false }
+    suspendedReadContinuation = nil
+    continuation.resume(returning: storedSession)
+    return true
+  }
 }
 
 private actor SuspendedActiveSessionVault: AccountVault {

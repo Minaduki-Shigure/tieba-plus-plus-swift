@@ -80,17 +80,20 @@ storage or verification.
 
 The current, not-yet-tagged `main` implementation of the home followed-forum
 projection and complete followed-forum list shares one application-scoped,
-memory-only state. The home projection exposes at most six rows; only the
-complete list may advance pagination. A new page request may start only while
-the home page or complete list is active. Before each request, the App reads the
-active Keychain session and binds the operation to its exact
+memory-only state. The home projection exposes at most six rows. The complete
+list and a selected, default-off followed-forum recommendation filter may advance
+pagination. A new page request may start only while the home page, complete list,
+or selected filtered recommendation page is active. Before each request, the App
+reads the active Keychain session and binds the operation to its exact
 `userID + sessionRevision`; after transport it reads the session again and
 rejects the page unless that same lease and the requested page are still current.
 Logout, account switching, same-UID credential rotation, and a matching forum-
 membership change invalidate the state epoch, clear all rows and cursors, and
-prevent an older response from repopulating them. Empty or duplicate-only
-continuation pages terminate pagination. No row, page cursor, or lease is stored
-across accounts or app launches.
+prevent an older response from repopulating them. A complete index is published
+only when the server explicitly reports the final page. Empty or duplicate-only
+continuations, invalid page data, transport failure, more than 100 pages, or more
+than 5,000 retained forums keep the index unavailable. No row, page cursor,
+complete forum-ID set, or lease is stored across accounts or app launches.
 
 These surfaces are read only: displaying or paginating them must not pin,
 unfollow, check in, or issue any other write automatically, and they currently
@@ -114,8 +117,16 @@ stored values are replaced locally. Responses are limited to 4 MiB. Raw full
 pages may continue, but an empty page stops immediately. A refresh may traverse
 duplicate-only pages up to the page frontier already reached by that client;
 beyond it, at most one additional duplicate-only page may advance before a
-second stops the request chain. Recommendation feedback is a separate server
-write and remains disabled.
+second stops the request chain. The default-off followed-forum filter never adds
+its account lease, credentials, or forum-ID set to this anonymous request. It
+waits for a verified-complete index and filters returned threads locally by
+stable forum ID. A waiting, signed-out, empty, partial, invalid, or failed index
+issues no recommendation request and cannot fall back to the unfiltered scope.
+Changing scope cancels the old request and synchronously clears its rows. To
+bound sparse-match traffic, each explicit action automatically scans at most five
+filtered pages before requiring another user action; raw page and thread-ID
+progress are tracked independently of locally visible rows. Recommendation
+feedback is a separate server write and remains disabled.
 
 The account-bound concern feed requires a complete same-snapshot BDUSS/STOKEN
 session and uses protobuf command `309474` at the fixed HTTPS `tiebac.baidu.com`

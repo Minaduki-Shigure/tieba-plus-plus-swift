@@ -40,6 +40,14 @@ final class AppPreferencesTests: XCTestCase {
     XCTAssertEqual(UUID(uuidString: repaired)?.uuidString.lowercased(), repaired)
   }
 
+  func testPersonalizedFollowedForumsOnlyUsesStableKeyAndDefaultsOff() {
+    XCTAssertEqual(
+      AppPreferenceKey.personalizedFollowedForumsOnly,
+      "TiebaPlusPlus.personalizedFollowedForumsOnly"
+    )
+    XCTAssertFalse(AppPreferenceDefaults.personalizedFollowedForumsOnly)
+  }
+
   func testHomeStartDestinationUsesStableValuesTitlesAndOrdering() {
     XCTAssertEqual(
       AppStartDestination.allCases,

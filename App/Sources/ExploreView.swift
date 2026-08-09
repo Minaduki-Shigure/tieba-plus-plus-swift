@@ -74,7 +74,10 @@ struct ExploreView: View {
       }
 
       PersonalizedFeedView(
+        isActive: selectedSection == .personalized,
         service: service,
+        accountService: accountService,
+        vault: accountVault,
         historyRepository: historyRepository,
         favoritesRepository: favoritesRepository,
         searchHistoryRepository: searchHistoryRepository

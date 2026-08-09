@@ -377,6 +377,7 @@ struct RootView: View {
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
       let loadsImmediately = RootFollowedForumsActivationPolicy.isActive(path: path)
         || followedForumsViewModel.hasActiveFullListSurface
+        || followedForumsViewModel.hasActiveCompleteIndexSurface
       followedForumsViewModel.accountSessionDidChange(loadImmediately: loadsImmediately)
     }
     .onReceive(NotificationCenter.default.publisher(for: .forumMembershipDidChange)) {
@@ -384,6 +385,7 @@ struct RootView: View {
       guard let change = ForumMembershipChange(notification) else { return }
       let loadsImmediately = RootFollowedForumsActivationPolicy.isActive(path: path)
         || followedForumsViewModel.hasActiveFullListSurface
+        || followedForumsViewModel.hasActiveCompleteIndexSurface
       followedForumsViewModel.forumMembershipDidChange(
         change,
         loadImmediately: loadsImmediately

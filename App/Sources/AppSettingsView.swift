@@ -26,6 +26,9 @@ struct AppSettingsView: View {
     AppPreferenceDefaults.favoriteThreadsOpenDescending
   @AppStorage(AppPreferenceKey.searchSuggestionsEnabled)
   private var searchSuggestionsEnabled = false
+  @AppStorage(AppPreferenceKey.personalizedFollowedForumsOnly)
+  private var personalizedFollowedForumsOnly =
+    AppPreferenceDefaults.personalizedFollowedForumsOnly
   @AppStorage(AppPreferenceKey.externalWebOpenMode)
   private var externalWebOpenMode = ExternalWebOpenMode.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.contentMediaLoadPolicy)
@@ -143,6 +146,14 @@ struct AppSettingsView: View {
         Text("首页")
       } footer: {
         Text("启动首选页会在下次启动应用时生效。")
+      }
+
+      Section {
+        Toggle("只推荐已关注的吧", isOn: $personalizedFollowedForumsOnly)
+      } header: {
+        Text("推荐")
+      } footer: {
+        Text("开启后，推荐页只显示当前账户已关注贴吧中的帖子；需要先登录并读取完整关注列表。")
       }
 
       Section {

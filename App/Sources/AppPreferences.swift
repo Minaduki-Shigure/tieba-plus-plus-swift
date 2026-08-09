@@ -10,6 +10,8 @@ enum AppPreferenceKey {
   static let homeShowsDiscovery = "TiebaPlusPlus.homeShowsDiscovery"
   static let homeShowsRecentForums = "TiebaPlusPlus.homeShowsRecentForums"
   static let searchSuggestionsEnabled = "TiebaPlusPlus.searchSuggestionsEnabled"
+  static let personalizedFollowedForumsOnly =
+    "TiebaPlusPlus.personalizedFollowedForumsOnly"
   static let externalWebOpenMode = "TiebaPlusPlus.externalWebOpenMode"
   static let contentMediaLoadPolicy = "TiebaPlusPlus.contentMediaLoadPolicy"
   static let contentImagePreviewQuality = "TiebaPlusPlus.contentImagePreviewQuality"
@@ -83,6 +85,7 @@ enum AppTextSizeAdjustment: Int, CaseIterable, Hashable, Identifiable, Sendable 
 
 enum AppPreferenceDefaults {
   static let homeShowsDiscovery = true
+  static let personalizedFollowedForumsOnly = false
   static let favoriteThreadsOpenOnlyAuthor = false
   static let favoriteThreadsOpenDescending = false
 }

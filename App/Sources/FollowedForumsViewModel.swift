@@ -1,13 +1,31 @@
 import Combine
 import Foundation
 
+enum FollowedForumIndexState: Equatable, Sendable {
+  case idle
+  case loading
+  case partial
+  case ready(FollowedForumIndexSnapshot)
+  case signedOut
+  case failed(String)
+}
+
+struct FollowedForumIndexSnapshot: Equatable, Sendable {
+  let lease: FollowedForumsSessionLease
+  let forumIDs: Set<Int64>
+}
+
 @MainActor
 final class FollowedForumsViewModel: ObservableObject {
+  static let maximumCatalogPageCount = 100
+  static let maximumRetainedForums = 5_000
+
   @Published private(set) var forums: [FollowedForumItem] = []
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
   @Published private(set) var loadMoreError: String?
   @Published private(set) var isSignedOut = false
+  @Published private(set) var indexState: FollowedForumIndexState = .idle
 
   private let service: any AccountService
   private let vault: any AccountVault
@@ -17,6 +35,7 @@ final class FollowedForumsViewModel: ObservableObject {
   private var loadTask: Task<Void, Never>?
   private var epoch = 0
   private var fullListSurfaceIDs = Set<UUID>()
+  private var completeIndexSurfaceIDs = Set<UUID>()
 
   init(service: any AccountService, vault: any AccountVault) {
     self.service = service
@@ -32,6 +51,10 @@ final class FollowedForumsViewModel: ObservableObject {
     !fullListSurfaceIDs.isEmpty
   }
 
+  var hasActiveCompleteIndexSurface: Bool {
+    !completeIndexSurfaceIDs.isEmpty
+  }
+
   func fullListSurfaceDidAppear(id: UUID) {
     fullListSurfaceIDs.insert(id)
     loadIfNeeded()
@@ -39,6 +62,24 @@ final class FollowedForumsViewModel: ObservableObject {
 
   func fullListSurfaceDidDisappear(id: UUID) {
     fullListSurfaceIDs.remove(id)
+  }
+
+  func completeIndexSurfaceDidAppear(id: UUID) {
+    completeIndexSurfaceIDs.insert(id)
+    ensureCompleteIndexIfNeeded()
+  }
+
+  func completeIndexSurfaceDidDisappear(id: UUID) {
+    completeIndexSurfaceIDs.remove(id)
+  }
+
+  func retryCompleteIndex() {
+    guard hasActiveCompleteIndexSurface, !isSignedOut else { return }
+    if loadMoreError != nil, hasMore {
+      retryLoadMore()
+    } else {
+      reload()
+    }
   }
 
   func reload() {
@@ -76,8 +117,12 @@ final class FollowedForumsViewModel: ObservableObject {
   }
 
   func retryLoadMore() {
-    guard loadMoreError != nil, hasMore, !isLoadingMore else { return }
-    load(page: currentPage + 1, replacing: false)
+    guard loadMoreError != nil, !isLoadingMore else { return }
+    if hasMore {
+      load(page: currentPage + 1, replacing: false)
+    } else {
+      reload()
+    }
   }
 
   func cancel() {
@@ -85,6 +130,22 @@ final class FollowedForumsViewModel: ObservableObject {
     isLoadingMore = false
     if state == .loading {
       state = forums.isEmpty ? .idle : .loaded
+    }
+    if indexState == .loading {
+      indexState = forums.isEmpty ? .idle : .partial
+    }
+  }
+
+  private func ensureCompleteIndexIfNeeded() {
+    guard hasActiveCompleteIndexSurface else { return }
+    switch indexState {
+    case .idle:
+      loadIfNeeded()
+    case .partial:
+      guard hasMore, !isLoadingMore, loadMoreError == nil else { return }
+      load(page: currentPage + 1, replacing: false)
+    case .loading, .ready, .signedOut, .failed:
+      break
     }
   }
 
@@ -98,13 +159,14 @@ final class FollowedForumsViewModel: ObservableObject {
     loadMoreError = nil
     isSignedOut = false
     state = loadImmediately ? .loading : .idle
+    indexState = loadImmediately ? .loading : .idle
     if loadImmediately {
       load(page: 1, replacing: true)
     }
   }
 
   private func load(page: Int, replacing: Bool) {
-    guard page > 0 else { return }
+    guard (1...Self.maximumCatalogPageCount).contains(page) else { return }
     let service = service
     let vault = vault
     epoch &+= 1
@@ -113,7 +175,11 @@ final class FollowedForumsViewModel: ObservableObject {
       isLoadingMore = true
       loadMoreError = nil
     }
+    indexState = .loading
     loadTask = Task {
+      var requestedPage = page
+      var requestReplacesSnapshot = replacing
+      var isAutomaticIndexContinuation = false
       defer {
         if requestEpoch == epoch {
           isLoadingMore = false
@@ -121,55 +187,133 @@ final class FollowedForumsViewModel: ObservableObject {
         }
       }
       do {
-        guard let sessionBeforeRequest = try await vault.activeSession() else {
-          discardResultsFromMissingSession(requestEpoch: requestEpoch)
-          return
+        while true {
+          if isAutomaticIndexContinuation, !hasActiveCompleteIndexSurface {
+            indexState = .partial
+            return
+          }
+          guard let sessionBeforeRequest = try await vault.activeSession() else {
+            discardResultsFromMissingSession(requestEpoch: requestEpoch)
+            return
+          }
+          try Task.checkCancellation()
+          guard requestEpoch == epoch else { return }
+          if isAutomaticIndexContinuation, !hasActiveCompleteIndexSurface {
+            indexState = .partial
+            return
+          }
+          let lease = FollowedForumsSessionLease(sessionBeforeRequest)
+          guard requestReplacesSnapshot || loadedLease == lease else {
+            discardResultsFromChangedSession(requestEpoch: requestEpoch)
+            return
+          }
+          let response = try await service.followedForums(
+            session: sessionBeforeRequest,
+            page: requestedPage,
+            pageSize: 50
+          )
+          try Task.checkCancellation()
+          let sessionAfterRequest = try await vault.activeSession()
+          try Task.checkCancellation()
+          guard requestEpoch == epoch else { return }
+          guard let sessionAfterRequest, lease.matches(sessionAfterRequest) else {
+            discardResultsFromChangedSession(requestEpoch: requestEpoch)
+            return
+          }
+          let continues = try apply(
+            response,
+            lease: lease,
+            requestedPage: requestedPage,
+            replacing: requestReplacesSnapshot
+          )
+          guard continues else { return }
+          requestReplacesSnapshot = false
+          requestedPage = currentPage + 1
+          isAutomaticIndexContinuation = true
+          isLoadingMore = true
         }
-        try Task.checkCancellation()
-        guard requestEpoch == epoch else { return }
-        let lease = FollowedForumsSessionLease(sessionBeforeRequest)
-        guard replacing || loadedLease == lease else {
-          discardResultsFromChangedSession(requestEpoch: requestEpoch)
-          return
-        }
-        let response = try await service.followedForums(
-          session: sessionBeforeRequest,
-          page: page,
-          pageSize: 50
-        )
-        try Task.checkCancellation()
-        let sessionAfterRequest = try await vault.activeSession()
-        try Task.checkCancellation()
-        guard requestEpoch == epoch else { return }
-        guard let sessionAfterRequest, lease.matches(sessionAfterRequest) else {
-          discardResultsFromChangedSession(requestEpoch: requestEpoch)
-          return
-        }
-        try Self.validate(
-          response,
-          requestedPage: page,
-          replacing: replacing,
-          currentPage: currentPage
-        )
-        let priorCount = replacing ? 0 : forums.count
-        let mergedForums = merge(replacing ? [] : forums, response.forums)
-        currentPage = response.currentPage
-        hasMore = response.hasMore
-          && !response.forums.isEmpty
-          && (replacing || mergedForums.count > priorCount)
-        loadedLease = lease
-        forums = mergedForums
-        state = .loaded
       } catch is CancellationError {
         return
       } catch {
         guard requestEpoch == epoch, !Task.isCancelled else { return }
-        if replacing {
-          state = .failed(error.localizedDescription)
+        let message = error.localizedDescription
+        indexState = .failed(message)
+        if requestReplacesSnapshot {
+          state = .failed(message)
         } else {
-          loadMoreError = error.localizedDescription
+          loadMoreError = message
         }
       }
+    }
+  }
+
+  private func apply(
+    _ response: FollowedForumPageData,
+    lease: FollowedForumsSessionLease,
+    requestedPage: Int,
+    replacing: Bool
+  ) throws -> Bool {
+    try Self.validate(
+      response,
+      requestedPage: requestedPage,
+      replacing: replacing,
+      currentPage: currentPage
+    )
+    let existing = replacing ? [] : forums
+    let merged = merge(existing, response.forums)
+    let madeProgress = merged.count > existing.count
+    currentPage = response.currentPage
+    loadedLease = lease
+    forums = Array(merged.prefix(Self.maximumRetainedForums))
+    state = .loaded
+
+    if merged.count > Self.maximumRetainedForums {
+      failIncompleteIndex(
+        message: "关注贴吧数量超过当前安全读取上限，请稍后重新加载。",
+        replacing: replacing
+      )
+      return false
+    }
+
+    guard response.hasMore else {
+      hasMore = false
+      loadMoreError = nil
+      indexState = .ready(
+        FollowedForumIndexSnapshot(lease: lease, forumIDs: Set(forums.map(\.id)))
+      )
+      return false
+    }
+
+    if response.forums.isEmpty || !madeProgress {
+      failIncompleteIndex(
+        message: "关注贴吧分页未取得进展，请重新加载后再试。",
+        replacing: replacing
+      )
+      return false
+    }
+    if currentPage >= Self.maximumCatalogPageCount
+      || merged.count >= Self.maximumRetainedForums
+    {
+      failIncompleteIndex(
+        message: "关注贴吧数量超过当前安全读取上限，请稍后重新加载。",
+        replacing: replacing
+      )
+      return false
+    }
+
+    hasMore = true
+    let continues = hasActiveCompleteIndexSurface
+    indexState = continues ? .loading : .partial
+    return continues
+  }
+
+  private func failIncompleteIndex(message: String, replacing: Bool) {
+    hasMore = false
+    indexState = .failed(message)
+    if replacing, forums.isEmpty {
+      state = .failed(message)
+    } else {
+      loadMoreError = message
     }
   }
 
@@ -183,6 +327,7 @@ final class FollowedForumsViewModel: ObservableObject {
     beginNewEpoch(loadImmediately: false)
     isSignedOut = true
     state = .failed("请先登录账户。")
+    indexState = .signedOut
   }
 
   private func invalidateLoad() {
@@ -208,6 +353,14 @@ final class FollowedForumsViewModel: ObservableObject {
     let expectedPage = replacing ? 1 : currentPage + 1
     guard requestedPage == expectedPage, page.currentPage == requestedPage else {
       throw BrowseError.unavailable("贴吧返回了异常的关注贴吧页码，请重新加载后再试。")
+    }
+    guard page.forums.count <= 100,
+      page.forums.allSatisfy({
+        $0.id > 0
+          && !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      })
+    else {
+      throw BrowseError.unavailable("贴吧返回了异常的关注贴吧数据，请重新加载后再试。")
     }
   }
 }
