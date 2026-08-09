@@ -6,6 +6,7 @@ struct CommentsView: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.appAccentColor) private var appAccentColor
+  @Environment(\.accountAccess) private var accountAccess
   @Environment(\.contentAgreementStore) private var contentAgreementStore
   @StateObject private var viewModel: CommentsViewModel
   @State private var linkedTarget: TiebaLinkTarget?
@@ -16,6 +17,11 @@ struct CommentsView: View {
   @State private var hasRecordedDirectVisit = false
   @State private var replyComposerContext: TextReplyComposerContext?
   @State private var pendingConfirmedThreadRoute: TiebaThreadRoute?
+  @State private var pendingInboxReplyIntent: InboxReplyIntent?
+  @State private var isResolvingInboxReplyIntent = false
+  @State private var inboxReplyIntentGeneration = 0
+  @State private var inboxReplyNotice: String?
+  @State private var inboxReplyComposerIntent: InboxReplyIntent?
   let service:
     any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
@@ -32,7 +38,8 @@ struct CommentsView: View {
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository,
-    showsDismissButton: Bool = true
+    showsDismissButton: Bool = true,
+    replyIntent: InboxReplyIntent? = nil
   ) {
     self.service = service
     self.historyRepository = historyRepository
@@ -40,6 +47,7 @@ struct CommentsView: View {
     self.searchHistoryRepository = searchHistoryRepository
     self.showsDismissButton = showsDismissButton
     self.recordsOwningThreadVisit = false
+    _pendingInboxReplyIntent = State(initialValue: replyIntent)
     _viewModel = StateObject(
       wrappedValue: CommentsViewModel(threadID: threadID, postID: postID, service: service)
     )
@@ -54,7 +62,8 @@ struct CommentsView: View {
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository,
-    showsDismissButton: Bool = true
+    showsDismissButton: Bool = true,
+    replyIntent: InboxReplyIntent? = nil
   ) {
     self.service = service
     self.historyRepository = historyRepository
@@ -62,6 +71,7 @@ struct CommentsView: View {
     self.searchHistoryRepository = searchHistoryRepository
     self.showsDismissButton = showsDismissButton
     self.recordsOwningThreadVisit = false
+    _pendingInboxReplyIntent = State(initialValue: replyIntent)
     _viewModel = StateObject(
       wrappedValue: CommentsViewModel(
         threadID: threadID,
@@ -80,7 +90,8 @@ struct CommentsView: View {
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository,
-    showsDismissButton: Bool = true
+    showsDismissButton: Bool = true,
+    replyIntent: InboxReplyIntent? = nil
   ) {
     self.service = service
     self.historyRepository = historyRepository
@@ -88,6 +99,7 @@ struct CommentsView: View {
     self.searchHistoryRepository = searchHistoryRepository
     self.showsDismissButton = showsDismissButton
     self.recordsOwningThreadVisit = true
+    _pendingInboxReplyIntent = State(initialValue: replyIntent)
     _viewModel = StateObject(
       wrappedValue: CommentsViewModel(
         threadID: threadID,
@@ -395,6 +407,9 @@ struct CommentsView: View {
     }
     .task { viewModel.loadIfNeeded() }
     .task(id: viewModel.state) {
+      await consumeInboxReplyIntentIfReady()
+    }
+    .task(id: viewModel.state) {
       await recordDirectVisitIfNeeded()
     }
     .task(id: viewModel.agreementDescriptorEpoch) {
@@ -410,6 +425,7 @@ struct CommentsView: View {
       viewModel.cancel()
     }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+      invalidateInboxReplyIntentForAccountChange()
       pendingAgreementChange = nil
       agreementErrorMessage = nil
     }
@@ -417,6 +433,9 @@ struct CommentsView: View {
       Task { @MainActor in viewModel.reload() }
     }
     .onChange(of: replyComposerContext) { context in
+      if context == nil {
+        inboxReplyComposerIntent = nil
+      }
       guard context == nil, let route = pendingConfirmedThreadRoute else { return }
       pendingConfirmedThreadRoute = nil
       Task { @MainActor in
@@ -509,10 +528,132 @@ struct CommentsView: View {
     )
   }
 
+  private func consumeInboxReplyIntentIfReady() async {
+    guard let intent = pendingInboxReplyIntent else { return }
+    switch viewModel.state {
+    case .idle, .loading:
+      return
+    case .failed:
+      pendingInboxReplyIntent = nil
+      inboxReplyNotice = "未能读取回复目标，因此没有打开回复编辑器。"
+      return
+    case .loaded:
+      break
+    }
+
+    let generation = inboxReplyIntentGeneration
+    pendingInboxReplyIntent = nil
+    isResolvingInboxReplyIntent = true
+    defer {
+      if inboxReplyIntentGeneration == generation {
+        isResolvingInboxReplyIntent = false
+      }
+    }
+
+    guard
+      intent.threadID == viewModel.threadID,
+      case .subpost(let commentID) = intent.target,
+      let thread = viewModel.thread,
+      let parentPost = viewModel.parentPost,
+      thread.id == intent.threadID,
+      parentPost.threadID == intent.threadID,
+      thread.localVisibility == .visible,
+      parentPost.localVisibility == .visible
+    else {
+      inboxReplyNotice = "未能在公开内容中精确定位这条回复，未打开回复编辑器。"
+      return
+    }
+    let matchingComments = viewModel.comments.filter {
+      $0.id == commentID
+        && $0.threadID == intent.threadID
+        && $0.parentPostID == parentPost.id
+    }
+    guard
+      matchingComments.count == 1,
+      let comment = matchingComments.first,
+      comment.localVisibility == .visible
+    else {
+      inboxReplyNotice = "未能在公开内容中精确定位这条回复，未打开回复编辑器。"
+      return
+    }
+
+    guard let accountAccess else {
+      inboxReplyNotice = "未能确认当前登录账户，未打开回复编辑器。"
+      return
+    }
+    do {
+      guard let session = try await accountAccess.vault.activeSession() else {
+        guard inboxReplyIntentGeneration == generation else { return }
+        inboxReplyNotice = "当前没有可用的登录账户，未打开回复编辑器。"
+        return
+      }
+      try Task.checkCancellation()
+      guard inboxReplyIntentGeneration == generation else { return }
+      guard intent.isBound(to: session) else {
+        inboxReplyNotice = "当前账户已变化，未打开回复编辑器。"
+        return
+      }
+      guard
+        let context = intent.composerContext(
+          session: session,
+          thread: thread,
+          parentPost: parentPost,
+          comment: comment
+        )
+      else {
+        inboxReplyNotice = "回复目标校验未通过，未打开回复编辑器。"
+        return
+      }
+      guard replyComposerContext == nil else { return }
+      inboxReplyComposerIntent = intent
+      replyComposerContext = context
+    } catch is CancellationError {
+      return
+    } catch {
+      guard inboxReplyIntentGeneration == generation else { return }
+      inboxReplyNotice = "未能确认当前登录账户，未打开回复编辑器。"
+    }
+  }
+
+  private func invalidateInboxReplyIntentForAccountChange() {
+    let hadInboxReplyFlow =
+      pendingInboxReplyIntent != nil
+      || isResolvingInboxReplyIntent
+      || inboxReplyComposerIntent != nil
+    inboxReplyIntentGeneration &+= 1
+    pendingInboxReplyIntent = nil
+    isResolvingInboxReplyIntent = false
+    if inboxReplyComposerIntent != nil {
+      inboxReplyComposerIntent = nil
+      replyComposerContext = nil
+    }
+    if hadInboxReplyFlow {
+      inboxReplyNotice = "当前账户已变化，已取消从消息发起的回复。"
+    }
+  }
+
   @ViewBuilder
   private var commentsBottomInset: some View {
     VStack(spacing: 0) {
-      if let message = viewModel.positionNotice {
+      if let inboxReplyNotice {
+        HStack(spacing: 10) {
+          Image(systemName: "exclamationmark.triangle")
+            .foregroundStyle(.secondary)
+          Text(inboxReplyNotice)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+          Spacer(minLength: 0)
+          Button {
+            self.inboxReplyNotice = nil
+          } label: {
+            Image(systemName: "xmark.circle.fill")
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("关闭")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+      } else if let message = viewModel.positionNotice {
         HStack(spacing: 10) {
           Image(systemName: "location.slash")
             .foregroundStyle(.secondary)

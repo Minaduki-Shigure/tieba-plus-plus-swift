@@ -10,6 +10,8 @@ struct NotificationsView: View {
   let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @StateObject private var viewModel: NotificationsViewModel
+  @State private var replyRoute: InboxReplyIntent?
+  @State private var replyNotice: String?
 
   init(
     browseService: any BrowseService & ForumPostSearchService & UserProfileService
@@ -54,6 +56,16 @@ struct NotificationsView: View {
     }
     .navigationTitle("消息")
     .navigationBarTitleDisplayMode(.inline)
+    .safeAreaInset(edge: .bottom, spacing: 0) {
+      if let replyNotice {
+        replyNoticeBanner(replyNotice)
+      }
+    }
+    .navigationDestination(isPresented: replyRoutePresented) {
+      if let replyRoute {
+        notificationReplyDestination(for: replyRoute)
+      }
+    }
     .task { viewModel.loadIfNeeded() }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
       viewModel.accountSessionDidChange()
@@ -86,10 +98,25 @@ struct NotificationsView: View {
   private var messageList: some View {
     List {
       ForEach(viewModel.messages) { message in
-        NavigationLink {
-          notificationDestination(for: message)
-        } label: {
-          NotificationMessageRow(message: message)
+        HStack(alignment: .center, spacing: 8) {
+          NavigationLink {
+            notificationDestination(for: message)
+          } label: {
+            NotificationMessageRow(message: message)
+              .frame(maxWidth: .infinity, alignment: .leading)
+          }
+
+          Button {
+            prepareReply(to: message)
+          } label: {
+            Image(systemName: "arrowshape.turn.up.left")
+              .foregroundStyle(.tint)
+              .frame(width: 36, height: 36)
+              .contentShape(Rectangle())
+          }
+          .buttonStyle(.borderless)
+          .accessibilityLabel("回复 \(message.sender.preferredName)")
+          .help("回复此消息")
         }
         .onAppear { viewModel.loadMoreIfNeeded(current: message) }
       }
@@ -133,6 +160,75 @@ struct NotificationsView: View {
         showsDismissButton: false
       )
     }
+  }
+
+  @ViewBuilder
+  private func notificationReplyDestination(for intent: InboxReplyIntent) -> some View {
+    switch intent.target {
+    case .post(let postID):
+      let route = TiebaThreadRoute(threadID: intent.threadID, postID: postID)
+      ThreadView(
+        thread: route.placeholderThread,
+        service: browseService,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository,
+        linkRoute: route,
+        replyIntent: intent
+      )
+      .id(intent)
+    case .subpost(let commentID):
+      CommentsView(
+        threadID: intent.threadID,
+        resolvingCommentID: commentID,
+        service: browseService,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository,
+        showsDismissButton: false,
+        replyIntent: intent
+      )
+      .id(intent)
+    }
+  }
+
+  private var replyRoutePresented: Binding<Bool> {
+    Binding(
+      get: { replyRoute != nil },
+      set: { isPresented in
+        if !isPresented { replyRoute = nil }
+      }
+    )
+  }
+
+  private func prepareReply(to message: InboxMessage) {
+    replyNotice = nil
+    guard let intent = viewModel.replyIntent(for: message) else {
+      replyNotice = "消息所属账户或回复目标已变化，请刷新后重试。"
+      return
+    }
+    replyRoute = intent
+  }
+
+  private func replyNoticeBanner(_ message: String) -> some View {
+    HStack(spacing: 10) {
+      Image(systemName: "exclamationmark.triangle")
+        .foregroundStyle(.secondary)
+      Text(message)
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+      Spacer(minLength: 0)
+      Button {
+        replyNotice = nil
+      } label: {
+        Image(systemName: "xmark.circle.fill")
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("关闭")
+    }
+    .padding(.horizontal, 14)
+    .padding(.vertical, 10)
+    .background(.regularMaterial)
   }
 }
 

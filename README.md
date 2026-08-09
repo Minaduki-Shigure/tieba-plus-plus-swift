@@ -17,7 +17,7 @@ checks.
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, and media preferences |
-| Accounts | Current `main` supports bound Web login, switching, logout, followed forums, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox, Tieba cloud favorites, per-forum state, and experimental content approval |
+| Accounts | Current `main` supports bound Web login, switching, logout, followed forums, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with authoritative reply actions, Tieba cloud favorites, per-forum state, and experimental content approval |
 | Server-side writes | Guarded forum follow/unfollow, check-in, content approval, thread-detail cloud-favorite changes, and plain-text topic/floor/nested replies are in device validation; other writes stay disabled |
 | TiebaLite parity | Anonymous reading and media: about 90–95%; full product scope: about 67–71% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.59.0-alpha.1` (build 62); later `main` features require a tagged release |
@@ -52,7 +52,11 @@ checks.
   pages also expose experimental, draft-backed plain-text composers for replying
   to the topic, an ordinary floor, or a specific nested reply. The write is sent
   at most once, a valid server PID is read back by exact identity, and challenge,
-  accepted-but-not-yet-visible, and unknown outcomes remain distinct.
+  accepted-but-not-yet-visible, and unknown outcomes remain distinct. Inbox reply
+  actions first relocate the exact ordinary post or child reply and recheck the
+  active account lease before opening that same composer. The notification's
+  legacy `quote_pid` and display payload never become a write target; failed
+  relocation or a changed session opens no composer and dispatches no write.
   These main-only changes will not enter the public app source until a tagged
   IPA passes the release checks.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
@@ -61,10 +65,11 @@ checks.
   simulator build, validates the app source, and verifies its public IPA hash.
   Authenticated flows never use real credentials in CI. Login binding, cloud
   favorite reads and mutations, followed-forum recommendation filtering,
-  concern-feed, inbox, and plain-text reply contracts are covered by fixtures,
-  while successful private reads and forum follow/unfollow, check-in,
-  cloud-favorite changes, topic/post/subpost content approval, and real reply
-  creation remain physical-device validation features in this alpha.
+  concern-feed, inbox navigation and reply-action rebinding, and plain-text reply
+  contracts are covered by fixtures, while successful private reads, forum
+  follow/unfollow, check-in, cloud-favorite changes, topic/post/subpost content
+  approval, and real reply creation remain physical-device validation features
+  in this alpha.
 - **App source:** Add [`sidestore-source.json`](https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json)
   to LiveContainer or SideStore. Its latest IPA is published only after the tag's
   package, anonymous integration, and simulator tests all pass.
@@ -182,7 +187,14 @@ checks.
   can reopen the exact post. A nested-reply notification sends only its child ID
   to the public floor resolver, validates the returned thread, parent, and child,
   and opens the exact reply without trusting the ambiguous legacy `quote_pid`
-  field. No background polling, badge clearing, or explicit mark-read request is
+  field. Each supported row also exposes an explicit reply action bound to the
+  current `userID + sessionRevision`. It reopens that ordinary post or resolves
+  that child, requires the authoritative model to match the notification's stable
+  thread, post, and sender IDs, and only then opens the existing composer. The
+  message title, body, forum label, and `quote_pid` never participate in the write
+  target. A missing or mismatched target, cancellation, or account change leaves
+  the fallback navigation available but opens no composer and sends no write. No
+  background polling, badge clearing, or explicit mark-read request is
   implemented.
 - **Concern feed:** Logged-in Explore adds a foreground-only concern channel.
   Page-style preloading cannot start it: the request begins only after the user
@@ -243,9 +255,10 @@ checks.
   check-in are not implemented.
 - **Unsupported operations:** Direct deletion from the cloud-favorites list,
   bulk cloud/local synchronization, disagreement and other reaction types,
-  new-thread creation, rich-media replies, notification replies, background
-  notification polling, and moderation remain unavailable until their request
-  contracts and recovery paths have been validated on a disposable account.
+  new-thread creation, rich-media replies, notification mark-read/unread
+  reconciliation, background notification polling, and moderation remain
+  unavailable until their request contracts and recovery paths have been
+  validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, auditable weighting, protocol constraints, and next milestones.
   The current `main` audit totals 67–71 of 100 weighted points; its anonymous

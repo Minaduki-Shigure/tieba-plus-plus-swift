@@ -24,6 +24,13 @@ final class NotificationsViewModelTests: XCTestCase {
 
     XCTAssertEqual(viewModel.messages.map(\.id), [11, 12])
     XCTAssertEqual(viewModel.state, .loaded)
+    let replyIntent = try XCTUnwrap(
+      viewModel.replyIntent(for: try XCTUnwrap(viewModel.messages.first))
+    )
+    XCTAssertEqual(replyIntent.userID, active.id)
+    XCTAssertEqual(replyIntent.sessionRevision, active.sessionRevision)
+    XCTAssertEqual(replyIntent.threadID, 1_011)
+    XCTAssertEqual(replyIntent.target, .post(id: 11))
     viewModel.loadMoreIfNeeded(current: try XCTUnwrap(viewModel.messages.last))
     try await waitForNotificationsTest { viewModel.messages.map(\.id) == [11, 12, 13] }
 
@@ -32,6 +39,64 @@ final class NotificationsViewModelTests: XCTestCase {
     let requests = await service.requestsSnapshot()
     XCTAssertEqual(requests.map(\.requestedPage), [1, 2])
     XCTAssertEqual(requests.map(\.kind), [.replies, .replies])
+  }
+
+  func testReplyIntentRequiresExactRetainedMessageAndLoadedSessionLease() async throws {
+    let oldSession = session(userID: 7, revision: uuid(7))
+    let newSession = session(userID: 8, revision: uuid(8))
+    let vault = NotificationsVaultSpy(session: oldSession)
+    let service = NotificationsServiceSpy(
+      scripts: [
+        .init(userID: 7, kind: .replies, requestedPage: 1): [
+          .init(page: page(userID: 7, kind: .replies, ids: [11], page: 1, hasMore: false))
+        ],
+        .init(userID: 8, kind: .replies, requestedPage: 1): [
+          .init(
+            page: page(userID: 8, kind: .replies, ids: [81], page: 1, hasMore: false),
+            delayNanoseconds: 120_000_000
+          )
+        ],
+      ]
+    )
+    let viewModel = NotificationsViewModel(service: service, vault: vault)
+
+    await viewModel.refresh()
+    let retained = try XCTUnwrap(viewModel.messages.first)
+    XCTAssertNotNil(viewModel.replyIntent(for: retained))
+    XCTAssertNil(viewModel.replyIntent(for: message(id: 99)))
+
+    let forgedSameID = InboxMessage(
+      id: retained.id,
+      sender: InboxSender(
+        id: retained.sender.id + 1,
+        username: "forged",
+        displayName: "Forged",
+        portraitURL: nil,
+        isFriend: false,
+        isFan: false
+      ),
+      quotedUser: retained.quotedUser,
+      threadID: retained.threadID,
+      postID: retained.postID,
+      quotedPostID: retained.quotedPostID,
+      title: retained.title,
+      content: retained.content,
+      quotedContent: retained.quotedContent,
+      forumName: retained.forumName,
+      createdAt: retained.createdAt,
+      isFloorReply: retained.isFloorReply,
+      isFirstPost: retained.isFirstPost,
+      isUnread: retained.isUnread,
+      threadType: retained.threadType
+    )
+    XCTAssertNil(viewModel.replyIntent(for: forgedSameID))
+
+    await vault.replaceActive(with: newSession)
+    viewModel.accountSessionDidChange()
+    XCTAssertNil(viewModel.replyIntent(for: retained))
+    XCTAssertTrue(viewModel.messages.isEmpty)
+    XCTAssertEqual(viewModel.state, .loading)
+    viewModel.cancel()
   }
 
   func testSelectingMentionsStartsIsolatedFirstPageLoad() async throws {

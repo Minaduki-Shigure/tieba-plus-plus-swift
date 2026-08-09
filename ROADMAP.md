@@ -141,10 +141,13 @@ the source metadata is updated to that tested IPA.
   navigation, deleted-thread state, and account-lease isolation, plus confirmed
   thread-detail add, saved-floor update, and removal with read-only reconciliation
 - Foreground ReplyMe and AtMe inbox with account-lease isolation, refresh,
-  bounded pagination, and safe thread navigation
+  bounded pagination, safe thread navigation, and explicit reply actions bound
+  to the active account lease
 - Exact nested-notification positioning through the public child-only resolver,
   with parent locking, bidirectional pagination, history continuity, and an
-  owning-thread fallback when the target is unavailable
+  owning-thread fallback when the target is unavailable; a reply action opens the
+  existing composer only after the exact ordinary post or child is relocated,
+  while legacy `quote_pid` never becomes a write target
 - Authoritative per-forum account membership state with explicit follow and
   unfollow confirmation
 - Authoritative per-forum check-in state and explicitly confirmed single-forum
@@ -174,7 +177,9 @@ the source metadata is updated to that tested IPA.
    idempotent, server-error, uncertain-failure, and read-only reconciliation
    paths, followed by account switching and follow recovery checks
 3. Real-device validation of the minimal HTTPS ReplyMe and AtMe requests,
-   including whether opening a list changes server unread state
+   including whether opening a list changes server unread state, plus ordinary
+   post and child-reply action relocation, unavailable targets, and account
+   switching before composer presentation
 4. Real-device validation of the account-bound concern request, including the
    signed-field deletion matrix, empty-account and expired-session envelopes,
    cursor replay, and whether list retrieval changes recommendation state
@@ -208,8 +213,17 @@ and `pn=1` to the public floor resolver, then requires the exact thread and chil
 in the response before accepting the server-resolved parent. That parent remains
 locked for earlier and later pages. A successful direct visit records the owning
 parent as local reading progress; a missing target retains an explicit owning-
-thread fallback. The inbox does not poll in the background, clear a local badge,
-or send a mark-read request. Whether list retrieval itself has an implicit
+thread fallback. An explicit reply action creates only an intent bound to the
+current `userID + sessionRevision` and the stable thread, post, and sender IDs.
+It never derives a write target from `quote_pid`, title, body, quoted content, or
+forum display text. The destination rechecks the account lease and requires the
+authoritative loaded post or child, including its author and resolved parent, to
+match before opening the existing composer. A missing or mismatched target,
+cancellation, or session change opens no composer and sends no write; normal
+fallback navigation remains available. Once presented, the existing draft,
+explicit confirmation, authenticated target rebinding, and non-retry outcome
+rules apply unchanged. The inbox does not poll in the background, clear a local
+badge, or send a mark-read request. Whether list retrieval itself has an implicit
 server-side read effect remains a physical-device validation item.
 
 The concern feed uses HTTPS protobuf command `309474` only after the user selects

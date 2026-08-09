@@ -28,7 +28,13 @@ struct ThreadView: View {
   @State private var pendingCloudFavoriteAction: ThreadCloudFavoritePendingAction?
   @State private var cloudFavoriteErrorMessage: String?
   @State private var replyComposerContext: TextReplyComposerContext?
+  @State private var pendingInboxReplyIntent: InboxReplyIntent?
+  @State private var isResolvingInboxReplyIntent = false
+  @State private var inboxReplyIntentGeneration = 0
+  @State private var inboxReplyNotice: String?
+  @State private var inboxReplyComposerIntent: InboxReplyIntent?
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.accountAccess) private var accountAccess
   @Environment(\.contentFilterRepository) private var contentFilterRepository
   @Environment(\.contentAgreementStore) private var contentAgreementStore
   @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
@@ -43,7 +49,8 @@ struct ThreadView: View {
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository,
     historySnapshot: ThreadHistorySnapshot? = nil,
-    linkRoute: TiebaThreadRoute? = nil
+    linkRoute: TiebaThreadRoute? = nil,
+    replyIntent: InboxReplyIntent? = nil
   ) {
     self.service = service
     self.historyRepository = historyRepository
@@ -51,6 +58,7 @@ struct ThreadView: View {
     self.searchHistoryRepository = searchHistoryRepository
     self.historySnapshot = historySnapshot
     self.linkRoute = linkRoute
+    _pendingInboxReplyIntent = State(initialValue: replyIntent)
     _viewModel = StateObject(
       wrappedValue: ThreadViewModel(
         thread: thread,
@@ -260,6 +268,9 @@ struct ThreadView: View {
       await threadCloudFavoriteStore.activate(target, for: cloudFavoriteScopeID)
     }
     .task(id: viewModel.state) {
+      await consumeInboxReplyIntentIfReady()
+    }
+    .task(id: viewModel.state) {
       guard
         !hasRecordedHistoryVisit,
         !Task.isCancelled,
@@ -317,10 +328,16 @@ struct ThreadView: View {
       viewModel.cancel()
     }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+      invalidateInboxReplyIntentForAccountChange()
       pendingAgreementChange = nil
       agreementErrorMessage = nil
       pendingCloudFavoriteAction = nil
       cloudFavoriteErrorMessage = nil
+    }
+    .onChange(of: replyComposerContext) { context in
+      if context == nil {
+        inboxReplyComposerIntent = nil
+      }
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       cancelPictureGallery()
@@ -408,7 +425,25 @@ struct ThreadView: View {
   @ViewBuilder
   private var threadBottomInset: some View {
     VStack(spacing: 0) {
-      if let message = viewModel.jumpError {
+      if let inboxReplyNotice {
+        HStack(spacing: 10) {
+          Image(systemName: "exclamationmark.triangle")
+            .foregroundStyle(.secondary)
+          Text(inboxReplyNotice)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+          Spacer(minLength: 0)
+          Button {
+            self.inboxReplyNotice = nil
+          } label: {
+            Image(systemName: "xmark.circle.fill")
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("关闭")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+      } else if let message = viewModel.jumpError {
         if viewModel.canRetryJump {
           LoadMoreErrorView(message: message, retry: viewModel.retryJump)
             .padding(.horizontal, 12)
@@ -485,6 +520,95 @@ struct ThreadView: View {
       replyComposerContext = context
     } else {
       replyComposerContext = TextReplyComposerContext(thread: viewModel.thread, post: post)
+    }
+  }
+
+  private func consumeInboxReplyIntentIfReady() async {
+    guard let intent = pendingInboxReplyIntent else { return }
+    switch viewModel.state {
+    case .idle, .loading:
+      return
+    case .failed:
+      pendingInboxReplyIntent = nil
+      inboxReplyNotice = "未能读取回复目标，因此没有打开回复编辑器。"
+      return
+    case .loaded:
+      break
+    }
+
+    let generation = inboxReplyIntentGeneration
+    pendingInboxReplyIntent = nil
+    isResolvingInboxReplyIntent = true
+    defer {
+      if inboxReplyIntentGeneration == generation {
+        isResolvingInboxReplyIntent = false
+      }
+    }
+
+    guard
+      intent.threadID == viewModel.thread.id,
+      case .post(let postID) = intent.target,
+      let post = viewModel.post(withID: postID),
+      post.id == postID,
+      post.threadID == intent.threadID,
+      viewModel.thread.localVisibility == .visible,
+      post.localVisibility == .visible
+    else {
+      inboxReplyNotice = "未能在公开内容中精确定位这条回复，未打开回复编辑器。"
+      return
+    }
+
+    guard let accountAccess else {
+      inboxReplyNotice = "未能确认当前登录账户，未打开回复编辑器。"
+      return
+    }
+    do {
+      guard let session = try await accountAccess.vault.activeSession() else {
+        guard inboxReplyIntentGeneration == generation else { return }
+        inboxReplyNotice = "当前没有可用的登录账户，未打开回复编辑器。"
+        return
+      }
+      try Task.checkCancellation()
+      guard inboxReplyIntentGeneration == generation else { return }
+      guard intent.isBound(to: session) else {
+        inboxReplyNotice = "当前账户已变化，未打开回复编辑器。"
+        return
+      }
+      guard
+        let context = intent.composerContext(
+          session: session,
+          thread: viewModel.thread,
+          post: post
+        )
+      else {
+        inboxReplyNotice = "回复目标校验未通过，未打开回复编辑器。"
+        return
+      }
+      guard replyComposerContext == nil else { return }
+      inboxReplyComposerIntent = intent
+      replyComposerContext = context
+    } catch is CancellationError {
+      return
+    } catch {
+      guard inboxReplyIntentGeneration == generation else { return }
+      inboxReplyNotice = "未能确认当前登录账户，未打开回复编辑器。"
+    }
+  }
+
+  private func invalidateInboxReplyIntentForAccountChange() {
+    let hadInboxReplyFlow =
+      pendingInboxReplyIntent != nil
+      || isResolvingInboxReplyIntent
+      || inboxReplyComposerIntent != nil
+    inboxReplyIntentGeneration &+= 1
+    pendingInboxReplyIntent = nil
+    isResolvingInboxReplyIntent = false
+    if inboxReplyComposerIntent != nil {
+      inboxReplyComposerIntent = nil
+      replyComposerContext = nil
+    }
+    if hadInboxReplyFlow {
+      inboxReplyNotice = "当前账户已变化，已取消从消息发起的回复。"
     }
   }
 

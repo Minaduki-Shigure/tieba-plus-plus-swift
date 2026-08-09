@@ -53,6 +53,19 @@ final class NotificationsViewModel: ObservableObject {
     beginNewEpoch(loadImmediately: true)
   }
 
+  func replyIntent(for message: InboxMessage) -> InboxReplyIntent? {
+    guard
+      state == .loaded,
+      let loadedLease,
+      messages.contains(message)
+    else { return nil }
+    return InboxReplyIntent(
+      message: message,
+      userID: loadedLease.userID,
+      sessionRevision: loadedLease.sessionRevision
+    )
+  }
+
   func loadMoreIfNeeded(current message: InboxMessage) {
     guard
       message.id == messages.last?.id,
