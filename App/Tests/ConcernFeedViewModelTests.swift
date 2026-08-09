@@ -191,7 +191,7 @@ final class ConcernFeedViewModelTests: XCTestCase {
     XCTAssertEqual(requestedUserIDs, [7, 8])
   }
 
-  func testSameUserCredentialRotationAndLogoutDiscardInFlightResult() async throws {
+  func testUnannouncedCredentialRotationReloadsAndLogoutEndsSignedOut() async throws {
     let original = concernSession(userID: 7, revision: concernUUID(7))
     let rotated = concernSession(userID: 7, revision: concernUUID(8))
     let vault = ConcernVaultSpy(session: original)
@@ -205,23 +205,27 @@ final class ConcernFeedViewModelTests: XCTestCase {
           concernPage(userID: 7, ids: [2], nextPageTag: nil, hasMore: false, requestUnix: 20),
           delayNanoseconds: 80_000_000
         ),
+        .page(
+          concernPage(userID: 7, ids: [3], nextPageTag: nil, hasMore: false, requestUnix: 30),
+          delayNanoseconds: 80_000_000
+        ),
       ]
     ])
     let viewModel = ConcernFeedViewModel(service: service, vault: vault)
     viewModel.setActive(true)
     try await waitForConcernTest { await service.requestCount() == 1 }
     await vault.replaceActive(with: rotated)
-    try await Task.sleep(nanoseconds: 100_000_000)
+    try await waitForConcernTest { viewModel.threads.map(\.id) == [2] }
+    let rotatedRequests = await service.requestCount()
+    XCTAssertEqual(rotatedRequests, 2)
 
-    XCTAssertTrue(viewModel.threads.isEmpty)
-    XCTAssertEqual(viewModel.state, .idle)
-
-    viewModel.accountSessionDidChange()
-    try await waitForConcernTest { await service.requestCount() == 2 }
+    viewModel.retry()
+    try await waitForConcernTest { await service.requestCount() == 3 }
     await vault.replaceActive(with: nil)
-    try await Task.sleep(nanoseconds: 100_000_000)
+    try await waitForConcernTest { viewModel.state == .signedOut }
     XCTAssertTrue(viewModel.threads.isEmpty)
-    XCTAssertEqual(viewModel.state, .idle)
+    let logoutRequests = await service.requestCount()
+    XCTAssertEqual(logoutRequests, 3)
   }
 
   func testSignedOutAndLegacySessionsNeverReachAccountService() async throws {

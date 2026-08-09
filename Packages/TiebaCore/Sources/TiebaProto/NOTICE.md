@@ -34,6 +34,14 @@ location, and screen fields are omitted. The implemented anonymous request uses
 only the endpoint business fields and one app-generated random UUID in
 `CommonReq.cuid`; live protocol probes confirmed that no account credential or
 hardware-derived identifier is required.
+The minimal authenticated `UserLikeReqIdl` and `UserLikeResIdl` schemas used for
+the foreground concern feed are adapted from the same TiebaLite commit. The
+additional response-only `user_tips`, `last_tips`, and `user_tips_type` field
+numbers were cross-checked against
+[`tbclient.protobuf`](https://github.com/clb-128258/tbclient.protobuf) commit
+`f6eed3691d2c72304f58c348aa8f90855d2d495a`. Unused recommendation-user,
+story, live, advertising, app-list, and layout fields are omitted. Android
+hardware, installation, location, and screen fields are not implemented.
 The minimal `SearchSug` request/response schemas used for anonymous search
 suggestions are also adapted from the same TiebaLite commit. The request's
 `CommonReq` field is deliberately omitted because this endpoint accepts the

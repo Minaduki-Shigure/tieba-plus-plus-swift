@@ -60,8 +60,9 @@ if let userID = posts.posts[0].author?.id {
 ```
 
 The authenticated client supports BDUSS-only identity validation, full-session
-UID-consistency probes, followed forums, read-only Tieba cloud favorites, authoritative
-per-forum follow/check-in state, confirmed follow/unfollow, and explicit
+UID-consistency probes, followed forums, an account-bound concern feed,
+read-only Tieba cloud favorites, authoritative per-forum follow/check-in state,
+confirmed follow/unfollow, and explicit
 single-forum check-in. Core single-flights equivalent check-in calls
 and serializes conflicting check-in identities for one account and forum. The
 app's Keychain and account-service layers own persistence, credential-rotation
@@ -109,6 +110,10 @@ let sessionAccount = try await authenticatedClient.validateSession(
     credential: sessionCredential
 )
 let cloudFavorites = try await authenticatedClient.getCloudFavorites(
+    credential: sessionCredential,
+    expectedUserID: sessionAccount.userID
+)
+let concern = try await authenticatedClient.getConcernFeed(
     credential: sessionCredential,
     expectedUserID: sessionAccount.userID
 )
@@ -177,6 +182,16 @@ not advertise a usable sign state; it is not permission to attempt a write.
   of at least 11 allows continuation. The App stops an empty page immediately,
   traverses the server pages reached before a refresh, and then permits only one
   additional duplicate-only overlap page.
+- The authenticated concern feed uses protobuf command `309474`, fixed client
+  version `11.10.8.6`, and a random process-local UUID distinct from anonymous
+  personalization. Its protobuf common data carries the full session; the outer
+  multipart carries only `BDUSS`, `_client_version`, `stoken`, `sign`, and the
+  protobuf file, with the expected UID in `client_user_token`. It sends no Cookie
+  or hardware-derived identifier, rejects every redirect, and limits responses
+  to 4 MiB. Refresh uses an empty page tag and a prior server timestamp or zero;
+  load-more preserves that timestamp and returns only a validated advancing
+  opaque cursor. A zero-error login-prompt envelope requires the independent
+  same-UID session probes before it is accepted as an empty page.
 - Requests identify as client type `2` and version `12.64.1.1` by default.
 - Account validation and authenticated read requests use version `22.6.5.1`.
 - Full-session validation signs an HTTPS `/c/s/login` request containing the

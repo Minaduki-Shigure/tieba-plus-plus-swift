@@ -152,7 +152,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
         )
       }
     }
-    let cuid = try validatedAppScopedCUID()
+    let cuid = try validatedConcernCUID()
 
     var common = CommonReq()
     common.clientType = 2
@@ -709,15 +709,25 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     }
   }
 
-  private func validatedAppScopedCUID() throws -> String {
-    let rawValue = configuration.personalizedCUID
+  private func validatedConcernCUID() throws -> String {
+    let rawValue = configuration.concernCUID
     guard
       rawValue.utf8.count == 36,
       let value = UUID(uuidString: rawValue),
       value.uuidString.caseInsensitiveCompare(rawValue) == .orderedSame
     else {
       throw TiebaClientError.invalidArgument(
-        "App-scoped recommendation identifier must be a canonical UUID."
+        "Concern-feed identifier must be a canonical UUID."
+      )
+    }
+    let personalizedValue = UUID(
+      uuidString: configuration.personalizedCUID.trimmingCharacters(
+        in: .whitespacesAndNewlines
+      )
+    )
+    guard personalizedValue != value else {
+      throw TiebaClientError.invalidArgument(
+        "Concern-feed identifier must not reuse the personalized recommendation identifier."
       )
     }
     return value.uuidString.lowercased()

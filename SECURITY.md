@@ -94,6 +94,42 @@ beyond it, at most one additional duplicate-only page may advance before a
 second stops the request chain. Recommendation feedback is a separate server
 write and remains disabled.
 
+The account-bound concern feed requires a complete same-snapshot BDUSS/STOKEN
+session and uses protobuf command `309474` at the fixed HTTPS `tiebac.baidu.com`
+origin. Its candidate compatibility contract places client type/version, a
+separate process-local random UUID, network type, BDUSS, and STOKEN in
+`CommonReq`; the outer multipart body contains only BDUSS, the fixed client
+version, STOKEN, their signature, and the protobuf file. The expected validated
+UID appears only in `client_user_token`. Cookie, Authorization, client ID, IMEI,
+OAID, Android ID, IDFV, model, brand, screen, location, installation time, and
+randomized telemetry fields are forbidden. The concern UUID must never reuse
+the persistent anonymous-personalization UUID or derive from an account,
+credential, or device. Responses are limited to 4 MiB and all redirects are
+rejected.
+
+Concern loading is foreground and explicit-selection only. Constructing or
+preloading its TabView page, starting the app on Personalized, or changing an
+account while the channel is inactive must issue no concern request. A refresh
+uses an empty page tag and the current lease's prior server timestamp or zero;
+load-more uses the exact opaque returned page tag and the same refresh timestamp.
+Both values remain memory-only and are scoped to `userID + sessionRevision`.
+Every request reads that lease before and after transport. Logout, switching
+UIDs, same-UID credential rotation, filter changes, or app restart invalidates
+rows, cursor, and timestamp; a late response cannot repopulate them. A returned
+`has_more` must be zero or one, and a continuing cursor must be bounded,
+control-free, nonempty, and different from the requested cursor. Only valid,
+non-advertising, non-live `recommend_type = 1` threads are exposed, while local
+filtering never alters raw cursor progression.
+
+The endpoint can return HTTP/protobuf success with no threads and a prompt to
+log in. That combined envelope must trigger the existing signed-app plus Web
+same-UID session probe before it can be treated as a legitimate empty snapshot;
+an authentication failure becomes a re-login requirement. Real-device testing
+must still determine the absolute minimum inner/outer credential fields,
+unsigned behavior, empty-account prompt type, expired and cross-account STOKEN
+behavior, cursor replay semantics, and whether reading changes recommendation or
+seen state. CI uses synthetic credentials and never calls this private endpoint.
+
 Read-only cloud favorites require a complete v3 session. They use one signed
 HTTPS POST to `https://tiebac.baidu.com/c/f/post/threadstore` containing exactly
 `BDUSS`, `_client_version`, `offset`, `rn`, `stoken`, `user_id`, and `sign`, the

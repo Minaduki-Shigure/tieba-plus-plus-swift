@@ -12,19 +12,22 @@ public struct TiebaClientConfiguration: Sendable, Hashable {
   public var userAgent: String
   public var requestTimeout: TimeInterval
   public var personalizedCUID: String
+  public var concernCUID: String
 
   public init(
     clientVersion: String = "12.64.1.1",
     authenticatedClientVersion: String = "22.6.5.1",
     userAgent: String = "TiebaPlusPlus/0.56 (iOS)",
     requestTimeout: TimeInterval = 30,
-    personalizedCUID: String = UUID().uuidString.lowercased()
+    personalizedCUID: String = UUID().uuidString.lowercased(),
+    concernCUID: String = UUID().uuidString.lowercased()
   ) {
     self.clientVersion = clientVersion
     self.authenticatedClientVersion = authenticatedClientVersion
     self.userAgent = userAgent
     self.requestTimeout = requestTimeout
     self.personalizedCUID = personalizedCUID
+    self.concernCUID = concernCUID
   }
 }
 

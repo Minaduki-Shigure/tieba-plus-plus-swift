@@ -197,7 +197,7 @@ enum TiebaProtoMapper {
     guard expectedUserID > 0 else {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
-    guard data.hasMore == 0 || data.hasMore == 1 else {
+    guard data.hasMore_p == 0 || data.hasMore_p == 1 else {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
     guard data.reqUnix > 0, data.reqUnix <= UInt64(Int64.max) else {
@@ -207,7 +207,7 @@ enum TiebaProtoMapper {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
 
-    let hasMore = data.hasMore == 1
+    let hasMore = data.hasMore_p == 1
     let nextPageTag: String?
     if hasMore {
       guard

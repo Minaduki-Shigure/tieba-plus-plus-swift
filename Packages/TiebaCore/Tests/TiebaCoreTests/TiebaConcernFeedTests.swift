@@ -14,7 +14,7 @@ final class TiebaConcernFeedTests: XCTestCase {
 
   func testRequestUsesSignedCredentialIsolatedContract() throws {
     let factory = TiebaAuthenticatedRequestFactory(
-      configuration: TiebaClientConfiguration(personalizedCUID: cuid)
+      configuration: TiebaClientConfiguration(concernCUID: cuid)
     )
     let credential = sessionCredential()
     let request = try factory.concernFeed(
@@ -125,11 +125,34 @@ final class TiebaConcernFeedTests: XCTestCase {
         lastRequestUnix: UInt64(Int64.max) + 1
       )
     )
-    let invalidCUIDFactory = TiebaAuthenticatedRequestFactory(
+    let unrelatedInvalidCUIDFactory = TiebaAuthenticatedRequestFactory(
       configuration: TiebaClientConfiguration(personalizedCUID: "not-a-uuid")
     )
+    XCTAssertNoThrow(
+      try unrelatedInvalidCUIDFactory.concernFeed(
+        credential: sessionCredential(), expectedUserID: userID,
+        pageTag: nil, lastRequestUnix: 0
+      )
+    )
+    let invalidConcernCUIDFactory = TiebaAuthenticatedRequestFactory(
+      configuration: TiebaClientConfiguration(concernCUID: "not-a-uuid")
+    )
     XCTAssertThrowsError(
-      try invalidCUIDFactory.concernFeed(
+      try invalidConcernCUIDFactory.concernFeed(
+        credential: sessionCredential(),
+        expectedUserID: userID,
+        pageTag: nil,
+        lastRequestUnix: 0
+      )
+    )
+    let reusedCUIDFactory = TiebaAuthenticatedRequestFactory(
+      configuration: TiebaClientConfiguration(
+        personalizedCUID: " \(cuid.uppercased()) ",
+        concernCUID: cuid
+      )
+    )
+    XCTAssertThrowsError(
+      try reusedCUIDFactory.concernFeed(
         credential: sessionCredential(),
         expectedUserID: userID,
         pageTag: nil,
@@ -151,7 +174,7 @@ final class TiebaConcernFeedTests: XCTestCase {
       item(id: 8),
     ]
     response.data.pageTag = "thread_next"
-    response.data.hasMore = 1
+    response.data.hasMore_p = 1
     response.data.reqUnix = 1_786_269_913
     let transport = ConcernQueueTransport(responses: [
       .init(body: try response.serializedData())
@@ -185,7 +208,7 @@ final class TiebaConcernFeedTests: XCTestCase {
     await assertError(.server(code: 7, message: "denied"), response: serverError)
 
     var invalidFlag = validResponse()
-    invalidFlag.data.hasMore = 2
+    invalidFlag.data.hasMore_p = 2
     await assertError(.invalidAuthenticatedResponse, response: invalidFlag)
 
     var missingCursor = validResponse()
@@ -271,7 +294,7 @@ final class TiebaConcernFeedTests: XCTestCase {
 
   private func factory() -> TiebaAuthenticatedRequestFactory {
     TiebaAuthenticatedRequestFactory(
-      configuration: TiebaClientConfiguration(personalizedCUID: cuid)
+      configuration: TiebaClientConfiguration(concernCUID: cuid)
     )
   }
 
@@ -312,7 +335,7 @@ final class TiebaConcernFeedTests: XCTestCase {
     var response = UserLikeResIdl()
     response.data.threadInfo = [item(id: 1)]
     response.data.pageTag = "next"
-    response.data.hasMore = 1
+    response.data.hasMore_p = 1
     response.data.reqUnix = 1_786_269_913
     return response
   }
@@ -320,7 +343,7 @@ final class TiebaConcernFeedTests: XCTestCase {
   private func loginTipResponse() -> UserLikeResIdl {
     var response = UserLikeResIdl()
     response.data.pageTag = "thread_0"
-    response.data.hasMore = 0
+    response.data.hasMore_p = 0
     response.data.userTips = "登录查看吧友最新贴子~"
     response.data.reqUnix = 1_786_269_913
     response.data.userTipsType = 1

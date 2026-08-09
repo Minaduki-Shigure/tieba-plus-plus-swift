@@ -9,17 +9,18 @@ in `Packages/TiebaCore/Sources/TiebaProto/NOTICE.md`.
 
 Tieba++ is an alpha-stage, native SwiftUI client. Anonymous browsing is the
 current stable focus; account writes remain experimental and require device
-validation. The table below separates what is usable today from what remains
-experimental or unsupported.
+validation. The table below describes the current `main` source; main-only
+features do not reach the public app source until a tagged IPA passes release
+checks.
 
 | Area | Current state |
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, and media preferences |
-| Accounts | Bound Web login, switching, logout, followed forums, read-only Tieba cloud favorites, a foreground ReplyMe/AtMe inbox, per-forum state, and experimental content approval |
+| Accounts | Current `main` supports bound Web login, switching, logout, followed forums, a foreground concern feed and ReplyMe/AtMe inbox, read-only Tieba cloud favorites, per-forum state, and experimental content approval |
 | Server-side writes | Confirmed forum follow/unfollow, check-in, and content approval are in device validation; other writes stay disabled |
-| TiebaLite parity | Anonymous reading and media: about 90–95%; full product scope: about 62–66% |
-| Distribution | Public SideStore/LiveContainer source backed by tested unsigned GitHub Release IPAs |
+| TiebaLite parity | Anonymous reading and media: about 90–95%; full product scope: about 65–68% |
+| Distribution | The public SideStore/LiveContainer source currently serves `v0.59.0-alpha.1` (build 62); later `main` features require a tagged release |
 
 ### Release and validation
 
@@ -28,21 +29,23 @@ experimental or unsupported.
   signed HTTPS AtMe form, paginates in memory, and discards responses when the
   active account lease changes.
 - **Current main source:** Explore now opens on a credential-free personalized
-  thread feed beside the existing hot ranking. It refreshes and paginates with
-  duplicate and stalled-page protection, preserves local filtering and media
-  preferences, and sends only one app-generated random UUID as its stable
-  recommendation-session identifier. Public profiles also expose separate reply
-  history plus read-only following and follower lists.
-  They will not enter the public app source until a tagged IPA passes the
-  release checks.
+  thread feed beside the existing hot ranking. A logged-in account additionally
+  receives an on-demand concern channel; it makes no request until selected,
+  keeps the server snapshot timestamp in memory per exact account session, and
+  rejects stale pages after logout, account switching, or credential rotation.
+  Both feeds preserve local filtering and media preferences. Public profiles
+  also expose separate reply history plus read-only following and follower lists.
+  These main-only changes will not enter the public app source until a tagged
+  IPA passes the release checks.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
   XcodeGen 2.45.4 or newer.
 - **Automated checks:** GitHub Actions runs package tests and an unsigned
   simulator build, validates the app source, and verifies its public IPA hash.
   Authenticated flows never use real credentials in CI. Login binding, cloud
-  favorites, and inbox contracts are covered by fixtures, while successful
-  private-list reads, forum follow/unfollow, check-in, and topic/post/subpost
-  content approval remain physical-device validation features in this alpha.
+  favorites, concern-feed, and inbox contracts are covered by fixtures, while
+  successful private-list reads, forum follow/unfollow, check-in, and
+  topic/post/subpost content approval remain physical-device validation features
+  in this alpha.
 - **App source:** Add [`sidestore-source.json`](https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json)
   to LiveContainer or SideStore. Its latest IPA is published only after the tag's
   package, anonymous integration, and simulator tests all pass.
@@ -56,9 +59,12 @@ experimental or unsupported.
 
 ### Discovery and forums
 
-- **Discovery:** A pageable anonymous personalized feed, post rankings, hot-topic
+- **Discovery:** On current `main`, a pageable anonymous personalized feed, an
+  explicitly selected account-bound concern feed, post rankings, hot-topic
   previews, category snapshots, topic details, related forums, and cursor-aware
-  topic pagination are available. Recommendation dislike feedback remains disabled.
+  topic pagination are available. The personalized and concern feeds are not in
+  the public `v0.59.0-alpha.1` IPA. Recommendation dislike feedback remains
+  disabled.
 - **Search:** Forum, thread, and user search are separated by category. Global
   and per-forum post search provide the supported sort and content filters,
   local history, and optional credential-free suggestions.
@@ -138,6 +144,13 @@ experimental or unsupported.
   and opens the exact reply without trusting the ambiguous legacy `quote_pid`
   field. No background polling, badge clearing, or explicit mark-read request is
   implemented.
+- **Concern feed:** Logged-in Explore adds a foreground-only concern channel.
+  Page-style preloading cannot start it: the request begins only after the user
+  selects the channel. Refresh replaces the snapshot; load-more preserves the
+  same opaque server timestamp and cursor, and all retained state is bound to
+  `userID + sessionRevision` in memory. The request uses a separate process-local
+  random UUID and no hardware-derived identifier. Successful retrieval and the
+  exact minimum signed-field set still require physical-device validation.
 - **Tieba cloud favorites:** The account page has a separate, read-only cloud
   favorites list with refresh, offset pagination, saved-post navigation, deleted
   thread state, and account-lease isolation. It never uploads, merges, or deletes
@@ -152,9 +165,10 @@ experimental or unsupported.
   persisted. Content approval's mandatory `cuid` is a random
   client-lifetime Galaxy2 identifier (`32HEX|V` plus an 8-character Helios
   checksum); it is not hardware-derived or persisted. Personalized discovery
-  separately uses one nonsecret random UUID stored in local preferences. It is
-  not derived from hardware, IDFV, an account, or a credential and is sent only
-  in that anonymous feed's Protobuf `cuid` field.
+  separately uses one nonsecret random UUID stored in local preferences. The
+  authenticated concern feed uses a different random UUID that lasts only for
+  the current process. Neither value is derived from hardware, IDFV, an account,
+  or a credential, and the two feeds never share an identifier.
 - **Write safety:** Each write is bound to the expected account UID and forum.
   Follow and check-in operations for the same forum cannot overlap, identical
   concurrent forum operations are coalesced, and both Core and the account
@@ -173,10 +187,11 @@ experimental or unsupported.
   moderation remain unavailable until their request contracts and recovery
   paths have been validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
-  comparison, protocol constraints, and next milestones. The current weighted
-  end-to-end audit estimates 90–95% coverage of anonymous reading and media, or
-  62–66% of the full TiebaLite product scope once the remaining concern feed, account writes,
-  creation, background messaging, and moderation are included.
+  comparison, auditable weighting, protocol constraints, and next milestones.
+  The current `main` audit totals 65–68 of 100 weighted points; its anonymous
+  reading and media subtotal is about 90–95%. The largest remaining gaps are
+  cloud-favorite mutations, post/reply creation, background unread handling,
+  broader settings, and moderation.
 
 ## Architecture
 

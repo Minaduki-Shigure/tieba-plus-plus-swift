@@ -286,6 +286,9 @@ final class ConcernFeedViewModel: ObservableObject {
     clearSnapshot()
     needsReloadAfterActivation = true
     state = .idle
+    if isActive {
+      startRequest(.replacement)
+    }
   }
 
   private func clearSnapshot() {

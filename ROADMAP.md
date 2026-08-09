@@ -4,6 +4,31 @@ Tieba++ is an independent Swift application implementation. TiebaLite is used as
 a product reference for expected workflows; the only adapted source material is
 the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
 
+## Progress audit
+
+The estimate below measures end-user workflow scope in the current `main`
+source, not line count or endpoint count. Full credit requires an end-to-end
+implementation with automated contract coverage; a substantial workflow that
+still needs disposable-account or physical-device validation receives partial
+credit. Ranges reflect remaining edge-case uncertainty. The public app source is
+versioned separately and currently serves `v0.59.0-alpha.1` (build 62).
+
+| Capability area | Weight | Credited points | Current basis |
+| --- | ---: | ---: | --- |
+| Anonymous discovery, search, and forums | 20 | 18–19 | Core browsing, ranking, recommendations, categories, and search are implemented; feedback and a few niche discovery paths remain |
+| Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
+| Media rendering, playback, and export | 15 | 13–14 | Images, galleries, video, voice, sharing, saving, and media policy are implemented; broader format and cache parity remain |
+| Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, and media preferences are implemented; TiebaLite's wider settings and customization surface remains |
+| Account, session, and private read flows | 15 | 8 | Login, switching, followed forums, cloud favorites, inbox, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
+| Server writes, creation, and social actions | 15 | 2 | Follow/unfollow, check-in, and approval have guarded implementations; cloud-favorite mutations, posting, replying, and most reactions remain unavailable |
+| Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
+| **Total** | **100** | **65–68** | Current full-product estimate |
+
+The first three rows form the anonymous reading-and-media subtotal: 49–52 of 55
+points, or roughly 90–95%. Concern raises the private-read area but receives only
+partial credit until its minimum request fields, empty/expired envelopes, cursor
+replay, and possible seen-state effects are validated on a disposable account.
+
 ## Available
 
 This section describes the current `main` source. A newly implemented item is
@@ -15,6 +40,9 @@ the source metadata is updated to that tested IPA.
 - Anonymous personalized thread feed as the default Explore channel, with pull
   refresh, integer pagination, duplicate and stalled-page termination, local
   filtering, and one app-scoped random recommendation UUID
+- Foreground account-bound concern feed shown only for a saved account, with
+  explicit-selection activation, opaque cursor pagination, per-session in-memory
+  timestamps, local filtering, and UID-plus-session-revision isolation
 - Ranked anonymous hot-topic discovery with images and discussion counts
 - Hot-topic details with related forums and cursor-aware thread pagination
 - Categorized anonymous forum, thread, and user search
@@ -135,8 +163,9 @@ the source metadata is updated to that tested IPA.
    paths, followed by account switching and follow recovery checks
 3. Real-device validation of the minimal HTTPS ReplyMe and AtMe requests,
    including whether opening a list changes server unread state
-4. Minimal HTTPS account-bound concern feed with opaque cursor validation,
-   per-session request timestamps, and account-switch result isolation
+4. Real-device validation of the account-bound concern request, including the
+   signed-field deletion matrix, empty-account and expired-session envelopes,
+   cursor replay, and whether list retrieval changes recommendation state
 5. Explicit cloud-favorite add/remove and saved-position updates with fresh
    state reconciliation and no retry after an uncertain write
 6. Experimental plain-text reply workflows behind explicit risk confirmation,
@@ -166,6 +195,21 @@ parent as local reading progress; a missing target retains an explicit owning-
 thread fallback. The inbox does not poll in the background, clear a local badge,
 or send a mark-read request. Whether list retrieval itself has an implicit
 server-side read effect remains a physical-device validation item.
+
+The concern feed uses HTTPS protobuf command `309474` only after the user selects
+its Explore channel; page-style TabView preloading and inactive account changes
+cannot start it. Its minimal candidate request carries the full session in the
+protobuf common data and a signed outer multipart credential set, one expected
+UID header, and a separate process-local random UUID. It carries no Cookie or
+hardware-derived identifier. A successful refresh binds the returned opaque
+page tag and request timestamp to the exact `userID + sessionRevision` lease.
+Load-more keeps that timestamp unchanged, honors the raw `has_more` flag, and
+stops on an empty, stalled, or duplicate-only page until explicit continuation.
+Logout, account switching, same-UID re-login, and app restart discard the
+frontier. A zero-error response that asks the user to log in is not accepted as
+an ordinary empty page until the existing two-origin session probe confirms the
+same UID. Live success, minimum-field elimination, and possible server-side
+seen-state changes remain real-device validation items.
 
 New Web logins capture one structurally valid BDUSS or BDUSS_BFESS and one
 STOKEN from the same ephemeral Cookie-store snapshot. The app checks the pair
