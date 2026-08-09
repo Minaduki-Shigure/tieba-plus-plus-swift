@@ -67,8 +67,15 @@ final class ThreadImageGalleryViewModelTests: XCTestCase {
       guard let selectedID = state.selectedID else { return state.occurrences.isEmpty }
       return state.occurrences.contains(where: { $0.id == selectedID })
     })
+    XCTAssertTrue(publishedStates.allSatisfy {
+      $0.localToRemoteIDMigrations[local[1].id] == $0.selectedID
+    })
     XCTAssertEqual(viewModel.selectedID, selectedRemote.id)
     XCTAssertEqual(viewModel.selectedURL, selectedRemote.url)
+    XCTAssertEqual(
+      viewModel.galleryState.localToRemoteIDMigrations,
+      [local[1].id: selectedRemote.id]
+    )
     XCTAssertTrue(viewModel.occurrences.contains(repeatedAtFive))
     XCTAssertTrue(viewModel.occurrences.contains(repeatedAtSeven))
     XCTAssertNotEqual(repeatedAtFive.id, repeatedAtSeven.id)
@@ -98,10 +105,45 @@ final class ThreadImageGalleryViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.selectedID, local[1].id)
     XCTAssertEqual(viewModel.selectedURL, local[1].url)
     XCTAssertEqual(viewModel.totalCount, local.count)
+    XCTAssertTrue(viewModel.galleryState.localToRemoteIDMigrations.isEmpty)
     XCTAssertFalse(viewModel.canLoadPrevious)
     XCTAssertFalse(viewModel.canLoadNext)
     let requestCount = await service.requestCount()
     XCTAssertEqual(requestCount, 1)
+  }
+
+  func testAmbiguousLocalBootstrapMatchKeepsEntireLocalSnapshotAndSelection() async {
+    let first = GalleryFixtures.local(
+      1,
+      pictureID: "repeated",
+      postID: 50,
+      contentOffset: 0
+    )
+    let selected = GalleryFixtures.local(
+      2,
+      pictureID: "repeated",
+      postID: 50,
+      contentOffset: 1
+    )
+    let remote = GalleryFixtures.remote(4, pictureID: "repeated", postID: 50)
+    let service = ScriptedThreadPictureGalleryService([
+      .value(GalleryFixtures.page([remote], totalCount: 10))
+    ])
+    let viewModel = ThreadImageGalleryViewModel(
+      context: GalleryFixtures.context(),
+      localOccurrences: [first, selected],
+      selectedID: selected.id,
+      service: service
+    )
+
+    await viewModel.waitForCurrentLoads()
+
+    XCTAssertEqual(viewModel.occurrences, [first, selected])
+    XCTAssertEqual(viewModel.selectedID, selected.id)
+    XCTAssertEqual(viewModel.totalCount, 2)
+    XCTAssertTrue(viewModel.galleryState.localToRemoteIDMigrations.isEmpty)
+    XCTAssertFalse(viewModel.canLoadPrevious)
+    XCTAssertFalse(viewModel.canLoadNext)
   }
 
   func testBootstrapFailureRetainsLocalSnapshotAndCanRetry() async throws {
@@ -161,6 +203,10 @@ final class ThreadImageGalleryViewModelTests: XCTestCase {
     )
 
     await viewModel.waitForCurrentLoads()
+    XCTAssertEqual(
+      viewModel.galleryState.localToRemoteIDMigrations,
+      [local.id: six.id]
+    )
     viewModel.select(five.id)
     let previousSelectedID = viewModel.selectedID
     let previousSelectedURL = viewModel.selectedURL
@@ -168,6 +214,10 @@ final class ThreadImageGalleryViewModelTests: XCTestCase {
 
     XCTAssertEqual(viewModel.selectedID, previousSelectedID)
     XCTAssertEqual(viewModel.selectedURL, previousSelectedURL)
+    XCTAssertEqual(
+      viewModel.galleryState.localToRemoteIDMigrations,
+      [local.id: six.id]
+    )
     XCTAssertEqual(viewModel.selectedIndex, 2)
     XCTAssertEqual(viewModel.occurrences.compactMap(\.overallIndex), [3, 4, 5, 6, 7])
 
@@ -178,6 +228,10 @@ final class ThreadImageGalleryViewModelTests: XCTestCase {
 
     XCTAssertEqual(viewModel.selectedID, nextSelectedID)
     XCTAssertEqual(viewModel.selectedURL, nextSelectedURL)
+    XCTAssertEqual(
+      viewModel.galleryState.localToRemoteIDMigrations,
+      [local.id: six.id]
+    )
     XCTAssertEqual(viewModel.occurrences.compactMap(\.overallIndex), [3, 4, 5, 6, 7, 8, 9])
   }
 
@@ -208,6 +262,10 @@ final class ThreadImageGalleryViewModelTests: XCTestCase {
 
     await viewModel.waitForCurrentLoads()
     XCTAssertTrue(viewModel.occurrences.contains(laterLocal))
+    XCTAssertEqual(
+      viewModel.galleryState.localToRemoteIDMigrations,
+      [firstLocal.id: firstRemote.id]
+    )
 
     viewModel.select(laterLocal.id)
     await viewModel.waitForCurrentLoads()
@@ -215,6 +273,13 @@ final class ThreadImageGalleryViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.selectedID, laterRemote.id)
     XCTAssertEqual(viewModel.selectedURL, laterRemote.url)
     XCTAssertEqual(viewModel.selectedDisplayIndex, 3)
+    XCTAssertEqual(
+      viewModel.galleryState.localToRemoteIDMigrations,
+      [
+        firstLocal.id: firstRemote.id,
+        laterLocal.id: laterRemote.id,
+      ]
+    )
     XCTAssertFalse(viewModel.occurrences.contains(laterLocal))
     XCTAssertEqual(viewModel.occurrences.filter { $0.pictureID == laterLocal.pictureID }.count, 1)
   }
@@ -329,6 +394,10 @@ final class ThreadImageGalleryViewModelTests: XCTestCase {
     try await galleryWaitUntil { viewModel.previousError == "previous failed" }
     XCTAssertFalse(viewModel.isLoadingPrevious)
     XCTAssertTrue(viewModel.occurrences.contains(where: { $0.overallIndex == 10 }))
+    XCTAssertEqual(
+      viewModel.galleryState.localToRemoteIDMigrations,
+      [local.id: six.id]
+    )
 
     viewModel.retryPrevious()
     await viewModel.waitForCurrentLoads()
@@ -472,10 +541,15 @@ final class ThreadImageGalleryViewModelTests: XCTestCase {
       localOccurrences: [newLocal],
       selectedID: newLocal.id
     )
+    XCTAssertTrue(viewModel.galleryState.localToRemoteIDMigrations.isEmpty)
     try await galleryWaitUntil { await service.requestCount() == 2 }
     await viewModel.waitForCurrentLoads()
     XCTAssertEqual(viewModel.context.threadID, 2)
     XCTAssertEqual(viewModel.selectedID, newRemote.id)
+    XCTAssertEqual(
+      viewModel.galleryState.localToRemoteIDMigrations,
+      [newLocal.id: newRemote.id]
+    )
 
     let resumedOldContext = await service.resume(
       id: 1,
@@ -488,6 +562,10 @@ final class ThreadImageGalleryViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.context.threadID, 2)
     XCTAssertEqual(viewModel.occurrences, [newRemote])
     XCTAssertEqual(viewModel.selectedID, newRemote.id)
+    XCTAssertEqual(
+      viewModel.galleryState.localToRemoteIDMigrations,
+      [newLocal.id: newRemote.id]
+    )
   }
 
   func testDisablingRemoteLoadingCancelsWorkRestoresOnlyLocalAndCanReenable() async throws {
@@ -509,6 +587,7 @@ final class ThreadImageGalleryViewModelTests: XCTestCase {
     XCTAssertFalse(viewModel.isRemoteLoadingEnabled)
     XCTAssertEqual(viewModel.occurrences, [local])
     XCTAssertEqual(viewModel.selectedID, local.id)
+    XCTAssertTrue(viewModel.galleryState.localToRemoteIDMigrations.isEmpty)
     XCTAssertFalse(viewModel.isBootstrapping)
 
     let resumedDisabledRequest = await service.resume(
@@ -520,12 +599,167 @@ final class ThreadImageGalleryViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.occurrences, [local])
 
     viewModel.setRemoteLoadingEnabled(true)
+    XCTAssertEqual(viewModel.occurrences, [local])
+    XCTAssertTrue(viewModel.galleryState.localToRemoteIDMigrations.isEmpty)
     await viewModel.waitForCurrentLoads()
     XCTAssertTrue(viewModel.isRemoteLoadingEnabled)
     XCTAssertEqual(viewModel.occurrences, [remote])
     XCTAssertEqual(viewModel.selectedID, remote.id)
+    XCTAssertEqual(
+      viewModel.galleryState.localToRemoteIDMigrations,
+      [local.id: remote.id]
+    )
     let requestCount = await service.requestCount()
     XCTAssertEqual(requestCount, 2)
+
+    viewModel.setRemoteLoadingEnabled(false)
+    XCTAssertEqual(viewModel.occurrences, [local])
+    XCTAssertEqual(viewModel.selectedID, local.id)
+    XCTAssertTrue(viewModel.galleryState.localToRemoteIDMigrations.isEmpty)
+  }
+
+  func testRemoteResetDoesNotInferALocalSelectionFromAnUnmappedRepeatedPair() async {
+    let firstLocal = GalleryFixtures.local(
+      1,
+      pictureID: "repeated",
+      postID: 50,
+      contentOffset: 0
+    )
+    let fallbackLocal = GalleryFixtures.local(2)
+    let firstRemote = GalleryFixtures.remote(1, pictureID: "repeated", postID: 50)
+    let repeatedRemote = GalleryFixtures.remote(2, pictureID: "repeated", postID: 50)
+    let service = ScriptedThreadPictureGalleryService([
+      .value(GalleryFixtures.page([firstRemote], totalCount: 2)),
+      .value(GalleryFixtures.page([firstRemote, repeatedRemote], totalCount: 2)),
+    ])
+    let viewModel = ThreadImageGalleryViewModel(
+      context: GalleryFixtures.context(),
+      localOccurrences: [firstLocal, fallbackLocal],
+      selectedID: firstLocal.id,
+      service: service
+    )
+
+    await viewModel.waitForCurrentLoads()
+    XCTAssertEqual(
+      viewModel.galleryState.localToRemoteIDMigrations,
+      [firstLocal.id: firstRemote.id]
+    )
+
+    viewModel.select(fallbackLocal.id)
+    await viewModel.waitForCurrentLoads()
+    XCTAssertTrue(viewModel.occurrences.contains(repeatedRemote))
+    viewModel.select(repeatedRemote.id)
+
+    viewModel.setRemoteLoadingEnabled(false)
+
+    XCTAssertEqual(viewModel.occurrences, [firstLocal, fallbackLocal])
+    XCTAssertEqual(viewModel.selectedID, fallbackLocal.id)
+    XCTAssertTrue(viewModel.galleryState.localToRemoteIDMigrations.isEmpty)
+  }
+
+  func testContextResetClearsCommittedMigrationsBeforeReplacementBootstrap() async throws {
+    let oldLocal = GalleryFixtures.local(1)
+    let oldRemote = GalleryFixtures.remote(
+      1,
+      pictureID: oldLocal.pictureID,
+      postID: oldLocal.postID
+    )
+    let newLocal = GalleryFixtures.local(2, postID: 202)
+    let newRemote = GalleryFixtures.remote(
+      1,
+      pictureID: newLocal.pictureID,
+      postID: newLocal.postID
+    )
+    let service = ScriptedThreadPictureGalleryService([
+      .value(GalleryFixtures.page([oldRemote], totalCount: 1)),
+      .suspended(1),
+    ])
+    let viewModel = ThreadImageGalleryViewModel(
+      context: GalleryFixtures.context(threadID: 1),
+      localOccurrences: [oldLocal],
+      selectedID: oldLocal.id,
+      service: service
+    )
+    await viewModel.waitForCurrentLoads()
+    XCTAssertEqual(
+      viewModel.galleryState.localToRemoteIDMigrations,
+      [oldLocal.id: oldRemote.id]
+    )
+
+    viewModel.updateContext(
+      GalleryFixtures.context(threadID: 2),
+      localOccurrences: [newLocal],
+      selectedID: newLocal.id
+    )
+    try await galleryWaitUntil { await service.requestCount() == 2 }
+
+    XCTAssertEqual(viewModel.occurrences, [newLocal])
+    XCTAssertEqual(viewModel.selectedID, newLocal.id)
+    XCTAssertTrue(viewModel.galleryState.localToRemoteIDMigrations.isEmpty)
+
+    let resumed = await service.resume(
+      id: 1,
+      returning: GalleryFixtures.page([newRemote], totalCount: 1)
+    )
+    XCTAssertTrue(resumed)
+    await viewModel.waitForCurrentLoads()
+    XCTAssertEqual(
+      viewModel.galleryState.localToRemoteIDMigrations,
+      [newLocal.id: newRemote.id]
+    )
+  }
+
+  func testLocalSnapshotResetClearsCommittedMigrationsInTheSameContext() async throws {
+    let oldLocal = GalleryFixtures.local(1)
+    let oldRemote = GalleryFixtures.remote(
+      1,
+      pictureID: oldLocal.pictureID,
+      postID: oldLocal.postID
+    )
+    let newLocal = GalleryFixtures.local(2)
+    let newRemote = GalleryFixtures.remote(
+      1,
+      pictureID: newLocal.pictureID,
+      postID: newLocal.postID
+    )
+    let service = ScriptedThreadPictureGalleryService([
+      .value(GalleryFixtures.page([oldRemote], totalCount: 1)),
+      .suspended(1),
+    ])
+    let context = GalleryFixtures.context()
+    let viewModel = ThreadImageGalleryViewModel(
+      context: context,
+      localOccurrences: [oldLocal],
+      selectedID: oldLocal.id,
+      service: service
+    )
+    await viewModel.waitForCurrentLoads()
+    XCTAssertEqual(
+      viewModel.galleryState.localToRemoteIDMigrations,
+      [oldLocal.id: oldRemote.id]
+    )
+
+    viewModel.updateContext(
+      context,
+      localOccurrences: [newLocal],
+      selectedID: newLocal.id
+    )
+    try await galleryWaitUntil { await service.requestCount() == 2 }
+
+    XCTAssertEqual(viewModel.occurrences, [newLocal])
+    XCTAssertEqual(viewModel.selectedID, newLocal.id)
+    XCTAssertTrue(viewModel.galleryState.localToRemoteIDMigrations.isEmpty)
+
+    let resumed = await service.resume(
+      id: 1,
+      returning: GalleryFixtures.page([newRemote], totalCount: 1)
+    )
+    XCTAssertTrue(resumed)
+    await viewModel.waitForCurrentLoads()
+    XCTAssertEqual(
+      viewModel.galleryState.localToRemoteIDMigrations,
+      [newLocal.id: newRemote.id]
+    )
   }
 
   func testCancelRejectsLateResponseAndLoadIfNeededStartsFreshBootstrap() async throws {
@@ -550,6 +784,10 @@ final class ThreadImageGalleryViewModelTests: XCTestCase {
     try await galleryWaitUntil { await service.requestCount() == 2 }
     await viewModel.waitForCurrentLoads()
     XCTAssertEqual(viewModel.selectedID, remote.id)
+    XCTAssertEqual(
+      viewModel.galleryState.localToRemoteIDMigrations,
+      [local.id: remote.id]
+    )
 
     let resumedCanceledRequest = await service.resume(
       id: 1,
@@ -561,6 +799,10 @@ final class ThreadImageGalleryViewModelTests: XCTestCase {
     await Task.yield()
     XCTAssertEqual(viewModel.occurrences, [remote])
     XCTAssertEqual(viewModel.selectedID, remote.id)
+    XCTAssertEqual(
+      viewModel.galleryState.localToRemoteIDMigrations,
+      [local.id: remote.id]
+    )
   }
 
   func testEmptyLocalGalleryAndDisabledModeNeverRequestOrIndexEmptyCollection() async {
@@ -588,6 +830,47 @@ final class ThreadImageGalleryViewModelTests: XCTestCase {
     XCTAssertTrue(emptyViewModel.occurrences.isEmpty)
     XCTAssertNil(emptyViewModel.selectedID)
     XCTAssertEqual(disabledViewModel.occurrences, [local])
+    let requestCount = await service.requestCount()
+    XCTAssertEqual(requestCount, 0)
+  }
+
+  func testViewerContextRevisionChangesOnlyAtHardIdentityBoundaries() async {
+    let service = ScriptedThreadPictureGalleryService()
+    let local = [GalleryFixtures.local(1), GalleryFixtures.local(2)]
+    let firstContext = ThreadPictureGalleryContext(
+      forumID: 0,
+      forumName: "",
+      threadID: 1
+    )
+    let secondContext = ThreadPictureGalleryContext(
+      forumID: 0,
+      forumName: "",
+      threadID: 2
+    )
+    let viewModel = ThreadImageGalleryViewModel(
+      context: firstContext,
+      localOccurrences: local,
+      selectedID: local[0].id,
+      isRemoteLoadingEnabled: false,
+      service: service
+    )
+
+    XCTAssertEqual(viewModel.galleryState.viewerContextRevision, 0)
+    viewModel.select(local[1].id)
+    XCTAssertEqual(viewModel.galleryState.viewerContextRevision, 0)
+
+    viewModel.setRemoteLoadingEnabled(true)
+    XCTAssertEqual(viewModel.galleryState.viewerContextRevision, 0)
+    viewModel.setRemoteLoadingEnabled(false)
+    XCTAssertEqual(viewModel.galleryState.viewerContextRevision, 1)
+
+    viewModel.updateContext(
+      secondContext,
+      localOccurrences: local,
+      selectedID: local[1].id
+    )
+    XCTAssertEqual(viewModel.galleryState.viewerContextRevision, 2)
+    XCTAssertEqual(viewModel.occurrences.map(\.id), local.map(\.id))
     let requestCount = await service.requestCount()
     XCTAssertEqual(requestCount, 0)
   }

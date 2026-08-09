@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import XCTest
 
 @testable import TiebaPlusPlus
@@ -275,6 +276,85 @@ final class ImageGalleryTests: XCTestCase {
     XCTAssertTrue(snapshot.retainingIDs(around: nil).isEmpty)
   }
 
+  func testIDMigrationValidatesRetiredSourcesExistingTargetsAndUniqueDestinations() {
+    let firstSource = ImageGalleryItem.ID.local(postID: 1, contentOffset: 0)
+    let secondSource = ImageGalleryItem.ID.local(postID: 1, contentOffset: 1)
+    let retainedSource = ImageGalleryItem.ID.local(postID: 1, contentOffset: 2)
+    let target = ImageGalleryItem.ID.remote(
+      overallIndex: 1,
+      pictureID: "target",
+      postID: 1
+    )
+    let missingTarget = ImageGalleryItem.ID.remote(
+      overallIndex: 2,
+      pictureID: "missing",
+      postID: 1
+    )
+
+    let conflicting = ImageGalleryItemIDMigration([
+      firstSource: target,
+      secondSource: target,
+    ]).normalized(for: [target])
+    XCTAssertTrue(conflicting.destinations.isEmpty)
+
+    let invalidEndpoints = ImageGalleryItemIDMigration([
+      firstSource: missingTarget,
+      retainedSource: target,
+    ]).normalized(for: [retainedSource, target])
+    XCTAssertTrue(invalidEndpoints.destinations.isEmpty)
+  }
+
+  func testPagerUpdateComposesDeltaMigrationsAndLatestCumulativeSourceWins() throws {
+    let localID = ImageGalleryItem.ID.local(postID: 1, contentOffset: 0)
+    let intermediateID = ImageGalleryItem.ID.remote(
+      overallIndex: 1,
+      pictureID: "intermediate",
+      postID: 1
+    )
+    let finalID = ImageGalleryItem.ID.remote(
+      overallIndex: 2,
+      pictureID: "final",
+      postID: 1
+    )
+    let cumulativeID = ImageGalleryItem.ID.remote(
+      overallIndex: 3,
+      pictureID: "cumulative",
+      postID: 1
+    )
+    let intermediate = ImageGalleryPagerUpdate(
+      snapshot: ImageGalleryPagerSnapshot(
+        items: [try item(id: intermediateID, value: 1)],
+        requestedSelection: intermediateID
+      ),
+      idMigrations: [localID: intermediateID],
+      accessibilityPageDescriptions: [intermediateID: "intermediate"]
+    ).normalized()
+    let final = ImageGalleryPagerUpdate(
+      snapshot: ImageGalleryPagerSnapshot(
+        items: [try item(id: finalID, value: 2)],
+        requestedSelection: finalID
+      ),
+      idMigrations: [intermediateID: finalID],
+      accessibilityPageDescriptions: [finalID: "final"]
+    )
+
+    let composed = intermediate.merging(final)
+    XCTAssertEqual(composed.migration.destinations, [localID: finalID])
+    XCTAssertEqual(composed.accessibilityPageDescriptions, [finalID: "final"])
+    XCTAssertEqual(composed.normalized(), composed)
+
+    let cumulative = ImageGalleryPagerUpdate(
+      snapshot: ImageGalleryPagerSnapshot(
+        items: [try item(id: cumulativeID, value: 3)],
+        requestedSelection: cumulativeID
+      ),
+      idMigrations: [localID: cumulativeID],
+      accessibilityPageDescriptions: [cumulativeID: "cumulative"]
+    )
+    let overridden = composed.merging(cumulative)
+    XCTAssertEqual(overridden.migration.destinations, [localID: cumulativeID])
+  }
+
   func testInteractiveTransitionKeepsNewerSelectionRequestAuthoritative() throws {
     let first = try item(1)
     let second = try item(2)
@@ -331,6 +411,81 @@ final class ImageGalleryTests: XCTestCase {
     )
   }
 
+  func testInteractiveTransitionResolvesSelectionsInMigratedIDNamespace() throws {
+    let localFirst = ImageGalleryItem.ID.local(postID: 1, contentOffset: 0)
+    let localSecond = ImageGalleryItem.ID.local(postID: 1, contentOffset: 1)
+    let remoteFirst = ImageGalleryItem.ID.remote(
+      overallIndex: 1,
+      pictureID: "first",
+      postID: 1
+    )
+    let remoteSecond = ImageGalleryItem.ID.remote(
+      overallIndex: 2,
+      pictureID: "second",
+      postID: 1
+    )
+    let update = ImageGalleryPagerUpdate(
+      snapshot: ImageGalleryPagerSnapshot(
+        items: [
+          try item(id: remoteFirst, value: 1),
+          try item(id: remoteSecond, value: 2),
+        ],
+        requestedSelection: remoteFirst
+      ),
+      idMigrations: [
+        localFirst: remoteFirst,
+        localSecond: remoteSecond,
+      ],
+      accessibilityPageDescriptions: [:]
+    ).normalized()
+
+    XCTAssertEqual(
+      ImageGalleryInteractiveTransitionPolicy.resolve(
+        completed: true,
+        pendingUpdate: update,
+        startingSelection: localFirst,
+        visibleSelection: localSecond
+      ),
+      ImageGalleryInteractiveTransitionResolution(
+        selectionToPublish: remoteSecond,
+        preferredVisibleSelection: remoteSecond
+      )
+    )
+    XCTAssertEqual(
+      ImageGalleryInteractiveTransitionPolicy.resolve(
+        completed: false,
+        pendingUpdate: update,
+        startingSelection: localFirst,
+        visibleSelection: localFirst
+      ),
+      ImageGalleryInteractiveTransitionResolution(
+        selectionToPublish: nil,
+        preferredVisibleSelection: remoteFirst
+      )
+    )
+
+    let newerSelection = ImageGalleryPagerUpdate(
+      snapshot: ImageGalleryPagerSnapshot(
+        items: update.snapshot.items,
+        requestedSelection: remoteSecond
+      ),
+      idMigrations: update.migration.destinations,
+      accessibilityPageDescriptions: [:]
+    ).normalized()
+    XCTAssertEqual(
+      ImageGalleryInteractiveTransitionPolicy.resolve(
+        completed: true,
+        pendingUpdate: newerSelection,
+        startingSelection: localFirst,
+        visibleSelection: localSecond
+      ),
+      ImageGalleryInteractiveTransitionResolution(
+        selectionToPublish: nil,
+        preferredVisibleSelection: nil
+      )
+    )
+  }
+
   func testAccessibilityDescriptionsUseRemoteAndSelectedGlobalPositions() throws {
     let local = try item(1)
     let remote = ImageGalleryItem(
@@ -377,6 +532,157 @@ final class ImageGalleryTests: XCTestCase {
     XCTAssertEqual(store.retainedStateCount, 1)
   }
 
+  @MainActor
+  func testZoomStateMigrationPreservesLRUAndLetsExistingDestinationWin() throws {
+    let source = try item(1)
+    let destination = try item(2)
+    let other = try item(3)
+    let newest = try item(4)
+    let sourceState = ImageGalleryZoomState(scale: 2, offset: .zero)
+    let destinationState = ImageGalleryZoomState(scale: 3, offset: .zero)
+    let otherState = ImageGalleryZoomState(scale: 4, offset: .zero)
+    let migration = ImageGalleryItemIDMigration([source.id: destination.id])
+      .normalized(for: [destination.id, other.id, newest.id])
+
+    let targetWinsStore = ImageGalleryZoomStateStore(maximumRetainedStates: 2)
+    targetWinsStore.update(sourceState, for: source.id)
+    targetWinsStore.update(destinationState, for: destination.id)
+    targetWinsStore.migrate(migration)
+    targetWinsStore.retainOnly([destination.id])
+    XCTAssertEqual(targetWinsStore.state(for: source.id), .identity)
+    XCTAssertEqual(targetWinsStore.state(for: destination.id), destinationState)
+    XCTAssertEqual(targetWinsStore.retainedStateCount, 1)
+
+    let visibleIdentityTargetStore = ImageGalleryZoomStateStore(maximumRetainedStates: 2)
+    visibleIdentityTargetStore.update(sourceState, for: source.id)
+    visibleIdentityTargetStore.migrate(migration, destinationWins: [destination.id])
+    visibleIdentityTargetStore.retainOnly([destination.id])
+    XCTAssertEqual(visibleIdentityTargetStore.state(for: source.id), .identity)
+    XCTAssertEqual(visibleIdentityTargetStore.state(for: destination.id), .identity)
+    XCTAssertEqual(visibleIdentityTargetStore.retainedStateCount, 0)
+
+    let lruStore = ImageGalleryZoomStateStore(maximumRetainedStates: 2)
+    lruStore.update(sourceState, for: source.id)
+    lruStore.update(otherState, for: other.id)
+    lruStore.migrate(migration)
+    lruStore.retainOnly([destination.id, other.id, newest.id])
+    lruStore.update(ImageGalleryZoomState(scale: 5, offset: .zero), for: newest.id)
+    XCTAssertEqual(lruStore.state(for: destination.id), .identity)
+    XCTAssertEqual(lruStore.state(for: other.id), otherState)
+    XCTAssertEqual(lruStore.retainedStateCount, 2)
+
+    let idempotentStore = ImageGalleryZoomStateStore(maximumRetainedStates: 2)
+    idempotentStore.update(sourceState, for: source.id)
+    idempotentStore.migrate(migration)
+    idempotentStore.retainOnly([destination.id])
+    idempotentStore.migrate(migration)
+    idempotentStore.retainOnly([destination.id])
+    XCTAssertEqual(idempotentStore.state(for: destination.id), sourceState)
+    XCTAssertEqual(idempotentStore.retainedStateCount, 1)
+  }
+
+  @MainActor
+  func testCoordinatorDefersMigrationUntilInteractiveTransitionFinishes() async throws {
+    let localFirstID = ImageGalleryItem.ID.local(postID: 1, contentOffset: 0)
+    let localSecondID = ImageGalleryItem.ID.local(postID: 1, contentOffset: 1)
+    let remoteFirstID = ImageGalleryItem.ID.remote(
+      overallIndex: 1,
+      pictureID: "first",
+      postID: 1
+    )
+    let remoteSecondID = ImageGalleryItem.ID.remote(
+      overallIndex: 2,
+      pictureID: "second",
+      postID: 1
+    )
+    let localItems = [
+      try item(id: localFirstID, value: 1),
+      try item(id: localSecondID, value: 2),
+    ]
+    let remoteItems = [
+      try item(id: remoteFirstID, value: 1),
+      try item(id: remoteSecondID, value: 2),
+    ]
+    let store = ImageGalleryZoomStateStore()
+    let coordinator = ImageGalleryPager.Coordinator()
+    let pageViewController = ImageGalleryPageViewController(
+      transitionStyle: .scroll,
+      navigationOrientation: .horizontal,
+      options: nil
+    )
+    var publishedSelections = [ImageGalleryItem.ID]()
+    coordinator.attach(to: pageViewController, axis: .horizontal)
+    coordinator.receive(
+      ImageGalleryPagerUpdate(
+        snapshot: ImageGalleryPagerSnapshot(
+          items: localItems,
+          requestedSelection: localFirstID
+        ),
+        accessibilityPageDescriptions: [:]
+      ),
+      zoomStateStore: store,
+      onSelectionChange: { id in
+        if let id { publishedSelections.append(id) }
+      }
+    )
+    for _ in 0..<5 { await Task.yield() }
+
+    let sourceState = ImageGalleryZoomState(
+      scale: 2,
+      offset: CGSize(width: 8, height: -4)
+    )
+    store.update(sourceState, for: localFirstID)
+    let visibleController = try XCTUnwrap(pageViewController.viewControllers?.first)
+    let pendingController = try XCTUnwrap(
+      coordinator.pageViewController(
+        pageViewController,
+        viewControllerAfter: visibleController
+      )
+    )
+    coordinator.pageViewController(
+      pageViewController,
+      willTransitionTo: [pendingController]
+    )
+    coordinator.receive(
+      ImageGalleryPagerUpdate(
+        snapshot: ImageGalleryPagerSnapshot(
+          items: remoteItems,
+          requestedSelection: remoteFirstID
+        ),
+        idMigrations: [
+          localFirstID: remoteFirstID,
+          localSecondID: remoteSecondID,
+        ],
+        accessibilityPageDescriptions: [:]
+      ),
+      zoomStateStore: store,
+      onSelectionChange: { id in
+        if let id { publishedSelections.append(id) }
+      }
+    )
+
+    XCTAssertEqual(store.state(for: localFirstID), sourceState)
+    XCTAssertEqual(store.state(for: remoteFirstID), .identity)
+    XCTAssertTrue(publishedSelections.isEmpty)
+
+    pageViewController.setViewControllers(
+      [pendingController],
+      direction: .forward,
+      animated: false
+    )
+    coordinator.pageViewController(
+      pageViewController,
+      didFinishAnimating: true,
+      previousViewControllers: [visibleController],
+      transitionCompleted: true
+    )
+
+    XCTAssertEqual(store.state(for: localFirstID), .identity)
+    XCTAssertEqual(store.state(for: remoteFirstID), sourceState)
+    XCTAssertEqual(publishedSelections, [remoteSecondID])
+    coordinator.detach()
+  }
+
   func testIdentityZoomStateDropsOffset() {
     let state = ImageGalleryZoomState(
       scale: 1,
@@ -396,6 +702,14 @@ final class ImageGalleryTests: XCTestCase {
 
   private func item(_ value: Int) throws -> ImageGalleryItem {
     ImageGalleryItem(
+      contentOffset: value,
+      url: try url("https://example.com/image-\(value).jpg")
+    )
+  }
+
+  private func item(id: ImageGalleryItem.ID, value: Int) throws -> ImageGalleryItem {
+    ImageGalleryItem(
+      id: id,
       contentOffset: value,
       url: try url("https://example.com/image-\(value).jpg")
     )

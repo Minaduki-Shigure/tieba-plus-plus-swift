@@ -126,8 +126,12 @@ checks.
 - **Images:** Responsive image groups open in a zoomable gallery with horizontal
   or vertical one-image paging. Switching direction retains the current image
   and its bounded in-memory zoom state while the occurrence ID remains stable.
-  Ordinary unfiltered threads can expand the gallery across floors; originals
-  can be explicitly shared or saved through add-only Photos access.
+  Within the same gallery context, an explicit one-to-one occurrence migration
+  also carries scale and clamped offset when whole-thread metadata first replaces
+  a local placeholder with the currently unique `(pictureID, postID)` remote
+  occurrence; ambiguous initial matches are never guessed. Ordinary unfiltered
+  threads can expand the gallery across floors; originals can be explicitly
+  shared or saved through add-only Photos access.
 - **Playback:** Voice and native AVKit video share one application-wide playback
   coordinator. Starting new media pauses the prior item, inactive scenes pause
   playback, and playback never resumes implicitly. Voice files can be explicitly

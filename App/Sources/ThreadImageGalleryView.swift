@@ -20,14 +20,17 @@ struct ThreadImageGalleryView: View {
   @ObservedObject var viewModel: ThreadImageGalleryViewModel
 
   var body: some View {
-    ImageViewer(
-      items: galleryItems,
-      selection: selection,
-      displayIndex: viewModel.selectedDisplayIndex,
-      totalCount: viewModel.totalCount,
-      onLoadIfNeeded: viewModel.loadIfNeeded
-    )
-    .overlay(alignment: .bottom) {
+    ZStack(alignment: .bottom) {
+      ImageViewer(
+        items: galleryItems,
+        selection: selection,
+        displayIndex: viewModel.selectedDisplayIndex,
+        totalCount: viewModel.totalCount,
+        onLoadIfNeeded: viewModel.loadIfNeeded,
+        idMigrations: galleryIDMigrations
+      )
+      .id(viewModel.galleryState.viewerContextRevision)
+
       loadStatus
         .padding(.horizontal, 18)
         .padding(.bottom, 62)
@@ -61,6 +64,14 @@ struct ThreadImageGalleryView: View {
       get: { viewModel.selectedID.map(galleryID) },
       set: { newValue in
         viewModel.select(newValue.flatMap(occurrenceID))
+      }
+    )
+  }
+
+  private var galleryIDMigrations: [ImageGalleryItem.ID: ImageGalleryItem.ID] {
+    Dictionary(
+      uniqueKeysWithValues: viewModel.galleryState.localToRemoteIDMigrations.map {
+        (galleryID($0.key), galleryID($0.value))
       }
     )
   }

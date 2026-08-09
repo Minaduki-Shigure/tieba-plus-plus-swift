@@ -156,6 +156,7 @@ struct ImageViewer: View {
   private let displayIndexOverride: Int?
   private let totalCountOverride: Int?
   private let onLoadIfNeeded: () -> Void
+  private let idMigrations: [ImageGalleryItem.ID: ImageGalleryItem.ID]
 
   @State private var internalSelection: ImageGalleryItem.ID?
   @State private var pagingAxis = ImageGalleryPagingAxis.horizontal
@@ -174,6 +175,7 @@ struct ImageViewer: View {
     displayIndexOverride = nil
     totalCountOverride = nil
     onLoadIfNeeded = {}
+    idMigrations = [:]
     _internalSelection = State(
       initialValue: items.indices.contains(initialIndex) ? items[initialIndex].id : nil
     )
@@ -189,6 +191,7 @@ struct ImageViewer: View {
     displayIndex: Int?,
     totalCount: Int?,
     onLoadIfNeeded: @escaping () -> Void,
+    idMigrations: [ImageGalleryItem.ID: ImageGalleryItem.ID] = [:],
     exporter: any RemoteImageExporting = RemoteImageExporter.shared
   ) {
     self.items = items
@@ -196,6 +199,7 @@ struct ImageViewer: View {
     displayIndexOverride = displayIndex
     totalCountOverride = totalCount
     self.onLoadIfNeeded = onLoadIfNeeded
+    self.idMigrations = idMigrations
     _internalSelection = State(initialValue: nil)
     _zoomStateStore = StateObject(wrappedValue: ImageGalleryZoomStateStore())
     _exportViewModel = StateObject(
@@ -270,6 +274,7 @@ struct ImageViewer: View {
           selection: selection,
           axis: pagingAxis,
           zoomStateStore: zoomStateStore,
+          idMigrations: idMigrations,
           accessibilityPageDescriptions: accessibilityPageDescriptions
         )
         .id(pagingAxis)

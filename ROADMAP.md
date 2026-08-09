@@ -102,8 +102,9 @@ the source metadata is updated to that tested IPA.
 - Optional compact media summaries for thread lists and per-forum search, with no collapsed preview request
 - Default-on dark-appearance dimming for successfully rendered static content thumbnails
 - Same-content multi-image gallery with horizontal or vertical one-image paging,
-  stable selection, retained bounded zoom state, bounded download progress,
-  original-file sharing, and Photos saving
+  stable selection, retained bounded zoom state with explicit one-to-one
+  local-to-remote occurrence migration, bounded download progress, original-file
+  sharing, and Photos saving
 - Anonymous whole-thread image traversal with stable occurrences, global
   positions, and bidirectional lazy metadata loading
 - Server-ranked inline nested-reply previews with anchored opening and safe text copying
@@ -197,9 +198,8 @@ the source metadata is updated to that tested IPA.
    including minimum-field deletion, missing/random/expired/cross-account
    STOKEN and TBS, challenge and permission failures, post-dispatch loss,
    exact-PID visibility, account rotation, and duplicate-send prevention
-7. Broader settings parity, zoomed-image edge handoff, local-to-remote zoom
-   continuity, remaining account activity, new-topic and rich-media creation,
-   and moderation tools
+7. Broader settings parity, zoomed-image edge handoff, remaining account
+   activity, new-topic and rich-media creation, and moderation tools
 
 The foreground inbox deliberately does not copy TiebaLite's cleartext JSON
 transport or its Android hardware parameters. ReplyMe uses the current HTTPS
@@ -390,19 +390,31 @@ and filtered threads deliberately keep the same-content gallery.
 The gallery uses one `UIPageViewController` implementation for horizontal and
 vertical one-image paging. Direction is transient to the current presentation;
 switching it rebuilds the UIKit pager but keeps the selected stable occurrence.
-A bounded process-local store also restores that occurrence's scale and clamped
-offset. At most the current controller plus two neighbors on either side stay in
-the normal cache, reduced to adjacent controllers after a memory warning. While
-the current image is enlarged, its pan gesture suspends the parent page scroll;
+A bounded process-local LRU store also restores that occurrence's scale and
+clamped offset. Within one gallery context, replacing a local placeholder with
+exactly one currently accepted remote occurrence sharing its `(pictureID, postID)`
+emits an explicit ID migration that carries that state to the new occurrence.
+URLs, source offsets, image ordinals, and list positions never infer a migration.
+Ambiguous local or remote candidates fail closed when that mapping is first
+established: the local fallback remains when reconciliation cannot prove a
+replacement, and an otherwise new destination starts at identity rather than
+borrowing guessed state. A committed mapping stays bound to that explicit
+destination; a later repeated server representation does not reassign it.
+Existing destination state wins. Context or local-snapshot replacement, or
+disabling remote loading, clears the migration chain and zoom cache; neither is
+persisted.
+At most the current controller plus two neighbors on either side stay in the
+normal cache, reduced to adjacent controllers after a memory warning. While the
+current image is enlarged, its pan gesture suspends the parent page scroll;
 returning to identity scale restores paging. Unlike TiebaLite, a drag at the
-enlarged image's pan boundary does not yet hand off to the parent pager. Zoom
-state follows a stable occurrence ID, so a local placeholder replaced by its
-remote occurrence resets that state. Interactive and programmatic transitions
-coalesce pending list and selection updates so whole-thread prepend or append
-loading cannot replace a newer requested occurrence. VoiceOver scroll directions
-map to the active axis and announce the displayed position. Single-image
-presentations omit paging direction, count, and previous/next controls while
-retaining share, save, zoom, and close actions.
+enlarged image's pan boundary does not yet hand off to the parent pager.
+Interactive and programmatic transitions coalesce pending migration, list, and
+selection updates, then apply them atomically after the active transition
+resolves, so whole-thread prepend or append loading cannot replace a newer
+requested occurrence. VoiceOver scroll directions map to the active axis and
+announce the displayed position. Single-image presentations omit paging
+direction, count, and previous/next controls while retaining share, save, zoom,
+and close actions.
 
 Each original-image page observes its own waiter on the existing deduplicated
 transfer. A stable positive server length produces an integer percentage from

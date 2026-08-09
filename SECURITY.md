@@ -917,6 +917,30 @@ Observed HTTP media URLs are upgraded only on that exact host allowlist; any
 other cleartext or malformed URL is rejected. Repeated picture IDs remain
 separate occurrences when their global indexes differ.
 
+Zoom continuity does not broaden that identity or privacy boundary. Within one
+gallery context, the view model may emit an explicit local-to-remote migration
+only when the complete local snapshot and currently accepted remote window each
+contain exactly one occurrence with the same nonempty picture ID and positive
+post ID. URLs, source offsets, image ordinals, and list positions must never be
+used to guess the relationship; global indexes remain part of remote occurrence
+identity, not substitute matching evidence. Ambiguous candidates produce no
+initial migration: the local fallback is retained when replacement cannot be
+proven, and any otherwise new destination begins at identity rather than receiving
+guessed state. Once committed, the mapping remains bound to that explicit remote
+occurrence for the gallery context and is not reassigned if a later page repeats
+the server representation. An existing destination state takes precedence over a
+migrated source state.
+
+The explicit migration map and bounded zoom-state LRU are process-local memory
+only. They must not enter requests, logs, analytics, archives, backups, or other
+persistence. A gallery-context or local-snapshot replacement, or disabling remote
+loading, clears both, and late work from the prior context must not restore either
+one. Enabling remote loading from the initial local presentation preserves its
+viewer identity so a user interaction can migrate with the accepted occurrence.
+If an interactive or programmatic page transition is active, migration, list,
+selection, and accessibility metadata changes are coalesced and applied atomically
+only after that transition resolves; stale pending work is discarded on reset.
+
 Gallery progress is derived only from the existing credential-free image
 download's observed and declared byte counts. Transfer limits are evaluated
 before a progress event is published. A percentage is available only while the

@@ -131,6 +131,127 @@ struct ImageGalleryPagerSnapshot: Equatable, Sendable {
   }
 }
 
+struct ImageGalleryItemIDMigration: Equatable, Sendable {
+  private(set) var destinations: [ImageGalleryItem.ID: ImageGalleryItem.ID]
+
+  init(_ destinations: [ImageGalleryItem.ID: ImageGalleryItem.ID] = [:]) {
+    self.destinations = destinations
+  }
+
+  func destination(for id: ImageGalleryItem.ID) -> ImageGalleryItem.ID {
+    destinations[id] ?? id
+  }
+
+  func normalized(for targetIDs: Set<ImageGalleryItem.ID>) -> Self {
+    Self().merging(self, targetIDs: targetIDs)
+  }
+
+  func merging(
+    _ newer: Self,
+    targetIDs: Set<ImageGalleryItem.ID>
+  ) -> Self {
+    let intermediateIDs = Set(destinations.values)
+    let newerIntermediateIDs = Set(newer.destinations.values)
+    let newerRoots = Set(newer.destinations.keys)
+      .subtracting(intermediateIDs)
+      .subtracting(newerIntermediateIDs)
+    let roots = Set(destinations.keys).union(newerRoots)
+
+    var candidates = [ImageGalleryItem.ID: ImageGalleryItem.ID]()
+    for source in roots {
+      let destination: ImageGalleryItem.ID?
+      if newer.destinations[source] != nil {
+        destination = newer.terminalDestination(for: source)
+      } else {
+        let intermediate = destinations[source] ?? source
+        destination = newer.destinations[intermediate] == nil
+          ? intermediate
+          : newer.terminalDestination(for: intermediate)
+      }
+      guard
+        let destination,
+        source != destination,
+        !targetIDs.contains(source),
+        targetIDs.contains(destination)
+      else { continue }
+      candidates[source] = destination
+    }
+
+    let destinationCounts = Dictionary(grouping: candidates.values, by: { $0 })
+      .mapValues(\.count)
+    candidates = candidates.filter { destinationCounts[$0.value] == 1 }
+    return Self(candidates)
+  }
+
+  private func terminalDestination(for source: ImageGalleryItem.ID) -> ImageGalleryItem.ID? {
+    var visited = Set<ImageGalleryItem.ID>()
+    var current = source
+    while let next = destinations[current] {
+      guard visited.insert(current).inserted else { return nil }
+      current = next
+    }
+    return current
+  }
+}
+
+struct ImageGalleryPagerUpdate: Equatable, Sendable {
+  let snapshot: ImageGalleryPagerSnapshot
+  let migration: ImageGalleryItemIDMigration
+  let accessibilityPageDescriptions: [ImageGalleryItem.ID: String]
+
+  init(
+    snapshot: ImageGalleryPagerSnapshot,
+    idMigrations: [ImageGalleryItem.ID: ImageGalleryItem.ID] = [:],
+    accessibilityPageDescriptions: [ImageGalleryItem.ID: String]
+  ) {
+    self.snapshot = snapshot
+    migration = ImageGalleryItemIDMigration(idMigrations)
+    self.accessibilityPageDescriptions = accessibilityPageDescriptions
+  }
+
+  private init(
+    snapshot: ImageGalleryPagerSnapshot,
+    migration: ImageGalleryItemIDMigration,
+    accessibilityPageDescriptions: [ImageGalleryItem.ID: String]
+  ) {
+    self.snapshot = snapshot
+    self.migration = migration
+    self.accessibilityPageDescriptions = accessibilityPageDescriptions
+  }
+
+  func normalized() -> Self {
+    Self(
+      snapshot: snapshot,
+      migration: migration.normalized(for: Set(snapshot.itemIDs)),
+      accessibilityPageDescriptions: accessibilityPageDescriptions
+    )
+  }
+
+  func merging(_ newer: Self) -> Self {
+    Self(
+      snapshot: newer.snapshot,
+      migration: migration.merging(
+        newer.migration,
+        targetIDs: Set(newer.snapshot.itemIDs)
+      ),
+      accessibilityPageDescriptions: newer.accessibilityPageDescriptions
+    )
+  }
+
+  func selecting(_ id: ImageGalleryItem.ID) -> Self {
+    Self(
+      snapshot: ImageGalleryPagerSnapshot(items: snapshot.items, requestedSelection: id),
+      migration: migration,
+      accessibilityPageDescriptions: accessibilityPageDescriptions
+    )
+  }
+}
+
+struct ImageGalleryInteractiveTransitionResolution: Equatable, Sendable {
+  let selectionToPublish: ImageGalleryItem.ID?
+  let preferredVisibleSelection: ImageGalleryItem.ID?
+}
+
 enum ImageGalleryInteractiveTransitionPolicy {
   static func shouldPublishVisibleSelection(
     pendingRequestedSelection: ImageGalleryItem.ID?,
@@ -150,6 +271,48 @@ enum ImageGalleryInteractiveTransitionPolicy {
   ) -> ImageGalleryItem.ID? {
     guard pendingContainsVisibleSelection else { return nil }
     return pendingRequestedSelection == startingSelection ? visibleSelection : nil
+  }
+
+  static func resolve(
+    completed: Bool,
+    pendingUpdate: ImageGalleryPagerUpdate?,
+    startingSelection: ImageGalleryItem.ID?,
+    visibleSelection: ImageGalleryItem.ID?
+  ) -> ImageGalleryInteractiveTransitionResolution {
+    guard let pendingUpdate else {
+      return ImageGalleryInteractiveTransitionResolution(
+        selectionToPublish: completed ? visibleSelection : nil,
+        preferredVisibleSelection: nil
+      )
+    }
+
+    let mappedStartingSelection = startingSelection.map {
+      pendingUpdate.migration.destination(for: $0)
+    }
+    let mappedVisibleSelection = visibleSelection.map {
+      pendingUpdate.migration.destination(for: $0)
+    }
+    let containsVisibleSelection = mappedVisibleSelection.map {
+      pendingUpdate.snapshot.contains($0)
+    } ?? false
+    let publishesVisibleSelection = shouldPublishVisibleSelection(
+      pendingRequestedSelection: pendingUpdate.snapshot.requestedSelection,
+      hasPendingSnapshot: true,
+      startingSelection: mappedStartingSelection,
+      pendingContainsVisibleSelection: containsVisibleSelection
+    )
+    let preferredSelection = preferredVisibleSelection(
+      pendingRequestedSelection: pendingUpdate.snapshot.requestedSelection,
+      startingSelection: mappedStartingSelection,
+      visibleSelection: mappedVisibleSelection,
+      pendingContainsVisibleSelection: containsVisibleSelection
+    )
+    return ImageGalleryInteractiveTransitionResolution(
+      selectionToPublish: completed && publishesVisibleSelection
+        ? mappedVisibleSelection
+        : nil,
+      preferredVisibleSelection: preferredSelection
+    )
   }
 }
 
@@ -234,9 +397,39 @@ final class ImageGalleryZoomStateStore: ObservableObject {
     }
   }
 
+  func migrate(
+    _ migration: ImageGalleryItemIDMigration,
+    destinationWins: Set<ImageGalleryItem.ID> = []
+  ) {
+    for (source, destination) in migration.destinations {
+      guard source != destination, let sourceState = states[source] else { continue }
+      let keepsDestination = states[destination] != nil || destinationWins.contains(destination)
+      if !keepsDestination {
+        states[destination] = sourceState
+        recency = recency.map { $0 == source ? destination : $0 }
+      }
+      states[source] = nil
+      recency.removeAll(where: { $0 == source })
+    }
+    removeDuplicateRecencyEntries()
+  }
+
   func retainOnly(_ validIDs: Set<ImageGalleryItem.ID>) {
     states = states.filter { validIDs.contains($0.key) }
     recency.removeAll(where: { !validIDs.contains($0) })
+  }
+
+  func zoomedIDs(in validIDs: Set<ImageGalleryItem.ID>) -> Set<ImageGalleryItem.ID> {
+    Set(states.compactMap { id, state in
+      validIDs.contains(id) && state.isZoomed ? id : nil
+    })
+  }
+
+  private func removeDuplicateRecencyEntries() {
+    var seen = Set<ImageGalleryItem.ID>()
+    recency = Array(recency.reversed().filter { id in
+      states[id] != nil && seen.insert(id).inserted
+    }.reversed())
   }
 }
 
@@ -246,6 +439,7 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
   let selection: Binding<ImageGalleryItem.ID?>
   let axis: ImageGalleryPagingAxis
   let zoomStateStore: ImageGalleryZoomStateStore
+  let idMigrations: [ImageGalleryItem.ID: ImageGalleryItem.ID]
   let accessibilityPageDescriptions: [ImageGalleryItem.ID: String]
 
   func makeCoordinator() -> Coordinator {
@@ -261,9 +455,15 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
     viewController.view.backgroundColor = .black
     context.coordinator.attach(to: viewController, axis: axis)
     context.coordinator.receive(
-      ImageGalleryPagerSnapshot(items: items, requestedSelection: selection.wrappedValue),
+      ImageGalleryPagerUpdate(
+        snapshot: ImageGalleryPagerSnapshot(
+          items: items,
+          requestedSelection: selection.wrappedValue
+        ),
+        idMigrations: idMigrations,
+        accessibilityPageDescriptions: accessibilityPageDescriptions
+      ),
       zoomStateStore: zoomStateStore,
-      accessibilityPageDescriptions: accessibilityPageDescriptions,
       onSelectionChange: { selection.wrappedValue = $0 }
     )
     return viewController
@@ -274,9 +474,15 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
     context: Context
   ) {
     context.coordinator.receive(
-      ImageGalleryPagerSnapshot(items: items, requestedSelection: selection.wrappedValue),
+      ImageGalleryPagerUpdate(
+        snapshot: ImageGalleryPagerSnapshot(
+          items: items,
+          requestedSelection: selection.wrappedValue
+        ),
+        idMigrations: idMigrations,
+        accessibilityPageDescriptions: accessibilityPageDescriptions
+      ),
       zoomStateStore: zoomStateStore,
-      accessibilityPageDescriptions: accessibilityPageDescriptions,
       onSelectionChange: { selection.wrappedValue = $0 }
     )
   }
@@ -295,7 +501,7 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
     private weak var pageViewController: ImageGalleryPageViewController?
     private var axis = ImageGalleryPagingAxis.horizontal
     private var snapshot = ImageGalleryPagerSnapshot(items: [], requestedSelection: nil)
-    private var pendingSnapshot: ImageGalleryPagerSnapshot?
+    private var pendingUpdate: ImageGalleryPagerUpdate?
     private var controllers = [ImageGalleryItem.ID: ImageGalleryPageHostingController]()
     private var zoomedIDs = Set<ImageGalleryItem.ID>()
     private var transitioningIDs = Set<ImageGalleryItem.ID>()
@@ -341,7 +547,7 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       pageViewController?.delegate = nil
       pageViewController?.onAccessibilityScroll = nil
       pageViewController = nil
-      pendingSnapshot = nil
+      pendingUpdate = nil
       isInteractiveTransition = false
       interactiveStartingSelection = nil
       programmaticTargetID = nil
@@ -355,20 +561,21 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
     }
 
     func receive(
-      _ snapshot: ImageGalleryPagerSnapshot,
+      _ update: ImageGalleryPagerUpdate,
       zoomStateStore: ImageGalleryZoomStateStore,
-      accessibilityPageDescriptions: [ImageGalleryItem.ID: String],
       onSelectionChange: @escaping (ImageGalleryItem.ID?) -> Void
     ) {
       self.zoomStateStore = zoomStateStore
-      zoomStateStore.retainOnly(Set(snapshot.itemIDs))
-      self.accessibilityPageDescriptions = accessibilityPageDescriptions
       self.onSelectionChange = onSelectionChange
       guard !isInteractiveTransition, programmaticTargetID == nil else {
-        pendingSnapshot = snapshot
+        if let pendingUpdate {
+          self.pendingUpdate = pendingUpdate.merging(update)
+        } else {
+          pendingUpdate = update.normalized()
+        }
         return
       }
-      apply(snapshot)
+      apply(update.normalized())
     }
 
     func pageViewController(
@@ -407,48 +614,53 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       interactiveStartingSelection = nil
       transitioningIDs.removeAll()
       let visibleID = currentVisibleID
-      let pendingContainsVisibleSelection = visibleID.map { id in
-        pendingSnapshot?.contains(id) == true
-      } ?? false
-      let shouldPublishVisibleSelection =
-        ImageGalleryInteractiveTransitionPolicy.shouldPublishVisibleSelection(
-          pendingRequestedSelection: pendingSnapshot?.requestedSelection,
-          hasPendingSnapshot: pendingSnapshot != nil,
-          startingSelection: startingSelection,
-          pendingContainsVisibleSelection: pendingContainsVisibleSelection
+      let resolution = ImageGalleryInteractiveTransitionPolicy.resolve(
+        completed: completed,
+        pendingUpdate: pendingUpdate,
+        startingSelection: startingSelection,
+        visibleSelection: visibleID
+      )
+
+      if let pendingUpdate {
+        self.pendingUpdate = nil
+        let reconciledUpdate = resolution.preferredVisibleSelection.map {
+          pendingUpdate.selecting($0)
+        } ?? pendingUpdate
+        apply(
+          reconciledUpdate,
+          preferredVisibleID: resolution.preferredVisibleSelection
         )
-      if completed, shouldPublishVisibleSelection, let visibleID {
-        onSelectionChange(visibleID)
+      } else if let selectionToPublish = resolution.selectionToPublish {
         snapshot = ImageGalleryPagerSnapshot(
           items: snapshot.items,
-          requestedSelection: visibleID
+          requestedSelection: selectionToPublish
         )
       }
+
+      if let selectionToPublish = resolution.selectionToPublish {
+        onSelectionChange(selectionToPublish)
+      }
       updatePagingAvailability()
-      drainPendingSnapshot(
-        preferring: visibleID,
-        onlyWhenRequestedSelectionEquals: startingSelection,
-        pendingContainsVisibleSelection: pendingContainsVisibleSelection
-      )
       pruneControllers(around: currentVisibleID)
     }
 
     private func apply(
-      _ newSnapshot: ImageGalleryPagerSnapshot,
+      _ update: ImageGalleryPagerUpdate,
       preferredVisibleID: ImageGalleryItem.ID? = nil,
       animatesTransition: Bool? = nil
     ) {
       guard let pageViewController else { return }
+      let update = update.normalized()
       let previousIDs = snapshot.itemIDs
       let visibleID = currentVisibleID
-      snapshot = newSnapshot
-      refreshCachedControllers()
+      let mappedVisibleID = visibleID.map { update.migration.destination(for: $0) }
+      install(update)
 
       let targetID: ImageGalleryItem.ID?
       if let preferredVisibleID, snapshot.contains(preferredVisibleID) {
         targetID = preferredVisibleID
       } else {
-        targetID = snapshot.resolvedSelection(currentID: visibleID)
+        targetID = snapshot.resolvedSelection(currentID: mappedVisibleID)
       }
 
       guard let targetID, let targetController = controller(for: targetID) else {
@@ -476,7 +688,7 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
         return
       }
 
-      let transition = snapshot.transitionDirection(from: visibleID, to: targetID)
+      let transition = snapshot.transitionDirection(from: mappedVisibleID, to: targetID)
       let direction: UIPageViewController.NavigationDirection =
         transition == .forward ? .forward : .reverse
       let animated = animatesTransition ?? (visibleID != nil && previousIDs == snapshot.itemIDs)
@@ -490,60 +702,65 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       ) { [weak self] completed in
         guard let self, token == self.programmaticTransitionToken else { return }
         self.programmaticTargetID = nil
-        self.updatePagingAvailability()
-        if
-          completed,
-          self.accessibilityAnnouncementID == targetID,
-          self.currentVisibleID == targetID,
-          self.pendingSnapshot.map({ pending in
-            pending.requestedSelection == targetID && pending.contains(targetID)
-          }) ?? true
-        {
-          self.postAccessibilityPageScrolled(for: targetID)
-        }
         if completed {
-          self.drainPendingSnapshot()
+          self.drainPendingUpdate(
+            preferring: self.currentVisibleID,
+            onlyWhenRequestedSelectionEquals: targetID
+          )
         } else {
           self.recoverFromInterruptedProgrammaticTransition()
+        }
+        self.updatePagingAvailability()
+        if
+          let announcementID = self.accessibilityAnnouncementID,
+          self.programmaticTargetID == nil,
+          self.snapshot.requestedSelection == announcementID,
+          self.currentVisibleID == announcementID
+        {
+          self.postAccessibilityPageScrolled(for: announcementID)
         }
         self.pruneControllers(around: self.currentVisibleID)
       }
     }
 
-    private func drainPendingSnapshot(
+    private func drainPendingUpdate(
       preferring visibleID: ImageGalleryItem.ID? = nil,
-      onlyWhenRequestedSelectionEquals staleSelection: ImageGalleryItem.ID? = nil,
-      pendingContainsVisibleSelection: Bool = false
+      onlyWhenRequestedSelectionEquals staleSelection: ImageGalleryItem.ID? = nil
     ) {
-      guard let pendingSnapshot else { return }
-      self.pendingSnapshot = nil
-      let preferredVisibleID =
-        ImageGalleryInteractiveTransitionPolicy.preferredVisibleSelection(
-          pendingRequestedSelection: pendingSnapshot.requestedSelection,
-          startingSelection: staleSelection,
-          visibleSelection: visibleID,
-          pendingContainsVisibleSelection: pendingContainsVisibleSelection
-        )
-      let reconciledSnapshot: ImageGalleryPagerSnapshot
-      if let preferredVisibleID {
-        reconciledSnapshot = ImageGalleryPagerSnapshot(
-          items: pendingSnapshot.items,
-          requestedSelection: preferredVisibleID
-        )
-      } else {
-        reconciledSnapshot = pendingSnapshot
+      guard let pendingUpdate else { return }
+      self.pendingUpdate = nil
+      let mappedVisibleID = visibleID.map { pendingUpdate.migration.destination(for: $0) }
+      let mappedStaleSelection = staleSelection.map {
+        pendingUpdate.migration.destination(for: $0)
       }
-      apply(reconciledSnapshot, preferredVisibleID: preferredVisibleID)
+      let preferredVisibleID: ImageGalleryItem.ID?
+      if
+        staleSelection != nil,
+        pendingUpdate.snapshot.requestedSelection == mappedStaleSelection,
+        let mappedVisibleID,
+        pendingUpdate.snapshot.contains(mappedVisibleID)
+      {
+        preferredVisibleID = mappedVisibleID
+      } else {
+        preferredVisibleID = nil
+      }
+      let reconciledUpdate = preferredVisibleID.map { pendingUpdate.selecting($0) }
+        ?? pendingUpdate
+      apply(reconciledUpdate, preferredVisibleID: preferredVisibleID)
     }
 
     private func recoverFromInterruptedProgrammaticTransition() {
       guard let pageViewController else { return }
-      let latestSnapshot = pendingSnapshot ?? snapshot
-      pendingSnapshot = nil
       let previousVisibleID = currentVisibleID
-      snapshot = latestSnapshot
-      refreshCachedControllers()
-      let targetID = latestSnapshot.resolvedSelection(currentID: previousVisibleID)
+      let mappedPreviousVisibleID = previousVisibleID.map { id in
+        pendingUpdate?.migration.destination(for: id) ?? id
+      }
+      if let pendingUpdate {
+        self.pendingUpdate = nil
+        install(pendingUpdate.normalized())
+      }
+      let latestSnapshot = snapshot
+      let targetID = latestSnapshot.resolvedSelection(currentID: mappedPreviousVisibleID)
       if accessibilityAnnouncementID != nil, accessibilityAnnouncementID != targetID {
         accessibilityAnnouncementID = nil
       }
@@ -551,7 +768,7 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       programmaticTransitionToken &+= 1
       pageViewController.dataSource = nil
       if let targetID, let targetController = controller(for: targetID) {
-        let transition = snapshot.transitionDirection(from: previousVisibleID, to: targetID)
+        let transition = snapshot.transitionDirection(from: mappedPreviousVisibleID, to: targetID)
         let direction: UIPageViewController.NavigationDirection =
           transition == .forward ? .forward : .reverse
         pageViewController.setViewControllers(
@@ -579,6 +796,23 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       }
       updatePagingAvailability()
       pruneControllers(around: reconciledSelection)
+    }
+
+    private func install(_ update: ImageGalleryPagerUpdate) {
+      let validIDs = Set(update.snapshot.itemIDs)
+      zoomStateStore?.migrate(
+        update.migration,
+        destinationWins: Set(controllers.keys)
+      )
+      zoomStateStore?.retainOnly(validIDs)
+      zoomedIDs = zoomStateStore?.zoomedIDs(in: validIDs) ?? []
+      if let accessibilityAnnouncementID {
+        let mappedID = update.migration.destination(for: accessibilityAnnouncementID)
+        self.accessibilityAnnouncementID = validIDs.contains(mappedID) ? mappedID : nil
+      }
+      accessibilityPageDescriptions = update.accessibilityPageDescriptions
+      snapshot = update.snapshot
+      refreshCachedControllers()
     }
 
     private func adjacentController(

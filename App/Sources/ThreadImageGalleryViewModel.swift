@@ -119,6 +119,8 @@ struct ThreadPictureGalleryState: Equatable, Sendable {
   let occurrences: [ThreadPictureOccurrence]
   let selectedID: ThreadPictureOccurrenceID?
   let totalCount: Int
+  let localToRemoteIDMigrations: [ThreadPictureOccurrenceID: ThreadPictureOccurrenceID]
+  let viewerContextRevision: UInt64
 }
 
 @MainActor
@@ -141,6 +143,7 @@ final class ThreadImageGalleryViewModel: ObservableObject {
   private var hasBootstrapped = false
   private var previousStalled = false
   private var nextStalled = false
+  private var viewerContextRevision: UInt64 = 0
   private var generation = 0
   private var bootstrapToken = 0
   private var previousToken = 0
@@ -164,7 +167,9 @@ final class ThreadImageGalleryViewModel: ObservableObject {
     galleryState = ThreadPictureGalleryState(
       occurrences: localOccurrences,
       selectedID: selectedID,
-      totalCount: localOccurrences.count
+      totalCount: localOccurrences.count,
+      localToRemoteIDMigrations: [:],
+      viewerContextRevision: 0
     )
     preferredLocalSelectionID = selectedID
     self.isRemoteLoadingEnabled = isRemoteLoadingEnabled
@@ -256,7 +261,7 @@ final class ThreadImageGalleryViewModel: ObservableObject {
   func setRemoteLoadingEnabled(_ enabled: Bool) {
     guard isRemoteLoadingEnabled != enabled else { return }
     invalidateAllLoads()
-    restoreLocalSnapshot()
+    restoreLocalSnapshot(resetsViewerContext: !enabled)
     isRemoteLoadingEnabled = enabled
     if enabled {
       startBootstrapIfNeeded()
@@ -313,6 +318,8 @@ final class ThreadImageGalleryViewModel: ObservableObject {
 
     if case .local = selectedID {
       preferredLocalSelectionID = selectedID
+    } else if let localID = localID(migratedTo: selectedID) {
+      preferredLocalSelectionID = localID
     }
 
     if isBootstrapping, selectedID != oldValue {
@@ -461,24 +468,46 @@ final class ThreadImageGalleryViewModel: ObservableObject {
       return
     }
 
-    let selectedMatches = normalizedPage.occurrences.filter {
-      $0.pictureID == selectedOccurrence.pictureID && $0.postID == selectedOccurrence.postID
+    let selectedPair = Self.picturePostPair(selectedOccurrence)
+    let selectedLocalMatches = localOccurrences.filter {
+      Self.picturePostPair($0) == selectedPair
     }
-    guard selectedMatches.count == 1, let remoteSelection = selectedMatches.first else {
+    let selectedRemoteMatches = normalizedPage.occurrences.filter {
+      Self.picturePostPair($0) == selectedPair
+    }
+    guard
+      selectedLocalMatches.count == 1,
+      selectedLocalMatches.first?.id == selectedIDAtRequest,
+      selectedRemoteMatches.count == 1,
+      let remoteSelection = selectedRemoteMatches.first
+    else {
       previousStalled = true
       nextStalled = true
       refreshAvailabilityFromRemoteBounds()
       return
     }
 
-    let mergedOccurrences = mergedBootstrapOccurrences(
+    let candidate = bootstrapCandidateOccurrences(
       remote: normalizedPage.occurrences,
-      replacing: selectedOccurrence.id
+      around: selectedOccurrence.id
     )
+    let reconciled = reconcilingLocalOccurrences(
+      in: candidate,
+      selectedID: selectedOccurrence.id,
+      existingMigrations: [:]
+    )
+    guard reconciled.selectedID == remoteSelection.id else {
+      previousStalled = true
+      nextStalled = true
+      refreshAvailabilityFromRemoteBounds()
+      return
+    }
     galleryState = ThreadPictureGalleryState(
-      occurrences: mergedOccurrences,
-      selectedID: remoteSelection.id,
-      totalCount: normalizedPage.totalCount
+      occurrences: reconciled.occurrences,
+      selectedID: reconciled.selectedID,
+      totalCount: normalizedPage.totalCount,
+      localToRemoteIDMigrations: reconciled.migrations,
+      viewerContextRevision: viewerContextRevision
     )
     previousStalled = false
     nextStalled = false
@@ -516,12 +545,15 @@ final class ThreadImageGalleryViewModel: ObservableObject {
 
     let reconciled = reconcilingLocalOccurrences(
       in: additions + occurrences,
-      selectedID: selectedID
+      selectedID: selectedID,
+      existingMigrations: galleryState.localToRemoteIDMigrations
     )
     galleryState = ThreadPictureGalleryState(
       occurrences: reconciled.occurrences,
       selectedID: reconciled.selectedID,
-      totalCount: normalizedPage.totalCount
+      totalCount: normalizedPage.totalCount,
+      localToRemoteIDMigrations: reconciled.migrations,
+      viewerContextRevision: viewerContextRevision
     )
     previousStalled = false
     refreshAvailabilityFromRemoteBounds()
@@ -558,12 +590,15 @@ final class ThreadImageGalleryViewModel: ObservableObject {
 
     let reconciled = reconcilingLocalOccurrences(
       in: occurrences + additions,
-      selectedID: selectedID
+      selectedID: selectedID,
+      existingMigrations: galleryState.localToRemoteIDMigrations
     )
     galleryState = ThreadPictureGalleryState(
       occurrences: reconciled.occurrences,
       selectedID: reconciled.selectedID,
-      totalCount: normalizedPage.totalCount
+      totalCount: normalizedPage.totalCount,
+      localToRemoteIDMigrations: reconciled.migrations,
+      viewerContextRevision: viewerContextRevision
     )
     nextStalled = false
     refreshAvailabilityFromRemoteBounds()
@@ -684,40 +719,32 @@ final class ThreadImageGalleryViewModel: ObservableObject {
     return ThreadPicturePage(occurrences: normalized, totalCount: page.totalCount)
   }
 
-  private func mergedBootstrapOccurrences(
+  private func bootstrapCandidateOccurrences(
     remote: [ThreadPictureOccurrence],
-    replacing selectedLocalID: ThreadPictureOccurrenceID
+    around selectedLocalID: ThreadPictureOccurrenceID
   ) -> [ThreadPictureOccurrence] {
-    guard let selectedLocalIndex = localOccurrences.firstIndex(where: { $0.id == selectedLocalID }) else {
+    guard
+      let selectedLocalIndex = localOccurrences.firstIndex(where: { $0.id == selectedLocalID })
+    else {
       return remote
     }
 
-    let localPairCounts = Dictionary(grouping: localOccurrences, by: Self.picturePostPair)
-      .mapValues(\.count)
-    let remotePairCounts = Dictionary(grouping: remote, by: Self.picturePostPair)
-      .mapValues(\.count)
-    let reconciledLocal = localOccurrences.enumerated().filter { index, occurrence in
-      guard occurrence.id != selectedLocalID else { return false }
-      let pair = Self.picturePostPair(occurrence)
-      return localPairCounts[pair] != 1 || remotePairCounts[pair] != 1
-    }
-
-    let prefix = reconciledLocal.filter { $0.offset < selectedLocalIndex }.map(\.element)
-    let suffix = reconciledLocal.filter { $0.offset > selectedLocalIndex }.map(\.element)
-    return prefix + remote + suffix
+    let prefix = Array(localOccurrences[..<selectedLocalIndex])
+    let selected = localOccurrences[selectedLocalIndex]
+    let suffix = Array(localOccurrences[localOccurrences.index(after: selectedLocalIndex)...])
+    return prefix + [selected] + remote + suffix
   }
 
   private func reconcilingLocalOccurrences(
     in candidate: [ThreadPictureOccurrence],
-    selectedID: ThreadPictureOccurrenceID?
-  ) -> (occurrences: [ThreadPictureOccurrence], selectedID: ThreadPictureOccurrenceID?) {
-    let localPairCounts = Dictionary(
-      grouping: candidate.filter { occurrence in
-        if case .local = occurrence.id { return true }
-        return false
-      },
-      by: Self.picturePostPair
-    ).mapValues(\.count)
+    selectedID: ThreadPictureOccurrenceID?,
+    existingMigrations: [ThreadPictureOccurrenceID: ThreadPictureOccurrenceID]
+  ) -> (
+    occurrences: [ThreadPictureOccurrence],
+    selectedID: ThreadPictureOccurrenceID?,
+    migrations: [ThreadPictureOccurrenceID: ThreadPictureOccurrenceID]
+  ) {
+    let localByPair = Dictionary(grouping: localOccurrences, by: Self.picturePostPair)
     let remoteByPair = Dictionary(
       grouping: candidate.filter { occurrence in
         if case .remote = occurrence.id { return true }
@@ -725,22 +752,29 @@ final class ThreadImageGalleryViewModel: ObservableObject {
       },
       by: Self.picturePostPair
     )
-    var resolvedSelection = selectedID
-    let reconciled = candidate.filter { occurrence in
-      guard case .local = occurrence.id else { return true }
-      let pair = Self.picturePostPair(occurrence)
+    let candidateIDs = Set(candidate.map(\.id))
+    var migrations = existingMigrations
+    var claimedRemoteIDs = Set(existingMigrations.values)
+
+    for (pair, localMatches) in localByPair where localMatches.count == 1 {
       guard
-        localPairCounts[pair] == 1,
+        let local = localMatches.first,
+        candidateIDs.contains(local.id),
+        migrations[local.id] == nil,
         let remoteMatches = remoteByPair[pair],
         remoteMatches.count == 1,
-        let remoteMatch = remoteMatches.first
-      else { return true }
-      if occurrence.id == selectedID {
-        resolvedSelection = remoteMatch.id
-      }
-      return false
+        let remote = remoteMatches.first,
+        claimedRemoteIDs.insert(remote.id).inserted
+      else { continue }
+      migrations[local.id] = remote.id
     }
-    return (reconciled, resolvedSelection)
+
+    let reconciled = candidate.filter { occurrence in
+      guard case .local = occurrence.id else { return true }
+      return migrations[occurrence.id] == nil
+    }
+    let resolvedSelection = selectedID.flatMap { migrations[$0] } ?? selectedID
+    return (reconciled, resolvedSelection, migrations)
   }
 
   private func refreshAvailabilityFromRemoteBounds() {
@@ -756,17 +790,26 @@ final class ThreadImageGalleryViewModel: ObservableObject {
     occurrences.compactMap(\.overallIndex).max()
   }
 
-  private func restoreLocalSnapshot(selection: ThreadPictureOccurrenceID? = nil) {
-    let previouslySelectedOccurrence = selectedOccurrence
+  private func restoreLocalSnapshot(
+    selection: ThreadPictureOccurrenceID? = nil,
+    resetsViewerContext: Bool = true
+  ) {
+    let previousSelection = selectedID
+    let migrations = galleryState.localToRemoteIDMigrations
     let selection = selection
-      ?? localSelection(matching: previouslySelectedOccurrence)
+      ?? localSelection(for: previousSelection, migrations: migrations)
       ?? preferredLocalSelectionID
     let validSelection = Self.validSelection(selection, in: localOccurrences)
     preferredLocalSelectionID = validSelection
+    if resetsViewerContext {
+      viewerContextRevision &+= 1
+    }
     galleryState = ThreadPictureGalleryState(
       occurrences: localOccurrences,
       selectedID: validSelection,
-      totalCount: localOccurrences.count
+      totalCount: localOccurrences.count,
+      localToRemoteIDMigrations: [:],
+      viewerContextRevision: viewerContextRevision
     )
     hasBootstrapped = false
     bootstrapError = nil
@@ -779,13 +822,20 @@ final class ThreadImageGalleryViewModel: ObservableObject {
   }
 
   private func localSelection(
-    matching occurrence: ThreadPictureOccurrence?
+    for selection: ThreadPictureOccurrenceID?,
+    migrations: [ThreadPictureOccurrenceID: ThreadPictureOccurrenceID]
   ) -> ThreadPictureOccurrenceID? {
-    guard let occurrence else { return nil }
-    let matches = localOccurrences.filter {
-      $0.pictureID == occurrence.pictureID && $0.postID == occurrence.postID
+    guard let selection else { return nil }
+    if case .local = selection {
+      return selection
     }
-    return matches.count == 1 ? matches.first?.id : nil
+    return migrations.first(where: { $0.value == selection })?.key
+  }
+
+  private func localID(
+    migratedTo remoteID: ThreadPictureOccurrenceID
+  ) -> ThreadPictureOccurrenceID? {
+    galleryState.localToRemoteIDMigrations.first(where: { $0.value == remoteID })?.key
   }
 
   private func invalidateAllLoads() {
@@ -808,7 +858,9 @@ final class ThreadImageGalleryViewModel: ObservableObject {
     galleryState = ThreadPictureGalleryState(
       occurrences: occurrences,
       selectedID: id,
-      totalCount: totalCount
+      totalCount: totalCount,
+      localToRemoteIDMigrations: galleryState.localToRemoteIDMigrations,
+      viewerContextRevision: viewerContextRevision
     )
   }
 
