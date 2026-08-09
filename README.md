@@ -18,8 +18,8 @@ checks.
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, and media preferences |
 | Accounts | Current `main` supports bound Web login, switching, logout, followed forums, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with authoritative reply actions, Tieba cloud favorites, per-forum state, and experimental content approval |
-| Server-side writes | Guarded forum follow/unfollow, check-in, content approval, thread-detail cloud-favorite changes, and plain-text topic/floor/nested replies are in device validation; other writes stay disabled |
-| TiebaLite parity | Anonymous reading and media: about 90–95%; full product scope: about 67–71% |
+| Server-side writes | Guarded forum follow/unfollow, check-in, content approval, thread-detail and verified list-level cloud-favorite changes, and plain-text topic/floor/nested replies are in device validation; other writes stay disabled |
+| TiebaLite parity | Anonymous reading and media: about 90–95%; full product scope: about 68–72% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.59.0-alpha.1` (build 62); later `main` features require a tagged release |
 
 ### Release and validation
@@ -48,7 +48,11 @@ checks.
   logged-in thread can also read its account-bound Tieba cloud-favorite state and,
   after explicit confirmation, add it at the last visible floor, update the saved
   floor, or remove it. Every mutation is followed by a read-only reconciliation;
-  an uncertain write is never retried. Logged-in thread and full nested-reply
+  an uncertain write is never retried. The cloud-favorites list can also remove
+  one item after a separate destructive confirmation. It first resolves the raw
+  anonymous PB thread/forum identity, then requires the existing authenticated
+  UID/forum/thread preflight before the single write; an unresolvable deleted
+  item sends no write. Logged-in thread and full nested-reply
   pages also expose experimental, draft-backed plain-text composers for replying
   to the topic, an ordinary floor, or a specific nested reply. The write is sent
   at most once, a valid server PID is read back by exact identity, and challenge,
@@ -64,7 +68,7 @@ checks.
 - **Automated checks:** GitHub Actions runs package tests and an unsigned
   simulator build, validates the app source, and verifies its public IPA hash.
   Authenticated flows never use real credentials in CI. Login binding, cloud
-  favorite reads and mutations, followed-forum recommendation filtering,
+  favorite reads and mutations, including verified list deletion, followed-forum recommendation filtering,
   concern-feed, inbox navigation and reply-action rebinding, and plain-text reply
   contracts are covered by fixtures, while successful private reads, forum
   follow/unfollow, check-in, cloud-favorite changes, topic/post/subpost content
@@ -203,9 +207,13 @@ checks.
   `userID + sessionRevision` in memory. The request uses a separate process-local
   random UUID and no hardware-derived identifier. Successful retrieval and the
   exact minimum signed-field set still require physical-device validation.
-- **Tieba cloud favorites:** The account page has a separate, read-only cloud
-  favorites list with refresh, offset pagination, saved-post navigation, deleted
-  thread state, and account-lease isolation. A logged-in thread separately reads
+- **Tieba cloud favorites:** The account page has a separate cloud favorites list
+  with refresh, offset pagination, saved-post navigation, deleted-thread state,
+  account-lease isolation, and explicitly confirmed single-item removal. Before a
+  list removal, a raw anonymous PB response must bind the thread to a positive
+  forum ID and canonical forum name; the authenticated PB preflight then binds
+  the same target to the exact account. A fully deleted item whose target can no
+  longer be resolved remains visible and sends no write. A logged-in thread separately reads
   its exact cloud state and offers explicitly confirmed add, saved-floor update,
   and removal controls. These operations never upload, merge, or delete the
   independent local favorites archive. Successful authenticated reads and writes
@@ -253,18 +261,18 @@ checks.
   Already-completed check-in and matching content state are idempotent. All
   supported writes require explicit user confirmation. Automatic and batch
   check-in are not implemented.
-- **Unsupported operations:** Direct deletion from the cloud-favorites list,
-  bulk cloud/local synchronization, disagreement and other reaction types,
+- **Unsupported operations:** Guess-based removal of unresolvable cloud-favorite
+  rows, bulk cloud/local synchronization, disagreement and other reaction types,
   new-thread creation, rich-media replies, notification mark-read/unread
   reconciliation, background notification polling, and moderation remain
   unavailable until their request contracts and recovery paths have been
   validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, auditable weighting, protocol constraints, and next milestones.
-  The current `main` audit totals 67–71 of 100 weighted points; its anonymous
+  The current `main` audit totals 68–72 of 100 weighted points; its anonymous
   reading and media subtotal is about 90–95%. The largest remaining gaps are
   new-thread and rich-media creation, background unread handling, broader
-  settings, remaining cloud-favorite list actions, and moderation.
+  settings, unresolvable cloud-favorite rows, and moderation.
 
 ## Architecture
 

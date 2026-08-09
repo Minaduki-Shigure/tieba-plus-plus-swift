@@ -459,6 +459,46 @@ final class CloudFavoritesViewModelTests: XCTestCase {
     let requests = await service.requestsSnapshot()
     XCTAssertEqual(requests.map(\.offset), [0, 0])
   }
+
+  func testChangeDuringInitialLoadInvalidatesStaleResponseAndReadsFromZeroAgain() async throws {
+    let active = cloudSession(userID: 7, revision: cloudUUID(36))
+    let item = cloudItem(id: 15)
+    let vault = CloudFavoritesVaultSpy(session: active)
+    let firstPageGate = CloudFavoritesTestGate()
+    let service = CloudFavoritesServiceSpy(
+      scripts: [
+        .init(userID: 7, offset: 0): [
+          .gatedPage(
+            cloudPage(userID: 7, items: [item], nextOffset: nil, hasMore: false),
+            gate: firstPageGate
+          ),
+          .page(cloudPage(userID: 7, items: [], nextOffset: nil, hasMore: false)),
+        ]
+      ]
+    )
+    let viewModel = CloudFavoritesViewModel(service: service, vault: vault)
+    let target = ThreadCloudFavoriteTarget(forumID: 42, forumName: "swift", threadID: item.id)!
+
+    viewModel.loadIfNeeded()
+    try await waitForCloudFavoritesTest { await service.requestCount() == 1 }
+    XCTAssertEqual(viewModel.state, .loading)
+    viewModel.threadCloudFavoriteDidChange(
+      ThreadCloudFavoriteChange(
+        accountID: active.id,
+        sessionRevision: active.sessionRevision,
+        target: target,
+        snapshot: ThreadCloudFavoriteSnapshot(markedPostID: nil)!
+      )
+    )
+    await firstPageGate.release()
+
+    try await waitForCloudFavoritesTest {
+      let requestCount = await service.requestCount()
+      return requestCount == 2 && viewModel.state == .loaded && viewModel.threads.isEmpty
+    }
+    let requests = await service.requestsSnapshot()
+    XCTAssertEqual(requests.map(\.offset), [0, 0])
+  }
 }
 
 private struct CloudFavoritesRequest: Hashable, Sendable {
@@ -475,8 +515,26 @@ private struct CloudFavoritesRequest: Hashable, Sendable {
 
 private enum CloudFavoritesScript: Sendable {
   case page(CloudFavoritePage, delayNanoseconds: UInt64 = 0)
+  case gatedPage(CloudFavoritePage, gate: CloudFavoritesTestGate)
   case failure(String)
   case requiresRelogin
+}
+
+private actor CloudFavoritesTestGate {
+  private var continuation: CheckedContinuation<Void, Never>?
+  private var isReleased = false
+
+  func wait() async {
+    guard !isReleased else { return }
+    await withCheckedContinuation { continuation = $0 }
+  }
+
+  func release() {
+    guard !isReleased else { return }
+    isReleased = true
+    continuation?.resume()
+    continuation = nil
+  }
 }
 
 private struct CloudFavoritesTestFailure: LocalizedError, Sendable {
@@ -527,6 +585,9 @@ private actor CloudFavoritesServiceSpy: AccountService {
       if delayNanoseconds > 0 {
         try? await Task.sleep(nanoseconds: delayNanoseconds)
       }
+      return page
+    case .gatedPage(let page, let gate):
+      await gate.wait()
       return page
     case .failure(let message):
       throw CloudFavoritesTestFailure(message: message)

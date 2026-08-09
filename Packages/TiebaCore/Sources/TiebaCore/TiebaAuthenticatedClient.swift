@@ -1107,19 +1107,23 @@ public actor TiebaAuthenticatedClient {
       ), reconciled.markedPostID == markedPostID {
         return reconciled
       }
-      throw error
+      throw TiebaClientError.threadCloudFavoriteOutcomeUnknown
     }
 
-    let reconciled = try await getThreadCloudFavoriteState(
-      credential: credential,
-      expectedUserID: expectedUserID,
-      forumID: forumID,
-      threadID: threadID
-    )
-    guard reconciled.markedPostID == markedPostID else {
-      throw TiebaClientError.invalidAuthenticatedResponse
+    do {
+      let reconciled = try await getThreadCloudFavoriteState(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID
+      )
+      guard reconciled.markedPostID == markedPostID else {
+        throw TiebaClientError.threadCloudFavoriteOutcomeUnknown
+      }
+      return reconciled
+    } catch {
+      throw TiebaClientError.threadCloudFavoriteOutcomeUnknown
     }
-    return reconciled
   }
 
   private func performTextReplySubmission(

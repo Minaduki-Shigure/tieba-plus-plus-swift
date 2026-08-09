@@ -1284,6 +1284,8 @@ struct TiebaCoreAccountService: AccountService {
       message = "该贴吧当前无法签到。"
     case .threadAgreementWriteConflict:
       message = "先前的主题点赞操作已结束，请重新读取当前状态。"
+    case .threadCloudFavoriteOutcomeUnknown:
+      message = "云端收藏结果尚未确认；再次操作时会先重新读取状态，不会自动重发请求。"
     case .replyChallengeRequired, .replyOutcomeUnknown, .replySubmissionIDConflict:
       message = "账户请求失败，请稍后重试。"
     case .server(let code, _):

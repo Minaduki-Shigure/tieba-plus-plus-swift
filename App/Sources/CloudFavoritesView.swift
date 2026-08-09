@@ -91,6 +91,8 @@ final class CloudFavoritesViewModel: ObservableObject {
   private var removalOperationID: UUID?
   private var removalTarget: ThreadCloudFavoriteTarget?
   private var reloadAfterRemoval = false
+  private var cloudFavoriteChangeSequence: UInt64 = 0
+  private var latestChangeSequenceByLease: [CloudFavoritesSessionLease: UInt64] = [:]
   private var epoch = 0
 
   init(
@@ -255,7 +257,10 @@ final class CloudFavoritesViewModel: ObservableObject {
   }
 
   func threadCloudFavoriteDidChange(_ change: ThreadCloudFavoriteChange) {
-    guard let loadedLease, loadedLease.matches(change) else { return }
+    cloudFavoriteChangeSequence &+= 1
+    let changeLease = CloudFavoritesSessionLease(change)
+    latestChangeSequenceByLease[changeLease] = cloudFavoriteChangeSequence
+    guard let loadedLease, loadedLease == changeLease else { return }
     if
       removingThreadID == change.target.threadID,
       removalTarget == change.target,
@@ -322,6 +327,7 @@ final class CloudFavoritesViewModel: ObservableObject {
     let service = service
     let vault = vault
     let pageSize = pageSize
+    let changeSequenceAtStart = cloudFavoriteChangeSequence
     epoch &+= 1
     let requestEpoch = epoch
     if !replacing {
@@ -360,6 +366,10 @@ final class CloudFavoritesViewModel: ObservableObject {
           return
         }
         try Self.validate(response, lease: lease, requestedOffset: offset)
+        if (latestChangeSequenceByLease[lease] ?? 0) > changeSequenceAtStart {
+          beginNewEpoch(loadImmediately: true)
+          return
+        }
 
         let previousCount = replacing ? 0 : threads.count
         let merged = Self.merge(replacing ? [] : threads, response.items)
@@ -487,13 +497,18 @@ final class CloudFavoritesViewModel: ObservableObject {
   }
 }
 
-struct CloudFavoritesSessionLease: Equatable, Sendable {
+struct CloudFavoritesSessionLease: Hashable, Sendable {
   let userID: Int64
   let sessionRevision: UUID
 
   init(_ session: StoredAccountSession) {
     userID = session.id
     sessionRevision = session.sessionRevision
+  }
+
+  init(_ change: ThreadCloudFavoriteChange) {
+    userID = change.accountID
+    sessionRevision = change.sessionRevision
   }
 
   func matches(_ session: StoredAccountSession) -> Bool {

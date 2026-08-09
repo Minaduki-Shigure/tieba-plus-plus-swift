@@ -204,39 +204,11 @@ final class ThreadCloudFavoriteStore {
     try Task.checkCancellation()
     guard current.isFavorited else { return current }
 
-    let removed: ThreadCloudFavoriteSnapshot
-    do {
-      removed = try await setMarkedPostID(
-        nil,
-        for: target,
-        requiredLease: expectedSession.lease
-      )
-    } catch {
-      if Task.isCancelled { throw CancellationError() }
-      do {
-        guard
-          let reconciled = try await reload(target, expectedLease: expectedSession.lease)
-        else { throw CancellationError() }
-        if !reconciled.isFavorited {
-          AccountChangeNotifications.postThreadCloudFavoriteChange(
-            ThreadCloudFavoriteChange(
-              accountID: expectedSession.userID,
-              sessionRevision: expectedSession.sessionRevision,
-              target: target,
-              snapshot: reconciled
-            )
-          )
-          return reconciled
-        }
-      } catch is CancellationError {
-        throw CancellationError()
-      } catch {
-        throw BrowseError.unavailable(
-          "云端收藏结果尚未确认；再次操作时会先重新读取状态，不会自动重发删除请求。"
-        )
-      }
-      throw error
-    }
+    let removed = try await setMarkedPostID(
+      nil,
+      for: target,
+      requiredLease: expectedSession.lease
+    )
     guard !removed.isFavorited else {
       throw BrowseError.unavailable("贴吧没有确认移除云端收藏，请重新读取当前状态。")
     }

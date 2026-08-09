@@ -1542,6 +1542,10 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
       ),
       (.forumNotFollowed, "请先关注该贴吧后再签到。"),
       (.forumCheckInUnavailable, "该贴吧当前无法签到。"),
+      (
+        .threadCloudFavoriteOutcomeUnknown,
+        "云端收藏结果尚未确认；再次操作时会先重新读取状态，不会自动重发请求。"
+      ),
     ]
 
     for (source, expected) in cases {

@@ -20,9 +20,9 @@ versioned separately and currently serves `v0.59.0-alpha.1` (build 62).
 | Media rendering, playback, and export | 15 | 13–14 | Images, galleries, video, voice, sharing, saving, and media policy are implemented; broader format and cache parity remain |
 | Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, and media preferences are implemented; TiebaLite's wider settings and customization surface remains |
 | Account, session, and private read flows | 15 | 8 | Login, switching, followed forums, cloud favorites, inbox, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
-| Server writes, creation, and social actions | 15 | 4–5 | Follow/unfollow, check-in, approval, thread-detail cloud-favorite mutations, and three plain-text reply targets have guarded implementations; real reply success, new topics, rich media, list-level cloud actions, and most reactions remain unavailable or unvalidated |
+| Server writes, creation, and social actions | 15 | 5–6 | Follow/unfollow, check-in, approval, verified list/thread-detail cloud-favorite mutations, and three plain-text reply targets have guarded implementations; real reply success, new topics, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
-| **Total** | **100** | **67–71** | Current full-product estimate |
+| **Total** | **100** | **68–72** | Current full-product estimate |
 
 The first three rows form the anonymous reading-and-media subtotal: 49–52 of 55
 points, or roughly 90–95%. Concern raises the private-read area but receives only
@@ -137,9 +137,10 @@ the source metadata is updated to that tested IPA.
 - App-scoped, memory-only followed-forum state shared by a six-item logged-in
   home projection, the active account's complete paginated list, and a selected
   default-off followed-forum recommendation filter
-- Separate read-only Tieba cloud favorites with offset pagination, saved-post
-  navigation, deleted-thread state, and account-lease isolation, plus confirmed
-  thread-detail add, saved-floor update, and removal with read-only reconciliation
+- Separate Tieba cloud favorites with offset pagination, saved-post navigation,
+  deleted-thread state, account-lease isolation, and confirmed list deletion only
+  after raw thread/forum rebinding, plus confirmed thread-detail add, saved-floor
+  update, and removal with read-only reconciliation
 - Foreground ReplyMe and AtMe inbox with account-lease isolation, refresh,
   bounded pagination, safe thread navigation, and explicit reply actions bound
   to the active account lease
@@ -183,9 +184,10 @@ the source metadata is updated to that tested IPA.
 4. Real-device validation of the account-bound concern request, including the
    signed-field deletion matrix, empty-account and expired-session envelopes,
    cursor replay, and whether list retrieval changes recommendation state
-5. Real-device validation of explicit cloud-favorite add/remove and saved-floor
-   updates, including STOKEN rejection, idempotence, uncertain-write readback,
-   concurrency, session rotation, and account switching
+5. Real-device validation of explicit cloud-favorite list/detail removal, add,
+   and saved-floor updates, including unresolvable deleted rows, STOKEN rejection,
+   idempotence, uncertain-write readback, concurrency, session rotation, and
+   account switching
 6. Disposable-account validation of all three plain-text reply targets,
    including minimum-field deletion, missing/random/expired/cross-account
    STOKEN and TBS, challenge and permission failures, post-dispatch loss,
@@ -253,7 +255,9 @@ list uses an HTTPS-only, signed minimal form and returns no credential to the
 application model. A thread-detail overlay separately binds the authenticated
 state to the exact UID, forum, thread, and positive saved post. Adding, updating,
 or removing that state requires explicit confirmation, at most one write, and a
-read-only reconciliation even after an apparently successful response. An
+read-only reconciliation even after an apparently successful response. List
+removal additionally requires a raw PB thread/forum identity that survives the
+same authenticated preflight; no `fid=null` fallback is used. An
 uncertain write is never retried. Both surfaces remain separate from local
 favorites, and a `userID + sessionRevision` lease discards late pages and
 mutation results after account changes.

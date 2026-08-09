@@ -14,6 +14,7 @@ public enum TiebaClientError: Error, Sendable, Equatable {
   case forumNotFollowed
   case forumCheckInUnavailable
   case threadAgreementWriteConflict
+  case threadCloudFavoriteOutcomeUnknown
   case replyChallengeRequired(message: String)
   case replyOutcomeUnknown
   case replySubmissionIDConflict
@@ -49,6 +50,8 @@ extension TiebaClientError: LocalizedError {
       "Tieba did not advertise check-in state for this forum."
     case .threadAgreementWriteConflict:
       "A conflicting thread agreement operation completed; read the current state before retrying."
+    case .threadCloudFavoriteOutcomeUnknown:
+      "The cloud-favorite write was sent, but Tieba did not return a verifiable final state."
     case .replyChallengeRequired(let message):
       message.isEmpty
         ? "Tieba requires additional verification before this reply can be submitted."

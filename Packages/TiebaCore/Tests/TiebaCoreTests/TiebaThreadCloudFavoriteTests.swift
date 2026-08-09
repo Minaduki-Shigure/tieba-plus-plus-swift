@@ -466,7 +466,7 @@ final class TiebaThreadCloudFavoriteTests: XCTestCase {
     )
     let client = TiebaAuthenticatedClient(transport: transport)
 
-    await assertError(.invalidAuthenticatedResponse) {
+    await assertError(.threadCloudFavoriteOutcomeUnknown) {
       _ = try await client.setThreadCloudFavoriteState(
         credential: self.sessionCredential(),
         expectedUserID: self.userID,
@@ -515,7 +515,7 @@ final class TiebaThreadCloudFavoriteTests: XCTestCase {
     }
   }
 
-  func testUncertainFailurePreservesOriginalErrorWhenReadBackDoesNotMatch() async throws {
+  func testUncertainFailureReportsUnknownWhenReadBackDoesNotMatch() async throws {
     let transport = CloudFavoriteMutationTransport(
       userID: userID,
       forumID: forumID,
@@ -526,7 +526,7 @@ final class TiebaThreadCloudFavoriteTests: XCTestCase {
     )
     let client = TiebaAuthenticatedClient(transport: transport)
 
-    await assertError(.network(code: -1_005)) {
+    await assertError(.threadCloudFavoriteOutcomeUnknown) {
       _ = try await client.setThreadCloudFavoriteState(
         credential: self.sessionCredential(),
         expectedUserID: self.userID,

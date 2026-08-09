@@ -216,6 +216,10 @@ not advertise a usable sign state; it is not permission to attempt a write.
   expected UID in `client_user_token` and only `ka=open` in the Cookie header.
   Responses are limited to 2 MiB. The returned model labels the requesting UID
   as context; the endpoint response itself contains no UID assertion.
+- List-level removal target resolution uses an anonymous PB Page request and
+  validates the raw requested thread ID, positive forum ID, thread `fid`, and
+  canonical forum names before returning a candidate identity. The authenticated
+  state preflight remains authoritative; Core provides no `fid=null` fallback.
 - Thread-detail cloud-favorite state uses an authenticated PB Page read that
   binds the logged-in UID, forum ID, thread ID, strict collect status, positive
   marker, and fresh internal `tbs`. Add/update and remove use one signed HTTPS
@@ -223,6 +227,8 @@ not advertise a usable sign state; it is not permission to attempt a write.
   minimum attributed form fields, no device identifier, and a 64 KiB response
   limit. A matching pre-read is idempotent. Every sent write is followed by one
   read-only reconciliation, and an uncertain failure never retries the write.
+  Failure to verify the requested final marker returns the typed
+  `threadCloudFavoriteOutcomeUnknown` error.
   Equivalent operations share one task; conflicting credentials or markers wait
   and then only reread.
 - The authenticated FRS forum-state probe binds the returned user ID, forum ID,
@@ -287,10 +293,10 @@ not advertise a usable sign state; it is not permission to attempt a write.
 These are unofficial APIs and may change without notice. Per-forum
 follow/unfollow, explicit single-forum check-in, and explicit topic, post, and
 subpost approval writes are implemented. Thread-detail cloud-favorite add,
-saved-position update, and removal are experimental validation-build features;
-the paginated cloud list and notifications remain read-only. Automatic or batch
-check-in, list-level favorite deletion or bulk synchronization, creation,
-replies, and moderation remain unsupported.
+saved-position update, and removal plus verified single-item list removal are
+experimental validation-build features; notifications remain read-only.
+Automatic or batch check-in, unverified list deletion, bulk synchronization,
+creation, replies, and moderation remain unsupported.
 
 ## Tests
 

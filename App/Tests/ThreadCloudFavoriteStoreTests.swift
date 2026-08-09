@@ -895,54 +895,19 @@ final class ThreadCloudFavoriteStoreTests: XCTestCase {
     XCTAssertEqual(writeCount, 0)
   }
 
-  func testLeaseBoundRemovalReconcilesCommittedWriteFailureWithoutRetry() async throws {
+  func testLeaseBoundRemovalDoesNotReconcileOrRetryServiceFailure() async {
     let session = favoriteSession(revisionComponent: 20)
     let target = favoriteTarget(threadID: 30)
     let vault = ThreadCloudFavoriteVaultSpy(session: session)
     let service = ThreadCloudFavoriteStoreServiceSpy(
       readResults: [
         FavoriteReadKey(session: session, target: target): [
-          .success(favoriteData(session: session, target: target, markedPostID: 130)),
-          .success(favoriteData(session: session, target: target, markedPostID: nil)),
+          .success(favoriteData(session: session, target: target, markedPostID: 130))
         ]
       ],
       writeResults: [
         FavoriteWriteKey(session: session, target: target, markedPostID: nil): [
-          .failure(ThreadCloudFavoriteStoreTestFailure(message: "connection lost"))
-        ]
-      ]
-    )
-    let store = makeFavoriteStore(vault: vault, service: service)
-
-    let snapshot = try await store.removeCloudFavorite(
-      target,
-      expectedSession: ThreadCloudFavoriteSessionExpectation(
-        userID: session.id,
-        sessionRevision: session.sessionRevision
-      )
-    )
-
-    XCTAssertEqual(snapshot, favoriteSnapshot(nil))
-    let readCount = await service.readCount()
-    let writeCount = await service.writeCount()
-    XCTAssertEqual(readCount, 2)
-    XCTAssertEqual(writeCount, 1)
-  }
-
-  func testLeaseBoundRemovalRetainsWriteFailureWhenReadbackStillFavorited() async {
-    let session = favoriteSession(revisionComponent: 21)
-    let target = favoriteTarget(threadID: 31)
-    let vault = ThreadCloudFavoriteVaultSpy(session: session)
-    let service = ThreadCloudFavoriteStoreServiceSpy(
-      readResults: [
-        FavoriteReadKey(session: session, target: target): [
-          .success(favoriteData(session: session, target: target, markedPostID: 131)),
-          .success(favoriteData(session: session, target: target, markedPostID: 131)),
-        ]
-      ],
-      writeResults: [
-        FavoriteWriteKey(session: session, target: target, markedPostID: nil): [
-          .failure(ThreadCloudFavoriteStoreTestFailure(message: "server rejected"))
+          .failure(ThreadCloudFavoriteStoreTestFailure(message: "outcome unknown"))
         ]
       ]
     )
@@ -958,54 +923,17 @@ final class ThreadCloudFavoriteStoreTests: XCTestCase {
       )
       XCTFail("Expected removal to fail")
     } catch {
-      XCTAssertEqual(error.localizedDescription, "server rejected")
+      XCTAssertEqual(error.localizedDescription, "outcome unknown")
     }
     let readCount = await service.readCount()
     let writeCount = await service.writeCount()
-    XCTAssertEqual(readCount, 2)
-    XCTAssertEqual(writeCount, 1)
-  }
-
-  func testLeaseBoundRemovalReportsUnknownWhenWriteAndReadbackFail() async {
-    let session = favoriteSession(revisionComponent: 22)
-    let target = favoriteTarget(threadID: 32)
-    let vault = ThreadCloudFavoriteVaultSpy(session: session)
-    let service = ThreadCloudFavoriteStoreServiceSpy(
-      readResults: [
-        FavoriteReadKey(session: session, target: target): [
-          .success(favoriteData(session: session, target: target, markedPostID: 132)),
-          .failure(ThreadCloudFavoriteStoreTestFailure(message: "readback failed")),
-        ]
-      ],
-      writeResults: [
-        FavoriteWriteKey(session: session, target: target, markedPostID: nil): [
-          .failure(ThreadCloudFavoriteStoreTestFailure(message: "connection lost"))
-        ]
-      ]
-    )
-    let store = makeFavoriteStore(vault: vault, service: service)
-
-    do {
-      _ = try await store.removeCloudFavorite(
-        target,
-        expectedSession: ThreadCloudFavoriteSessionExpectation(
-          userID: session.id,
-          sessionRevision: session.sessionRevision
-        )
-      )
-      XCTFail("Expected unknown outcome")
-    } catch {
-      XCTAssertTrue(error.localizedDescription.contains("不会自动重发"))
-    }
-    let readCount = await service.readCount()
-    let writeCount = await service.writeCount()
-    XCTAssertEqual(readCount, 2)
+    XCTAssertEqual(readCount, 1)
     XCTAssertEqual(writeCount, 1)
   }
 
   func testLeaseBoundRemovalCannotAdoptNewSessionDuringSuspendedPreflight() async throws {
-    let oldSession = favoriteSession(revisionComponent: 23)
-    let newSession = favoriteSession(revisionComponent: 24, userID: 8)
+    let oldSession = favoriteSession(revisionComponent: 21)
+    let newSession = favoriteSession(revisionComponent: 22, userID: 8)
     let target = favoriteTarget(threadID: 33)
     let vault = ThreadCloudFavoriteVaultSpy(session: oldSession)
     let service = ThreadCloudFavoriteStoreServiceSpy(
