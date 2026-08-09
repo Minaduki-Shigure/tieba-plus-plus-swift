@@ -376,9 +376,10 @@ private actor InboxUnreadSummaryVaultSpy: AccountVault {
   }
 }
 
+@MainActor
 private func waitForInboxUnreadSummaryTest(
   timeout: TimeInterval = 2,
-  condition: () async -> Bool
+  condition: @MainActor () async -> Bool
 ) async throws {
   let deadline = Date().addingTimeInterval(timeout)
   while !(await condition()) {
