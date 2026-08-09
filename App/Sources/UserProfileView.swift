@@ -45,6 +45,7 @@ struct UserProfileView: View {
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
+  let showsUserFilterActions: Bool
 
   @StateObject private var viewModel: UserProfileViewModel
   @StateObject private var repliesViewModel: UserRepliesViewModel
@@ -55,6 +56,7 @@ struct UserProfileView: View {
 
   init(
     userID: Int64,
+    showsUserFilterActions: Bool = true,
     service: any BrowseService & ForumPostSearchService & UserProfileService
       & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
@@ -65,6 +67,7 @@ struct UserProfileView: View {
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
+    self.showsUserFilterActions = showsUserFilterActions
     _viewModel = StateObject(
       wrappedValue: UserProfileViewModel(userID: userID, service: service)
     )
@@ -87,7 +90,7 @@ struct UserProfileView: View {
     .navigationTitle(navigationTitle)
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
-      if let profile = viewModel.profile, profile.id > 0 {
+      if showsUserFilterActions, let profile = viewModel.profile, profile.id > 0 {
         ToolbarItem(placement: .navigationBarTrailing) {
           Menu {
             Button {

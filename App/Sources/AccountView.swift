@@ -147,8 +147,22 @@ struct AccountView: View {
           }
         }
 
-        if viewModel.activeAccount != nil {
+        if let activeAccount = viewModel.activeAccount {
           Section("贴吧账户") {
+            NavigationLink {
+              UserProfileView(
+                userID: activeAccount.id,
+                showsUserFilterActions: false,
+                service: browseService,
+                historyRepository: historyRepository,
+                favoritesRepository: favoritesRepository,
+                searchHistoryRepository: searchHistoryRepository
+              )
+            } label: {
+              Label("我的公开主页", systemImage: "person.crop.circle")
+            }
+            .disabled(viewModel.isMutating)
+
             NavigationLink {
               FollowedForumsView(
                 browseService: browseService,
@@ -159,7 +173,7 @@ struct AccountView: View {
                 searchHistoryRepository: searchHistoryRepository
               )
             } label: {
-              Label("我的关注", systemImage: "star")
+              Label("关注的贴吧", systemImage: "star")
             }
 
             NavigationLink {
@@ -175,7 +189,7 @@ struct AccountView: View {
               Label("消息", systemImage: "bell")
             }
 
-            if viewModel.activeAccount?.hasFullCredentials == true {
+            if activeAccount.hasFullCredentials {
               NavigationLink {
                 CloudFavoritesView(
                   browseService: browseService,
