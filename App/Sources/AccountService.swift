@@ -134,7 +134,7 @@ struct ThreadCloudFavoriteTarget: Hashable, Sendable {
       threadID > 0,
       !forumName.isEmpty,
       forumName.count <= 100,
-      !forumName.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
+      !forumName.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
     else { return nil }
     self.forumID = forumID
     self.forumName = forumName
