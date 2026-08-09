@@ -45,7 +45,7 @@ final class ReplyRelocationTests: XCTestCase {
   }
 
   @MainActor
-  func testThreadReplyRelocationLeavesHotSortBeforeExactRequest() async {
+  func testThreadReplyRelocationLeavesHotSortBeforeExactRequest() async throws {
     let service = ReplyRelocationBrowseService()
     let thread = Self.thread(id: 94, firstPostID: 941)
     let reply = Self.post(id: 942, threadID: thread.id, floor: 2)
@@ -74,7 +74,7 @@ final class ReplyRelocationTests: XCTestCase {
   }
 
   @MainActor
-  func testThreadReplyRelocationDisablesOnlyThreadAuthorBeforeExactRequest() async {
+  func testThreadReplyRelocationDisablesOnlyThreadAuthorBeforeExactRequest() async throws {
     let service = ReplyRelocationBrowseService()
     let thread = Self.thread(id: 95, firstPostID: 951)
     let reply = Self.post(id: 952, threadID: thread.id, floor: 2)
