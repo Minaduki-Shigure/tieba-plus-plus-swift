@@ -185,6 +185,222 @@ final class ImageGalleryTests: XCTestCase {
     )
   }
 
+  @MainActor
+  func testPagingAxisUsesStableModeLabelsIconsAndOrientations() {
+    XCTAssertEqual(ImageGalleryPagingAxis.allCases, [.horizontal, .vertical])
+    XCTAssertEqual(ImageGalleryPagingAxis.horizontal.toggled, .vertical)
+    XCTAssertEqual(ImageGalleryPagingAxis.vertical.toggled, .horizontal)
+    XCTAssertEqual(ImageGalleryPagingAxis.horizontal.title, "横向翻页")
+    XCTAssertEqual(ImageGalleryPagingAxis.vertical.title, "纵向翻页")
+    XCTAssertEqual(ImageGalleryPagingAxis.horizontal.systemImage, "arrow.left.and.right")
+    XCTAssertEqual(ImageGalleryPagingAxis.vertical.systemImage, "arrow.up.and.down")
+    XCTAssertEqual(ImageGalleryPagingAxis.horizontal.pageViewControllerOrientation, .horizontal)
+    XCTAssertEqual(ImageGalleryPagingAxis.vertical.pageViewControllerOrientation, .vertical)
+    XCTAssertEqual(
+      ImageGalleryPagingAxis.horizontal.transitionDirection(for: .left),
+      .forward
+    )
+    XCTAssertEqual(
+      ImageGalleryPagingAxis.horizontal.transitionDirection(for: .right),
+      .reverse
+    )
+    XCTAssertEqual(ImageGalleryPagingAxis.vertical.transitionDirection(for: .up), .forward)
+    XCTAssertEqual(ImageGalleryPagingAxis.vertical.transitionDirection(for: .down), .reverse)
+    XCTAssertEqual(ImageGalleryPagingAxis.horizontal.transitionDirection(for: .next), .forward)
+    XCTAssertEqual(ImageGalleryPagingAxis.vertical.transitionDirection(for: .previous), .reverse)
+    XCTAssertNil(ImageGalleryPagingAxis.horizontal.transitionDirection(for: .up))
+    XCTAssertNil(ImageGalleryPagingAxis.vertical.transitionDirection(for: .left))
+  }
+
+  func testPagerSnapshotPreservesStableSelectionAcrossPrependAndAppend() throws {
+    let first = try item(1)
+    let second = try item(2)
+    let third = try item(3)
+    let fourth = try item(4)
+    let initial = ImageGalleryPagerSnapshot(
+      items: [second, third],
+      requestedSelection: third.id
+    )
+    let expanded = ImageGalleryPagerSnapshot(
+      items: [first, second, third, fourth],
+      requestedSelection: third.id
+    )
+
+    XCTAssertEqual(initial.resolvedSelection(currentID: nil), third.id)
+    XCTAssertEqual(expanded.resolvedSelection(currentID: third.id), third.id)
+    XCTAssertEqual(
+      expanded.resolvedSelection(currentID: third.id, prefersCurrent: true),
+      third.id
+    )
+    XCTAssertEqual(expanded.adjacentID(to: third.id, direction: .reverse), second.id)
+    XCTAssertEqual(expanded.adjacentID(to: third.id, direction: .forward), fourth.id)
+    XCTAssertEqual(expanded.transitionDirection(from: third.id, to: first.id), .reverse)
+    XCTAssertEqual(expanded.transitionDirection(from: second.id, to: fourth.id), .forward)
+  }
+
+  func testPagerSnapshotFiltersDuplicateIDsAndUsesDeterministicFallback() throws {
+    let first = try item(1)
+    let duplicate = ImageGalleryItem(
+      id: first.id,
+      contentOffset: 99,
+      url: try url("https://example.com/duplicate.jpg")
+    )
+    let second = try item(2)
+    let missingID = ImageGalleryItem.ID.local(postID: nil, contentOffset: 999)
+    let snapshot = ImageGalleryPagerSnapshot(
+      items: [first, duplicate, second],
+      requestedSelection: missingID
+    )
+
+    XCTAssertEqual(snapshot.items, [first, second])
+    XCTAssertEqual(snapshot.resolvedSelection(currentID: nil), first.id)
+    XCTAssertEqual(
+      snapshot.resolvedSelection(currentID: second.id, prefersCurrent: true),
+      second.id
+    )
+    XCTAssertNil(snapshot.adjacentID(to: first.id, direction: .reverse))
+    XCTAssertNil(snapshot.adjacentID(to: second.id, direction: .forward))
+  }
+
+  func testPagerSnapshotRetainsAtMostCurrentPlusTwoNeighborsPerSide() throws {
+    let items = try (1...9).map(item)
+    let snapshot = ImageGalleryPagerSnapshot(items: items, requestedSelection: items[4].id)
+
+    XCTAssertEqual(
+      snapshot.retainingIDs(around: items[4].id),
+      Set(items[2...6].map(\.id))
+    )
+    XCTAssertEqual(snapshot.retainingIDs(around: items[0].id).count, 3)
+    XCTAssertEqual(snapshot.retainingIDs(around: items[4].id, radius: 1).count, 3)
+    XCTAssertTrue(snapshot.retainingIDs(around: nil).isEmpty)
+  }
+
+  func testInteractiveTransitionKeepsNewerSelectionRequestAuthoritative() throws {
+    let first = try item(1)
+    let second = try item(2)
+    let third = try item(3)
+
+    XCTAssertFalse(
+      ImageGalleryInteractiveTransitionPolicy.shouldPublishVisibleSelection(
+        pendingRequestedSelection: third.id,
+        hasPendingSnapshot: true,
+        startingSelection: first.id,
+        pendingContainsVisibleSelection: true
+      )
+    )
+    XCTAssertNil(
+      ImageGalleryInteractiveTransitionPolicy.preferredVisibleSelection(
+        pendingRequestedSelection: third.id,
+        startingSelection: first.id,
+        visibleSelection: second.id,
+        pendingContainsVisibleSelection: true
+      )
+    )
+    XCTAssertTrue(
+      ImageGalleryInteractiveTransitionPolicy.shouldPublishVisibleSelection(
+        pendingRequestedSelection: first.id,
+        hasPendingSnapshot: true,
+        startingSelection: first.id,
+        pendingContainsVisibleSelection: true
+      )
+    )
+    XCTAssertEqual(
+      ImageGalleryInteractiveTransitionPolicy.preferredVisibleSelection(
+        pendingRequestedSelection: first.id,
+        startingSelection: first.id,
+        visibleSelection: second.id,
+        pendingContainsVisibleSelection: true
+      ),
+      second.id
+    )
+    XCTAssertFalse(
+      ImageGalleryInteractiveTransitionPolicy.shouldPublishVisibleSelection(
+        pendingRequestedSelection: first.id,
+        hasPendingSnapshot: true,
+        startingSelection: first.id,
+        pendingContainsVisibleSelection: false
+      )
+    )
+    XCTAssertNil(
+      ImageGalleryInteractiveTransitionPolicy.preferredVisibleSelection(
+        pendingRequestedSelection: first.id,
+        startingSelection: first.id,
+        visibleSelection: second.id,
+        pendingContainsVisibleSelection: false
+      )
+    )
+  }
+
+  func testAccessibilityDescriptionsUseRemoteAndSelectedGlobalPositions() throws {
+    let local = try item(1)
+    let remote = ImageGalleryItem(
+      id: .remote(overallIndex: 8, pictureID: "picture", postID: 2),
+      contentOffset: 2,
+      url: try url("https://example.com/remote.jpg")
+    )
+    let descriptions = ImageGalleryAccessibilityPolicy.pageDescriptions(
+      items: [local, remote],
+      selectedID: local.id,
+      selectedDisplayIndex: 7,
+      totalCount: 20
+    )
+
+    XCTAssertEqual(descriptions[local.id], "第 7 张，共 20 张")
+    XCTAssertEqual(descriptions[remote.id], "第 8 张，共 20 张")
+  }
+
+  @MainActor
+  func testZoomStateStorePersistsStatesAndUsesBoundedLRU() throws {
+    let first = try item(1)
+    let second = try item(2)
+    let third = try item(3)
+    let store = ImageGalleryZoomStateStore(maximumRetainedStates: 2)
+    let firstState = ImageGalleryZoomState(
+      scale: 2,
+      offset: CGSize(width: 10, height: -5)
+    )
+    let secondState = ImageGalleryZoomState(scale: 3, offset: .zero)
+    let thirdState = ImageGalleryZoomState(scale: 4, offset: .zero)
+
+    store.update(firstState, for: first.id)
+    store.update(secondState, for: second.id)
+    XCTAssertEqual(store.state(for: first.id), firstState)
+    store.update(thirdState, for: third.id)
+
+    XCTAssertEqual(store.state(for: first.id), firstState)
+    XCTAssertEqual(store.state(for: second.id), .identity)
+    XCTAssertEqual(store.state(for: third.id), thirdState)
+    XCTAssertEqual(store.retainedStateCount, 2)
+
+    store.retainOnly([third.id])
+    XCTAssertEqual(store.state(for: first.id), .identity)
+    XCTAssertEqual(store.retainedStateCount, 1)
+  }
+
+  func testIdentityZoomStateDropsOffset() {
+    let state = ImageGalleryZoomState(
+      scale: 1,
+      offset: CGSize(width: 20, height: 20)
+    )
+
+    XCTAssertEqual(state, .identity)
+  }
+
+  func testPagingControlsAppearOnlyForKnownMultiImageGallery() {
+    XCTAssertFalse(ImageViewerControlPolicy.showsPagingControls(itemCount: 0, totalCount: nil))
+    XCTAssertFalse(ImageViewerControlPolicy.showsPagingControls(itemCount: 1, totalCount: 1))
+    XCTAssertTrue(ImageViewerControlPolicy.showsPagingControls(itemCount: 2, totalCount: nil))
+    XCTAssertTrue(ImageViewerControlPolicy.showsPagingControls(itemCount: 1, totalCount: 10))
+    XCTAssertFalse(ImageViewerControlPolicy.showsPagingControls(itemCount: -1, totalCount: -2))
+  }
+
+  private func item(_ value: Int) throws -> ImageGalleryItem {
+    ImageGalleryItem(
+      contentOffset: value,
+      url: try url("https://example.com/image-\(value).jpg")
+    )
+  }
+
   private func url(_ value: String) throws -> URL {
     try XCTUnwrap(URL(string: value))
   }

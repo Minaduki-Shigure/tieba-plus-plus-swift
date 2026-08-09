@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ImageGalleryItem: Identifiable, Equatable, Sendable {
   enum ID: Hashable, Sendable {
@@ -78,7 +79,7 @@ enum ImageZoomGeometry {
   }
 
   static func allowsPanning(at scale: CGFloat) -> Bool {
-    clampedScale(scale) > 1
+    clampedScale(scale) > 1.001
   }
 
   static func clampedOffset(
@@ -157,7 +158,9 @@ struct ImageViewer: View {
   private let onLoadIfNeeded: () -> Void
 
   @State private var internalSelection: ImageGalleryItem.ID?
+  @State private var pagingAxis = ImageGalleryPagingAxis.horizontal
   @State private var exportTask: Task<Void, Never>?
+  @StateObject private var zoomStateStore: ImageGalleryZoomStateStore
   @StateObject private var exportViewModel: RemoteImageExportViewModel
 
   init(
@@ -174,6 +177,7 @@ struct ImageViewer: View {
     _internalSelection = State(
       initialValue: items.indices.contains(initialIndex) ? items[initialIndex].id : nil
     )
+    _zoomStateStore = StateObject(wrappedValue: ImageGalleryZoomStateStore())
     _exportViewModel = StateObject(
       wrappedValue: RemoteImageExportViewModel(exporter: exporter)
     )
@@ -193,6 +197,7 @@ struct ImageViewer: View {
     totalCountOverride = totalCount
     self.onLoadIfNeeded = onLoadIfNeeded
     _internalSelection = State(initialValue: nil)
+    _zoomStateStore = StateObject(wrappedValue: ImageGalleryZoomStateStore())
     _exportViewModel = StateObject(
       wrappedValue: RemoteImageExportViewModel(exporter: exporter)
     )
@@ -234,6 +239,22 @@ struct ImageViewer: View {
     max(totalCountOverride ?? items.count, items.count)
   }
 
+  private var showsPagingControls: Bool {
+    ImageViewerControlPolicy.showsPagingControls(
+      itemCount: items.count,
+      totalCount: totalCountOverride
+    )
+  }
+
+  private var accessibilityPageDescriptions: [ImageGalleryItem.ID: String] {
+    ImageGalleryAccessibilityPolicy.pageDescriptions(
+      items: items,
+      selectedID: selection.wrappedValue,
+      selectedDisplayIndex: displayedIndex,
+      totalCount: displayedTotalCount
+    )
+  }
+
   var body: some View {
     ZStack {
       Color.black.ignoresSafeArea()
@@ -244,13 +265,14 @@ struct ImageViewer: View {
           .foregroundStyle(.white)
           .accessibilityLabel("没有可显示的图片")
       } else {
-        TabView(selection: selection) {
-          ForEach(items) { item in
-            ZoomableRemoteImage(item: item)
-              .tag(Optional(item.id))
-          }
-        }
-        .tabViewStyle(.page(indexDisplayMode: .never))
+        ImageGalleryPager(
+          items: items,
+          selection: selection,
+          axis: pagingAxis,
+          zoomStateStore: zoomStateStore,
+          accessibilityPageDescriptions: accessibilityPageDescriptions
+        )
+        .id(pagingAxis)
       }
 
       VStack {
@@ -281,6 +303,15 @@ struct ImageViewer: View {
             .disabled(exportViewModel.isBusy || exportViewModel.shareItem != nil)
           }
 
+          if showsPagingControls {
+            Button(action: togglePagingAxis) {
+              Image(systemName: pagingAxis.toggled.systemImage)
+            }
+            .accessibilityLabel("切换为\(pagingAxis.toggled.title)")
+            .accessibilityValue(pagingAxis.title)
+            .help("切换为\(pagingAxis.toggled.title)")
+          }
+
           Spacer()
 
           Button {
@@ -297,12 +328,12 @@ struct ImageViewer: View {
 
         Spacer()
 
-        if let selectedIndex, let displayedIndex {
+        if showsPagingControls, let selectedIndex, let displayedIndex {
           HStack(spacing: 10) {
             Button {
               selectImage(at: selectedIndex - 1)
             } label: {
-              Image(systemName: "chevron.left")
+              Image(systemName: pagingAxis.previousSystemImage)
             }
             .disabled(selectedIndex == items.startIndex)
             .accessibilityLabel("上一张图片")
@@ -322,7 +353,7 @@ struct ImageViewer: View {
             Button {
               selectImage(at: selectedIndex + 1)
             } label: {
-              Image(systemName: "chevron.right")
+              Image(systemName: pagingAxis.nextSystemImage)
             }
             .disabled(selectedIndex == items.index(before: items.endIndex))
             .accessibilityLabel("下一张图片")
@@ -433,6 +464,14 @@ struct ImageViewer: View {
     }
   }
 
+  private func togglePagingAxis() {
+    pagingAxis = pagingAxis.toggled
+    UIAccessibility.post(
+      notification: .announcement,
+      argument: "已切换为\(pagingAxis.title)"
+    )
+  }
+
   private func selectImage(at index: Int) {
     guard items.indices.contains(index) else { return }
     withAnimation(.easeInOut(duration: 0.2)) {
@@ -455,13 +494,32 @@ struct ImageViewer: View {
   }
 }
 
-private struct ZoomableRemoteImage: View {
+struct ZoomableRemoteImage: View {
   let item: ImageGalleryItem
+  let onZoomStateChange: (ImageGalleryItem.ID, ImageGalleryZoomState) -> Void
 
-  @State private var scale: CGFloat = 1
-  @State private var committedScale: CGFloat = 1
-  @State private var offset = CGSize.zero
-  @State private var committedOffset = CGSize.zero
+  @State private var scale: CGFloat
+  @State private var committedScale: CGFloat
+  @State private var offset: CGSize
+  @State private var committedOffset: CGSize
+  @State private var lastPublishedZoomState: ImageGalleryZoomState
+
+  init(
+    item: ImageGalleryItem,
+    initialZoomState: ImageGalleryZoomState = .identity,
+    onZoomStateChange: @escaping (
+      ImageGalleryItem.ID,
+      ImageGalleryZoomState
+    ) -> Void = { _, _ in }
+  ) {
+    self.item = item
+    self.onZoomStateChange = onZoomStateChange
+    _scale = State(initialValue: initialZoomState.scale)
+    _committedScale = State(initialValue: initialZoomState.scale)
+    _offset = State(initialValue: initialZoomState.offset)
+    _committedOffset = State(initialValue: initialZoomState.offset)
+    _lastPublishedZoomState = State(initialValue: initialZoomState)
+  }
 
   var body: some View {
     GeometryReader { proxy in
@@ -488,17 +546,24 @@ private struct ZoomableRemoteImage: View {
             .onTapGesture(count: 2) {
               toggleZoom(viewportSize: proxy.size, imagePixelSize: pixelSize)
             }
-            .onChange(of: proxy.size) { viewportSize in
-              offset = ImageZoomGeometry.clampedOffset(
-                offset,
-                scale: scale,
-                viewportSize: viewportSize,
-                fittedImageSize: fittedImageSize(
-                  in: viewportSize,
-                  imagePixelSize: pixelSize
-                )
+            .accessibilityAction(
+              named: Text(
+                ImageZoomGeometry.allowsPanning(at: scale) ? "重置缩放" : "放大图片"
               )
-              committedOffset = offset
+            ) {
+              toggleZoom(viewportSize: proxy.size, imagePixelSize: pixelSize)
+            }
+            .onAppear {
+              clampZoomOffset(
+                viewportSize: proxy.size,
+                imagePixelSize: pixelSize
+              )
+            }
+            .onChange(of: proxy.size) { viewportSize in
+              clampZoomOffset(
+                viewportSize: viewportSize,
+                imagePixelSize: pixelSize
+              )
             }
             .accessibilityLabel("大图")
         case .failure:
@@ -513,6 +578,9 @@ private struct ZoomableRemoteImage: View {
         }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    .onAppear {
+      publishZoomState(force: true)
     }
   }
 
@@ -532,10 +600,12 @@ private struct ZoomableRemoteImage: View {
             imagePixelSize: imagePixelSize
           )
         )
+        publishZoomState()
       }
       .onEnded { _ in
         committedScale = scale
         committedOffset = offset
+        publishZoomState()
       }
   }
 
@@ -557,15 +627,17 @@ private struct ZoomableRemoteImage: View {
             imagePixelSize: imagePixelSize
           )
         )
+        publishZoomState()
       }
       .onEnded { _ in
         committedOffset = offset
+        publishZoomState()
       }
   }
 
   private func toggleZoom(viewportSize: CGSize, imagePixelSize: CGSize) {
     withAnimation(.easeInOut(duration: 0.2)) {
-      scale = scale > 1 ? 1 : 2
+      scale = ImageZoomGeometry.allowsPanning(at: scale) ? 1 : 2
       offset = ImageZoomGeometry.clampedOffset(
         .zero,
         scale: scale,
@@ -577,7 +649,29 @@ private struct ZoomableRemoteImage: View {
       )
       committedScale = scale
       committedOffset = offset
+      publishZoomState()
     }
+  }
+
+  private func clampZoomOffset(viewportSize: CGSize, imagePixelSize: CGSize) {
+    offset = ImageZoomGeometry.clampedOffset(
+      offset,
+      scale: scale,
+      viewportSize: viewportSize,
+      fittedImageSize: fittedImageSize(
+        in: viewportSize,
+        imagePixelSize: imagePixelSize
+      )
+    )
+    committedOffset = offset
+    publishZoomState()
+  }
+
+  private func publishZoomState(force: Bool = false) {
+    let state = ImageGalleryZoomState(scale: scale, offset: offset)
+    guard force || state != lastPublishedZoomState else { return }
+    lastPublishedZoomState = state
+    onZoomStateChange(item.id, state)
   }
 
   private func fittedImageSize(

@@ -99,7 +99,8 @@ the source metadata is updated to that tested IPA.
 - Explicit eviction of the process-local decoded-image memory cache
 - Optional compact media summaries for thread lists and per-forum search, with no collapsed preview request
 - Default-on dark-appearance dimming for successfully rendered static content thumbnails
-- Same-content multi-image gallery with paging, zoom, bounded download progress,
+- Same-content multi-image gallery with horizontal or vertical one-image paging,
+  stable selection, retained bounded zoom state, bounded download progress,
   original-file sharing, and Photos saving
 - Anonymous whole-thread image traversal with stable occurrences, global
   positions, and bidirectional lazy metadata loading
@@ -130,6 +131,8 @@ the source metadata is updated to that tested IPA.
 - Ephemeral, HTTPS-only Baidu Web login with an exact host allowlist
 - Same-snapshot BDUSS/STOKEN capture, independent same-UID session binding,
   device-only Keychain v3 storage, account switching, and local logout
+- Explicit current-account shortcut to the existing credential-free public
+  profile and its public topic, reply, following, and follower views
 - Paginated followed-forum list for the active account
 - Separate read-only Tieba cloud favorites with offset pagination, saved-post
   navigation, deleted-thread state, and account-lease isolation
@@ -170,8 +173,8 @@ the source metadata is updated to that tested IPA.
    state reconciliation and no retry after an uncertain write
 6. Experimental plain-text reply workflows behind explicit risk confirmation,
    anti-CSRF tests, and unknown-outcome handling
-7. Broader settings parity, remaining account activity, content creation, and
-   moderation tools
+7. Broader settings parity, zoomed-image edge handoff, local-to-remote zoom
+   continuity, remaining account activity, content creation, and moderation tools
 
 The foreground inbox deliberately does not copy TiebaLite's cleartext JSON
 transport or its Android hardware parameters. ReplyMe uses the current HTTPS
@@ -337,6 +340,23 @@ local fallback. Changing thread options or filters cancels and dismisses the
 session. Nested replies, origin cards, search results, forum rules, profiles,
 and filtered threads deliberately keep the same-content gallery.
 
+The gallery uses one `UIPageViewController` implementation for horizontal and
+vertical one-image paging. Direction is transient to the current presentation;
+switching it rebuilds the UIKit pager but keeps the selected stable occurrence.
+A bounded process-local store also restores that occurrence's scale and clamped
+offset. At most the current controller plus two neighbors on either side stay in
+the normal cache, reduced to adjacent controllers after a memory warning. While
+the current image is enlarged, its pan gesture suspends the parent page scroll;
+returning to identity scale restores paging. Unlike TiebaLite, a drag at the
+enlarged image's pan boundary does not yet hand off to the parent pager. Zoom
+state follows a stable occurrence ID, so a local placeholder replaced by its
+remote occurrence resets that state. Interactive and programmatic transitions
+coalesce pending list and selection updates so whole-thread prepend or append
+loading cannot replace a newer requested occurrence. VoiceOver scroll directions
+map to the active axis and announce the displayed position. Single-image
+presentations omit paging direction, count, and previous/next controls while
+retaining share, save, zoom, and close actions.
+
 Each original-image page observes its own waiter on the existing deduplicated
 transfer. A stable positive server length produces an integer percentage from
 exact received bytes; missing, changing, or inconsistent lengths remain
@@ -363,6 +383,10 @@ the outer group post ID is never treated as a parent. Unknown post types remain
 visible but have no guessed navigation. TiebaLite presents this history only for
 the current account, while the separately researched guest contract exposes the
 same public data without credentials or account-only fields.
+The account page now supplies a direct current-UID route to that same guest view
+and hides self-directed local block/allow shortcuts on that route. It adds no
+authenticated profile endpoint or private activity data, so this discoverability
+improvement does not add weighted parity credit.
 
 Public following and follower lists are separate anonymous signed-form reads.
 Following uses `POST https://tiebac.baidu.com/c/u/follow/followList`; followers

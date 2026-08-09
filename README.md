@@ -34,7 +34,10 @@ checks.
   keeps the server snapshot timestamp in memory per exact account session, and
   rejects stale pages after logout, account switching, or credential rotation.
   Both feeds preserve local filtering and media preferences. Public profiles
-  also expose separate reply history plus read-only following and follower lists.
+  also expose separate reply history plus read-only following and follower lists;
+  the account page links the active UID to that same credential-free public view.
+  Multi-image galleries can switch between horizontal and vertical one-image
+  paging while retaining a stable selected occurrence and bounded zoom state.
   These main-only changes will not enter the public app source until a tagged
   IPA passes the release checks.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
@@ -89,7 +92,9 @@ checks.
   account can explicitly approve or cancel approval on the canonical topic,
   ordinary floors, and individual replies on the full nested-reply page. Inline
   nested-reply previews remain read only.
-- **Images:** Responsive image groups open in a pageable, zoomable gallery.
+- **Images:** Responsive image groups open in a zoomable gallery with horizontal
+  or vertical one-image paging. Switching direction retains the current image
+  and its bounded in-memory zoom state while the occurrence ID remains stable.
   Ordinary unfiltered threads can expand the gallery across floors; originals
   can be explicitly shared or saved through add-only Photos access.
 - **Playback:** Voice and native AVKit video share one application-wide playback
@@ -133,6 +138,10 @@ checks.
   followed-forum list. A loaded forum independently reads authoritative
   account-specific follow and check-in state, exposes confirmed follow/unfollow,
   and offers an explicit single-forum check-in action when eligible.
+- **Current-account public profile:** The account page can open the active UID in
+  the same credential-free public profile used elsewhere, including public
+  topics, replies, following, and followers. This is a navigation shortcut, not
+  private account history, and it adds no authenticated profile request.
 - **Content approval state:** The canonical first floor, ordinary floors, and
   parent and child rows on a full nested-reply page independently read the active
   account's approval state and expose confirmed approve/cancel actions. Anonymous
