@@ -30,7 +30,7 @@ final class ReplyDraftStoreTests: XCTestCase {
     XCTAssertEqual(restored?.content, text)
     let values = try location.file.resourceValues(forKeys: [.isExcludedFromBackupKey])
     XCTAssertEqual(values.isExcludedFromBackup, true)
-#if os(iOS)
+#if os(iOS) && !targetEnvironment(simulator)
     let attributes = try FileManager.default.attributesOfItem(atPath: location.file.path)
     XCTAssertEqual(
       attributes[.protectionKey] as? FileProtectionType,
@@ -83,7 +83,8 @@ final class ReplyDraftStoreTests: XCTestCase {
         disposition: .challengeRequired(
           submissionID: submissionID,
           sessionRevision: revision
-        )
+        ),
+        updatedAt: Date(timeIntervalSince1970: 100)
       )
     )
 

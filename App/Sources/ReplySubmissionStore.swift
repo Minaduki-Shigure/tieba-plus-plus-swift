@@ -477,11 +477,15 @@ final class TextReplySubmissionStore {
       case .acceptedAwaitingVisibility(let submissionID, let draftReceipt) = draft.disposition,
       draftReceipt == receipt,
       let lease = entry.lease,
-      draft.key.userID == lease.userID,
+      draft.key.userID == lease.userID
+    else {
+      throw stateError(entry.state)
+    }
+    guard
       confirmation.authorUserID == lease.userID,
       confirmation.content == draft.content
     else {
-      throw stateError(entry.state)
+      throw TextReplySubmissionError.invalidSubmission
     }
     let operationGeneration = generation
     let operationEpoch = entry.epoch
