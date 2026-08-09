@@ -43,6 +43,8 @@
         "SubPostList.proto",
         "ThreadInfo.proto",
         "User.proto",
+        "UserLikeReqIdl.proto",
+        "UserLikeResIdl.proto",
         "UserPostReqIdl.proto",
         "UserPostResIdl.proto",
         "VideoInfo.proto",

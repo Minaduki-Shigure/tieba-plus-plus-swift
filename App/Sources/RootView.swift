@@ -256,7 +256,9 @@ struct RootView: View {
             service: service,
             historyRepository: historyRepository,
             favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository
+            searchHistoryRepository: searchHistoryRepository,
+            accountService: accountService,
+            accountVault: accountVault
           )
         case .history:
           HistoryView(repository: historyRepository) { target in

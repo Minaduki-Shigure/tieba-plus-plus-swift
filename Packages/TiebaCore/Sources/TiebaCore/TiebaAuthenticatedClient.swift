@@ -109,6 +109,7 @@ public actor TiebaAuthenticatedClient {
   static let webSessionResponseMaximumBytes = 256 * 1_024
   static let followedForumsResponseMaximumBytes = 2 * 1_024 * 1_024
   static let cloudFavoritesResponseMaximumBytes = 2 * 1_024 * 1_024
+  static let concernResponseMaximumBytes = 4 * 1_024 * 1_024
   static let notificationResponseMaximumBytes = 2 * 1_024 * 1_024
   static let forumMembershipResponseMaximumBytes = 512 * 1_024
   static let forumFollowWriteResponseMaximumBytes = 64 * 1_024
@@ -201,6 +202,55 @@ public actor TiebaAuthenticatedClient {
       offset: offset,
       pageSize: pageSize
     )
+  }
+
+  public func getConcernFeed(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    pageTag: String? = nil,
+    lastRequestUnix: UInt64 = 0
+  ) async throws -> TiebaConcernPage {
+    let request = try requestFactory.concernFeed(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      pageTag: pageTag,
+      lastRequestUnix: lastRequestUnix
+    )
+    let response: UserLikeResIdl = try await sendProtobuf(
+      request,
+      maximumBodyBytes: Self.concernResponseMaximumBytes
+    )
+    guard response.error.errorno == 0 else {
+      throw TiebaClientError.server(
+        code: response.error.errorno,
+        message: response.error.errmsg
+      )
+    }
+    let page = try TiebaProtoMapper.concernPage(
+      response.data,
+      expectedUserID: expectedUserID,
+      requestedPageTag: pageTag
+    )
+    guard Self.concernResponseRequestsSessionValidation(response.data, page: page) else {
+      return page
+    }
+
+    do {
+      let account = try await validateSession(credential: credential)
+      guard account.userID == expectedUserID else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+      return page
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch let error as TiebaClientError {
+      switch error {
+      case .server, .invalidAuthenticatedResponse:
+        throw TiebaClientError.invalidAuthenticatedResponse
+      default:
+        throw error
+      }
+    }
   }
 
   public func getFollowedForums(
@@ -794,6 +844,19 @@ public actor TiebaAuthenticatedClient {
     } catch {
       throw TiebaClientError.invalidProtobuf
     }
+  }
+
+  private static func concernResponseRequestsSessionValidation(
+    _ data: UserLikeResIdl.DataRes,
+    page: TiebaConcernPage
+  ) -> Bool {
+    guard
+      page.threads.isEmpty,
+      !page.hasMore,
+      data.userTipsType == 1
+    else { return false }
+    let tip = data.userTips.trimmingCharacters(in: .whitespacesAndNewlines)
+    return tip.contains("登录") || tip.lowercased().contains("login")
   }
 
   private func adjustedAgreementScore(_ score: Int, isAgreed: Bool) -> Int {

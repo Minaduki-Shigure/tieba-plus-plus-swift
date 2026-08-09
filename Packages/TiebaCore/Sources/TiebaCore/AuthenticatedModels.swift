@@ -68,6 +68,28 @@ public struct TiebaAuthenticatedAccount:
   }
 }
 
+public struct TiebaConcernPage: Sendable, Hashable {
+  public let requestedUserID: Int64
+  public let threads: [TiebaThread]
+  public let nextPageTag: String?
+  public let hasMore: Bool
+  public let requestUnix: UInt64
+
+  public init(
+    requestedUserID: Int64,
+    threads: [TiebaThread],
+    nextPageTag: String?,
+    hasMore: Bool,
+    requestUnix: UInt64
+  ) {
+    self.requestedUserID = requestedUserID
+    self.threads = threads
+    self.nextPageTag = nextPageTag
+    self.hasMore = hasMore
+    self.requestUnix = requestUnix
+  }
+}
+
 public struct TiebaFollowedForum: Identifiable, Sendable, Hashable {
   public let id: Int64
   public let name: String

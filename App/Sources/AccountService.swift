@@ -121,6 +121,14 @@ struct CloudFavoritePage: Hashable, Sendable {
   let hasMore: Bool
 }
 
+struct ConcernFeedPageData: Hashable, Sendable {
+  let userID: Int64
+  let threads: [BrowseThread]
+  let nextPageTag: String?
+  let hasMore: Bool
+  let requestUnix: UInt64
+}
+
 struct ForumMembershipData: Hashable, Sendable {
   let userID: Int64
   let forumID: Int64
@@ -255,6 +263,11 @@ protocol AccountService: Sendable {
     offset: Int,
     pageSize: Int
   ) async throws -> CloudFavoritePage
+  func concernFeed(
+    session: StoredAccountSession,
+    pageTag: String?,
+    lastRequestUnix: UInt64
+  ) async throws -> ConcernFeedPageData
   func forumMembership(
     session: StoredAccountSession,
     forumID: Int64,
@@ -307,6 +320,14 @@ protocol AccountService: Sendable {
 }
 
 extension AccountService {
+  func concernFeed(
+    session: StoredAccountSession,
+    pageTag: String?,
+    lastRequestUnix: UInt64
+  ) async throws -> ConcernFeedPageData {
+    throw BrowseError.unavailable("当前账户服务不支持读取关注动态。")
+  }
+
   func cloudFavorites(
     session: StoredAccountSession,
     offset: Int,

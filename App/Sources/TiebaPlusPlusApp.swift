@@ -45,8 +45,15 @@ struct TiebaPlusPlusApp: App {
   private let startDestination: AppStartDestination
 
   init() {
+    let contentFilterRepository = FileContentFilterStore.live()
+    let clientConfiguration = TiebaClientConfiguration(
+      personalizedCUID: PersonalizedRecommendationIdentity.current()
+    )
     let accountVault: any AccountVault = KeychainAccountVault()
-    let accountService: any AccountService = TiebaCoreAccountService()
+    let accountService: any AccountService = TiebaCoreAccountService(
+      client: TiebaAuthenticatedClient(configuration: clientConfiguration),
+      contentFilterRepository: contentFilterRepository
+    )
     self.accountVault = accountVault
     self.accountService = accountService
     self.contentAgreementStore = ContentAgreementStore(
@@ -63,13 +70,8 @@ struct TiebaPlusPlusApp: App {
     startDestination = AppStartDestination.resolved(
       UserDefaults.standard.string(forKey: AppPreferenceKey.homeStartDestination) ?? ""
     )
-    let contentFilterRepository = FileContentFilterStore.live()
     self.contentFilterRepository = contentFilterRepository
-    let browseClient = TiebaClient(
-      configuration: TiebaClientConfiguration(
-        personalizedCUID: PersonalizedRecommendationIdentity.current()
-      )
-    )
+    let browseClient = TiebaClient(configuration: clientConfiguration)
     self.service = TiebaCoreBrowseService(
       client: browseClient,
       contentFilterRepository: contentFilterRepository

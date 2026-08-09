@@ -5,9 +5,20 @@ import XCTest
 
 final class RootStartupNavigationTests: XCTestCase {
   func testExploreSectionsKeepStableOrderAndTitles() {
-    XCTAssertEqual(ExploreSection.allCases, [.personalized, .hot])
-    XCTAssertEqual(ExploreSection.allCases.map(\.rawValue), ["personalized", "hot"])
-    XCTAssertEqual(ExploreSection.allCases.map(\.title), ["推荐", "热门"])
+    XCTAssertEqual(ExploreSection.allCases, [.concern, .personalized, .hot])
+    XCTAssertEqual(
+      ExploreSection.allCases.map(\.rawValue),
+      ["concern", "personalized", "hot"]
+    )
+    XCTAssertEqual(ExploreSection.allCases.map(\.title), ["关注", "推荐", "热门"])
+    XCTAssertEqual(
+      ExploreSection.available(hasActiveAccount: false),
+      [.personalized, .hot]
+    )
+    XCTAssertEqual(
+      ExploreSection.available(hasActiveAccount: true),
+      [.concern, .personalized, .hot]
+    )
   }
 
   func testStartDestinationCreatesExpectedInitialPath() {

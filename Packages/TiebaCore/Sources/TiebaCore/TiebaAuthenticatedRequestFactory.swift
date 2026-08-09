@@ -15,6 +15,8 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let notificationClientVersion = "22.6.5.1"
   static let sessionClientVersion = "11.10.8.6"
   static let cloudFavoritesClientVersion = "11.10.8.6"
+  static let concernClientVersion = "11.10.8.6"
+  static let maximumConcernPageTagBytes = 4_096
   static let writeHost = TiebaRequestFactory.serviceHost
   static let webIdentityHost = "tieba.baidu.com"
 
@@ -124,6 +126,63 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       userAgent: "bdtb for Android \(Self.cloudFavoritesClientVersion)",
       clientUserToken: String(expectedUserID),
       cookie: "ka=open"
+    )
+  }
+
+  func concernFeed(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    pageTag: String?,
+    lastRequestUnix: UInt64
+  ) throws -> URLRequest {
+    try validate(credential)
+    guard expectedUserID > 0 else {
+      throw TiebaClientError.invalidArgument("Expected user ID must be positive.")
+    }
+    guard lastRequestUnix <= UInt64(Int64.max) else {
+      throw TiebaClientError.invalidArgument("Concern snapshot timestamp is out of range.")
+    }
+    if let pageTag {
+      guard Self.isValidConcernPageTag(pageTag) else {
+        throw TiebaClientError.invalidArgument("Concern page tag is invalid.")
+      }
+      guard lastRequestUnix > 0 else {
+        throw TiebaClientError.invalidArgument(
+          "Concern load-more requests require a snapshot timestamp."
+        )
+      }
+    }
+    let cuid = try validatedAppScopedCUID()
+
+    var common = CommonReq()
+    common.clientType = 2
+    common.clientVersion = Self.concernClientVersion
+    common.cuid = cuid
+    common.bduss = credential.bduss
+    common.netType = 1
+    common.stoken = credential.stoken
+
+    var data = UserLikeReqIdl.DataReq()
+    data.common = common
+    data.pageTag = pageTag ?? ""
+    data.lastReqUnix = lastRequestUnix
+    data.followType = 1
+    data.loadType = pageTag == nil ? 1 : 2
+
+    var message = UserLikeReqIdl()
+    message.data = data
+    let fields = [
+      ("BDUSS", credential.bduss),
+      ("_client_version", Self.concernClientVersion),
+      ("stoken", credential.stoken),
+    ]
+    return try signedProtobufRequest(
+      path: "/c/f/concern/userlike",
+      command: 309_474,
+      message: message,
+      fields: fields,
+      userAgent: "bdtb for Android \(Self.concernClientVersion)",
+      clientUserToken: String(expectedUserID)
     )
   }
 
@@ -593,6 +652,75 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     )
     request.setValue("gzip", forHTTPHeaderField: "Accept-Encoding")
     return request
+  }
+
+  private func signedProtobufRequest<Message: SwiftProtobuf.Message>(
+    path: String,
+    command: Int,
+    message: Message,
+    fields: [(String, String)],
+    userAgent: String,
+    clientUserToken: String
+  ) throws -> URLRequest {
+    try validateConfiguration()
+    let signedFields = fields.sorted {
+      $0.0 == $1.0 ? $0.1 < $1.1 : $0.0 < $1.0
+    } + [("sign", Self.signature(for: fields))]
+
+    var components = URLComponents()
+    components.scheme = "https"
+    components.host = TiebaRequestFactory.serviceHost
+    components.path = path
+    components.queryItems = [URLQueryItem(name: "cmd", value: String(command))]
+    guard
+      let url = components.url,
+      Self.allows(url, expectedHost: TiebaRequestFactory.serviceHost)
+    else {
+      throw TiebaClientError.invalidEndpoint
+    }
+
+    var request = URLRequest(
+      url: url,
+      cachePolicy: .reloadIgnoringLocalCacheData,
+      timeoutInterval: configuration.requestTimeout
+    )
+    request.httpMethod = "POST"
+    request.httpShouldHandleCookies = false
+    request.httpBody = TiebaRequestFactory.multipartBody(
+      fields: signedFields,
+      protobuf: try message.serializedData()
+    )
+    request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+    request.setValue("protobuf", forHTTPHeaderField: "x_bd_data_type")
+    request.setValue(clientUserToken, forHTTPHeaderField: "client_user_token")
+    request.setValue(
+      "multipart/form-data; boundary=\(TiebaRequestFactory.multipartBoundary)",
+      forHTTPHeaderField: "Content-Type"
+    )
+    request.setValue("gzip", forHTTPHeaderField: "Accept-Encoding")
+    return request
+  }
+
+  static func isValidConcernPageTag(_ value: String) -> Bool {
+    let bytes = value.utf8
+    guard !bytes.isEmpty, bytes.count <= maximumConcernPageTagBytes else { return false }
+    return !value.unicodeScalars.contains {
+      CharacterSet.controlCharacters.contains($0)
+    }
+  }
+
+  private func validatedAppScopedCUID() throws -> String {
+    let rawValue = configuration.personalizedCUID
+    guard
+      rawValue.utf8.count == 36,
+      let value = UUID(uuidString: rawValue),
+      value.uuidString.caseInsensitiveCompare(rawValue) == .orderedSame
+    else {
+      throw TiebaClientError.invalidArgument(
+        "App-scoped recommendation identifier must be a canonical UUID."
+      )
+    }
+    return value.uuidString.lowercased()
   }
 
   private func validate(_ credential: TiebaBDUSSCredential) throws {

@@ -1,6 +1,7 @@
 import SwiftUI
 
 enum ExploreSection: String, CaseIterable, Hashable, Identifiable, Sendable {
+  case concern
   case personalized
   case hot
 
@@ -8,11 +9,17 @@ enum ExploreSection: String, CaseIterable, Hashable, Identifiable, Sendable {
 
   var title: String {
     switch self {
+    case .concern:
+      "关注"
     case .personalized:
       "推荐"
     case .hot:
       "热门"
     }
+  }
+
+  static func available(hasActiveAccount: Bool) -> [Self] {
+    hasActiveAccount ? [.concern, .personalized, .hot] : [.personalized, .hot]
   }
 }
 
@@ -23,8 +30,11 @@ struct ExploreView: View {
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
+  let accountService: any AccountService
+  let accountVault: any AccountVault
 
   @State private var selectedSection: ExploreSection
+  @StateObject private var channelsViewModel: ExploreChannelsViewModel
 
   init(
     initialSection: ExploreSection = .personalized,
@@ -32,17 +42,37 @@ struct ExploreView: View {
       & PersonalizedFeedService & UserProfileService & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
-    searchHistoryRepository: any ForumSearchHistoryRepository
+    searchHistoryRepository: any ForumSearchHistoryRepository,
+    accountService: any AccountService,
+    accountVault: any AccountVault
   ) {
     self.service = service
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
+    self.accountService = accountService
+    self.accountVault = accountVault
     _selectedSection = State(initialValue: initialSection)
+    _channelsViewModel = StateObject(
+      wrappedValue: ExploreChannelsViewModel(vault: accountVault)
+    )
   }
 
   var body: some View {
-    TabView(selection: $selectedSection) {
+    TabView(selection: selectedSectionBinding) {
+      if channelsViewModel.visibleSections.contains(.concern) {
+        ConcernFeedView(
+          isActive: selectedSection == .concern,
+          browseService: service,
+          accountService: accountService,
+          vault: accountVault,
+          historyRepository: historyRepository,
+          favoritesRepository: favoritesRepository,
+          searchHistoryRepository: searchHistoryRepository
+        )
+        .tag(ExploreSection.concern)
+      }
+
       PersonalizedFeedView(
         service: service,
         historyRepository: historyRepository,
@@ -64,8 +94,8 @@ struct ExploreView: View {
     .navigationTitle("发现")
     .navigationBarTitleDisplayMode(.inline)
     .safeAreaInset(edge: .top, spacing: 0) {
-      Picker("发现频道", selection: $selectedSection) {
-        ForEach(ExploreSection.allCases) { section in
+      Picker("发现频道", selection: selectedSectionBinding) {
+        ForEach(channelsViewModel.visibleSections) { section in
           Text(section.title).tag(section)
         }
       }
@@ -74,5 +104,29 @@ struct ExploreView: View {
       .padding(.vertical, 8)
       .background(.bar)
     }
+    .onAppear(perform: channelsViewModel.reload)
+    .onDisappear(perform: channelsViewModel.cancel)
+    .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+      channelsViewModel.reload()
+    }
+    .onChange(of: channelsViewModel.visibleSections) { sections in
+      if !sections.contains(selectedSection) {
+        selectedSection = .personalized
+      }
+    }
+  }
+
+  private var selectedSectionBinding: Binding<ExploreSection> {
+    Binding(
+      get: {
+        channelsViewModel.visibleSections.contains(selectedSection)
+          ? selectedSection
+          : .personalized
+      },
+      set: { section in
+        guard channelsViewModel.visibleSections.contains(section) else { return }
+        selectedSection = section
+      }
+    )
   }
 }

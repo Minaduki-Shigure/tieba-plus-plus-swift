@@ -189,6 +189,84 @@ enum TiebaProtoMapper {
     )
   }
 
+  static func concernPage(
+    _ data: UserLikeResIdl.DataRes,
+    expectedUserID: Int64,
+    requestedPageTag: String?
+  ) throws -> TiebaConcernPage {
+    guard expectedUserID > 0 else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    guard data.hasMore == 0 || data.hasMore == 1 else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    guard data.reqUnix > 0, data.reqUnix <= UInt64(Int64.max) else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    guard data.threadInfo.count <= 100 else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+
+    let hasMore = data.hasMore == 1
+    let nextPageTag: String?
+    if hasMore {
+      guard
+        TiebaAuthenticatedRequestFactory.isValidConcernPageTag(data.pageTag),
+        data.pageTag != requestedPageTag
+      else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+      nextPageTag = data.pageTag
+    } else {
+      nextPageTag = nil
+    }
+
+    var seenThreadIDs = Set<Int64>()
+    var threads = [TiebaThread]()
+    threads.reserveCapacity(data.threadInfo.count)
+    for item in data.threadInfo {
+      guard item.recomType == 1 else { continue }
+      let rawProto = item.threadList
+      guard
+        rawProto.isAd == 0,
+        rawProto.alaInfo.isEmpty,
+        rawProto.isLivepost == 0
+      else { continue }
+      let id = rawProto.id
+      let threadID = rawProto.threadID
+      guard id > 0 || threadID > 0 else { continue }
+      guard id <= 0 || threadID <= 0 || id == threadID else { continue }
+      let resolvedID = id > 0 ? id : threadID
+      guard seenThreadIDs.insert(resolvedID).inserted else { continue }
+
+      let forumName = rawProto.fname.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard rawProto.fid > 0, !forumName.isEmpty else { continue }
+      let forum = TiebaForum(
+        id: rawProto.fid,
+        name: forumName,
+        category: "",
+        subcategory: "",
+        memberCount: 0,
+        threadCount: 0,
+        postCount: 0,
+        hasModerators: false,
+        hasRules: false
+      )
+      var proto = rawProto
+      proto.id = resolvedID
+      proto.threadID = resolvedID
+      threads.append(thread(proto, forum: forum, author: optionalUser(proto.author)))
+    }
+
+    return TiebaConcernPage(
+      requestedUserID: expectedUserID,
+      threads: threads,
+      nextPageTag: nextPageTag,
+      hasMore: hasMore,
+      requestUnix: data.reqUnix
+    )
+  }
+
   static func threadPage(_ data: FrsPageResIdl.DataRes) -> TiebaThreadPage {
     let forumProto = data.forum
     let forum = TiebaForum(

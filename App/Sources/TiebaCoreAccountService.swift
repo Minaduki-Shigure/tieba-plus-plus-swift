@@ -20,6 +20,12 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
     offset: Int,
     pageSize: Int
   ) async throws -> TiebaCloudFavoritePage
+  func getConcernFeed(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    pageTag: String?,
+    lastRequestUnix: UInt64
+  ) async throws -> TiebaConcernPage
   func getNotifications(
     credential: TiebaBDUSSCredential,
     expectedUserID: Int64,
@@ -110,6 +116,15 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
 }
 
 extension TiebaAuthenticatedAccountClient {
+  func getConcernFeed(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    pageTag: String?,
+    lastRequestUnix: UInt64
+  ) async throws -> TiebaConcernPage {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
   func validateSession(
     credential: TiebaSessionCredential
   ) async throws -> TiebaAuthenticatedAccount {
@@ -213,12 +228,17 @@ extension TiebaAuthenticatedClient: TiebaAuthenticatedAccountClient {}
 
 struct TiebaCoreAccountService: AccountService {
   private let client: any TiebaAuthenticatedAccountClient
+  private let contentFilterRepository: any ContentFilterRepository
   private let forumWriteCoordinator: ForumAccountWriteCoordinator
   private let threadAgreementWriteCoordinator: ThreadAgreementWriteCoordinator
   private let contentAgreementWriteCoordinator: ContentAgreementWriteCoordinator
 
-  init(client: any TiebaAuthenticatedAccountClient = TiebaAuthenticatedClient()) {
+  init(
+    client: any TiebaAuthenticatedAccountClient = TiebaAuthenticatedClient(),
+    contentFilterRepository: any ContentFilterRepository = EmptyContentFilterRepository()
+  ) {
     self.client = client
+    self.contentFilterRepository = contentFilterRepository
     self.forumWriteCoordinator = ForumAccountWriteCoordinator(client: client)
     self.threadAgreementWriteCoordinator = ThreadAgreementWriteCoordinator(client: client)
     self.contentAgreementWriteCoordinator = ContentAgreementWriteCoordinator(client: client)
@@ -304,6 +324,44 @@ struct TiebaCoreAccountService: AccountService {
       },
       nextOffset: response.hasMore ? response.nextOffset : nil,
       hasMore: response.hasMore
+    )
+  }
+
+  func concernFeed(
+    session: StoredAccountSession,
+    pageTag: String?,
+    lastRequestUnix: UInt64
+  ) async throws -> ConcernFeedPageData {
+    guard let credentials = session.credentials else {
+      throw BrowseError.unavailable("此账户需要重新登录，才能安全读取关注动态。")
+    }
+    let response: TiebaConcernPage
+    do {
+      response = try await client.getConcernFeed(
+        credential: Self.coreSessionCredential(credentials),
+        expectedUserID: session.id,
+        pageTag: pageTag,
+        lastRequestUnix: lastRequestUnix
+      )
+      try Task.checkCancellation()
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.accountError(error)
+    }
+    guard response.requestedUserID == session.id else {
+      throw BrowseError.unavailable("贴吧返回了不匹配的账户动态，请重新加载后再试。")
+    }
+    let filter = (try? await contentFilterRepository.snapshot()) ?? .empty
+    return ConcernFeedPageData(
+      userID: response.requestedUserID,
+      threads: response.threads.map {
+        let mapped = TiebaCoreBrowseService.mapThread($0)
+        return filter.applying(to: mapped, hasKnownVideo: mapped.kind == .video)
+      },
+      nextPageTag: response.nextPageTag,
+      hasMore: response.hasMore,
+      requestUnix: response.requestUnix
     )
   }
 

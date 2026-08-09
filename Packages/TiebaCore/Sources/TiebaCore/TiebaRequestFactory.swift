@@ -678,7 +678,19 @@ struct TiebaRequestFactory: Sendable {
   }
 
   static func multipartBody(protobuf: Data) -> Data {
+    multipartBody(fields: [], protobuf: protobuf)
+  }
+
+  static func multipartBody(fields: [(String, String)], protobuf: Data) -> Data {
     var body = Data()
+    for (name, value) in fields {
+      body.append(Data("--\(multipartBoundary)\r\n".utf8))
+      body.append(
+        Data("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".utf8)
+      )
+      body.append(Data(value.utf8))
+      body.append(Data("\r\n".utf8))
+    }
     body.append(Data("--\(multipartBoundary)\r\n".utf8))
     body.append(
       Data("Content-Disposition: form-data; name=\"data\"; filename=\"file\"\r\n\r\n".utf8))

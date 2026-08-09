@@ -153,6 +153,92 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     XCTAssertTrue(requests.isEmpty)
   }
 
+  func testConcernFeedRequiresFullSessionMapsCursorAndAppliesContentFilter() async throws {
+    let coreThread = TiebaThread(
+      id: 123,
+      firstPostID: 456,
+      forumID: 42,
+      forumName: "swift",
+      title: "Blocked title",
+      content: TiebaContent(fragments: [.text("blocked excerpt")]),
+      author: nil,
+      kind: .article,
+      tabID: 0,
+      viewCount: 10,
+      replyCount: 3,
+      shareCount: 1,
+      agreeCount: 5,
+      disagreeCount: 1,
+      createdAt: nil,
+      lastReplyAt: nil,
+      isPinned: false,
+      isFeatured: false,
+      isShared: false,
+      isHidden: false,
+      isLive: false
+    )
+    let client = AccountClientSpy(
+      concern: TiebaConcernPage(
+        requestedUserID: 7,
+        threads: [coreThread],
+        nextPageTag: "next",
+        hasMore: true,
+        requestUnix: 100
+      )
+    )
+    let filter = StaticConcernFilterRepository(
+      value: ContentFilterSnapshot(
+        displayMode: .hidden,
+        blockVideos: false,
+        rules: [.keyword("blocked", list: .block)]
+      )
+    )
+    let service = TiebaCoreAccountService(
+      client: client,
+      contentFilterRepository: filter
+    )
+
+    let page = try await service.concernFeed(
+      session: session(),
+      pageTag: "current",
+      lastRequestUnix: 50
+    )
+
+    XCTAssertEqual(page.userID, 7)
+    XCTAssertEqual(page.threads.map(\.id), [123])
+    XCTAssertEqual(page.threads.first?.firstPostID, 456)
+    XCTAssertEqual(page.threads.first?.localVisibility, .hidden)
+    XCTAssertEqual(page.nextPageTag, "next")
+    XCTAssertTrue(page.hasMore)
+    XCTAssertEqual(page.requestUnix, 100)
+    let snapshot = await client.snapshot()
+    XCTAssertEqual(
+      snapshot.concernRequests,
+      [
+        ConcernClientRequest(
+          userID: 7,
+          pageTag: "current",
+          requestUnix: 50,
+          bdussBytes: 192,
+          stokenBytes: 64,
+          cookieName: .bduss
+        )
+      ]
+    )
+
+    let legacyService = TiebaCoreAccountService(client: AccountClientSpy())
+    do {
+      _ = try await legacyService.concernFeed(
+        session: session(stokenComponent: nil),
+        pageTag: nil,
+        lastRequestUnix: 0
+      )
+      XCTFail("Expected a re-login requirement")
+    } catch let error as BrowseError {
+      XCTAssertEqual(error.errorDescription, "此账户需要重新登录，才能安全读取关注动态。")
+    }
+  }
+
   func testForumAccountStateMapsCheckInWithoutExposingCredentials() async throws {
     let client = AccountClientSpy(
       accountState: signedCoreState(days: 6, rank: 12)
@@ -1587,6 +1673,15 @@ private struct CloudFavoriteClientRequest: Equatable, Sendable {
   let cookieName: TiebaBDUSSCookieName
 }
 
+private struct ConcernClientRequest: Equatable, Sendable {
+  let userID: Int64
+  let pageTag: String?
+  let requestUnix: UInt64
+  let bdussBytes: Int
+  let stokenBytes: Int
+  let cookieName: TiebaBDUSSCookieName
+}
+
 private struct ThreadAgreementClientRequest: Equatable, Sendable {
   let credentialByteCount: Int
   let expectedUserID: Int64
@@ -1636,6 +1731,7 @@ private struct AccountClientSnapshot: Sendable {
   let validationCredentialByteCounts: [Int]
   let validationSessionShapes: [SessionCredentialShape]
   let cloudFavoriteRequests: [CloudFavoriteClientRequest]
+  let concernRequests: [ConcernClientRequest]
   let membershipRequests: [AccountClientRequest]
   let accountStateRequests: [AccountClientRequest]
   let mutationRequests: [AccountClientRequest]
@@ -1665,6 +1761,7 @@ private actor AccountServiceCompletionProbe {
 private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   private let validation: TiebaAuthenticatedAccount?
   private let cloudFavorites: TiebaCloudFavoritePage?
+  private let concern: TiebaConcernPage?
   private let membership: TiebaForumMembership?
   private let accountState: TiebaForumAccountState?
   private let mutation: TiebaForumMembership?
@@ -1683,6 +1780,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   private var validationCredentialByteCounts: [Int] = []
   private var validationSessionShapes: [SessionCredentialShape] = []
   private var cloudFavoriteRequests: [CloudFavoriteClientRequest] = []
+  private var concernRequests: [ConcernClientRequest] = []
   private var membershipRequests: [AccountClientRequest] = []
   private var accountStateRequests: [AccountClientRequest] = []
   private var mutationRequests: [AccountClientRequest] = []
@@ -1705,6 +1803,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   init(
     validation: TiebaAuthenticatedAccount? = nil,
     cloudFavorites: TiebaCloudFavoritePage? = nil,
+    concern: TiebaConcernPage? = nil,
     membership: TiebaForumMembership? = nil,
     accountState: TiebaForumAccountState? = nil,
     mutation: TiebaForumMembership? = nil,
@@ -1723,6 +1822,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   ) {
     self.validation = validation
     self.cloudFavorites = cloudFavorites
+    self.concern = concern
     self.membership = membership
     self.accountState = accountState
     self.mutation = mutation
@@ -1780,6 +1880,26 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     )
     guard let cloudFavorites else { throw AccountClientSpyError.unexpectedCall }
     return cloudFavorites
+  }
+
+  func getConcernFeed(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    pageTag: String?,
+    lastRequestUnix: UInt64
+  ) async throws -> TiebaConcernPage {
+    concernRequests.append(
+      ConcernClientRequest(
+        userID: expectedUserID,
+        pageTag: pageTag,
+        requestUnix: lastRequestUnix,
+        bdussBytes: credential.bduss.utf8.count,
+        stokenBytes: credential.stoken.utf8.count,
+        cookieName: credential.bdussCookieName
+      )
+    )
+    guard let concern else { throw AccountClientSpyError.unexpectedCall }
+    return concern
   }
 
   func getFollowedForums(
@@ -2073,6 +2193,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
       validationCredentialByteCounts: validationCredentialByteCounts,
       validationSessionShapes: validationSessionShapes,
       cloudFavoriteRequests: cloudFavoriteRequests,
+      concernRequests: concernRequests,
       membershipRequests: membershipRequests,
       accountStateRequests: accountStateRequests,
       mutationRequests: mutationRequests,
@@ -2085,6 +2206,26 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
       agreementSubpostPageRequests: agreementSubpostPageRequests
     )
   }
+}
+
+private struct StaticConcernFilterRepository: ContentFilterRepository {
+  let value: ContentFilterSnapshot
+
+  func snapshot() async throws -> ContentFilterSnapshot { value }
+  func add(_ rule: ContentFilterRule) async throws -> ContentFilterRule {
+    throw ContentFilterStoreError.unavailable
+  }
+  func delete(id: UUID) async throws { throw ContentFilterStoreError.unavailable }
+  func deleteAll(in list: ContentFilterList) async throws {
+    throw ContentFilterStoreError.unavailable
+  }
+  func setDisplayMode(_ mode: ContentFilterDisplayMode) async throws {
+    throw ContentFilterStoreError.unavailable
+  }
+  func setBlockVideos(_ blockVideos: Bool) async throws {
+    throw ContentFilterStoreError.unavailable
+  }
+  func reset() async throws { throw ContentFilterStoreError.unavailable }
 }
 
 private func waitForAccountServiceTest(
