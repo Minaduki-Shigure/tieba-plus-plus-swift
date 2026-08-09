@@ -23,6 +23,8 @@ struct TiebaPlusPlusApp: App {
   private var contentImagePreviewQuality = ContentImagePreviewQuality.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.hidesThreadListMedia)
   private var hidesThreadListMedia = false
+  @AppStorage(AppPreferenceKey.hidesReplyEntryPoints)
+  private var hidesReplyEntryPoints = AppPreferenceDefaults.hidesReplyEntryPoints
   @AppStorage(AppPreferenceKey.darkensContentThumbnailsInDarkMode)
   private var darkensContentThumbnailsInDarkMode = true
   @AppStorage(AppPreferenceKey.showsBothUsernameAndNickname)
@@ -124,6 +126,7 @@ struct TiebaPlusPlusApp: App {
         ContentImagePreviewQuality.resolved(contentImagePreviewQuality)
       )
       .environment(\.hidesThreadListMedia, hidesThreadListMedia)
+      .environment(\.hidesReplyEntryPoints, hidesReplyEntryPoints)
       .environment(
         \.darkensContentThumbnailsInDarkMode,
         darkensContentThumbnailsInDarkMode

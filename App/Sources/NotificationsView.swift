@@ -9,8 +9,9 @@ struct NotificationsView: View {
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
 
+  @Environment(\.hidesReplyEntryPoints) private var hidesReplyEntryPoints
   @StateObject private var viewModel: NotificationsViewModel
-  @State private var replyRoute: InboxReplyIntent?
+  @State private var replyRouteState = NotificationsReplyRouteState()
   @State private var replyNotice: String?
 
   init(
@@ -62,11 +63,14 @@ struct NotificationsView: View {
       }
     }
     .navigationDestination(isPresented: replyRoutePresented) {
-      if let replyRoute {
+      if let replyRoute = replyRouteState.intent {
         notificationReplyDestination(for: replyRoute)
       }
     }
     .task { viewModel.loadIfNeeded() }
+    .onChange(of: hidesReplyEntryPoints) { hidden in
+      if hidden { invalidatePendingReplyRouteForHiddenPreference() }
+    }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
       viewModel.accountSessionDidChange()
     }
@@ -106,17 +110,20 @@ struct NotificationsView: View {
               .frame(maxWidth: .infinity, alignment: .leading)
           }
 
-          Button {
-            prepareReply(to: message)
-          } label: {
-            Image(systemName: "arrowshape.turn.up.left")
-              .foregroundStyle(.tint)
-              .frame(width: 36, height: 36)
-              .contentShape(Rectangle())
+          if replyEntriesVisible {
+            Button {
+              guard replyEntriesVisible else { return }
+              prepareReply(to: message)
+            } label: {
+              Image(systemName: "arrowshape.turn.up.left")
+                .foregroundStyle(.tint)
+                .frame(width: 36, height: 36)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("回复 \(message.sender.preferredName)")
+            .help("回复此消息")
           }
-          .buttonStyle(.borderless)
-          .accessibilityLabel("回复 \(message.sender.preferredName)")
-          .help("回复此消息")
         }
         .onAppear { viewModel.loadMoreIfNeeded(current: message) }
       }
@@ -174,7 +181,8 @@ struct NotificationsView: View {
         favoritesRepository: favoritesRepository,
         searchHistoryRepository: searchHistoryRepository,
         linkRoute: route,
-        replyIntent: intent
+        replyIntent: intent,
+        onInboxReplyComposerPresented: markReplyRouteEstablished
       )
       .id(intent)
     case .subpost(let commentID):
@@ -186,7 +194,8 @@ struct NotificationsView: View {
         favoritesRepository: favoritesRepository,
         searchHistoryRepository: searchHistoryRepository,
         showsDismissButton: false,
-        replyIntent: intent
+        replyIntent: intent,
+        onInboxReplyComposerPresented: markReplyRouteEstablished
       )
       .id(intent)
     }
@@ -194,20 +203,43 @@ struct NotificationsView: View {
 
   private var replyRoutePresented: Binding<Bool> {
     Binding(
-      get: { replyRoute != nil },
+      get: { replyRouteState.isPresented },
       set: { isPresented in
-        if !isPresented { replyRoute = nil }
+        if !isPresented { replyRouteState.dismiss() }
       }
     )
   }
 
+  private var replyEntriesVisible: Bool {
+    ReplyEntryVisibilityPolicy(
+      preferenceHidden: hidesReplyEntryPoints,
+      pureReading: false,
+      contextAvailable: true
+    ).showsReplyEntry
+  }
+
   private func prepareReply(to message: InboxMessage) {
+    guard replyEntriesVisible else { return }
     replyNotice = nil
-    guard let intent = viewModel.replyIntent(for: message) else {
+    guard
+      let intent = InboxReplyIntentAdmissionPolicy.admittedIntent(
+        viewModel.replyIntent(for: message),
+        hidesReplyEntryPoints: hidesReplyEntryPoints
+      )
+    else {
       replyNotice = "消息所属账户或回复目标已变化，请刷新后重试。"
       return
     }
-    replyRoute = intent
+    replyRouteState.present(intent)
+  }
+
+  private func invalidatePendingReplyRouteForHiddenPreference() {
+    guard replyRouteState.cancelPending() else { return }
+    replyNotice = "已在设置中隐藏回复入口，未打开回复编辑器。"
+  }
+
+  private func markReplyRouteEstablished(_ intent: InboxReplyIntent) {
+    replyRouteState.markEstablished(intent)
   }
 
   private func replyNoticeBanner(_ message: String) -> some View {
@@ -229,6 +261,35 @@ struct NotificationsView: View {
     .padding(.horizontal, 14)
     .padding(.vertical, 10)
     .background(.regularMaterial)
+  }
+}
+
+struct NotificationsReplyRouteState: Equatable {
+  private(set) var intent: InboxReplyIntent?
+  private(set) var isEstablished = false
+
+  var isPresented: Bool { intent != nil }
+
+  mutating func present(_ intent: InboxReplyIntent) {
+    self.intent = intent
+    isEstablished = false
+  }
+
+  mutating func markEstablished(_ intent: InboxReplyIntent) {
+    guard self.intent == intent else { return }
+    isEstablished = true
+  }
+
+  @discardableResult
+  mutating func cancelPending() -> Bool {
+    guard intent != nil, !isEstablished else { return false }
+    dismiss()
+    return true
+  }
+
+  mutating func dismiss() {
+    intent = nil
+    isEstablished = false
   }
 }
 

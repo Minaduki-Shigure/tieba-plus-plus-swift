@@ -48,6 +48,54 @@ final class AppPreferencesTests: XCTestCase {
     XCTAssertFalse(AppPreferenceDefaults.personalizedFollowedForumsOnly)
   }
 
+  @MainActor
+  func testReplyEntryPreferenceUsesStableKeyAndDefaultsToVisible() {
+    XCTAssertEqual(
+      AppPreferenceKey.hidesReplyEntryPoints,
+      "TiebaPlusPlus.hidesReplyEntryPoints"
+    )
+    XCTAssertFalse(AppPreferenceDefaults.hidesReplyEntryPoints)
+    XCTAssertFalse(EnvironmentValues().hidesReplyEntryPoints)
+
+    var environment = EnvironmentValues()
+    environment.hidesReplyEntryPoints = true
+    XCTAssertTrue(environment.hidesReplyEntryPoints)
+  }
+
+  func testReplyEntryPreferencePersistsInUserDefaults() throws {
+    let suiteName = "AppPreferencesTests.reply-entry.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    XCTAssertNil(defaults.object(forKey: AppPreferenceKey.hidesReplyEntryPoints))
+    XCTAssertFalse(defaults.bool(forKey: AppPreferenceKey.hidesReplyEntryPoints))
+
+    defaults.set(true, forKey: AppPreferenceKey.hidesReplyEntryPoints)
+
+    let reloadedDefaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    XCTAssertTrue(reloadedDefaults.bool(forKey: AppPreferenceKey.hidesReplyEntryPoints))
+  }
+
+  func testReplyEntryVisibilityPolicyMatrix() {
+    for preferenceHidden in [false, true] {
+      for pureReading in [false, true] {
+        for contextAvailable in [false, true] {
+          let policy = ReplyEntryVisibilityPolicy(
+            preferenceHidden: preferenceHidden,
+            pureReading: pureReading,
+            contextAvailable: contextAvailable
+          )
+          XCTAssertEqual(
+            policy.showsReplyEntry,
+            contextAvailable && !preferenceHidden && !pureReading,
+            "Unexpected reply entry visibility for hidden=\(preferenceHidden), "
+              + "pureReading=\(pureReading), contextAvailable=\(contextAvailable)"
+          )
+        }
+      }
+    }
+  }
+
   func testHomeStartDestinationUsesStableValuesTitlesAndOrdering() {
     XCTAssertEqual(
       AppStartDestination.allCases,

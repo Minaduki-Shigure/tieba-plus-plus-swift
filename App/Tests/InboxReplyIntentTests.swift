@@ -3,6 +3,35 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class InboxReplyIntentTests: XCTestCase {
+  func testAdmissionPolicyRejectsHiddenReplyEntryBeforeResolution() throws {
+    let intent = try XCTUnwrap(
+      InboxReplyIntent(
+        message: message(),
+        session: session(userID: 41, revision: uuid(14))
+      )
+    )
+
+    XCTAssertEqual(
+      InboxReplyIntentAdmissionPolicy.admittedIntent(
+        intent,
+        hidesReplyEntryPoints: false
+      ),
+      intent
+    )
+    XCTAssertNil(
+      InboxReplyIntentAdmissionPolicy.admittedIntent(
+        intent,
+        hidesReplyEntryPoints: true
+      )
+    )
+    XCTAssertNil(
+      InboxReplyIntentAdmissionPolicy.admittedIntent(
+        nil,
+        hidesReplyEntryPoints: false
+      )
+    )
+  }
+
   func testInitializerBindsStableAccountAndNotificationIdentity() throws {
     let revision = uuid(1)
     let account = session(userID: 41, revision: revision)

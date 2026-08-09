@@ -8,6 +8,7 @@ struct CommentsView: View {
   @Environment(\.appAccentColor) private var appAccentColor
   @Environment(\.accountAccess) private var accountAccess
   @Environment(\.contentAgreementStore) private var contentAgreementStore
+  @Environment(\.hidesReplyEntryPoints) private var hidesReplyEntryPoints
   @StateObject private var viewModel: CommentsViewModel
   @State private var linkedTarget: TiebaLinkTarget?
   @State private var highlightedComment: CommentHighlightToken?
@@ -29,6 +30,7 @@ struct CommentsView: View {
   let searchHistoryRepository: any ForumSearchHistoryRepository
   private let showsDismissButton: Bool
   private let recordsOwningThreadVisit: Bool
+  private let onInboxReplyComposerPresented: ((InboxReplyIntent) -> Void)?
 
   init(
     threadID: Int64,
@@ -39,7 +41,8 @@ struct CommentsView: View {
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository,
     showsDismissButton: Bool = true,
-    replyIntent: InboxReplyIntent? = nil
+    replyIntent: InboxReplyIntent? = nil,
+    onInboxReplyComposerPresented: ((InboxReplyIntent) -> Void)? = nil
   ) {
     self.service = service
     self.historyRepository = historyRepository
@@ -47,6 +50,7 @@ struct CommentsView: View {
     self.searchHistoryRepository = searchHistoryRepository
     self.showsDismissButton = showsDismissButton
     self.recordsOwningThreadVisit = false
+    self.onInboxReplyComposerPresented = onInboxReplyComposerPresented
     _pendingInboxReplyIntent = State(initialValue: replyIntent)
     _viewModel = StateObject(
       wrappedValue: CommentsViewModel(threadID: threadID, postID: postID, service: service)
@@ -63,7 +67,8 @@ struct CommentsView: View {
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository,
     showsDismissButton: Bool = true,
-    replyIntent: InboxReplyIntent? = nil
+    replyIntent: InboxReplyIntent? = nil,
+    onInboxReplyComposerPresented: ((InboxReplyIntent) -> Void)? = nil
   ) {
     self.service = service
     self.historyRepository = historyRepository
@@ -71,6 +76,7 @@ struct CommentsView: View {
     self.searchHistoryRepository = searchHistoryRepository
     self.showsDismissButton = showsDismissButton
     self.recordsOwningThreadVisit = false
+    self.onInboxReplyComposerPresented = onInboxReplyComposerPresented
     _pendingInboxReplyIntent = State(initialValue: replyIntent)
     _viewModel = StateObject(
       wrappedValue: CommentsViewModel(
@@ -91,7 +97,8 @@ struct CommentsView: View {
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository,
     showsDismissButton: Bool = true,
-    replyIntent: InboxReplyIntent? = nil
+    replyIntent: InboxReplyIntent? = nil,
+    onInboxReplyComposerPresented: ((InboxReplyIntent) -> Void)? = nil
   ) {
     self.service = service
     self.historyRepository = historyRepository
@@ -99,6 +106,7 @@ struct CommentsView: View {
     self.searchHistoryRepository = searchHistoryRepository
     self.showsDismissButton = showsDismissButton
     self.recordsOwningThreadVisit = true
+    self.onInboxReplyComposerPresented = onInboxReplyComposerPresented
     _pendingInboxReplyIntent = State(initialValue: replyIntent)
     _viewModel = StateObject(
       wrappedValue: CommentsViewModel(
@@ -155,9 +163,14 @@ struct CommentsView: View {
                   openTiebaLink: openTiebaLink,
                   requestAgreementChange: requestAgreementChange,
                   retryAgreement: retryAgreement,
-                  requestReply: parentReplyContext.map { context in
-                    { replyComposerContext = context }
-                  }
+                  requestReply: replyEntriesVisible
+                    ? parentReplyContext.map { context in
+                      {
+                        guard replyEntriesVisible else { return }
+                        presentReplyComposer(context)
+                      }
+                    }
+                    : nil
                 )
               }
               .id(CommentsListItemID.parentPost(parentPost.id))
@@ -224,9 +237,10 @@ struct CommentsView: View {
                         retry: retryAgreement
                       )
 
-                      if let context = replyContext(for: comment) {
+                      if replyEntriesVisible, let context = replyContext(for: comment) {
                         Button {
-                          replyComposerContext = context
+                          guard replyEntriesVisible else { return }
+                          presentReplyComposer(context)
                         } label: {
                           Image(systemName: "arrowshape.turn.up.left")
                         }
@@ -250,9 +264,10 @@ struct CommentsView: View {
                         Label("复制此条回复", systemImage: "doc.on.doc")
                       }
                     }
-                    if let context = replyContext(for: comment) {
+                    if replyEntriesVisible, let context = replyContext(for: comment) {
                       Button {
-                        replyComposerContext = context
+                        guard replyEntriesVisible else { return }
+                        presentReplyComposer(context)
                       } label: {
                         Label("回复此条", systemImage: "arrowshape.turn.up.left")
                       }
@@ -406,7 +421,12 @@ struct CommentsView: View {
       }
     }
     .task { viewModel.loadIfNeeded() }
-    .task(id: viewModel.state) {
+    .task(
+      id: InboxReplyIntentResolutionTaskID(
+        loadState: viewModel.state,
+        hidesReplyEntryPoints: hidesReplyEntryPoints
+      )
+    ) {
       await consumeInboxReplyIntentIfReady()
     }
     .task(id: viewModel.state) {
@@ -431,6 +451,11 @@ struct CommentsView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       Task { @MainActor in viewModel.reload() }
+    }
+    .onChange(of: hidesReplyEntryPoints) { isHidden in
+      if isHidden {
+        invalidatePendingInboxReplyIntentForHiddenPreference()
+      }
     }
     .onChange(of: replyComposerContext) { context in
       if context == nil {
@@ -516,6 +541,26 @@ struct CommentsView: View {
     return TextReplyComposerContext(thread: thread, parentPost: parentPost)
   }
 
+  private var replyEntriesVisible: Bool {
+    ReplyEntryVisibilityPolicy(
+      preferenceHidden: hidesReplyEntryPoints,
+      pureReading: false,
+      contextAvailable: true
+    ).showsReplyEntry
+  }
+
+  private func presentReplyComposer(_ context: TextReplyComposerContext?) {
+    guard
+      ReplyEntryVisibilityPolicy(
+        preferenceHidden: hidesReplyEntryPoints,
+        pureReading: false,
+        contextAvailable: context != nil
+      ).showsReplyEntry,
+      let context
+    else { return }
+    replyComposerContext = context
+  }
+
   private func replyContext(for comment: BrowseComment) -> TextReplyComposerContext? {
     guard
       let thread = viewModel.thread,
@@ -529,7 +574,16 @@ struct CommentsView: View {
   }
 
   private func consumeInboxReplyIntentIfReady() async {
-    guard let intent = pendingInboxReplyIntent else { return }
+    guard pendingInboxReplyIntent != nil else { return }
+    guard
+      let intent = InboxReplyIntentAdmissionPolicy.admittedIntent(
+        pendingInboxReplyIntent,
+        hidesReplyEntryPoints: hidesReplyEntryPoints
+      )
+    else {
+      invalidatePendingInboxReplyIntentForHiddenPreference()
+      return
+    }
     switch viewModel.state {
     case .idle, .loading:
       return
@@ -582,9 +636,19 @@ struct CommentsView: View {
       return
     }
     do {
-      guard let session = try await accountAccess.vault.activeSession() else {
+      guard
+        let session = try await InboxReplyIntentAdmissionPolicy.activeSession(
+          for: intent,
+          hidesReplyEntryPoints: hidesReplyEntryPoints,
+          vault: accountAccess.vault
+        )
+      else {
         guard inboxReplyIntentGeneration == generation else { return }
-        inboxReplyNotice = "当前没有可用的登录账户，未打开回复编辑器。"
+        if hidesReplyEntryPoints {
+          invalidatePendingInboxReplyIntentForHiddenPreference()
+        } else {
+          inboxReplyNotice = "当前没有可用的登录账户，未打开回复编辑器。"
+        }
         return
       }
       try Task.checkCancellation()
@@ -605,8 +669,10 @@ struct CommentsView: View {
         return
       }
       guard replyComposerContext == nil else { return }
+      guard replyEntriesVisible else { return }
       inboxReplyComposerIntent = intent
       replyComposerContext = context
+      onInboxReplyComposerPresented?(intent)
     } catch is CancellationError {
       return
     } catch {
@@ -629,6 +695,18 @@ struct CommentsView: View {
     }
     if hadInboxReplyFlow {
       inboxReplyNotice = "当前账户已变化，已取消从消息发起的回复。"
+    }
+  }
+
+  private func invalidatePendingInboxReplyIntentForHiddenPreference() {
+    let hadInboxReplyFlow =
+      pendingInboxReplyIntent != nil
+      || isResolvingInboxReplyIntent
+    inboxReplyIntentGeneration &+= 1
+    pendingInboxReplyIntent = nil
+    isResolvingInboxReplyIntent = false
+    if hadInboxReplyFlow {
+      inboxReplyNotice = "已在设置中隐藏回复入口，未打开回复编辑器。"
     }
   }
 
@@ -687,10 +765,11 @@ struct CommentsView: View {
         .padding(.vertical, 10)
       }
 
-      if let context = parentReplyContext {
+      if replyEntriesVisible, let context = parentReplyContext {
         Divider()
         Button {
-          replyComposerContext = context
+          guard replyEntriesVisible else { return }
+          presentReplyComposer(context)
         } label: {
           HStack(spacing: 10) {
             Image(systemName: "bubble.left")

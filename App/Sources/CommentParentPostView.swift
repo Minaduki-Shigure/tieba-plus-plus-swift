@@ -16,6 +16,7 @@ struct CommentParentPostView: View {
   let requestReply: (() -> Void)?
 
   @Environment(\.contentAgreementStore) private var contentAgreementStore
+  @Environment(\.hidesReplyEntryPoints) private var hidesReplyEntryPoints
 
   var body: some View {
     VStack(alignment: .leading, spacing: 9) {
@@ -45,8 +46,11 @@ struct CommentParentPostView: View {
           retry: retryAgreement
         )
 
-        if let requestReply {
-          Button(action: requestReply) {
+        if replyEntryVisible, let requestReply {
+          Button {
+            guard replyEntryVisible else { return }
+            requestReply()
+          } label: {
             Image(systemName: "arrowshape.turn.up.left")
           }
           .buttonStyle(.plain)
@@ -74,8 +78,11 @@ struct CommentParentPostView: View {
           Label("复制父楼内容", systemImage: "doc.on.doc")
         }
       }
-      if let requestReply {
-        Button(action: requestReply) {
+      if replyEntryVisible, let requestReply {
+        Button {
+          guard replyEntryVisible else { return }
+          requestReply()
+        } label: {
           Label(
             post.floor == 1 ? "回复主题" : "回复父楼",
             systemImage: "arrowshape.turn.up.left"
@@ -84,6 +91,14 @@ struct CommentParentPostView: View {
       }
     }
     .accessibilityIdentifier("comments-parent-post")
+  }
+
+  private var replyEntryVisible: Bool {
+    ReplyEntryVisibilityPolicy(
+      preferenceHidden: hidesReplyEntryPoints,
+      pureReading: false,
+      contextAvailable: requestReply != nil
+    ).showsReplyEntry
   }
 
   private var authorIdentity: some View {

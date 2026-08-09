@@ -34,12 +34,14 @@ struct ThreadView: View {
   @State private var inboxReplyNotice: String?
   @State private var inboxReplyComposerIntent: InboxReplyIntent?
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.hidesReplyEntryPoints) private var hidesReplyEntryPoints
   @Environment(\.accountAccess) private var accountAccess
   @Environment(\.contentFilterRepository) private var contentFilterRepository
   @Environment(\.contentAgreementStore) private var contentAgreementStore
   @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
   private let historySnapshot: ThreadHistorySnapshot?
   private let linkRoute: TiebaThreadRoute?
+  private let onInboxReplyComposerPresented: ((InboxReplyIntent) -> Void)?
 
   init(
     thread: BrowseThread,
@@ -50,7 +52,8 @@ struct ThreadView: View {
     searchHistoryRepository: any ForumSearchHistoryRepository,
     historySnapshot: ThreadHistorySnapshot? = nil,
     linkRoute: TiebaThreadRoute? = nil,
-    replyIntent: InboxReplyIntent? = nil
+    replyIntent: InboxReplyIntent? = nil,
+    onInboxReplyComposerPresented: ((InboxReplyIntent) -> Void)? = nil
   ) {
     self.service = service
     self.historyRepository = historyRepository
@@ -58,6 +61,7 @@ struct ThreadView: View {
     self.searchHistoryRepository = searchHistoryRepository
     self.historySnapshot = historySnapshot
     self.linkRoute = linkRoute
+    self.onInboxReplyComposerPresented = onInboxReplyComposerPresented
     _pendingInboxReplyIntent = State(initialValue: replyIntent)
     _viewModel = StateObject(
       wrappedValue: ThreadViewModel(
@@ -267,7 +271,12 @@ struct ThreadView: View {
       }
       await threadCloudFavoriteStore.activate(target, for: cloudFavoriteScopeID)
     }
-    .task(id: viewModel.state) {
+    .task(
+      id: InboxReplyIntentResolutionTaskID(
+        loadState: viewModel.state,
+        hidesReplyEntryPoints: hidesReplyEntryPoints
+      )
+    ) {
       await consumeInboxReplyIntentIfReady()
     }
     .task(id: viewModel.state) {
@@ -337,6 +346,11 @@ struct ThreadView: View {
     .onChange(of: replyComposerContext) { context in
       if context == nil {
         inboxReplyComposerIntent = nil
+      }
+    }
+    .onChange(of: hidesReplyEntryPoints) { isHidden in
+      if isHidden {
+        invalidatePendingInboxReplyIntentForHiddenPreference()
       }
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
@@ -480,9 +494,10 @@ struct ThreadView: View {
         .padding(.vertical, 10)
       }
 
-      if !isPureReadingMode, let context = topicReplyContext {
+      if replyEntriesVisible, let context = topicReplyContext {
         Divider()
         Button {
+          guard replyEntriesVisible else { return }
           replyComposerContext = context
         } label: {
           HStack(spacing: 10) {
@@ -510,8 +525,16 @@ struct ThreadView: View {
     return TextReplyComposerContext(thread: viewModel.thread, firstPost: firstPost)
   }
 
+  private var replyEntriesVisible: Bool {
+    ReplyEntryVisibilityPolicy(
+      preferenceHidden: hidesReplyEntryPoints,
+      pureReading: isPureReadingMode,
+      contextAvailable: true
+    ).showsReplyEntry
+  }
+
   private func requestReply(to post: BrowsePost) {
-    guard !isPureReadingMode else { return }
+    guard replyEntriesVisible else { return }
     if
       let firstPost = viewModel.firstPost,
       firstPost.id == post.id,
@@ -524,7 +547,19 @@ struct ThreadView: View {
   }
 
   private func consumeInboxReplyIntentIfReady() async {
-    guard let intent = pendingInboxReplyIntent else { return }
+    let pendingIntent = pendingInboxReplyIntent
+    guard
+      let intent = InboxReplyIntentAdmissionPolicy.admittedIntent(
+        pendingIntent,
+        hidesReplyEntryPoints: hidesReplyEntryPoints
+      )
+    else {
+      if pendingInboxReplyIntent != nil {
+        pendingInboxReplyIntent = nil
+        inboxReplyNotice = "已在设置中隐藏回复入口，未打开回复编辑器。"
+      }
+      return
+    }
     switch viewModel.state {
     case .idle, .loading:
       return
@@ -563,9 +598,19 @@ struct ThreadView: View {
       return
     }
     do {
-      guard let session = try await accountAccess.vault.activeSession() else {
+      guard
+        let session = try await InboxReplyIntentAdmissionPolicy.activeSession(
+          for: intent,
+          hidesReplyEntryPoints: hidesReplyEntryPoints,
+          vault: accountAccess.vault
+        )
+      else {
         guard inboxReplyIntentGeneration == generation else { return }
-        inboxReplyNotice = "当前没有可用的登录账户，未打开回复编辑器。"
+        if hidesReplyEntryPoints {
+          invalidatePendingInboxReplyIntentForHiddenPreference()
+        } else {
+          inboxReplyNotice = "当前没有可用的登录账户，未打开回复编辑器。"
+        }
         return
       }
       try Task.checkCancellation()
@@ -585,8 +630,10 @@ struct ThreadView: View {
         return
       }
       guard replyComposerContext == nil else { return }
+      guard replyEntriesVisible else { return }
       inboxReplyComposerIntent = intent
       replyComposerContext = context
+      onInboxReplyComposerPresented?(intent)
     } catch is CancellationError {
       return
     } catch {
@@ -609,6 +656,16 @@ struct ThreadView: View {
     }
     if hadInboxReplyFlow {
       inboxReplyNotice = "当前账户已变化，已取消从消息发起的回复。"
+    }
+  }
+
+  private func invalidatePendingInboxReplyIntentForHiddenPreference() {
+    let hadPendingIntent = pendingInboxReplyIntent != nil || isResolvingInboxReplyIntent
+    inboxReplyIntentGeneration &+= 1
+    pendingInboxReplyIntent = nil
+    isResolvingInboxReplyIntent = false
+    if hadPendingIntent {
+      inboxReplyNotice = "已在设置中隐藏回复入口，未打开回复编辑器。"
     }
   }
 
@@ -749,9 +806,9 @@ struct ThreadView: View {
                     openTiebaLink: openTiebaLink,
                     requestAgreementChange: requestAgreementChange,
                     retryAgreement: retryAgreement,
-                    requestReply: isPureReadingMode ? nil : {
+                    requestReply: replyEntriesVisible ? {
                       requestReply(to: firstPost)
-                    },
+                    } : nil,
                     openComments: { commentID in
                       commentsRoute = CommentsRoute(
                         threadID: firstPost.threadID,
@@ -830,9 +887,9 @@ struct ThreadView: View {
                     openTiebaLink: openTiebaLink,
                     requestAgreementChange: requestAgreementChange,
                     retryAgreement: retryAgreement,
-                    requestReply: isPureReadingMode ? nil : {
+                    requestReply: replyEntriesVisible ? {
                       requestReply(to: post)
-                    },
+                    } : nil,
                     openComments: { commentID in
                       commentsRoute = CommentsRoute(
                         threadID: post.threadID,

@@ -341,12 +341,13 @@ share only their expected-target union. Scope changes, a write in progress, or
 an account switch must invalidate or epoch-guard stale batch results so they
 cannot overwrite a mutation or the new account's state.
 
-Follow, unfollow, check-in, and topic, post, or nested-reply approval or
-cancellation all require explicit user confirmation. Automatic, scheduled, and
-batch check-in are deliberately unsupported. `disagree` or downvote, content
-creation, replying, editing, deletion, reporting, and every other authenticated
-content write remain unsupported and must not be inferred from the approval
-endpoint.
+Follow, unfollow, check-in, topic, post, or nested-reply approval or
+cancellation, and each supported plain-text topic, floor, or nested-reply
+submission all require explicit user confirmation. Automatic, scheduled, and
+batch check-in are deliberately unsupported. `disagree` or downvote, new-topic
+creation, rich-media replying, editing, deletion, reporting, and every other
+authenticated content write remain unsupported and must not be inferred from
+the approval or plain-text reply endpoints.
 
 STOKEN is available only through a validated complete session and only to an
 endpoint whose contract explicitly requires it. The current unfollow, check-in,
@@ -1000,6 +1001,18 @@ second store. Full-floor copying is initiated by an explicit user gesture and
 may include decoded public textual fragments and fixed non-URL media boundary
 markers only; it must not add media URLs, credentials, account responses, or
 hidden nested replies to the pasteboard.
+
+The hide-reply-entry preference is a default-off, nonsecret local Boolean and
+must not itself issue a request or read account storage. While enabled, topic,
+floor, nested-reply, and inbox quick-reply controls are not constructed, and
+their actions recheck the current policy before presenting a composer. An inbox
+reply intent is rejected before the account vault is read; enabling the setting
+also invalidates any pending or resolving intent so a late account result cannot
+open a composer. This presentation preference must not hide reply content,
+ordinary notification navigation, copying, or agreement controls, and it must
+not erase a draft or close a composer that is already open. Account-session
+changes retain their stricter existing behavior and may still invalidate an
+inbox-originated composer whose credential binding is no longer current.
 
 Home-entry preferences are also nonsecret UserDefaults values. The start target
 must resolve through the closed home, post-ranking, hot-topic, local-favorite,

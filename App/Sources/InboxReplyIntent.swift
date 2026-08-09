@@ -1,5 +1,40 @@
 import Foundation
 
+enum InboxReplyIntentAdmissionPolicy {
+  static func admittedIntent(
+    _ intent: InboxReplyIntent?,
+    hidesReplyEntryPoints: Bool
+  ) -> InboxReplyIntent? {
+    guard
+      ReplyEntryVisibilityPolicy(
+        preferenceHidden: hidesReplyEntryPoints,
+        pureReading: false,
+        contextAvailable: intent != nil
+      ).showsReplyEntry
+    else { return nil }
+    return intent
+  }
+
+  static func activeSession(
+    for intent: InboxReplyIntent?,
+    hidesReplyEntryPoints: Bool,
+    vault: any AccountVault
+  ) async throws -> StoredAccountSession? {
+    guard
+      admittedIntent(
+        intent,
+        hidesReplyEntryPoints: hidesReplyEntryPoints
+      ) != nil
+    else { return nil }
+    return try await vault.activeSession()
+  }
+}
+
+struct InboxReplyIntentResolutionTaskID: Equatable {
+  let loadState: LoadState
+  let hidesReplyEntryPoints: Bool
+}
+
 struct InboxReplyIntent:
   Hashable, Sendable, CustomStringConvertible, CustomDebugStringConvertible,
   CustomReflectable

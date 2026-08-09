@@ -16,6 +16,7 @@ enum AppPreferenceKey {
   static let contentMediaLoadPolicy = "TiebaPlusPlus.contentMediaLoadPolicy"
   static let contentImagePreviewQuality = "TiebaPlusPlus.contentImagePreviewQuality"
   static let hidesThreadListMedia = "TiebaPlusPlus.hidesThreadListMedia"
+  static let hidesReplyEntryPoints = "TiebaPlusPlus.hidesReplyEntryPoints"
   static let darkensContentThumbnailsInDarkMode =
     "TiebaPlusPlus.darkensContentThumbnailsInDarkMode"
   static let showsBothUsernameAndNickname =
@@ -88,6 +89,17 @@ enum AppPreferenceDefaults {
   static let personalizedFollowedForumsOnly = false
   static let favoriteThreadsOpenOnlyAuthor = false
   static let favoriteThreadsOpenDescending = false
+  static let hidesReplyEntryPoints = false
+}
+
+struct ReplyEntryVisibilityPolicy: Equatable, Sendable {
+  let preferenceHidden: Bool
+  let pureReading: Bool
+  let contextAvailable: Bool
+
+  var showsReplyEntry: Bool {
+    contextAvailable && !preferenceHidden && !pureReading
+  }
 }
 
 struct FavoriteThreadOpenOverrides: Equatable, Sendable {
@@ -191,6 +203,10 @@ private struct HidesThreadListMediaEnvironmentKey: EnvironmentKey {
   static let defaultValue = false
 }
 
+private struct HidesReplyEntryPointsEnvironmentKey: EnvironmentKey {
+  static let defaultValue = AppPreferenceDefaults.hidesReplyEntryPoints
+}
+
 private struct DarkensContentThumbnailsInDarkModeEnvironmentKey: EnvironmentKey {
   static let defaultValue = true
 }
@@ -207,6 +223,11 @@ extension EnvironmentValues {
   var hidesThreadListMedia: Bool {
     get { self[HidesThreadListMediaEnvironmentKey.self] }
     set { self[HidesThreadListMediaEnvironmentKey.self] = newValue }
+  }
+
+  var hidesReplyEntryPoints: Bool {
+    get { self[HidesReplyEntryPointsEnvironmentKey.self] }
+    set { self[HidesReplyEntryPointsEnvironmentKey.self] = newValue }
   }
 
   var darkensContentThumbnailsInDarkMode: Bool {

@@ -18,7 +18,7 @@ versioned separately and currently serves `v0.59.0-alpha.1` (build 62).
 | Anonymous discovery, search, and forums | 20 | 18–19 | Core browsing, ranking, recommendations, categories, and search are implemented; feedback and a few niche discovery paths remain |
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 13–14 | Images, galleries, video, voice, sharing, saving, and media policy are implemented; broader format and cache parity remain |
-| Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, and media preferences are implemented; TiebaLite's wider settings and customization surface remains |
+| Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, media preferences, and local reply-entry visibility are implemented; TiebaLite's wider settings and customization surface remains |
 | Account, session, and private read flows | 15 | 9 | Login, switching, followed forums, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 5–6 | Follow/unfollow, check-in, approval, verified list/thread-detail cloud-favorite mutations, and three plain-text reply targets have guarded implementations; real reply success, new topics, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
@@ -82,6 +82,8 @@ the source metadata is updated to that tested IPA.
 - Persistent five-color accent selection with light, dark, and high-contrast variants
 - Persistent six-position app text-size adjustment relative to iOS Dynamic Type
 - Transient pure-reading mode and full textual floor copying
+- Default-off local hiding of topic, floor, nested-reply, and inbox quick-reply
+  entry points without removing reply content, drafts, or an open composer
 - Home-screen recent-forum history, expanded by default and independently hideable
 - Canonical forum/thread sharing and browse-mode-aware thread-link copying
 - Strict internal routing for supported Tieba HTTPS, pasted official-scheme, and app links
@@ -721,9 +723,14 @@ No-history mode updates the recording flag inside the existing versioned
 history archive, so it does not create a competing source of truth or delete
 favorites. Pure-reading mode is transient and removes author chrome, filter
 placeholders, and nested-reply entry points without changing post data or the
-persisted sort. Full-floor copy uses the currently decoded public textual
-fragments plus fixed `[图片]`, `[视频]`, and `[语音]` boundary markers; media URLs
-and nested replies are not synthesized into the copied text.
+persisted sort. The independent hide-reply-entry preference is persistent,
+defaults off, and removes the topic, floor, nested-reply, and inbox quick-reply
+controls while retaining reply content, ordinary notification navigation,
+copying, agreement controls, drafts, and any composer that is already open.
+Changing it is local-only and starts no network request. Full-floor copy uses the
+currently decoded public textual fragments plus fixed `[图片]`, `[视频]`, and
+`[语音]` boundary markers; media URLs and nested replies are not synthesized into
+the copied text.
 
 Local content filtering covers ordinary and channel forum thread lists, global
 and per-forum search results, public-profile activity, post floors, nested

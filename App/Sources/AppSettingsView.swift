@@ -37,6 +37,8 @@ struct AppSettingsView: View {
   private var contentImagePreviewQuality = ContentImagePreviewQuality.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.hidesThreadListMedia)
   private var hidesThreadListMedia = false
+  @AppStorage(AppPreferenceKey.hidesReplyEntryPoints)
+  private var hidesReplyEntryPoints = AppPreferenceDefaults.hidesReplyEntryPoints
   @AppStorage(AppPreferenceKey.darkensContentThumbnailsInDarkMode)
   private var darkensContentThumbnailsInDarkMode = true
   @AppStorage(AppPreferenceKey.showsBothUsernameAndNickname)
@@ -129,6 +131,18 @@ struct AppSettingsView: View {
         case .loaded:
           EmptyView()
         }
+      }
+
+      Section {
+        Toggle("隐藏回复入口", isOn: $hidesReplyEntryPoints)
+          .accessibilityIdentifier("settings-hide-reply-entry-points")
+      } header: {
+        Text("阅读与回复")
+      } footer: {
+        Text(
+          "开启后，会隐藏主题、楼层、楼中楼和消息列表中的回复按钮；"
+            + "不会隐藏回复内容或删除草稿。此设置只保存在本机，切换时不会发起网络请求。"
+        )
       }
 
       Section {

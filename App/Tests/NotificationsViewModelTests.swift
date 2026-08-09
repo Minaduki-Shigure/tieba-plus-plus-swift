@@ -291,6 +291,73 @@ final class NotificationsViewModelTests: XCTestCase {
     XCTAssertTrue(viewModel.messages.isEmpty)
   }
 
+  func testHiddenPreferenceCancelsPendingReplyRoute() throws {
+    let intent = try XCTUnwrap(
+      InboxReplyIntent(
+        message: message(id: 11),
+        userID: 7,
+        sessionRevision: uuid(7)
+      )
+    )
+    var route = NotificationsReplyRouteState()
+
+    route.present(intent)
+
+    XCTAssertTrue(route.isPresented)
+    XCTAssertFalse(route.isEstablished)
+    XCTAssertTrue(route.cancelPending())
+    XCTAssertFalse(route.isPresented)
+    XCTAssertNil(route.intent)
+  }
+
+  func testHiddenPreferencePreservesEstablishedReplyRouteUntilDismissed() throws {
+    let intent = try XCTUnwrap(
+      InboxReplyIntent(
+        message: message(id: 11),
+        userID: 7,
+        sessionRevision: uuid(7)
+      )
+    )
+    var route = NotificationsReplyRouteState()
+    route.present(intent)
+    route.markEstablished(intent)
+
+    XCTAssertFalse(route.cancelPending())
+    XCTAssertEqual(route.intent, intent)
+    XCTAssertTrue(route.isEstablished)
+
+    route.dismiss()
+
+    XCTAssertFalse(route.isPresented)
+    XCTAssertFalse(route.isEstablished)
+  }
+
+  func testStaleDestinationCannotEstablishReplacementReplyRoute() throws {
+    let staleIntent = try XCTUnwrap(
+      InboxReplyIntent(
+        message: message(id: 11),
+        userID: 7,
+        sessionRevision: uuid(7)
+      )
+    )
+    let currentIntent = try XCTUnwrap(
+      InboxReplyIntent(
+        message: message(id: 12),
+        userID: 7,
+        sessionRevision: uuid(7)
+      )
+    )
+    var route = NotificationsReplyRouteState()
+    route.present(staleIntent)
+    route.present(currentIntent)
+
+    route.markEstablished(staleIntent)
+
+    XCTAssertEqual(route.intent, currentIntent)
+    XCTAssertFalse(route.isEstablished)
+    XCTAssertTrue(route.cancelPending())
+  }
+
   private func session(
     userID: Int64,
     revision: UUID = UUID()

@@ -16,7 +16,7 @@ checks.
 | Area | Current state |
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
-| Local features | Available for history, favorites, filtering, appearance, and media preferences |
+| Local features | Available for history, favorites, filtering, appearance, media preferences, and reply-entry visibility |
 | Accounts | Current `main` supports bound Web login, switching, logout, followed forums, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, and experimental content approval |
 | Server-side writes | Guarded forum follow/unfollow, check-in, content approval, thread-detail and verified list-level cloud-favorite changes, and plain-text topic/floor/nested replies are in device validation; other writes stay disabled |
 | TiebaLite parity | Anonymous reading and media: about 90–95%; full product scope: about 69–73% |
@@ -165,6 +165,10 @@ checks.
 - **Appearance:** System, light, and dark themes, a bounded accent palette,
   Dynamic Type-relative text sizing, compact previews, and optional combined
   nickname/username presentation are persistent local controls.
+- **Reply controls:** A default-off local preference can hide topic, floor,
+  nested-reply, and inbox quick-reply entry points without hiding reply content,
+  read-only navigation, agreement controls, existing drafts, or an already-open
+  composer.
 - **Media policy:** Automatic, data-saving, or tap-to-load behavior and standard
   or high-definition preview selection apply to content media. The decoded-image
   cache is memory-only and can be explicitly evicted.
@@ -250,10 +254,12 @@ checks.
   exact target and protected on disk. A non-resendable pending marker must be
   persisted before the network write; challenge, accepted-but-not-visible, and
   unknown outcomes remain blocked so reopening a composer cannot silently resend
-  them. A challenge remains blocked for the same `sessionRevision`; only an
-  explicit new login can start a fresh attempt. The request deliberately omits
-  Android device fingerprints and therefore remains a disposable-account
-  validation feature.
+  them. The local reply-entry preference prevents new manual or inbox-driven
+  composers while hidden, but never deletes those drafts or closes a composer
+  that is already open. A challenge remains blocked for the same
+  `sessionRevision`; only an explicit new login can start a fresh attempt. The
+  request deliberately omits Android device fingerprints and therefore remains
+  a disposable-account validation feature.
 - **Credential boundary:** Anonymous and authenticated requests use isolated,
   ephemeral clients. The vault stores only the same-snapshot BDUSS/STOKEN pair
   accepted by the UID-consistency probes and its actual BDUSS Cookie name;
