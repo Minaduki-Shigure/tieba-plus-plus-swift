@@ -55,6 +55,12 @@ checks.
   unsupported, oversized, or malformed sequences remain readable as static
   posters. Only the current gallery page animates, and playback stops while the
   scene or view is inactive or Reduce Motion is enabled.
+  Validated HTTPS image bytes fetched without account Cookie or Authorization
+  headers now use a bounded persistent cache
+  shared by previews, galleries, sharing, and Photos export. Exact request URLs
+  are represented only by SHA-256 keys; metadata contains no URL, response header,
+  MIME type, filename, cookie, or account data. Settings reports its logical size
+  and clears it together with decoded memory and animation-frame caches.
   A logged-in thread can also read its account-bound Tieba cloud-favorite state and,
   after explicit confirmation, add it at the last visible floor, update the saved
   floor, or remove it. Every mutation is followed by a read-only reconciliation;
@@ -191,8 +197,13 @@ checks.
   composer.
 - **Media policy:** Automatic, data-saving, or tap-to-load behavior and standard
   or high-definition preview selection apply to content media. Animation uses
-  the same URL authorization and transfer limits as static images. The decoded-
-  image and animation-frame cache is memory-only and can be explicitly evicted.
+  the same URL authorization and transfer limits as static images. Decoded images
+  and animation frames remain memory-only. Validated image bytes fetched without
+  account Cookie or Authorization headers can also
+  enter a 256 MiB, 1,024-entry, seven-day disk cache; preview and original reads
+  retain their separate 16 MiB and 80 MiB limits. Tap-to-load and data-saving
+  cache checks can reuse exact-URL disk entries without starting or joining a
+  network request. The settings screen reports and explicitly clears both layers.
 
 ### Accounts and boundaries
 

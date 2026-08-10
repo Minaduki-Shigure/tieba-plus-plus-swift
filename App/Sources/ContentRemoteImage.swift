@@ -109,7 +109,7 @@ enum ContentRemoteImageLoadDecision {
     case .economicalNetworkOnly:
       return .allowEconomicalNetwork(.preview)
     case .userInitiated:
-      return .cacheOnly
+      return .cacheOnly(.preview)
     }
   }
 

@@ -189,6 +189,81 @@ final class DownsampledRemoteImageTests: XCTestCase {
     XCTAssertTrue(recordedKinds.isEmpty)
   }
 
+  func testPersistentCacheOnlyHitSurvivesRepositoryRecreationWithoutNetwork() async throws {
+    let environment = try makeDiskCacheEnvironment()
+    defer { try? FileManager.default.removeItem(at: environment.rootURL) }
+    let url = try XCTUnwrap(URL(string: "https://img.example/persistent-preview.jpg"))
+    let firstDownloader = RecordingRemoteImageDownloader(imageData: try makeJPEGData())
+    let firstCache = RemoteImageDiskCache(
+      directoryURL: environment.cacheURL,
+      leaseDirectoryURL: environment.leaseURL
+    )
+    let firstRepository = DownsampledImageRepository(
+      downloader: firstDownloader,
+      persistentCache: firstCache
+    )
+
+    _ = try await firstRepository.image(
+      at: url,
+      maxPixelSize: 320,
+      fetchPolicy: .allowNetwork(.preview)
+    )
+
+    let secondDownloader = RecordingRemoteImageDownloader(imageData: Data())
+    let recreatedCache = RemoteImageDiskCache(
+      directoryURL: environment.cacheURL,
+      leaseDirectoryURL: environment.leaseURL
+    )
+    let recreatedRepository = DownsampledImageRepository(
+      downloader: secondDownloader,
+      persistentCache: recreatedCache
+    )
+    let asset = try await recreatedRepository.image(
+      at: url,
+      maxPixelSize: 320,
+      fetchPolicy: .cacheOnly(.preview)
+    )
+
+    let firstKinds = await firstDownloader.recordedKinds()
+    let secondKinds = await secondDownloader.recordedKinds()
+    XCTAssertGreaterThan(asset.pixelSize.width, 0)
+    XCTAssertEqual(firstKinds, [.preview])
+    XCTAssertTrue(secondKinds.isEmpty)
+  }
+
+  func testUnreadableNetworkResponseIsNeverPersisted() async throws {
+    let environment = try makeDiskCacheEnvironment()
+    defer { try? FileManager.default.removeItem(at: environment.rootURL) }
+    let cache = RemoteImageDiskCache(
+      directoryURL: environment.cacheURL,
+      leaseDirectoryURL: environment.leaseURL
+    )
+    let downloader = RecordingRemoteImageDownloader(
+      imageData: Data("not-an-image".utf8)
+    )
+    let repository = DownsampledImageRepository(
+      downloader: downloader,
+      persistentCache: cache
+    )
+    let url = try XCTUnwrap(URL(string: "https://img.example/not-an-image"))
+
+    do {
+      _ = try await repository.image(
+        at: url,
+        maxPixelSize: 320,
+        fetchPolicy: .allowNetwork(.preview)
+      )
+      XCTFail("Expected the invalid image to be rejected")
+    } catch {
+      XCTAssertEqual(error as? DownsampledImageError, .unreadableImage)
+    }
+
+    let usage = await cache.usage()
+    XCTAssertEqual(usage, RemoteImageDiskCacheUsage(entryCount: 0, byteCount: 0))
+    let cached = try await cache.cachedDownload(from: url, kind: .preview)
+    XCTAssertNil(cached)
+  }
+
   func testCompletedNetworkImageCanBeReadFromExactCacheWithoutNewDownload() async throws {
     let downloader = RecordingRemoteImageDownloader(imageData: try makeJPEGData())
     let repository = DownsampledImageRepository(downloader: downloader)
@@ -202,7 +277,7 @@ final class DownsampledRemoteImageTests: XCTestCase {
     _ = try await repository.image(
       at: url,
       maxPixelSize: 320,
-      fetchPolicy: .cacheOnly
+      fetchPolicy: .cacheOnly(.preview)
     )
 
     let recordedKinds = await downloader.recordedKinds()
@@ -224,7 +299,7 @@ final class DownsampledRemoteImageTests: XCTestCase {
     let cachedAsset = try await repository.image(
       at: url,
       maxPixelSize: 320,
-      fetchPolicy: .cacheOnly
+      fetchPolicy: .cacheOnly(.preview)
     )
 
     let networkAnimation = try XCTUnwrap(networkAsset.animation)
@@ -293,7 +368,7 @@ final class DownsampledRemoteImageTests: XCTestCase {
     _ = try await repository.image(
       at: url,
       maxPixelSize: 320,
-      fetchPolicy: .cacheOnly
+      fetchPolicy: .cacheOnly(.preview)
     )
 
     await repository.clearMemoryCache()
@@ -314,6 +389,41 @@ final class DownsampledRemoteImageTests: XCTestCase {
     await expectCacheMiss(repository, url: url, maxPixelSize: 320)
     let recordedKinds = await downloader.recordedKinds()
     XCTAssertTrue(recordedKinds.isEmpty)
+  }
+
+  func testClearAllImageCachesBlocksCrossLayerReadsUntilDiskClearFinishes() async throws {
+    let url = try XCTUnwrap(URL(string: "https://img.example/cross-layer-clear.jpg"))
+    let persistentCache = GatedPersistentImageCache(imageData: try makeJPEGData())
+    addTeardownBlock { await persistentCache.releaseClear() }
+    let downloader = RecordingRemoteImageDownloader(imageData: try makeJPEGData())
+    let repository = DownsampledImageRepository(
+      downloader: downloader,
+      persistentCache: persistentCache
+    )
+
+    _ = try await repository.image(
+      at: url,
+      maxPixelSize: 320,
+      fetchPolicy: .allowNetwork(.preview)
+    )
+    let readsBeforeClear = await persistentCache.cachedReadCount()
+    XCTAssertEqual(readsBeforeClear, 1)
+
+    let clearTask = Task {
+      await repository.clearAllImageCaches(using: persistentCache)
+    }
+    let didEnterClear = await persistentCache.waitUntilClearStarted()
+    XCTAssertTrue(didEnterClear)
+
+    await expectCacheMiss(repository, url: url, maxPixelSize: 320)
+    let readsDuringClear = await persistentCache.cachedReadCount()
+    XCTAssertEqual(readsDuringClear, readsBeforeClear)
+
+    await persistentCache.releaseClear()
+    let result = await clearTask.value
+    XCTAssertTrue(result.removedAllEntries)
+    let networkKinds = await downloader.recordedKinds()
+    XCTAssertTrue(networkKinds.isEmpty)
   }
 
   func testClearDuringInFlightRequestDoesNotCancelOrRepopulateCache() async throws {
@@ -387,7 +497,7 @@ final class DownsampledRemoteImageTests: XCTestCase {
     _ = try await repository.image(
       at: url,
       maxPixelSize: 320,
-      fetchPolicy: .cacheOnly
+      fetchPolicy: .cacheOnly(.preview)
     )
 
     let requestCount = await downloader.requestCount()
@@ -468,7 +578,7 @@ final class DownsampledRemoteImageTests: XCTestCase {
     _ = try await repository.image(
       at: url,
       maxPixelSize: 320,
-      fetchPolicy: .cacheOnly
+      fetchPolicy: .cacheOnly(.preview)
     )
 
     let recordedKinds = await downloader.recordedKinds()
@@ -510,7 +620,7 @@ final class DownsampledRemoteImageTests: XCTestCase {
     _ = try await repository.image(
       at: url,
       maxPixelSize: 63,
-      fetchPolicy: .cacheOnly
+      fetchPolicy: .cacheOnly(.preview)
     )
 
     let recordedKinds = await downloader.recordedKinds()
@@ -1309,7 +1419,7 @@ final class DownsampledRemoteImageTests: XCTestCase {
     _ = try await repository.image(
       at: url,
       maxPixelSize: 320,
-      fetchPolicy: .cacheOnly,
+      fetchPolicy: .cacheOnly(.preview),
       onProgress: { progress in cachedProgressProbe.record(progress) }
     )
 
@@ -1327,7 +1437,7 @@ final class DownsampledRemoteImageTests: XCTestCase {
       _ = try await repository.image(
         at: url,
         maxPixelSize: maxPixelSize,
-        fetchPolicy: .cacheOnly
+        fetchPolicy: .cacheOnly(.preview)
       )
       XCTFail("Expected a cache miss")
     } catch DownsampledImageError.cacheMiss {
@@ -1351,6 +1461,25 @@ final class DownsampledRemoteImageTests: XCTestCase {
       }
     }
     return !FileManager.default.fileExists(atPath: fileURL.path)
+  }
+
+  private func makeDiskCacheEnvironment() throws -> (
+    rootURL: URL,
+    cacheURL: URL,
+    leaseURL: URL
+  ) {
+    let rootURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("DownsampledImageDiskCacheTests", isDirectory: true)
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(
+      at: rootURL,
+      withIntermediateDirectories: true
+    )
+    return (
+      rootURL,
+      rootURL.appendingPathComponent("cache", isDirectory: true),
+      rootURL.appendingPathComponent("leases", isDirectory: true)
+    )
   }
 
   private func makeJPEGData() throws -> Data {
@@ -1399,6 +1528,78 @@ final class DownsampledRemoteImageTests: XCTestCase {
     }
     XCTAssertTrue(CGImageDestinationFinalize(destination))
     return data as Data
+  }
+}
+
+private actor GatedPersistentImageCache: RemoteImagePersistentCacheProviding {
+  private let imageData: Data
+  private var cachedReads = 0
+  private var clearStarted = false
+  private var clearContinuation: CheckedContinuation<Void, Never>?
+  private var clearReleased = false
+
+  init(imageData: Data) {
+    self.imageData = imageData
+  }
+
+  func cachedDownload(
+    from url: URL,
+    kind: RemoteImageDownloadKind
+  ) async throws -> RemoteImageFileLease? {
+    cachedReads += 1
+    return try makeLease(imageData: imageData, sourceURL: url)
+  }
+
+  func currentGenerationToken() async -> RemoteImageDiskCacheGenerationToken {
+    await RemoteImageDiskCache.shared.currentGenerationToken()
+  }
+
+  func storeValidated(
+    _ lease: RemoteImageFileLease,
+    requestedURL: URL,
+    kind: RemoteImageDownloadKind,
+    generationToken: RemoteImageDiskCacheGenerationToken
+  ) async throws {}
+
+  func usage() async -> RemoteImageDiskCacheUsage {
+    RemoteImageDiskCacheUsage(entryCount: 1, byteCount: Int64(imageData.count))
+  }
+
+  func clear() async -> RemoteImageDiskCacheClearResult {
+    clearStarted = true
+    if !clearReleased {
+      await withCheckedContinuation { continuation in
+        clearContinuation = continuation
+      }
+    }
+    return RemoteImageDiskCacheClearResult(
+      removedEntryCount: 1,
+      removedByteCount: Int64(imageData.count),
+      removedAllEntries: true
+    )
+  }
+
+  func cachedReadCount() -> Int {
+    cachedReads
+  }
+
+  func waitUntilClearStarted(timeout: Duration = .seconds(2)) async -> Bool {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: timeout)
+    while !clearStarted, clock.now < deadline {
+      do {
+        try await Task.sleep(for: .milliseconds(1))
+      } catch {
+        return false
+      }
+    }
+    return clearStarted
+  }
+
+  func releaseClear() {
+    clearReleased = true
+    clearContinuation?.resume()
+    clearContinuation = nil
   }
 }
 

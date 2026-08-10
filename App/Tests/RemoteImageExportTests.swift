@@ -174,6 +174,99 @@ final class RemoteImageExportTests: XCTestCase {
     XCTAssertFalse(FileManager.default.fileExists(atPath: exportedURL.path))
   }
 
+  func testValidatedExportIsReusedAcrossCacheRecreationWithoutNetwork() async throws {
+    let environment = try makeDiskCacheEnvironment()
+    defer { try? FileManager.default.removeItem(at: environment.rootURL) }
+    let imageData = pngData(width: 14, height: 9)
+    let firstRecorder = ExportEventRecorder()
+    let firstDownloader = RemoteImageDownloaderSpy(
+      data: imageData,
+      suggestedFilename: "first.png",
+      recorder: firstRecorder
+    )
+    let firstCache = RemoteImageDiskCache(
+      directoryURL: environment.cacheURL,
+      leaseDirectoryURL: environment.leaseURL
+    )
+    let firstExporter = RemoteImageExporter(
+      downloader: firstDownloader,
+      persistentCache: firstCache,
+      photoLibrary: RemoteImagePhotoLibrarySpy(
+        authorization: .denied,
+        requestedAuthorization: .denied,
+        recorder: firstRecorder
+      )
+    )
+
+    var firstItem: RemoteImageShareItem? = try await firstExporter.prepareForSharing(
+      from: sourceURL
+    )
+    XCTAssertEqual(try Data(contentsOf: XCTUnwrap(firstItem?.fileURL)), imageData)
+    firstItem = nil
+
+    let secondRecorder = ExportEventRecorder()
+    let secondDownloader = RemoteImageDownloaderSpy(
+      data: Data("network-must-not-run".utf8),
+      suggestedFilename: "network.bin",
+      recorder: secondRecorder
+    )
+    let recreatedCache = RemoteImageDiskCache(
+      directoryURL: environment.cacheURL,
+      leaseDirectoryURL: environment.leaseURL
+    )
+    let recreatedExporter = RemoteImageExporter(
+      downloader: secondDownloader,
+      persistentCache: recreatedCache,
+      photoLibrary: RemoteImagePhotoLibrarySpy(
+        authorization: .denied,
+        requestedAuthorization: .denied,
+        recorder: secondRecorder
+      )
+    )
+
+    let cachedItem = try await recreatedExporter.prepareForSharing(from: sourceURL)
+    let secondEvents = await secondRecorder.snapshot()
+    let secondDownloadCount = await secondDownloader.downloadCount()
+    XCTAssertEqual(try Data(contentsOf: cachedItem.fileURL), imageData)
+    XCTAssertEqual(cachedItem.pixelWidth, 14)
+    XCTAssertEqual(cachedItem.pixelHeight, 9)
+    XCTAssertEqual(secondDownloadCount, 0)
+    XCTAssertTrue(secondEvents.isEmpty)
+  }
+
+  func testInvalidExportResponseIsNeverPersisted() async throws {
+    let environment = try makeDiskCacheEnvironment()
+    defer { try? FileManager.default.removeItem(at: environment.rootURL) }
+    let recorder = ExportEventRecorder()
+    let cache = RemoteImageDiskCache(
+      directoryURL: environment.cacheURL,
+      leaseDirectoryURL: environment.leaseURL
+    )
+    let exporter = RemoteImageExporter(
+      downloader: RemoteImageDownloaderSpy(
+        data: Data("not-an-image".utf8),
+        suggestedFilename: "image.png",
+        recorder: recorder
+      ),
+      persistentCache: cache,
+      photoLibrary: RemoteImagePhotoLibrarySpy(
+        authorization: .denied,
+        requestedAuthorization: .denied,
+        recorder: recorder
+      )
+    )
+
+    do {
+      _ = try await exporter.prepareForSharing(from: sourceURL)
+      XCTFail("Expected invalid image data to be rejected")
+    } catch {
+      XCTAssertEqual(error as? RemoteImageExportError, .invalidImage)
+    }
+
+    let usage = await cache.usage()
+    XCTAssertEqual(usage, RemoteImageDiskCacheUsage(entryCount: 0, byteCount: 0))
+  }
+
   func testDeniedPhotoPermissionPerformsNoDownload() async throws {
     let recorder = ExportEventRecorder()
     let downloader = RemoteImageDownloaderSpy(
@@ -383,6 +476,25 @@ final class RemoteImageExportTests: XCTestCase {
       withIntermediateDirectories: true
     )
     return directory
+  }
+
+  private func makeDiskCacheEnvironment() throws -> (
+    rootURL: URL,
+    cacheURL: URL,
+    leaseURL: URL
+  ) {
+    let rootURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("RemoteImageExportDiskCacheTests", isDirectory: true)
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(
+      at: rootURL,
+      withIntermediateDirectories: true
+    )
+    return (
+      rootURL,
+      rootURL.appendingPathComponent("cache", isDirectory: true),
+      rootURL.appendingPathComponent("leases", isDirectory: true)
+    )
   }
 
   private func makeOneShotShareExporter() throws

@@ -19,7 +19,7 @@ versioned separately and currently serves `v0.59.0-alpha.1` (build 62).
 | --- | ---: | ---: | --- |
 | Anonymous discovery, search, and forums | 20 | 18–19 | Core browsing, ranking, recommendations, categories, and search are implemented; feedback and a few niche discovery paths remain |
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
-| Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, and media policy are implemented; persistent cache parity remains |
+| Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
 | Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, media preferences, and local reply-entry visibility are implemented; TiebaLite's wider settings and customization surface remains |
 | Account, session, and private read flows | 15 | 9 | Login, switching, followed and target-user liked forums, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 5–6 | Follow/unfollow, check-in, approval, verified list/thread-detail cloud-favorite mutations, and three plain-text reply targets have guarded implementations; real reply success, new topics, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
@@ -449,11 +449,15 @@ transfer. A stable positive server length produces an integer percentage from
 exact received bytes; missing, changing, or inconsistent lengths remain
 indeterminate, and ImageIO work is shown as a separate processing stage.
 Transfer, waiter, and SwiftUI-attempt identities reject late progress from a
-canceled same-URL request without fragmenting the decoded cache. Sharing and
-Photos saving explicitly download only the selected original image through the
-bounded credential-free media transport, validate its real ImageIO type and
-dimensions, and retain the temporary file only until the system consumer
-finishes.
+canceled same-URL request without fragmenting the decoded cache. Persistent-cache
+hits never report a network-download stage and may finish bounded ImageIO work
+before SwiftUI observes the processing state. Sharing and
+Photos saving request only the selected original image. They first reuse an
+exact-URL persistent entry when one passes the original-size bound and payload
+digest, otherwise use the bounded credential-free media transport. The bytes
+must still pass full ImageIO type, frame, pixel, and dimension validation before
+export or cache publication, and an independent temporary copy is retained only
+until the system consumer finishes.
 
 Public profiles use the protocol's guest fields instead of impersonating the
 target user as the current account. The public-topic endpoint ignores its
@@ -729,17 +733,37 @@ concrete color needed by attributed strings, comment highlights, badges, and
 progress fills. System Safari, Web login, share sheets, semantic warning colors,
 and immersive media controls remain system-managed or explicitly white.
 
-TiebaLite clears both memory and persistent image caches. Tieba++ deliberately
-offers only process-local decoded-image eviction because its hardened ephemeral
-transport disables URL caching and download leases remove their own temporary
-files. Clearing increments a cache generation and evicts `NSCache` entries
-without cancelling active transfers or blanking displayed images. A waiter that
-started before the clear can still receive its image but cannot repopulate the
-old generation; a waiter that starts afterward may share that same transfer and
-cache the result for the new generation. An animated asset retains only its
-poster, metadata, and temporary source lease in that asset cache. Later frames
-  use a separate process-wide cache capped at 64 MiB and 1,000 entries, costed by
-  `bytesPerRow * height`; the same explicit clear advances both cache generations.
+Tieba++ now clears both memory and persistent image caches. The hardened media
+transport remains ephemeral with system URL caching disabled; persistence is an
+explicit application layer used only after an HTTPS image response fetched without
+account Cookie or Authorization headers has
+passed the existing ImageIO validation. Exact request URLs are mapped to SHA-256
+directory names. Versioned metadata stores only a random entry identifier,
+payload byte count and digest, and creation/access timestamps: no URL, query,
+header, MIME type, suggested filename, cookie, credential, or account response is
+written. URLs with fragments or more than 8 KiB are never persisted.
+
+The disk layer is capped at 256 MiB and 1,024 entries with a seven-day maximum
+lifetime and persisted LRU access times. Every hit rechecks a regular, non-symlink
+payload, exact byte count, digest, and the active 16 MiB preview or 80 MiB original
+bound, then creates an independent temporary copy so clearing or eviction cannot
+invalidate an active animation, share sheet, or Photos save. Staging directories
+publish atomically. A generation token and bounded per-key publication sequence reject
+pre-clear and out-of-order late stores; publication is selected by each live
+repository waiter rather than by the shared transfer task.
+
+Explicit clearing advances both decoded-cache and disk-cache generations without
+cancelling active transfers or blanking displayed images. A waiter that started
+before the clear can still receive its image but cannot repopulate the old
+generation; a waiter that starts afterward may share that same transfer and
+publish for the new generation. A repository-level barrier bypasses all memory
+and disk reads or publications while the disk actor is clearing, then evicts
+decoded state again before the operation returns. Active independent leases are
+released when
+their animation or system consumer finishes, so the settings value and clear
+result describe logical cached entries rather than immediately reclaimed physical
+bytes. Later animation frames use a separate process-wide memory cache capped at
+64 MiB and 1,000 entries, costed by `bytesPerRow * height`.
 
 The global forum-sort preference applies when a forum has no remembered choice;
 changing a forum's picker stores a normalized, bounded per-forum override.

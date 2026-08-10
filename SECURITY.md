@@ -709,7 +709,21 @@ Forum and user lookup remain outside this filtering boundary.
 Remote media uses an ephemeral, credential-free session, rejects cleartext
 requests or redirect destinations, and is decoded through ImageIO with a
 bounded pixel size and memory cache. Original image dimensions are never
-decoded directly into the browsing UI.
+decoded directly into the browsing UI. System HTTP caching remains disabled.
+After successful ImageIO validation, HTTPS image bytes fetched without account
+Cookie or Authorization headers may enter a separate application cache in
+`Library/Caches`; account responses, cookies,
+headers, credentials, voice, and export temporary files never enter it.
+
+The persistent cache uses a SHA-256 key for the exact requested URL and never
+writes the URL, query, MIME type, response filename, or headers to metadata.
+Fragment-bearing or over-8-KiB URLs are rejected from persistence. Metadata is
+versioned and contains only a random entry identifier, byte count, payload
+SHA-256, and creation/access timestamps. Entries expire after seven days and are
+bounded to 256 MiB and 1,024 records. Every read rejects symlinks, nonregular
+files, unexpected byte counts, digest changes, future or expired timestamps, and
+the wrong preview/original size class. A hit is copied to an independent UUID
+temporary lease and revalidated before ImageIO, sharing, or PhotoKit use.
 
 An observed `dynamic` URL is an independently normalized media candidate, not
 an animation flag. Animation requires ImageIO to identify a supported real
@@ -755,16 +769,31 @@ from another source. It does not alter request access flags, byte limits,
 decoder bounds, cache keys, or the gallery's fixed
 original-then-dynamic-then-high-definition-then-standard selection.
 
-A cold manually gated image performs an exact in-memory cache lookup and must
-not create or join a network request until the user presses its load control.
+A cold manually gated image performs exact in-memory and persistent cache lookups
+and must not create or join a network request until the user presses its load control.
 That authorization is bound to the current HTTPS URL and requested pixel size;
 changing either value or changing the persistent policy revokes it. A path
 change alone must not revoke or restart an already authorized request. Once
 that request reaches a terminal state, the effective policy is evaluated again:
 a path that has become economical may start one restricted automatic attempt,
-while a still-gated failure requires another explicit tap. The cache is
-process-local and ephemeral, so this setting does not claim persistent offline
-media or suppress the page-data requests needed to browse.
+while a still-gated failure requires another explicit tap. The decoded cache is
+process-local; validated image bytes fetched without account headers can survive
+a restart in the bounded
+disk cache. This is opportunistic media reuse, not offline browsing: page data is
+not persisted, entries expire or may be evicted, and a miss remains gated without
+network access.
+
+Disk-cache clearing advances a generation before deleting entries. A validated
+download can publish only with the generation token captured by its live waiter;
+late pre-clear and older out-of-order stores are rejected. The image repository
+bypasses cache reads and publications for the whole cross-actor clear operation
+and evicts decoded state again before lifting that barrier. Active animations and
+system exports retain independent leases, so logical clearing does not mutate
+bytes already being consumed. The settings UI therefore does not represent the
+removed logical byte total as immediately reclaimed physical space. Cache files
+are browsing traces even without plaintext URLs; users can inspect and clear the
+logical cache, and a LiveContainer host with access to the guest sandbox remains
+outside the app's trust boundary.
 
 Automatic data-saving requests deny cellular, expensive, and constrained
 network access on the `URLRequest` itself as well as in the path decision. The

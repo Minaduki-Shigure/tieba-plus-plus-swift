@@ -338,24 +338,26 @@ protocol RemoteImageExporting: Sendable {
 }
 
 struct RemoteImageExporter: RemoteImageExporting, Sendable {
-  static let shared = RemoteImageExporter()
+  static let shared = RemoteImageExporter(
+    persistentCache: RemoteImageDiskCache.shared
+  )
 
   private let downloader: any RemoteImageDownloading
+  private let persistentCache: (any RemoteImagePersistentCacheProviding)?
   private let photoLibrary: any RemoteImagePhotoLibrary
 
   init(
     downloader: any RemoteImageDownloading = BoundedHTTPSRemoteImageTransport.shared,
+    persistentCache: (any RemoteImagePersistentCacheProviding)? = nil,
     photoLibrary: any RemoteImagePhotoLibrary = PhotoKitRemoteImageLibrary()
   ) {
     self.downloader = downloader
+    self.persistentCache = persistentCache
     self.photoLibrary = photoLibrary
   }
 
   func prepareForSharing(from sourceURL: URL) async throws -> RemoteImageShareItem {
-    let lease = try await downloader.download(from: sourceURL, kind: .original)
-    try Task.checkCancellation()
-    let prepared = try Self.prepareFile(from: lease)
-    try Task.checkCancellation()
+    let (lease, prepared) = try await preparedDownload(from: sourceURL)
     return RemoteImageShareItem(
       fileURL: prepared.fileURL,
       validation: prepared.validation,
@@ -373,12 +375,67 @@ struct RemoteImageExporter: RemoteImageExporting, Sendable {
     }
     try Task.checkCancellation()
 
-    let lease = try await downloader.download(from: sourceURL, kind: .original)
+    let (lease, prepared) = try await preparedDownload(from: sourceURL)
     defer { withExtendedLifetime(lease) {} }
+    try Task.checkCancellation()
+    try await photoLibrary.createImageAsset(from: prepared.fileURL)
+  }
+
+  private func preparedDownload(
+    from sourceURL: URL
+  ) async throws -> (
+    lease: RemoteImageFileLease,
+    prepared: (fileURL: URL, validation: RemoteImageValidationResult)
+  ) {
+    let generationToken = await persistentCache?.currentGenerationToken()
+    try Task.checkCancellation()
+
+    if let persistentCache {
+      let cachedLease: RemoteImageFileLease?
+      do {
+        cachedLease = try await persistentCache.cachedDownload(
+          from: sourceURL,
+          kind: .original
+        )
+      } catch is CancellationError {
+        throw CancellationError()
+      } catch {
+        cachedLease = nil
+      }
+      if let cachedLease {
+        do {
+          let prepared = try Self.prepareFile(from: cachedLease)
+          try Task.checkCancellation()
+          return (cachedLease, prepared)
+        } catch is CancellationError {
+          throw CancellationError()
+        } catch {
+          // A corrupt cache entry must not prevent an explicitly requested export.
+        }
+      }
+    }
+
+    let lease = try await downloader.download(from: sourceURL, kind: .original)
     try Task.checkCancellation()
     let prepared = try Self.prepareFile(from: lease)
     try Task.checkCancellation()
-    try await photoLibrary.createImageAsset(from: prepared.fileURL)
+
+    if let persistentCache, let generationToken {
+      do {
+        try await persistentCache.storeValidated(
+          lease,
+          requestedURL: sourceURL,
+          kind: .original,
+          generationToken: generationToken
+        )
+      } catch is CancellationError {
+        throw CancellationError()
+      } catch {
+        // Sharing and PhotoKit saves remain available if optional caching fails.
+      }
+    }
+    try Task.checkCancellation()
+    return (lease, prepared)
   }
 
   private static func prepareFile(

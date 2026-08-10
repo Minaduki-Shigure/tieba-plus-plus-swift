@@ -100,7 +100,7 @@ final class ContentRemoteImageTests: XCTestCase {
         request: request,
         authorizedRequest: nil
       ),
-      .cacheOnly
+      .cacheOnly(.preview)
     )
     XCTAssertEqual(
       ContentRemoteImageLoadDecision.fetchPolicy(
@@ -125,7 +125,7 @@ final class ContentRemoteImageTests: XCTestCase {
         request: request,
         authorizedRequest: nil
       ),
-      .cacheOnly
+      .cacheOnly(.preview)
     )
     XCTAssertEqual(
       ContentRemoteImageLoadDecision.fetchPolicy(
@@ -153,7 +153,7 @@ final class ContentRemoteImageTests: XCTestCase {
           request: candidate,
           authorizedRequest: authorized
         ),
-        .cacheOnly
+        .cacheOnly(.preview)
       )
     }
   }
@@ -169,7 +169,7 @@ final class ContentRemoteImageTests: XCTestCase {
         request: request,
         authorizedRequest: request
       ),
-      .cacheOnly
+      .cacheOnly(.preview)
     )
   }
 
@@ -268,7 +268,7 @@ final class ContentRemoteImageTests: XCTestCase {
         request: request,
         authorizedRequest: state.authorizedRequest
       ),
-      .cacheOnly
+      .cacheOnly(.preview)
     )
 
     state.authorize(request: request, policy: .tapToLoad, behavior: .userInitiated)
@@ -397,7 +397,7 @@ final class ContentRemoteImageTests: XCTestCase {
         request: request,
         authorizedRequest: state.authorizedRequest
       ),
-      .cacheOnly
+      .cacheOnly(.preview)
     )
   }
 

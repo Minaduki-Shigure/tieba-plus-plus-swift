@@ -1,8 +1,19 @@
 import SwiftUI
 
 struct AppSettingsView: View {
+  private struct ImageCacheNotice: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
+  }
+
   @StateObject private var historyViewModel: BrowsingHistoryViewModel
-  @State private var showsImageCacheCleared = false
+  private let imageRepository: DownsampledImageRepository
+  private let persistentImageCache: any RemoteImagePersistentCacheProviding
+  @State private var imageCacheUsage: RemoteImageDiskCacheUsage?
+  @State private var imageCacheUsageRequestID: UUID?
+  @State private var isClearingImageCache = false
+  @State private var imageCacheNotice: ImageCacheNotice?
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @AppStorage(AppPreferenceKey.appearance)
   private var appearance = AppAppearance.system.rawValue
@@ -44,10 +55,16 @@ struct AppSettingsView: View {
   @AppStorage(AppPreferenceKey.showsBothUsernameAndNickname)
   private var showsBothUsernameAndNickname = false
 
-  init(historyRepository: any BrowsingHistoryRepository) {
+  init(
+    historyRepository: any BrowsingHistoryRepository,
+    imageRepository: DownsampledImageRepository = .shared,
+    persistentImageCache: any RemoteImagePersistentCacheProviding = RemoteImageDiskCache.shared
+  ) {
     _historyViewModel = StateObject(
       wrappedValue: BrowsingHistoryViewModel(repository: historyRepository)
     )
+    self.imageRepository = imageRepository
+    self.persistentImageCache = persistentImageCache
   }
 
   var body: some View {
@@ -246,7 +263,7 @@ struct AppSettingsView: View {
         Text(
           "\u{201c}节省流量\u{201d}在普通 Wi-Fi 等非昂贵、非低数据模式网络上自动加载；"
             + "在蜂窝网络、个人热点或低数据模式下需点按加载。\u{201c}点按加载\u{201d}在所有网络上"
-            + "均需点按；两种模式都会直接显示进程内缓存的图片。这些模式控制展开后的列表媒体、"
+            + "均需点按；两种模式都会直接显示内存或磁盘中已缓存的图片。这些模式控制展开后的列表媒体、"
             + "帖子正文、话题图片和视频封面，头像、图库、页面数据和其他网络请求不受影响。\n\n"
             + "图片预览画质只在服务器同时返回标准和高清地址时选择帖子正文、帖子列表和吧内搜索"
             + "所用的图片地址；高清可能使用更多流量。打开图库后仍优先加载原图，不受此选项影响。\n\n"
@@ -258,20 +275,42 @@ struct AppSettingsView: View {
       }
 
       Section {
-        Button {
-          Task { @MainActor in
-            await DownsampledImageRepository.shared.clearMemoryCache()
-            showsImageCacheCleared = true
+        LabeledContent {
+          if let imageCacheUsage {
+            Text(
+              "\(imageCacheUsage.entryCount) 项，"
+                + formattedByteCount(imageCacheUsage.byteCount)
+            )
+            .foregroundStyle(.secondary)
+          } else {
+            ProgressView()
+              .accessibilityLabel("正在统计图片缓存")
           }
         } label: {
-          Label("清理图片内存缓存", systemImage: "trash")
+          Label("磁盘图片缓存", systemImage: "internaldrive")
         }
+
+        Button {
+          Task { @MainActor in
+            await clearImageCaches()
+          }
+        } label: {
+          if isClearingImageCache {
+            Label("正在清理图片缓存", systemImage: "trash")
+          } else {
+            Label("清理图片缓存", systemImage: "trash")
+          }
+        }
+        .disabled(isClearingImageCache)
       } header: {
         Text("缓存")
       } footer: {
         Text(
-          "只清理本次运行中已解码的图片，不清理磁盘文件或照片，也不提供可释放存储空间的大小。"
-            + "当前显示的图片会保留；之后再次打开时可能重新下载。"
+          "磁盘缓存只保存已通过图片校验、且请求未携带账户 Cookie 或 Authorization 头的 HTTPS "
+            + "图片字节；不保存账户响应、明文请求地址、语音或导出临时文件。清理会移除内存缓存"
+            + "和磁盘缓存索引；当前显示、"
+            + "播放或分享中的独立临时副本会在使用结束后释放，因此统计值不等同于立即释放的"
+            + "物理空间。"
         )
       }
     }
@@ -279,6 +318,7 @@ struct AppSettingsView: View {
     .navigationTitle("设置")
     .navigationBarTitleDisplayMode(.inline)
     .task { await historyViewModel.refresh() }
+    .task { await refreshImageCacheUsage() }
     .alert(
       "无法更新浏览记录设置",
       isPresented: Binding(
@@ -290,11 +330,59 @@ struct AppSettingsView: View {
     } message: {
       Text(historyViewModel.operationError ?? "未知错误")
     }
-    .alert("图片内存缓存已清理", isPresented: $showsImageCacheCleared) {
-      Button("好", role: .cancel) {}
-    } message: {
-      Text("当前显示的图片不会消失，之后再次打开时可能重新下载。")
+    .alert(item: $imageCacheNotice) { notice in
+      Alert(
+        title: Text(notice.title),
+        message: Text(notice.message),
+        dismissButton: .cancel(Text("好"))
+      )
     }
+  }
+
+  @MainActor
+  private func refreshImageCacheUsage() async {
+    let requestID = UUID()
+    imageCacheUsageRequestID = requestID
+    let usage = await persistentImageCache.usage()
+    guard imageCacheUsageRequestID == requestID, !isClearingImageCache else { return }
+    imageCacheUsage = usage
+  }
+
+  @MainActor
+  private func clearImageCaches() async {
+    guard !isClearingImageCache else { return }
+    isClearingImageCache = true
+    imageCacheUsageRequestID = nil
+    let result = await imageRepository.clearAllImageCaches(using: persistentImageCache)
+    imageCacheUsage = await persistentImageCache.usage()
+    isClearingImageCache = false
+
+    if result.removedAllEntries {
+      let removedDescription =
+        "已从缓存索引移除 \(result.removedEntryCount) 项（"
+          + "\(formattedByteCount(result.removedByteCount))）。"
+      imageCacheNotice = ImageCacheNotice(
+        title: "图片缓存已清理",
+        message: removedDescription
+          + " 当前显示或正在使用的图片副本会在使用结束后释放。"
+      )
+    } else {
+      imageCacheNotice = ImageCacheNotice(
+        title: "图片缓存未完全清理",
+        message: "清理前缓存索引包含 \(result.removedEntryCount) 项（"
+          + "\(formattedByteCount(result.removedByteCount))）；部分磁盘条目可能仍然存在，"
+          + "请稍后重试。"
+      )
+    }
+  }
+
+  private func formattedByteCount(_ byteCount: Int64) -> String {
+    let formatter = ByteCountFormatter()
+    formatter.allowedUnits = [.useKB, .useMB, .useGB]
+    formatter.countStyle = .file
+    formatter.includesUnit = true
+    formatter.isAdaptive = true
+    return formatter.string(fromByteCount: max(0, byteCount))
   }
 
   private var appearanceSelection: Binding<AppAppearance> {

@@ -21,7 +21,7 @@ enum DownsampledRemoteImageLoadProgress: Equatable, Sendable {
 }
 
 enum DownsampledImageFetchPolicy: Hashable, Sendable {
-  case cacheOnly
+  case cacheOnly(RemoteImageDownloadKind)
   case allowNetwork(RemoteImageDownloadKind)
   case allowEconomicalNetwork(RemoteImageDownloadKind)
 }
@@ -289,7 +289,7 @@ private final class DownsampledImageAssetBox: NSObject {
   }
 }
 
-enum DownsampledImageError: Error {
+enum DownsampledImageError: Error, Equatable {
   case cacheMiss
   case invalidResponse
   case responseTooLarge
@@ -308,8 +308,13 @@ actor DownsampledImageRepository {
 
   private struct InFlightKey: Hashable, Sendable {
     let cacheKey: CacheKey
-    let downloadKind: RemoteImageDownloadKind
-    let networkAccess: RemoteImageNetworkAccess
+    let fetchPolicy: DownsampledImageFetchPolicy
+  }
+
+  private struct LoadedImage: @unchecked Sendable {
+    let asset: DownsampledImageAsset
+    let sourceLease: RemoteImageFileLease
+    let shouldPersist: Bool
   }
 
   private struct InFlightRequest {
@@ -323,15 +328,18 @@ actor DownsampledImageRepository {
     }
 
     let transferID: UUID
-    let task: Task<DownsampledImageAsset, Error>
+    let task: Task<LoadedImage, Error>
     var waiters: [UUID: Waiter]
     var latestProgress: DownsampledRemoteImageLoadProgress?
     var stage: Stage
   }
 
-  static let shared = DownsampledImageRepository()
+  static let shared = DownsampledImageRepository(
+    persistentCache: RemoteImageDiskCache.shared
+  )
 
   private let downloader: any RemoteImageDownloading
+  private let persistentCache: (any RemoteImagePersistentCacheProviding)?
   private let beforeDownload: @Sendable () async -> Void
   private let beforeDecoding: @Sendable () async -> Void
   private let inFlightWaiterCountDidChange: @Sendable (Int) -> Void
@@ -341,10 +349,16 @@ actor DownsampledImageRepository {
   ) -> Void
   private let cache = NSCache<NSString, DownsampledImageAssetBox>()
   private var cacheGeneration: UInt64 = 0
+  private var activeCacheClearCount = 0
   private var inFlight: [InFlightKey: InFlightRequest] = [:]
+
+  private var isClearingAllCaches: Bool {
+    activeCacheClearCount > 0
+  }
 
   init(
     downloader: any RemoteImageDownloading = BoundedHTTPSRemoteImageTransport.shared,
+    persistentCache: (any RemoteImagePersistentCacheProviding)? = nil,
     beforeDownload: @escaping @Sendable () async -> Void = {},
     beforeDecoding: @escaping @Sendable () async -> Void = {},
     inFlightWaiterCountDidChange: @escaping @Sendable (Int) -> Void = { _ in },
@@ -354,6 +368,7 @@ actor DownsampledImageRepository {
     ) -> Void = { _, _ in }
   ) {
     self.downloader = downloader
+    self.persistentCache = persistentCache
     self.beforeDownload = beforeDownload
     self.beforeDecoding = beforeDecoding
     self.inFlightWaiterCountDidChange = inFlightWaiterCountDidChange
@@ -363,6 +378,21 @@ actor DownsampledImageRepository {
   }
 
   func clearMemoryCache() {
+    evictDecodedCaches()
+  }
+
+  func clearAllImageCaches(
+    using persistentCache: any RemoteImagePersistentCacheProviding
+  ) async -> RemoteImageDiskCacheClearResult {
+    activeCacheClearCount += 1
+    evictDecodedCaches()
+    let result = await persistentCache.clear()
+    evictDecodedCaches()
+    activeCacheClearCount -= 1
+    return result
+  }
+
+  private func evictDecodedCaches() {
     cacheGeneration &+= 1
     cache.removeAllObjects()
     RemoteImageAnimationFrameCache.shared.removeAllObjects()
@@ -408,14 +438,15 @@ actor DownsampledImageRepository {
       urlString: url.absoluteString,
       maxPixelSize: maxPixelSize
     )
-    if let cached = cache.object(forKey: cacheKey.storageKey) {
+    if !isClearingAllCaches, let cached = cache.object(forKey: cacheKey.storageKey) {
       return cached.asset
     }
     let downloadKind: RemoteImageDownloadKind
-    let networkAccess: RemoteImageNetworkAccess
+    let networkAccess: RemoteImageNetworkAccess?
     switch fetchPolicy {
-    case .cacheOnly:
-      throw DownsampledImageError.cacheMiss
+    case .cacheOnly(let kind):
+      downloadKind = kind
+      networkAccess = nil
     case .allowNetwork(let kind):
       downloadKind = kind
       networkAccess = .unrestricted
@@ -424,16 +455,26 @@ actor DownsampledImageRepository {
       networkAccess = .economicalOnly
     }
     let waiterCacheGeneration = cacheGeneration
+    let persistentGenerationToken: RemoteImageDiskCacheGenerationToken?
+    let requestPersistentCache = isClearingAllCaches ? nil : persistentCache
+    if networkAccess != nil, let requestPersistentCache {
+      persistentGenerationToken = await requestPersistentCache.currentGenerationToken()
+    } else {
+      persistentGenerationToken = nil
+    }
+
+    if !isClearingAllCaches, let cached = cache.object(forKey: cacheKey.storageKey) {
+      return cached.asset
+    }
 
     let inFlightKey = InFlightKey(
       cacheKey: cacheKey,
-      downloadKind: downloadKind,
-      networkAccess: networkAccess
+      fetchPolicy: fetchPolicy
     )
     let waiterID = UUID()
     let waiter = InFlightRequest.Waiter(onProgress: onProgress)
     let transferID: UUID
-    let task: Task<DownsampledImageAsset, Error>
+    let task: Task<LoadedImage, Error>
     if var request = inFlight[inFlightKey] {
       request.waiters[waiterID] = waiter
       inFlight[inFlightKey] = request
@@ -445,12 +486,63 @@ actor DownsampledImageRepository {
       task = request.task
     } else {
       let downloader = downloader
+      let persistentCache = requestPersistentCache
       let beforeDownload = beforeDownload
       let beforeDecoding = beforeDecoding
       let newTransferID = UUID()
       transferID = newTransferID
-      task = Task<DownsampledImageAsset, Error> {
+      task = Task<LoadedImage, Error> {
         try Task.checkCancellation()
+        if let persistentCache {
+          let cachedLease: RemoteImageFileLease?
+          do {
+            cachedLease = try await persistentCache.cachedDownload(
+              from: url,
+              kind: downloadKind
+            )
+          } catch is CancellationError {
+            throw CancellationError()
+          } catch {
+            cachedLease = nil
+          }
+          if let cachedLease {
+            do {
+              await beforeDecoding()
+              try Task.checkCancellation()
+              let cachedAsset = try await RemoteImageIODecodeScheduler.shared.decode {
+                try withExtendedLifetime(cachedLease) {
+                  try ImageDownsampler.image(
+                    at: cachedLease.fileURL,
+                    maxPixelSize: maxPixelSize,
+                    sourceOwner: cachedLease,
+                    sourceByteCount: cachedLease.byteCount
+                  )
+                }
+              }
+              try Task.checkCancellation()
+              await self.beginDecoding(
+                forKey: inFlightKey,
+                transferID: newTransferID
+              )
+              return LoadedImage(
+                asset: cachedAsset,
+                sourceLease: cachedLease,
+                shouldPersist: false
+              )
+            } catch is CancellationError {
+              throw CancellationError()
+            } catch {
+              if networkAccess == nil {
+                throw DownsampledImageError.cacheMiss
+              }
+              // A validated cache entry that no longer decodes is treated as a miss.
+            }
+          }
+        }
+
+        guard let networkAccess else {
+          throw DownsampledImageError.cacheMiss
+        }
         await beforeDownload()
         try Task.checkCancellation()
         let lease: RemoteImageFileLease
@@ -492,7 +584,7 @@ actor DownsampledImageRepository {
           }
         }
         try Task.checkCancellation()
-        return asset
+        return LoadedImage(asset: asset, sourceLease: lease, shouldPersist: true)
       }
       inFlight[inFlightKey] = InFlightRequest(
         transferID: newTransferID,
@@ -508,16 +600,35 @@ actor DownsampledImageRepository {
       defer {
         removeWaiter(waiterID, forKey: inFlightKey, transferID: transferID)
       }
-      let asset = try await task.value
+      let loaded = try await task.value
       try Task.checkCancellation()
-      if waiterCacheGeneration == cacheGeneration {
+      if
+        loaded.shouldPersist,
+        let persistentCache,
+        let persistentGenerationToken
+      {
+        do {
+          try await persistentCache.storeValidated(
+            loaded.sourceLease,
+            requestedURL: url,
+            kind: downloadKind,
+            generationToken: persistentGenerationToken
+          )
+        } catch is CancellationError {
+          throw CancellationError()
+        } catch {
+          // Image rendering remains available when the optional disk cache fails.
+        }
+      }
+      try Task.checkCancellation()
+      if !isClearingAllCaches, waiterCacheGeneration == cacheGeneration {
         cache.setObject(
-          DownsampledImageAssetBox(asset),
+          DownsampledImageAssetBox(loaded.asset),
           forKey: cacheKey.storageKey,
-          cost: asset.decodedByteCost
+          cost: loaded.asset.decodedByteCost
         )
       }
-      return asset
+      return loaded.asset
     } onCancel: {
       Task {
         await self.removeWaiter(
