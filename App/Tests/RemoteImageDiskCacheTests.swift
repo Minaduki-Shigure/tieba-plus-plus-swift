@@ -73,6 +73,39 @@ final class RemoteImageDiskCacheTests: XCTestCase {
     XCTAssertEqual(try Data(contentsOf: firstHit.fileURL), data)
   }
 
+  func testMissingKeyDoesNotDisableAValidExistingEntry() async throws {
+    let environment = try DiskCacheTestEnvironment()
+    defer { environment.remove() }
+    let cache = environment.makeCache()
+    let existingURL = try XCTUnwrap(URL(string: "https://img.example/existing"))
+    let missingURL = try XCTUnwrap(URL(string: "https://img.example/not-stored"))
+    let data = Data("existing-image".utf8)
+    try await store(data, for: existingURL, in: cache, environment: environment)
+
+    let miss = try await cache.cachedDownload(from: missingURL, kind: .preview)
+    let existingHit = try await cache.cachedDownload(from: existingURL, kind: .preview)
+    let usage = await cache.usage()
+
+    XCTAssertNil(miss)
+    XCTAssertEqual(try Data(contentsOf: XCTUnwrap(existingHit).fileURL), data)
+    XCTAssertEqual(usage, RemoteImageDiskCacheUsage(entryCount: 1, byteCount: 14))
+  }
+
+  func testColdMissCanBeFollowedByValidatedStoreAndHit() async throws {
+    let environment = try DiskCacheTestEnvironment()
+    defer { environment.remove() }
+    let cache = environment.makeCache()
+    let url = try XCTUnwrap(URL(string: "https://img.example/miss-then-store"))
+    let data = Data("validated-after-miss".utf8)
+
+    let initialMiss = try await cache.cachedDownload(from: url, kind: .preview)
+    try await store(data, for: url, in: cache, environment: environment)
+    let hit = try await cache.cachedDownload(from: url, kind: .preview)
+
+    XCTAssertNil(initialMiss)
+    XCTAssertEqual(try Data(contentsOf: XCTUnwrap(hit).fileURL), data)
+  }
+
   func testPreviewLookupRejectsAndEvictsEntryLargerThanSixteenMiB() async throws {
     let environment = try DiskCacheTestEnvironment()
     defer { environment.remove() }
@@ -414,8 +447,10 @@ final class RemoteImageDiskCacheTests: XCTestCase {
     await gate.release(index: 0)
     try await firstTask.value
 
+    let usage = await cache.usage()
     let firstHit = try await cache.cachedDownload(from: firstURL, kind: .preview)
     let secondHit = try await cache.cachedDownload(from: secondURL, kind: .preview)
+    XCTAssertEqual(usage, RemoteImageDiskCacheUsage(entryCount: 2, byteCount: 11))
     XCTAssertEqual(try Data(contentsOf: XCTUnwrap(firstHit).fileURL), Data("first".utf8))
     XCTAssertEqual(try Data(contentsOf: XCTUnwrap(secondHit).fileURL), Data("second".utf8))
   }
@@ -439,9 +474,14 @@ final class RemoteImageDiskCacheTests: XCTestCase {
       kind: .preview,
       generationToken: boundaryToken
     )
+    let boundaryUsage = await acceptedCache.usage()
     let boundaryHit = try await acceptedCache.cachedDownload(
       from: acceptedURL,
       kind: .preview
+    )
+    XCTAssertEqual(
+      boundaryUsage,
+      RemoteImageDiskCacheUsage(entryCount: 1, byteCount: 8)
     )
     XCTAssertNotNil(boundaryHit)
 
@@ -508,8 +548,10 @@ final class RemoteImageDiskCacheTests: XCTestCase {
       XCTFail("Unexpected error: \(error)")
     }
 
+    let usage = await cache.usage()
     let firstHit = try await cache.cachedDownload(from: firstURL, kind: .preview)
     let secondHit = try await cache.cachedDownload(from: secondURL, kind: .preview)
+    XCTAssertEqual(usage, RemoteImageDiskCacheUsage(entryCount: 1, byteCount: 5))
     XCTAssertNotNil(firstHit)
     XCTAssertNil(secondHit)
   }

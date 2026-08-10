@@ -260,7 +260,8 @@ actor RemoteImageDiskCache: RemoteImagePersistentCacheProviding {
         throw RemoteImageDiskCacheError.staleGeneration
       }
 
-      _ = trimIfNeeded(now: currentDate)
+      let trimDate = validCurrentDate() ?? currentDate
+      _ = trimIfNeeded(now: trimDate)
     } catch {
       preparation.cancel()
       activeStagingDirectoryNames.remove(stagingDirectoryName)
@@ -691,13 +692,7 @@ actor RemoteImageDiskCache: RemoteImagePersistentCacheProviding {
   }
 
   private func removeEntryFailClosed(at url: URL) {
-    do {
-      try FileManager.default.removeItem(at: url)
-    } catch {
-      if (error as? CocoaError)?.code != .fileNoSuchFile {
-        isDisabledAfterClearFailure = true
-      }
-    }
+    try? FileManager.default.removeItem(at: url)
   }
 
   private func rawUsageForClear() -> RemoteImageDiskCacheUsage {
