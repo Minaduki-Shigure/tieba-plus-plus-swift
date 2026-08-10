@@ -977,25 +977,25 @@ enum TiebaAuthenticatedDecoder {
   private static func binaryBool(_ value: Any?) -> Bool? {
     switch value {
     case let value as Bool:
-      value
+      return value
     case let value as NSNumber:
       if CFGetTypeID(value) == CFBooleanGetTypeID() {
         return value.boolValue
       }
       guard let integer = Int64(value.stringValue) else { return nil }
       switch integer {
-      case 0: false
-      case 1: true
-      default: nil
+      case 0: return false
+      case 1: return true
+      default: return nil
       }
     case let value as String:
       switch value.lowercased() {
-      case "0", "false": false
-      case "1", "true": true
-      default: nil
+      case "0", "false": return false
+      case "1", "true": return true
+      default: return nil
       }
     default:
-      nil
+      return nil
     }
   }
 }
