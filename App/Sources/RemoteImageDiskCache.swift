@@ -40,6 +40,48 @@ struct RemoteImageDiskCacheLimits: Equatable, Sendable {
   }
 }
 
+struct RemoteImageDiskCacheTimestamps: Equatable, Sendable {
+  let storedAt: Date
+  let lastAccess: Date
+}
+
+enum RemoteImageDiskCacheTimestampPolicy {
+  static func normalizedDate(_ value: Date) -> Date? {
+    let seconds = value.timeIntervalSince1970
+    guard seconds.isFinite else { return nil }
+    let milliseconds = seconds * 1_000
+    guard milliseconds.isFinite else { return nil }
+    return Date(
+      timeIntervalSince1970: milliseconds.rounded(.down) / 1_000
+    )
+  }
+
+  static func timestamps(
+    storedAt: Date,
+    lastAccess: Date,
+    currentDate: Date,
+    entryLifetime: TimeInterval
+  ) -> RemoteImageDiskCacheTimestamps? {
+    guard
+      entryLifetime.isFinite,
+      entryLifetime > 0,
+      let normalizedCurrentDate = normalizedDate(currentDate),
+      let normalizedStoredAt = normalizedDate(storedAt),
+      let normalizedLastAccess = normalizedDate(lastAccess)
+    else { return nil }
+
+    let clampedLastAccess = min(normalizedLastAccess, normalizedCurrentDate)
+    let clampedStoredAt = min(normalizedStoredAt, clampedLastAccess)
+    guard
+      normalizedCurrentDate.timeIntervalSince(clampedStoredAt) < entryLifetime
+    else { return nil }
+    return RemoteImageDiskCacheTimestamps(
+      storedAt: clampedStoredAt,
+      lastAccess: clampedLastAccess
+    )
+  }
+}
+
 enum RemoteImageDiskCacheError: Error, Equatable {
   case invalidURL
   case invalidFile
@@ -393,17 +435,7 @@ actor RemoteImageDiskCache: RemoteImagePersistentCacheProviding {
   }
 
   private func validCurrentDate() -> Date? {
-    Self.normalizedMetadataDate(now())
-  }
-
-  private static func normalizedMetadataDate(_ value: Date) -> Date? {
-    let seconds = value.timeIntervalSince1970
-    guard seconds.isFinite else { return nil }
-    let milliseconds = seconds * 1_000
-    guard milliseconds.isFinite else { return nil }
-    return Date(
-      timeIntervalSince1970: milliseconds.rounded(.down) / 1_000
-    )
+    RemoteImageDiskCacheTimestampPolicy.normalizedDate(now())
   }
 
   private func ensureCacheDirectory() -> Bool {
@@ -509,16 +541,18 @@ actor RemoteImageDiskCache: RemoteImagePersistentCacheProviding {
       metadata.byteCount <= maximumByteCount,
       metadata.byteCount <= Self.absoluteMaximumPayloadByteCount,
       Self.isCacheKey(metadata.payloadSHA256),
-      let normalizedStoredAt = Self.normalizedMetadataDate(metadata.storedAt),
-      let normalizedLastAccess = Self.normalizedMetadataDate(metadata.lastAccess)
+      let timestamps = RemoteImageDiskCacheTimestampPolicy.timestamps(
+        storedAt: metadata.storedAt,
+        lastAccess: metadata.lastAccess,
+        currentDate: currentDate,
+        entryLifetime: limits.entryLifetime
+      )
     else { return nil }
 
-    metadata.lastAccess = min(normalizedLastAccess, currentDate)
-    metadata.storedAt = min(normalizedStoredAt, metadata.lastAccess)
+    metadata.lastAccess = timestamps.lastAccess
+    metadata.storedAt = timestamps.storedAt
 
     guard
-      limits.entryLifetime > 0,
-      currentDate.timeIntervalSince(metadata.storedAt) < limits.entryLifetime,
       measuredRegularFileSize(at: payloadURL) == metadata.byteCount,
       !verifiesDigest
         || Self.fileSHA256(

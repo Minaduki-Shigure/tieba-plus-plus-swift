@@ -200,13 +200,59 @@ final class RemoteImageDiskCacheTests: XCTestCase {
     let url = try XCTUnwrap(URL(string: "https://img.example/submillisecond"))
     let data = Data("submillisecond-image".utf8)
     try await store(data, for: url, in: cache, environment: environment)
+    let entryURL = entryDirectory(for: url, environment: environment)
+    let metadataURL = entryURL.appendingPathComponent("metadata.json")
+    let payloadURL = entryURL.appendingPathComponent("payload")
+    let storedMetadata = try readTimestampMetadata(at: metadataURL)
+    let usageBeforeRollback = await cache.usage()
+
+    XCTAssertTrue(FileManager.default.fileExists(atPath: metadataURL.path))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: payloadURL.path))
+    XCTAssertEqual(usageBeforeRollback.entryCount, 1)
 
     clock.advance(by: -10_000)
-    let rollbackHit = try await cache.cachedDownload(from: url, kind: .preview)
-    let rollbackUsage = await cache.usage()
+    let rollbackDate = clock.now()
+    let expectedTimestamps = try XCTUnwrap(
+      RemoteImageDiskCacheTimestampPolicy.timestamps(
+        storedAt: storedMetadata.storedAt,
+        lastAccess: storedMetadata.lastAccess,
+        currentDate: rollbackDate,
+        entryLifetime: 7 * 24 * 60 * 60
+      )
+    )
+    let usageBeforeRollbackHit = await cache.usage()
 
-    XCTAssertEqual(try Data(contentsOf: XCTUnwrap(rollbackHit).fileURL), data)
+    XCTAssertEqual(
+      expectedTimestamps.storedAt.timeIntervalSince1970,
+      5_000,
+      accuracy: 0.000_001
+    )
+    XCTAssertEqual(
+      expectedTimestamps.lastAccess.timeIntervalSince1970,
+      5_000,
+      accuracy: 0.000_001
+    )
+    XCTAssertEqual(usageBeforeRollbackHit.entryCount, 1)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: metadataURL.path))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: payloadURL.path))
+
+    let optionalRollbackHit = try await cache.cachedDownload(from: url, kind: .preview)
+    let rollbackHit = try XCTUnwrap(optionalRollbackHit)
+    let rollbackUsage = await cache.usage()
+    let rewrittenMetadata = try readTimestampMetadata(at: metadataURL)
+
+    XCTAssertEqual(try Data(contentsOf: rollbackHit.fileURL), data)
     XCTAssertEqual(rollbackUsage.entryCount, 1)
+    XCTAssertEqual(
+      rewrittenMetadata.storedAt.timeIntervalSince1970,
+      expectedTimestamps.storedAt.timeIntervalSince1970,
+      accuracy: 0.000_001
+    )
+    XCTAssertEqual(
+      rewrittenMetadata.lastAccess.timeIntervalSince1970,
+      expectedTimestamps.lastAccess.timeIntervalSince1970,
+      accuracy: 0.000_001
+    )
 
     clock.advance(by: 7 * 24 * 60 * 60)
     let expiredHit = try await cache.cachedDownload(from: url, kind: .preview)
@@ -216,6 +262,31 @@ final class RemoteImageDiskCacheTests: XCTestCase {
     XCTAssertEqual(
       expiredUsage,
       RemoteImageDiskCacheUsage(entryCount: 0, byteCount: 0)
+    )
+  }
+
+  func testTimestampPolicyClampsRollbackAndExpiresAtExactBoundary() throws {
+    let lifetime: TimeInterval = 7 * 24 * 60 * 60
+    let original = Date(timeIntervalSince1970: 15_000.000_75)
+    let rollback = Date(timeIntervalSince1970: 5_000.000_75)
+    let normalized = try XCTUnwrap(
+      RemoteImageDiskCacheTimestampPolicy.timestamps(
+        storedAt: original,
+        lastAccess: original,
+        currentDate: rollback,
+        entryLifetime: lifetime
+      )
+    )
+
+    XCTAssertEqual(normalized.storedAt.timeIntervalSince1970, 5_000, accuracy: 0.000_001)
+    XCTAssertEqual(normalized.lastAccess.timeIntervalSince1970, 5_000, accuracy: 0.000_001)
+    XCTAssertNil(
+      RemoteImageDiskCacheTimestampPolicy.timestamps(
+        storedAt: normalized.storedAt,
+        lastAccess: normalized.lastAccess,
+        currentDate: rollback.addingTimeInterval(lifetime),
+        entryLifetime: lifetime
+      )
     )
   }
 
@@ -847,6 +918,20 @@ private func entryDirectory(
   environment.cacheDirectoryURL.appendingPathComponent(
     RemoteImageDiskCache.cacheKey(for: url),
     isDirectory: true
+  )
+}
+
+private struct DiskCacheTimestampMetadata: Decodable {
+  let storedAt: Date
+  let lastAccess: Date
+}
+
+private func readTimestampMetadata(at url: URL) throws -> DiskCacheTimestampMetadata {
+  let decoder = JSONDecoder()
+  decoder.dateDecodingStrategy = .millisecondsSince1970
+  return try decoder.decode(
+    DiskCacheTimestampMetadata.self,
+    from: Data(contentsOf: url)
   )
 }
 
