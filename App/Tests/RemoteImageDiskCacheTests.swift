@@ -192,7 +192,7 @@ final class RemoteImageDiskCacheTests: XCTestCase {
     XCTAssertEqual(usage.entryCount, 0)
   }
 
-  func testSubmillisecondDateRoundTripAndClockSkewRemainValid() async throws {
+  func testArbitraryClockRollbackClampsMetadataAndStillExpiresAtLifetime() async throws {
     let environment = try DiskCacheTestEnvironment()
     defer { environment.remove() }
     let clock = DiskCacheTestClock(Date(timeIntervalSince1970: 15_000.000_75))
@@ -201,32 +201,47 @@ final class RemoteImageDiskCacheTests: XCTestCase {
     let data = Data("submillisecond-image".utf8)
     try await store(data, for: url, in: cache, environment: environment)
 
-    clock.advance(by: -0.000_25)
-    let hit = try await cache.cachedDownload(from: url, kind: .preview)
-    let usage = await cache.usage()
+    clock.advance(by: -10_000)
+    let rollbackHit = try await cache.cachedDownload(from: url, kind: .preview)
+    let rollbackUsage = await cache.usage()
 
-    XCTAssertEqual(try Data(contentsOf: XCTUnwrap(hit).fileURL), data)
-    XCTAssertEqual(usage.entryCount, 1)
+    XCTAssertEqual(try Data(contentsOf: XCTUnwrap(rollbackHit).fileURL), data)
+    XCTAssertEqual(rollbackUsage.entryCount, 1)
+
+    clock.advance(by: 7 * 24 * 60 * 60)
+    let expiredHit = try await cache.cachedDownload(from: url, kind: .preview)
+    let expiredUsage = await cache.usage()
+
+    XCTAssertNil(expiredHit)
+    XCTAssertEqual(
+      expiredUsage,
+      RemoteImageDiskCacheUsage(entryCount: 0, byteCount: 0)
+    )
   }
 
-  func testMetadataTimestampBeyondSubmillisecondToleranceIsRejected() async throws {
+  func testNonFiniteClockFailsClosedWithoutPublishing() async throws {
     let environment = try DiskCacheTestEnvironment()
     defer { environment.remove() }
-    let clock = DiskCacheTestClock(Date(timeIntervalSince1970: 16_000.000_75))
+    let clock = DiskCacheTestClock(Date(timeIntervalSince1970: .nan))
     let cache = environment.makeCache(now: { clock.now() })
-    let url = try XCTUnwrap(URL(string: "https://img.example/future-metadata"))
-    try await store(
-      Data("future-image".utf8),
-      for: url,
-      in: cache,
-      environment: environment
-    )
+    let url = try XCTUnwrap(URL(string: "https://img.example/non-finite-clock"))
+    let lease = try environment.makeLease(data: Data("image".utf8), sourceURL: url)
+    let token = await cache.currentGenerationToken()
 
-    clock.advance(by: -0.003)
-    let hit = try await cache.cachedDownload(from: url, kind: .preview)
+    do {
+      try await cache.storeValidated(
+        lease,
+        requestedURL: url,
+        kind: .preview,
+        generationToken: token
+      )
+      XCTFail("Expected a non-finite clock to reject persistence")
+    } catch RemoteImageDiskCacheError.cannotPersist {
+      // Expected.
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
     let usage = await cache.usage()
-
-    XCTAssertNil(hit)
     XCTAssertEqual(usage, RemoteImageDiskCacheUsage(entryCount: 0, byteCount: 0))
   }
 

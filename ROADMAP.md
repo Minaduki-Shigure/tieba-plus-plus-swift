@@ -741,7 +741,9 @@ passed the existing ImageIO validation. Exact request URLs are mapped to SHA-256
 directory names. Versioned metadata stores only a random entry identifier,
 payload byte count and digest, and creation/access timestamps: no URL, query,
 header, MIME type, suggested filename, cookie, credential, or account response is
-written. URLs with fragments or more than 8 KiB are never persisted.
+written. URLs with fragments or more than 8 KiB are never persisted. Finite cache
+times are normalized to milliseconds and clamped on clock rollback, then written
+back after a hit so future timestamps cannot extend the seven-day lifetime.
 
 The disk layer is capped at 256 MiB and 1,024 entries with a seven-day maximum
 lifetime and persisted LRU access times. Every hit rechecks a regular, non-symlink

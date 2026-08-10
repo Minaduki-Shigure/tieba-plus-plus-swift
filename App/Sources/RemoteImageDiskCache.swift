@@ -72,7 +72,6 @@ actor RemoteImageDiskCache: RemoteImagePersistentCacheProviding {
 
   private static let formatVersion = 1
   private static let maximumMetadataByteCount: Int64 = 64 * 1_024
-  private static let metadataDateTolerance: TimeInterval = 0.001
   private static let requestSequenceWindowSize: UInt64 = 2_048
   private static let absoluteMaximumPayloadByteCount =
     RemoteImageDownloadPolicy.originalMaximumResponseBytes
@@ -394,8 +393,17 @@ actor RemoteImageDiskCache: RemoteImagePersistentCacheProviding {
   }
 
   private func validCurrentDate() -> Date? {
-    let value = now()
-    return value.timeIntervalSince1970.isFinite ? value : nil
+    Self.normalizedMetadataDate(now())
+  }
+
+  private static func normalizedMetadataDate(_ value: Date) -> Date? {
+    let seconds = value.timeIntervalSince1970
+    guard seconds.isFinite else { return nil }
+    let milliseconds = seconds * 1_000
+    guard milliseconds.isFinite else { return nil }
+    return Date(
+      timeIntervalSince1970: milliseconds.rounded(.down) / 1_000
+    )
   }
 
   private func ensureCacheDirectory() -> Bool {
@@ -495,23 +503,22 @@ actor RemoteImageDiskCache: RemoteImagePersistentCacheProviding {
         maximumByteCount: Self.maximumMetadataByteCount
       ),
       Int64(metadataData.count) == metadataSize,
-      let metadata = Self.decodeMetadata(metadataData),
+      var metadata = Self.decodeMetadata(metadataData),
       metadata.version == Self.formatVersion,
       metadata.byteCount > 0,
       metadata.byteCount <= maximumByteCount,
       metadata.byteCount <= Self.absoluteMaximumPayloadByteCount,
       Self.isCacheKey(metadata.payloadSHA256),
-      metadata.storedAt.timeIntervalSince1970.isFinite,
-      metadata.lastAccess.timeIntervalSince1970.isFinite,
-      metadata.storedAt.timeIntervalSince(metadata.lastAccess)
-        <= Self.metadataDateTolerance,
-      metadata.lastAccess.timeIntervalSince(currentDate)
-        <= Self.metadataDateTolerance,
-      metadata.storedAt.timeIntervalSince(currentDate)
-        <= Self.metadataDateTolerance,
+      let normalizedStoredAt = Self.normalizedMetadataDate(metadata.storedAt),
+      let normalizedLastAccess = Self.normalizedMetadataDate(metadata.lastAccess)
+    else { return nil }
+
+    metadata.lastAccess = min(normalizedLastAccess, currentDate)
+    metadata.storedAt = min(normalizedStoredAt, metadata.lastAccess)
+
+    guard
       limits.entryLifetime > 0,
-      currentDate.timeIntervalSince(metadata.storedAt) + Self.metadataDateTolerance
-        < limits.entryLifetime,
+      currentDate.timeIntervalSince(metadata.storedAt) < limits.entryLifetime,
       measuredRegularFileSize(at: payloadURL) == metadata.byteCount,
       !verifiesDigest
         || Self.fileSHA256(
@@ -970,7 +977,7 @@ private struct EntryMetadata: Codable, Sendable {
   let entryIdentifier: UUID
   let byteCount: Int64
   var payloadSHA256: String
-  let storedAt: Date
+  var storedAt: Date
   var lastAccess: Date
 }
 

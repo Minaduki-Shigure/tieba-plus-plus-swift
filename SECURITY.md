@@ -721,9 +721,13 @@ Fragment-bearing or over-8-KiB URLs are rejected from persistence. Metadata is
 versioned and contains only a random entry identifier, byte count, payload
 SHA-256, and creation/access timestamps. Entries expire after seven days and are
 bounded to 256 MiB and 1,024 records. Every read rejects symlinks, nonregular
-files, unexpected byte counts, digest changes, future or expired timestamps, and
-the wrong preview/original size class. A hit is copied to an independent UUID
-temporary lease and revalidated before ImageIO, sharing, or PhotoKit use.
+files, unexpected byte counts, digest changes, nonfinite or expired timestamps,
+and the wrong preview/original size class. Finite timestamps are normalized to
+milliseconds; clock-skewed future access times are clamped to the current time and
+the stored time is clamped no later than that access. A successful hit writes the
+clamped values back, so a wall-clock rollback cannot make an entry immortal. A hit
+is copied to an independent UUID temporary lease and revalidated before ImageIO,
+sharing, or PhotoKit use.
 
 An observed `dynamic` URL is an independently normalized media candidate, not
 an animation flag. Animation requires ImageIO to identify a supported real
