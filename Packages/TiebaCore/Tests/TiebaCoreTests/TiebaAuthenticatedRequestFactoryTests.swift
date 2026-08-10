@@ -36,8 +36,15 @@ final class TiebaAuthenticatedRequestFactoryTests: XCTestCase {
     XCTAssertNil(fields["BDUSS"])
   }
 
-  func testFollowedForumsRequestIncludesOnlyRequiredAccountFields() throws {
-    let request = try factory.followedForums(
+  func testSelfLikedForumsRequestPreservesFollowedForumsWireFields() throws {
+    let request = try factory.likedForums(
+      credential: credential(),
+      accountUserID: 957_339_815,
+      targetUserID: 957_339_815,
+      page: 2,
+      pageSize: 50
+    )
+    let compatibilityRequest = try factory.followedForums(
       credential: credential(),
       userID: 957_339_815,
       page: 2,
@@ -46,6 +53,8 @@ final class TiebaAuthenticatedRequestFactoryTests: XCTestCase {
     let fields = try formFields(request)
 
     XCTAssertEqual(request.url?.absoluteString, "https://tiebac.baidu.com/c/f/forum/like")
+    XCTAssertEqual(request.httpBody, compatibilityRequest.httpBody)
+    XCTAssertFalse(request.httpShouldHandleCookies)
     XCTAssertEqual(fields["BDUSS"]?.count, 192)
     XCTAssertEqual(fields["uid"], "957339815")
     XCTAssertEqual(fields["page_no"], "2")
@@ -55,6 +64,44 @@ final class TiebaAuthenticatedRequestFactoryTests: XCTestCase {
     XCTAssertNil(fields["friend_uid"])
     XCTAssertNil(fields["is_guest"])
     XCTAssertNil(fields["Cookie"])
+    XCTAssertEqual(
+      Set(fields.keys),
+      ["BDUSS", "_client_version", "page_no", "page_size", "sign", "uid"]
+    )
+  }
+
+  func testOtherUserLikedForumsRequestSeparatesAccountAndTargetFields() throws {
+    let request = try factory.likedForums(
+      credential: credential(),
+      accountUserID: 957_339_815,
+      targetUserID: 123_456_789,
+      page: 2,
+      pageSize: 50
+    )
+    let fields = try formFields(request)
+
+    XCTAssertEqual(request.url?.absoluteString, "https://tiebac.baidu.com/c/f/forum/like")
+    XCTAssertEqual(request.httpMethod, "POST")
+    XCTAssertFalse(request.httpShouldHandleCookies)
+    XCTAssertEqual(fields["BDUSS"]?.count, 192)
+    XCTAssertEqual(fields["uid"], "957339815")
+    XCTAssertEqual(fields["friend_uid"], "123456789")
+    XCTAssertEqual(fields["is_guest"], "1")
+    XCTAssertEqual(fields["page_no"], "2")
+    XCTAssertEqual(fields["page_size"], "50")
+    XCTAssertEqual(fields["sign"], "6258dd406a4aeb85485175cf1aafb6a3")
+    XCTAssertNil(fields["stoken"])
+    XCTAssertNil(fields["Cookie"])
+    XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+    XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+    XCTAssertNil(request.value(forHTTPHeaderField: "client_user_token"))
+    XCTAssertEqual(
+      Set(fields.keys),
+      [
+        "BDUSS", "_client_version", "friend_uid", "is_guest", "page_no", "page_size",
+        "sign", "uid",
+      ]
+    )
   }
 
   func testRejectsMalformedCredentialsArgumentsAndHeaderInjection() throws {
@@ -83,6 +130,60 @@ final class TiebaAuthenticatedRequestFactoryTests: XCTestCase {
     XCTAssertThrowsError(
       try factory.followedForums(
         credential: credential(), userID: 1, page: 1, pageSize: 101
+      )
+    )
+    XCTAssertThrowsError(
+      try factory.likedForums(
+        credential: credential(),
+        accountUserID: 0,
+        targetUserID: 1,
+        page: 1,
+        pageSize: 50
+      )
+    )
+    XCTAssertThrowsError(
+      try factory.likedForums(
+        credential: credential(),
+        accountUserID: 1,
+        targetUserID: 0,
+        page: 1,
+        pageSize: 50
+      )
+    )
+    XCTAssertThrowsError(
+      try factory.likedForums(
+        credential: credential(),
+        accountUserID: 1,
+        targetUserID: 2,
+        page: 0,
+        pageSize: 50
+      )
+    )
+    XCTAssertThrowsError(
+      try factory.likedForums(
+        credential: credential(),
+        accountUserID: 1,
+        targetUserID: 2,
+        page: Int(Int32.max) + 1,
+        pageSize: 50
+      )
+    )
+    XCTAssertThrowsError(
+      try factory.likedForums(
+        credential: credential(),
+        accountUserID: 1,
+        targetUserID: 2,
+        page: 1,
+        pageSize: 0
+      )
+    )
+    XCTAssertThrowsError(
+      try factory.likedForums(
+        credential: credential(),
+        accountUserID: 1,
+        targetUserID: 2,
+        page: 1,
+        pageSize: 101
       )
     )
 

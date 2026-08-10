@@ -14,6 +14,13 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
     page: Int,
     pageSize: Int
   ) async throws -> TiebaFollowedForumPage
+  func getLikedForums(
+    credential: TiebaBDUSSCredential,
+    accountUserID: Int64,
+    targetUserID: Int64,
+    page: Int,
+    pageSize: Int
+  ) async throws -> TiebaFollowedForumPage
   func getCloudFavorites(
     credential: TiebaSessionCredential,
     expectedUserID: Int64,
@@ -138,6 +145,24 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
 }
 
 extension TiebaAuthenticatedAccountClient {
+  func getLikedForums(
+    credential: TiebaBDUSSCredential,
+    accountUserID: Int64,
+    targetUserID: Int64,
+    page: Int,
+    pageSize: Int
+  ) async throws -> TiebaFollowedForumPage {
+    if accountUserID == targetUserID {
+      return try await getFollowedForums(
+        credential: credential,
+        userID: accountUserID,
+        page: page,
+        pageSize: pageSize
+      )
+    }
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
   func getConcernFeed(
     credential: TiebaSessionCredential,
     expectedUserID: Int64,
@@ -578,6 +603,53 @@ struct TiebaCoreAccountService: AccountService {
           name: $0.name,
           level: $0.level,
           experience: $0.experience
+        )
+      },
+      currentPage: response.pagination.currentPage,
+      hasMore: response.pagination.hasMore
+    )
+  }
+
+  func likedForums(
+    session: StoredAccountSession,
+    targetUserID: Int64,
+    page: Int,
+    pageSize: Int
+  ) async throws -> UserLikedForumPageData {
+    let response: TiebaFollowedForumPage
+    do {
+      response = try await client.getLikedForums(
+        credential: TiebaBDUSSCredential(bduss: session.bduss),
+        accountUserID: session.id,
+        targetUserID: targetUserID,
+        page: page,
+        pageSize: pageSize
+      )
+      try Task.checkCancellation()
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.accountError(error)
+    }
+    guard
+      response.accountUserID == session.id,
+      response.targetUserID == targetUserID,
+      response.pagination.currentPage == page,
+      response.pagination.pageSize == pageSize
+    else {
+      throw BrowseError.unavailable("贴吧返回了不匹配的用户贴吧列表，请重新加载后再试。")
+    }
+    return UserLikedForumPageData(
+      accountUserID: response.accountUserID,
+      targetUserID: response.targetUserID,
+      forums: response.forums.map {
+        FollowedForumItem(
+          id: $0.id,
+          name: $0.name,
+          level: $0.level,
+          experience: $0.experience,
+          avatarURL: SecureTiebaURL.media($0.avatar),
+          slogan: $0.slogan
         )
       },
       currentPage: response.pagination.currentPage,

@@ -568,9 +568,26 @@ public actor TiebaAuthenticatedClient {
     page: Int = 1,
     pageSize: Int = 50
   ) async throws -> TiebaFollowedForumPage {
-    let request = try requestFactory.followedForums(
+    try await getLikedForums(
       credential: credential,
-      userID: userID,
+      accountUserID: userID,
+      targetUserID: userID,
+      page: page,
+      pageSize: pageSize
+    )
+  }
+
+  public func getLikedForums(
+    credential: TiebaBDUSSCredential,
+    accountUserID: Int64,
+    targetUserID: Int64,
+    page: Int = 1,
+    pageSize: Int = 50
+  ) async throws -> TiebaFollowedForumPage {
+    let request = try requestFactory.likedForums(
+      credential: credential,
+      accountUserID: accountUserID,
+      targetUserID: targetUserID,
       page: page,
       pageSize: pageSize
     )
@@ -581,7 +598,9 @@ public actor TiebaAuthenticatedClient {
     return try TiebaAuthenticatedDecoder.followedForums(
       from: body,
       page: page,
-      pageSize: pageSize
+      pageSize: pageSize,
+      accountUserID: accountUserID,
+      targetUserID: targetUserID
     )
   }
 

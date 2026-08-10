@@ -19,9 +19,35 @@ struct FollowedForumItem: Identifiable, Hashable, Sendable {
   let name: String
   let level: Int
   let experience: Int
+  let avatarURL: URL?
+  let slogan: String
+
+  init(
+    id: Int64,
+    name: String,
+    level: Int,
+    experience: Int,
+    avatarURL: URL? = nil,
+    slogan: String = ""
+  ) {
+    self.id = id
+    self.name = name
+    self.level = level
+    self.experience = experience
+    self.avatarURL = avatarURL
+    self.slogan = slogan
+  }
 }
 
 struct FollowedForumPageData: Sendable {
+  let forums: [FollowedForumItem]
+  let currentPage: Int
+  let hasMore: Bool
+}
+
+struct UserLikedForumPageData: Hashable, Sendable {
+  let accountUserID: Int64
+  let targetUserID: Int64
   let forums: [FollowedForumItem]
   let currentPage: Int
   let hasMore: Bool
@@ -305,6 +331,12 @@ protocol AccountService: Sendable {
     page: Int,
     pageSize: Int
   ) async throws -> FollowedForumPageData
+  func likedForums(
+    session: StoredAccountSession,
+    targetUserID: Int64,
+    page: Int,
+    pageSize: Int
+  ) async throws -> UserLikedForumPageData
   func notifications(
     session: StoredAccountSession,
     kind: InboxKind,
@@ -388,6 +420,15 @@ protocol AccountService: Sendable {
 }
 
 extension AccountService {
+  func likedForums(
+    session: StoredAccountSession,
+    targetUserID: Int64,
+    page: Int,
+    pageSize: Int
+  ) async throws -> UserLikedForumPageData {
+    throw BrowseError.unavailable("当前账户服务不支持读取用户喜欢的贴吧。")
+  }
+
   func concernFeed(
     session: StoredAccountSession,
     pageTag: String?,

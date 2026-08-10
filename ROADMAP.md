@@ -3,6 +3,8 @@
 Tieba++ is an independent Swift application implementation. TiebaLite is used as
 a product reference for expected workflows; the only adapted source material is
 the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
+This audit was last compared with TiebaLite `4.0-dev` at commit
+[`268f388c`](https://github.com/zzc10086/TiebaLite/tree/268f388c7824ae2c8f6ed549827a943ec8a7f352).
 
 ## Progress audit
 
@@ -19,7 +21,7 @@ versioned separately and currently serves `v0.59.0-alpha.1` (build 62).
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 13–14 | Images, galleries, video, voice, sharing, saving, and media policy are implemented; broader format and cache parity remain |
 | Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, media preferences, and local reply-entry visibility are implemented; TiebaLite's wider settings and customization surface remains |
-| Account, session, and private read flows | 15 | 9 | Login, switching, followed forums, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
+| Account, session, and private read flows | 15 | 9 | Login, switching, followed and target-user liked forums, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 5–6 | Follow/unfollow, check-in, approval, verified list/thread-detail cloud-favorite mutations, and three plain-text reply targets have guarded implementations; real reply success, new topics, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
 | **Total** | **100** | **69–73** | Current full-product estimate |
@@ -29,6 +31,9 @@ points, or roughly 90–95%. Concern and the foreground unread summary raise the
 private-read area but receive only partial credit until their minimum request
 fields, empty/expired envelopes, cursor replay where applicable, and possible
 seen-state effects are validated on a disposable account.
+The complete self/other liked-forum list remains inside the existing private-read
+credit until its pagination, privacy-empty, expired-session, and account-switch
+behavior has also been validated on physical devices.
 
 ## Available
 
@@ -117,7 +122,8 @@ the source metadata is updated to that tested IPA.
 - Lossless nested-reply context and public-profile links for user mentions
 - Public user profiles opened from post and nested-reply authors
 - Explicit profile-avatar viewing, sharing, and Photos saving
-- Limited public liked-forum previews with direct forum navigation
+- Bounded public liked-forum previews plus an independent login-gated, paginated
+  complete list for the current or another user, with direct forum navigation
 - Paginated public threads on user profiles
 - Lazily paginated public replies on user profiles, with exact ordinary-floor
   navigation and child-only nested-reply resolution
@@ -177,30 +183,34 @@ the source metadata is updated to that tested IPA.
 
 ## Next milestones
 
-1. Real-device validation of full-session binding and the minimal HTTPS cloud
+1. Real-device validation of the complete liked-forum list for the current and
+   another public user, including page-one/page-two termination, privacy-empty
+   results, expired credentials, same-UID credential rotation, account switching,
+   and confirmation that reading performs no follow, check-in, or other write
+2. Real-device validation of full-session binding and the minimal HTTPS cloud
    favorites list, including valid, random, cross-account, and expired STOKEN
    cases and whether reading the list has any server-side side effect
-2. Real-device validation of canonical-topic, ordinary-floor, and full
+3. Real-device validation of canonical-topic, ordinary-floor, and full
    nested-reply approval/cancellation, plus single-forum check-in success,
    idempotent, server-error, uncertain-failure, and read-only reconciliation
    paths, followed by account switching and follow recovery checks
-3. Real-device validation of the minimal HTTPS ReplyMe, AtMe, and `/c/s/msg`
+4. Real-device validation of the minimal HTTPS ReplyMe, AtMe, and `/c/s/msg`
    summary requests, including the summary field-deletion matrix, count parity,
    and whether either summary or list retrieval changes server unread state,
    plus ordinary post and child-reply action relocation, unavailable targets,
    and account switching before composer presentation
-4. Real-device validation of the account-bound concern request, including the
+5. Real-device validation of the account-bound concern request, including the
    signed-field deletion matrix, empty-account and expired-session envelopes,
    cursor replay, and whether list retrieval changes recommendation state
-5. Real-device validation of explicit cloud-favorite list/detail removal, add,
+6. Real-device validation of explicit cloud-favorite list/detail removal, add,
    and saved-floor updates, including unresolvable deleted rows, STOKEN rejection,
    idempotence, uncertain-write readback, concurrency, session rotation, and
    account switching
-6. Disposable-account validation of all three plain-text reply targets,
+7. Disposable-account validation of all three plain-text reply targets,
    including minimum-field deletion, missing/random/expired/cross-account
    STOKEN and TBS, challenge and permission failures, post-dispatch loss,
    exact-PID visibility, account rotation, and duplicate-send prevention
-7. Broader settings parity, remaining account activity, new-topic and rich-media
+8. Broader settings parity, remaining account activity, new-topic and rich-media
    creation, and moderation tools
 
 The foreground inbox deliberately does not copy TiebaLite's cleartext JSON
@@ -481,18 +491,17 @@ neither value establishes a privacy state. These public lists likewise do not
 establish whether the active account follows, is followed by, or can mutate any
 listed user; this surface deliberately has no relationship write controls.
 
-Tieba's followed-forum list still rejects anonymous requests and is not exposed
-as a misleading public-profile tab. The logged-in home page instead projects at
-most the first six entries from the same app-scoped, memory-only state used by
-the complete paginated list. A selected, default-off recommendation filter may
-also request completion of that shared index. New requests may start only while
-the home page, complete list, or selected filtered recommendation page is active.
-Every page reads the active account before transport and again after transport,
-and the result is accepted only while the exact
-`userID + sessionRevision` lease and requested page remain current. Account
+Tieba's followed-forum list rejects anonymous requests. The logged-in home page
+projects at most the first six entries from the same app-scoped, memory-only state
+used by the current account's complete paginated list. A selected, default-off
+recommendation filter may also request completion of that shared index. New
+requests may start only while the home page, complete list, or selected filtered
+recommendation page is active. Every page reads the active account before
+transport and again after transport, and the result is accepted only while the
+exact `userID + sessionRevision` lease and requested page remain current. Account
 switching, logout, same-UID credential rotation, or a matching forum-membership
-change starts a new state epoch and synchronously removes the prior snapshot;
-an inactive surface remains empty until an eligible surface becomes active again.
+change starts a new state epoch and synchronously removes the prior snapshot; an
+inactive surface remains empty until an eligible surface becomes active again.
 Only an explicit server end publishes the complete forum-ID set. Empty or
 duplicate-only continuations, invalid data, service failures, more than 100
 pages, or more than 5,000 retained forums fail closed rather than publishing a
@@ -505,10 +514,20 @@ per-forum membership and check-in workflow. Client-side lease checks prevent a
 late page from being published under another local session, but successful
 private-list retrieval and server-side account binding still require physical-
 device validation.
-The profile response may include a small public liked-forum preview. It is
-presented as a preview alongside the server's declared total, never as a full
-list, and an empty preview remains a valid privacy state. The authenticated
-full-list endpoint is not called from a public profile.
+The profile response may include a small public liked-forum preview. It remains
+visible without credentials and is presented as a preview alongside the server's
+declared total, never as a full list; an empty preview remains a valid privacy
+state. A separate profile action can use the login-required `/c/f/forum/like`
+read for either the current or another user. A self request keeps `uid` equal to
+the active account and omits guest fields. An other-user request still keeps
+`uid` equal to the active account, adds the target as `friend_uid`, and adds only
+`is_guest=1`. Its pagination state is independently bound to active-account UID,
+`sessionRevision`, target UID, and page, and it never populates or mutates the
+global current-account followed-forum index. Duplicate-only or empty continuing
+pages, invalid response context, more than 100 pages, and more than 5,000 retained
+rows stop safely. The complete list is memory only and read only; successful
+self/other retrieval and privacy behavior still require physical-device
+validation.
 
 The profile header keeps its existing bounded portrait preview and creates a
 large-portrait presentation only after an explicit avatar tap. A bare portrait

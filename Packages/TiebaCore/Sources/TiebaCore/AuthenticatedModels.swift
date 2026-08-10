@@ -95,20 +95,40 @@ public struct TiebaFollowedForum: Identifiable, Sendable, Hashable {
   public let name: String
   public let level: Int
   public let experience: Int
+  public let avatar: String
+  public let slogan: String
 
-  public init(id: Int64, name: String, level: Int, experience: Int) {
+  public init(
+    id: Int64,
+    name: String,
+    level: Int,
+    experience: Int,
+    avatar: String = "",
+    slogan: String = ""
+  ) {
     self.id = id
     self.name = name
     self.level = level
     self.experience = experience
+    self.avatar = avatar
+    self.slogan = slogan
   }
 }
 
 public struct TiebaFollowedForumPage: Sendable, Hashable {
+  public let accountUserID: Int64
+  public let targetUserID: Int64
   public let forums: [TiebaFollowedForum]
   public let pagination: TiebaPagination
 
-  public init(forums: [TiebaFollowedForum], pagination: TiebaPagination) {
+  public init(
+    accountUserID: Int64,
+    targetUserID: Int64,
+    forums: [TiebaFollowedForum],
+    pagination: TiebaPagination
+  ) {
+    self.accountUserID = accountUserID
+    self.targetUserID = targetUserID
     self.forums = forums
     self.pagination = pagination
   }

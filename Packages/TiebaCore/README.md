@@ -60,7 +60,7 @@ if let userID = posts.posts[0].author?.id {
 ```
 
 The authenticated client supports BDUSS-only identity validation, full-session
-UID-consistency probes, followed forums, an account-bound concern feed,
+UID-consistency probes, followed and target-user liked forums, an account-bound concern feed,
 Tieba cloud-favorite reads and guarded thread-detail mutations, authoritative
 per-forum follow/check-in state, confirmed follow/unfollow, and explicit
 single-forum check-in. Core single-flights equivalent check-in and cloud-favorite
@@ -77,6 +77,12 @@ let account = try await authenticatedClient.validateAccount(credential: credenti
 let followed = try await authenticatedClient.getFollowedForums(
     credential: credential,
     userID: account.userID
+)
+let targetUserID = account.userID
+let likedForums = try await authenticatedClient.getLikedForums(
+    credential: credential,
+    accountUserID: account.userID,
+    targetUserID: targetUserID
 )
 if let forum = followed.forums.first {
     let forumState = try await authenticatedClient.getForumAccountState(
@@ -153,7 +159,11 @@ not advertise a usable sign state; it is not permission to attempt a write.
 - Public profiles use Profile `303012` with explicit guest fields; public user
   threads use UserPost `303002` and terminate pagination on an empty page. A
   profile's liked-forum array is a limited public preview rather than a complete
-  anonymous followed-forum list. Read-only following and follower lists use the
+  anonymous followed-forum list. The separate authenticated
+  `getLikedForums` read keeps `uid` bound to the active account and, only for a
+  different target, adds `friend_uid` plus `is_guest=1`; it uses no STOKEN or
+  device metadata, carries both requested identities as context, and has a 2 MiB
+  response limit. Read-only following and follower lists use the
   HTTPS form endpoints `/c/u/follow/followList` and `/c/u/fans/page`; each signed
   request contains only fixed client version `22.6.5.1`, one-based page, target
   UID, and signature, with no account credential or device field. The two

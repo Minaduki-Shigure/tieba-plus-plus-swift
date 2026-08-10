@@ -477,9 +477,28 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     page: Int,
     pageSize: Int
   ) throws -> URLRequest {
+    try likedForums(
+      credential: credential,
+      accountUserID: userID,
+      targetUserID: userID,
+      page: page,
+      pageSize: pageSize
+    )
+  }
+
+  func likedForums(
+    credential: TiebaBDUSSCredential,
+    accountUserID: Int64,
+    targetUserID: Int64,
+    page: Int,
+    pageSize: Int
+  ) throws -> URLRequest {
     try validate(credential)
-    guard userID > 0 else {
-      throw TiebaClientError.invalidArgument("User ID must be positive.")
+    guard accountUserID > 0 else {
+      throw TiebaClientError.invalidArgument("Account user ID must be positive.")
+    }
+    guard targetUserID > 0 else {
+      throw TiebaClientError.invalidArgument("Target user ID must be positive.")
     }
     guard (1...Int(Int32.max)).contains(page) else {
       throw TiebaClientError.invalidArgument("Page must be between 1 and \(Int32.max).")
@@ -487,16 +506,18 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     guard (1...100).contains(pageSize) else {
       throw TiebaClientError.invalidArgument("Page size must be between 1 and 100.")
     }
-    return try signedFormRequest(
-      path: "/c/f/forum/like",
-      fields: [
-        ("BDUSS", credential.bduss),
-        ("_client_version", configuration.authenticatedClientVersion),
-        ("page_no", String(page)),
-        ("page_size", String(pageSize)),
-        ("uid", String(userID)),
-      ]
-    )
+    var fields = [
+      ("BDUSS", credential.bduss),
+      ("_client_version", configuration.authenticatedClientVersion),
+      ("page_no", String(page)),
+      ("page_size", String(pageSize)),
+      ("uid", String(accountUserID)),
+    ]
+    if targetUserID != accountUserID {
+      fields.append(("friend_uid", String(targetUserID)))
+      fields.append(("is_guest", "1"))
+    }
+    return try signedFormRequest(path: "/c/f/forum/like", fields: fields)
   }
 
   func notifications(

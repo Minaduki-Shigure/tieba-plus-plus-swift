@@ -31,6 +31,10 @@ struct TiebaThreadCloudFavoriteContext:
 }
 
 enum TiebaAuthenticatedDecoder {
+  static let followedForumNameMaximumBytes = 1_024
+  static let followedForumAvatarMaximumBytes = 4_096
+  static let followedForumSloganMaximumBytes = 4_096
+
   static func account(from body: Data) throws -> TiebaAuthenticatedAccount {
     let object = try responseObject(from: body)
     try checkServerError(object)
@@ -70,22 +74,55 @@ enum TiebaAuthenticatedDecoder {
   static func followedForums(
     from body: Data,
     page: Int,
-    pageSize: Int
+    pageSize: Int,
+    accountUserID: Int64,
+    targetUserID: Int64
   ) throws -> TiebaFollowedForumPage {
+    guard
+      accountUserID > 0,
+      targetUserID > 0,
+      (1...Int(Int32.max)).contains(page),
+      (1...100).contains(pageSize)
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
     let object = try responseObject(from: body)
     try checkServerError(object)
 
-    var forums = [TiebaFollowedForum]()
-    if let groups = object["forum_list"] as? [String: Any] {
+    var rawForums = [[String: Any]]()
+    if let rawGroups = object["forum_list"] {
+      guard let groups = rawGroups as? [String: Any] else {
+        throw TiebaClientError.invalidJSON
+      }
       for key in ["non-gconforum", "gconforum"] {
-        guard let entries = groups[key] as? [[String: Any]] else { continue }
-        forums.append(contentsOf: entries.compactMap(followedForum))
+        guard let rawEntries = groups[key] else { continue }
+        guard let entries = rawEntries as? [[String: Any]] else {
+          throw TiebaClientError.invalidJSON
+        }
+        rawForums.append(contentsOf: entries)
       }
     }
+    // The endpoint may return one page from each of its two known forum groups.
+    let maximumRawForumCount = min(pageSize * 2, 100)
+    guard rawForums.count <= maximumRawForumCount else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    var forums = try rawForums.map(followedForum)
     var seen = Set<Int64>()
     forums = forums.filter { seen.insert($0.id).inserted }
-    let hasMore = bool(object["has_more"]) ?? false
+    let hasMore: Bool
+    if let rawHasMore = object["has_more"] {
+      guard let parsedHasMore = binaryBool(rawHasMore) else {
+        throw TiebaClientError.invalidJSON
+      }
+      hasMore = parsedHasMore
+    } else {
+      // The endpoint schema defaults an omitted pagination flag to its final-page value.
+      hasMore = false
+    }
     return TiebaFollowedForumPage(
+      accountUserID: accountUserID,
+      targetUserID: targetUserID,
       forums: forums,
       pagination: TiebaPagination(
         pageSize: pageSize,
@@ -792,17 +829,44 @@ enum TiebaAuthenticatedDecoder {
     return Int64(value)
   }
 
-  private static func followedForum(_ object: [String: Any]) -> TiebaFollowedForum? {
+  private static func followedForum(_ object: [String: Any]) throws -> TiebaFollowedForum {
     guard
       let id = int64(object["id"]), id > 0,
-      let name = string(object["name"]), !name.isEmpty
-    else { return nil }
+      let rawName = object["name"] as? String
+    else { throw TiebaClientError.invalidJSON }
+    let name = normalizedForumMetadata(
+      rawName,
+      maximumBytes: followedForumNameMaximumBytes
+    )
+    guard !name.isEmpty else { throw TiebaClientError.invalidJSON }
     return TiebaFollowedForum(
       id: id,
       name: name,
-      level: Int(clamping: int64(object["level_id"]) ?? 0),
-      experience: Int(clamping: int64(object["cur_score"]) ?? 0)
+      level: max(Int(clamping: int64(object["level_id"]) ?? 0), 0),
+      experience: max(Int(clamping: int64(object["cur_score"]) ?? 0), 0),
+      avatar: normalizedForumMetadata(
+        object["avatar"] as? String,
+        maximumBytes: followedForumAvatarMaximumBytes
+      ),
+      slogan: normalizedForumMetadata(
+        object["slogan"] as? String,
+        maximumBytes: followedForumSloganMaximumBytes
+      )
     )
+  }
+
+  private static func normalizedForumMetadata(
+    _ value: String?,
+    maximumBytes: Int
+  ) -> String {
+    guard let value else { return "" }
+    let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    guard
+      !normalized.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+      normalized.utf8.count <= maximumBytes
+    else { return "" }
+    return normalized
   }
 
   private static func cloudFavorite(_ object: [String: Any]) throws -> TiebaCloudFavorite {
@@ -903,6 +967,31 @@ enum TiebaAuthenticatedDecoder {
       switch value.lowercased() {
       case "1", "true": true
       case "0", "false", "": false
+      default: nil
+      }
+    default:
+      nil
+    }
+  }
+
+  private static func binaryBool(_ value: Any?) -> Bool? {
+    switch value {
+    case let value as Bool:
+      value
+    case let value as NSNumber:
+      if CFGetTypeID(value) == CFBooleanGetTypeID() {
+        return value.boolValue
+      }
+      guard let integer = Int64(value.stringValue) else { return nil }
+      switch integer {
+      case 0: false
+      case 1: true
+      default: nil
+      }
+    case let value as String:
+      switch value.lowercased() {
+      case "0", "false": false
+      case "1", "true": true
       default: nil
       }
     default:

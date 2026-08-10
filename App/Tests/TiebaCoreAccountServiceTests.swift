@@ -5,6 +5,185 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class TiebaCoreAccountServiceTests: XCTestCase {
+  func testLikedForumsMapsTargetContextAndForumPresentation() async throws {
+    let client = AccountClientSpy(
+      likedForums: TiebaFollowedForumPage(
+        accountUserID: 7,
+        targetUserID: 9,
+        forums: [
+          TiebaFollowedForum(
+            id: 42,
+            name: "swift",
+            level: 12,
+            experience: 345,
+            avatar: "https://example.com/forum-avatar.png",
+            slogan: "A forum slogan"
+          )
+        ],
+        pagination: TiebaPagination(
+          pageSize: 50,
+          currentPage: 2,
+          totalPages: 0,
+          totalCount: 0,
+          hasMore: true,
+          hasPrevious: true
+        )
+      )
+    )
+    let service = TiebaCoreAccountService(client: client)
+
+    let page = try await service.likedForums(
+      session: session(),
+      targetUserID: 9,
+      page: 2,
+      pageSize: 50
+    )
+
+    XCTAssertEqual(page.accountUserID, 7)
+    XCTAssertEqual(page.targetUserID, 9)
+    XCTAssertEqual(page.currentPage, 2)
+    XCTAssertTrue(page.hasMore)
+    XCTAssertEqual(page.forums.map(\.id), [42])
+    XCTAssertEqual(page.forums.first?.name, "swift")
+    XCTAssertEqual(page.forums.first?.level, 12)
+    XCTAssertEqual(page.forums.first?.experience, 345)
+    XCTAssertEqual(
+      page.forums.first?.avatarURL,
+      URL(string: "https://example.com/forum-avatar.png")
+    )
+    XCTAssertEqual(page.forums.first?.slogan, "A forum slogan")
+    let snapshot = await client.snapshot()
+    XCTAssertEqual(
+      snapshot.likedForumRequests,
+      [
+        LikedForumClientRequest(
+          accountUserID: 7,
+          targetUserID: 9,
+          page: 2,
+          pageSize: 50,
+          credentialByteCount: 192
+        )
+      ]
+    )
+  }
+
+  func testLikedForumsRejectsMismatchedResponseContext() async throws {
+    let expectedPagination = TiebaPagination(
+      pageSize: 50,
+      currentPage: 2,
+      totalPages: 0,
+      totalCount: 0,
+      hasMore: false,
+      hasPrevious: true
+    )
+    let mismatchedResponses = [
+      TiebaFollowedForumPage(
+        accountUserID: 8,
+        targetUserID: 9,
+        forums: [],
+        pagination: expectedPagination
+      ),
+      TiebaFollowedForumPage(
+        accountUserID: 7,
+        targetUserID: 10,
+        forums: [],
+        pagination: expectedPagination
+      ),
+      TiebaFollowedForumPage(
+        accountUserID: 7,
+        targetUserID: 9,
+        forums: [],
+        pagination: TiebaPagination(
+          pageSize: 50,
+          currentPage: 3,
+          totalPages: 0,
+          totalCount: 0,
+          hasMore: false,
+          hasPrevious: true
+        )
+      ),
+      TiebaFollowedForumPage(
+        accountUserID: 7,
+        targetUserID: 9,
+        forums: [],
+        pagination: TiebaPagination(
+          pageSize: 20,
+          currentPage: 2,
+          totalPages: 0,
+          totalCount: 0,
+          hasMore: false,
+          hasPrevious: true
+        )
+      ),
+    ]
+
+    for response in mismatchedResponses {
+      let service = TiebaCoreAccountService(client: AccountClientSpy(likedForums: response))
+      do {
+        _ = try await service.likedForums(
+          session: session(),
+          targetUserID: 9,
+          page: 2,
+          pageSize: 50
+        )
+        XCTFail("Expected mismatched liked-forum context to be rejected")
+      } catch let error as BrowseError {
+        XCTAssertEqual(
+          error.errorDescription,
+          "贴吧返回了不匹配的用户贴吧列表，请重新加载后再试。"
+        )
+      }
+    }
+  }
+
+  func testAccountServiceDefaultLikedForumsIsUnsupported() async throws {
+    let service: any AccountService = UnsupportedLikedForumsAccountService()
+
+    do {
+      _ = try await service.likedForums(
+        session: session(),
+        targetUserID: 9,
+        page: 1,
+        pageSize: 50
+      )
+      XCTFail("Expected the default liked-forum implementation to be unavailable")
+    } catch let error as BrowseError {
+      XCTAssertEqual(
+        error.errorDescription,
+        "当前账户服务不支持读取用户喜欢的贴吧。"
+      )
+    }
+  }
+
+  func testLegacyAuthenticatedClientDefaultsSelfLikedForumsToFollowedForums() async throws {
+    let expected = TiebaFollowedForumPage(
+      accountUserID: 7,
+      targetUserID: 7,
+      forums: [],
+      pagination: TiebaPagination(
+        pageSize: 50,
+        currentPage: 2,
+        totalPages: 0,
+        totalCount: 0,
+        hasMore: false,
+        hasPrevious: true
+      )
+    )
+    let client: any TiebaAuthenticatedAccountClient = LegacyFollowedForumsClient(
+      response: expected
+    )
+
+    let page = try await client.getLikedForums(
+      credential: TiebaBDUSSCredential(bduss: session().bduss),
+      accountUserID: 7,
+      targetUserID: 7,
+      page: 2,
+      pageSize: 50
+    )
+
+    XCTAssertEqual(page, expected)
+  }
+
   func testValidationAndMembershipMapCoreResponsesWithoutChangingAccountIdentity() async throws {
     let client = AccountClientSpy(
       validation: TiebaAuthenticatedAccount(
@@ -1649,6 +1828,109 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
   }
 }
 
+private struct UnsupportedLikedForumsAccountService: AccountService {
+  func validate(credential: AccountCredentials) async throws -> ValidatedAccount {
+    throw AccountClientSpyError.unexpectedCall
+  }
+
+  func followedForums(
+    session: StoredAccountSession,
+    page: Int,
+    pageSize: Int
+  ) async throws -> FollowedForumPageData {
+    throw AccountClientSpyError.unexpectedCall
+  }
+
+  func forumMembership(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> ForumMembershipData {
+    throw AccountClientSpyError.unexpectedCall
+  }
+
+  func forumAccountState(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> ForumAccountStateData {
+    throw AccountClientSpyError.unexpectedCall
+  }
+
+  func setForumFollowed(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String,
+    isFollowed: Bool
+  ) async throws -> ForumMembershipData {
+    throw AccountClientSpyError.unexpectedCall
+  }
+
+  func checkInToForum(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> ForumAccountStateData {
+    throw AccountClientSpyError.unexpectedCall
+  }
+}
+
+private struct LegacyFollowedForumsClient: TiebaAuthenticatedAccountClient {
+  let response: TiebaFollowedForumPage
+
+  func validateAccount(
+    credential: TiebaBDUSSCredential
+  ) async throws -> TiebaAuthenticatedAccount {
+    throw AccountClientSpyError.unexpectedCall
+  }
+
+  func getFollowedForums(
+    credential: TiebaBDUSSCredential,
+    userID: Int64,
+    page: Int,
+    pageSize: Int
+  ) async throws -> TiebaFollowedForumPage {
+    response
+  }
+
+  func getForumMembership(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> TiebaForumMembership {
+    throw AccountClientSpyError.unexpectedCall
+  }
+
+  func getForumAccountState(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> TiebaForumAccountState {
+    throw AccountClientSpyError.unexpectedCall
+  }
+
+  func setForumFollowState(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String,
+    isFollowed: Bool
+  ) async throws -> TiebaForumMembership {
+    throw AccountClientSpyError.unexpectedCall
+  }
+
+  func checkInToForum(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> TiebaForumAccountState {
+    throw AccountClientSpyError.unexpectedCall
+  }
+}
+
 private struct SensitiveAccountError: LocalizedError {
   let message: String
   var errorDescription: String? { message }
@@ -1675,6 +1957,14 @@ private struct CloudFavoriteClientRequest: Equatable, Sendable {
   let bdussBytes: Int
   let stokenBytes: Int
   let cookieName: TiebaBDUSSCookieName
+}
+
+private struct LikedForumClientRequest: Equatable, Sendable {
+  let accountUserID: Int64
+  let targetUserID: Int64
+  let page: Int
+  let pageSize: Int
+  let credentialByteCount: Int
 }
 
 private struct ConcernClientRequest: Equatable, Sendable {
@@ -1734,6 +2024,7 @@ private struct ContentAgreementSubpostPageClientRequest: Equatable, Sendable {
 private struct AccountClientSnapshot: Sendable {
   let validationCredentialByteCounts: [Int]
   let validationSessionShapes: [SessionCredentialShape]
+  let likedForumRequests: [LikedForumClientRequest]
   let cloudFavoriteRequests: [CloudFavoriteClientRequest]
   let concernRequests: [ConcernClientRequest]
   let membershipRequests: [AccountClientRequest]
@@ -1764,6 +2055,7 @@ private actor AccountServiceCompletionProbe {
 
 private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   private let validation: TiebaAuthenticatedAccount?
+  private let likedForums: TiebaFollowedForumPage?
   private let cloudFavorites: TiebaCloudFavoritePage?
   private let concern: TiebaConcernPage?
   private let membership: TiebaForumMembership?
@@ -1783,6 +2075,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   private let suspendsAgreementMutation: Bool
   private var validationCredentialByteCounts: [Int] = []
   private var validationSessionShapes: [SessionCredentialShape] = []
+  private var likedForumRequests: [LikedForumClientRequest] = []
   private var cloudFavoriteRequests: [CloudFavoriteClientRequest] = []
   private var concernRequests: [ConcernClientRequest] = []
   private var membershipRequests: [AccountClientRequest] = []
@@ -1806,6 +2099,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
 
   init(
     validation: TiebaAuthenticatedAccount? = nil,
+    likedForums: TiebaFollowedForumPage? = nil,
     cloudFavorites: TiebaCloudFavoritePage? = nil,
     concern: TiebaConcernPage? = nil,
     membership: TiebaForumMembership? = nil,
@@ -1825,6 +2119,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     suspendsAgreementMutation: Bool = false
   ) {
     self.validation = validation
+    self.likedForums = likedForums
     self.cloudFavorites = cloudFavorites
     self.concern = concern
     self.membership = membership
@@ -1913,6 +2208,26 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     pageSize: Int
   ) async throws -> TiebaFollowedForumPage {
     throw AccountClientSpyError.unexpectedCall
+  }
+
+  func getLikedForums(
+    credential: TiebaBDUSSCredential,
+    accountUserID: Int64,
+    targetUserID: Int64,
+    page: Int,
+    pageSize: Int
+  ) async throws -> TiebaFollowedForumPage {
+    likedForumRequests.append(
+      LikedForumClientRequest(
+        accountUserID: accountUserID,
+        targetUserID: targetUserID,
+        page: page,
+        pageSize: pageSize,
+        credentialByteCount: credential.bduss.utf8.count
+      )
+    )
+    guard let likedForums else { throw AccountClientSpyError.unexpectedCall }
+    return likedForums
   }
 
   func getForumMembership(
@@ -2196,6 +2511,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     AccountClientSnapshot(
       validationCredentialByteCounts: validationCredentialByteCounts,
       validationSessionShapes: validationSessionShapes,
+      likedForumRequests: likedForumRequests,
       cloudFavoriteRequests: cloudFavoriteRequests,
       concernRequests: concernRequests,
       membershipRequests: membershipRequests,

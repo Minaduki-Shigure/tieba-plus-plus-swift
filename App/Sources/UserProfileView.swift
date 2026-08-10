@@ -23,6 +23,49 @@ struct UserProfilePortraitPresentation: Identifiable, Equatable, Sendable {
   }
 }
 
+struct UserLikedForumsPreviewPresentation: Equatable, Sendable {
+  let reportedCount: Int
+  let totalCount: Int
+  let previewCount: Int
+  let offersFullList: Bool
+
+  init(
+    reportedCount: Int,
+    previewCount: Int,
+    offersFullList: Bool
+  ) {
+    self.reportedCount = max(reportedCount, 0)
+    self.previewCount = max(previewCount, 0)
+    totalCount = max(self.reportedCount, self.previewCount)
+    self.offersFullList = offersFullList
+  }
+
+  var showsSection: Bool {
+    totalCount > 0 || offersFullList
+  }
+
+  var title: String {
+    hasReliableReportedCount ? "喜欢的吧 \(reportedCount.formatted())" : "喜欢的吧"
+  }
+
+  var footer: String {
+    if totalCount == 0 {
+      return "公开资料未提供喜欢贴吧计数或可浏览预览；可通过完整列表继续读取。"
+    }
+    guard hasReliableReportedCount else {
+      return "公开资料提供了 \(previewCount.formatted()) 个预览，但未提供可靠的完整数量。"
+    }
+    if previewCount == 0 {
+      return "公开资料计数为 \(reportedCount.formatted()) 个吧，但未提供可浏览的预览。"
+    }
+    return "公开资料提供了 \(previewCount.formatted()) 个预览；资料计数为 \(reportedCount.formatted()) 个吧。"
+  }
+
+  private var hasReliableReportedCount: Bool {
+    reportedCount > 0 && reportedCount >= previewCount
+  }
+}
+
 private enum UserProfileActivity: String, CaseIterable, Hashable, Identifiable, Sendable {
   case threads
   case replies
@@ -38,6 +81,7 @@ private enum UserProfileActivity: String, CaseIterable, Hashable, Identifiable, 
 }
 
 struct UserProfileView: View {
+  @Environment(\.accountAccess) private var accountAccess
   @Environment(\.contentFilterRepository) private var contentFilterRepository
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
   let service:
@@ -416,8 +460,12 @@ struct UserProfileView: View {
 
   @ViewBuilder
   private func likedForumPreview(_ profile: BrowseUserProfile) -> some View {
-    let totalCount = max(profile.followedForumCount, profile.likedForums.count)
-    if totalCount > 0 {
+    let presentation = UserLikedForumsPreviewPresentation(
+      reportedCount: profile.followedForumCount,
+      previewCount: profile.likedForums.count,
+      offersFullList: accountAccess != nil
+    )
+    if presentation.showsSection {
       Section {
         if profile.likedForums.isEmpty {
           Label("公开资料未提供贴吧预览", systemImage: "eye.slash")
@@ -438,16 +486,25 @@ struct UserProfileView: View {
             }
           }
         }
-      } header: {
-        Text("喜欢的吧 \(totalCount.formatted())")
-      } footer: {
-        if profile.likedForums.isEmpty {
-          Text("该用户共喜欢 \(totalCount.formatted()) 个吧，公开资料未提供可浏览的预览。")
-        } else {
-          Text(
-            "公开资料提供了 \(profile.likedForums.count.formatted()) 个预览；该用户共喜欢 \(totalCount.formatted()) 个吧。"
-          )
+
+        if let accountAccess {
+          NavigationLink {
+            UserLikedForumsView(
+              targetUserID: profile.id,
+              accountAccess: accountAccess,
+              browseService: service,
+              historyRepository: historyRepository,
+              favoritesRepository: favoritesRepository,
+              searchHistoryRepository: searchHistoryRepository
+            )
+          } label: {
+            Label("查看完整列表", systemImage: "list.bullet")
+          }
         }
+      } header: {
+        Text(presentation.title)
+      } footer: {
+        Text(presentation.footer)
       }
     }
   }

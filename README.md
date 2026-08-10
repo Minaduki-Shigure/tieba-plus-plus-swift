@@ -17,7 +17,7 @@ checks.
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, media preferences, and reply-entry visibility |
-| Accounts | Current `main` supports bound Web login, switching, logout, followed forums, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, and experimental content approval |
+| Accounts | Current `main` supports bound Web login, switching, logout, followed forums, login-gated complete liked-forum lists for the current or another user, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, and experimental content approval |
 | Server-side writes | Guarded forum follow/unfollow, check-in, content approval, thread-detail and verified list-level cloud-favorite changes, and plain-text topic/floor/nested replies are in device validation; other writes stay disabled |
 | TiebaLite parity | Anonymous reading and media: about 90–95%; full product scope: about 69–73% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.59.0-alpha.1` (build 62); later `main` features require a tagged release |
@@ -35,7 +35,11 @@ checks.
   rejects stale pages after logout, account switching, or credential rotation.
   Both feeds preserve local filtering and media preferences. Public profiles
   also expose separate reply history plus read-only following and follower lists;
-  the account page links the active UID to that same credential-free public view.
+  their bounded public liked-forum preview now links to an independently paginated,
+  login-gated complete list for either the current or another user. That list is
+  bound to the active account session and target UID and never enters the global
+  current-account followed-forum index. The account page links the active UID to
+  that same credential-free public profile.
   A logged-in home page also shows at most six forums from the current account's
   followed-forum list and links to the complete paginated list. Both surfaces
   share one app-scoped, memory-only snapshot that is discarded when the account
@@ -72,8 +76,9 @@ checks.
   simulator build, validates the app source, and verifies its public IPA hash.
   Authenticated flows never use real credentials in CI. Login binding, cloud
   favorite reads and mutations, including verified list deletion, followed-forum recommendation filtering,
-  concern-feed, inbox summary, inbox navigation and reply-action rebinding, and
-  plain-text reply contracts are covered by fixtures, while successful private
+  target-bound liked-forum pagination, concern-feed, inbox summary, inbox
+  navigation and reply-action rebinding, and plain-text reply contracts are
+  covered by fixtures, while successful private
   reads, forum
   follow/unfollow, check-in, cloud-favorite changes, topic/post/subpost content
   approval, and real reply creation remain physical-device validation features
@@ -107,10 +112,11 @@ checks.
   bounded channel menus with independent cursors.
 - **Public information:** Forum introductions, statistics, rules, moderator
   teams, and credential-free user profiles are available. Profiles include
-  independently paginated public topics, replies, following, and followers;
-  public liked-forum data is presented only as a bounded preview. Relationship
-  lists are read-only public endpoint snapshots, not proof of the active
-  account's relationship with any listed user.
+  independently paginated public topics, replies, following, and followers.
+  Public liked-forum data remains a bounded preview; a separate complete list is
+  available only through an active account session and still performs no write.
+  Relationship lists are read-only public endpoint snapshots, not proof of the
+  active account's relationship with any listed user.
 
 ### Threads and media
 
@@ -203,6 +209,15 @@ checks.
   the same credential-free public profile used elsewhere, including public
   topics, replies, following, and followers. This is a navigation shortcut, not
   private account history, and it adds no authenticated profile request.
+- **User liked forums:** A public profile keeps its bounded credential-free
+  preview and offers a separate complete list for the current or another user
+  when account access is available. The request is read only and paginated; each
+  page is bound to the active account UID, session revision, target UID, and page
+  number before and after transport. Its memory-only state is independent from
+  the global current-account followed-forum snapshot, so viewing another user
+  cannot affect home shortcuts or recommendation filtering. Successful self and
+  other-user retrieval, privacy-empty results, expired credentials, and account
+  switching still require physical-device validation.
 - **Content approval state:** The canonical first floor, ordinary floors, and
   parent and child rows on a full nested-reply page independently read the active
   account's approval state and expose confirmed approve/cancel actions. Anonymous
@@ -296,7 +311,7 @@ checks.
   unavailable until their request contracts and recovery paths have been
   validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
-  comparison, auditable weighting, protocol constraints, and next milestones.
+  comparison, weighted estimate, protocol constraints, and next milestones.
   The current `main` audit totals 69–73 of 100 weighted points; its anonymous
   reading and media subtotal is about 90–95%. The largest remaining gaps are
   new-thread and rich-media creation, background unread handling, broader

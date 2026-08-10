@@ -363,8 +363,31 @@ Anonymous public-profile requests must use the protocol's guest target fields.
 They must not place the target user in the current-account field, attach account
 credentials, or attempt to bypass profile privacy settings.
 Liked forums embedded in that public response are a bounded preview only. The
-app must not call the login-required full-list endpoint, infer hidden entries,
-or describe an empty or partial preview as the user's complete forum list.
+app must not infer hidden entries or describe an empty or partial preview as the
+user's complete forum list.
+
+The separate complete liked-forum list is an authenticated, read-only
+`POST https://tiebac.baidu.com/c/f/forum/like` request. Before signing, a self
+request contains exactly BDUSS, `_client_version`, one-based `page_no`, bounded
+`page_size`, and the active account `uid`; the final form adds only `sign`. An
+other-user request adds exactly the positive target `friend_uid` and
+`is_guest=1`, while `uid` must remain the active account. Neither form may add
+STOKEN, Cookie, Authorization, CUID, IMEI, Android ID, model, screen, network, or
+another device or account field. Responses are limited to 2 MiB. When present,
+`has_more` must be binary; an omitted flag uses the endpoint schema's final-page
+default. Known forum groups remain bounded and rows require valid positive
+identities.
+
+Core's account and target IDs on a returned page are request context carried by
+the client, not server proof of identity. The App must bind every page to the
+active account UID, `sessionRevision`, target UID, and requested page, read the
+vault before and after transport, and discard results after logout, account
+switching, or credential rotation. This list remains memory only, initiates no
+write, and must never populate or mutate the global current-account followed-
+forum index used by home and recommendation filtering. Missing login state sends
+no request. Physical-device validation must cover self and other-user pages,
+pagination termination, empty/privacy responses, expired credentials, account
+switching, and absence of follow, check-in, or other side effects.
 
 Public following and follower lists are independent credential-free form reads.
 Following must use `POST https://tiebac.baidu.com/c/u/follow/followList`, and
