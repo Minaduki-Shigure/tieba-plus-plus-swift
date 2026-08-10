@@ -204,6 +204,7 @@ final class RemoteImageDiskCacheTests: XCTestCase {
     let metadataURL = entryURL.appendingPathComponent("metadata.json")
     let payloadURL = entryURL.appendingPathComponent("payload")
     let storedMetadata = try readTimestampMetadata(at: metadataURL)
+    let storedMetadataByteCount = try Data(contentsOf: metadataURL).count
     let usageBeforeRollback = await cache.usage()
 
     XCTAssertTrue(FileManager.default.fileExists(atPath: metadataURL.path))
@@ -240,9 +241,11 @@ final class RemoteImageDiskCacheTests: XCTestCase {
     let rollbackHit = try XCTUnwrap(optionalRollbackHit)
     let rollbackUsage = await cache.usage()
     let rewrittenMetadata = try readTimestampMetadata(at: metadataURL)
+    let rewrittenMetadataByteCount = try Data(contentsOf: metadataURL).count
 
     XCTAssertEqual(try Data(contentsOf: rollbackHit.fileURL), data)
     XCTAssertEqual(rollbackUsage.entryCount, 1)
+    XCTAssertLessThan(rewrittenMetadataByteCount, storedMetadataByteCount)
     XCTAssertEqual(
       rewrittenMetadata.storedAt.timeIntervalSince1970,
       expectedTimestamps.storedAt.timeIntervalSince1970,

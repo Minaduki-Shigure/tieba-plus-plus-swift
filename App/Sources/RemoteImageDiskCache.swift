@@ -574,7 +574,13 @@ actor RemoteImageDiskCache: RemoteImagePersistentCacheProviding {
     guard let data = Self.encodeMetadata(metadata) else { return false }
     do {
       try data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
-      return measuredRegularFileSize(at: url) == Int64(data.count)
+      // Atomic writes replace the inode, so URL resource values can still describe
+      // the old file. Reopen the path and verify the replacement bytes directly.
+      return Self.boundedRegularFileData(
+        at: url,
+        expectedByteCount: Int64(data.count),
+        maximumByteCount: Self.maximumMetadataByteCount
+      ) == data
     } catch {
       return false
     }
