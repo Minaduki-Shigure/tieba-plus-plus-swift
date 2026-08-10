@@ -19,15 +19,15 @@ versioned separately and currently serves `v0.59.0-alpha.1` (build 62).
 | --- | ---: | ---: | --- |
 | Anonymous discovery, search, and forums | 20 | 18–19 | Core browsing, ranking, recommendations, categories, and search are implemented; feedback and a few niche discovery paths remain |
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
-| Media rendering, playback, and export | 15 | 13–14 | Images, galleries, video, voice, sharing, saving, and media policy are implemented; broader format and cache parity remain |
+| Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, and media policy are implemented; persistent cache parity remains |
 | Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, media preferences, and local reply-entry visibility are implemented; TiebaLite's wider settings and customization surface remains |
 | Account, session, and private read flows | 15 | 9 | Login, switching, followed and target-user liked forums, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 5–6 | Follow/unfollow, check-in, approval, verified list/thread-detail cloud-favorite mutations, and three plain-text reply targets have guarded implementations; real reply success, new topics, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
-| **Total** | **100** | **69–73** | Current full-product estimate |
+| **Total** | **100** | **70–73** | Current full-product estimate |
 
-The first three rows form the anonymous reading-and-media subtotal: 49–52 of 55
-points, or roughly 90–95%. Concern and the foreground unread summary raise the
+The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
+points, or roughly 91–95%. Concern and the foreground unread summary raise the
 private-read area but receive only partial credit until their minimum request
 fields, empty/expired envelopes, cursor replay where applicable, and possible
 seen-state effects are validated on a disposable account.
@@ -105,6 +105,11 @@ the source metadata is updated to that tested IPA.
 - Responsive one-to-three-column masonry for consecutive post-body image runs
 - Persistent automatic, data-saving, or tap-to-load policy for content media
 - Persistent standard or high-definition quality selection for supported image previews
+- Independent server dynamic-image URL preservation plus ImageIO-confirmed
+  multi-frame GIF, WebP, and HEIC/HEIF-sequence playback in previews and the
+  gallery, with single-frame fallback, a 500-frame metadata limit, a 16 MiB
+  per-frame bound and a shared frame cache capped at 64 MiB and 1,000 entries,
+  view-disappearance/background/Reduce Motion pausing, and one active gallery page
 - Explicit eviction of the process-local decoded-image memory cache
 - Optional compact media summaries for thread lists and per-forum search, with no collapsed preview request
 - Default-on dark-appearance dimming for successfully rendered static content thumbnails
@@ -183,34 +188,39 @@ the source metadata is updated to that tested IPA.
 
 ## Next milestones
 
-1. Real-device validation of the complete liked-forum list for the current and
+1. Real-device validation of multi-frame GIF, WebP, and HEIC/HEIF sequences in
+   post bodies, list previews, and the zoom gallery on iOS 16 and iOS 18.7.2,
+   including single-frame containers, Reduce Motion, backgrounding, rapid and
+   cancelled paging, memory pressure, save/share byte preservation, and static
+   fallback at the frame and decoded-memory limits
+2. Real-device validation of the complete liked-forum list for the current and
    another public user, including page-one/page-two termination, privacy-empty
    results, expired credentials, same-UID credential rotation, account switching,
    and confirmation that reading performs no follow, check-in, or other write
-2. Real-device validation of full-session binding and the minimal HTTPS cloud
+3. Real-device validation of full-session binding and the minimal HTTPS cloud
    favorites list, including valid, random, cross-account, and expired STOKEN
    cases and whether reading the list has any server-side side effect
-3. Real-device validation of canonical-topic, ordinary-floor, and full
+4. Real-device validation of canonical-topic, ordinary-floor, and full
    nested-reply approval/cancellation, plus single-forum check-in success,
    idempotent, server-error, uncertain-failure, and read-only reconciliation
    paths, followed by account switching and follow recovery checks
-4. Real-device validation of the minimal HTTPS ReplyMe, AtMe, and `/c/s/msg`
+5. Real-device validation of the minimal HTTPS ReplyMe, AtMe, and `/c/s/msg`
    summary requests, including the summary field-deletion matrix, count parity,
    and whether either summary or list retrieval changes server unread state,
    plus ordinary post and child-reply action relocation, unavailable targets,
    and account switching before composer presentation
-5. Real-device validation of the account-bound concern request, including the
+6. Real-device validation of the account-bound concern request, including the
    signed-field deletion matrix, empty-account and expired-session envelopes,
    cursor replay, and whether list retrieval changes recommendation state
-6. Real-device validation of explicit cloud-favorite list/detail removal, add,
+7. Real-device validation of explicit cloud-favorite list/detail removal, add,
    and saved-floor updates, including unresolvable deleted rows, STOKEN rejection,
    idempotence, uncertain-write readback, concurrency, session rotation, and
    account switching
-7. Disposable-account validation of all three plain-text reply targets,
+8. Disposable-account validation of all three plain-text reply targets,
    including minimum-field deletion, missing/random/expired/cross-account
    STOKEN and TBS, challenge and permission failures, post-dispatch loss,
    exact-PID visibility, account rotation, and duplicate-send prevention
-8. Broader settings parity, remaining account activity, new-topic and rich-media
+9. Broader settings parity, remaining account activity, new-topic and rich-media
    creation, and moderation tools
 
 The foreground inbox deliberately does not copy TiebaLite's cleartext JSON
@@ -669,15 +679,30 @@ load control. An explicit tap remains unrestricted and stays authorized across
 later path changes. Avatars, galleries, media playback, export, page data, and
 all nonmedia requests remain outside this policy.
 An independent preview-quality setting retains the separately normalized
-standard, high-definition, and original candidates already carried by the
-anonymous response. Standard remains the default and preserves the prior URL
-choice. The opt-in high-definition mode selects that candidate when available
-and otherwise falls back to the standard candidate. It applies dynamically to
-post bodies, thread cards, and per-forum search without changing whether a
+standard, high-definition, dynamic, and original candidates already carried by
+the anonymous response. Standard remains the default and preserves the prior URL
+choice. The opt-in high-definition mode selects that candidate when available,
+then the dynamic candidate, and otherwise falls back to the standard candidate.
+It applies dynamically to post bodies, thread cards, and per-forum search
+without changing whether a
 request is automatic, economical, or user initiated. Gallery, sharing, and
-saving always retain the original-then-high-definition-then-standard chain and
-do not consult the preview preference. Avatars, video covers, and single-source
-hot-topic images are also unchanged.
+saving retain the original-then-dynamic-then-high-definition-then-standard
+chain and do not consult the preview preference. Avatars, video covers, and
+single-source hot-topic images are also unchanged.
+
+Downloaded bytes, rather than a URL suffix, MIME label, or `dynamic` field,
+decide whether an image animates. A real multi-frame GIF, WebP, or HEIC/HEIF
+sequence is downsampled frame by frame off the main actor. The decoder accepts
+at most 500 frame metadata entries, limits each decoded frame to 16 MiB, and
+  shares a generation-aware frame cache capped at 64 MiB and 1,000 entries across
+  the app. It keeps only the poster and current frame strongly; unsupported,
+  malformed, single-frame, or
+over-budget inputs render a normal poster instead of failing the image. Per-frame
+timing is preserved with a 100 ms fallback for invalid or pathologically short
+delays. Animation does not create a new request identity or bypass the existing
+  network policy. Views removed from presentation, inactive scenes, Reduce
+  Motion, and inactive gallery neighbors stop playback; only the visible gallery
+  page can own its player.
 An independent persistent compact mode replaces those thread-list previews and
 per-forum search image strips with noninteractive media summaries. Its collapsed
 presentation retains only a media type or full image count and never constructs
@@ -686,7 +711,7 @@ bodies, hot-topic images, avatars, gallery/export paths, playback, page data, or
 the separate automatic, data-saving, or tap-to-load policy used when previews
 are expanded.
 A separate default-on dark-appearance control applies a 0.4 color multiplier
-only to successfully rendered static content images in thread cards, post
+only to successfully rendered content images in thread cards, post
 bodies, per-forum search, and hot topics. Video covers, avatars, galleries,
 placeholders, and compact summaries remain unchanged. The control is a pure
 rendering decision and does not enter URL normalization, fetch policy, reload
@@ -711,7 +736,10 @@ files. Clearing increments a cache generation and evicts `NSCache` entries
 without cancelling active transfers or blanking displayed images. A waiter that
 started before the clear can still receive its image but cannot repopulate the
 old generation; a waiter that starts afterward may share that same transfer and
-cache the result for the new generation.
+cache the result for the new generation. An animated asset retains only its
+poster, metadata, and temporary source lease in that asset cache. Later frames
+  use a separate process-wide cache capped at 64 MiB and 1,000 entries, costed by
+  `bytesPerRow * height`; the same explicit clear advances both cache generations.
 
 The global forum-sort preference applies when a forum has no remembered choice;
 changing a forum's picker stores a normalized, bounded per-forum override.

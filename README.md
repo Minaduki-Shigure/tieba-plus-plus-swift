@@ -19,7 +19,7 @@ checks.
 | Local features | Available for history, favorites, filtering, appearance, media preferences, and reply-entry visibility |
 | Accounts | Current `main` supports bound Web login, switching, logout, followed forums, login-gated complete liked-forum lists for the current or another user, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, and experimental content approval |
 | Server-side writes | Guarded forum follow/unfollow, check-in, content approval, thread-detail and verified list-level cloud-favorite changes, and plain-text topic/floor/nested replies are in device validation; other writes stay disabled |
-| TiebaLite parity | Anonymous reading and media: about 90–95%; full product scope: about 69–73% |
+| TiebaLite parity | Anonymous reading and media: about 91–95%; full product scope: about 70–73% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.59.0-alpha.1` (build 62); later `main` features require a tagged release |
 
 ### Release and validation
@@ -49,7 +49,13 @@ checks.
   recommendation request receives no account, credential, lease, or forum ID.
   Multi-image galleries can switch between horizontal and vertical one-image
   paging while retaining a stable selected occurrence and bounded zoom state. A
-  logged-in thread can also read its account-bound Tieba cloud-favorite state and,
+  server-provided dynamic-image candidate now remains separate from static and
+  original sources. ImageIO-confirmed multi-frame GIF, WebP, and HEIC/HEIF
+  sequences use bounded frame decoding in previews and the gallery; single-frame,
+  unsupported, oversized, or malformed sequences remain readable as static
+  posters. Only the current gallery page animates, and playback stops while the
+  scene or view is inactive or Reduce Motion is enabled.
+  A logged-in thread can also read its account-bound Tieba cloud-favorite state and,
   after explicit confirmation, add it at the last visible floor, update the saved
   floor, or remove it. Every mutation is followed by a read-only reconciliation;
   an uncertain write is never retried. The cloud-favorites list can also remove
@@ -147,6 +153,14 @@ checks.
   occurrence; ambiguous initial matches are never guessed. Ordinary unfiltered
   threads can expand the gallery across floors; originals can be explicitly
   shared or saved through add-only Photos access.
+  Server dynamic-image URLs are retained as independent fallbacks rather than
+  animation flags. The downloaded file must identify as a real multi-frame GIF,
+  WebP, or HEIC/HEIF sequence before it animates. Metadata is capped at 500 frames;
+  frames downscale to a 16 MiB decoded bound and enter one shared cache capped
+  at 64 MiB and 1,000 entries.
+  Unsupported or over-limit data falls back to a poster. Animated thumbnails pause
+  after their SwiftUI surface leaves presentation or the scene becomes inactive;
+  gallery neighbors and Reduce Motion always show the poster.
 - **Playback:** Voice and native AVKit video share one application-wide playback
   coordinator. Starting new media pauses the prior item, inactive scenes pause
   playback, and playback never resumes implicitly. Voice files can be explicitly
@@ -176,8 +190,9 @@ checks.
   read-only navigation, agreement controls, existing drafts, or an already-open
   composer.
 - **Media policy:** Automatic, data-saving, or tap-to-load behavior and standard
-  or high-definition preview selection apply to content media. The decoded-image
-  cache is memory-only and can be explicitly evicted.
+  or high-definition preview selection apply to content media. Animation uses
+  the same URL authorization and transfer limits as static images. The decoded-
+  image and animation-frame cache is memory-only and can be explicitly evicted.
 
 ### Accounts and boundaries
 
@@ -312,8 +327,8 @@ checks.
   validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, weighted estimate, protocol constraints, and next milestones.
-  The current `main` audit totals 69–73 of 100 weighted points; its anonymous
-  reading and media subtotal is about 90–95%. The largest remaining gaps are
+  The current `main` audit totals 70–73 of 100 weighted points; its anonymous
+  reading and media subtotal is about 91–95%. The largest remaining gaps are
   new-thread and rich-media creation, background unread handling, broader
   settings, unresolvable cloud-favorite rows, and moderation.
 

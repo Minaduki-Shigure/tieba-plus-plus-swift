@@ -1261,7 +1261,8 @@ enum TiebaProtoMapper {
       originalURL: remoteURL(proto.originSrc),
       width: dimensions.first ?? Int(proto.width),
       height: dimensions.count > 1 ? dimensions[1] : Int(proto.height),
-      originalByteCount: Int(proto.originSize)
+      originalByteCount: Int(proto.originSize),
+      dynamicURL: remoteURL(proto.dynamic)
     )
   }
 
@@ -1273,7 +1274,8 @@ enum TiebaProtoMapper {
         originalURL: remoteURL(proto.bigPic.isEmpty ? proto.originPic : proto.bigPic),
         width: Int(proto.width),
         height: Int(proto.height),
-        originalByteCount: Int(proto.originSize)
+        originalByteCount: Int(proto.originSize),
+        dynamicURL: remoteURL(proto.dynamicPic)
       )
     )
   }

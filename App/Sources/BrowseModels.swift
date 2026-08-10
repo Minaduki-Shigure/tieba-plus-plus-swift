@@ -1393,6 +1393,7 @@ enum BrowseContent: Hashable, Sendable {
     thumbnail: URL,
     fullSize: URL?,
     original: URL?,
+    dynamic: URL? = nil,
     width: Int,
     height: Int
   )
@@ -1406,21 +1407,23 @@ enum BrowseContentImageSourceResolver {
   static func previewURL(
     thumbnail: URL,
     fullSize: URL?,
+    dynamic: URL? = nil,
     quality: ContentImagePreviewQuality
   ) -> URL {
     switch quality {
     case .standard:
       thumbnail
     case .highDefinition:
-      fullSize ?? thumbnail
+      fullSize ?? dynamic ?? thumbnail
     }
   }
 
   static func galleryURL(
     thumbnail: URL,
     fullSize: URL?,
-    original: URL?
+    original: URL?,
+    dynamic: URL? = nil
   ) -> URL {
-    original ?? fullSize ?? thumbnail
+    original ?? dynamic ?? fullSize ?? thumbnail
   }
 }

@@ -155,6 +155,7 @@ public struct TiebaImage: Sendable, Hashable {
   public let thumbnailURL: URL?
   public let fullSizeURL: URL?
   public let originalURL: URL?
+  public let dynamicURL: URL?
   public let width: Int
   public let height: Int
   public let originalByteCount: Int
@@ -165,11 +166,13 @@ public struct TiebaImage: Sendable, Hashable {
     originalURL: URL?,
     width: Int,
     height: Int,
-    originalByteCount: Int
+    originalByteCount: Int,
+    dynamicURL: URL? = nil
   ) {
     self.thumbnailURL = thumbnailURL
     self.fullSizeURL = fullSizeURL
     self.originalURL = originalURL
+    self.dynamicURL = dynamicURL
     self.width = width
     self.height = height
     self.originalByteCount = originalByteCount

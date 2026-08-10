@@ -316,6 +316,139 @@ enum ImageGalleryInteractiveTransitionPolicy {
   }
 }
 
+struct ImageGalleryAnimationPlaybackOwnership: Equatable, Sendable {
+  enum Transition: Equatable, Sendable {
+    case idle
+    case interactive(startingOwnerID: ImageGalleryItem.ID?)
+    case programmatic(
+      startingOwnerID: ImageGalleryItem.ID?,
+      targetID: ImageGalleryItem.ID
+    )
+  }
+
+  private(set) var ownerID: ImageGalleryItem.ID?
+  private(set) var transition = Transition.idle
+
+  var enabledIDs: Set<ImageGalleryItem.ID> {
+    guard let ownerID else { return [] }
+    return [ownerID]
+  }
+
+  mutating func reconcileVisible(
+    _ visibleID: ImageGalleryItem.ID?,
+    validIDs: Set<ImageGalleryItem.ID>
+  ) {
+    guard transition == .idle else {
+      retainOnly(validIDs)
+      return
+    }
+    ownerID = validated(visibleID, validIDs: validIDs)
+  }
+
+  mutating func beginInteractive(
+    visibleID: ImageGalleryItem.ID?,
+    validIDs: Set<ImageGalleryItem.ID>
+  ) {
+    let startingOwnerID = validated(ownerID, validIDs: validIDs)
+      ?? validated(visibleID, validIDs: validIDs)
+    ownerID = startingOwnerID
+    transition = .interactive(startingOwnerID: startingOwnerID)
+  }
+
+  mutating func finishInteractive(
+    completed: Bool,
+    visibleID: ImageGalleryItem.ID?,
+    validIDs: Set<ImageGalleryItem.ID>
+  ) {
+    let startingOwnerID: ImageGalleryItem.ID?
+    if case .interactive(let ownerID) = transition {
+      startingOwnerID = ownerID
+    } else {
+      startingOwnerID = self.ownerID
+    }
+    transition = .idle
+    ownerID = validated(
+      completed ? visibleID : startingOwnerID,
+      validIDs: validIDs
+    )
+  }
+
+  mutating func beginProgrammatic(
+    targetID: ImageGalleryItem.ID,
+    visibleID: ImageGalleryItem.ID?,
+    validIDs: Set<ImageGalleryItem.ID>
+  ) {
+    let startingOwnerID = validated(ownerID, validIDs: validIDs)
+      ?? validated(visibleID, validIDs: validIDs)
+    ownerID = startingOwnerID
+    transition = .programmatic(
+      startingOwnerID: startingOwnerID,
+      targetID: targetID
+    )
+  }
+
+  mutating func finishProgrammatic(
+    completed: Bool,
+    visibleID: ImageGalleryItem.ID?,
+    validIDs: Set<ImageGalleryItem.ID>
+  ) {
+    let startingOwnerID: ImageGalleryItem.ID?
+    let targetID: ImageGalleryItem.ID?
+    if case .programmatic(let startingID, let destinationID) = transition {
+      startingOwnerID = startingID
+      targetID = destinationID
+    } else {
+      startingOwnerID = ownerID
+      targetID = nil
+    }
+    transition = .idle
+    let candidateID = completed
+      ? (visibleID ?? targetID)
+      : (visibleID ?? startingOwnerID)
+    ownerID = validated(candidateID, validIDs: validIDs)
+  }
+
+  mutating func migrate(
+    _ migration: ImageGalleryItemIDMigration,
+    validIDs: Set<ImageGalleryItem.ID>
+  ) {
+    func mapped(_ id: ImageGalleryItem.ID?) -> ImageGalleryItem.ID? {
+      id.map { migration.destination(for: $0) }
+    }
+
+    ownerID = mapped(ownerID)
+    switch transition {
+    case .idle:
+      break
+    case .interactive(let startingOwnerID):
+      transition = .interactive(startingOwnerID: mapped(startingOwnerID))
+    case .programmatic(let startingOwnerID, let targetID):
+      transition = .programmatic(
+        startingOwnerID: mapped(startingOwnerID),
+        targetID: migration.destination(for: targetID)
+      )
+    }
+    retainOnly(validIDs)
+  }
+
+  mutating func retainOnly(_ validIDs: Set<ImageGalleryItem.ID>) {
+    ownerID = validated(ownerID, validIDs: validIDs)
+  }
+
+  mutating func detach() {
+    ownerID = nil
+    transition = .idle
+  }
+
+  private func validated(
+    _ id: ImageGalleryItem.ID?,
+    validIDs: Set<ImageGalleryItem.ID>
+  ) -> ImageGalleryItem.ID? {
+    guard let id, validIDs.contains(id) else { return nil }
+    return id
+  }
+}
+
 enum ImageViewerControlPolicy {
   static func showsPagingControls(itemCount: Int, totalCount: Int?) -> Bool {
     max(max(itemCount, 0), max(totalCount ?? 0, 0)) > 1
@@ -498,10 +631,21 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
     private var interactiveStartingSelection: ImageGalleryItem.ID?
     private var programmaticTransitionToken = 0
     private var programmaticTargetID: ImageGalleryItem.ID?
+    private var animationPlaybackOwnership = ImageGalleryAnimationPlaybackOwnership()
     private var accessibilityAnnouncementID: ImageGalleryItem.ID?
     private var accessibilityPageDescriptions = [ImageGalleryItem.ID: String]()
     private var zoomStateStore: ImageGalleryZoomStateStore?
     private var onSelectionChange: (ImageGalleryItem.ID?) -> Void = { _ in }
+
+    var animationPlaybackOwnerID: ImageGalleryItem.ID? {
+      animationPlaybackOwnership.ownerID
+    }
+
+    var animationPlaybackEnabledControllerIDs: Set<ImageGalleryItem.ID> {
+      Set(controllers.compactMap { id, controller in
+        controller.animationPlaybackEnabled ? id : nil
+      })
+    }
 
     override init() {
       super.init()
@@ -529,6 +673,7 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
         self?.handleAccessibilityScroll(direction) ?? false
       }
       configurePagingGesture()
+      reconcileAnimationPlaybackWithVisibleController()
     }
 
     func detach() {
@@ -544,6 +689,8 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       accessibilityAnnouncementID = nil
       accessibilityPageDescriptions.removeAll()
       snapshot = ImageGalleryPagerSnapshot(items: [], requestedSelection: nil)
+      animationPlaybackOwnership.detach()
+      synchronizeAnimationPlaybackControllers()
       controllers.removeAll()
       transitioningIDs.removeAll()
       zoomStateStore = nil
@@ -589,6 +736,11 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       isInteractiveTransition = true
       interactiveStartingSelection = snapshot.requestedSelection
       transitioningIDs = Set(pendingViewControllers.compactMap(controllerID))
+      animationPlaybackOwnership.beginInteractive(
+        visibleID: currentVisibleID,
+        validIDs: Set(snapshot.itemIDs)
+      )
+      synchronizeAnimationPlaybackControllers()
     }
 
     func pageViewController(
@@ -603,6 +755,11 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       interactiveStartingSelection = nil
       transitioningIDs.removeAll()
       let visibleID = currentVisibleID
+      animationPlaybackOwnership.finishInteractive(
+        completed: completed,
+        visibleID: visibleID,
+        validIDs: Set(snapshot.itemIDs)
+      )
       let resolution = ImageGalleryInteractiveTransitionPolicy.resolve(
         completed: completed,
         pendingUpdate: pendingUpdate,
@@ -630,6 +787,7 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
         onSelectionChange(selectionToPublish)
       }
       configurePagingGesture()
+      synchronizeAnimationPlaybackControllers()
       pruneControllers(around: currentVisibleID)
     }
 
@@ -659,6 +817,11 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
           direction: .forward,
           animated: false
         )
+        animationPlaybackOwnership.reconcileVisible(
+          nil,
+          validIDs: Set(snapshot.itemIDs)
+        )
+        synchronizeAnimationPlaybackControllers()
         configurePagingGesture()
         pruneControllers(around: nil)
         return
@@ -672,6 +835,11 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
           pageViewController.dataSource = nil
           pageViewController.dataSource = self
         }
+        animationPlaybackOwnership.reconcileVisible(
+          targetID,
+          validIDs: Set(snapshot.itemIDs)
+        )
+        synchronizeAnimationPlaybackControllers()
         configurePagingGesture()
         pruneControllers(around: targetID)
         return
@@ -684,6 +852,12 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       programmaticTransitionToken &+= 1
       let token = programmaticTransitionToken
       programmaticTargetID = targetID
+      animationPlaybackOwnership.beginProgrammatic(
+        targetID: targetID,
+        visibleID: mappedVisibleID ?? visibleID,
+        validIDs: Set(snapshot.itemIDs)
+      )
+      synchronizeAnimationPlaybackControllers()
       pageViewController.setViewControllers(
         [targetController],
         direction: direction,
@@ -692,12 +866,24 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
         guard let self, token == self.programmaticTransitionToken else { return }
         self.programmaticTargetID = nil
         if completed {
+          self.animationPlaybackOwnership.finishProgrammatic(
+            completed: true,
+            visibleID: self.currentVisibleID,
+            validIDs: Set(self.snapshot.itemIDs)
+          )
+          self.synchronizeAnimationPlaybackControllers()
           self.drainPendingUpdate(
             preferring: self.currentVisibleID,
             onlyWhenRequestedSelectionEquals: targetID
           )
         } else {
           self.recoverFromInterruptedProgrammaticTransition()
+          self.animationPlaybackOwnership.finishProgrammatic(
+            completed: false,
+            visibleID: self.currentVisibleID,
+            validIDs: Set(self.snapshot.itemIDs)
+          )
+          self.synchronizeAnimationPlaybackControllers()
         }
         self.configurePagingGesture()
         if
@@ -789,6 +975,7 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
 
     private func install(_ update: ImageGalleryPagerUpdate) {
       let validIDs = Set(update.snapshot.itemIDs)
+      animationPlaybackOwnership.migrate(update.migration, validIDs: validIDs)
       zoomStateStore?.migrate(
         update.migration,
         destinationWins: Set(controllers.keys)
@@ -821,13 +1008,15 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       if let controller = controllers[id] {
         controller.update(
           item: item,
-          zoomState: zoomStateStore?.state(for: id) ?? .identity
+          zoomState: zoomStateStore?.state(for: id) ?? .identity,
+          animationPlaybackEnabled: controller.animationPlaybackEnabled
         )
         return controller
       }
       let controller = ImageGalleryPageHostingController(
         item: item,
         zoomState: zoomStateStore?.state(for: id) ?? .identity,
+        animationPlaybackEnabled: false,
         onZoomStateChange: { [weak self] itemID, state in
           self?.zoomStateDidChange(itemID: itemID, state: state)
         }
@@ -854,12 +1043,15 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
         }
         controller.update(
           item: item,
-          zoomState: zoomStateStore?.state(for: id) ?? .identity
+          zoomState: zoomStateStore?.state(for: id) ?? .identity,
+          animationPlaybackEnabled: controller.animationPlaybackEnabled
         )
       }
       for id in invalidIDs {
+        controllers[id]?.setAnimationPlaybackEnabled(false, zoomState: .identity)
         controllers[id] = nil
       }
+      synchronizeAnimationPlaybackControllers()
     }
 
     private func pruneControllers(
@@ -870,8 +1062,40 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       if let id { retainedIDs.insert(id) }
       retainedIDs.formUnion(transitioningIDs)
       if let programmaticTargetID { retainedIDs.insert(programmaticTargetID) }
+      if let ownerID = animationPlaybackOwnership.ownerID { retainedIDs.insert(ownerID) }
       if let visibleID = currentVisibleID { retainedIDs.insert(visibleID) }
-      controllers = controllers.filter { retainedIDs.contains($0.key) }
+      let removedIDs = Set(controllers.keys).subtracting(retainedIDs)
+      for id in removedIDs {
+        controllers[id]?.setAnimationPlaybackEnabled(false, zoomState: .identity)
+        controllers[id] = nil
+      }
+      animationPlaybackOwnership.retainOnly(Set(snapshot.itemIDs))
+      synchronizeAnimationPlaybackControllers()
+    }
+
+    private func reconcileAnimationPlaybackWithVisibleController() {
+      animationPlaybackOwnership.reconcileVisible(
+        currentVisibleID,
+        validIDs: Set(snapshot.itemIDs)
+      )
+      synchronizeAnimationPlaybackControllers()
+    }
+
+    private func synchronizeAnimationPlaybackControllers() {
+      let ownerID = animationPlaybackOwnership.ownerID
+      // Stop the previous owner before starting the next one so two players never run together.
+      for (id, controller) in controllers where id != ownerID {
+        controller.setAnimationPlaybackEnabled(
+          false,
+          zoomState: zoomStateStore?.state(for: id) ?? .identity
+        )
+      }
+      if let ownerID, let ownerController = controllers[ownerID] {
+        ownerController.setAnimationPlaybackEnabled(
+          true,
+          zoomState: zoomStateStore?.state(for: ownerID) ?? .identity
+        )
+      }
     }
 
     private func zoomStateDidChange(
@@ -938,21 +1162,25 @@ private final class ImageGalleryPageHostingController: UIHostingController<AnyVi
   let itemID: ImageGalleryItem.ID
 
   private var item: ImageGalleryItem
+  private(set) var animationPlaybackEnabled: Bool
   private let onZoomStateChange: (ImageGalleryItem.ID, ImageGalleryZoomState) -> Void
 
   init(
     item: ImageGalleryItem,
     zoomState: ImageGalleryZoomState,
+    animationPlaybackEnabled: Bool,
     onZoomStateChange: @escaping (ImageGalleryItem.ID, ImageGalleryZoomState) -> Void
   ) {
     itemID = item.id
     self.item = item
+    self.animationPlaybackEnabled = animationPlaybackEnabled
     self.onZoomStateChange = onZoomStateChange
     super.init(
       rootView: AnyView(
         ZoomableRemoteImage(
           item: item,
           initialZoomState: zoomState,
+          animationPlaybackEnabled: animationPlaybackEnabled,
           onZoomStateChange: onZoomStateChange
         )
       )
@@ -965,15 +1193,34 @@ private final class ImageGalleryPageHostingController: UIHostingController<AnyVi
     fatalError("init(coder:) has not been implemented")
   }
 
-  func update(item: ImageGalleryItem, zoomState: ImageGalleryZoomState) {
-    guard self.item != item else { return }
+  func update(
+    item: ImageGalleryItem,
+    zoomState: ImageGalleryZoomState,
+    animationPlaybackEnabled: Bool
+  ) {
+    guard self.item != item || self.animationPlaybackEnabled != animationPlaybackEnabled else {
+      return
+    }
     self.item = item
+    self.animationPlaybackEnabled = animationPlaybackEnabled
     rootView = AnyView(
       ZoomableRemoteImage(
         item: item,
         initialZoomState: zoomState,
+        animationPlaybackEnabled: animationPlaybackEnabled,
         onZoomStateChange: onZoomStateChange
       )
+    )
+  }
+
+  func setAnimationPlaybackEnabled(
+    _ enabled: Bool,
+    zoomState: ImageGalleryZoomState
+  ) {
+    update(
+      item: item,
+      zoomState: zoomState,
+      animationPlaybackEnabled: enabled
     )
   }
 }

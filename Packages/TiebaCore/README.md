@@ -37,7 +37,7 @@ if let channel = threads.channels.first {
 }
 let posts = try await client.getPosts(threadID: threads.threads[0].id)
 if let imageURL = posts.posts.lazy.flatMap({ $0.content.images }).compactMap({
-    $0.originalURL ?? $0.fullSizeURL ?? $0.thumbnailURL
+    $0.originalURL ?? $0.dynamicURL ?? $0.fullSizeURL ?? $0.thumbnailURL
 }).first,
    let cursor = TiebaPicturePageCursor(imageURL: imageURL) {
     let pictures = try await client.getPicturePage(

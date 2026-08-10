@@ -99,12 +99,13 @@ struct BrowseContentView: View {
   @ViewBuilder
   private func standalone(_ content: BrowseContent, contentOffset: Int) -> some View {
     switch content {
-    case .image(let thumbnail, let fullSize, _, let width, let height):
+    case .image(let thumbnail, let fullSize, _, let dynamic, let width, let height):
       browseImage(
         BrowseContentImageItem(
           contentOffset: contentOffset,
           thumbnailURL: thumbnail,
           fullSizeURL: fullSize,
+          dynamicURL: dynamic,
           width: width,
           height: height
         )
@@ -123,6 +124,7 @@ struct BrowseContentView: View {
       thumbnailURL: BrowseContentImageSourceResolver.previewURL(
         thumbnail: image.thumbnailURL,
         fullSize: image.fullSizeURL,
+        dynamic: image.dynamicURL,
         quality: contentImagePreviewQuality
       ),
       width: image.width,
@@ -192,8 +194,25 @@ struct BrowseContentImageItem: Identifiable, Equatable, Sendable {
   let contentOffset: Int
   let thumbnailURL: URL
   let fullSizeURL: URL?
+  let dynamicURL: URL?
   let width: Int
   let height: Int
+
+  init(
+    contentOffset: Int,
+    thumbnailURL: URL,
+    fullSizeURL: URL?,
+    dynamicURL: URL? = nil,
+    width: Int,
+    height: Int
+  ) {
+    self.contentOffset = contentOffset
+    self.thumbnailURL = thumbnailURL
+    self.fullSizeURL = fullSizeURL
+    self.dynamicURL = dynamicURL
+    self.width = width
+    self.height = height
+  }
 
   var id: Int { contentOffset }
 
@@ -251,13 +270,14 @@ enum BrowseContentBlock: Identifiable, Equatable, Sendable {
           inlineStartOffset = offset
         }
         inline.append(content)
-      case .image(let thumbnail, let fullSize, _, let width, let height):
+      case .image(let thumbnail, let fullSize, _, let dynamic, let width, let height):
         flushInline()
         images.append(
           BrowseContentImageItem(
             contentOffset: offset,
             thumbnailURL: thumbnail,
             fullSizeURL: fullSize,
+            dynamicURL: dynamic,
             width: width,
             height: height
           )
@@ -518,13 +538,11 @@ private struct BrowseImageView: View {
       loadAccessibilityLabel: "加载正文图片"
     ) { phase in
       switch phase {
-      case .success(let image, _):
+      case .success(let asset, _):
         Button {
           onOpen()
         } label: {
-          image
-            .resizable()
-            .scaledToFill()
+          RemoteImageAssetView(asset: asset, contentMode: .fill)
             .contentThumbnailDimming()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -631,10 +649,8 @@ private struct BrowseVideoView: View {
               loadAccessibilityLabel: "加载视频封面"
             ) { phase in
               switch phase {
-              case .success(let image, _):
-                image
-                  .resizable()
-                  .scaledToFill()
+              case .success(let asset, _):
+                RemoteImageAssetView(asset: asset, contentMode: .fill)
                   .accessibilityHidden(true)
               case .empty:
                 ZStack {

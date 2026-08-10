@@ -53,7 +53,12 @@ final class TiebaLiveTests: XCTestCase {
       let posts = (postPage.firstPost.map { [$0] } ?? []) + postPage.posts
       for post in posts {
         for (imageIndex, image) in post.content.images.enumerated() {
-          for url in [image.originalURL, image.fullSizeURL, image.thumbnailURL].compactMap({ $0 }) {
+          for url in [
+            image.originalURL,
+            image.fullSizeURL,
+            image.dynamicURL,
+            image.thumbnailURL,
+          ].compactMap({ $0 }) {
             if let cursor = TiebaPicturePageCursor(
               imageURL: url,
               overallIndex: imageIndex + 1

@@ -91,13 +91,17 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   func testThreadMappingPreservesFeedMetadataAndSanitizesMedia() throws {
+    let dynamicImageURL = try XCTUnwrap(
+      URL(string: "https://img.example/animated.webp")
+    )
     let validImage = TiebaImage(
       thumbnailURL: try XCTUnwrap(URL(string: "https://img.example/thumb.jpg")),
       fullSizeURL: try XCTUnwrap(URL(string: "https://img.example/full.jpg")),
       originalURL: try XCTUnwrap(URL(string: "https://img.example/original.jpg")),
       width: 640,
       height: 480,
-      originalByteCount: 0
+      originalByteCount: 0,
+      dynamicURL: dynamicImageURL
     )
     let unsafeImage = TiebaImage(
       thumbnailURL: try XCTUnwrap(URL(string: "ftp://img.example/unsafe.jpg")),
@@ -191,7 +195,7 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertFalse(mapped.isLive)
     XCTAssertEqual(
       mapped.contents.compactMap { content -> URL? in
-        guard case .image(let thumbnail, _, _, _, _) = content else { return nil }
+        guard case .image(let thumbnail, _, _, _, _, _) = content else { return nil }
         return thumbnail
       },
       [
@@ -201,7 +205,7 @@ final class BrowseViewModelTests: XCTestCase {
     )
     XCTAssertEqual(
       mapped.contents.compactMap { content -> URL? in
-        guard case .image(_, let fullSize, _, _, _) = content else { return nil }
+        guard case .image(_, let fullSize, _, _, _, _) = content else { return nil }
         return fullSize
       },
       [
@@ -211,10 +215,17 @@ final class BrowseViewModelTests: XCTestCase {
     )
     XCTAssertEqual(
       mapped.contents.compactMap { content -> URL? in
-        guard case .image(_, _, let original, _, _) = content else { return nil }
+        guard case .image(_, _, let original, _, _, _) = content else { return nil }
         return original
       },
       [try XCTUnwrap(URL(string: "https://img.example/original.jpg"))]
+    )
+    XCTAssertEqual(
+      mapped.contents.compactMap { content -> URL? in
+        guard case .image(_, _, _, let dynamic, _, _) = content else { return nil }
+        return dynamic
+      },
+      [dynamicImageURL]
     )
     XCTAssertTrue(
       mapped.contents.contains { content in

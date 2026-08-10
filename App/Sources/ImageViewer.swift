@@ -46,7 +46,14 @@ struct ImageGalleryPresentation: Identifiable, Equatable, Sendable {
     let items: [ImageGalleryItem] = contents.enumerated().compactMap { pair -> ImageGalleryItem? in
       let (offset, content) = pair
       guard
-        case .image(let thumbnail, let fullSize, let original, let width, let height) = content
+        case .image(
+          let thumbnail,
+          let fullSize,
+          let original,
+          let dynamic,
+          let width,
+          let height
+        ) = content
       else {
         return nil
       }
@@ -55,7 +62,8 @@ struct ImageGalleryPresentation: Identifiable, Equatable, Sendable {
         url: BrowseContentImageSourceResolver.galleryURL(
           thumbnail: thumbnail,
           fullSize: fullSize,
-          original: original
+          original: original,
+          dynamic: dynamic
         ),
         width: width,
         height: height
@@ -787,6 +795,7 @@ struct ImageViewer: View {
 
 struct ZoomableRemoteImage: View {
   let item: ImageGalleryItem
+  let animationPlaybackEnabled: Bool
   let onZoomStateChange: (ImageGalleryItem.ID, ImageGalleryZoomState) -> Void
 
   @Environment(\.displayScale) private var displayScale
@@ -799,12 +808,14 @@ struct ZoomableRemoteImage: View {
   init(
     item: ImageGalleryItem,
     initialZoomState: ImageGalleryZoomState = .identity,
+    animationPlaybackEnabled: Bool,
     onZoomStateChange: @escaping (
       ImageGalleryItem.ID,
       ImageGalleryZoomState
     ) -> Void = { _, _ in }
   ) {
     self.item = item
+    self.animationPlaybackEnabled = animationPlaybackEnabled
     self.onZoomStateChange = onZoomStateChange
     _scale = State(initialValue: initialZoomState.scale)
     _committedScale = State(initialValue: initialZoomState.scale)
@@ -821,10 +832,12 @@ struct ZoomableRemoteImage: View {
         fetchPolicy: .allowNetwork(.original)
       ) { phase, progress in
         switch phase {
-        case .success(let image, let pixelSize):
-          image
-            .resizable()
-            .scaledToFit()
+        case .success(let asset, let pixelSize):
+          RemoteImageAssetView(
+            asset: asset,
+            contentMode: .fit,
+            animationPlaybackEnabled: animationPlaybackEnabled
+          )
             .scaleEffect(scale)
             .offset(offset)
             .frame(maxWidth: .infinity, maxHeight: .infinity)

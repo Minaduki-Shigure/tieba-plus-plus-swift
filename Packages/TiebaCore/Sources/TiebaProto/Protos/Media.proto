@@ -10,4 +10,5 @@ message Media {
     uint32 height = 11;
     string origin_pic = 15;
     uint32 origin_size = 16;
+    string dynamic_pic = 18;
 }

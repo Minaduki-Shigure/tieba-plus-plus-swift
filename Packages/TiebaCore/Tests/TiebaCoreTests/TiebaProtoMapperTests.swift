@@ -1,9 +1,98 @@
+import Foundation
 import TiebaProto
 import XCTest
 
 @testable import TiebaCore
 
 final class TiebaProtoMapperTests: XCTestCase {
+  func testAnimatedImageSourceFieldsUseAuthoritativeStringWireTags() throws {
+    var content = PbContent()
+    content.dynamic = "x"
+    XCTAssertEqual(
+      try content.serializedData(),
+      Data([0x82, 0x01, 0x01, 0x78])
+    )
+
+    var media = Media()
+    media.dynamicPic = "y"
+    XCTAssertEqual(
+      try media.serializedData(),
+      Data([0x92, 0x01, 0x01, 0x79])
+    )
+
+    XCTAssertEqual(PbContent().dynamic, "")
+    XCTAssertEqual(Media().dynamicPic, "")
+  }
+
+  func testPbContentImagePreservesOnlyNormalizedDynamicURLStrings() throws {
+    var fixture = ProtoFixtures.threadPage().data
+    let imageIndex = try XCTUnwrap(
+      fixture.threadList[0].firstPostContent.firstIndex { $0.type == 3 }
+    )
+
+    fixture.threadList[0].firstPostContent[imageIndex].dynamic =
+      "//img.example/animated.gif"
+    var image = try XCTUnwrap(
+      TiebaProtoMapper.threadPage(fixture).threads.first?.content.images.first
+    )
+    XCTAssertEqual(image.dynamicURL?.absoluteString, "https://img.example/animated.gif")
+
+    fixture.threadList[0].firstPostContent[imageIndex].dynamic = ""
+    image = try XCTUnwrap(
+      TiebaProtoMapper.threadPage(fixture).threads.first?.content.images.first
+    )
+    XCTAssertNil(image.dynamicURL)
+
+    fixture.threadList[0].firstPostContent[imageIndex].dynamic =
+      "file:///tmp/animated.gif"
+    image = try XCTUnwrap(
+      TiebaProtoMapper.threadPage(fixture).threads.first?.content.images.first
+    )
+    XCTAssertNil(image.dynamicURL)
+
+    fixture.threadList[0].firstPostContent[imageIndex].dynamic = "1"
+    image = try XCTUnwrap(
+      TiebaProtoMapper.threadPage(fixture).threads.first?.content.images.first
+    )
+    XCTAssertNil(image.dynamicURL, "The string field must not be interpreted as an animation flag")
+  }
+
+  func testMediaImagePreservesDynamicURLWithoutReplacingOtherSources() throws {
+    var fixture = ProtoFixtures.postPage().data
+    fixture.thread.originThreadInfo.media[0].dynamicPic =
+      "https://img.example/thread-animated.webp"
+
+    var image = try XCTUnwrap(
+      TiebaProtoMapper.postPage(fixture).thread.content.images.first
+    )
+    XCTAssertEqual(image.thumbnailURL?.absoluteString, "https://img.example/thread-thumb.jpg")
+    XCTAssertEqual(image.fullSizeURL?.absoluteString, "https://img.example/thread-full.jpg")
+    XCTAssertEqual(image.originalURL?.absoluteString, "https://img.example/thread-original.jpg")
+    XCTAssertEqual(
+      image.dynamicURL?.absoluteString,
+      "https://img.example/thread-animated.webp"
+    )
+
+    fixture.thread.originThreadInfo.media[0].dynamicPic = "data:image/gif;base64,R0lGODlh"
+    image = try XCTUnwrap(
+      TiebaProtoMapper.postPage(fixture).thread.content.images.first
+    )
+    XCTAssertNil(image.dynamicURL)
+  }
+
+  func testTiebaImageInitializerKeepsDynamicURLSourceCompatibility() {
+    let image = TiebaImage(
+      thumbnailURL: nil,
+      fullSizeURL: nil,
+      originalURL: nil,
+      width: 1,
+      height: 1,
+      originalByteCount: 0
+    )
+
+    XCTAssertNil(image.dynamicURL)
+  }
+
   func testUserReplyMappingBoundsOuterAndInnerCollectionsAndRejectsOverflowingTime() {
     var data = UserPostResIdl.DataRes()
     for groupIndex in 0...100 {

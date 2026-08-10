@@ -5,7 +5,7 @@ import UIKit
 
 enum DownsampledRemoteImagePhase {
   case empty
-  case success(Image, pixelSize: CGSize)
+  case success(DownsampledImageAsset, pixelSize: CGSize)
   case failure
 }
 
@@ -222,11 +222,8 @@ struct DownsampledRemoteImage<Content: View>: View {
           loadProgress = nil
           phaseResourceID = activeResourceID
           phase = .success(
-            Image(uiImage: asset.image),
-            pixelSize: CGSize(
-              width: asset.image.cgImage?.width ?? 0,
-              height: asset.image.cgImage?.height ?? 0
-            )
+            asset,
+            pixelSize: asset.pixelSize
           )
           onAttemptCompletion(.success)
         } catch is CancellationError {
@@ -265,6 +262,31 @@ struct DownsampledRemoteImage<Content: View>: View {
 
 struct DownsampledImageAsset: @unchecked Sendable {
   let image: UIImage
+  let animation: RemoteImageAnimationSequence?
+
+  init(image: UIImage, animation: RemoteImageAnimationSequence? = nil) {
+    self.image = image
+    self.animation = animation
+  }
+
+  var pixelSize: CGSize {
+    CGSize(
+      width: image.cgImage?.width ?? 0,
+      height: image.cgImage?.height ?? 0
+    )
+  }
+
+  var decodedByteCost: Int {
+    animation?.decodedByteCost ?? ImageDownsampler.decodedByteCost(of: image) ?? 0
+  }
+}
+
+private final class DownsampledImageAssetBox: NSObject {
+  let asset: DownsampledImageAsset
+
+  init(_ asset: DownsampledImageAsset) {
+    self.asset = asset
+  }
 }
 
 enum DownsampledImageError: Error {
@@ -317,7 +339,7 @@ actor DownsampledImageRepository {
     DownsampledRemoteImageLoadProgress,
     Bool
   ) -> Void
-  private let cache = NSCache<NSString, UIImage>()
+  private let cache = NSCache<NSString, DownsampledImageAssetBox>()
   private var cacheGeneration: UInt64 = 0
   private var inFlight: [InFlightKey: InFlightRequest] = [:]
 
@@ -343,6 +365,7 @@ actor DownsampledImageRepository {
   func clearMemoryCache() {
     cacheGeneration &+= 1
     cache.removeAllObjects()
+    RemoteImageAnimationFrameCache.shared.removeAllObjects()
   }
 
   func image(at url: URL, maxPixelSize requestedSize: Int) async throws
@@ -386,7 +409,7 @@ actor DownsampledImageRepository {
       maxPixelSize: maxPixelSize
     )
     if let cached = cache.object(forKey: cacheKey.storageKey) {
-      return DownsampledImageAsset(image: cached)
+      return cached.asset
     }
     let downloadKind: RemoteImageDownloadKind
     let networkAccess: RemoteImageNetworkAccess
@@ -458,11 +481,16 @@ actor DownsampledImageRepository {
         await self.beginDecoding(forKey: inFlightKey, transferID: newTransferID)
         await beforeDecoding()
         try Task.checkCancellation()
-        let asset = try await Task.detached(priority: .utility) {
+        let asset = try await RemoteImageIODecodeScheduler.shared.decode {
           try withExtendedLifetime(lease) {
-            try ImageDownsampler.image(at: lease.fileURL, maxPixelSize: maxPixelSize)
+            try ImageDownsampler.image(
+              at: lease.fileURL,
+              maxPixelSize: maxPixelSize,
+              sourceOwner: lease,
+              sourceByteCount: lease.byteCount
+            )
           }
-        }.value
+        }
         try Task.checkCancellation()
         return asset
       }
@@ -483,12 +511,10 @@ actor DownsampledImageRepository {
       let asset = try await task.value
       try Task.checkCancellation()
       if waiterCacheGeneration == cacheGeneration {
-        let pixelWidth = asset.image.cgImage?.width ?? 0
-        let pixelHeight = asset.image.cgImage?.height ?? 0
         cache.setObject(
-          asset.image,
+          DownsampledImageAssetBox(asset),
           forKey: cacheKey.storageKey,
-          cost: pixelWidth * pixelHeight * 4
+          cost: asset.decodedByteCost
         )
       }
       return asset
@@ -564,21 +590,319 @@ actor DownsampledImageRepository {
 }
 
 enum ImageDownsampler {
-  static func image(at fileURL: URL, maxPixelSize: Int) throws -> DownsampledImageAsset {
+  static let maximumAnimationFrameCount = 500
+  static let maximumAnimationFrameDecodedByteCost = 16 * 1_024 * 1_024
+
+  static func image(
+    at fileURL: URL,
+    maxPixelSize: Int,
+    sourceOwner: AnyObject? = nil,
+    sourceByteCount: Int64? = nil,
+    animationDecodedByteBudget: Int = maximumAnimationFrameDecodedByteCost
+  ) throws -> DownsampledImageAsset {
+    try Task.checkCancellation()
     let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
     guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, sourceOptions) else {
       throw DownsampledImageError.unreadableImage
     }
+    let frameCount = CGImageSourceGetCount(source)
+    guard frameCount > 0 else {
+      throw DownsampledImageError.unreadableImage
+    }
+    let requestedPixelSize = min(max(maxPixelSize, 64), 4_096)
+    let sourceTypeIdentifier = CGImageSourceGetType(source) as String?
+    let sourceProperties = properties(of: source)
+    let hasHEICSSequenceMetadata = hasHEICSSequenceMetadata(
+      sourceProperties,
+      frameCount: frameCount
+    )
+
+    if let format = RemoteImageAnimationPolicy.format(
+      sourceTypeIdentifier: sourceTypeIdentifier,
+      frameCount: frameCount,
+      hasHEICSSequenceMetadata: hasHEICSSequenceMetadata
+    ), let animationPixelSize = animationPixelLimit(
+      requestedPixelSize: requestedPixelSize,
+      frameCount: frameCount,
+      decodedByteBudget: animationDecodedByteBudget
+    ) {
+      try Task.checkCancellation()
+      let poster = try thumbnail(
+        source: source,
+        index: 0,
+        maxPixelSize: animationPixelSize
+      )
+      try Task.checkCancellation()
+      guard
+        let posterCost = decodedByteCost(of: poster),
+        posterCost <= animationDecodedByteBudget
+      else {
+        return DownsampledImageAsset(image: poster)
+      }
+      let frameDurations = try animationFrameDurations(
+        source: source,
+        format: format,
+        frameCount: frameCount,
+        sourceProperties: sourceProperties
+      )
+      try Task.checkCancellation()
+      let source = RemoteImageAnimationSource(
+        fileURL: fileURL,
+        compressedByteCount: compressedByteCost(
+          at: fileURL,
+          suppliedByteCount: sourceByteCount
+        ),
+        retainedOwner: sourceOwner
+      )
+      let retainedCost = addingClamped(posterCost, source.compressedByteCount)
+      let animation = RemoteImageAnimationSequence(
+        format: format,
+        poster: poster,
+        frameCount: frameCount,
+        maxPixelSize: animationPixelSize,
+        frameDurations: frameDurations,
+        totalPlaythroughs: RemoteImageAnimationPolicy.totalPlaythroughs(
+          format: format,
+          imageIOLoopCount: imageIOLoopCount(
+            format: format,
+            sourceProperties: sourceProperties
+          )
+        ),
+        posterDecodedByteCost: posterCost,
+        decodedByteCost: retainedCost,
+        source: source
+      )
+      return DownsampledImageAsset(image: poster, animation: animation)
+    }
+
+    try Task.checkCancellation()
+    let primaryIndex = staticPosterIndex(
+      sourceTypeIdentifier: sourceTypeIdentifier,
+      source: source,
+      frameCount: frameCount
+    )
+    let poster = try thumbnail(
+      source: source,
+      index: primaryIndex,
+      maxPixelSize: requestedPixelSize
+    )
+    try Task.checkCancellation()
+    return DownsampledImageAsset(image: poster)
+  }
+
+  static func animationPixelLimit(
+    requestedPixelSize: Int,
+    frameCount: Int,
+    decodedByteBudget: Int = maximumAnimationFrameDecodedByteCost
+  ) -> Int? {
+    guard
+      frameCount > 1,
+      frameCount <= maximumAnimationFrameCount,
+      decodedByteBudget > 0
+    else { return nil }
+
+    let pixelsPerFrame = decodedByteBudget / 4
+    let budgetedPixelSize = Int(Double(pixelsPerFrame).squareRoot().rounded(.down))
+    guard budgetedPixelSize >= 64 else { return nil }
+    return min(min(max(requestedPixelSize, 64), 4_096), budgetedPixelSize)
+  }
+
+  static func decodedByteCost(of image: UIImage) -> Int? {
+    guard let cgImage = image.cgImage else { return nil }
+    return decodedByteCost(bytesPerRow: cgImage.bytesPerRow, height: cgImage.height)
+  }
+
+  static func decodedByteCost(bytesPerRow: Int, height: Int) -> Int? {
+    guard bytesPerRow > 0, height > 0, bytesPerRow <= Int.max / height else {
+      return nil
+    }
+    return bytesPerRow * height
+  }
+
+  static func frame(
+    at fileURL: URL,
+    index: Int,
+    maxPixelSize: Int
+  ) throws -> UIImage {
+    try Task.checkCancellation()
+    let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+    guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, sourceOptions) else {
+      throw DownsampledImageError.unreadableImage
+    }
+    guard (0..<CGImageSourceGetCount(source)).contains(index) else {
+      throw RemoteImageAnimationFrameError.invalidFrameIndex
+    }
+    let image = try thumbnail(source: source, index: index, maxPixelSize: maxPixelSize)
+    try Task.checkCancellation()
+    return image
+  }
+
+  static func addingClamped(_ first: Int, _ second: Int) -> Int {
+    guard first >= 0, second >= 0, first <= Int.max - second else { return Int.max }
+    return first + second
+  }
+
+  static func compressedByteCost(at fileURL: URL, suppliedByteCount: Int64?) -> Int {
+    if let suppliedByteCount {
+      guard suppliedByteCount > 0 else { return 0 }
+      return suppliedByteCount > Int64(Int.max) ? Int.max : Int(suppliedByteCount)
+    }
+    guard
+      let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey]),
+      let fileSize = values.fileSize,
+      fileSize > 0
+    else { return 0 }
+    return fileSize
+  }
+
+  private static func animationFrameDurations(
+    source: CGImageSource,
+    format: RemoteImageAnimationFormat,
+    frameCount: Int,
+    sourceProperties: [CFString: Any]
+  ) throws -> [TimeInterval] {
+    var durations = [TimeInterval]()
+    durations.reserveCapacity(frameCount)
+
+    for index in 0..<frameCount {
+      try Task.checkCancellation()
+      durations.append(
+        RemoteImageAnimationPolicy.normalizedFrameDuration(
+          rawFrameDuration(
+            source: source,
+            index: index,
+            format: format,
+            sourceProperties: sourceProperties
+          )
+        )
+      )
+      try Task.checkCancellation()
+    }
+    return durations
+  }
+
+  private static func thumbnail(
+    source: CGImageSource,
+    index: Int,
+    maxPixelSize: Int
+  ) throws -> UIImage {
     let options: [CFString: Any] = [
       kCGImageSourceCreateThumbnailFromImageAlways: true,
       kCGImageSourceCreateThumbnailWithTransform: true,
       kCGImageSourceShouldCacheImmediately: true,
       kCGImageSourceThumbnailMaxPixelSize: min(max(maxPixelSize, 64), 4_096),
     ]
-    guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    guard let image = CGImageSourceCreateThumbnailAtIndex(source, index, options as CFDictionary)
     else {
       throw DownsampledImageError.unreadableImage
     }
-    return DownsampledImageAsset(image: UIImage(cgImage: image))
+    return UIImage(cgImage: image)
+  }
+
+  private static func properties(of source: CGImageSource) -> [CFString: Any] {
+    CGImageSourceCopyProperties(source, nil) as? [CFString: Any] ?? [:]
+  }
+
+  private static func frameProperties(
+    source: CGImageSource,
+    index: Int
+  ) -> [CFString: Any] {
+    CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any] ?? [:]
+  }
+
+  private static func staticPosterIndex(
+    sourceTypeIdentifier: String?,
+    source: CGImageSource,
+    frameCount: Int
+  ) -> Int {
+    guard
+      let sourceTypeIdentifier,
+      RemoteImageAnimationPolicy.isHEIFContainer(sourceTypeIdentifier)
+    else { return 0 }
+    let primaryIndex = CGImageSourceGetPrimaryImageIndex(source)
+    return (0..<frameCount).contains(primaryIndex) ? primaryIndex : 0
+  }
+
+  private static func hasHEICSSequenceMetadata(
+    _ sourceProperties: [CFString: Any],
+    frameCount: Int
+  ) -> Bool {
+    guard
+      let dictionary = sourceProperties[kCGImagePropertyHEICSDictionary] as? [CFString: Any],
+      let frameInformation = dictionary[kCGImagePropertyHEICSFrameInfoArray] as? [Any]
+    else { return false }
+    return frameInformation.count == frameCount && frameCount > 1
+  }
+
+  private static func rawFrameDuration(
+    source: CGImageSource,
+    index: Int,
+    format: RemoteImageAnimationFormat,
+    sourceProperties: [CFString: Any]
+  ) -> TimeInterval? {
+    let properties = frameProperties(source: source, index: index)
+    let dictionaryKey: CFString
+    let unclampedDelayKey: CFString
+    let delayKey: CFString
+    let frameInformationKey: CFString
+    switch format {
+    case .gif:
+      dictionaryKey = kCGImagePropertyGIFDictionary
+      unclampedDelayKey = kCGImagePropertyGIFUnclampedDelayTime
+      delayKey = kCGImagePropertyGIFDelayTime
+      frameInformationKey = kCGImagePropertyGIFFrameInfoArray
+    case .webP:
+      dictionaryKey = kCGImagePropertyWebPDictionary
+      unclampedDelayKey = kCGImagePropertyWebPUnclampedDelayTime
+      delayKey = kCGImagePropertyWebPDelayTime
+      frameInformationKey = kCGImagePropertyWebPFrameInfoArray
+    case .heics:
+      dictionaryKey = kCGImagePropertyHEICSDictionary
+      unclampedDelayKey = kCGImagePropertyHEICSUnclampedDelayTime
+      delayKey = kCGImagePropertyHEICSDelayTime
+      frameInformationKey = kCGImagePropertyHEICSFrameInfoArray
+    }
+
+    if let dictionary = properties[dictionaryKey] as? [CFString: Any] {
+      if let duration = number(dictionary[unclampedDelayKey]) { return duration }
+      if let duration = number(dictionary[delayKey]) { return duration }
+    }
+    guard
+      let sourceDictionary = sourceProperties[dictionaryKey] as? [CFString: Any],
+      let frameInformation = sourceDictionary[frameInformationKey] as? [Any],
+      frameInformation.indices.contains(index),
+      let dictionary = frameInformation[index] as? [CFString: Any]
+    else { return nil }
+    return number(dictionary[unclampedDelayKey]) ?? number(dictionary[delayKey])
+  }
+
+  private static func imageIOLoopCount(
+    format: RemoteImageAnimationFormat,
+    sourceProperties: [CFString: Any]
+  ) -> Int? {
+    let dictionaryKey: CFString
+    let loopCountKey: CFString
+    switch format {
+    case .gif:
+      dictionaryKey = kCGImagePropertyGIFDictionary
+      loopCountKey = kCGImagePropertyGIFLoopCount
+    case .webP:
+      dictionaryKey = kCGImagePropertyWebPDictionary
+      loopCountKey = kCGImagePropertyWebPLoopCount
+    case .heics:
+      dictionaryKey = kCGImagePropertyHEICSDictionary
+      loopCountKey = kCGImagePropertyHEICSLoopCount
+    }
+    guard
+      let dictionary = sourceProperties[dictionaryKey] as? [CFString: Any],
+      let value = dictionary[loopCountKey] as? NSNumber,
+      value.int64Value >= 0,
+      value.int64Value <= Int64(Int.max)
+    else { return nil }
+    return Int(value.int64Value)
+  }
+
+  private static func number(_ value: Any?) -> TimeInterval? {
+    (value as? NSNumber)?.doubleValue
   }
 }

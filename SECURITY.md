@@ -711,6 +711,27 @@ requests or redirect destinations, and is decoded through ImageIO with a
 bounded pixel size and memory cache. Original image dimensions are never
 decoded directly into the browsing UI.
 
+An observed `dynamic` URL is an independently normalized media candidate, not
+an animation flag. Animation requires ImageIO to identify a supported real
+multi-frame GIF, WebP, or HEIC/HEIF sequence from the downloaded bytes. A
+single-frame container, ordinary multi-image HEIF, unknown type, malformed
+frame, more than 500 frame metadata entries, or an input that cannot fit the
+16 MiB decoded-frame bound must fall back to a bounded static poster. Invalid,
+nonfinite, nonpositive, or sub-20 ms frame delays normalize to 100 ms. Later
+frames are decoded on demand through at most two concurrent ImageIO operations
+and enter one process-wide cache capped at 64 MiB and 1,000 entries, costed by
+`bytesPerRow * height`.
+
+Animation playback is presentation state and must not enter the URL, transfer,
+manual authorization, retry, or cache identity. It runs only while the view is
+attached, the scene is active, Reduce Motion is disabled, and its surface owns
+playback. The zoom gallery grants ownership only to its visible page, retains
+the starting page through an interactive transition, and transfers ownership
+only after completion. Leaving the view, cancelling a page transition,
+backgrounding, or disabling playback invalidates the display clock and prevents
+elapsed background time from being replayed as a frame burst. Animation is not
+added to the voice/video playback coordinator.
+
 The content-media preference applies only to thread previews, rich-content
 images, video covers, per-forum search media, and hot-topic images. Automatic
 mode preserves unrestricted preview loading. Data-saving mode automatically
@@ -723,15 +744,16 @@ carrier identity, or local-network peer and does not probe a URL to classify
 the network.
 
 The image preview-quality preference is independent from that network policy.
-Every standard, high-definition, and original candidate is normalized through
-the existing HTTPS media policy before it enters the browsing model. Standard
+Every standard, high-definition, dynamic, and original candidate is normalized
+through the existing HTTPS media policy before it enters the browsing model. Standard
 quality remains the default; high-definition can select only the separately
-accepted high-definition candidate and otherwise falls back to the accepted
-standard candidate. Changing quality changes the existing URL-based request
-identity and therefore cannot inherit a manual authorization or failed state
+accepted high-definition candidate, then the accepted dynamic candidate, and
+otherwise falls back to the accepted standard candidate. Changing quality
+changes the existing URL-based request identity and therefore cannot inherit a
+manual authorization or failed state
 from another source. It does not alter request access flags, byte limits,
 decoder bounds, cache keys, or the gallery's fixed
-original-then-high-definition-then-standard selection.
+original-then-dynamic-then-high-definition-then-standard selection.
 
 A cold manually gated image performs an exact in-memory cache lookup and must
 not create or join a network request until the user presses its load control.
@@ -765,7 +787,7 @@ page-data requests remain outside this preference. Expanded previews continue
 to follow the separate automatic, data-saving, or tap-to-load policy.
 
 Dark-appearance thumbnail dimming is a post-decode visual modifier only. When
-enabled, successfully rendered static content images use a fixed 0.4 color
+enabled, successfully rendered content images use a fixed 0.4 color
 multiplier in dark appearance; light appearance and a disabled setting use the
 identity multiplier. The preference must not enter a media URL, fetch policy,
 reload ID, transfer key, decoder, or cache key, so changing it or the appearance
@@ -782,9 +804,9 @@ independent, while image viewers and video overlays keep their explicit white
 controls on black. System Web, Safari, and share surfaces continue to manage
 their own appearance.
 
-Manual image-cache clearing may evict only the process-local decoded-image
-`NSCache`. It must advance a generation barrier so a transfer started before the
-clear cannot later repopulate that old cache state. It must not cancel active
+Manual image-cache clearing may evict only the process-local decoded-image and
+animation-frame `NSCache` instances. It must advance both generation barriers so a transfer
+started before the clear cannot later repopulate that old cache state. It must not cancel active
 transfers, delete temporary download or export leases, clear system photo data,
 or touch account, history, favorite, filter, or search archives. Currently
 displayed images may remain retained by their views, and a later explicit or

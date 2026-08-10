@@ -8,10 +8,8 @@ struct AvatarView: View {
   var body: some View {
     DownsampledRemoteImage(url: url, maxPixelSize: max(Int(size * 3), 128)) { phase in
       switch phase {
-      case .success(let image, _):
-        image
-          .resizable()
-          .scaledToFill()
+      case .success(let asset, _):
+        RemoteImageAssetView(asset: asset, contentMode: .fill)
       case .empty, .failure:
         ZStack {
           Color(uiColor: .secondarySystemFill)

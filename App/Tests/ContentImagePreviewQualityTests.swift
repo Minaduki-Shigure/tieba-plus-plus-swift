@@ -47,6 +47,30 @@ final class ContentImagePreviewQualityTests: XCTestCase {
     )
   }
 
+  func testDynamicSourceIsAHighDefinitionFallbackWithoutChangingStandardTraffic() throws {
+    let thumbnail = try url("https://img.example/standard.jpg")
+    let dynamic = try url("https://img.example/animated.webp")
+
+    XCTAssertEqual(
+      BrowseContentImageSourceResolver.previewURL(
+        thumbnail: thumbnail,
+        fullSize: nil,
+        dynamic: dynamic,
+        quality: .standard
+      ),
+      thumbnail
+    )
+    XCTAssertEqual(
+      BrowseContentImageSourceResolver.previewURL(
+        thumbnail: thumbnail,
+        fullSize: nil,
+        dynamic: dynamic,
+        quality: .highDefinition
+      ),
+      dynamic
+    )
+  }
+
   func testGalleryAlwaysPrefersOriginalThenFullSizeThenThumbnail() throws {
     let thumbnail = try url("https://img.example/standard.jpg")
     let fullSize = try url("https://img.example/high-definition.jpg")
@@ -75,6 +99,32 @@ final class ContentImagePreviewQualityTests: XCTestCase {
         original: nil
       ),
       thumbnail
+    )
+  }
+
+  func testGalleryUsesDynamicBetweenOriginalAndStaticPreviews() throws {
+    let thumbnail = try url("https://img.example/standard.jpg")
+    let fullSize = try url("https://img.example/high-definition.jpg")
+    let original = try url("https://img.example/original.gif")
+    let dynamic = try url("https://img.example/animated.gif")
+
+    XCTAssertEqual(
+      BrowseContentImageSourceResolver.galleryURL(
+        thumbnail: thumbnail,
+        fullSize: fullSize,
+        original: original,
+        dynamic: dynamic
+      ),
+      original
+    )
+    XCTAssertEqual(
+      BrowseContentImageSourceResolver.galleryURL(
+        thumbnail: thumbnail,
+        fullSize: fullSize,
+        original: nil,
+        dynamic: dynamic
+      ),
+      dynamic
     )
   }
 

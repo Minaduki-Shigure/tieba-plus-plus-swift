@@ -1600,6 +1600,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
           let thumbnail = firstSecureMediaURL(
             image.thumbnailURL,
             image.fullSizeURL,
+            image.dynamicURL,
             image.originalURL
           )
         else {
@@ -1609,6 +1610,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
           thumbnail: thumbnail,
           fullSize: firstSecureMediaURL(image.fullSizeURL),
           original: firstSecureMediaURL(image.originalURL),
+          dynamic: firstSecureMediaURL(image.dynamicURL),
           width: image.width,
           height: image.height
         )

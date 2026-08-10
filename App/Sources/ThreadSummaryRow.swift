@@ -23,10 +23,13 @@ enum ThreadSummaryPresentation {
       return .video(cover)
     }
     let images = thread.contents.compactMap { content -> URL? in
-      guard case .image(let thumbnail, let fullSize, _, _, _) = content else { return nil }
+      guard case .image(let thumbnail, let fullSize, _, let dynamic, _, _) = content else {
+        return nil
+      }
       return BrowseContentImageSourceResolver.previewURL(
         thumbnail: thumbnail,
         fullSize: fullSize,
+        dynamic: dynamic,
         quality: quality
       )
     }
@@ -477,10 +480,8 @@ private struct ThreadPreviewImage: View {
       loadAccessibilityLabel: loadAccessibilityLabel
     ) { phase in
       switch phase {
-      case .success(let image, _):
-        image
-          .resizable()
-          .scaledToFill()
+      case .success(let asset, _):
+        RemoteImageAssetView(asset: asset, contentMode: .fill)
           .contentThumbnailDimming(applies: role.appliesContentThumbnailDimming)
           .accessibilityLabel(successAccessibilityLabel)
       case .failure:

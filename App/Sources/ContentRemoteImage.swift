@@ -2,7 +2,7 @@ import SwiftUI
 
 enum ContentRemoteImagePhase {
   case empty
-  case success(Image, pixelSize: CGSize)
+  case success(DownsampledImageAsset, pixelSize: CGSize)
   case loadRequired
   case failure
 }
@@ -261,8 +261,8 @@ struct ContentRemoteImage<Content: View>: View {
         return .failure
       }
       return .empty
-    case .success(let image, let pixelSize):
-      return .success(image, pixelSize: pixelSize)
+    case .success(let asset, let pixelSize):
+      return .success(asset, pixelSize: pixelSize)
     case .failure:
       switch ContentRemoteImageLoadDecision.storedFailurePresentation(
         policy: policy,

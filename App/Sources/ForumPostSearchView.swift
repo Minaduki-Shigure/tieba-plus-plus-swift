@@ -567,13 +567,16 @@ enum ForumPostSearchMediaPresentation: Equatable, Sendable {
     var imageURLs: [URL] = []
     var totalCount = 0
     for content in contents {
-      guard case .image(let thumbnail, let fullSize, _, _, _) = content else { continue }
+      guard case .image(let thumbnail, let fullSize, _, let dynamic, _, _) = content else {
+        continue
+      }
       totalCount += 1
       if !hidesMedia, imageURLs.count < 3 {
         imageURLs.append(
           BrowseContentImageSourceResolver.previewURL(
             thumbnail: thumbnail,
             fullSize: fullSize,
+            dynamic: dynamic,
             quality: quality
           )
         )
@@ -624,10 +627,8 @@ private struct ForumPostSearchMediaStrip: View {
           loadAccessibilityLabel: "加载搜索结果图片 \(index + 1)"
         ) { phase in
           switch phase {
-          case .success(let renderedImage, _):
-            renderedImage
-              .resizable()
-              .scaledToFill()
+          case .success(let asset, _):
+            RemoteImageAssetView(asset: asset, contentMode: .fill)
               .contentThumbnailDimming()
               .accessibilityLabel(
                 "图片预览 \(index + 1)，共 \(max(totalCount, 0).formatted()) 张"

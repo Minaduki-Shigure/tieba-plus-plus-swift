@@ -261,8 +261,8 @@ private struct ForumOverviewList: View {
       HStack(alignment: .center, spacing: 14) {
         DownsampledRemoteImage(url: avatarURL, maxPixelSize: 384) { phase in
           switch phase {
-          case .success(let image, _):
-            image.resizable().scaledToFill()
+          case .success(let asset, _):
+            RemoteImageAssetView(asset: asset, contentMode: .fill)
           default:
             Image(systemName: "text.bubble.fill")
               .foregroundStyle(.tint)

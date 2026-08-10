@@ -201,10 +201,8 @@ struct HotTopicRemoteImage: View {
       loadAccessibilityLabel: "加载话题图片"
     ) { phase in
       switch phase {
-      case .success(let image, _):
-        image
-          .resizable()
-          .scaledToFill()
+      case .success(let asset, _):
+        RemoteImageAssetView(asset: asset, contentMode: .fill)
           .contentThumbnailDimming()
           .accessibilityHidden(true)
       case .empty:

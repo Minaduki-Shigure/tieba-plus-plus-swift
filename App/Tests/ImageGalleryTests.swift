@@ -903,6 +903,122 @@ final class ImageGalleryTests: XCTestCase {
     )
   }
 
+  func testAnimationPlaybackOwnershipTransfersOnlyAfterInteractiveCompletion() throws {
+    let first = try item(1)
+    let second = try item(2)
+    let validIDs = Set([first.id, second.id])
+    var ownership = ImageGalleryAnimationPlaybackOwnership()
+
+    ownership.reconcileVisible(first.id, validIDs: validIDs)
+    XCTAssertEqual(ownership.ownerID, first.id)
+    XCTAssertEqual(ownership.enabledIDs, [first.id])
+
+    ownership.beginInteractive(visibleID: first.id, validIDs: validIDs)
+    ownership.reconcileVisible(second.id, validIDs: validIDs)
+    XCTAssertEqual(ownership.ownerID, first.id)
+    XCTAssertEqual(ownership.enabledIDs, [first.id])
+
+    ownership.finishInteractive(
+      completed: false,
+      visibleID: second.id,
+      validIDs: validIDs
+    )
+    XCTAssertEqual(ownership.ownerID, first.id)
+    XCTAssertEqual(ownership.enabledIDs, [first.id])
+
+    ownership.beginInteractive(visibleID: first.id, validIDs: validIDs)
+    ownership.finishInteractive(
+      completed: true,
+      visibleID: second.id,
+      validIDs: validIDs
+    )
+    XCTAssertEqual(ownership.ownerID, second.id)
+    XCTAssertEqual(ownership.enabledIDs, [second.id])
+    XCTAssertLessThanOrEqual(ownership.enabledIDs.count, 1)
+  }
+
+  func testAnimationPlaybackOwnershipKeepsSourceDuringProgrammaticTransition() throws {
+    let first = try item(1)
+    let second = try item(2)
+    let validIDs = Set([first.id, second.id])
+    var ownership = ImageGalleryAnimationPlaybackOwnership()
+
+    ownership.reconcileVisible(first.id, validIDs: validIDs)
+    ownership.beginProgrammatic(
+      targetID: second.id,
+      visibleID: first.id,
+      validIDs: validIDs
+    )
+    ownership.reconcileVisible(second.id, validIDs: validIDs)
+    XCTAssertEqual(ownership.ownerID, first.id)
+    XCTAssertEqual(ownership.enabledIDs, [first.id])
+
+    ownership.finishProgrammatic(
+      completed: false,
+      visibleID: first.id,
+      validIDs: validIDs
+    )
+    XCTAssertEqual(ownership.ownerID, first.id)
+
+    ownership.beginProgrammatic(
+      targetID: second.id,
+      visibleID: first.id,
+      validIDs: validIDs
+    )
+    ownership.finishProgrammatic(
+      completed: true,
+      visibleID: second.id,
+      validIDs: validIDs
+    )
+    XCTAssertEqual(ownership.ownerID, second.id)
+    XCTAssertEqual(ownership.enabledIDs, [second.id])
+    XCTAssertLessThanOrEqual(ownership.enabledIDs.count, 1)
+  }
+
+  func testAnimationPlaybackOwnershipMigratesPrunesAndDetaches() {
+    let localID = ImageGalleryItem.ID.local(postID: 1, contentOffset: 0)
+    let remoteID = ImageGalleryItem.ID.remote(
+      overallIndex: 1,
+      pictureID: "remote",
+      postID: 1
+    )
+    let otherID = ImageGalleryItem.ID.remote(
+      overallIndex: 2,
+      pictureID: "other",
+      postID: 1
+    )
+    var ownership = ImageGalleryAnimationPlaybackOwnership()
+
+    ownership.reconcileVisible(localID, validIDs: [localID, otherID])
+    ownership.beginInteractive(visibleID: localID, validIDs: [localID, otherID])
+    ownership.migrate(
+      ImageGalleryItemIDMigration([localID: remoteID]),
+      validIDs: [remoteID, otherID]
+    )
+    XCTAssertEqual(ownership.ownerID, remoteID)
+    XCTAssertEqual(
+      ownership.transition,
+      .interactive(startingOwnerID: remoteID)
+    )
+    XCTAssertEqual(ownership.enabledIDs, [remoteID])
+
+    ownership.finishInteractive(
+      completed: false,
+      visibleID: otherID,
+      validIDs: [remoteID, otherID]
+    )
+    XCTAssertEqual(ownership.ownerID, remoteID)
+    ownership.retainOnly([otherID])
+    XCTAssertNil(ownership.ownerID)
+    XCTAssertTrue(ownership.enabledIDs.isEmpty)
+
+    ownership.reconcileVisible(otherID, validIDs: [otherID])
+    ownership.detach()
+    XCTAssertNil(ownership.ownerID)
+    XCTAssertEqual(ownership.transition, .idle)
+    XCTAssertTrue(ownership.enabledIDs.isEmpty)
+  }
+
   func testAccessibilityDescriptionsUseRemoteAndSelectedGlobalPositions() throws {
     let local = try item(1)
     let remote = ImageGalleryItem(
@@ -1101,6 +1217,100 @@ final class ImageGalleryTests: XCTestCase {
     XCTAssertEqual(publishedSelections, [remoteSecondID])
     XCTAssertTrue(pageViewController.completeNextProgrammaticTransition(completed: true))
     coordinator.detach()
+  }
+
+  @MainActor
+  func testCoordinatorAllowsOnlyCurrentPageToOwnAnimationPlayback() throws {
+    let first = try item(1)
+    let second = try item(2)
+    let items = [first, second]
+    let store = ImageGalleryZoomStateStore()
+    let coordinator = ImageGalleryPager.Coordinator()
+    let pageViewController = ControllableImageGalleryPageViewController(
+      transitionStyle: .scroll,
+      navigationOrientation: .horizontal,
+      options: nil
+    )
+    coordinator.attach(to: pageViewController, axis: .horizontal)
+    coordinator.receive(
+      ImageGalleryPagerUpdate(
+        snapshot: ImageGalleryPagerSnapshot(
+          items: items,
+          requestedSelection: first.id
+        ),
+        accessibilityPageDescriptions: [:]
+      ),
+      zoomStateStore: store,
+      onSelectionChange: { _ in }
+    )
+
+    XCTAssertNil(coordinator.animationPlaybackOwnerID)
+    XCTAssertTrue(coordinator.animationPlaybackEnabledControllerIDs.isEmpty)
+    XCTAssertTrue(pageViewController.completeNextProgrammaticTransition(completed: true))
+    XCTAssertEqual(coordinator.animationPlaybackOwnerID, first.id)
+    XCTAssertEqual(coordinator.animationPlaybackEnabledControllerIDs, [first.id])
+
+    let visibleController = try XCTUnwrap(pageViewController.viewControllers?.first)
+    let pendingController = try XCTUnwrap(
+      coordinator.pageViewController(
+        pageViewController,
+        viewControllerAfter: visibleController
+      )
+    )
+    coordinator.pageViewController(
+      pageViewController,
+      willTransitionTo: [pendingController]
+    )
+    XCTAssertEqual(coordinator.animationPlaybackEnabledControllerIDs, [first.id])
+    coordinator.pageViewController(
+      pageViewController,
+      didFinishAnimating: true,
+      previousViewControllers: [visibleController],
+      transitionCompleted: false
+    )
+    XCTAssertEqual(coordinator.animationPlaybackOwnerID, first.id)
+    XCTAssertEqual(coordinator.animationPlaybackEnabledControllerIDs, [first.id])
+
+    coordinator.pageViewController(
+      pageViewController,
+      willTransitionTo: [pendingController]
+    )
+    pageViewController.setViewControllers(
+      [pendingController],
+      direction: .forward,
+      animated: false,
+      completion: nil
+    )
+    coordinator.pageViewController(
+      pageViewController,
+      didFinishAnimating: true,
+      previousViewControllers: [visibleController],
+      transitionCompleted: true
+    )
+    XCTAssertEqual(coordinator.animationPlaybackOwnerID, second.id)
+    XCTAssertEqual(coordinator.animationPlaybackEnabledControllerIDs, [second.id])
+
+    coordinator.receive(
+      ImageGalleryPagerUpdate(
+        snapshot: ImageGalleryPagerSnapshot(
+          items: items,
+          requestedSelection: first.id
+        ),
+        accessibilityPageDescriptions: [:]
+      ),
+      zoomStateStore: store,
+      onSelectionChange: { _ in }
+    )
+    XCTAssertEqual(pageViewController.pendingProgrammaticCompletionCount, 1)
+    XCTAssertEqual(coordinator.animationPlaybackOwnerID, second.id)
+    XCTAssertEqual(coordinator.animationPlaybackEnabledControllerIDs, [second.id])
+
+    coordinator.detach()
+    XCTAssertNil(coordinator.animationPlaybackOwnerID)
+    XCTAssertTrue(coordinator.animationPlaybackEnabledControllerIDs.isEmpty)
+    XCTAssertTrue(pageViewController.completeNextProgrammaticTransition(completed: true))
+    XCTAssertNil(coordinator.animationPlaybackOwnerID)
+    XCTAssertTrue(coordinator.animationPlaybackEnabledControllerIDs.isEmpty)
   }
 
   @MainActor

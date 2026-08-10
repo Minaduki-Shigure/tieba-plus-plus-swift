@@ -1,4 +1,6 @@
+import ImageIO
 import UIKit
+import UniformTypeIdentifiers
 import XCTest
 
 @testable import TiebaPlusPlus
@@ -205,6 +207,77 @@ final class DownsampledRemoteImageTests: XCTestCase {
 
     let recordedKinds = await downloader.recordedKinds()
     XCTAssertEqual(recordedKinds, [.preview])
+  }
+
+  func testCompletedAnimationIsCachedAsTheSameCompleteAsset() async throws {
+    let downloader = RecordingRemoteImageDownloader(
+      imageData: try makeAnimatedGIFData(frameDurations: [0.1, 0.2])
+    )
+    let repository = DownsampledImageRepository(downloader: downloader)
+    let url = try XCTUnwrap(URL(string: "https://img.example/cached-animation.gif"))
+
+    let networkAsset = try await repository.image(
+      at: url,
+      maxPixelSize: 320,
+      fetchPolicy: .allowNetwork(.preview)
+    )
+    let cachedAsset = try await repository.image(
+      at: url,
+      maxPixelSize: 320,
+      fetchPolicy: .cacheOnly
+    )
+
+    let networkAnimation = try XCTUnwrap(networkAsset.animation)
+    let cachedAnimation = try XCTUnwrap(cachedAsset.animation)
+    XCTAssertEqual(networkAnimation.id, cachedAnimation.id)
+    XCTAssertEqual(networkAnimation.frameCount, 2)
+    XCTAssertEqual(networkAsset.decodedByteCost, networkAnimation.decodedByteCost)
+    XCTAssertEqual(cachedAsset.decodedByteCost, networkAsset.decodedByteCost)
+    let secondFrame = try await cachedAnimation.decodedFrame(at: 1)
+    XCTAssertNotNil(secondFrame.image.cgImage)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: cachedAnimation.source.fileURL.path))
+    let frameKey = RemoteImageAnimationFrameCacheKey(
+      sequenceID: cachedAnimation.id,
+      frameIndex: 1
+    )
+    let (frameBeforeClear, _) =
+      RemoteImageAnimationFrameCache.shared.cachedFrameAndGeneration(for: frameKey)
+    XCTAssertNotNil(frameBeforeClear)
+    let recordedKinds = await downloader.recordedKinds()
+    XCTAssertEqual(recordedKinds, [.preview])
+
+    await repository.clearMemoryCache()
+    let (frameAfterClear, _) =
+      RemoteImageAnimationFrameCache.shared.cachedFrameAndGeneration(for: frameKey)
+    XCTAssertNil(frameAfterClear)
+  }
+
+  func testAnimatedAssetRetainsDownloadedLeaseUntilAssetAndCacheRelease() async throws {
+    let data = try makeAnimatedGIFData(frameDurations: [0.1, 0.2])
+    let downloader = RecordingRemoteImageDownloader(imageData: data)
+    let repository = DownsampledImageRepository(downloader: downloader)
+    let url = try XCTUnwrap(URL(string: "https://img.example/lease-animation.gif"))
+    var asset: DownsampledImageAsset? = try await repository.image(
+      at: url,
+      maxPixelSize: 320,
+      fetchPolicy: .allowNetwork(.preview)
+    )
+    var animation: RemoteImageAnimationSequence? = try XCTUnwrap(asset?.animation)
+    let leasedFileURL = try XCTUnwrap(animation?.source.fileURL)
+    let poster = try XCTUnwrap(animation?.poster)
+    let posterCost = try XCTUnwrap(ImageDownsampler.decodedByteCost(of: poster))
+
+    XCTAssertTrue(FileManager.default.fileExists(atPath: leasedFileURL.path))
+    XCTAssertEqual(asset?.decodedByteCost, posterCost + data.count)
+
+    await repository.clearMemoryCache()
+    XCTAssertTrue(FileManager.default.fileExists(atPath: leasedFileURL.path))
+    asset = nil
+    XCTAssertTrue(FileManager.default.fileExists(atPath: leasedFileURL.path))
+
+    animation = nil
+    let didRemoveLease = await waitUntilFileIsRemoved(leasedFileURL)
+    XCTAssertTrue(didRemoveLease)
   }
 
   func testClearMemoryCacheEvictsCompletedEntryWithoutStartingDownload() async throws {
@@ -1264,6 +1337,22 @@ final class DownsampledRemoteImageTests: XCTestCase {
     }
   }
 
+  private func waitUntilFileIsRemoved(
+    _ fileURL: URL,
+    timeout: Duration = .seconds(2)
+  ) async -> Bool {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: timeout)
+    while FileManager.default.fileExists(atPath: fileURL.path), clock.now < deadline {
+      do {
+        try await Task.sleep(for: .milliseconds(1))
+      } catch {
+        return false
+      }
+    }
+    return !FileManager.default.fileExists(atPath: fileURL.path)
+  }
+
   private func makeJPEGData() throws -> Data {
     let renderer = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16))
     let image = renderer.image { context in
@@ -1271,6 +1360,45 @@ final class DownsampledRemoteImageTests: XCTestCase {
       context.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
     }
     return try XCTUnwrap(image.jpegData(compressionQuality: 0.9))
+  }
+
+  private func makeAnimatedGIFData(frameDurations: [TimeInterval]) throws -> Data {
+    let data = NSMutableData()
+    let destination = try XCTUnwrap(
+      CGImageDestinationCreateWithData(
+        data,
+        UTType.gif.identifier as CFString,
+        frameDurations.count,
+        nil
+      )
+    )
+    CGImageDestinationSetProperties(
+      destination,
+      [
+        kCGImagePropertyGIFDictionary: [
+          kCGImagePropertyGIFLoopCount: 0
+        ]
+      ] as CFDictionary
+    )
+    for (index, duration) in frameDurations.enumerated() {
+      let renderer = UIGraphicsImageRenderer(size: CGSize(width: 32, height: 24))
+      let image = renderer.image { context in
+        (index.isMultiple(of: 2) ? UIColor.systemBlue : UIColor.systemRed).setFill()
+        context.fill(CGRect(x: 0, y: 0, width: 32, height: 24))
+      }
+      CGImageDestinationAddImage(
+        destination,
+        try XCTUnwrap(image.cgImage),
+        [
+          kCGImagePropertyGIFDictionary: [
+            kCGImagePropertyGIFDelayTime: duration,
+            kCGImagePropertyGIFUnclampedDelayTime: duration,
+          ]
+        ] as CFDictionary
+      )
+    }
+    XCTAssertTrue(CGImageDestinationFinalize(destination))
+    return data as Data
   }
 }
 
