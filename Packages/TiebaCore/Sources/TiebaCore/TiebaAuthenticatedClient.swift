@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import SwiftProtobuf
 import TiebaProto
@@ -247,6 +248,112 @@ private enum TiebaTextReplyWaitOutcome: Sendable, Equatable {
   case cancelled
 }
 
+struct TiebaNewThreadCredentialFingerprint:
+  Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  private let digest: [UInt8]
+
+  init(credential: TiebaSessionCredential) {
+    var input = Data("TiebaNewThreadCredentialFingerprint/v1".utf8)
+    for value in [
+      credential.bdussCookieName.rawValue,
+      credential.bduss,
+      credential.stoken,
+    ] {
+      var byteCount = UInt64(value.utf8.count).bigEndian
+      withUnsafeBytes(of: &byteCount) { input.append(contentsOf: $0) }
+      input.append(contentsOf: value.utf8)
+    }
+    self.digest = Array(SHA256.hash(data: input))
+  }
+
+  var description: String { "TiebaNewThreadCredentialFingerprint(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror { Mirror(self, children: [:], displayStyle: .struct) }
+}
+
+private struct TiebaNewThreadFlightIdentity:
+  Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let expectedUserID: Int64
+  let submission: TiebaNewThreadSubmission
+  let normalizedForumName: String
+  private let credentialFingerprint: TiebaNewThreadCredentialFingerprint
+
+  init(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    submission: TiebaNewThreadSubmission,
+    normalizedForumName: String
+  ) {
+    self.expectedUserID = expectedUserID
+    self.submission = submission
+    self.normalizedForumName = normalizedForumName
+    self.credentialFingerprint = TiebaNewThreadCredentialFingerprint(credential: credential)
+  }
+
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.expectedUserID == rhs.expectedUserID
+      && lhs.submission == rhs.submission
+      && lhs.normalizedForumName == rhs.normalizedForumName
+      && lhs.credentialFingerprint == rhs.credentialFingerprint
+  }
+
+  var description: String { "TiebaNewThreadFlightIdentity(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(
+      self,
+      children: [
+        "expectedUserID": expectedUserID,
+        "submissionID": submission.submissionID,
+        "forumID": submission.forumID,
+      ],
+      displayStyle: .struct
+    )
+  }
+}
+
+private struct TiebaNewThreadFlight:
+  Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let identity: TiebaNewThreadFlightIdentity
+  let task: Task<TiebaNewThreadResult, Swift.Error>
+  var stage: TiebaNewThreadFlightStage
+
+  var isCompleted: Bool { stage == .completed }
+
+  var description: String { "TiebaNewThreadFlight(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(
+      self,
+      children: [
+        "identity": identity,
+        "stage": stage,
+      ],
+      displayStyle: .struct
+    )
+  }
+}
+
+private enum TiebaNewThreadFlightStage: Sendable, Equatable {
+  case queued
+  case preflight
+  case writeDispatched
+  case completed
+}
+
+private struct TiebaNewThreadAccountTail: Sendable {
+  let submissionID: UUID
+  let task: Task<Void, Never>
+}
+
+private enum TiebaNewThreadWaitOutcome: Sendable, Equatable {
+  case completed
+  case cancelled
+}
+
 public actor TiebaAuthenticatedClient {
   static let accountResponseMaximumBytes = 512 * 1_024
   static let webSessionResponseMaximumBytes = 256 * 1_024
@@ -265,6 +372,8 @@ public actor TiebaAuthenticatedClient {
   static let threadAgreementWriteResponseMaximumBytes = 64 * 1_024
   static let textReplyWriteResponseMaximumBytes = 128 * 1_024
   static let retainedTextReplySubmissionLimit = 64
+  static let newThreadWriteResponseMaximumBytes = 128 * 1_024
+  static let retainedNewThreadSubmissionLimit = 64
 
   private let requestFactory: TiebaAuthenticatedRequestFactory
   private let transport: any TiebaTransport
@@ -295,6 +404,12 @@ public actor TiebaAuthenticatedClient {
   private var textReplyAccountTails = [Int64: TiebaTextReplyAccountTail]()
   private var textReplyWaiters = [
     UUID: [UUID: CheckedContinuation<TiebaTextReplyWaitOutcome, Never>]
+  ]()
+  private var newThreadFlights = [UUID: TiebaNewThreadFlight]()
+  private var newThreadFlightOrder = [UUID]()
+  private var newThreadAccountTails = [Int64: TiebaNewThreadAccountTail]()
+  private var newThreadWaiters = [
+    UUID: [UUID: CheckedContinuation<TiebaNewThreadWaitOutcome, Never>]
   ]()
 
   public init(configuration: TiebaClientConfiguration = .init()) {
@@ -510,6 +625,103 @@ public actor TiebaAuthenticatedClient {
     return try await waitForTextReplyFlight(
       submissionID: submission.submissionID,
       task: task
+    )
+  }
+
+  public func submitNewThread(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    submission: TiebaNewThreadSubmission
+  ) async throws -> TiebaNewThreadResult {
+    try Task.checkCancellation()
+    let normalizedForumName = try requestFactory.validateNewThreadArguments(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      submission: submission
+    )
+    let identity = TiebaNewThreadFlightIdentity(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      submission: submission,
+      normalizedForumName: normalizedForumName
+    )
+    if let flight = newThreadFlights[submission.submissionID] {
+      guard flight.identity == identity else {
+        throw TiebaClientError.newThreadSubmissionIDConflict
+      }
+      return try await waitForNewThreadFlight(
+        submissionID: submission.submissionID,
+        task: flight.task
+      )
+    }
+
+    let predecessor = newThreadAccountTails[expectedUserID]?.task
+    let task: Task<TiebaNewThreadResult, Swift.Error> = Task.detached { [self] in
+      if let predecessor {
+        await predecessor.value
+      }
+      try Task.checkCancellation()
+      return try await performNewThreadSubmission(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        submission: submission,
+        normalizedForumName: normalizedForumName
+      )
+    }
+    newThreadFlights[submission.submissionID] = TiebaNewThreadFlight(
+      identity: identity,
+      task: task,
+      stage: .queued
+    )
+    newThreadFlightOrder.append(submission.submissionID)
+
+    let tail = Task.detached { [self] in
+      await finishNewThreadFlight(
+        submissionID: submission.submissionID,
+        expectedUserID: expectedUserID,
+        task: task
+      )
+    }
+    newThreadAccountTails[expectedUserID] = TiebaNewThreadAccountTail(
+      submissionID: submission.submissionID,
+      task: tail
+    )
+    return try await waitForNewThreadFlight(
+      submissionID: submission.submissionID,
+      task: task
+    )
+  }
+
+  public func verifyNewThreadVisibility(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    submission: TiebaNewThreadSubmission,
+    receipt: TiebaNewThreadReceipt
+  ) async throws -> TiebaNewThreadReceipt? {
+    try Task.checkCancellation()
+    let normalizedForumName = try requestFactory.validateNewThreadArguments(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      submission: submission
+    )
+    guard receipt.isValid else {
+      throw TiebaClientError.invalidArgument(
+        "New-thread receipt identifiers must be positive."
+      )
+    }
+    let context = try await getNewThreadContext(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: submission.forumID,
+      forumName: normalizedForumName
+    )
+    try Task.checkCancellation()
+    return try await verifiedNewThread(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      context: context,
+      submission: submission,
+      receipt: receipt
     )
   }
 
@@ -1245,6 +1457,83 @@ public actor TiebaAuthenticatedClient {
     )
   }
 
+  private func performNewThreadSubmission(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    submission: TiebaNewThreadSubmission,
+    normalizedForumName: String
+  ) async throws -> TiebaNewThreadResult {
+    setNewThreadFlightStage(submissionID: submission.submissionID, stage: .preflight)
+    let context = try await getNewThreadContext(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: submission.forumID,
+      forumName: normalizedForumName
+    )
+    try Task.checkCancellation()
+    let request = try requestFactory.newThread(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      submission: submission,
+      normalizedForumName: normalizedForumName,
+      tbs: context.tbs,
+      accountDisplayName: context.accountDisplayName
+    )
+    try Task.checkCancellation()
+    setNewThreadFlightStage(submissionID: submission.submissionID, stage: .writeDispatched)
+
+    let body: Data
+    do {
+      body = try await send(
+        request,
+        maximumBodyBytes: Self.newThreadWriteResponseMaximumBytes
+      )
+    } catch {
+      throw TiebaClientError.newThreadOutcomeUnknown
+    }
+
+    let receipt: TiebaNewThreadReceipt
+    do {
+      receipt = try TiebaAuthenticatedDecoder.newThreadReceipt(
+        from: body,
+        submission: submission
+      )
+    } catch let error as TiebaClientError {
+      switch error {
+      case .newThreadChallengeRequired, .server:
+        throw error
+      default:
+        throw TiebaClientError.newThreadOutcomeUnknown
+      }
+    } catch {
+      throw TiebaClientError.newThreadOutcomeUnknown
+    }
+
+    let outcome: TiebaNewThreadOutcome
+    do {
+      if let confirmed = try await verifiedNewThread(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        context: context,
+        submission: submission,
+        receipt: receipt
+      ) {
+        outcome = .confirmed(confirmed)
+      } else {
+        outcome = .acceptedAwaitingVisibility(receipt)
+      }
+    } catch {
+      throw TiebaClientError.newThreadOutcomeUnknown
+    }
+    return TiebaNewThreadResult(
+      submissionID: submission.submissionID,
+      userID: expectedUserID,
+      forumID: submission.forumID,
+      forumName: normalizedForumName,
+      outcome: outcome
+    )
+  }
+
   private func performForumCheckIn(
     credential: TiebaBDUSSCredential,
     expectedUserID: Int64,
@@ -1607,6 +1896,134 @@ public actor TiebaAuthenticatedClient {
     textReplyWaiters.values.reduce(0) { $0 + $1.count }
   }
 
+  private func waitForNewThreadFlight(
+    submissionID: UUID,
+    task: Task<TiebaNewThreadResult, Swift.Error>
+  ) async throws -> TiebaNewThreadResult {
+    try Task.checkCancellation()
+    if newThreadFlights[submissionID]?.isCompleted != false {
+      return try await task.value
+    }
+
+    let waiterID = UUID()
+    let outcome = await withTaskCancellationHandler {
+      await withCheckedContinuation { continuation in
+        guard
+          !Task.isCancelled,
+          newThreadFlights[submissionID]?.isCompleted == false
+        else {
+          continuation.resume(
+            returning: Task.isCancelled
+              ? TiebaNewThreadWaitOutcome.cancelled
+              : TiebaNewThreadWaitOutcome.completed
+          )
+          return
+        }
+        newThreadWaiters[submissionID, default: [:]][waiterID] = continuation
+      }
+    } onCancel: {
+      Task {
+        await self.cancelNewThreadWaiter(
+          submissionID: submissionID,
+          waiterID: waiterID
+        )
+      }
+    }
+    guard outcome == .completed else { throw CancellationError() }
+    return try await task.value
+  }
+
+  private func cancelNewThreadWaiter(
+    submissionID: UUID,
+    waiterID: UUID
+  ) {
+    guard var waiters = newThreadWaiters[submissionID] else { return }
+    let continuation = waiters.removeValue(forKey: waiterID)
+    if waiters.isEmpty {
+      newThreadWaiters.removeValue(forKey: submissionID)
+      if let flight = newThreadFlights[submissionID],
+        flight.stage == .queued || flight.stage == .preflight
+      {
+        flight.task.cancel()
+      }
+    } else {
+      newThreadWaiters[submissionID] = waiters
+    }
+    continuation?.resume(returning: .cancelled)
+  }
+
+  private func finishNewThreadFlight(
+    submissionID: UUID,
+    expectedUserID: Int64,
+    task: Task<TiebaNewThreadResult, Swift.Error>
+  ) async {
+    let result = await task.result
+    guard var flight = newThreadFlights[submissionID] else { return }
+    flight.stage = .completed
+
+    let retainsSubmission: Bool
+    switch result {
+    case .success:
+      retainsSubmission = true
+    case .failure(let error):
+      retainsSubmission = (error as? TiebaClientError) == .newThreadOutcomeUnknown
+    }
+    if retainsSubmission {
+      newThreadFlights[submissionID] = flight
+    } else {
+      newThreadFlights.removeValue(forKey: submissionID)
+      newThreadFlightOrder.removeAll { $0 == submissionID }
+    }
+    if newThreadAccountTails[expectedUserID]?.submissionID == submissionID {
+      newThreadAccountTails.removeValue(forKey: expectedUserID)
+    }
+
+    let waiters = newThreadWaiters.removeValue(forKey: submissionID) ?? [:]
+    for continuation in waiters.values {
+      continuation.resume(returning: .completed)
+    }
+    pruneRetainedNewThreadFlights()
+  }
+
+  private func pruneRetainedNewThreadFlights() {
+    var completedCount = newThreadFlights.values.lazy.filter(\.isCompleted).count
+    guard completedCount > Self.retainedNewThreadSubmissionLimit else { return }
+    var retainedOrder = [UUID]()
+    retainedOrder.reserveCapacity(newThreadFlightOrder.count)
+    for submissionID in newThreadFlightOrder {
+      if completedCount > Self.retainedNewThreadSubmissionLimit,
+        newThreadFlights[submissionID]?.isCompleted == true
+      {
+        newThreadFlights.removeValue(forKey: submissionID)
+        completedCount -= 1
+      } else if newThreadFlights[submissionID] != nil {
+        retainedOrder.append(submissionID)
+      }
+    }
+    newThreadFlightOrder = retainedOrder
+  }
+
+  private func setNewThreadFlightStage(
+    submissionID: UUID,
+    stage: TiebaNewThreadFlightStage
+  ) {
+    guard var flight = newThreadFlights[submissionID], !flight.isCompleted else { return }
+    flight.stage = stage
+    newThreadFlights[submissionID] = flight
+  }
+
+  func newThreadWaiterCount(submissionID: UUID) -> Int {
+    newThreadWaiters[submissionID]?.count ?? 0
+  }
+
+  func newThreadWaiterCountForTests() -> Int {
+    newThreadWaiters.values.reduce(0) { $0 + $1.count }
+  }
+
+  func newThreadRetainedFlightCountForTests() -> Int {
+    newThreadFlights.values.lazy.filter(\.isCompleted).count
+  }
+
   private func adjustedAgreementScore(_ score: Int, isAgreed: Bool) -> Int {
     let delta = isAgreed ? 1 : -1
     let (adjusted, overflow) = score.addingReportingOverflow(delta)
@@ -1726,6 +2143,66 @@ public actor TiebaAuthenticatedClient {
       expectedUserID: expectedUserID,
       forumID: forumID,
       threadID: threadID
+    )
+  }
+
+  private func getNewThreadContext(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> TiebaNewThreadContext {
+    let request = try requestFactory.forumMembership(
+      credential: credential.bdussCredential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      forumName: forumName
+    )
+    let response: FrsPageResIdl = try await sendProtobuf(
+      request,
+      maximumBodyBytes: Self.forumMembershipResponseMaximumBytes
+    )
+    return try TiebaAuthenticatedDecoder.newThreadContext(
+      from: response,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      forumName: forumName
+    )
+  }
+
+  private func verifiedNewThread(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    context: TiebaNewThreadContext,
+    submission: TiebaNewThreadSubmission,
+    receipt: TiebaNewThreadReceipt
+  ) async throws -> TiebaNewThreadReceipt? {
+    guard expectedUserID == context.userID else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    let request = try requestFactory.agreementPage(
+      credential: credential.bdussCredential,
+      expectedUserID: expectedUserID,
+      forumID: submission.forumID,
+      threadID: receipt.threadID,
+      page: 1,
+      pageSize: 2,
+      sort: .ascending,
+      onlyThreadAuthor: false,
+      location: .postID(receipt.firstPostID),
+      includeSubposts: false,
+      subpostsSortedByAgree: true,
+      subpostPageSize: 4
+    )
+    let response: PbPageResIdl = try await sendProtobuf(
+      request,
+      maximumBodyBytes: Self.agreementPageResponseMaximumBytes
+    )
+    return try TiebaAuthenticatedDecoder.verifiedNewThread(
+      from: response,
+      context: context,
+      submission: submission,
+      receipt: receipt
     )
   }
 

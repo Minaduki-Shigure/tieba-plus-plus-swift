@@ -18,6 +18,9 @@ public enum TiebaClientError: Error, Sendable, Equatable {
   case replyChallengeRequired(message: String)
   case replyOutcomeUnknown
   case replySubmissionIDConflict
+  case newThreadChallengeRequired(message: String)
+  case newThreadOutcomeUnknown
+  case newThreadSubmissionIDConflict
   case server(code: Int32, message: String)
 }
 
@@ -60,6 +63,14 @@ extension TiebaClientError: LocalizedError {
       "The reply may have been submitted, but Tieba did not return a verifiable receipt."
     case .replySubmissionIDConflict:
       "The reply submission identifier was already used for a different request."
+    case .newThreadChallengeRequired(let message):
+      message.isEmpty
+        ? "Tieba requires additional verification before this thread can be submitted."
+        : message
+    case .newThreadOutcomeUnknown:
+      "The thread may have been submitted, but Tieba did not return a verifiable receipt."
+    case .newThreadSubmissionIDConflict:
+      "The new-thread submission identifier was already used for a different request."
     case .server(let code, let message):
       message.isEmpty ? "Tieba returned error \(code)." : message
     }

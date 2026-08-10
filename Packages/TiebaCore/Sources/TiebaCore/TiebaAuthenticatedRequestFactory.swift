@@ -18,6 +18,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let cloudFavoritesClientVersion = "11.10.8.6"
   static let threadCloudFavoriteClientVersion = "12.41.7.1"
   static let textReplyClientVersion = "12.35.1.0"
+  static let newThreadClientVersion = "7.2.0.0"
   static let concernClientVersion = "11.10.8.6"
   static let maximumConcernPageTagBytes = 4_096
   static let writeHost = TiebaRequestFactory.serviceHost
@@ -288,6 +289,87 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       )
     }
     return try normalizedForumName(submission.forumName)
+  }
+
+  func validateNewThreadArguments(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    submission: TiebaNewThreadSubmission
+  ) throws -> String {
+    try validate(credential)
+    try validateIdentity(expectedUserID: expectedUserID, forumID: submission.forumID)
+    guard
+      TiebaNewThreadContentPolicy.isValid(
+        title: submission.title,
+        content: submission.content
+      )
+    else {
+      throw TiebaClientError.invalidArgument(
+        "The new-thread title or content is invalid, too large, contains unsupported control characters, or contains a Tieba rich-content marker."
+      )
+    }
+    return try normalizedForumName(submission.forumName)
+  }
+
+  func newThread(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    submission: TiebaNewThreadSubmission,
+    normalizedForumName: String,
+    tbs: String,
+    accountDisplayName: String
+  ) throws -> URLRequest {
+    let validatedForumName = try validateNewThreadArguments(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      submission: submission
+    )
+    guard validatedForumName == normalizedForumName, Self.isValidTBS(tbs) else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    let displayName = try validatedReplyMetadata(
+      accountDisplayName,
+      name: "Account display name",
+      maximumBytes: 512,
+      allowsEmpty: false
+    )
+    let title = submission.title.precomposedStringWithCanonicalMapping
+    let isUntitled = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+    return try signedFormRequest(
+      host: Self.writeHost,
+      path: "/c/c/thread/add",
+      fields: [
+        ("BDUSS", credential.bduss),
+        ("_client_type", "2"),
+        ("_client_version", Self.newThreadClientVersion),
+        ("anonymous", "1"),
+        ("call_from", "2"),
+        ("can_no_forum", "0"),
+        ("content", submission.content),
+        ("cuid_gid", ""),
+        ("entrance_type", "1"),
+        ("fid", String(submission.forumID)),
+        ("from", "1021636m"),
+        ("is_feedback", "0"),
+        ("is_hide", "1"),
+        ("is_ntitle", isUntitled ? "1" : "0"),
+        ("kw", normalizedForumName),
+        ("name_show", displayName),
+        ("new_vcode", "1"),
+        ("reply_uid", "null"),
+        ("stoken", credential.stoken),
+        ("subapp_type", "mini"),
+        ("takephoto_num", "0"),
+        ("tbs", tbs),
+        ("title", title),
+        ("vcode_tag", "12"),
+        ("z_id", ""),
+      ],
+      userAgent: "bdtb for Android \(Self.newThreadClientVersion)",
+      clientUserToken: String(expectedUserID),
+      cookie: "ka=open"
+    )
   }
 
   func textReply(

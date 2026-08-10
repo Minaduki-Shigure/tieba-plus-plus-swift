@@ -363,6 +363,15 @@ protocol AccountService: Sendable {
     session: StoredAccountSession,
     submission: TextReplySubmission
   ) async throws -> TextReplyResult
+  func submitNewThread(
+    session: StoredAccountSession,
+    submission: NewThreadSubmission
+  ) async throws -> NewThreadResult
+  func verifyNewThreadVisibility(
+    session: StoredAccountSession,
+    submission: NewThreadSubmission,
+    receipt: NewThreadReceipt
+  ) async throws -> NewThreadVisibilityConfirmation?
   func concernFeed(
     session: StoredAccountSession,
     pageTag: String?,
@@ -465,6 +474,21 @@ extension AccountService {
     submission: TextReplySubmission
   ) async throws -> TextReplyResult {
     throw TextReplySubmissionError.unavailable
+  }
+
+  func submitNewThread(
+    session: StoredAccountSession,
+    submission: NewThreadSubmission
+  ) async throws -> NewThreadResult {
+    throw NewThreadSubmissionError.unavailable
+  }
+
+  func verifyNewThreadVisibility(
+    session: StoredAccountSession,
+    submission: NewThreadSubmission,
+    receipt: NewThreadReceipt
+  ) async throws -> NewThreadVisibilityConfirmation? {
+    throw NewThreadSubmissionError.unavailable
   }
 
   func notifications(

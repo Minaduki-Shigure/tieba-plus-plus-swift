@@ -22,6 +22,10 @@ private struct TextReplySubmissionStoreEnvironmentKey: EnvironmentKey {
   static let defaultValue: TextReplySubmissionStore? = nil
 }
 
+private struct NewThreadSubmissionStoreEnvironmentKey: EnvironmentKey {
+  static let defaultValue: NewThreadSubmissionStore? = nil
+}
+
 extension EnvironmentValues {
   var accountAccess: AccountAccess? {
     get { self[AccountAccessEnvironmentKey.self] }
@@ -41,6 +45,11 @@ extension EnvironmentValues {
   var textReplySubmissionStore: TextReplySubmissionStore? {
     get { self[TextReplySubmissionStoreEnvironmentKey.self] }
     set { self[TextReplySubmissionStoreEnvironmentKey.self] = newValue }
+  }
+
+  var newThreadSubmissionStore: NewThreadSubmissionStore? {
+    get { self[NewThreadSubmissionStoreEnvironmentKey.self] }
+    set { self[NewThreadSubmissionStoreEnvironmentKey.self] = newValue }
   }
 }
 

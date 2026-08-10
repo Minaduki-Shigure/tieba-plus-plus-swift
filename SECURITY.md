@@ -343,11 +343,47 @@ cannot overwrite a mutation or the new account's state.
 
 Follow, unfollow, check-in, topic, post, or nested-reply approval or
 cancellation, and each supported plain-text topic, floor, or nested-reply
-submission all require explicit user confirmation. Automatic, scheduled, and
-batch check-in are deliberately unsupported. `disagree` or downvote, new-topic
-creation, rich-media replying, editing, deletion, reporting, and every other
-authenticated content write remain unsupported and must not be inferred from
-the approval or plain-text reply endpoints.
+submission, plus plain-text new-topic creation, all require explicit user
+confirmation. Automatic, scheduled, and batch check-in are deliberately
+unsupported. `disagree` or downvote, rich-media topic/reply creation, editing,
+deletion, reporting, and every other authenticated content write remain
+unsupported and must not be inferred from the approval, reply, or new-topic
+endpoints.
+
+Plain-text new-topic creation requires a validated complete BDUSS/STOKEN session
+and a fresh authenticated FRS preflight binding the exact UID, positive forum ID,
+canonical forum name, trusted display name, and valid TBS. It may then send at
+most one signed HTTPS POST to `https://tiebac.baidu.com/c/c/thread/add`. The form
+uses the observed fixed mini-client fields plus only the credential, forum,
+title, body, display name, and TBS needed by that endpoint. The contract's
+`cuid_gid` and `z_id` values remain empty; it must not add an IMEI, Android ID,
+OAID, nonempty CUID/ZID, model, screen, location, installation history,
+advertising data, or randomized telemetry, and every redirect is rejected.
+
+Titles are optional and bounded to 31 Swift characters and 124 UTF-8 bytes;
+bodies use the reply policy's 10,000-character and 32 KiB limits. Titles reject
+control characters; bodies preserve CR, LF, and tab while rejecting other
+unsupported controls. Tieba rich-content markers are rejected. An identical submission
+UUID shares one owner, conflicting reuse fails, and all new-topic writes for one
+UID are serialized. Cancellation before dispatch performs no write. Once the
+write is dispatched, it is never automatically retried: an unparseable receipt,
+transport loss, or mismatched authenticated readback becomes an unknown outcome.
+A positive TID/PID is confirmed only by an exact account, forum, thread, first-
+floor author, explicit-title, and body match. A missing first floor remains
+accepted-awaiting-visibility; an untitled topic may accept a server-generated
+display title only when every other proof matches.
+
+The App stores new-topic drafts in a bounded, versioned atomic archive keyed by
+the account UID and exact forum identity. The archive contains title, body,
+submission state, receipt when available, and timestamps, but no credential,
+TBS, trusted display name, or private response. It is excluded from backup and
+uses iOS file protection. A submission-pending marker must reach disk before the
+write. Challenge, accepted, and unknown states are non-sendable across
+navigation and restart; an explicit new login is required to unlock a challenge.
+A confirmed submission is retained as a bounded receipt tombstone until the user
+explicitly starts another topic in that forum. The App must not clear it merely
+because the write task returned: a crash before the success navigation became
+visible would otherwise restore an apparently sendable old body.
 
 STOKEN is available only through a validated complete session and only to an
 endpoint whose contract explicitly requires it. The current unfollow, check-in,
@@ -1128,7 +1164,13 @@ or mismatched PB state, valid/random/cross-account/expired STOKEN, a known serve
 failure, an uncertain write followed by exactly one readback and no second write,
 nominal success followed by mandatory readback, identical-operation sharing,
 conflicting-operation read-only reconciliation, logout, same-UID session
-rotation, and a switch to another UID while either read or write is in flight.
+  rotation, and a switch to another UID while either read or write is in flight.
+Plain-text new-topic validation must additionally cover titled and untitled
+topics, Chinese/emoji/newline/form-reserved characters, exact forum and author
+binding, server-generated untitled display titles, challenge and moderation
+delay, pre-dispatch cancellation, post-dispatch transport loss, foreground and
+background transitions, same-UID credential rotation, account switching, and
+proof that every submission dispatches at most one write.
 
 Report security issues privately to the repository owner rather than opening a
 public issue.

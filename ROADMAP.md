@@ -22,9 +22,9 @@ versioned separately and currently serves `v0.59.0-alpha.1` (build 62).
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
 | Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, media preferences, and local reply-entry visibility are implemented; TiebaLite's wider settings and customization surface remains |
 | Account, session, and private read flows | 15 | 9 | Login, switching, followed and target-user liked forums, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
-| Server writes, creation, and social actions | 15 | 5–6 | Follow/unfollow, check-in, approval, verified list/thread-detail cloud-favorite mutations, and three plain-text reply targets have guarded implementations; real reply success, new topics, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
+| Server writes, creation, and social actions | 15 | 6–7 | Follow/unfollow, check-in, approval, verified list/thread-detail cloud-favorite mutations, three plain-text reply targets, and plain-text new-topic creation have guarded implementations; real creation success, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
-| **Total** | **100** | **70–73** | Current full-product estimate |
+| **Total** | **100** | **71–74** | Current full-product estimate |
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
 points, or roughly 91–95%. Concern and the foreground unread summary raise the
@@ -179,6 +179,10 @@ the source metadata is updated to that tested IPA.
   first floor, with exact target rebinding, account-level write serialization,
   persistent per-target drafts, strict challenge/accepted/unknown states, and
   exact-PID readback without write retry
+- Experimental native plain-text new-topic creation from a loaded forum, with an
+  optional bounded title, fresh account/forum/TBS preflight, one signed HTTPS
+  write, persistent per-account-and-forum drafts, strict
+  challenge/accepted/unknown states, and exact TID/PID readback without retry
 - Page-shaped authenticated approval overlays that mirror the anonymous post
   and nested-reply requests, batch the currently retained targets, and refresh
   a full nested-reply page even when its target set is unchanged
@@ -224,8 +228,9 @@ the source metadata is updated to that tested IPA.
    including minimum-field deletion, missing/random/expired/cross-account
    STOKEN and TBS, challenge and permission failures, post-dispatch loss,
    exact-PID visibility, account rotation, and duplicate-send prevention
-10. Broader settings parity, remaining account activity, new-topic and rich-media
-   creation, and moderation tools
+10. Disposable-account validation of plain-text new-topic creation, followed by
+   rich-media topic/reply creation, broader settings parity, remaining account
+   activity, and moderation tools
 
 The foreground inbox deliberately does not copy TiebaLite's cleartext JSON
 transport or its Android hardware parameters. ReplyMe uses the current HTTPS
@@ -902,6 +907,33 @@ remain non-sendable across navigation and restart; a challenge for one session
 can be unlocked only by an explicit new login. Composer navigation uses the
 native stack without a custom back gesture, including cancellation of an
 interactive edge swipe.
+
+Plain-text new topics use one signed HTTPS form at `/c/c/thread/add` after a
+fresh authenticated FRS read binds the active UID, positive forum ID, canonical
+forum name, trusted account display name, and valid TBS. The optional title is
+limited to 31 Swift characters and 124 UTF-8 bytes; the body uses the same
+10,000-character and 32 KiB plain-text bounds as replies. Titles reject control
+characters; bodies preserve line breaks and tabs while rejecting other
+unsupported controls. Both reject Tieba rich-content markers. The minimal form
+follows the observed
+TiebaLite contract but deliberately omits Android hardware, advertising,
+installation, screen, network, and telemetry identifiers; every redirect is
+rejected.
+
+One account has one new-topic write tail. An identical submission UUID shares
+its owner, conflicting reuse is rejected, and cancellation before dispatch
+performs no write. After dispatch, transport loss, malformed receipts, or
+mismatched readback become an unknown outcome and are never resent. A positive
+TID/PID receipt is confirmed only when an authenticated first-floor readback
+matches the account, forum, thread, author, explicit title when supplied, and
+exact plain-text body. Temporary first-floor absence remains
+accepted-awaiting-visibility. The App persists a non-sendable marker before the
+write, isolates drafts by account and forum, locks challenge and unknown states,
+and allows an untitled topic's server-generated display title only after all
+other proof matches. Confirmed creation remains as a bounded local tombstone
+across restart until the user explicitly starts another topic in that forum, so
+a crash between persistence and navigation cannot reopen the old body as
+sendable. Rich-media topic creation remains unsupported.
 
 Search categories load independently so one endpoint failure does not discard
 another category's results. User search uses the credential-free Web endpoint,

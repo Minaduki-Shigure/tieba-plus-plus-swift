@@ -6,6 +6,11 @@ private enum ForumScrollTarget: Hashable {
   case top
 }
 
+private enum ForumNavigationDestination {
+  case newThread(NewThreadTarget)
+  case createdThread(BrowseThread)
+}
+
 struct ForumView: View {
   let service:
     any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
@@ -14,6 +19,7 @@ struct ForumView: View {
   let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @StateObject private var viewModel: ForumViewModel
+  @State private var navigationDestination: ForumNavigationDestination?
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Environment(\.accountAccess) private var accountAccess
 
@@ -74,6 +80,17 @@ struct ForumView: View {
           .accessibilityLabel("吧内搜索")
           .help("吧内搜索")
 
+          if let target = newThreadTarget {
+            Button {
+              navigationDestination = .newThread(target)
+            } label: {
+              Image(systemName: "square.and.pencil")
+            }
+            .accessibilityLabel("发布主题")
+            .help("发布主题")
+            .accessibilityIdentifier("forum-new-thread")
+          }
+
           if let accountAccess, viewModel.forum.id > 0 {
             ForumMembershipToolbarControl(
               forumID: viewModel.forum.id,
@@ -113,12 +130,98 @@ struct ForumView: View {
       .onChange(of: viewModel.options.sort) { sort in
         ForumSortPreferences.save(sort, for: viewModel.forumName)
       }
+      .navigationDestination(isPresented: forumNavigationPresented) {
+        switch navigationDestination {
+        case .newThread(let target):
+          NewThreadComposerView(
+            target: target,
+            verifyVisibility: { submission, receipt in
+              try await verifyNewThreadVisibility(submission, receipt: receipt)
+            },
+            onConfirmed: handleConfirmedNewThread
+          )
+          .id("new-thread:\(target.id)")
+        case .createdThread(let createdThread):
+          ThreadView(
+            thread: createdThread,
+            service: service,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository,
+            linkRoute: TiebaThreadRoute(
+              threadID: createdThread.id,
+              postID: createdThread.firstPostID
+            )
+          )
+          .id("created-thread:\(createdThread.id):\(createdThread.firstPostID)")
+        case nil:
+          EmptyView()
+        }
+      }
     }
   }
 
   private var membershipForumName: String {
     let name = viewModel.forum.name.trimmingCharacters(in: .whitespacesAndNewlines)
     return name.isEmpty ? viewModel.forumName : name
+  }
+
+  private var newThreadTarget: NewThreadTarget? {
+    guard accountAccess != nil, viewModel.forum.id > 0 else { return nil }
+    return NewThreadTarget(
+      forumID: viewModel.forum.id,
+      forumName: membershipForumName
+    )
+  }
+
+  private var forumNavigationPresented: Binding<Bool> {
+    Binding(
+      get: { navigationDestination != nil },
+      set: { isPresented in
+        if !isPresented { navigationDestination = nil }
+      }
+    )
+  }
+
+  private func verifyNewThreadVisibility(
+    _ submission: NewThreadSubmission,
+    receipt: NewThreadReceipt
+  ) async throws -> NewThreadVisibilityConfirmation? {
+    guard let currentTarget = newThreadTarget, submission.target == currentTarget else {
+      throw NewThreadSubmissionError.invalidSubmission
+    }
+    guard let accountAccess, let session = try await accountAccess.vault.activeSession() else {
+      throw NewThreadSubmissionError.signedOut
+    }
+    return try await accountAccess.service.verifyNewThreadVisibility(
+      session: session,
+      submission: submission,
+      receipt: receipt
+    )
+  }
+
+  private func handleConfirmedNewThread(
+    _ receipt: NewThreadReceipt,
+    title: String?,
+    content: String
+  ) {
+    let fallbackTitle = content.trimmingCharacters(in: .whitespacesAndNewlines)
+    let thread = BrowseThread(
+      id: receipt.threadID,
+      forumID: viewModel.forum.id,
+      forumName: membershipForumName,
+      title: title ?? String(fallbackTitle.prefix(NewThreadTitlePolicy.maximumCharacterCount)),
+      excerpt: String(content.prefix(160)),
+      authorName: "",
+      replyCount: 0,
+      viewCount: 0,
+      createdAt: nil,
+      lastReplyAt: nil,
+      contents: [.text(content)],
+      firstPostID: receipt.firstPostID
+    )
+    viewModel.reload()
+    navigationDestination = .createdThread(thread)
   }
 
   private func forumActionsMenu(proxy: ScrollViewProxy) -> some View {

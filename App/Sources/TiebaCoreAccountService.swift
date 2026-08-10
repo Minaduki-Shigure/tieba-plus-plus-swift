@@ -45,6 +45,17 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
     expectedUserID: Int64,
     submission: TiebaTextReplySubmission
   ) async throws -> TiebaTextReplyResult
+  func submitNewThread(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    submission: TiebaNewThreadSubmission
+  ) async throws -> TiebaNewThreadResult
+  func verifyNewThreadVisibility(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    submission: TiebaNewThreadSubmission,
+    receipt: TiebaNewThreadReceipt
+  ) async throws -> TiebaNewThreadReceipt?
   func getConcernFeed(
     credential: TiebaSessionCredential,
     expectedUserID: Int64,
@@ -211,6 +222,23 @@ extension TiebaAuthenticatedAccountClient {
     expectedUserID: Int64,
     submission: TiebaTextReplySubmission
   ) async throws -> TiebaTextReplyResult {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
+  func submitNewThread(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    submission: TiebaNewThreadSubmission
+  ) async throws -> TiebaNewThreadResult {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
+  func verifyNewThreadVisibility(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    submission: TiebaNewThreadSubmission,
+    receipt: TiebaNewThreadReceipt
+  ) async throws -> TiebaNewThreadReceipt? {
     throw TiebaClientError.invalidAuthenticatedResponse
   }
 
@@ -465,6 +493,107 @@ struct TiebaCoreAccountService: AccountService {
       throw TextReplySubmissionError.outcomeUnknown
     }
     return result
+  }
+
+  func submitNewThread(
+    session: StoredAccountSession,
+    submission: NewThreadSubmission
+  ) async throws -> NewThreadResult {
+    guard session.id > 0, let credentials = session.credentials else {
+      throw NewThreadSubmissionError.fullCredentialsRequired
+    }
+    let coreSubmission = TiebaNewThreadSubmission(
+      submissionID: submission.id,
+      forumID: submission.target.forumID,
+      forumName: submission.target.forumName,
+      title: submission.title ?? "",
+      content: submission.content
+    )
+    let response: TiebaNewThreadResult
+    do {
+      response = try await client.submitNewThread(
+        credential: Self.coreSessionCredential(credentials),
+        expectedUserID: session.id,
+        submission: coreSubmission
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch let error as TiebaClientError {
+      throw Self.newThreadError(error)
+    } catch {
+      throw NewThreadSubmissionError.unavailable
+    }
+
+    guard
+      response.submissionID == submission.id,
+      response.userID == session.id,
+      response.forumID == submission.target.forumID,
+      response.forumName == submission.target.forumName,
+      let outcome = Self.newThreadOutcome(response.outcome),
+      let result = NewThreadResult(
+        submissionID: response.submissionID,
+        userID: response.userID,
+        target: submission.target,
+        outcome: outcome
+      )
+    else {
+      throw NewThreadSubmissionError.outcomeUnknown
+    }
+    return result
+  }
+
+  func verifyNewThreadVisibility(
+    session: StoredAccountSession,
+    submission: NewThreadSubmission,
+    receipt: NewThreadReceipt
+  ) async throws -> NewThreadVisibilityConfirmation? {
+    guard session.id > 0, let credentials = session.credentials else {
+      throw NewThreadSubmissionError.fullCredentialsRequired
+    }
+    let coreSubmission = TiebaNewThreadSubmission(
+      submissionID: submission.id,
+      forumID: submission.target.forumID,
+      forumName: submission.target.forumName,
+      title: submission.title ?? "",
+      content: submission.content
+    )
+    let coreReceipt = TiebaNewThreadReceipt(
+      threadID: receipt.threadID,
+      firstPostID: receipt.firstPostID
+    )
+    let verifiedReceipt: TiebaNewThreadReceipt?
+    do {
+      verifiedReceipt = try await client.verifyNewThreadVisibility(
+        credential: Self.coreSessionCredential(credentials),
+        expectedUserID: session.id,
+        submission: coreSubmission,
+        receipt: coreReceipt
+      )
+      try Task.checkCancellation()
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw NewThreadSubmissionError.unavailable
+    }
+
+    guard let verifiedReceipt else { return nil }
+    guard
+      let confirmedReceipt = NewThreadReceipt(
+        threadID: verifiedReceipt.threadID,
+        firstPostID: verifiedReceipt.firstPostID
+      ),
+      confirmedReceipt == receipt,
+      let confirmation = NewThreadVisibilityConfirmation(
+        receipt: confirmedReceipt,
+        target: submission.target,
+        authorUserID: session.id,
+        title: submission.title,
+        content: submission.content
+      )
+    else {
+      throw NewThreadSubmissionError.unavailable
+    }
+    return confirmation
   }
 
   func threadCloudFavorite(
@@ -1357,6 +1486,45 @@ struct TiebaCoreAccountService: AccountService {
     case .replyOutcomeUnknown:
       .outcomeUnknown
     case .replySubmissionIDConflict:
+      .submissionConflict
+    case .server(let code, _):
+      .server(code: code)
+    default:
+      .unavailable
+    }
+  }
+
+  private static func newThreadOutcome(
+    _ outcome: TiebaNewThreadOutcome
+  ) -> NewThreadOutcome? {
+    let coreReceipt: TiebaNewThreadReceipt
+    let isConfirmed: Bool
+    switch outcome {
+    case .confirmed(let receipt):
+      coreReceipt = receipt
+      isConfirmed = true
+    case .acceptedAwaitingVisibility(let receipt):
+      coreReceipt = receipt
+      isConfirmed = false
+    }
+    guard
+      let receipt = NewThreadReceipt(
+        threadID: coreReceipt.threadID,
+        firstPostID: coreReceipt.firstPostID
+      )
+    else { return nil }
+    return isConfirmed ? .confirmed(receipt) : .acceptedAwaitingVisibility(receipt)
+  }
+
+  private static func newThreadError(_ error: TiebaClientError) -> NewThreadSubmissionError {
+    switch error {
+    case .invalidArgument:
+      .invalidSubmission
+    case .newThreadChallengeRequired:
+      .challengeRequired
+    case .newThreadOutcomeUnknown:
+      .outcomeUnknown
+    case .newThreadSubmissionIDConflict:
       .submissionConflict
     case .server(let code, _):
       .server(code: code)

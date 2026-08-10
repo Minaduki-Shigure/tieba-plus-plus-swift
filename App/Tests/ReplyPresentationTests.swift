@@ -54,10 +54,13 @@ final class ReplyPresentationTests: XCTestCase {
   func testCancelledInteractivePopInvalidatesPendingDeactivation() throws {
     var gate = ReplyComposerLifecycleGate()
     _ = gate.beginAppearance()
+    XCTAssertTrue(gate.isActive)
     let disappearingLifecycle = try XCTUnwrap(gate.scheduleDeactivation())
+    XCTAssertFalse(gate.isActive)
 
     _ = gate.beginAppearance()
 
+    XCTAssertTrue(gate.isActive)
     XCTAssertFalse(gate.isCurrent(disappearingLifecycle))
     XCTAssertNotNil(gate.scheduleDeactivation())
     XCTAssertNil(gate.scheduleDeactivation())

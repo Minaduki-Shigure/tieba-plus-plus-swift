@@ -63,7 +63,8 @@ The authenticated client supports BDUSS-only identity validation, full-session
 UID-consistency probes, followed and target-user liked forums, an account-bound concern feed,
 Tieba cloud-favorite reads and guarded thread-detail mutations, authoritative
 per-forum follow/check-in state, confirmed follow/unfollow, and explicit
-single-forum check-in. Core single-flights equivalent check-in and cloud-favorite
+single-forum check-in. It also exposes guarded plain-text reply and new-topic
+creation for validation builds. Core single-flights equivalent check-in and cloud-favorite
 calls and serializes conflicting identities for the same resource. The
 app's Keychain and account-service layers own persistence, credential-rotation
 leases, and mutual exclusion between follow and check-in. A conflicting App
@@ -130,6 +131,17 @@ let threadFavorite = try await authenticatedClient.getThreadCloudFavoriteState(
 let concern = try await authenticatedClient.getConcernFeed(
     credential: sessionCredential,
     expectedUserID: sessionAccount.userID
+)
+let newThread = try await authenticatedClient.submitNewThread(
+    credential: sessionCredential,
+    expectedUserID: sessionAccount.userID,
+    submission: TiebaNewThreadSubmission(
+        submissionID: UUID(),
+        forumID: favoriteForumID,
+        forumName: "swift",
+        title: "Optional title",
+        content: "Plain-text body"
+    )
 )
 ```
 
@@ -300,6 +312,18 @@ not advertise a usable sign state; it is not permission to attempt a write.
   request or bounded write flight. Credential values are redacted from public
   debug descriptions and mirrors, and the FRS anti-CSRF value is not exposed by
   the public API.
+- Plain-text new topics use one signed HTTPS `/c/c/thread/add` form only after a
+  fresh FRS response binds the expected UID, forum ID/name, trusted display name,
+  and valid TBS. Titles are capped at 31 Swift characters and 124 UTF-8 bytes;
+  bodies use the 10,000-character/32 KiB reply bounds. Rich markers and
+  unsupported control characters are rejected. The minimal form omits
+  hardware-derived and advertising fields,
+  rejects every redirect, and has a 128 KiB response limit. Per-account writes
+  are serialized; equal submission UUIDs share a flight, conflicting reuse is
+  rejected, cancellation before dispatch sends no write, and a dispatched write
+  is never retried. Positive TID/PID receipts receive one authenticated first-
+  floor readback; exact matches confirm, temporary absence remains accepted, and
+  mismatches or lost receipts become an unknown outcome.
 
 The account unread summary uses `POST https://tiebac.baidu.com/c/s/msg` with a
 signed form restricted to BDUSS, `_client_version=8.2.2`, and `bookmark=1` plus
@@ -316,7 +340,7 @@ subpost approval writes are implemented. Thread-detail cloud-favorite add,
 saved-position update, and removal plus verified single-item list removal are
 experimental validation-build features; notifications remain read-only.
 Automatic or batch check-in, unverified list deletion, bulk synchronization,
-new-topic creation, rich-media replies, and moderation remain unsupported.
+rich-media topic/reply creation, and moderation remain unsupported.
 
 ## Tests
 

@@ -413,6 +413,10 @@ struct ReplyComposerLifecycleGate {
   func isCurrent(_ candidate: UUID) -> Bool {
     lifecycleID == candidate
   }
+
+  var isActive: Bool {
+    !deactivationIsScheduled
+  }
 }
 
 extension TextReplyComposerContext {

@@ -18,8 +18,8 @@ checks.
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, media preferences, and reply-entry visibility |
 | Accounts | Current `main` supports bound Web login, switching, logout, followed forums, login-gated complete liked-forum lists for the current or another user, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, and experimental content approval |
-| Server-side writes | Guarded forum follow/unfollow, check-in, content approval, thread-detail and verified list-level cloud-favorite changes, and plain-text topic/floor/nested replies are in device validation; other writes stay disabled |
-| TiebaLite parity | Anonymous reading and media: about 91–95%; full product scope: about 70–73% |
+| Server-side writes | Guarded forum follow/unfollow, check-in, content approval, thread-detail and verified list-level cloud-favorite changes, plain-text topic/floor/nested replies, and plain-text new-topic creation are in device validation; other writes stay disabled |
+| TiebaLite parity | Anonymous reading and media: about 91–95%; full product scope: about 71–74% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.59.0-alpha.1` (build 62); later `main` features require a tagged release |
 
 ### Release and validation
@@ -77,6 +77,17 @@ checks.
   active account lease before opening that same composer. The notification's
   legacy `quote_pid` and display payload never become a write target; failed
   relocation or a changed session opens no composer and dispatches no write.
+  A loaded forum now also exposes an experimental native composer for a new
+  plain-text topic with an optional title. It binds the active account, exact
+  forum ID and canonical forum name through a fresh FRS preflight, persists the
+  account-scoped draft before dispatch, sends one signed HTTPS write at most,
+  and verifies the returned topic and first-floor IDs by authenticated readback.
+  Challenge, accepted-but-not-yet-visible, and unknown outcomes lock and retain
+  the draft; an untitled topic may accept a server-generated display title, but
+  an explicit title, author, forum, first floor, and body must match exactly.
+  Confirmed creation retains a bounded local receipt marker across restart so a
+  crash cannot silently reopen the old body for resubmission; the next composer
+  requires an explicit “开始新主题” action before clearing that marker.
   The account page also reads TiebaLite's reply-plus-mention summary on demand
   and displays it beside the message entry. This summary is memory-only, bound
   to the exact account lease, and never cleared locally when the entry opens.
@@ -89,12 +100,13 @@ checks.
   Authenticated flows never use real credentials in CI. Login binding, cloud
   favorite reads and mutations, including verified list deletion, followed-forum recommendation filtering,
   target-bound liked-forum pagination, concern-feed, inbox summary, inbox
-  navigation and reply-action rebinding, and plain-text reply contracts are
+  navigation and reply-action rebinding, plain-text reply contracts, and
+  plain-text new-topic contracts are
   covered by fixtures, while successful private
   reads, forum
   follow/unfollow, check-in, cloud-favorite changes, topic/post/subpost content
-  approval, and real reply creation remain physical-device validation features
-  in this alpha.
+  approval, real reply creation, and real new-topic creation remain
+  physical-device validation features in this alpha.
 - **App source:** Add [`sidestore-source.json`](https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json)
   to LiveContainer 3.7.0 or newer, or to SideStore. Its latest IPA is published
   only after the tag's package, anonymous integration, and simulator tests all
@@ -122,7 +134,10 @@ checks.
   local history, and optional credential-free suggestions.
 - **Forum browsing:** Forum and channel lists support pagination, refresh,
   reply-time or creation-time sorting, server-defined classifications, and
-  bounded channel menus with independent cursors.
+  bounded channel menus with independent cursors. A loaded forum offers an
+  experimental, account-bound plain-text new-topic composer with an optional
+  title, persistent per-account draft, explicit publish confirmation, and no
+  automatic retry; a signed-out composer remains read only and asks for login.
 - **Public information:** Forum introductions, statistics, rules, moderator
   teams, and credential-free user profiles are available. Profiles include
   independently paginated public topics, replies, following, and followers.
@@ -324,25 +339,26 @@ checks.
   as a second write. The
   App starts and applies reconciliation only while the initiating account lease
   remains readable and current; a later account change discards its result. No
-  uncertain failure retries a write. Reply submissions additionally serialize
-  per account, share only an identical submission UUID, and permit cancellation
-  to stop the owner only before write dispatch. Once dispatched, the owner
-  finishes receipt parsing and exact-ID readback even if its view disappears.
+  uncertain failure retries a write. Reply and new-topic submissions additionally
+  serialize per account, share only an identical submission UUID, and permit
+  cancellation to stop the owner only before write dispatch. Once dispatched,
+  the owner finishes receipt parsing and exact-ID readback even if its view
+  disappears.
   Already-completed check-in and matching content state are idempotent. All
   supported writes require explicit user confirmation. Automatic and batch
   check-in are not implemented.
 - **Unsupported operations:** Guess-based removal of unresolvable cloud-favorite
   rows, bulk cloud/local synchronization, disagreement and other reaction types,
-  new-thread creation, rich-media replies, notification mark-read/unread
+  rich-media topic/reply creation, notification mark-read/unread
   reconciliation, background notification polling, and moderation remain
   unavailable until their request contracts and recovery paths have been
   validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, weighted estimate, protocol constraints, and next milestones.
-  The current `main` audit totals 70–73 of 100 weighted points; its anonymous
+  The current `main` audit totals 71–74 of 100 weighted points; its anonymous
   reading and media subtotal is about 91–95%. The largest remaining gaps are
-  new-thread and rich-media creation, background unread handling, broader
-  settings, unresolvable cloud-favorite rows, and moderation.
+  rich-media creation, background unread handling, broader settings, remaining
+  account/social actions, unresolvable cloud-favorite rows, and moderation.
 
 ## Architecture
 
