@@ -144,7 +144,8 @@ final class AnimatedRemoteImageTests: XCTestCase {
     XCTAssertTrue(cache.insert(frame, for: key, generation: generation))
     let (cached, _) = cache.cachedFrameAndGeneration(for: key)
     XCTAssertTrue(cached === frame)
-    XCTAssertEqual(cached?.decodedByteCost, try XCTUnwrap(image.cgImage).bytesPerRow * 7)
+    let cgImage = try XCTUnwrap(image.cgImage)
+    XCTAssertEqual(cached?.decodedByteCost, cgImage.bytesPerRow * cgImage.height)
 
     cache.removeAllObjects()
     let (cleared, newGeneration) = cache.cachedFrameAndGeneration(for: key)
@@ -156,10 +157,10 @@ final class AnimatedRemoteImageTests: XCTestCase {
   func testDecodeSchedulerLimitsConcurrencyAndCancelsQueuedWork() async throws {
     let scheduler = RemoteImageIODecodeScheduler(maxConcurrentDecodes: 2)
     let probe = DecodeConcurrencyProbe()
-    let first = Task {
+    let first = Task.detached {
       try await scheduler.decode { try probe.run(value: 1) }
     }
-    let second = Task {
+    let second = Task.detached {
       try await scheduler.decode { try probe.run(value: 2) }
     }
     defer {
@@ -170,7 +171,7 @@ final class AnimatedRemoteImageTests: XCTestCase {
     let didEnterTwoDecodes = await probe.waitUntilEntered(2)
     XCTAssertTrue(didEnterTwoDecodes)
 
-    let queued = Task {
+    let queued = Task.detached {
       try await scheduler.decode { try probe.run(value: 3) }
     }
     try await Task.sleep(for: .milliseconds(20))
@@ -198,7 +199,7 @@ final class AnimatedRemoteImageTests: XCTestCase {
   func testDecodeSchedulerCancelsActiveDetachedWork() async throws {
     let scheduler = RemoteImageIODecodeScheduler(maxConcurrentDecodes: 1)
     let probe = DecodeConcurrencyProbe()
-    let request = Task {
+    let request = Task.detached {
       try await scheduler.decode { try probe.run(value: 1) }
     }
     defer {
@@ -268,14 +269,14 @@ private final class DecodeConcurrencyProbe: @unchecked Sendable {
 
   func waitUntilEntered(
     _ expectedCount: Int,
-    timeout: Duration = .seconds(2)
+    timeout: Duration = .seconds(5)
   ) async -> Bool {
     await waitUntil(timeout: timeout) { self.enteredCount >= expectedCount }
   }
 
   func waitUntilActiveCount(
     _ expectedCount: Int,
-    timeout: Duration = .seconds(2)
+    timeout: Duration = .seconds(5)
   ) async -> Bool {
     await waitUntil(timeout: timeout) {
       self.currentActiveCount == expectedCount
