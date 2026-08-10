@@ -193,34 +193,38 @@ the source metadata is updated to that tested IPA.
    including single-frame containers, Reduce Motion, backgrounding, rapid and
    cancelled paging, memory pressure, save/share byte preservation, and static
    fallback at the frame and decoded-memory limits
-2. Real-device validation of the complete liked-forum list for the current and
+2. Real-device validation of the persistent image cache on iOS 16 and iOS 18.7.2,
+   including cold-relaunch hits, preview/original size boundaries, TTL and LRU
+   eviction, clearing against in-flight downloads, storage pressure, and logical
+   usage while independent share or Photos-export leases remain alive
+3. Real-device validation of the complete liked-forum list for the current and
    another public user, including page-one/page-two termination, privacy-empty
    results, expired credentials, same-UID credential rotation, account switching,
    and confirmation that reading performs no follow, check-in, or other write
-3. Real-device validation of full-session binding and the minimal HTTPS cloud
+4. Real-device validation of full-session binding and the minimal HTTPS cloud
    favorites list, including valid, random, cross-account, and expired STOKEN
    cases and whether reading the list has any server-side side effect
-4. Real-device validation of canonical-topic, ordinary-floor, and full
+5. Real-device validation of canonical-topic, ordinary-floor, and full
    nested-reply approval/cancellation, plus single-forum check-in success,
    idempotent, server-error, uncertain-failure, and read-only reconciliation
    paths, followed by account switching and follow recovery checks
-5. Real-device validation of the minimal HTTPS ReplyMe, AtMe, and `/c/s/msg`
+6. Real-device validation of the minimal HTTPS ReplyMe, AtMe, and `/c/s/msg`
    summary requests, including the summary field-deletion matrix, count parity,
    and whether either summary or list retrieval changes server unread state,
    plus ordinary post and child-reply action relocation, unavailable targets,
    and account switching before composer presentation
-6. Real-device validation of the account-bound concern request, including the
+7. Real-device validation of the account-bound concern request, including the
    signed-field deletion matrix, empty-account and expired-session envelopes,
    cursor replay, and whether list retrieval changes recommendation state
-7. Real-device validation of explicit cloud-favorite list/detail removal, add,
+8. Real-device validation of explicit cloud-favorite list/detail removal, add,
    and saved-floor updates, including unresolvable deleted rows, STOKEN rejection,
    idempotence, uncertain-write readback, concurrency, session rotation, and
    account switching
-8. Disposable-account validation of all three plain-text reply targets,
+9. Disposable-account validation of all three plain-text reply targets,
    including minimum-field deletion, missing/random/expired/cross-account
    STOKEN and TBS, challenge and permission failures, post-dispatch loss,
    exact-PID visibility, account rotation, and duplicate-send prevention
-9. Broader settings parity, remaining account activity, new-topic and rich-media
+10. Broader settings parity, remaining account activity, new-topic and rich-media
    creation, and moderation tools
 
 The foreground inbox deliberately does not copy TiebaLite's cleartext JSON

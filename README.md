@@ -96,8 +96,9 @@ checks.
   approval, and real reply creation remain physical-device validation features
   in this alpha.
 - **App source:** Add [`sidestore-source.json`](https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json)
-  to LiveContainer or SideStore. Its latest IPA is published only after the tag's
-  package, anonymous integration, and simulator tests all pass.
+  to LiveContainer 3.7.0 or newer, or to SideStore. Its latest IPA is published
+  only after the tag's package, anonymous integration, and simulator tests all
+  pass.
 - **Login hotfix:** `v0.54.0-alpha.1` can reach Tieba's account page without
   completing because its callback and Cookie matching are too strict.
   `v0.54.1-alpha.1` made that failure explicit and confirmed that iOS 18.7.2
@@ -386,10 +387,10 @@ swift test --package-path Packages/TiebaCore
 
 The distribution target is SideStore-compatible self-signing. The public
 [`sidestore-source.json`](https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json)
-can be added directly to LiveContainer or SideStore. Each listed IPA is an
-unsigned GitHub Release asset that must be signed by the installer; its byte size
-and SHA-256 are checked against the source by CI. App Store distribution is not
-currently a project goal.
+can be added directly to LiveContainer 3.7.0 or newer, or to SideStore. Each
+listed IPA is an unsigned GitHub Release asset that must be signed by the
+installer; its byte size and SHA-256 are checked against the source by CI. App
+Store distribution is not currently a project goal.
 
 ## License
 
