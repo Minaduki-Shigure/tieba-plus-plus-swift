@@ -159,6 +159,44 @@ final class RemoteImageDiskCacheTests: XCTestCase {
     XCTAssertEqual(usage.entryCount, 0)
   }
 
+  func testSubmillisecondDateRoundTripAndClockSkewRemainValid() async throws {
+    let environment = try DiskCacheTestEnvironment()
+    defer { environment.remove() }
+    let clock = DiskCacheTestClock(Date(timeIntervalSince1970: 15_000.000_75))
+    let cache = environment.makeCache(now: { clock.now() })
+    let url = try XCTUnwrap(URL(string: "https://img.example/submillisecond"))
+    let data = Data("submillisecond-image".utf8)
+    try await store(data, for: url, in: cache, environment: environment)
+
+    clock.advance(by: -0.000_25)
+    let hit = try await cache.cachedDownload(from: url, kind: .preview)
+    let usage = await cache.usage()
+
+    XCTAssertEqual(try Data(contentsOf: XCTUnwrap(hit).fileURL), data)
+    XCTAssertEqual(usage.entryCount, 1)
+  }
+
+  func testMetadataTimestampBeyondSubmillisecondToleranceIsRejected() async throws {
+    let environment = try DiskCacheTestEnvironment()
+    defer { environment.remove() }
+    let clock = DiskCacheTestClock(Date(timeIntervalSince1970: 16_000.000_75))
+    let cache = environment.makeCache(now: { clock.now() })
+    let url = try XCTUnwrap(URL(string: "https://img.example/future-metadata"))
+    try await store(
+      Data("future-image".utf8),
+      for: url,
+      in: cache,
+      environment: environment
+    )
+
+    clock.advance(by: -0.003)
+    let hit = try await cache.cachedDownload(from: url, kind: .preview)
+    let usage = await cache.usage()
+
+    XCTAssertNil(hit)
+    XCTAssertEqual(usage, RemoteImageDiskCacheUsage(entryCount: 0, byteCount: 0))
+  }
+
   func testLRUEntryCountTrimUsesPersistedLastAccess() async throws {
     let environment = try DiskCacheTestEnvironment()
     defer { environment.remove() }

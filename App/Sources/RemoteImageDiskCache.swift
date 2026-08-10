@@ -72,6 +72,7 @@ actor RemoteImageDiskCache: RemoteImagePersistentCacheProviding {
 
   private static let formatVersion = 1
   private static let maximumMetadataByteCount: Int64 = 64 * 1_024
+  private static let metadataDateTolerance: TimeInterval = 0.001
   private static let requestSequenceWindowSize: UInt64 = 2_048
   private static let absoluteMaximumPayloadByteCount =
     RemoteImageDownloadPolicy.originalMaximumResponseBytes
@@ -501,11 +502,15 @@ actor RemoteImageDiskCache: RemoteImagePersistentCacheProviding {
       Self.isCacheKey(metadata.payloadSHA256),
       metadata.storedAt.timeIntervalSince1970.isFinite,
       metadata.lastAccess.timeIntervalSince1970.isFinite,
-      metadata.storedAt <= metadata.lastAccess,
-      metadata.lastAccess <= currentDate,
-      metadata.storedAt <= currentDate,
+      metadata.storedAt.timeIntervalSince(metadata.lastAccess)
+        <= Self.metadataDateTolerance,
+      metadata.lastAccess.timeIntervalSince(currentDate)
+        <= Self.metadataDateTolerance,
+      metadata.storedAt.timeIntervalSince(currentDate)
+        <= Self.metadataDateTolerance,
       limits.entryLifetime > 0,
-      currentDate.timeIntervalSince(metadata.storedAt) < limits.entryLifetime,
+      currentDate.timeIntervalSince(metadata.storedAt) + Self.metadataDateTolerance
+        < limits.entryLifetime,
       measuredRegularFileSize(at: payloadURL) == metadata.byteCount,
       !verifiesDigest
         || Self.fileSHA256(
