@@ -460,7 +460,7 @@ struct ThreadView: View {
   }
 
   private func clearSelectableTextRoute() {
-    guard let sheetRoute, case .selectableText = sheetRoute else { return }
+    guard case .selectableText = sheetRoute else { return }
     sheetRoute = nil
   }
 
