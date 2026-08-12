@@ -198,7 +198,9 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
     XCTAssertEqual(
       authorizedTargets,
       [
-        ForumBatchCheckInTarget(forumID: 10, forumName: "A")
+        ForumBatchCheckInTarget(forumID: 10, forumName: "A"),
+        ForumBatchCheckInTarget(forumID: 20, forumName: "B"),
+        ForumBatchCheckInTarget(forumID: 30, forumName: "C"),
       ]
     )
   }
