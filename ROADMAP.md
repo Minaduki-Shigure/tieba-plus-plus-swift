@@ -21,7 +21,7 @@ does not yet include the foreground batch-check-in work on `main`.
 | Anonymous discovery, search, and forums | 20 | 18–19 | Core browsing, ranking, recommendations, categories, and search are implemented; feedback and a few niche discovery paths remain |
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
-| Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, media preferences, followed-forum layout, reply-entry visibility, a default-on composer risk notice, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
+| Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, media preferences, followed-forum layout, reply-entry visibility, a default-on composer risk notice, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, switching, a self-profile summary, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 10–11 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, three plain-text reply targets, and plain-text new-topic creation have guarded implementations; real batch-check-in behavior, creation, poll and interaction-restriction success, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
@@ -47,6 +47,8 @@ reflows two existing surfaces without adding a data source or workflow.
 The composer-entry risk notice likewise completes one narrow TiebaLite habit
 setting and hardens an existing creation flow, but adds no new write target or
 workflow and therefore does not add a weighted point.
+The local About destination closes another narrow settings gap but adds no data
+source or workflow, so it also remains inside the existing settings credit.
 
 ## Available
 
@@ -112,6 +114,8 @@ the source metadata is updated to that tested IPA.
 - Canonical forum/thread sharing and browse-mode-aware thread-link copying
 - Strict internal routing for supported Tieba HTTPS, pasted official-scheme, and app links
 - Default-system external HTTPS opening with an optional in-app Safari view
+- Local About page with bundle version/build information and an explicit fixed
+  source-repository action using the selected external-Web policy
 - Nested replies, images, video links, and voice playback
 - Explicit video landing-page fallback when a `PbContent` video has no accepted
   native stream, using native Tieba routing and the selected browser policy
@@ -765,6 +769,10 @@ history to the app. The app does not register Baidu's official scheme,
 automatically inspect the clipboard, claim Universal Links without Baidu's AASA
 authorization, or fabricate a browsing-history snapshot before the linked
 thread has loaded successfully.
+The About page reads only local display/version/build strings and exposes one
+exact, credential-free HTTPS source-repository URL after an explicit tap. That
+destination is code-defined rather than constructed from Bundle, account, or
+remote data, and follows the same external-Web preference and Safari isolation.
 
 Forum introductions, rule documents, and moderator teams use independent
 credential-free protobuf endpoints. Moderator role names are treated as an

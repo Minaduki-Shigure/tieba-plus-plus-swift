@@ -725,6 +725,13 @@ The app must not read its page, Cookie state, or navigation history; inject BDUS
 headers, or scripts; persist the opened URL; or reuse the login Web view. After
 presentation, redirects and website interaction are controlled by SafariServices,
 not the app's API-host allowlist.
+The About page may expose only the code-defined, credential-free
+`https://github.com/Minaduki-Shigure/tieba-plus-plus-swift` target after an
+explicit tap. It must validate that exact HTTPS host and path, use the same
+external-Web preference, and pass only the validated URL to either browser path.
+The destination must not be derived from Bundle metadata, account state, remote
+data, a deep link, or user input; opening the About page itself must not issue a
+request or read account storage.
 
 Only the app-owned scheme is registered. The app must not claim Baidu's scheme
 or `tieba.baidu.com` Universal Links without domain authorization. It must not

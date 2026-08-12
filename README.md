@@ -274,6 +274,10 @@ checks.
   return without deleting that draft. It is advisory only: disabling or
   acknowledging it never replaces the separate confirmation of the exact reply
   or topic snapshot immediately before submission.
+- **About:** A local About page reads the installed bundle's display name,
+  version, and build number. Its explicit source-code action opens only the fixed
+  project repository URL through the selected system-browser or in-app Safari
+  policy; the destination is not derived from account or remote data.
 - **Media policy:** Automatic, data-saving, or tap-to-load behavior and standard
   or high-definition preview selection apply to content media. Animation uses
   the same URL authorization and transfer limits as static images. Decoded images

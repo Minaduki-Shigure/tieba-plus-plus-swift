@@ -329,6 +329,15 @@ struct AppSettingsView: View {
             + "物理空间。"
         )
       }
+
+      Section("应用") {
+        NavigationLink {
+          AppAboutView()
+        } label: {
+          Label("关于贴吧++", systemImage: "info.circle")
+        }
+        .accessibilityIdentifier("settings-about")
+      }
     }
     .listStyle(.insetGrouped)
     .navigationTitle("设置")
