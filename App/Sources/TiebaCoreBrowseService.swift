@@ -182,7 +182,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       throw Self.browseError(error)
     }
     let filter = await contentFilterSnapshot()
-    let mappedThread = Self.mapThread(response.thread)
+    let mappedThread = Self.mapThread(response.thread, applying: filter)
     let mappedPosts = response.posts.map { Self.mapPost($0, applying: filter) }
     let mappedFirstPost = response.firstPost.map { Self.mapPost($0, applying: filter) }
     let returnedPostIDs = Self.returnedPostIDs(
@@ -816,6 +816,13 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     )
   }
 
+  static func mapThread(
+    _ thread: TiebaThread,
+    applying filter: ContentFilterSnapshot
+  ) -> BrowseThread {
+    filter.applying(to: mapThread(thread))
+  }
+
   static func mapForumChannel(_ channel: TiebaForumChannel) -> BrowseForumChannel {
     BrowseForumChannel(
       id: channel.id,
@@ -1238,7 +1245,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     {
       throw BrowseError.unavailable("贴吧未返回要定位的楼中楼回复，未显示该响应。")
     }
-    let mappedThread = mapThread(response.thread)
+    let mappedThread = mapThread(response.thread, applying: filter)
     let mappedParentPost = filter.applying(to: mapCommentParentPost(parentPost))
     return CommentPageData(
       parentPost: mappedParentPost,

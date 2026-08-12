@@ -1,6 +1,5 @@
 import Combine
 import SwiftUI
-import UIKit
 
 struct CommentsView: View {
   @Environment(\.dismiss) private var dismiss
@@ -23,6 +22,7 @@ struct CommentsView: View {
   @State private var inboxReplyIntentGeneration = 0
   @State private var inboxReplyNotice: String?
   @State private var inboxReplyComposerIntent: InboxReplyIntent?
+  @State private var selectableTextPresentation: SelectableTextPresentation?
   let service:
     any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let historyRepository: any BrowsingHistoryRepository
@@ -154,6 +154,7 @@ struct CommentsView: View {
               ) {
                 CommentParentPostView(
                   post: parentPost,
+                  thread: viewModel.thread,
                   agreementTarget: viewModel.parentAgreementTarget,
                   service: service,
                   historyRepository: historyRepository,
@@ -170,7 +171,8 @@ struct CommentsView: View {
                         presentReplyComposer(context)
                       }
                     }
-                    : nil
+                    : nil,
+                  selectText: presentSelectableText
                 )
               }
               .id(CommentsListItemID.parentPost(parentPost.id))
@@ -257,11 +259,11 @@ struct CommentsView: View {
                   }
                   .padding(.vertical, 4)
                   .contextMenu {
-                    if let copyText = BrowseContentCopyText.text(comment.contents) {
+                    if let copyText = PostCopyText.text(comment: comment) {
                       Button {
-                        UIPasteboard.general.string = copyText
+                        presentSelectableText(copyText)
                       } label: {
-                        Label("复制此条回复", systemImage: "doc.on.doc")
+                        Label("选择文字", systemImage: "text.cursor")
                       }
                     }
                     if replyEntriesVisible, let context = replyContext(for: comment) {
@@ -413,6 +415,12 @@ struct CommentsView: View {
         )
       }
     }
+    .sheet(item: $selectableTextPresentation) { presentation in
+      SelectableTextSheet(
+        presentation: presentation,
+        onCommand: performSelectableTextCommand
+      )
+    }
     .toolbar {
       if showsDismissButton {
         ToolbarItem(placement: .confirmationAction) {
@@ -441,6 +449,7 @@ struct CommentsView: View {
     }
     .onDisappear {
       pendingAgreementChange = nil
+      selectableTextPresentation = nil
       contentAgreementStore?.removeScope(agreementScopeID)
       viewModel.cancel()
     }
@@ -450,6 +459,7 @@ struct CommentsView: View {
       agreementErrorMessage = nil
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
+      selectableTextPresentation = nil
       Task { @MainActor in viewModel.reload() }
     }
     .onChange(of: hidesReplyEntryPoints) { isHidden in
@@ -523,6 +533,28 @@ struct CommentsView: View {
         if !isPresented { linkedTarget = nil }
       }
     )
+  }
+
+  private func presentSelectableText(_ text: String) {
+    selectableTextPresentation = SelectableTextPresentation(text: text)
+  }
+
+  private func performSelectableTextCommand(
+    _ command: SelectableTextSheetCommand,
+    expected: SelectableTextPresentation
+  ) {
+    guard let current = selectableTextPresentation else { return }
+    var pending: SelectableTextPresentation? = current
+    let text = SelectableTextSheetCommandPolicy.consume(
+      command,
+      expected: expected,
+      pending: &pending
+    )
+    guard pending == nil else { return }
+    selectableTextPresentation = nil
+    if let text {
+      SelectableTextPasteboard.write(text)
+    }
   }
 
   private var replyComposerPresented: Binding<Bool> {

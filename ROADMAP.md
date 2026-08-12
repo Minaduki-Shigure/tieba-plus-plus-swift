@@ -19,7 +19,7 @@ does not yet include the foreground batch-check-in work on `main`.
 | Capability area | Weight | Credited points | Current basis |
 | --- | ---: | ---: | --- |
 | Anonymous discovery, search, and forums | 20 | 18–19 | Core browsing, ranking, recommendations, categories, and search are implemented; feedback and a few niche discovery paths remain |
-| Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
+| Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, shared text selection/copying, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
 | Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, media preferences, followed-forum layout, reply-entry visibility, a default-on composer risk notice, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, switching, a self-profile summary, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
@@ -49,6 +49,10 @@ setting and hardens an existing creation flow, but adds no new write target or
 workflow and therefore does not add a weighted point.
 The local About destination closes another narrow settings gap but adds no data
 source or workflow, so it also remains inside the existing settings credit.
+The shared selectable-text panel closes one narrow TiebaLite interaction gap
+across existing visible post and reply surfaces, but adds no data source or
+readable content, so it remains inside the existing reading credit rather than
+adding a weighted point.
 
 ## Available
 
@@ -105,7 +109,9 @@ the source metadata is updated to that tested IPA.
 - Native system, light, and dark appearance selection
 - Persistent five-color accent selection with light, dark, and high-contrast variants
 - Persistent six-position app text-size adjustment relative to iOS Dynamic Type
-- Transient pure-reading mode and full textual floor copying
+- Transient pure-reading mode plus one shared text-selection panel for visible
+  topic and ordinary floors, inline nested-reply previews, and full-page parent
+  and child rows, with partial system selection and explicit whole-text copying
 - Default-off local hiding of topic, floor, nested-reply, and inbox quick-reply
   entry points without removing reply content, drafts, or an open composer
 - Default-on, locally configurable entry-risk notice for editable reply and
@@ -144,7 +150,8 @@ the source metadata is updated to that tested IPA.
   sharing, and Photos saving
 - Anonymous whole-thread image traversal with stable occurrences, global
   positions, and bidirectional lazy metadata loading
-- Server-ranked inline nested-reply previews with anchored opening and safe text copying
+- Server-ranked inline nested-reply previews with anchored opening and the shared
+  selectable-text panel
 - Full nested-reply pages with parent-floor context and bidirectional anchored pagination
 - Shared-thread origin cards with original content, media, and navigation
 - Anonymous single- and multiple-choice poll result cards
@@ -946,11 +953,17 @@ placeholders, and nested-reply entry points without changing post data or the
 persisted sort. The independent hide-reply-entry preference is persistent,
 defaults off, and removes the topic, floor, nested-reply, and inbox quick-reply
 controls while retaining reply content, ordinary notification navigation,
-copying, agreement controls, drafts, and any composer that is already open.
-Changing it is local-only and starts no network request. Full-floor copy uses the
-currently decoded public textual fragments plus fixed `[图片]`, `[视频]`, and
-`[语音]` boundary markers; media URLs and nested replies are not synthesized into
-the copied text.
+text selection/copying, agreement controls, drafts, and any composer that is
+already open. Changing it is local-only and starts no network request. Copy
+actions for a visible topic or ordinary floor, an inline nested-reply preview,
+or a parent or child row on the full nested-reply page capture the currently
+decoded public-text projection in one transient, immutable panel. System text
+selection can copy a substring; Copy All writes that exact snapshot and closes
+the panel, while closing alone writes nothing. The projection uses fixed
+`[图片]`, `[视频]`, and `[语音]` boundary markers and never synthesizes media URLs,
+credentials, account responses, locally filtered content, or replies outside
+the selected item. A content-filter change revokes an open selection snapshot
+before the affected page reloads.
 
 The independent composer-risk preference is a default-on local Boolean. An
 editable reply or new-topic composer restores its draft before presenting the

@@ -692,8 +692,9 @@ response copy. The anonymous object alone cannot supply account state; an
 approval control requires the separate exact-target authenticated validation
 described above.
 
-Parent-floor links, media, profiles, and copying reuse the same strict routing,
-credential-free media, and text-projection policies as ordinary post content.
+Parent-floor links, media, profiles, and text selection/copying reuse the same
+strict routing, credential-free media, transient selection panel, and
+text-projection policies as ordinary post content.
 Parent and child filtering use one immutable rule snapshot; hiding the parent or
 anchor must not expose filtered content, alter pagination identity, or synthesize
 a pasteboard value. A visible parent or child may expose only the separately
@@ -1200,10 +1201,17 @@ presentation-only offset from the current system Dynamic Type category and must
 not enter requests, account storage, archives, logs, or exported content. The
 no-history control must update the recording flag in
 the existing browsing-history archive and must never duplicate that state in a
-second store. Full-floor copying is initiated by an explicit user gesture and
-may include decoded public textual fragments and fixed non-URL media boundary
-markers only; it must not add media URLs, credentials, account responses, or
-hidden nested replies to the pasteboard.
+second store. Selecting or copying a visible topic or ordinary floor, an inline
+nested-reply preview, or a parent or child row on the full nested-reply page is
+initiated by an explicit user gesture and opens one transient, in-memory panel.
+Presenting or dismissing that panel must not issue a request, read account
+storage, persist or log its text, read the clipboard, or write the pasteboard.
+Only an explicit system selection-copy command or the panel's Copy All action may
+write the selected or complete projection. That projection may contain decoded
+public textual fragments and fixed non-URL media boundary markers only; it must
+not add media URLs, credentials, authenticated or private responses, locally
+filtered content, or replies outside the selected item. A content-filter change
+must synchronously revoke an open selection panel before starting the page reload.
 
 The hide-reply-entry preference is a default-off, nonsecret local Boolean and
 must not itself issue a request or read account storage. While enabled, topic,
@@ -1212,10 +1220,11 @@ their actions recheck the current policy before presenting a composer. An inbox
 reply intent is rejected before the account vault is read; enabling the setting
 also invalidates any pending or resolving intent so a late account result cannot
 open a composer. This presentation preference must not hide reply content,
-ordinary notification navigation, copying, or agreement controls, and it must
-not erase a draft or close a composer that is already open. Account-session
-changes retain their stricter existing behavior and may still invalidate an
-inbox-originated composer whose credential binding is no longer current.
+ordinary notification navigation, text selection/copying, or agreement controls,
+and it must not erase a draft or close a composer that is already open.
+Account-session changes retain their stricter existing behavior and may still
+invalidate an inbox-originated composer whose credential binding is no longer
+current.
 
 The post-and-reply risk-notice preference is a default-on, nonsecret local
 Boolean in UserDefaults. Reading or changing the preference, presenting the

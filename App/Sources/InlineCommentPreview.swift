@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 struct InlineCommentPreviewPresentation: Hashable, Sendable {
   let comments: [BrowseComment]
@@ -21,6 +20,7 @@ struct InlineCommentPreviewPresentation: Hashable, Sendable {
 struct InlineCommentPreviewCard: View {
   let presentation: InlineCommentPreviewPresentation
   let openComments: (Int64?) -> Void
+  let selectText: (String) -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -30,9 +30,11 @@ struct InlineCommentPreviewCard: View {
         }
         switch comment.localVisibility {
         case .visible:
-          InlineCommentPreviewRow(comment: comment) {
-            openComments(comment.id)
-          }
+          InlineCommentPreviewRow(
+            comment: comment,
+            action: { openComments(comment.id) },
+            selectText: selectText
+          )
         case .placeholder:
           Label("已屏蔽此条回复", systemImage: "hand.raised.fill")
             .font(.caption)
@@ -77,12 +79,13 @@ struct InlineCommentPreviewCard: View {
 private struct InlineCommentPreviewRow: View {
   let comment: BrowseComment
   let action: () -> Void
+  let selectText: (String) -> Void
 
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
   @Environment(\.appAccentColor) private var appAccentColor
 
   private var bodyText: String {
-    BrowseContentCopyText.text(comment.contents) ?? "（无可显示内容）"
+    PostCopyText.text(comment: comment) ?? "（无可显示内容）"
   }
 
   var body: some View {
@@ -100,11 +103,11 @@ private struct InlineCommentPreviewRow: View {
     .buttonStyle(.plain)
     .accessibilityLabel(accessibilityText)
     .contextMenu {
-      if let copyText = BrowseContentCopyText.text(comment.contents) {
+      if let copyText = PostCopyText.text(comment: comment) {
         Button {
-          UIPasteboard.general.string = copyText
+          selectText(copyText)
         } label: {
-          Label("复制此条回复", systemImage: "doc.on.doc")
+          Label("选择文字", systemImage: "text.cursor")
         }
       }
     }

@@ -174,6 +174,14 @@ final class BrowseViewModelTests: XCTestCase {
     )
 
     let mapped = TiebaCoreBrowseService.mapThread(thread)
+    let titleFiltered = TiebaCoreBrowseService.mapThread(
+      thread,
+      applying: ContentFilterSnapshot(
+        displayMode: .placeholder,
+        blockVideos: false,
+        rules: [.keyword("Rich thread", list: .block)]
+      )
+    )
 
     XCTAssertEqual(mapped.id, 42)
     XCTAssertEqual(mapped.firstPostID, 43)
@@ -194,6 +202,7 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertTrue(mapped.isShared)
     XCTAssertTrue(mapped.isServerHidden)
     XCTAssertFalse(mapped.isLive)
+    XCTAssertEqual(titleFiltered.localVisibility, .placeholder)
     XCTAssertEqual(
       mapped.contents.compactMap { content -> URL? in
         guard case .image(let thumbnail, _, _, _, _, _) = content else { return nil }
@@ -1142,7 +1151,7 @@ final class BrowseViewModelTests: XCTestCase {
       firstPostID: 101,
       forumID: 1,
       forumName: "swift",
-      title: "Thread",
+      title: "blocked thread title",
       content: TiebaContent(fragments: []),
       author: author,
       kind: .article,
@@ -1246,6 +1255,7 @@ final class BrowseViewModelTests: XCTestCase {
     )
     XCTAssertEqual(mapped.parentPost.agreeScore, 4)
     XCTAssertEqual(mapped.parentPost.localVisibility, .placeholder)
+    XCTAssertEqual(mapped.thread?.localVisibility, .placeholder)
     XCTAssertEqual(mapped.comments.map(\.id), [301, 304])
     XCTAssertEqual(mapped.comments.map(\.localVisibility), [.placeholder, .visible])
     XCTAssertEqual(mapped.currentPage, 2)

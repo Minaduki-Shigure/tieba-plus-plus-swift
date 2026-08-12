@@ -1,6 +1,5 @@
 import Combine
 import SwiftUI
-import UIKit
 
 struct ThreadView: View {
   let service:
@@ -10,7 +9,7 @@ struct ThreadView: View {
   let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @StateObject private var viewModel: ThreadViewModel
-  @State private var commentsRoute: CommentsRoute?
+  @State private var sheetRoute: ThreadSheetRoute?
   @State private var showsPageJump = false
   @State private var pageInput = ""
   @State private var visiblePost: BrowsePost?
@@ -332,6 +331,7 @@ struct ThreadView: View {
       cancelPictureGallery()
       pendingAgreementChange = nil
       pendingCloudFavoriteAction = nil
+      clearSelectableTextRoute()
       contentAgreementStore?.removeScope(agreementScopeID)
       threadCloudFavoriteStore?.deactivate(cloudFavoriteScopeID)
       viewModel.cancel()
@@ -355,6 +355,7 @@ struct ThreadView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       cancelPictureGallery()
+      clearSelectableTextRoute()
       Task { @MainActor in
         visiblePost = nil
         viewModel.reload()
@@ -380,32 +381,40 @@ struct ThreadView: View {
         )
       }
     }
-    .sheet(item: $commentsRoute) { route in
-      NavigationStack {
-        switch route {
-        case .post(let threadID, let postID):
-          CommentsView(
-            threadID: threadID,
-            postID: postID,
-            service: service,
-            historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository
-          )
-        case .comment(let threadID, let postID, let commentID):
-          CommentsView(
-            threadID: threadID,
-            postID: postID,
-            aroundCommentID: commentID,
-            service: service,
-            historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository
-          )
+    .sheet(item: $sheetRoute) { route in
+      switch route {
+      case .comments(let commentsRoute):
+        NavigationStack {
+          switch commentsRoute {
+          case .post(let threadID, let postID):
+            CommentsView(
+              threadID: threadID,
+              postID: postID,
+              service: service,
+              historyRepository: historyRepository,
+              favoritesRepository: favoritesRepository,
+              searchHistoryRepository: searchHistoryRepository
+            )
+          case .comment(let threadID, let postID, let commentID):
+            CommentsView(
+              threadID: threadID,
+              postID: postID,
+              aroundCommentID: commentID,
+              service: service,
+              historyRepository: historyRepository,
+              favoritesRepository: favoritesRepository,
+              searchHistoryRepository: searchHistoryRepository
+            )
+          }
         }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+      case .selectableText(let presentation):
+        SelectableTextSheet(
+          presentation: presentation,
+          onCommand: performSelectableTextCommand
+        )
       }
-      .presentationDetents([.medium, .large])
-      .presentationDragIndicator(.visible)
     }
   }
 
@@ -434,6 +443,43 @@ struct ThreadView: View {
 
   private func openTiebaLink(_ target: TiebaLinkTarget) {
     linkedTarget = target
+  }
+
+  private func presentComments(threadID: Int64, postID: Int64, commentID: Int64?) {
+    guard let route = CommentsRoute(
+      threadID: threadID,
+      postID: postID,
+      commentID: commentID
+    ) else { return }
+    sheetRoute = .comments(route)
+  }
+
+  private func presentSelectableText(_ text: String) {
+    guard let presentation = SelectableTextPresentation(text: text) else { return }
+    sheetRoute = .selectableText(presentation)
+  }
+
+  private func clearSelectableTextRoute() {
+    guard let sheetRoute, case .selectableText = sheetRoute else { return }
+    sheetRoute = nil
+  }
+
+  private func performSelectableTextCommand(
+    _ command: SelectableTextSheetCommand,
+    expected: SelectableTextPresentation
+  ) {
+    guard case .selectableText(let current)? = sheetRoute else { return }
+    var pending: SelectableTextPresentation? = current
+    let text = SelectableTextSheetCommandPolicy.consume(
+      command,
+      expected: expected,
+      pending: &pending
+    )
+    guard pending == nil else { return }
+    sheetRoute = nil
+    if let text {
+      SelectableTextPasteboard.write(text)
+    }
   }
 
   @ViewBuilder
@@ -713,7 +759,7 @@ struct ThreadView: View {
         viewModel.relocateAfterConfirmedReply(postID: postID)
       }
     case .subpost(let parentPostID, let subpostID):
-      commentsRoute = CommentsRoute(
+      presentComments(
         threadID: viewModel.thread.id,
         postID: parentPostID,
         commentID: subpostID
@@ -798,7 +844,7 @@ struct ThreadView: View {
                     historyRepository: historyRepository,
                     favoritesRepository: favoritesRepository,
                     searchHistoryRepository: searchHistoryRepository,
-                    threadTitle: viewModel.thread.title,
+                    selectableThreadTitle: selectableThreadTitle(for: firstPost),
                     isPureReadingMode: isPureReadingMode,
                     openImage: { contentOffset in
                       openPictureGallery(post: firstPost, contentOffset: contentOffset)
@@ -811,12 +857,13 @@ struct ThreadView: View {
                       requestReply(to: firstPost)
                     } : nil,
                     openComments: { commentID in
-                      commentsRoute = CommentsRoute(
+                      presentComments(
                         threadID: firstPost.threadID,
                         postID: firstPost.id,
                         commentID: commentID
                       )
-                    }
+                    },
+                    selectText: presentSelectableText
                   )
                   Divider()
                     .padding(.leading, isPureReadingMode ? 0 : 52)
@@ -880,7 +927,7 @@ struct ThreadView: View {
                     historyRepository: historyRepository,
                     favoritesRepository: favoritesRepository,
                     searchHistoryRepository: searchHistoryRepository,
-                    threadTitle: viewModel.thread.title,
+                    selectableThreadTitle: selectableThreadTitle(for: post),
                     isPureReadingMode: isPureReadingMode,
                     openImage: { contentOffset in
                       openPictureGallery(post: post, contentOffset: contentOffset)
@@ -893,12 +940,13 @@ struct ThreadView: View {
                       requestReply(to: post)
                     } : nil,
                     openComments: { commentID in
-                      commentsRoute = CommentsRoute(
+                      presentComments(
                         threadID: post.threadID,
                         postID: post.id,
                         commentID: commentID
                       )
-                    }
+                    },
+                    selectText: presentSelectableText
                   )
                   Divider()
                     .padding(.leading, isPureReadingMode ? 0 : 52)
@@ -1095,6 +1143,18 @@ struct ThreadView: View {
       return post.localVisibility
     }
     return .hidden
+  }
+
+  private func selectableThreadTitle(for post: BrowsePost) -> String? {
+    let thread = viewModel.thread
+    guard
+      thread.localVisibility == .visible,
+      post.localVisibility == .visible,
+      post.threadID == thread.id,
+      post.id == thread.firstPostID,
+      post.floor == 1
+    else { return nil }
+    return thread.title
   }
 
   private func openPictureGallery(post: BrowsePost, contentOffset: Int) {
@@ -1516,7 +1576,7 @@ private struct PostView: View {
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
-  let threadTitle: String
+  let selectableThreadTitle: String?
   let isPureReadingMode: Bool
   let openImage: (Int) -> Void
   let openMentionedUser: (Int64) -> Void
@@ -1525,6 +1585,7 @@ private struct PostView: View {
   let retryAgreement: (ContentAgreementTarget) -> Void
   let requestReply: (() -> Void)?
   let openComments: (Int64?) -> Void
+  let selectText: (String) -> Void
 
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
   @Environment(\.accountAccess) private var accountAccess
@@ -1584,18 +1645,19 @@ private struct PostView: View {
       ) {
         InlineCommentPreviewCard(
           presentation: presentation,
-          openComments: openComments
+          openComments: openComments,
+          selectText: selectText
         )
       }
     }
     .padding(.horizontal, 14)
     .padding(.vertical, 12)
     .contextMenu {
-      if let copyText = PostCopyText.text(threadTitle: threadTitle, post: post) {
+      if let copyText = PostCopyText.text(threadTitle: selectableThreadTitle, post: post) {
         Button {
-          UIPasteboard.general.string = copyText
+          selectText(copyText)
         } label: {
-          Label("复制本楼内容", systemImage: "doc.on.doc")
+          Label("选择文字", systemImage: "text.cursor")
         }
       }
       if let requestReply {
@@ -1717,6 +1779,20 @@ private struct PostView: View {
       username: post.authorUsername,
       showsBoth: showsBothNames
     )
+  }
+}
+
+private enum ThreadSheetRoute: Identifiable, Equatable, Sendable {
+  case comments(CommentsRoute)
+  case selectableText(SelectableTextPresentation)
+
+  var id: String {
+    switch self {
+    case .comments(let route):
+      "comments:\(route.id)"
+    case .selectableText(let presentation):
+      "selectable-text:\(presentation.id.uuidString)"
+    }
   }
 }
 

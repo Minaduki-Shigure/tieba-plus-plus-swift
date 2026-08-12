@@ -1,8 +1,8 @@
 import SwiftUI
-import UIKit
 
 struct CommentParentPostView: View {
   let post: CommentParentPostContext
+  let thread: BrowseThread?
   let agreementTarget: ContentAgreementTarget?
   let service:
     any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
@@ -14,6 +14,7 @@ struct CommentParentPostView: View {
   let requestAgreementChange: (ContentAgreementTarget, Bool) -> Void
   let retryAgreement: (ContentAgreementTarget) -> Void
   let requestReply: (() -> Void)?
+  let selectText: (String) -> Void
 
   @Environment(\.contentAgreementStore) private var contentAgreementStore
   @Environment(\.hidesReplyEntryPoints) private var hidesReplyEntryPoints
@@ -71,11 +72,11 @@ struct CommentParentPostView: View {
     }
     .padding(.vertical, 4)
     .contextMenu {
-      if let copyText = BrowseContentCopyText.text(post.contents) {
+      if let copyText = PostCopyText.text(thread: thread, parentPost: post) {
         Button {
-          UIPasteboard.general.string = copyText
+          selectText(copyText)
         } label: {
-          Label("复制父楼内容", systemImage: "doc.on.doc")
+          Label("选择文字", systemImage: "text.cursor")
         }
       }
       if replyEntryVisible, let requestReply {

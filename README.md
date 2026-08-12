@@ -16,7 +16,7 @@ checks.
 | Area | Current state |
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
-| Local features | Available for history, favorites, filtering, appearance, media preferences, followed-forum layout, reply-entry visibility, a default-on posting/reply risk notice, and a next-launch destination including the inbox |
+| Local features | Available for history, favorites, filtering, appearance, media preferences, followed-forum layout, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
 | Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, plain-text topic/floor/nested replies, and plain-text new-topic creation are in device validation; other writes stay disabled |
 | TiebaLite parity | Anonymous reading and media: about 91–95%; full product scope: about 75–78% complete, with about 22–25% remaining |
@@ -136,6 +136,12 @@ checks.
   The account page also reads TiebaLite's reply-plus-mention summary on demand
   and displays it beside the message entry. This summary is memory-only, bound
   to the exact account lease, and never cleared locally when the entry opens.
+  Visible topic and floor text, inline nested-reply previews, and parent and
+  child rows on a full nested-reply page now open one shared transient selection
+  panel from their context menus. It reuses the existing public-text projection,
+  supports partial system selection and an explicit copy-all action, and presents
+  or dismisses without a network request, account read, persistent write, or
+  implicit pasteboard write.
   These main-only changes will not enter the public app source until a tagged
   IPA passes the release checks.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
@@ -248,6 +254,13 @@ checks.
 - **Links and sharing:** Supported Tieba links stay in the native router with
   post and reply context. External HTTPS links use the selected system or Safari
   presentation, while forum and thread sharing emits canonical HTTPS links.
+- **Text selection and copying:** Context-menu copy actions for a visible topic
+  or ordinary floor, an inline nested-reply preview, and the parent or child row
+  of a full nested-reply page open one shared local panel. Its projected text is
+  scrollable and selectable; the user can copy a system-selected range or
+  explicitly copy all. Dismissing the panel writes nothing, while short-value
+  actions such as copying a link, user ID, or forum name retain their direct
+  system behavior.
 
 ### Local data and controls
 
