@@ -53,6 +53,25 @@ struct UserLikedForumPageData: Hashable, Sendable {
   let hasMore: Bool
 }
 
+struct AccountProfileSummary: Hashable, Sendable {
+  let userID: Int64
+  let username: String
+  let displayName: String
+  let portraitURL: URL?
+  let biography: String
+  let followingCount: Int
+  let followerCount: Int
+  let postCount: Int
+
+  var preferredName: String {
+    for candidate in [displayName, username] {
+      let name = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+      if !name.isEmpty { return name }
+    }
+    return "用户 \(userID)"
+  }
+}
+
 enum InboxKind: String, CaseIterable, Identifiable, Hashable, Sendable {
   case replies
   case mentions
@@ -326,6 +345,9 @@ struct ContentAgreementPageData: Hashable, Sendable {
 
 protocol AccountService: Sendable {
   func validate(credential: AccountCredentials) async throws -> ValidatedAccount
+  func selfProfile(
+    session: StoredAccountSession
+  ) async throws -> AccountProfileSummary
   func followedForums(
     session: StoredAccountSession,
     page: Int,
@@ -429,6 +451,12 @@ protocol AccountService: Sendable {
 }
 
 extension AccountService {
+  func selfProfile(
+    session: StoredAccountSession
+  ) async throws -> AccountProfileSummary {
+    throw BrowseError.unavailable("当前账户服务不支持读取本人资料。")
+  }
+
   func likedForums(
     session: StoredAccountSession,
     targetUserID: Int64,

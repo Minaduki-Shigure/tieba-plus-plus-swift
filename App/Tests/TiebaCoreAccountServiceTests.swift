@@ -5,6 +5,112 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class TiebaCoreAccountServiceTests: XCTestCase {
+  func testSelfProfileUsesFullSessionAndMapsSafePresentation() async throws {
+    let client = AccountClientSpy(
+      selfProfile: TiebaSelfProfileSummary(
+        userID: 7,
+        username: "account",
+        displayName: "Account Name",
+        portrait: "portrait-token?t=123",
+        biography: "Account biography",
+        followingCount: 12,
+        followerCount: 34,
+        postCount: 56
+      )
+    )
+    let service = TiebaCoreAccountService(client: client)
+
+    let profile = try await service.selfProfile(session: session())
+
+    XCTAssertEqual(profile.userID, 7)
+    XCTAssertEqual(profile.preferredName, "Account Name")
+    XCTAssertEqual(profile.biography, "Account biography")
+    XCTAssertEqual(profile.followingCount, 12)
+    XCTAssertEqual(profile.followerCount, 34)
+    XCTAssertEqual(profile.postCount, 56)
+    XCTAssertEqual(
+      profile.portraitURL,
+      URL(string: "https://himg.bdimg.com/sys/portraitn/item/portrait-token")
+    )
+    let snapshot = await client.snapshot()
+    XCTAssertEqual(
+      snapshot.selfProfileRequests,
+      [
+        SelfProfileClientRequest(
+          userID: 7,
+          bdussBytes: 192,
+          stokenBytes: 64,
+          cookieName: .bduss
+        )
+      ]
+    )
+  }
+
+  func testSelfProfileRequiresFullCredentialsAndDropsUnsafePortraitURL() async throws {
+    let legacyClient = AccountClientSpy()
+    let legacyService = TiebaCoreAccountService(client: legacyClient)
+    do {
+      _ = try await legacyService.selfProfile(session: session(stokenComponent: nil))
+      XCTFail("Expected complete credentials to be required")
+    } catch let error as BrowseError {
+      XCTAssertEqual(
+        error.errorDescription,
+        "此账户需要重新登录，才能安全读取本人资料。"
+      )
+    }
+
+    let unsafePortraitClient = AccountClientSpy(
+      selfProfile: TiebaSelfProfileSummary(
+        userID: 7,
+        username: "account",
+        displayName: "",
+        portrait: "file:///private/account-data",
+        biography: "",
+        followingCount: 0,
+        followerCount: 0,
+        postCount: 0
+      )
+    )
+    let profile = try await TiebaCoreAccountService(client: unsafePortraitClient)
+      .selfProfile(session: session())
+    XCTAssertNil(profile.portraitURL)
+    XCTAssertEqual(profile.preferredName, "account")
+    let snapshot = await legacyClient.snapshot()
+    XCTAssertTrue(snapshot.selfProfileRequests.isEmpty)
+  }
+
+  func testSelfProfileRejectsMismatchedIdentityAndInvalidCounts() async {
+    let invalidResponses = [
+      TiebaSelfProfileSummary(
+        userID: 8, username: "account", displayName: "", portrait: "",
+        biography: "", followingCount: 0, followerCount: 0, postCount: 0
+      ),
+      TiebaSelfProfileSummary(
+        userID: 7, username: "account", displayName: "", portrait: "",
+        biography: "", followingCount: -1, followerCount: 0, postCount: 0
+      ),
+      TiebaSelfProfileSummary(
+        userID: 7, username: "account", displayName: "", portrait: "",
+        biography: "", followingCount: 0, followerCount: Int(Int32.max) + 1, postCount: 0
+      ),
+    ]
+
+    for response in invalidResponses {
+      do {
+        _ = try await TiebaCoreAccountService(client: AccountClientSpy(selfProfile: response))
+          .selfProfile(session: session())
+        XCTFail("Expected invalid self-profile response to be rejected")
+      } catch let error as BrowseError {
+        XCTAssertEqual(
+          error.errorDescription,
+          "贴吧返回了不匹配的本人资料，请重新加载后再试。"
+        )
+      } catch {
+        XCTFail("Unexpected error: \(error)")
+      }
+    }
+  }
+
   func testLikedForumsMapsTargetContextAndForumPresentation() async throws {
     let client = AccountClientSpy(
       likedForums: TiebaFollowedForumPage(
@@ -1959,6 +2065,13 @@ private struct CloudFavoriteClientRequest: Equatable, Sendable {
   let cookieName: TiebaBDUSSCookieName
 }
 
+private struct SelfProfileClientRequest: Equatable, Sendable {
+  let userID: Int64
+  let bdussBytes: Int
+  let stokenBytes: Int
+  let cookieName: TiebaBDUSSCookieName
+}
+
 private struct LikedForumClientRequest: Equatable, Sendable {
   let accountUserID: Int64
   let targetUserID: Int64
@@ -2024,6 +2137,7 @@ private struct ContentAgreementSubpostPageClientRequest: Equatable, Sendable {
 private struct AccountClientSnapshot: Sendable {
   let validationCredentialByteCounts: [Int]
   let validationSessionShapes: [SessionCredentialShape]
+  let selfProfileRequests: [SelfProfileClientRequest]
   let likedForumRequests: [LikedForumClientRequest]
   let cloudFavoriteRequests: [CloudFavoriteClientRequest]
   let concernRequests: [ConcernClientRequest]
@@ -2055,6 +2169,7 @@ private actor AccountServiceCompletionProbe {
 
 private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   private let validation: TiebaAuthenticatedAccount?
+  private let selfProfile: TiebaSelfProfileSummary?
   private let likedForums: TiebaFollowedForumPage?
   private let cloudFavorites: TiebaCloudFavoritePage?
   private let concern: TiebaConcernPage?
@@ -2075,6 +2190,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   private let suspendsAgreementMutation: Bool
   private var validationCredentialByteCounts: [Int] = []
   private var validationSessionShapes: [SessionCredentialShape] = []
+  private var selfProfileRequests: [SelfProfileClientRequest] = []
   private var likedForumRequests: [LikedForumClientRequest] = []
   private var cloudFavoriteRequests: [CloudFavoriteClientRequest] = []
   private var concernRequests: [ConcernClientRequest] = []
@@ -2099,6 +2215,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
 
   init(
     validation: TiebaAuthenticatedAccount? = nil,
+    selfProfile: TiebaSelfProfileSummary? = nil,
     likedForums: TiebaFollowedForumPage? = nil,
     cloudFavorites: TiebaCloudFavoritePage? = nil,
     concern: TiebaConcernPage? = nil,
@@ -2119,6 +2236,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     suspendsAgreementMutation: Bool = false
   ) {
     self.validation = validation
+    self.selfProfile = selfProfile
     self.likedForums = likedForums
     self.cloudFavorites = cloudFavorites
     self.concern = concern
@@ -2159,6 +2277,22 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     )
     guard let validation else { throw AccountClientSpyError.unexpectedCall }
     return validation
+  }
+
+  func getSelfProfile(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64
+  ) async throws -> TiebaSelfProfileSummary {
+    selfProfileRequests.append(
+      SelfProfileClientRequest(
+        userID: expectedUserID,
+        bdussBytes: credential.bduss.utf8.count,
+        stokenBytes: credential.stoken.utf8.count,
+        cookieName: credential.bdussCookieName
+      )
+    )
+    guard let selfProfile else { throw AccountClientSpyError.unexpectedCall }
+    return selfProfile
   }
 
   func getCloudFavorites(
@@ -2511,6 +2645,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     AccountClientSnapshot(
       validationCredentialByteCounts: validationCredentialByteCounts,
       validationSessionShapes: validationSessionShapes,
+      selfProfileRequests: selfProfileRequests,
       likedForumRequests: likedForumRequests,
       cloudFavoriteRequests: cloudFavoriteRequests,
       concernRequests: concernRequests,

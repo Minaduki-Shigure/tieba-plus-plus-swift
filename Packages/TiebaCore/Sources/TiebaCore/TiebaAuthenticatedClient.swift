@@ -356,6 +356,7 @@ private enum TiebaNewThreadWaitOutcome: Sendable, Equatable {
 
 public actor TiebaAuthenticatedClient {
   static let accountResponseMaximumBytes = 512 * 1_024
+  static let selfProfileResponseMaximumBytes = 2 * 1_024 * 1_024
   static let webSessionResponseMaximumBytes = 256 * 1_024
   static let followedForumsResponseMaximumBytes = 2 * 1_024 * 1_024
   static let cloudFavoritesResponseMaximumBytes = 2 * 1_024 * 1_024
@@ -458,6 +459,24 @@ public actor TiebaAuthenticatedClient {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
     return account
+  }
+
+  public func getSelfProfile(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64
+  ) async throws -> TiebaSelfProfileSummary {
+    let request = try requestFactory.selfProfile(
+      credential: credential,
+      expectedUserID: expectedUserID
+    )
+    let response: ProfileResIdl = try await sendProtobuf(
+      request,
+      maximumBodyBytes: Self.selfProfileResponseMaximumBytes
+    )
+    return try TiebaAuthenticatedDecoder.selfProfile(
+      from: response,
+      expectedUserID: expectedUserID
+    )
   }
 
   public func getCloudFavorites(

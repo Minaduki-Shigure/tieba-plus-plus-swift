@@ -31,6 +31,9 @@ struct TiebaThreadCloudFavoriteContext:
 }
 
 enum TiebaAuthenticatedDecoder {
+  static let selfProfileNameMaximumBytes = 1_024
+  static let selfProfilePortraitMaximumBytes = 4_096
+  static let selfProfileBiographyMaximumBytes = 16 * 1_024
   static let followedForumNameMaximumBytes = 1_024
   static let followedForumAvatarMaximumBytes = 4_096
   static let followedForumSloganMaximumBytes = 4_096
@@ -52,6 +55,125 @@ enum TiebaAuthenticatedDecoder {
       username: username,
       portrait: portrait
     )
+  }
+
+  static func selfProfile(
+    from response: ProfileResIdl,
+    expectedUserID: Int64
+  ) throws -> TiebaSelfProfileSummary {
+    guard response.error.errorno == 0 else {
+      throw TiebaClientError.server(
+        code: response.error.errorno,
+        message: response.error.errmsg
+      )
+    }
+    guard
+      expectedUserID > 0,
+      response.hasData,
+      response.data.hasUser,
+      response.data.user.id == expectedUserID
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+
+    let user = response.data.user
+    let username = try boundedSelfProfileSingleLineText(
+      user.name,
+      maximumBytes: selfProfileNameMaximumBytes
+    )
+    let displayName = try boundedSelfProfileSingleLineText(
+      user.nameShow,
+      maximumBytes: selfProfileNameMaximumBytes
+    )
+    guard !username.isEmpty || !displayName.isEmpty else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    let portrait = try normalizedSelfProfilePortrait(user.portrait)
+    let biographySource = user.displayIntro.trimmingCharacters(in: .whitespacesAndNewlines)
+      .isEmpty ? user.intro : user.displayIntro
+    let biography = try boundedSelfProfileMultilineText(
+      biographySource,
+      maximumBytes: selfProfileBiographyMaximumBytes
+    )
+    let counts = [user.concernNum, user.fansNum, user.postNum]
+    guard counts.allSatisfy({ $0 >= 0 }) else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+
+    return TiebaSelfProfileSummary(
+      userID: expectedUserID,
+      username: username,
+      displayName: displayName,
+      portrait: portrait,
+      biography: biography,
+      followingCount: Int(user.concernNum),
+      followerCount: Int(user.fansNum),
+      postCount: Int(user.postNum)
+    )
+  }
+
+  private static func boundedSelfProfileSingleLineText(
+    _ rawValue: String,
+    maximumBytes: Int
+  ) throws -> String {
+    guard
+      rawValue.utf8.count <= maximumBytes,
+      !rawValue.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    return rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private static func boundedSelfProfileMultilineText(
+    _ rawValue: String,
+    maximumBytes: Int
+  ) throws -> String {
+    guard rawValue.utf8.count <= maximumBytes else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    let allowedControls = CharacterSet(charactersIn: "\n\r")
+    guard !rawValue.unicodeScalars.contains(where: { scalar in
+      CharacterSet.controlCharacters.contains(scalar) && !allowedControls.contains(scalar)
+    }) else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    return rawValue
+      .replacingOccurrences(of: "\r\n", with: "\n")
+      .replacingOccurrences(of: "\r", with: "\n")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private static func normalizedSelfProfilePortrait(_ rawValue: String) throws -> String {
+    let source = try boundedSelfProfileSingleLineText(
+      rawValue,
+      maximumBytes: selfProfilePortraitMaximumBytes
+    )
+    guard !source.isEmpty else { return "" }
+    guard !source.contains("#") else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+
+    let parts = source.split(
+      separator: "?",
+      maxSplits: 1,
+      omittingEmptySubsequences: false
+    )
+    guard let token = parts.first, !token.isEmpty else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    if parts.count == 2 {
+      let query = parts[1]
+      guard query.hasPrefix("t=") else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+      let digits = query.utf8.dropFirst(2)
+      guard (1...20).contains(digits.count), digits.allSatisfy({ (48...57).contains($0) })
+      else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+    }
+    return String(token)
   }
 
   static func webAccountID(from body: Data) throws -> Int64 {

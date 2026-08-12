@@ -17,7 +17,7 @@ checks.
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, media preferences, and reply-entry visibility |
-| Accounts | Current `main` supports bound Web login, switching, logout, followed forums, login-gated complete liked-forum lists for the current or another user, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, and experimental content approval |
+| Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, and experimental content approval |
 | Server-side writes | Guarded forum follow/unfollow, check-in, content approval, thread-detail and verified list-level cloud-favorite changes, plain-text topic/floor/nested replies, and plain-text new-topic creation are in device validation; other writes stay disabled |
 | TiebaLite parity | Anonymous reading and media: about 91–95%; full product scope: about 71–74% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.59.0-alpha.1` (build 62); later `main` features require a tagged release |
@@ -38,8 +38,11 @@ checks.
   their bounded public liked-forum preview now links to an independently paginated,
   login-gated complete list for either the current or another user. That list is
   bound to the active account session and target UID and never enters the global
-  current-account followed-forum index. The account page links the active UID to
-  that same credential-free public profile.
+  current-account followed-forum index. The account page reads a bounded,
+  memory-only self-profile summary for the exact authenticated session and links
+  it to the existing credential-free public profile. It shows the current avatar,
+  display name, biography, following, follower, and reply counts; a refresh checks
+  the `userID + sessionRevision` lease before and after transport.
   A logged-in home page also shows at most six forums from the current account's
   followed-forum list and links to the complete paginated list. Both surfaces
   share one app-scoped, memory-only snapshot that is discarded when the account
@@ -99,10 +102,11 @@ checks.
   simulator build, validates the app source, and verifies its public IPA hash.
   Authenticated flows never use real credentials in CI. Login binding, cloud
   favorite reads and mutations, including verified list deletion, followed-forum recommendation filtering,
-  target-bound liked-forum pagination, concern-feed, inbox summary, inbox
+  target-bound liked-forum pagination, the minimal self-profile request and its
+  UID/session-lease race handling, concern-feed, inbox summary, inbox
   navigation and reply-action rebinding, plain-text reply contracts, and
   plain-text new-topic contracts are
-  covered by fixtures, while successful private
+  covered by fixtures, while successful real-account self-profile and private
   reads, forum
   follow/unfollow, check-in, cloud-favorite changes, topic/post/subpost content
   approval, real reply creation, and real new-topic creation remain
@@ -110,7 +114,8 @@ checks.
 - **App source:** Add [`sidestore-source.json`](https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json)
   to LiveContainer 3.7.0 or newer, or to SideStore. Its latest IPA is published
   only after the tag's package, anonymous integration, and simulator tests all
-  pass.
+  pass. The source currently distributes `v0.59.0-alpha.1`; the newer `main`
+  features described above are not in that IPA yet.
 - **Login hotfix:** `v0.54.0-alpha.1` can reach Tieba's account page without
   completing because its callback and Cookie matching are too strict.
   `v0.54.1-alpha.1` made that failure explicit and confirmed that iOS 18.7.2
@@ -250,10 +255,12 @@ checks.
   separately reads account-specific follow and check-in state and retains its
   explicitly confirmed single-forum actions. Successful private-list retrieval
   still requires physical-device validation and is not asserted by CI fixtures.
-- **Current-account public profile:** The account page can open the active UID in
-  the same credential-free public profile used elsewhere, including public
-  topics, replies, following, and followers. This is a navigation shortcut, not
-  private account history, and it adds no authenticated profile request.
+- **Current-account profile:** The account page reads a bounded, account-lease-
+  bound authenticated summary containing identity, biography, relation counts,
+  and reply count. Selecting it opens the same credential-free public profile
+  used elsewhere for public topics, replies, following, and followers. The
+  destination remains a navigation shortcut and does not expose private account
+  history.
 - **User liked forums:** A public profile keeps its bounded credential-free
   preview and offers a separate complete list for the current or another user
   when account access is available. The request is read only and paginated; each
@@ -352,7 +359,9 @@ checks.
   check-in are not implemented.
 - **Unsupported operations:** Guess-based removal of unresolvable cloud-favorite
   rows, bulk cloud/local synchronization, disagreement and other reaction types,
-  rich-media topic/reply creation, notification mark-read/unread
+  recommendation feedback, rich-media topic/reply creation, poll submission,
+  user follow/unfollow, server-side user blocking, profile editing, content
+  deletion/reporting, automatic or batch check-in, notification mark-read/unread
   reconciliation, background notification polling, and moderation remain
   unavailable until their request contracts and recovery paths have been
   validated on a disposable account.
@@ -410,6 +419,10 @@ can be added directly to LiveContainer 3.7.0 or newer, or to SideStore. Each
 listed IPA is an unsigned GitHub Release asset that must be signed by the
 installer; its byte size and SHA-256 are checked against the source by CI. App
 Store distribution is not currently a project goal.
+
+```text
+https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json
+```
 
 ## License
 

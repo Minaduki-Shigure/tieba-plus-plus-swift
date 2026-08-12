@@ -68,6 +68,41 @@ public struct TiebaAuthenticatedAccount:
   }
 }
 
+public struct TiebaSelfProfileSummary: Sendable, Hashable {
+  public let userID: Int64
+  public let username: String
+  public let displayName: String
+  public let portrait: String
+  public let biography: String
+  public let followingCount: Int
+  public let followerCount: Int
+  public let postCount: Int
+
+  public init(
+    userID: Int64,
+    username: String,
+    displayName: String,
+    portrait: String,
+    biography: String,
+    followingCount: Int,
+    followerCount: Int,
+    postCount: Int
+  ) {
+    self.userID = userID
+    self.username = username
+    self.displayName = displayName
+    self.portrait = portrait
+    self.biography = biography
+    self.followingCount = followingCount
+    self.followerCount = followerCount
+    self.postCount = postCount
+  }
+
+  public var preferredName: String {
+    displayName.isEmpty ? username : displayName
+  }
+}
+
 public struct TiebaConcernPage: Sendable, Hashable {
   public let requestedUserID: Int64
   public let threads: [TiebaThread]

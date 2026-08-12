@@ -8,6 +8,10 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
   func validateSession(
     credential: TiebaSessionCredential
   ) async throws -> TiebaAuthenticatedAccount
+  func getSelfProfile(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64
+  ) async throws -> TiebaSelfProfileSummary
   func getFollowedForums(
     credential: TiebaBDUSSCredential,
     userID: Int64,
@@ -156,6 +160,13 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
 }
 
 extension TiebaAuthenticatedAccountClient {
+  func getSelfProfile(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64
+  ) async throws -> TiebaSelfProfileSummary {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
   func getLikedForums(
     credential: TiebaBDUSSCredential,
     accountUserID: Int64,
@@ -386,6 +397,43 @@ struct TiebaCoreAccountService: AccountService {
       userID: response.userID,
       username: response.username,
       portrait: response.portrait
+    )
+  }
+
+  func selfProfile(
+    session: StoredAccountSession
+  ) async throws -> AccountProfileSummary {
+    guard session.id > 0, let credentials = session.credentials else {
+      throw BrowseError.unavailable("此账户需要重新登录，才能安全读取本人资料。")
+    }
+    let response: TiebaSelfProfileSummary
+    do {
+      response = try await client.getSelfProfile(
+        credential: Self.coreSessionCredential(credentials),
+        expectedUserID: session.id
+      )
+      try Task.checkCancellation()
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.accountError(error)
+    }
+    guard
+      response.userID == session.id,
+      [response.followingCount, response.followerCount, response.postCount]
+        .allSatisfy({ (0...Int(Int32.max)).contains($0) })
+    else {
+      throw BrowseError.unavailable("贴吧返回了不匹配的本人资料，请重新加载后再试。")
+    }
+    return AccountProfileSummary(
+      userID: response.userID,
+      username: response.username,
+      displayName: response.displayName,
+      portraitURL: SecureTiebaURL.strictPortrait(response.portrait),
+      biography: response.biography,
+      followingCount: response.followingCount,
+      followerCount: response.followerCount,
+      postCount: response.postCount
     )
   }
 

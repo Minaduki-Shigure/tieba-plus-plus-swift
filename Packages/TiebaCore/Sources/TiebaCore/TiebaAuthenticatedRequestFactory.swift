@@ -20,6 +20,10 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let textReplyClientVersion = "12.35.1.0"
   static let newThreadClientVersion = "7.2.0.0"
   static let concernClientVersion = "11.10.8.6"
+  static let selfProfileClientVersion = "12.52.1.0"
+  static let selfProfileUserAgent =
+    "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) "
+    + "Version/4.0 Chrome/135.0.0.0 Mobile Safari/537.36 tieba/12.52.1.0"
   static let maximumConcernPageTagBytes = 4_096
   static let writeHost = TiebaRequestFactory.serviceHost
   static let webIdentityHost = "tieba.baidu.com"
@@ -97,6 +101,46 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       forHTTPHeaderField: "Cookie"
     )
     return request
+  }
+
+  func selfProfile(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64
+  ) throws -> URLRequest {
+    try validate(credential)
+    guard expectedUserID > 0 else {
+      throw TiebaClientError.invalidArgument("Expected user ID must be positive.")
+    }
+    try validateConfiguration()
+
+    var common = CommonReq()
+    common.clientType = 2
+    common.clientVersion = Self.selfProfileClientVersion
+    common.bduss = credential.bduss
+    common.stoken = credential.stoken
+
+    var data = ProfileReqIdl.DataReq()
+    data.uid = expectedUserID
+    data.needPostCount = 1
+    data.isGuest = 0
+    data.pn = 1
+    data.rn = 20
+    data.hasPlist_p = 1
+    data.common = common
+    data.isFromUsercenter = 1
+    data.page = 1
+
+    var message = ProfileReqIdl()
+    message.data = data
+    return try authenticatedProtobufReadRequest(
+      path: "/c/u/user/profile",
+      command: 303_012,
+      message: message,
+      fields: [("stoken", credential.stoken)],
+      userAgent: Self.selfProfileUserAgent,
+      clientUserToken: String(expectedUserID),
+      cookie: "ka=open"
+    )
   }
 
   func cloudFavorites(
@@ -1146,6 +1190,51 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       protobuf: try message.serializedData()
     )
     request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+    request.setValue("protobuf", forHTTPHeaderField: "x_bd_data_type")
+    request.setValue(clientUserToken, forHTTPHeaderField: "client_user_token")
+    request.setValue(cookie, forHTTPHeaderField: "Cookie")
+    request.setValue(
+      "multipart/form-data; boundary=\(TiebaRequestFactory.multipartBoundary)",
+      forHTTPHeaderField: "Content-Type"
+    )
+    request.setValue("gzip", forHTTPHeaderField: "Accept-Encoding")
+    return request
+  }
+
+  private func authenticatedProtobufReadRequest<Message: SwiftProtobuf.Message>(
+    path: String,
+    command: Int,
+    message: Message,
+    fields: [(String, String)],
+    userAgent: String,
+    clientUserToken: String,
+    cookie: String
+  ) throws -> URLRequest {
+    var components = URLComponents()
+    components.scheme = "https"
+    components.host = Self.writeHost
+    components.path = path
+    components.queryItems = [
+      URLQueryItem(name: "cmd", value: String(command)),
+      URLQueryItem(name: "format", value: "protobuf"),
+    ]
+    guard let url = components.url, Self.allows(url, expectedHost: Self.writeHost) else {
+      throw TiebaClientError.invalidEndpoint
+    }
+
+    var request = URLRequest(
+      url: url,
+      cachePolicy: .reloadIgnoringLocalCacheData,
+      timeoutInterval: configuration.requestTimeout
+    )
+    request.httpMethod = "POST"
+    request.httpShouldHandleCookies = false
+    request.httpBody = TiebaRequestFactory.multipartBody(
+      fields: fields,
+      protobuf: try message.serializedData()
+    )
+    request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+    request.setValue("2", forHTTPHeaderField: "client_type")
     request.setValue("protobuf", forHTTPHeaderField: "x_bd_data_type")
     request.setValue(clientUserToken, forHTTPHeaderField: "client_user_token")
     request.setValue(cookie, forHTTPHeaderField: "Cookie")

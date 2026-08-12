@@ -23,6 +23,26 @@ final class SecureTiebaURLTests: XCTestCase {
     XCTAssertNil(SecureTiebaURL.portrait("javascript://alert"))
   }
 
+  func testStrictPortraitAcceptsOnlyCanonicalTokenAndCacheBuster() {
+    XCTAssertEqual(
+      SecureTiebaURL.strictPortrait("portrait-token?t=123")?.absoluteString,
+      "https://himg.bdimg.com/sys/portraitn/item/portrait-token"
+    )
+    XCTAssertEqual(
+      SecureTiebaURL.strictPortrait(
+        "https://tb.himg.baidu.com/sys/portrait/item/portrait-token?t=12345678901234567890"
+      )?.absoluteString,
+      "https://himg.bdimg.com/sys/portraitn/item/portrait-token"
+    )
+    XCTAssertNil(
+      SecureTiebaURL.strictPortrait(
+        "portrait-token?t=123456789012345678901"
+      )
+    )
+    XCTAssertNil(SecureTiebaURL.strictPortrait("portrait-token?evil=123"))
+    XCTAssertNil(SecureTiebaURL.strictPortrait("file:///private/avatar.png"))
+  }
+
   func testLargePortraitAcceptsStrictBareTokenAndLengthBoundary() throws {
     let token = "AbC012._~-"
     let url = try XCTUnwrap(SecureTiebaURL.largePortrait(token))

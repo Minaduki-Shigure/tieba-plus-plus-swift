@@ -11,6 +11,7 @@ struct AccountView: View {
 
   @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
   @StateObject private var viewModel: AccountViewModel
+  @StateObject private var profileSummaryViewModel: ActiveAccountProfileSummaryViewModel
   @StateObject private var unreadSummaryViewModel: InboxUnreadSummaryViewModel
   @State private var showsLogin = false
   @State private var confirmsLogout = false
@@ -32,6 +33,9 @@ struct AccountView: View {
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
     _viewModel = StateObject(wrappedValue: AccountViewModel(vault: vault))
+    _profileSummaryViewModel = StateObject(
+      wrappedValue: ActiveAccountProfileSummaryViewModel(service: accountService, vault: vault)
+    )
     _unreadSummaryViewModel = StateObject(
       wrappedValue: InboxUnreadSummaryViewModel(service: accountService, vault: vault)
     )
@@ -67,13 +71,18 @@ struct AccountView: View {
       }
     }
     .task {
+      profileSummaryViewModel.loadIfNeeded()
       unreadSummaryViewModel.loadIfNeeded()
       await viewModel.loadIfNeeded()
     }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+      profileSummaryViewModel.accountSessionDidChange()
       unreadSummaryViewModel.accountSessionDidChange()
     }
-    .onDisappear(perform: unreadSummaryViewModel.cancel)
+    .onDisappear {
+      profileSummaryViewModel.cancel()
+      unreadSummaryViewModel.cancel()
+    }
     .sheet(isPresented: $showsLogin) {
       NavigationStack {
         LoginView(service: accountService, vault: vault) {
@@ -171,9 +180,40 @@ struct AccountView: View {
                 searchHistoryRepository: searchHistoryRepository
               )
             } label: {
-              Label("我的公开主页", systemImage: "person.crop.circle")
+              ActiveAccountProfileSummaryRow(
+                account: activeAccount,
+                profile: activeProfileSummary,
+                isLoading: profileSummaryViewModel.state == .loading
+              )
             }
             .disabled(viewModel.isMutating)
+
+            if let message = profileSummaryFailureMessage {
+              HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+                  .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                if activeAccount.hasFullCredentials {
+                  Button {
+                    profileSummaryViewModel.reload()
+                  } label: {
+                    Image(systemName: "arrow.clockwise")
+                  }
+                  .buttonStyle(.borderless)
+                  .disabled(viewModel.isMutating)
+                  .accessibilityLabel("重新读取本人资料")
+                  .help("重新读取本人资料")
+                } else {
+                  Button { showsLogin = true } label: {
+                    Label("重新登录", systemImage: "key")
+                  }
+                  .buttonStyle(.borderless)
+                  .disabled(viewModel.isMutating)
+                }
+              }
+            }
 
             NavigationLink {
               FollowedForumsView(
@@ -231,8 +271,34 @@ struct AccountView: View {
     .listStyle(.insetGrouped)
     .refreshable {
       await viewModel.reload()
+      await profileSummaryViewModel.refresh()
       await unreadSummaryViewModel.refresh()
     }
+  }
+
+  private var activeProfileSummary: AccountProfileSummary? {
+    guard
+      let activeUserID = viewModel.activeAccount?.id,
+      let summary = profileSummaryViewModel.summary,
+      summary.userID == activeUserID,
+      [summary.followingCount, summary.followerCount, summary.postCount]
+        .allSatisfy({ (0...Int(Int32.max)).contains($0) })
+    else { return nil }
+    return summary
+  }
+
+  private var profileSummaryFailureMessage: String? {
+    if
+      let activeUserID = viewModel.activeAccount?.id,
+      let summary = profileSummaryViewModel.summary,
+      summary.userID != activeUserID
+    {
+      return viewModel.isMutating ? nil : "账户状态已变化，请重新加载本人资料。"
+    }
+    if case .failed(let message) = profileSummaryViewModel.state {
+      return message
+    }
+    return nil
   }
 
   private var unreadBadgePresentation: InboxUnreadBadgePresentation {
@@ -381,5 +447,86 @@ private struct AccountRow: View {
     }
     .contentShape(Rectangle())
     .padding(.vertical, 2)
+  }
+}
+
+private struct ActiveAccountProfileSummaryRow: View {
+  let account: AccountSummary
+  let profile: AccountProfileSummary?
+  let isLoading: Bool
+
+  private var name: String { profile?.preferredName ?? account.preferredName }
+  private var avatarURL: URL? { profile?.portraitURL ?? account.portraitURL }
+  private var biography: String {
+    guard let profile else { return "用户 ID \(account.id)" }
+    return profile.biography.isEmpty ? "暂未填写简介" : profile.biography
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      HStack(alignment: .top, spacing: 12) {
+        AvatarView(url: avatarURL, name: name, size: 56)
+        VStack(alignment: .leading, spacing: 5) {
+          Text(name)
+            .font(.headline)
+            .foregroundStyle(.primary)
+            .lineLimit(2)
+          Text(biography)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        if isLoading {
+          ProgressView()
+            .controlSize(.small)
+            .accessibilityHidden(true)
+        }
+      }
+
+      if let profile {
+        HStack(spacing: 0) {
+          ProfileStatistic(title: "关注", value: profile.followingCount)
+          ProfileStatistic(title: "粉丝", value: profile.followerCount)
+          ProfileStatistic(title: "回贴", value: profile.postCount)
+        }
+        .frame(minHeight: 38)
+      }
+    }
+    .padding(.vertical, 5)
+    .contentShape(Rectangle())
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(name)
+    .accessibilityValue(accessibilityValue)
+  }
+
+  private var accessibilityValue: String {
+    guard let profile else {
+      return isLoading ? "用户 ID \(account.id)，正在读取本人资料" : "用户 ID \(account.id)"
+    }
+    let intro = profile.biography.isEmpty ? "暂未填写简介" : profile.biography
+    return "\(intro)，关注 \(profile.followingCount)，粉丝 \(profile.followerCount)，回贴 \(profile.postCount)"
+  }
+}
+
+private struct ProfileStatistic: View {
+  let title: String
+  let value: Int
+
+  var body: some View {
+    VStack(spacing: 2) {
+      Text(max(value, 0).formatted(.number.notation(.compactName)))
+        .font(.subheadline.weight(.semibold))
+        .monospacedDigit()
+        .foregroundStyle(.primary)
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
+      Text(title)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+    }
+    .frame(maxWidth: .infinity)
+    .accessibilityHidden(true)
   }
 }

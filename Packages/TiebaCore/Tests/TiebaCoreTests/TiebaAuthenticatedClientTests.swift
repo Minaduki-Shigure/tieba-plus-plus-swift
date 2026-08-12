@@ -1,4 +1,5 @@
 import Foundation
+import TiebaProto
 import XCTest
 
 @testable import TiebaCore
@@ -30,6 +31,176 @@ final class TiebaAuthenticatedClientTests: XCTestCase {
     XCTAssertEqual(account.username, "account-name")
     XCTAssertEqual(account.portrait, "portrait-token")
     XCTAssertEqual(Array(account.customMirror.children).count, 2)
+  }
+
+  func testSelfProfileMapsBoundedAuthenticatedSummary() async throws {
+    var response = ProtoFixtures.userProfile()
+    response.data.user.isLogin = 0
+    response.data.user.name = " profile-user "
+    response.data.user.nameShow = " Profile User "
+    response.data.user.displayIntro = " Line one\r\nLine two "
+    let client = TiebaAuthenticatedClient(
+      transport: AuthStubTransport(body: try response.serializedData())
+    )
+
+    let summary = try await client.getSelfProfile(
+      credential: sessionCredential(),
+      expectedUserID: 957_339_815
+    )
+
+    XCTAssertEqual(summary.userID, 957_339_815)
+    XCTAssertEqual(summary.username, "profile-user")
+    XCTAssertEqual(summary.displayName, "Profile User")
+    XCTAssertEqual(summary.preferredName, "Profile User")
+    XCTAssertEqual(summary.portrait, "profile-portrait")
+    XCTAssertEqual(summary.biography, "Line one\nLine two")
+    XCTAssertEqual(summary.followingCount, 67)
+    XCTAssertEqual(summary.followerCount, 345)
+    XCTAssertEqual(summary.postCount, 890)
+  }
+
+  func testSelfProfileRejectsMismatchedMalformedAndOversizedPayloads() async throws {
+    var mismatched = ProtoFixtures.userProfile()
+    mismatched.data.user.id = 123
+    await assertError(.invalidAuthenticatedResponse) {
+      _ = try await TiebaAuthenticatedClient(
+        transport: AuthStubTransport(body: try mismatched.serializedData())
+      ).getSelfProfile(
+        credential: sessionCredential(),
+        expectedUserID: 957_339_815
+      )
+    }
+
+    var invalidCount = ProtoFixtures.userProfile()
+    invalidCount.data.user.fansNum = -1
+    await assertError(.invalidAuthenticatedResponse) {
+      _ = try await TiebaAuthenticatedClient(
+        transport: AuthStubTransport(body: try invalidCount.serializedData())
+      ).getSelfProfile(
+        credential: sessionCredential(),
+        expectedUserID: 957_339_815
+      )
+    }
+
+    var oversizedBiography = ProtoFixtures.userProfile()
+    oversizedBiography.data.user.displayIntro = String(
+      repeating: "a",
+      count: TiebaAuthenticatedDecoder.selfProfileBiographyMaximumBytes + 1
+    )
+    await assertError(.invalidAuthenticatedResponse) {
+      _ = try await TiebaAuthenticatedClient(
+        transport: AuthStubTransport(body: try oversizedBiography.serializedData())
+      ).getSelfProfile(
+        credential: sessionCredential(),
+        expectedUserID: 957_339_815
+      )
+    }
+
+    var controlName = ProtoFixtures.userProfile()
+    controlName.data.user.nameShow = "unsafe\nname"
+    await assertError(.invalidAuthenticatedResponse) {
+      _ = try await TiebaAuthenticatedClient(
+        transport: AuthStubTransport(body: try controlName.serializedData())
+      ).getSelfProfile(
+        credential: sessionCredential(),
+        expectedUserID: 957_339_815
+      )
+    }
+  }
+
+  func testSelfProfileRejectsServerEnvelopeMissingIdentityAndUnsafeText() async throws {
+    var serverError = ProtoFixtures.userProfile()
+    serverError.error.errorno = 123
+    serverError.error.errmsg = "private response"
+    await assertError(.server(code: 123, message: "private response")) {
+      _ = try await self.profileClient(serverError).getSelfProfile(
+        credential: self.sessionCredential(),
+        expectedUserID: 957_339_815
+      )
+    }
+
+    var missingData = ProfileResIdl()
+    await assertError(.invalidAuthenticatedResponse) {
+      _ = try await self.profileClient(missingData).getSelfProfile(
+        credential: self.sessionCredential(),
+        expectedUserID: 957_339_815
+      )
+    }
+
+    missingData.data = ProfileResIdl.DataRes()
+    await assertError(.invalidAuthenticatedResponse) {
+      _ = try await self.profileClient(missingData).getSelfProfile(
+        credential: self.sessionCredential(),
+        expectedUserID: 957_339_815
+      )
+    }
+
+    var emptyNames = ProtoFixtures.userProfile()
+    emptyNames.data.user.name = "   "
+    emptyNames.data.user.nameShow = ""
+    await assertError(.invalidAuthenticatedResponse) {
+      _ = try await self.profileClient(emptyNames).getSelfProfile(
+        credential: self.sessionCredential(),
+        expectedUserID: 957_339_815
+      )
+    }
+
+    var oversizedName = ProtoFixtures.userProfile()
+    oversizedName.data.user.nameShow = String(
+      repeating: "n",
+      count: TiebaAuthenticatedDecoder.selfProfileNameMaximumBytes + 1
+    )
+    await assertError(.invalidAuthenticatedResponse) {
+      _ = try await self.profileClient(oversizedName).getSelfProfile(
+        credential: self.sessionCredential(),
+        expectedUserID: 957_339_815
+      )
+    }
+
+    var oversizedPortrait = ProtoFixtures.userProfile()
+    oversizedPortrait.data.user.portrait = String(
+      repeating: "p",
+      count: TiebaAuthenticatedDecoder.selfProfilePortraitMaximumBytes + 1
+    )
+    await assertError(.invalidAuthenticatedResponse) {
+      _ = try await self.profileClient(oversizedPortrait).getSelfProfile(
+        credential: self.sessionCredential(),
+        expectedUserID: 957_339_815
+      )
+    }
+
+    var unsafeBiography = ProtoFixtures.userProfile()
+    unsafeBiography.data.user.displayIntro = "unsafe\tbiography"
+    await assertError(.invalidAuthenticatedResponse) {
+      _ = try await self.profileClient(unsafeBiography).getSelfProfile(
+        credential: self.sessionCredential(),
+        expectedUserID: 957_339_815
+      )
+    }
+
+    for portrait in ["profile-portrait?evil=1", "profile-portrait?t=", "profile-portrait#fragment"] {
+      var unsafePortrait = ProtoFixtures.userProfile()
+      unsafePortrait.data.user.portrait = portrait
+      await assertError(.invalidAuthenticatedResponse) {
+        _ = try await self.profileClient(unsafePortrait).getSelfProfile(
+          credential: self.sessionCredential(),
+          expectedUserID: 957_339_815
+        )
+      }
+    }
+  }
+
+  func testSelfProfileFallsBackToLegacyBiography() async throws {
+    var response = ProtoFixtures.userProfile()
+    response.data.user.displayIntro = " \n "
+    response.data.user.intro = " Legacy biography\rline two "
+
+    let summary = try await profileClient(response).getSelfProfile(
+      credential: sessionCredential(),
+      expectedUserID: 957_339_815
+    )
+
+    XCTAssertEqual(summary.biography, "Legacy biography\nline two")
   }
 
   func testMapsBothFollowedForumGroupsAndDeduplicatesIDs() async throws {
@@ -338,10 +509,41 @@ final class TiebaAuthenticatedClientTests: XCTestCase {
         targetUserID: 123_456_789
       )
     }
+
+    let oversizedProfile = TiebaAuthenticatedClient(
+      transport: AuthStubTransport(
+        body: Data(
+          repeating: 0,
+          count: TiebaAuthenticatedClient.selfProfileResponseMaximumBytes + 1
+        )
+      )
+    )
+    await assertError(
+      .responseTooLarge(maximumBytes: TiebaAuthenticatedClient.selfProfileResponseMaximumBytes)
+    ) {
+      _ = try await oversizedProfile.getSelfProfile(
+        credential: sessionCredential(),
+        expectedUserID: 957_339_815
+      )
+    }
   }
 
   private func credential() -> TiebaBDUSSCredential {
     TiebaBDUSSCredential(bduss: String(repeating: "b", count: 192))
+  }
+
+  private func sessionCredential() -> TiebaSessionCredential {
+    TiebaSessionCredential(
+      bduss: String(repeating: "b", count: 192),
+      stoken: String(repeating: "s", count: 64),
+      bdussCookieName: .bduss
+    )
+  }
+
+  private func profileClient(_ response: ProfileResIdl) throws -> TiebaAuthenticatedClient {
+    TiebaAuthenticatedClient(
+      transport: AuthStubTransport(body: try response.serializedData())
+    )
   }
 
   private func assertError(

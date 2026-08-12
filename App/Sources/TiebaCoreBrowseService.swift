@@ -1683,26 +1683,35 @@ enum SecureTiebaURL {
     return components.url
   }
 
-  static func largePortrait(_ rawValue: String?) -> URL? {
-    guard let rawValue else { return nil }
-    guard rawValue.utf8.count <= 4_096 else { return nil }
-    let portrait = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !portrait.isEmpty else { return nil }
+  static func strictPortrait(_ rawValue: String?) -> URL? {
+    guard let token = validatedStrictPortraitToken(rawValue) else { return nil }
 
-    let token: String
-    if portrait.hasPrefix("//") || portrait.contains("://") {
-      guard let parsedToken = strictPortraitToken(from: portrait) else { return nil }
-      token = parsedToken
-    } else {
-      guard let parsedToken = strictBarePortraitToken(from: portrait) else { return nil }
-      token = parsedToken
-    }
+    var components = URLComponents()
+    components.scheme = "https"
+    components.host = "himg.bdimg.com"
+    components.path = "/sys/portraitn/item/\(token)"
+    return components.url
+  }
+
+  static func largePortrait(_ rawValue: String?) -> URL? {
+    guard let token = validatedStrictPortraitToken(rawValue) else { return nil }
 
     var components = URLComponents()
     components.scheme = "https"
     components.host = "himg.bdimg.com"
     components.path = "/sys/portraith/item/\(token)"
     return components.url
+  }
+
+  private static func validatedStrictPortraitToken(_ rawValue: String?) -> String? {
+    guard let rawValue, rawValue.utf8.count <= 4_096 else { return nil }
+    let portrait = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !portrait.isEmpty else { return nil }
+
+    if portrait.hasPrefix("//") || portrait.contains("://") {
+      return strictPortraitToken(from: portrait)
+    }
+    return strictBarePortraitToken(from: portrait)
   }
 
   private static func strictPortraitToken(from rawValue: String) -> String? {

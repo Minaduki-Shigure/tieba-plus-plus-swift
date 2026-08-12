@@ -21,7 +21,7 @@ versioned separately and currently serves `v0.59.0-alpha.1` (build 62).
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
 | Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, media preferences, and local reply-entry visibility are implemented; TiebaLite's wider settings and customization surface remains |
-| Account, session, and private read flows | 15 | 9 | Login, switching, followed and target-user liked forums, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
+| Account, session, and private read flows | 15 | 9 | Login, switching, a self-profile summary, followed and target-user liked forums, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 6–7 | Follow/unfollow, check-in, approval, verified list/thread-detail cloud-favorite mutations, three plain-text reply targets, and plain-text new-topic creation have guarded implementations; real creation success, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
 | **Total** | **100** | **71–74** | Current full-product estimate |
@@ -149,8 +149,10 @@ the source metadata is updated to that tested IPA.
 - Ephemeral, HTTPS-only Baidu Web login with an exact host allowlist
 - Same-snapshot BDUSS/STOKEN capture, independent same-UID session binding,
   device-only Keychain v3 storage, account switching, and local logout
-- Explicit current-account shortcut to the existing credential-free public
-  profile and its public topic, reply, following, and follower views
+- Account-bound, memory-only self-profile summary with current avatar, display
+  name, biography, following, follower, and reply counts, plus an explicit link to
+  the existing credential-free public profile and its public topic, reply,
+  following, and follower views
 - App-scoped, memory-only followed-forum state shared by a six-item logged-in
   home projection, the active account's complete paginated list, and a selected
   default-off followed-forum recommendation filter
@@ -219,18 +221,22 @@ the source metadata is updated to that tested IPA.
    and whether either summary or list retrieval changes server unread state,
    plus ordinary post and child-reply action relocation, unavailable targets,
    and account switching before composer presentation
-7. Real-device validation of the account-bound concern request, including the
+7. Real-device validation of the minimal authenticated self-profile request,
+   including successful V12 field deletion, absent `is_login`, empty biography,
+   expired and cross-account credentials, response UID binding, account switching,
+   and same-UID credential rotation
+8. Real-device validation of the account-bound concern request, including the
    signed-field deletion matrix, empty-account and expired-session envelopes,
    cursor replay, and whether list retrieval changes recommendation state
-8. Real-device validation of explicit cloud-favorite list/detail removal, add,
+9. Real-device validation of explicit cloud-favorite list/detail removal, add,
    and saved-floor updates, including unresolvable deleted rows, STOKEN rejection,
    idempotence, uncertain-write readback, concurrency, session rotation, and
    account switching
-9. Disposable-account validation of all three plain-text reply targets,
+10. Disposable-account validation of all three plain-text reply targets,
    including minimum-field deletion, missing/random/expired/cross-account
    STOKEN and TBS, challenge and permission failures, post-dispatch loss,
    exact-PID visibility, account rotation, and duplicate-send prevention
-10. Disposable-account validation of plain-text new-topic creation, followed by
+11. Disposable-account validation of plain-text new-topic creation, followed by
    rich-media topic/reply creation, broader settings parity, remaining account
    activity, and moderation tools
 
@@ -497,10 +503,13 @@ the outer group post ID is never treated as a parent. Unknown post types remain
 visible but have no guessed navigation. TiebaLite presents this history only for
 the current account, while the separately researched guest contract exposes the
 same public data without credentials or account-only fields.
-The account page now supplies a direct current-UID route to that same guest view
-and hides self-directed local block/allow shortcuts on that route. It adds no
-authenticated profile endpoint or private activity data, so this discoverability
-improvement does not add weighted parity credit.
+The account page now reads a minimal authenticated self-profile summary bound to
+the exact active-session lease, supplies a direct current-UID route to that same
+guest view, and hides self-directed local block/allow shortcuts on that route.
+The summary does not expose private activity, and the public destination remains
+credential-free. Until successful real-device validation, this incremental
+enhancement stays within the existing account/private-read score and adds no
+weighted parity credit.
 
 Public following and follower lists are separate anonymous signed-form reads.
 Following uses `POST https://tiebac.baidu.com/c/u/follow/followList`; followers

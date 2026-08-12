@@ -78,6 +78,26 @@ have endpoint-specific transfer limits before decoding. MD5 is used only for
 compatibility with the unofficial request signature protocol, not for password
 storage or verification.
 
+The current, not-yet-tagged self-profile summary requires a complete validated
+BDUSS/STOKEN session. It sends one HTTPS Protobuf request to the exact
+`tiebac.baidu.com/c/u/user/profile` path with command `303012`. The outer
+multipart body contains only STOKEN and the protobuf file; the inner common
+message contains only BDUSS, STOKEN, client type, and the fixed V12 client
+version. The request carries the expected UID in `client_user_token` and only
+the fixed noncredential value `ka=open` in the Cookie header. It must not add a
+CUID, IMEI, Android ID, IDFV, hardware/install identifier, model, screen,
+location, advertising value, stored cookie jar, or Authorization header.
+Responses are limited to 2 MiB and must contain the exact positive requested
+UID. Text and count fields are bounded before reaching the App, and portrait
+values pass through the existing secure portrait URL builder. The App reads the
+active Keychain session before and after transport and publishes only while the
+exact `userID + sessionRevision` lease remains current. The summary is memory
+only: it is not written back to Keychain, local preferences, caches, analytics,
+or logs. Failure may retain a snapshot only for that same lease; logout,
+switching, or same-UID credential rotation clears it synchronously. Successful
+minimal-field compatibility and server-side account binding remain physical-
+device validation questions; CI uses synthetic credentials and fixtures only.
+
 The current, not-yet-tagged `main` implementation of the home followed-forum
 projection and complete followed-forum list shares one application-scoped,
 memory-only state. The home projection exposes at most six rows. The complete

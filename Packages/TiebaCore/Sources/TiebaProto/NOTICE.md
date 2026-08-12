@@ -96,6 +96,13 @@ and request `forum_id`), authenticated `PbFloor` additions (`anti`, request
 and the embedded `Post.SubPost.pid` parent identifier used to bind those states
 are also adapted from TiebaLite commit
 `268f388c7824ae2c8f6ed549827a943ec8a7f352`.
+The authenticated self-profile request polarity (`uid`, omitted `friend_uid`,
+`is_guest = 0`, `need_post_count`, and the page-one profile flags) and its
+minimal `User` summary fields are adapted from `UserViewModel` and
+`MixedTiebaApiImpl.userProfileFlow` at that same commit. Tieba++ deliberately
+omits Android hardware, installation, advertising, location, screen, and CUID
+fields; it sends only the account-bound UID and credentials required by this
+read and never persists the returned summary.
 The Galaxy2 CUID framing and Helios checksum implementation in
 `TiebaGalaxy2CUID.swift` are adapted from TiebaLite's `CuidUtils` and
 `utils/helios` helpers at that commit. This implementation deliberately replaces
