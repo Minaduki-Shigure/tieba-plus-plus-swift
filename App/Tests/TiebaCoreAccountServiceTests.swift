@@ -5,6 +5,130 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class TiebaCoreAccountServiceTests: XCTestCase {
+  func testUserRelationshipRequiresFullSessionAndMapsBoundIdentity() async throws {
+    let relationship = TiebaUserRelationship(
+      userID: 7,
+      targetUserID: 9,
+      isFollowed: false
+    )
+    let client = AccountClientSpy(userRelationship: relationship)
+    let service = TiebaCoreAccountService(client: client)
+
+    let result = try await service.userRelationship(
+      session: session(),
+      targetUserID: 9
+    )
+
+    XCTAssertEqual(
+      result,
+      UserRelationshipData(userID: 7, targetUserID: 9, isFollowed: false)
+    )
+    let snapshot = await client.snapshot()
+    XCTAssertEqual(
+      snapshot.userRelationshipRequests,
+      [
+        UserRelationshipClientRequest(
+          expectedUserID: 7,
+          targetUserID: 9,
+          desiredState: nil,
+          bdussBytes: 192,
+          stokenBytes: 64,
+          cookieName: .bduss
+        )
+      ]
+    )
+  }
+
+  func testUserRelationshipRejectsLegacySessionSelfTargetAndMismatchedCoreIdentity()
+    async throws
+  {
+    let client = AccountClientSpy(
+      userRelationship: TiebaUserRelationship(
+        userID: 8,
+        targetUserID: 9,
+        isFollowed: false
+      )
+    )
+    let service = TiebaCoreAccountService(client: client)
+
+    for (storedSession, targetUserID) in [
+      (session(stokenComponent: nil), Int64(9)),
+      (session(), Int64(7)),
+    ] {
+      do {
+        _ = try await service.userRelationship(
+          session: storedSession,
+          targetUserID: targetUserID
+        )
+        XCTFail("Expected invalid relationship context to be rejected")
+      } catch let error as BrowseError {
+        XCTAssertEqual(
+          error.errorDescription,
+          "此账户需要重新登录，才能安全读取用户关注状态。"
+        )
+      }
+    }
+
+    do {
+      _ = try await service.userRelationship(session: session(), targetUserID: 9)
+      XCTFail("Expected mismatched relationship identity to be rejected")
+    } catch let error as BrowseError {
+      XCTAssertEqual(
+        error.errorDescription,
+        "贴吧返回了不匹配的用户关注状态，请重新加载后再试。"
+      )
+    }
+  }
+
+  func testSetUserFollowedUsesFullSessionAndMapsAuthoritativeReconciledState() async throws {
+    let client = AccountClientSpy(
+      userRelationshipMutation: TiebaUserRelationship(
+        userID: 7,
+        targetUserID: 9,
+        isFollowed: true
+      )
+    )
+    let service = TiebaCoreAccountService(client: client)
+
+    let result = try await service.setUserFollowed(
+      session: session(),
+      targetUserID: 9,
+      isFollowed: true
+    )
+
+    XCTAssertTrue(result.isFollowed)
+    let snapshot = await client.snapshot()
+    XCTAssertEqual(
+      snapshot.userRelationshipMutationRequests,
+      [
+        UserRelationshipClientRequest(
+          expectedUserID: 7,
+          targetUserID: 9,
+          desiredState: true,
+          bdussBytes: 192,
+          stokenBytes: 64,
+          cookieName: .bduss
+        )
+      ]
+    )
+
+    let mismatch = TiebaCoreAccountService(
+      client: AccountClientSpy(
+        userRelationshipMutation: TiebaUserRelationship(
+          userID: 7,
+          targetUserID: 9,
+          isFollowed: false
+        )
+      )
+    )
+    let unchanged = try await mismatch.setUserFollowed(
+      session: session(),
+      targetUserID: 9,
+      isFollowed: true
+    )
+    XCTAssertFalse(unchanged.isFollowed)
+  }
+
   func testSelfProfileUsesFullSessionAndMapsSafePresentation() async throws {
     let client = AccountClientSpy(
       selfProfile: TiebaSelfProfileSummary(
@@ -2089,6 +2213,15 @@ private struct ConcernClientRequest: Equatable, Sendable {
   let cookieName: TiebaBDUSSCookieName
 }
 
+private struct UserRelationshipClientRequest: Equatable, Sendable {
+  let expectedUserID: Int64
+  let targetUserID: Int64
+  let desiredState: Bool?
+  let bdussBytes: Int
+  let stokenBytes: Int
+  let cookieName: TiebaBDUSSCookieName
+}
+
 private struct ThreadAgreementClientRequest: Equatable, Sendable {
   let credentialByteCount: Int
   let expectedUserID: Int64
@@ -2141,6 +2274,8 @@ private struct AccountClientSnapshot: Sendable {
   let likedForumRequests: [LikedForumClientRequest]
   let cloudFavoriteRequests: [CloudFavoriteClientRequest]
   let concernRequests: [ConcernClientRequest]
+  let userRelationshipRequests: [UserRelationshipClientRequest]
+  let userRelationshipMutationRequests: [UserRelationshipClientRequest]
   let membershipRequests: [AccountClientRequest]
   let accountStateRequests: [AccountClientRequest]
   let mutationRequests: [AccountClientRequest]
@@ -2173,6 +2308,8 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   private let likedForums: TiebaFollowedForumPage?
   private let cloudFavorites: TiebaCloudFavoritePage?
   private let concern: TiebaConcernPage?
+  private let userRelationship: TiebaUserRelationship?
+  private let userRelationshipMutation: TiebaUserRelationship?
   private let membership: TiebaForumMembership?
   private let accountState: TiebaForumAccountState?
   private let mutation: TiebaForumMembership?
@@ -2194,6 +2331,8 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   private var likedForumRequests: [LikedForumClientRequest] = []
   private var cloudFavoriteRequests: [CloudFavoriteClientRequest] = []
   private var concernRequests: [ConcernClientRequest] = []
+  private var userRelationshipRequests: [UserRelationshipClientRequest] = []
+  private var userRelationshipMutationRequests: [UserRelationshipClientRequest] = []
   private var membershipRequests: [AccountClientRequest] = []
   private var accountStateRequests: [AccountClientRequest] = []
   private var mutationRequests: [AccountClientRequest] = []
@@ -2219,6 +2358,8 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     likedForums: TiebaFollowedForumPage? = nil,
     cloudFavorites: TiebaCloudFavoritePage? = nil,
     concern: TiebaConcernPage? = nil,
+    userRelationship: TiebaUserRelationship? = nil,
+    userRelationshipMutation: TiebaUserRelationship? = nil,
     membership: TiebaForumMembership? = nil,
     accountState: TiebaForumAccountState? = nil,
     mutation: TiebaForumMembership? = nil,
@@ -2240,6 +2381,8 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     self.likedForums = likedForums
     self.cloudFavorites = cloudFavorites
     self.concern = concern
+    self.userRelationship = userRelationship
+    self.userRelationshipMutation = userRelationshipMutation
     self.membership = membership
     self.accountState = accountState
     self.mutation = mutation
@@ -2333,6 +2476,45 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     )
     guard let concern else { throw AccountClientSpyError.unexpectedCall }
     return concern
+  }
+
+  func getUserRelationship(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64
+  ) async throws -> TiebaUserRelationship {
+    userRelationshipRequests.append(
+      UserRelationshipClientRequest(
+        expectedUserID: expectedUserID,
+        targetUserID: targetUserID,
+        desiredState: nil,
+        bdussBytes: credential.bduss.utf8.count,
+        stokenBytes: credential.stoken.utf8.count,
+        cookieName: credential.bdussCookieName
+      )
+    )
+    guard let userRelationship else { throw AccountClientSpyError.unexpectedCall }
+    return userRelationship
+  }
+
+  func setUserFollowState(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64,
+    isFollowed: Bool
+  ) async throws -> TiebaUserRelationship {
+    userRelationshipMutationRequests.append(
+      UserRelationshipClientRequest(
+        expectedUserID: expectedUserID,
+        targetUserID: targetUserID,
+        desiredState: isFollowed,
+        bdussBytes: credential.bduss.utf8.count,
+        stokenBytes: credential.stoken.utf8.count,
+        cookieName: credential.bdussCookieName
+      )
+    )
+    guard let userRelationshipMutation else { throw AccountClientSpyError.unexpectedCall }
+    return userRelationshipMutation
   }
 
   func getFollowedForums(
@@ -2649,6 +2831,8 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
       likedForumRequests: likedForumRequests,
       cloudFavoriteRequests: cloudFavoriteRequests,
       concernRequests: concernRequests,
+      userRelationshipRequests: userRelationshipRequests,
+      userRelationshipMutationRequests: userRelationshipMutationRequests,
       membershipRequests: membershipRequests,
       accountStateRequests: accountStateRequests,
       mutationRequests: mutationRequests,

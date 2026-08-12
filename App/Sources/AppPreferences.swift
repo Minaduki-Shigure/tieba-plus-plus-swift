@@ -150,6 +150,7 @@ enum AppStartDestination: String, CaseIterable, Hashable, Identifiable, Sendable
   case home
   case hotThreads
   case hotTopics
+  case notifications
   case favorites
   case history
 
@@ -165,6 +166,8 @@ enum AppStartDestination: String, CaseIterable, Hashable, Identifiable, Sendable
       "帖子热榜"
     case .hotTopics:
       "热门话题"
+    case .notifications:
+      "消息"
     case .favorites:
       "本地收藏"
     case .history:

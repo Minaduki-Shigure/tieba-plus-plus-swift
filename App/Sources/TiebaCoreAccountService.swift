@@ -66,6 +66,17 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
     pageTag: String?,
     lastRequestUnix: UInt64
   ) async throws -> TiebaConcernPage
+  func getUserRelationship(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64
+  ) async throws -> TiebaUserRelationship
+  func setUserFollowState(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64,
+    isFollowed: Bool
+  ) async throws -> TiebaUserRelationship
   func getNotifications(
     credential: TiebaBDUSSCredential,
     expectedUserID: Int64,
@@ -191,6 +202,23 @@ extension TiebaAuthenticatedAccountClient {
     pageTag: String?,
     lastRequestUnix: UInt64
   ) async throws -> TiebaConcernPage {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
+  func getUserRelationship(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64
+  ) async throws -> TiebaUserRelationship {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
+  func setUserFollowState(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64,
+    isFollowed: Bool
+  ) async throws -> TiebaUserRelationship {
     throw TiebaClientError.invalidAuthenticatedResponse
   }
 
@@ -883,6 +911,66 @@ struct TiebaCoreAccountService: AccountService {
     }
   }
 
+  func userRelationship(
+    session: StoredAccountSession,
+    targetUserID: Int64
+  ) async throws -> UserRelationshipData {
+    guard session.id > 0, targetUserID > 0, targetUserID != session.id,
+      let credentials = session.credentials
+    else {
+      throw BrowseError.unavailable("此账户需要重新登录，才能安全读取用户关注状态。")
+    }
+    let response: TiebaUserRelationship
+    do {
+      response = try await client.getUserRelationship(
+        credential: Self.coreSessionCredential(credentials),
+        expectedUserID: session.id,
+        targetUserID: targetUserID
+      )
+      try Task.checkCancellation()
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.accountError(error)
+    }
+    return try Self.userRelationshipData(
+      response,
+      expectedUserID: session.id,
+      expectedTargetUserID: targetUserID
+    )
+  }
+
+  func setUserFollowed(
+    session: StoredAccountSession,
+    targetUserID: Int64,
+    isFollowed: Bool
+  ) async throws -> UserRelationshipData {
+    guard session.id > 0, targetUserID > 0, targetUserID != session.id,
+      let credentials = session.credentials
+    else {
+      throw BrowseError.unavailable("此账户需要重新登录，才能安全更新用户关注状态。")
+    }
+    let response: TiebaUserRelationship
+    do {
+      response = try await client.setUserFollowState(
+        credential: Self.coreSessionCredential(credentials),
+        expectedUserID: session.id,
+        targetUserID: targetUserID,
+        isFollowed: isFollowed
+      )
+      try Task.checkCancellation()
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.accountError(error)
+    }
+    return try Self.userRelationshipData(
+      response,
+      expectedUserID: session.id,
+      expectedTargetUserID: targetUserID
+    )
+  }
+
   func forumMembership(
     session: StoredAccountSession,
     forumID: Int64,
@@ -1154,6 +1242,27 @@ struct TiebaCoreAccountService: AccountService {
       forumID: membership.forumID,
       forumName: membership.forumName,
       isFollowed: membership.isFollowed
+    )
+  }
+
+  private static func userRelationshipData(
+    _ relationship: TiebaUserRelationship,
+    expectedUserID: Int64,
+    expectedTargetUserID: Int64
+  ) throws -> UserRelationshipData {
+    guard
+      expectedUserID > 0,
+      expectedTargetUserID > 0,
+      expectedUserID != expectedTargetUserID,
+      relationship.userID == expectedUserID,
+      relationship.targetUserID == expectedTargetUserID
+    else {
+      throw BrowseError.unavailable("贴吧返回了不匹配的用户关注状态，请重新加载后再试。")
+    }
+    return UserRelationshipData(
+      userID: relationship.userID,
+      targetUserID: relationship.targetUserID,
+      isFollowed: relationship.isFollowed
     )
   }
 

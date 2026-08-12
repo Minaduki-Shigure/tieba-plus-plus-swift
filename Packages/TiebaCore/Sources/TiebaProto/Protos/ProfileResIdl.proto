@@ -10,6 +10,7 @@ message ProfileResIdl {
     message DataRes {
         User user = 1;
         message Anti {
+            string tbs = 1;
             int32 block_stat = 6;
             int32 hide_stat = 7;
             int32 days_tofree = 9;

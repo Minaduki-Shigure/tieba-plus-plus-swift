@@ -71,7 +71,7 @@ parameter and must remain credential-free. Authenticated request factories send
 only the fields required by the selected endpoint in the HTTPS request body,
 disable persistent cookie handling and URL credentials, reject all redirects,
 and never persist credentials or retain them beyond the active authenticated
-operation. Forum follow/unfollow and check-in writes may carry the fixed,
+operation. Forum and user follow/unfollow and check-in writes may carry the fixed,
 noncredential header `Cookie: ka=open`; they must not attach a stored cookie jar.
 Authenticated account, followed-forum, forum-state probe, and write responses
 have endpoint-specific transfer limits before decoding. MD5 is used only for
@@ -1162,8 +1162,8 @@ changes retain their stricter existing behavior and may still invalidate an
 inbox-originated composer whose credential binding is no longer current.
 
 Home-entry preferences are also nonsecret UserDefaults values. The start target
-must resolve through the closed home, post-ranking, hot-topic, local-favorite,
-or browsing-history enum, with unknown values falling back to home; it must not
+must resolve through the closed home, post-ranking, hot-topic, inbox, local-
+favorite, or browsing-history enum, with unknown values falling back to home; it must not
 store a URL, query, forum name, content identifier, or account destination. The
 resolved value is snapshotted once when the app process starts and must not
 redirect an active session. A supported external forum, thread, or user link is
@@ -1204,6 +1204,23 @@ binding, server-generated untitled display titles, challenge and moderation
 delay, pre-dispatch cancellation, post-dispatch transport loss, foreground and
 background transitions, same-UID credential rotation, account switching, and
 proof that every submission dispatches at most one write.
+
+User relationship mutation requires a complete validated BDUSS/STOKEN session
+and is unavailable on the active account's own profile. Its preflight and
+readback use the fixed HTTPS `tiebac.baidu.com/c/u/user/profile` protobuf command
+`303012`, binding the account UID as `uid` and the distinct target UID as
+`friend_uid`. The response must echo the target UID, expose only relationship
+values `0`, `1`, or mutual `2`, contain a bounded portrait token, and supply a
+valid short-lived `anti_stat.tbs`. Portrait and `tbs` never leave Core. A changed
+state sends at most one signed HTTPS request to `/c/c/user/follow` or
+`/c/c/user/unfollow`, without CUID, IMEI, Android ID, advertising ID, model,
+hardware, or install identifiers. Its target-less JSON acknowledgement is only
+an acknowledgement; one mandatory authenticated profile readback is the final
+relationship truth. Identical writes may share a flight, conflicting calls may
+only read after it settles, and an uncertain failure must never automatically
+dispatch another write. Until a disposable account validates both directions,
+server errors, rate limits, expiry, cancellation, and minimal-field acceptance,
+the control remains an explicitly confirmed validation-build feature.
 
 Report security issues privately to the repository owner rather than opening a
 public issue.

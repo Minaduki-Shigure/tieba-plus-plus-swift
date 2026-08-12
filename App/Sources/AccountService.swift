@@ -226,6 +226,12 @@ struct ConcernFeedPageData: Hashable, Sendable {
   let requestUnix: UInt64
 }
 
+struct UserRelationshipData: Hashable, Sendable {
+  let userID: Int64
+  let targetUserID: Int64
+  let isFollowed: Bool
+}
+
 struct ForumMembershipData: Hashable, Sendable {
   let userID: Int64
   let forumID: Int64
@@ -399,6 +405,15 @@ protocol AccountService: Sendable {
     pageTag: String?,
     lastRequestUnix: UInt64
   ) async throws -> ConcernFeedPageData
+  func userRelationship(
+    session: StoredAccountSession,
+    targetUserID: Int64
+  ) async throws -> UserRelationshipData
+  func setUserFollowed(
+    session: StoredAccountSession,
+    targetUserID: Int64,
+    isFollowed: Bool
+  ) async throws -> UserRelationshipData
   func forumMembership(
     session: StoredAccountSession,
     forumID: Int64,
@@ -472,6 +487,21 @@ extension AccountService {
     lastRequestUnix: UInt64
   ) async throws -> ConcernFeedPageData {
     throw BrowseError.unavailable("当前账户服务不支持读取关注动态。")
+  }
+
+  func userRelationship(
+    session: StoredAccountSession,
+    targetUserID: Int64
+  ) async throws -> UserRelationshipData {
+    throw BrowseError.unavailable("当前账户服务不支持读取用户关注状态。")
+  }
+
+  func setUserFollowed(
+    session: StoredAccountSession,
+    targetUserID: Int64,
+    isFollowed: Bool
+  ) async throws -> UserRelationshipData {
+    throw BrowseError.unavailable("当前账户服务不支持更新用户关注状态。")
   }
 
   func cloudFavorites(

@@ -203,6 +203,526 @@ final class TiebaAuthenticatedClientTests: XCTestCase {
     XCTAssertEqual(summary.biography, "Legacy biography\nline two")
   }
 
+  func testUserRelationshipMapsFollowedAndMutualStatesAndKeepsContextPrivate() async throws {
+    let targetID: Int64 = 123_456_789
+    for rawState in [Int32(1), 2] {
+      let response = ProtoFixtures.userRelationship(
+        targetUserID: targetID,
+        isFollowed: rawState
+      )
+      let relationship = try await profileClient(response).getUserRelationship(
+        credential: sessionCredential(),
+        expectedUserID: 957_339_815,
+        targetUserID: targetID
+      )
+      XCTAssertEqual(
+        relationship,
+        TiebaUserRelationship(
+          userID: 957_339_815,
+          targetUserID: targetID,
+          isFollowed: true
+        )
+      )
+      XCTAssertFalse(String(reflecting: relationship).contains("91be894d01799c4991be894d01"))
+    }
+
+    let notFollowed = ProtoFixtures.userRelationship(targetUserID: targetID, isFollowed: 0)
+    let relationship = try await profileClient(notFollowed).getUserRelationship(
+      credential: sessionCredential(),
+      expectedUserID: 957_339_815,
+      targetUserID: targetID
+    )
+    XCTAssertFalse(relationship.isFollowed)
+  }
+
+  func testUserRelationshipRejectsMismatchedTargetInvalidStatesPortraitAndTBS() async throws {
+    let targetID: Int64 = 123_456_789
+    var responses = [ProfileResIdl]()
+    responses.append(ProtoFixtures.userRelationship(targetUserID: targetID + 1))
+    responses.append(ProtoFixtures.userRelationship(targetUserID: targetID, isFollowed: -1))
+    responses.append(ProtoFixtures.userRelationship(targetUserID: targetID, isFollowed: 3))
+    responses.append(ProtoFixtures.userRelationship(targetUserID: targetID, tbs: "short"))
+    var emptyPortrait = ProtoFixtures.userRelationship(targetUserID: targetID)
+    emptyPortrait.data.user.portrait = ""
+    responses.append(emptyPortrait)
+
+    for response in responses {
+      await assertError(.invalidAuthenticatedResponse) {
+        _ = try await self.profileClient(response).getUserRelationship(
+          credential: self.sessionCredential(),
+          expectedUserID: 957_339_815,
+          targetUserID: targetID
+        )
+      }
+    }
+  }
+
+  func testUserFollowSkipsWriteWhenRelationshipAlreadyMatches() async throws {
+    let targetID: Int64 = 123_456_789
+    let current = try ProtoFixtures.userRelationship(
+      targetUserID: targetID,
+      isFollowed: 2
+    ).serializedData()
+    let transport = UserFollowStubTransport(responses: [.init(body: current)])
+    let result = try await TiebaAuthenticatedClient(transport: transport).setUserFollowState(
+      credential: sessionCredential(),
+      expectedUserID: 957_339_815,
+      targetUserID: targetID,
+      isFollowed: true
+    )
+
+    XCTAssertTrue(result.isFollowed)
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.requests.count, 1)
+    XCTAssertEqual(snapshot.requests.first?.url?.path, "/c/u/user/profile")
+  }
+
+  func testUserFollowTreatsACKOnlyAsAcknowledgementAndRequiresMatchingReadback() async throws {
+    let targetID: Int64 = 123_456_789
+    let initial = try ProtoFixtures.userRelationship(
+      targetUserID: targetID,
+      isFollowed: 0
+    ).serializedData()
+    let readback = try ProtoFixtures.userRelationship(
+      targetUserID: targetID,
+      isFollowed: 1
+    ).serializedData()
+    let transport = UserFollowStubTransport(
+      responses: [
+        .init(body: initial),
+        .init(body: Data(#"{"error_code":0,"status":"success"}"#.utf8)),
+        .init(body: readback),
+      ]
+    )
+    let result = try await TiebaAuthenticatedClient(transport: transport).setUserFollowState(
+      credential: sessionCredential(),
+      expectedUserID: 957_339_815,
+      targetUserID: targetID,
+      isFollowed: true
+    )
+
+    XCTAssertTrue(result.isFollowed)
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.requests.map { $0.url?.path }, [
+      "/c/u/user/profile", "/c/c/user/follow", "/c/u/user/profile",
+    ])
+    XCTAssertEqual(snapshot.maximumBodyBytes, [
+      TiebaAuthenticatedClient.userRelationshipResponseMaximumBytes,
+      TiebaAuthenticatedClient.userFollowWriteResponseMaximumBytes,
+      TiebaAuthenticatedClient.userRelationshipResponseMaximumBytes,
+    ])
+  }
+
+  func testUserFollowReturnsAuthoritativeUnchangedReadbackWithoutSecondWrite() async throws {
+    let targetID: Int64 = 123_456_789
+    let unchanged = try ProtoFixtures.userRelationship(
+      targetUserID: targetID,
+      isFollowed: 0
+    ).serializedData()
+    let transport = UserFollowStubTransport(
+      responses: [
+        .init(body: unchanged),
+        .init(body: Data(#"{"error_code":0}"#.utf8)),
+        .init(body: unchanged),
+      ]
+    )
+    let result = try await TiebaAuthenticatedClient(transport: transport).setUserFollowState(
+      credential: sessionCredential(),
+      expectedUserID: 957_339_815,
+      targetUserID: targetID,
+      isFollowed: true
+    )
+    XCTAssertFalse(result.isFollowed)
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.requests.filter { $0.url?.path == "/c/c/user/follow" }.count, 1)
+  }
+
+  func testUserFollowTransportFailurePerformsOneReadbackAndNeverRetriesWrite() async throws {
+    let targetID: Int64 = 123_456_789
+    let initial = try ProtoFixtures.userRelationship(
+      targetUserID: targetID,
+      isFollowed: 0
+    ).serializedData()
+    let reconciled = try ProtoFixtures.userRelationship(
+      targetUserID: targetID,
+      isFollowed: 1
+    ).serializedData()
+    let transport = UserFollowStubTransport(
+      responses: [
+        .init(body: initial),
+        .init(error: .transportFailure),
+        .init(body: reconciled),
+      ]
+    )
+    let result = try await TiebaAuthenticatedClient(transport: transport).setUserFollowState(
+      credential: sessionCredential(),
+      expectedUserID: 957_339_815,
+      targetUserID: targetID,
+      isFollowed: true
+    )
+    XCTAssertTrue(result.isFollowed)
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.requests.filter { $0.url?.path == "/c/c/user/follow" }.count, 1)
+    XCTAssertEqual(snapshot.requests.count, 3)
+  }
+
+  func testUserFollowServerErrorStillReturnsAuthoritativeReadbackWithoutRetry() async throws {
+    let targetID: Int64 = 123_456_789
+    let unchanged = try ProtoFixtures.userRelationship(
+      targetUserID: targetID,
+      isFollowed: 0
+    ).serializedData()
+    let transport = UserFollowStubTransport(
+      responses: [
+        .init(body: unchanged),
+        .init(body: Data(#"{"error_code":340006,"error_msg":"denied"}"#.utf8)),
+        .init(body: unchanged),
+      ]
+    )
+
+    let result = try await TiebaAuthenticatedClient(transport: transport).setUserFollowState(
+      credential: sessionCredential(),
+      expectedUserID: 957_339_815,
+      targetUserID: targetID,
+      isFollowed: true
+    )
+
+    XCTAssertFalse(result.isFollowed)
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.requests.count, 3)
+    XCTAssertEqual(snapshot.requests.filter { $0.url?.path == "/c/c/user/follow" }.count, 1)
+  }
+
+  func testConcurrentEquivalentUserFollowsShareFlightAndCancellationKeepsWriteAlive() async throws {
+    let targetID: Int64 = 123_456_789
+    let initial = try ProtoFixtures.userRelationship(
+      targetUserID: targetID,
+      isFollowed: 0
+    ).serializedData()
+    let readback = try ProtoFixtures.userRelationship(
+      targetUserID: targetID,
+      isFollowed: 1
+    ).serializedData()
+    let transport = UserFollowStubTransport(
+      responses: [
+        .init(body: initial),
+        .init(body: Data(#"{"error_code":0}"#.utf8)),
+        .init(body: readback),
+      ],
+      blockedRequestIndex: 1
+    )
+    let client = TiebaAuthenticatedClient(transport: transport)
+    let requestCredential = sessionCredential()
+    let expectedUserID: Int64 = 957_339_815
+
+    let first = Task {
+      try await client.setUserFollowState(
+        credential: requestCredential,
+        expectedUserID: expectedUserID,
+        targetUserID: targetID,
+        isFollowed: true
+      )
+    }
+    guard await transport.waitUntilRequestCount(2) else {
+      first.cancel()
+      await transport.releaseBlockedRequest()
+      XCTFail("Timed out waiting for the first follow write")
+      return
+    }
+    let joined = Task {
+      try await client.setUserFollowState(
+        credential: requestCredential,
+        expectedUserID: expectedUserID,
+        targetUserID: targetID,
+        isFollowed: true
+      )
+    }
+    guard await waitUntilUserFollowWaiterCount(
+      client: client,
+      expectedUserID: expectedUserID,
+      targetUserID: targetID,
+      count: 2
+    ) else {
+      joined.cancel()
+      await transport.releaseBlockedRequest()
+      _ = await first.result
+      _ = await joined.result
+      XCTFail("Timed out waiting for the equivalent follow caller to join")
+      return
+    }
+
+    joined.cancel()
+    do {
+      _ = try await joined.value
+      XCTFail("Expected cancellation")
+    } catch is CancellationError {
+    } catch {
+      XCTFail("Unexpected error type: \(error)")
+    }
+    let waiterCountAfterCancellation = await client.userFollowWaiterCount(
+      expectedUserID: expectedUserID,
+      targetUserID: targetID
+    )
+    XCTAssertEqual(waiterCountAfterCancellation, 1)
+    let requestCountAfterCancellation = await transport.requestCount()
+    XCTAssertEqual(requestCountAfterCancellation, 2)
+
+    await transport.releaseBlockedRequest()
+    let firstResult = try await first.value
+    XCTAssertTrue(firstResult.isFollowed)
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(
+      snapshot.requests.map(\.url?.path),
+      ["/c/u/user/profile", "/c/c/user/follow", "/c/u/user/profile"]
+    )
+    XCTAssertEqual(
+      snapshot.requests.filter { $0.url?.path == "/c/c/user/follow" }.count,
+      1
+    )
+    let finalWaiterCount = await client.userFollowWaiterCount(
+      expectedUserID: expectedUserID,
+      targetUserID: targetID
+    )
+    XCTAssertEqual(finalWaiterCount, 0)
+  }
+
+  func testConflictingUserUnfollowWaitsThenOnlyReadsFinalState() async throws {
+    let targetID: Int64 = 123_456_789
+    let initial = try ProtoFixtures.userRelationship(
+      targetUserID: targetID,
+      isFollowed: 0
+    ).serializedData()
+    let followed = try ProtoFixtures.userRelationship(
+      targetUserID: targetID,
+      isFollowed: 1
+    ).serializedData()
+    let transport = UserFollowStubTransport(
+      responses: [
+        .init(body: initial),
+        .init(body: Data(#"{"error_code":0}"#.utf8)),
+        .init(body: followed),
+        .init(body: followed),
+      ],
+      blockedRequestIndex: 1
+    )
+    let client = TiebaAuthenticatedClient(transport: transport)
+    let requestCredential = sessionCredential()
+    let expectedUserID: Int64 = 957_339_815
+
+    let first = Task {
+      try await client.setUserFollowState(
+        credential: requestCredential,
+        expectedUserID: expectedUserID,
+        targetUserID: targetID,
+        isFollowed: true
+      )
+    }
+    guard await transport.waitUntilRequestCount(2) else {
+      first.cancel()
+      await transport.releaseBlockedRequest()
+      XCTFail("Timed out waiting for the first follow write")
+      return
+    }
+    let conflicting = Task {
+      try await client.setUserFollowState(
+        credential: requestCredential,
+        expectedUserID: expectedUserID,
+        targetUserID: targetID,
+        isFollowed: false
+      )
+    }
+    guard await waitUntilUserFollowWaiterCount(
+      client: client,
+      expectedUserID: expectedUserID,
+      targetUserID: targetID,
+      count: 2
+    ) else {
+      conflicting.cancel()
+      await transport.releaseBlockedRequest()
+      _ = await first.result
+      _ = await conflicting.result
+      XCTFail("Timed out waiting for the conflicting follow caller")
+      return
+    }
+    let requestCountBeforeConflictRelease = await transport.requestCount()
+    XCTAssertEqual(requestCountBeforeConflictRelease, 2)
+
+    await transport.releaseBlockedRequest()
+    let firstResult = try await first.value
+    let conflictingResult = try await conflicting.value
+    XCTAssertTrue(firstResult.isFollowed)
+    XCTAssertTrue(conflictingResult.isFollowed)
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(
+      snapshot.requests.map(\.url?.path),
+      [
+        "/c/u/user/profile", "/c/c/user/follow", "/c/u/user/profile",
+        "/c/u/user/profile",
+      ]
+    )
+    XCTAssertEqual(
+      snapshot.requests.filter {
+        $0.url?.path == "/c/c/user/follow" || $0.url?.path == "/c/c/user/unfollow"
+      }.count,
+      1
+    )
+  }
+
+  func testRotatedCredentialWaitsThenOnlyReadsWithoutSecondWrite() async throws {
+    let targetID: Int64 = 123_456_789
+    let initial = try ProtoFixtures.userRelationship(
+      targetUserID: targetID,
+      isFollowed: 0
+    ).serializedData()
+    let followed = try ProtoFixtures.userRelationship(
+      targetUserID: targetID,
+      isFollowed: 1
+    ).serializedData()
+    let transport = UserFollowStubTransport(
+      responses: [
+        .init(body: initial),
+        .init(body: Data(#"{"error_code":0}"#.utf8)),
+        .init(body: followed),
+        .init(body: followed),
+      ],
+      blockedRequestIndex: 1
+    )
+    let client = TiebaAuthenticatedClient(transport: transport)
+    let oldCredential = sessionCredential(stokenCharacter: "s")
+    let rotatedCredential = sessionCredential(stokenCharacter: "t")
+    let expectedUserID: Int64 = 957_339_815
+
+    let first = Task {
+      try await client.setUserFollowState(
+        credential: oldCredential,
+        expectedUserID: expectedUserID,
+        targetUserID: targetID,
+        isFollowed: true
+      )
+    }
+    guard await transport.waitUntilRequestCount(2) else {
+      first.cancel()
+      await transport.releaseBlockedRequest()
+      XCTFail("Timed out waiting for the old-credential follow write")
+      return
+    }
+    let rotated = Task {
+      try await client.setUserFollowState(
+        credential: rotatedCredential,
+        expectedUserID: expectedUserID,
+        targetUserID: targetID,
+        isFollowed: true
+      )
+    }
+    guard await waitUntilUserFollowWaiterCount(
+      client: client,
+      expectedUserID: expectedUserID,
+      targetUserID: targetID,
+      count: 2
+    ) else {
+      rotated.cancel()
+      await transport.releaseBlockedRequest()
+      _ = await first.result
+      _ = await rotated.result
+      XCTFail("Timed out waiting for the rotated credential caller")
+      return
+    }
+    let requestCountBeforeRotationRelease = await transport.requestCount()
+    XCTAssertEqual(requestCountBeforeRotationRelease, 2)
+
+    await transport.releaseBlockedRequest()
+    let firstResult = try await first.value
+    let rotatedResult = try await rotated.value
+    XCTAssertTrue(firstResult.isFollowed)
+    XCTAssertTrue(rotatedResult.isFollowed)
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.requests.count, 4)
+    XCTAssertEqual(
+      snapshot.requests.filter { $0.url?.path == "/c/c/user/follow" }.count,
+      1
+    )
+  }
+
+  func testDifferentUserFollowTargetsCanProgressInParallel() async throws {
+    let firstTargetID: Int64 = 123_456_789
+    let secondTargetID: Int64 = 987_654_321
+    let firstInitial = try ProtoFixtures.userRelationship(
+      targetUserID: firstTargetID,
+      isFollowed: 0
+    ).serializedData()
+    let firstFollowed = try ProtoFixtures.userRelationship(
+      targetUserID: firstTargetID,
+      isFollowed: 1
+    ).serializedData()
+    let secondInitial = try ProtoFixtures.userRelationship(
+      targetUserID: secondTargetID,
+      isFollowed: 0
+    ).serializedData()
+    let secondFollowed = try ProtoFixtures.userRelationship(
+      targetUserID: secondTargetID,
+      isFollowed: 1
+    ).serializedData()
+    let transport = UserFollowStubTransport(
+      responses: [
+        .init(body: firstInitial),
+        .init(body: Data(#"{"error_code":0}"#.utf8)),
+        .init(body: secondInitial),
+        .init(body: Data(#"{"error_code":0}"#.utf8)),
+        .init(body: secondFollowed),
+        .init(body: firstFollowed),
+      ],
+      blockedRequestIndex: 1
+    )
+    let client = TiebaAuthenticatedClient(transport: transport)
+    let requestCredential = sessionCredential()
+    let expectedUserID: Int64 = 957_339_815
+
+    let first = Task {
+      try await client.setUserFollowState(
+        credential: requestCredential,
+        expectedUserID: expectedUserID,
+        targetUserID: firstTargetID,
+        isFollowed: true
+      )
+    }
+    guard await transport.waitUntilRequestCount(2) else {
+      first.cancel()
+      await transport.releaseBlockedRequest()
+      XCTFail("Timed out waiting for the first target write")
+      return
+    }
+    let second = Task {
+      try await client.setUserFollowState(
+        credential: requestCredential,
+        expectedUserID: expectedUserID,
+        targetUserID: secondTargetID,
+        isFollowed: true
+      )
+    }
+    guard await transport.waitUntilRequestCount(5) else {
+      second.cancel()
+      await transport.releaseBlockedRequest()
+      _ = await first.result
+      _ = await second.result
+      XCTFail("Second target did not complete while the first target was blocked")
+      return
+    }
+
+    let secondResult = try await second.value
+    XCTAssertTrue(secondResult.isFollowed)
+    let requestCountBeforeFirstRelease = await transport.requestCount()
+    XCTAssertEqual(requestCountBeforeFirstRelease, 5)
+    await transport.releaseBlockedRequest()
+    let firstResult = try await first.value
+    XCTAssertTrue(firstResult.isFollowed)
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.requests.count, 6)
+    XCTAssertEqual(
+      snapshot.requests.filter { $0.url?.path == "/c/c/user/follow" }.count,
+      2
+    )
+  }
+
   func testMapsBothFollowedForumGroupsAndDeduplicatesIDs() async throws {
     let body = Data(
       """
@@ -532,12 +1052,39 @@ final class TiebaAuthenticatedClientTests: XCTestCase {
     TiebaBDUSSCredential(bduss: String(repeating: "b", count: 192))
   }
 
-  private func sessionCredential() -> TiebaSessionCredential {
+  private func sessionCredential(
+    bdussCharacter: String = "b",
+    stokenCharacter: String = "s"
+  ) -> TiebaSessionCredential {
     TiebaSessionCredential(
-      bduss: String(repeating: "b", count: 192),
-      stoken: String(repeating: "s", count: 64),
+      bduss: String(repeating: bdussCharacter, count: 192),
+      stoken: String(repeating: stokenCharacter, count: 64),
       bdussCookieName: .bduss
     )
+  }
+
+  private func waitUntilUserFollowWaiterCount(
+    client: TiebaAuthenticatedClient,
+    expectedUserID: Int64,
+    targetUserID: Int64,
+    count: Int,
+    timeout: Duration = .seconds(2)
+  ) async -> Bool {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: timeout)
+    while clock.now < deadline {
+      let actual = await client.userFollowWaiterCount(
+        expectedUserID: expectedUserID,
+        targetUserID: targetUserID
+      )
+      if actual == count { return true }
+      do {
+        try await Task.sleep(for: .milliseconds(1))
+      } catch {
+        return false
+      }
+    }
+    return false
   }
 
   private func profileClient(_ response: ProfileResIdl) throws -> TiebaAuthenticatedClient {
@@ -572,5 +1119,99 @@ private actor AuthStubTransport: TiebaTransport {
 
   func send(_ request: URLRequest) async throws -> TiebaHTTPResponse {
     TiebaHTTPResponse(body: body, statusCode: statusCode)
+  }
+}
+
+private actor UserFollowStubTransport: TiebaTransport {
+  struct Response: Sendable {
+    let body: Data
+    let statusCode: Int
+    let error: TiebaClientError?
+
+    init(
+      body: Data = Data(),
+      statusCode: Int = 200,
+      error: TiebaClientError? = nil
+    ) {
+      self.body = body
+      self.statusCode = statusCode
+      self.error = error
+    }
+  }
+
+  struct Snapshot: Sendable {
+    let requests: [URLRequest]
+    let maximumBodyBytes: [Int?]
+  }
+
+  private let responses: [Response]
+  private let blockedRequestIndex: Int?
+  private var requests = [URLRequest]()
+  private var maximumBodyBytes = [Int?]()
+  private var blockedContinuation: CheckedContinuation<Void, Never>?
+  private var isBlockedRequestReleased = false
+
+  init(responses: [Response], blockedRequestIndex: Int? = nil) {
+    self.responses = responses
+    self.blockedRequestIndex = blockedRequestIndex
+  }
+
+  func send(_ request: URLRequest) async throws -> TiebaHTTPResponse {
+    try await send(request, maximumBodyBytes: nil)
+  }
+
+  func send(
+    _ request: URLRequest,
+    maximumBodyBytes: Int?
+  ) async throws -> TiebaHTTPResponse {
+    let index = requests.count
+    guard responses.indices.contains(index) else {
+      throw TiebaClientError.transportFailure
+    }
+    requests.append(request)
+    self.maximumBodyBytes.append(maximumBodyBytes)
+    let response = responses[index]
+    if index == blockedRequestIndex, !isBlockedRequestReleased {
+      await withCheckedContinuation { continuation in
+        if isBlockedRequestReleased {
+          continuation.resume()
+        } else {
+          blockedContinuation = continuation
+        }
+      }
+    }
+    if let error = response.error { throw error }
+    return TiebaHTTPResponse(body: response.body, statusCode: response.statusCode)
+  }
+
+  func waitUntilRequestCount(
+    _ count: Int,
+    timeout: Duration = .seconds(2)
+  ) async -> Bool {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: timeout)
+    while requests.count < count, clock.now < deadline {
+      do {
+        try await Task.sleep(for: .milliseconds(1))
+      } catch {
+        return false
+      }
+    }
+    return requests.count >= count
+  }
+
+  func releaseBlockedRequest() {
+    isBlockedRequestReleased = true
+    let continuation = blockedContinuation
+    blockedContinuation = nil
+    continuation?.resume()
+  }
+
+  func requestCount() -> Int {
+    requests.count
+  }
+
+  func snapshot() -> Snapshot {
+    Snapshot(requests: requests, maximumBodyBytes: maximumBodyBytes)
   }
 }

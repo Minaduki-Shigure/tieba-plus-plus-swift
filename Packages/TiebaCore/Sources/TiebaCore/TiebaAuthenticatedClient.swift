@@ -12,6 +12,51 @@ private struct TiebaForumCheckInResourceKey: Hashable, Sendable {
   let forumID: Int64
 }
 
+private struct TiebaUserFollowResourceKey: Hashable, Sendable {
+  let userID: Int64
+  let targetUserID: Int64
+}
+
+private struct TiebaUserFollowIdentity:
+  Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let credential: TiebaSessionCredential
+
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.credential.bduss == rhs.credential.bduss
+      && lhs.credential.stoken == rhs.credential.stoken
+      && lhs.credential.bdussCookieName == rhs.credential.bdussCookieName
+  }
+
+  var description: String { "TiebaUserFollowIdentity(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror { Mirror(self, children: [:], displayStyle: .struct) }
+}
+
+private struct TiebaUserFollowFlight:
+  Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let id: UUID
+  let identity: TiebaUserFollowIdentity
+  let isFollowed: Bool
+  let task: Task<TiebaUserRelationship, Swift.Error>
+
+  var description: String { "TiebaUserFollowFlight(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(
+      self,
+      children: ["id": id, "identity": identity, "isFollowed": isFollowed],
+      displayStyle: .struct
+    )
+  }
+}
+
+private enum TiebaUserFollowWaitOutcome: Sendable, Equatable {
+  case completed
+  case cancelled
+}
+
 private struct TiebaForumCheckInIdentity:
   Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
 {
@@ -357,6 +402,8 @@ private enum TiebaNewThreadWaitOutcome: Sendable, Equatable {
 public actor TiebaAuthenticatedClient {
   static let accountResponseMaximumBytes = 512 * 1_024
   static let selfProfileResponseMaximumBytes = 2 * 1_024 * 1_024
+  static let userRelationshipResponseMaximumBytes = 2 * 1_024 * 1_024
+  static let userFollowWriteResponseMaximumBytes = 64 * 1_024
   static let webSessionResponseMaximumBytes = 256 * 1_024
   static let followedForumsResponseMaximumBytes = 2 * 1_024 * 1_024
   static let cloudFavoritesResponseMaximumBytes = 2 * 1_024 * 1_024
@@ -378,6 +425,10 @@ public actor TiebaAuthenticatedClient {
 
   private let requestFactory: TiebaAuthenticatedRequestFactory
   private let transport: any TiebaTransport
+  private var userFollowFlights = [TiebaUserFollowResourceKey: TiebaUserFollowFlight]()
+  private var userFollowWaiters = [
+    TiebaUserFollowResourceKey: [UUID: CheckedContinuation<TiebaUserFollowWaitOutcome, Never>]
+  ]()
   private var forumCheckInFlights = [TiebaForumCheckInResourceKey: TiebaForumCheckInFlight]()
   private var forumCheckInSharedWaiterCounts = [UUID: Int]()
   private var forumCheckInConflictWaiters = [
@@ -476,6 +527,79 @@ public actor TiebaAuthenticatedClient {
     return try TiebaAuthenticatedDecoder.selfProfile(
       from: response,
       expectedUserID: expectedUserID
+    )
+  }
+
+  public func getUserRelationship(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64
+  ) async throws -> TiebaUserRelationship {
+    try await getUserRelationshipContext(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      targetUserID: targetUserID
+    ).relationship
+  }
+
+  public func setUserFollowState(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64,
+    isFollowed: Bool
+  ) async throws -> TiebaUserRelationship {
+    try Task.checkCancellation()
+    let resourceKey = TiebaUserFollowResourceKey(
+      userID: expectedUserID,
+      targetUserID: targetUserID
+    )
+    let identity = TiebaUserFollowIdentity(credential: credential)
+
+    if let flight = userFollowFlights[resourceKey] {
+      if flight.identity == identity, flight.isFollowed == isFollowed {
+        return try await waitForUserFollowFlight(
+          resourceKey: resourceKey,
+          flightID: flight.id,
+          task: flight.task
+        )
+      }
+      try await waitForUserFollowFlightCompletion(
+        resourceKey: resourceKey,
+        flightID: flight.id
+      )
+      return try await getUserRelationship(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        targetUserID: targetUserID
+      )
+    }
+
+    let flightID = UUID()
+    let task: Task<TiebaUserRelationship, Swift.Error> = Task.detached { [self] in
+      try await performUserFollowWrite(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        targetUserID: targetUserID,
+        isFollowed: isFollowed
+      )
+    }
+    userFollowFlights[resourceKey] = TiebaUserFollowFlight(
+      id: flightID,
+      identity: identity,
+      isFollowed: isFollowed,
+      task: task
+    )
+    Task {
+      await finishUserFollowFlight(
+        resourceKey: resourceKey,
+        flightID: flightID,
+        task: task
+      )
+    }
+    return try await waitForUserFollowFlight(
+      resourceKey: resourceKey,
+      flightID: flightID,
+      task: task
     )
   }
 
@@ -1393,6 +1517,55 @@ public actor TiebaAuthenticatedClient {
     } catch {
       throw TiebaClientError.threadCloudFavoriteOutcomeUnknown
     }
+  }
+
+  private func performUserFollowWrite(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64,
+    isFollowed: Bool
+  ) async throws -> TiebaUserRelationship {
+    let current = try await getUserRelationshipContext(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      targetUserID: targetUserID
+    )
+    guard current.relationship.isFollowed != isFollowed else {
+      return current.relationship
+    }
+
+    let request = try requestFactory.setUserFollowState(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      targetUserID: targetUserID,
+      targetPortrait: current.portrait,
+      tbs: current.tbs,
+      isFollowed: isFollowed
+    )
+    var writeError: Swift.Error?
+    do {
+      let body = try await send(
+        request,
+        maximumBodyBytes: Self.userFollowWriteResponseMaximumBytes
+      )
+      try TiebaAuthenticatedDecoder.checkUserFollowWriteResponse(body)
+    } catch {
+      writeError = error
+    }
+
+    let reconciled: TiebaUserRelationship
+    do {
+      reconciled = try await getUserRelationship(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        targetUserID: targetUserID
+      )
+    } catch {
+      throw writeError ?? error
+    }
+    // The acknowledgement does not bind a target or state. A successful
+    // authenticated readback is therefore the only mutation result we expose.
+    return reconciled
   }
 
   private func performTextReplySubmission(
@@ -2398,6 +2571,112 @@ public actor TiebaAuthenticatedClient {
         forumID: forumID,
         forumName: forumName
       )
+    }
+  }
+
+  private func getUserRelationshipContext(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64
+  ) async throws -> TiebaUserRelationshipContext {
+    let request = try requestFactory.userRelationship(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      targetUserID: targetUserID
+    )
+    let response: ProfileResIdl = try await sendProtobuf(
+      request,
+      maximumBodyBytes: Self.userRelationshipResponseMaximumBytes
+    )
+    return try TiebaAuthenticatedDecoder.userRelationship(
+      from: response,
+      expectedUserID: expectedUserID,
+      targetUserID: targetUserID
+    )
+  }
+
+  private func waitForUserFollowFlight(
+    resourceKey: TiebaUserFollowResourceKey,
+    flightID: UUID,
+    task: Task<TiebaUserRelationship, Swift.Error>
+  ) async throws -> TiebaUserRelationship {
+    try await waitForUserFollowFlightCompletion(
+      resourceKey: resourceKey,
+      flightID: flightID
+    )
+    try Task.checkCancellation()
+    return try await task.value
+  }
+
+  private func waitForUserFollowFlightCompletion(
+    resourceKey: TiebaUserFollowResourceKey,
+    flightID: UUID
+  ) async throws {
+    try Task.checkCancellation()
+    guard userFollowFlights[resourceKey]?.id == flightID else { return }
+    let waiterID = UUID()
+    let outcome: TiebaUserFollowWaitOutcome = await withTaskCancellationHandler {
+      await withCheckedContinuation {
+        (continuation: CheckedContinuation<TiebaUserFollowWaitOutcome, Never>) in
+        guard
+          !Task.isCancelled,
+          userFollowFlights[resourceKey]?.id == flightID
+        else {
+          continuation.resume(
+            returning: Task.isCancelled ? .cancelled : .completed
+          )
+          return
+        }
+        userFollowWaiters[resourceKey, default: [:]][waiterID] = continuation
+      }
+    } onCancel: {
+      Task {
+        await self.cancelUserFollowWaiter(
+          resourceKey: resourceKey,
+          waiterID: waiterID
+        )
+      }
+    }
+    guard outcome == .completed else { throw CancellationError() }
+    try Task.checkCancellation()
+  }
+
+  private func cancelUserFollowWaiter(
+    resourceKey: TiebaUserFollowResourceKey,
+    waiterID: UUID
+  ) {
+    guard var waiters = userFollowWaiters[resourceKey] else { return }
+    let continuation = waiters.removeValue(forKey: waiterID)
+    if waiters.isEmpty {
+      userFollowWaiters.removeValue(forKey: resourceKey)
+    } else {
+      userFollowWaiters[resourceKey] = waiters
+    }
+    continuation?.resume(returning: .cancelled)
+  }
+
+  func userFollowWaiterCount(
+    expectedUserID: Int64,
+    targetUserID: Int64
+  ) -> Int {
+    let resourceKey = TiebaUserFollowResourceKey(
+      userID: expectedUserID,
+      targetUserID: targetUserID
+    )
+    return userFollowWaiters[resourceKey]?.count ?? 0
+  }
+
+  private func finishUserFollowFlight(
+    resourceKey: TiebaUserFollowResourceKey,
+    flightID: UUID,
+    task: Task<TiebaUserRelationship, Swift.Error>
+  ) async {
+    _ = await task.result
+    guard userFollowFlights[resourceKey]?.id == flightID else { return }
+    userFollowFlights.removeValue(forKey: resourceKey)
+    let waiters = userFollowWaiters.removeValue(forKey: resourceKey) ?? [:]
+    for continuation in waiters.values {
+      continuation.resume(returning: .completed)
     }
   }
 

@@ -16,10 +16,10 @@ checks.
 | Area | Current state |
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
-| Local features | Available for history, favorites, filtering, appearance, media preferences, and reply-entry visibility |
-| Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, and experimental content approval |
-| Server-side writes | Guarded forum follow/unfollow, check-in, content approval, thread-detail and verified list-level cloud-favorite changes, plain-text topic/floor/nested replies, and plain-text new-topic creation are in device validation; other writes stay disabled |
-| TiebaLite parity | Anonymous reading and media: about 91–95%; full product scope: about 71–74% |
+| Local features | Available for history, favorites, filtering, appearance, media preferences, reply-entry visibility, and a next-launch destination including the inbox |
+| Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, and experimental content approval |
+| Server-side writes | Guarded forum and user follow/unfollow, check-in, content approval, thread-detail and verified list-level cloud-favorite changes, plain-text topic/floor/nested replies, and plain-text new-topic creation are in device validation; other writes stay disabled |
+| TiebaLite parity | Anonymous reading and media: about 91–95%; full product scope: about 72–75% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.59.0-alpha.1` (build 62); later `main` features require a tagged release |
 
 ### Release and validation
@@ -43,6 +43,15 @@ checks.
   it to the existing credential-free public profile. It shows the current avatar,
   display name, biography, following, follower, and reply counts; a refresh checks
   the `userID + sessionRevision` lease before and after transport.
+  Another user's profile can now read whether the exact active account follows
+  that target and, after explicit confirmation, follow or unfollow them. A fresh
+  authenticated profile probe binds the account UID, target UID, portrait,
+  relationship value, and short-lived `tbs`; the write is sent at most once and
+  its target-less acknowledgement never becomes relationship truth. One
+  mandatory authenticated readback supplies the final state, including mutual-
+  follow value `2`; cancellation or account rotation cannot publish a late
+  result. This minimum-field HTTPS contract remains a disposable-account
+  validation gate.
   A logged-in home page also shows at most six forums from the current account's
   followed-forum list and links to the complete paginated list. Both surfaces
   share one app-scoped, memory-only snapshot that is discarded when the account
@@ -109,7 +118,7 @@ checks.
   covered by fixtures, while successful real-account self-profile and private
   reads, forum
   follow/unfollow, check-in, cloud-favorite changes, topic/post/subpost content
-  approval, real reply creation, and real new-topic creation remain
+  approval, user follow/unfollow, real reply creation, and real new-topic creation remain
   physical-device validation features in this alpha.
 - **App source:** Add [`sidestore-source.json`](https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json)
   to LiveContainer 3.7.0 or newer, or to SideStore. Its latest IPA is published
@@ -360,14 +369,14 @@ checks.
 - **Unsupported operations:** Guess-based removal of unresolvable cloud-favorite
   rows, bulk cloud/local synchronization, disagreement and other reaction types,
   recommendation feedback, rich-media topic/reply creation, poll submission,
-  user follow/unfollow, server-side user blocking, profile editing, content
+  server-side user blocking, profile editing, content
   deletion/reporting, automatic or batch check-in, notification mark-read/unread
   reconciliation, background notification polling, and moderation remain
   unavailable until their request contracts and recovery paths have been
   validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, weighted estimate, protocol constraints, and next milestones.
-  The current `main` audit totals 71–74 of 100 weighted points; its anonymous
+  The current `main` audit totals 72–75 of 100 weighted points; its anonymous
   reading and media subtotal is about 91–95%. The largest remaining gaps are
   rich-media creation, background unread handling, broader settings, remaining
   account/social actions, unresolvable cloud-favorite rows, and moderation.

@@ -289,6 +289,15 @@ struct RootView: View {
             favoritesRepository: favoritesRepository,
             searchHistoryRepository: searchHistoryRepository
           )
+        case .notifications:
+          NotificationsView(
+            browseService: service,
+            accountService: accountService,
+            vault: accountVault,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
+          )
         case .account:
           AccountView(
             browseService: service,
@@ -729,6 +738,7 @@ enum RootDestination: Hashable {
   case history
   case favorites
   case followedForums
+  case notifications
   case account
   case settings
   case thread(ThreadHistorySnapshot)
@@ -802,6 +812,8 @@ enum RootStartupNavigation {
       [.explore(.hot)]
     case .hotTopics:
       [.hotTopics]
+    case .notifications:
+      [.notifications]
     case .favorites:
       [.favorites]
     case .history:

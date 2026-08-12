@@ -213,6 +213,7 @@ struct UserProfileView: View {
       if let profile = viewModel.profile {
         UserProfileHeader(
           profile: profile,
+          accountAccess: accountAccess,
           onOpenPortrait: {
             portraitPresentation = UserProfilePortraitPresentation(profile: profile)
           },
@@ -512,6 +513,7 @@ struct UserProfileView: View {
 
 private struct UserProfileHeader: View {
   let profile: BrowseUserProfile
+  let accountAccess: AccountAccess?
   let onOpenPortrait: () -> Void
   let onOpenFollowing: () -> Void
   let onOpenFollowers: () -> Void
@@ -569,6 +571,14 @@ private struct UserProfileHeader: View {
           }
           .font(.caption)
           .foregroundStyle(.secondary)
+        }
+        Spacer(minLength: 8)
+        if let accountAccess {
+          UserRelationshipControl(
+            targetUserID: profile.id,
+            targetName: profile.preferredName,
+            access: accountAccess
+          )
         }
       }
 
@@ -691,6 +701,109 @@ private struct UserProfileHeader: View {
     .buttonStyle(.plain)
     .accessibilityLabel("\(title) \(max(value, 0).formatted())")
     .help("查看\(title)列表")
+  }
+}
+
+private struct UserRelationshipControl: View {
+  @StateObject private var viewModel: UserRelationshipViewModel
+  @State private var pendingFollowedState: Bool?
+  private let targetName: String
+
+  init(targetUserID: Int64, targetName: String, access: AccountAccess) {
+    self.targetName = targetName
+    _viewModel = StateObject(
+      wrappedValue: UserRelationshipViewModel(
+        targetUserID: targetUserID,
+        access: access
+      )
+    )
+  }
+
+  var body: some View {
+    control
+      .task { await viewModel.loadIfNeeded() }
+      .onDisappear {
+        pendingFollowedState = nil
+        viewModel.cancel()
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+        pendingFollowedState = nil
+        Task { @MainActor in await viewModel.accountSessionDidChange() }
+      }
+      .confirmationDialog(
+        pendingFollowedState == true ? "关注这名用户？" : "取消关注这名用户？",
+        isPresented: Binding(
+          get: { pendingFollowedState != nil },
+          set: { if !$0 { pendingFollowedState = nil } }
+        ),
+        titleVisibility: .visible
+      ) {
+        if pendingFollowedState == true {
+          Button("关注") { confirmFollowedState(true) }
+        } else if pendingFollowedState == false {
+          Button("取消关注", role: .destructive) { confirmFollowedState(false) }
+        }
+        Button("取消", role: .cancel) { pendingFollowedState = nil }
+      } message: {
+        Text("这会修改当前贴吧账户对“\(targetName)”的关注状态。")
+      }
+      .alert(
+        "无法更新用户关注",
+        isPresented: Binding(
+          get: { viewModel.errorMessage != nil },
+          set: { if !$0 { viewModel.dismissError() } }
+        )
+      ) {
+        Button("好", role: .cancel) { viewModel.dismissError() }
+      } message: {
+        Text(viewModel.errorMessage ?? "无法完成用户关注操作。")
+      }
+  }
+
+  @ViewBuilder
+  private var control: some View {
+    switch viewModel.state {
+    case .idle, .hidden, .signedOut:
+      EmptyView()
+    case .loading, .mutating:
+      ProgressView()
+        .controlSize(.small)
+        .frame(width: 44, height: 44)
+        .accessibilityLabel("正在更新用户关注")
+    case .ready(let isFollowed):
+      if isFollowed {
+        Button {
+          pendingFollowedState = false
+        } label: {
+          Label("已关注", systemImage: "person.crop.circle.badge.checkmark")
+        }
+        .buttonStyle(.bordered)
+        .accessibilityLabel("取消关注用户")
+      } else {
+        Button {
+          pendingFollowedState = true
+        } label: {
+          Label("关注", systemImage: "person.badge.plus")
+        }
+        .buttonStyle(.borderedProminent)
+        .accessibilityLabel("关注用户")
+      }
+    case .failed:
+      Button {
+        Task { @MainActor in await viewModel.reload() }
+      } label: {
+        Image(systemName: "arrow.clockwise")
+          .frame(width: 24, height: 24)
+      }
+      .buttonStyle(.bordered)
+      .accessibilityLabel("重试读取用户关注状态")
+      .help("重试读取用户关注状态")
+    }
+  }
+
+  private func confirmFollowedState(_ isFollowed: Bool) {
+    pendingFollowedState = nil
+    Task { @MainActor in await viewModel.setFollowed(isFollowed) }
   }
 }
 

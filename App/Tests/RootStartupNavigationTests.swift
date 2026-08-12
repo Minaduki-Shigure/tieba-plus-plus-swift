@@ -26,6 +26,7 @@ final class RootStartupNavigationTests: XCTestCase {
       (.home, []),
       (.hotThreads, [.explore(.hot)]),
       (.hotTopics, [.hotTopics]),
+      (.notifications, [.notifications]),
       (.favorites, [.favorites]),
       (.history, [.history]),
     ]
@@ -81,6 +82,7 @@ final class RootStartupNavigationTests: XCTestCase {
       .history,
       .favorites,
       .followedForums,
+      .notifications,
       .account,
       .settings,
       .thread(thread),

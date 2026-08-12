@@ -30,6 +30,20 @@ struct TiebaThreadCloudFavoriteContext:
   }
 }
 
+struct TiebaUserRelationshipContext:
+  Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let relationship: TiebaUserRelationship
+  let portrait: String
+  let tbs: String
+
+  var description: String { "TiebaUserRelationshipContext(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(self, children: ["relationship": relationship], displayStyle: .struct)
+  }
+}
+
 enum TiebaAuthenticatedDecoder {
   static let selfProfileNameMaximumBytes = 1_024
   static let selfProfilePortraitMaximumBytes = 4_096
@@ -109,6 +123,48 @@ enum TiebaAuthenticatedDecoder {
       followingCount: Int(user.concernNum),
       followerCount: Int(user.fansNum),
       postCount: Int(user.postNum)
+    )
+  }
+
+  static func userRelationship(
+    from response: ProfileResIdl,
+    expectedUserID: Int64,
+    targetUserID: Int64
+  ) throws -> TiebaUserRelationshipContext {
+    guard response.error.errorno == 0 else {
+      throw TiebaClientError.server(
+        code: response.error.errorno,
+        message: response.error.errmsg
+      )
+    }
+    guard
+      expectedUserID > 0,
+      targetUserID > 0,
+      expectedUserID != targetUserID,
+      response.hasData,
+      response.data.hasUser,
+      response.data.user.id == targetUserID,
+      response.data.hasAntiStat,
+      TiebaAuthenticatedRequestFactory.isValidTBS(response.data.antiStat.tbs)
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    let rawFollowed = response.data.user.hasConcerned_p
+    guard (0...2).contains(rawFollowed) else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    let portrait = try normalizedSelfProfilePortrait(response.data.user.portrait)
+    guard !portrait.isEmpty else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    return TiebaUserRelationshipContext(
+      relationship: TiebaUserRelationship(
+        userID: expectedUserID,
+        targetUserID: targetUserID,
+        isFollowed: rawFollowed != 0
+      ),
+      portrait: portrait,
+      tbs: response.data.antiStat.tbs
     )
   }
 
@@ -433,6 +489,11 @@ enum TiebaAuthenticatedDecoder {
   }
 
   static func checkForumFollowWriteResponse(_ body: Data) throws {
+    let object = try responseObject(from: body)
+    try checkServerError(object)
+  }
+
+  static func checkUserFollowWriteResponse(_ body: Data) throws {
     let object = try responseObject(from: body)
     try checkServerError(object)
   }

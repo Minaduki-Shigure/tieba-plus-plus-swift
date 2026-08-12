@@ -21,6 +21,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let newThreadClientVersion = "7.2.0.0"
   static let concernClientVersion = "11.10.8.6"
   static let selfProfileClientVersion = "12.52.1.0"
+  static let userFollowClientVersion = "11.10.8.6"
   static let selfProfileUserAgent =
     "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) "
     + "Version/4.0 Chrome/135.0.0.0 Mobile Safari/537.36 tieba/12.52.1.0"
@@ -139,6 +140,89 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       fields: [("stoken", credential.stoken)],
       userAgent: Self.selfProfileUserAgent,
       clientUserToken: String(expectedUserID),
+      cookie: "ka=open"
+    )
+  }
+
+  func userRelationship(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64
+  ) throws -> URLRequest {
+    try validate(credential)
+    try validateDistinctUserIDs(expectedUserID: expectedUserID, targetUserID: targetUserID)
+    try validateConfiguration()
+
+    var common = CommonReq()
+    common.clientType = 2
+    common.clientVersion = Self.selfProfileClientVersion
+    common.bduss = credential.bduss
+    common.stoken = credential.stoken
+
+    var data = ProfileReqIdl.DataReq()
+    data.uid = expectedUserID
+    data.needPostCount = 1
+    data.friendUid = targetUserID
+    data.isGuest = 1
+    data.pn = 1
+    data.rn = 20
+    data.hasPlist_p = 1
+    data.common = common
+    data.isFromUsercenter = 1
+    data.page = 1
+
+    var message = ProfileReqIdl()
+    message.data = data
+    return try authenticatedProtobufReadRequest(
+      path: "/c/u/user/profile",
+      command: 303_012,
+      message: message,
+      fields: [("stoken", credential.stoken)],
+      userAgent: Self.selfProfileUserAgent,
+      clientUserToken: String(expectedUserID),
+      cookie: "ka=open"
+    )
+  }
+
+  func setUserFollowState(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64,
+    targetPortrait: String,
+    tbs: String,
+    isFollowed: Bool,
+    timestampMilliseconds: Int64? = nil
+  ) throws -> URLRequest {
+    try validate(credential)
+    try validateDistinctUserIDs(expectedUserID: expectedUserID, targetUserID: targetUserID)
+    guard Self.isValidTBS(tbs) else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    let portrait = try normalizedPortraitToken(targetPortrait)
+
+    var fields: [(String, String)] = [
+      ("BDUSS", credential.bduss),
+      ("_client_version", Self.userFollowClientVersion),
+      ("authsid", "null"),
+      ("from_type", "2"),
+      ("in_live", "0"),
+      ("portrait", portrait),
+      ("stoken", credential.stoken),
+      ("tbs", tbs),
+    ]
+    if !isFollowed {
+      let timestamp = timestampMilliseconds
+        ?? Int64((Date().timeIntervalSince1970 * 1_000).rounded(.down))
+      guard timestamp > 0 else {
+        throw TiebaClientError.invalidArgument("Timestamp must be positive.")
+      }
+      fields.append(("timestamp", String(timestamp)))
+    }
+    return try signedFormRequest(
+      host: Self.writeHost,
+      path: isFollowed ? "/c/c/user/follow" : "/c/c/user/unfollow",
+      fields: fields,
+      userAgent: "bdtb for Android \(Self.userFollowClientVersion)",
       cookie: "ka=open"
     )
   }
@@ -1379,6 +1463,28 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       throw TiebaClientError.invalidArgument(
         "Forum name must contain between 1 and 100 non-control characters."
       )
+    }
+    return value
+  }
+
+  private func validateDistinctUserIDs(expectedUserID: Int64, targetUserID: Int64) throws {
+    guard expectedUserID > 0, targetUserID > 0, expectedUserID != targetUserID else {
+      throw TiebaClientError.invalidArgument(
+        "Account and target user IDs must be distinct positive integers."
+      )
+    }
+  }
+
+  private func normalizedPortraitToken(_ rawValue: String) throws -> String {
+    let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard
+      !value.isEmpty,
+      value.utf8.count <= TiebaAuthenticatedDecoder.selfProfilePortraitMaximumBytes,
+      !value.contains("?"),
+      !value.contains("#"),
+      !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
     }
     return value
   }

@@ -384,6 +384,18 @@ enum ProtoFixtures {
     return response
   }
 
+  static func userRelationship(
+    targetUserID: Int64 = 123_456_789,
+    isFollowed: Int32 = 0,
+    tbs: String = "91be894d01799c4991be894d01"
+  ) -> ProfileResIdl {
+    var response = userProfile()
+    response.data.user.id = targetUserID
+    response.data.user.hasConcerned_p = isFollowed
+    response.data.antiStat.tbs = tbs
+    return response
+  }
+
   static func userThreadPage() -> UserPostResIdl {
     var duplicateImage = PbContent()
     duplicateImage.type = 3

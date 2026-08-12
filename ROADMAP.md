@@ -20,11 +20,11 @@ versioned separately and currently serves `v0.59.0-alpha.1` (build 62).
 | Anonymous discovery, search, and forums | 20 | 18–19 | Core browsing, ranking, recommendations, categories, and search are implemented; feedback and a few niche discovery paths remain |
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
-| Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, media preferences, and local reply-entry visibility are implemented; TiebaLite's wider settings and customization surface remains |
-| Account, session, and private read flows | 15 | 9 | Login, switching, a self-profile summary, followed and target-user liked forums, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
-| Server writes, creation, and social actions | 15 | 6–7 | Follow/unfollow, check-in, approval, verified list/thread-detail cloud-favorite mutations, three plain-text reply targets, and plain-text new-topic creation have guarded implementations; real creation success, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
+| Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, media preferences, reply-entry visibility, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
+| Account, session, and private read flows | 15 | 9 | Login, switching, a self-profile summary, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
+| Server writes, creation, and social actions | 15 | 7–8 | Forum/user follow and unfollow, check-in, approval, verified list/thread-detail cloud-favorite mutations, three plain-text reply targets, and plain-text new-topic creation have guarded implementations; real creation success, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
-| **Total** | **100** | **71–74** | Current full-product estimate |
+| **Total** | **100** | **72–75** | Current full-product estimate |
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
 points, or roughly 91–95%. Concern and the foreground unread summary raise the
@@ -34,6 +34,10 @@ seen-state effects are validated on a disposable account.
 The complete self/other liked-forum list remains inside the existing private-read
 credit until its pagination, privacy-empty, expired-session, and account-switch
 behavior has also been validated on physical devices.
+User relationship reads are required by the guarded follow workflow, so their
+incremental credit is counted in the server-write row rather than duplicated in
+the private-read row. The inbox startup destination improves parity inside the
+existing local-settings credit but is too small to add a full weighted point.
 
 ## Available
 
@@ -54,7 +58,8 @@ the source metadata is updated to that tested IPA.
 - Hot-topic details with related forums and cursor-aware thread pagination
 - Categorized anonymous forum, thread, and user search
 - Default-off anonymous online suggestions for the home search field
-- Local home-entry customization with a next-launch destination and optional discovery section
+- Local home-entry customization with a next-launch home, ranking, topic,
+  inbox, favorite, or history destination plus an optional discovery section
 - Global post search with newest, oldest, and relevance sorting
 - Local keyword, user, and video filtering for global and per-forum search results
 - Local filtering for paginated public-profile activity
@@ -213,9 +218,11 @@ the source metadata is updated to that tested IPA.
    favorites list, including valid, random, cross-account, and expired STOKEN
    cases and whether reading the list has any server-side side effect
 5. Real-device validation of canonical-topic, ordinary-floor, and full
-   nested-reply approval/cancellation, plus single-forum check-in success,
-   idempotent, server-error, uncertain-failure, and read-only reconciliation
-   paths, followed by account switching and follow recovery checks
+   nested-reply approval/cancellation, single-forum check-in, forum follow, and
+   user follow/unfollow in both directions. Cover mutual-follow value `2`,
+   idempotence, rate limits, expired credentials, server errors, uncertain
+   failures, mandatory read-only reconciliation, account switching, and same-UID
+   credential rotation
 6. Real-device validation of the minimal HTTPS ReplyMe, AtMe, and `/c/s/msg`
    summary requests, including the summary field-deletion matrix, count parity,
    and whether either summary or list retrieval changes server unread state,
@@ -536,6 +543,30 @@ metadata: observed visible and unavailable results can share the same switch, so
 neither value establishes a privacy state. These public lists likewise do not
 establish whether the active account follows, is followed by, or can mutate any
 listed user; this surface deliberately has no relationship write controls.
+
+An independently authenticated relationship probe now powers an explicit
+follow/unfollow control on another user's profile. It sends the active account
+as `uid`, the profile target as `friend_uid`, `is_guest=1`, and only the existing
+minimal V12 BDUSS/STOKEN common fields to the fixed HTTPS profile endpoint. The
+response is accepted only when the target UID matches, `has_concerned` is `0`,
+`1`, or mutual-follow `2`, the portrait token is bounded, and `anti_stat.tbs`
+has the expected lowercase hexadecimal format. The portrait and `tbs` remain
+inside Core and are never exposed to SwiftUI, logs, persistence, or reflection.
+
+A changed-state action requires explicit confirmation, performs that fresh
+probe, sends at most one signed HTTPS follow or unfollow form, then performs
+exactly one authenticated profile readback. The acknowledgement has no target
+identity and is never treated as relationship truth; the readback's actual state
+is returned even when it did not reach the requested value. Identical concurrent
+operations share one complete flight. A conflicting state or rotated credential
+waits for that flight and performs a read only, while another target may progress
+independently. Caller cancellation removes only its waiter and never turns an
+already-dispatched write into an implicit retry. The App additionally binds
+presentation to `userID + sessionRevision`, hides the control when signed out or
+viewing the active account, and rejects late results after logout, account
+switching, or same-UID reauthentication. Minimum-field server compatibility,
+rate limits, expired-session behavior, and both directions remain disposable-
+account validation gates, so this workflow receives only partial parity credit.
 
 Tieba's followed-forum list rejects anonymous requests. The logged-in home page
 projects at most the first six entries from the same app-scoped, memory-only state

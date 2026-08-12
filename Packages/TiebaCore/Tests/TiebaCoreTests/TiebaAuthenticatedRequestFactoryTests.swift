@@ -176,6 +176,111 @@ final class TiebaAuthenticatedRequestFactoryTests: XCTestCase {
     XCTAssertEqual(message.data.common, expectedCommon)
   }
 
+  func testUserRelationshipUsesBoundTargetProfileFieldsWithoutDeviceIdentifiers() throws {
+    let accountID: Int64 = 957_339_815
+    let targetID: Int64 = 123_456_789
+    let credential = sessionCredential()
+    let request = try factory.userRelationship(
+      credential: credential,
+      expectedUserID: accountID,
+      targetUserID: targetID
+    )
+    let fields = try multipartScalarFields(request)
+    let message = try ProfileReqIdl(serializedBytes: try protobufPayload(request))
+
+    XCTAssertEqual(
+      request.url?.absoluteString,
+      "https://tiebac.baidu.com/c/u/user/profile?cmd=303012&format=protobuf"
+    )
+    XCTAssertEqual(request.value(forHTTPHeaderField: "client_user_token"), String(accountID))
+    XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "ka=open")
+    XCTAssertEqual(Set(fields.keys), ["stoken"])
+    XCTAssertEqual(message.data.uid, accountID)
+    XCTAssertEqual(message.data.friendUid, targetID)
+    XCTAssertEqual(message.data.isGuest, 1)
+    XCTAssertEqual(message.data.needPostCount, 1)
+    XCTAssertEqual(message.data.pn, 1)
+    XCTAssertEqual(message.data.rn, 20)
+    XCTAssertEqual(message.data.hasPlist_p, 1)
+    XCTAssertEqual(message.data.isFromUsercenter, 1)
+    XCTAssertEqual(message.data.page, 1)
+    XCTAssertEqual(message.data.common.bduss, credential.bduss)
+    XCTAssertEqual(message.data.common.stoken, credential.stoken)
+    XCTAssertNil(request.value(forHTTPHeaderField: "CUID"))
+    XCTAssertNil(request.value(forHTTPHeaderField: "CUID_Galaxy2"))
+    XCTAssertNil(request.value(forHTTPHeaderField: "TBBRAND"))
+  }
+
+  func testUserFollowRequestsUseMinimalHTTPSFieldsAndExactOperationShape() throws {
+    let accountID: Int64 = 957_339_815
+    let targetID: Int64 = 123_456_789
+    let credential = sessionCredential()
+    let tbs = "91be894d01799c4991be894d01"
+
+    let follow = try factory.setUserFollowState(
+      credential: credential,
+      expectedUserID: accountID,
+      targetUserID: targetID,
+      targetPortrait: "target-portrait",
+      tbs: tbs,
+      isFollowed: true
+    )
+    let followFields = try formFields(follow)
+    XCTAssertEqual(follow.url?.absoluteString, "https://tiebac.baidu.com/c/c/user/follow")
+    XCTAssertEqual(follow.value(forHTTPHeaderField: "Cookie"), "ka=open")
+    XCTAssertEqual(follow.value(forHTTPHeaderField: "User-Agent"), "bdtb for Android 11.10.8.6")
+    XCTAssertEqual(
+      Set(followFields.keys),
+      [
+        "BDUSS", "_client_version", "authsid", "from_type", "in_live", "portrait",
+        "sign", "stoken", "tbs",
+      ]
+    )
+    XCTAssertEqual(followFields["portrait"], "target-portrait")
+    XCTAssertEqual(followFields["stoken"], credential.stoken)
+    XCTAssertNil(followFields["timestamp"])
+    XCTAssertNil(followFields["cuid"])
+    XCTAssertNil(followFields["_phone_imei"])
+
+    let unfollow = try factory.setUserFollowState(
+      credential: credential,
+      expectedUserID: accountID,
+      targetUserID: targetID,
+      targetPortrait: "target-portrait",
+      tbs: tbs,
+      isFollowed: false,
+      timestampMilliseconds: 1_723_456_789_012
+    )
+    let unfollowFields = try formFields(unfollow)
+    XCTAssertEqual(unfollow.url?.absoluteString, "https://tiebac.baidu.com/c/c/user/unfollow")
+    XCTAssertEqual(unfollowFields["timestamp"], "1723456789012")
+    XCTAssertEqual(Set(unfollowFields.keys), Set(followFields.keys).union(["timestamp"]))
+  }
+
+  func testUserRelationshipAndFollowRejectInvalidIdentityContext() throws {
+    for targetID in [Int64(0), 957_339_815] {
+      XCTAssertThrowsError(
+        try factory.userRelationship(
+          credential: sessionCredential(),
+          expectedUserID: 957_339_815,
+          targetUserID: targetID
+        )
+      )
+    }
+    for portrait in ["", "target?t=1", "target#fragment", "unsafe\nportrait"] {
+      XCTAssertThrowsError(
+        try factory.setUserFollowState(
+          credential: sessionCredential(),
+          expectedUserID: 957_339_815,
+          targetUserID: 123_456_789,
+          targetPortrait: portrait,
+          tbs: "91be894d01799c4991be894d01",
+          isFollowed: true
+        )
+      )
+    }
+  }
+
   func testRejectsMalformedCredentialsArgumentsAndHeaderInjection() throws {
     XCTAssertThrowsError(
       try factory.validateAccount(

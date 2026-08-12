@@ -103,6 +103,18 @@ public struct TiebaSelfProfileSummary: Sendable, Hashable {
   }
 }
 
+public struct TiebaUserRelationship: Sendable, Hashable {
+  public let userID: Int64
+  public let targetUserID: Int64
+  public let isFollowed: Bool
+
+  public init(userID: Int64, targetUserID: Int64, isFollowed: Bool) {
+    self.userID = userID
+    self.targetUserID = targetUserID
+    self.isFollowed = isFollowed
+  }
+}
+
 public struct TiebaConcernPage: Sendable, Hashable {
   public let requestedUserID: Int64
   public let threads: [TiebaThread]

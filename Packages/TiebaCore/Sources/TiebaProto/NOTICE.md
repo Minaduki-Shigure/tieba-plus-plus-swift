@@ -103,6 +103,14 @@ minimal `User` summary fields are adapted from `UserViewModel` and
 omits Android hardware, installation, advertising, location, screen, and CUID
 fields; it sends only the account-bound UID and credentials required by this
 read and never persists the returned summary.
+The authenticated target-profile polarity (`uid`, `friend_uid`, `is_guest = 1`),
+the response-only `User.has_concerned` and `anti.tbs` fields, and the explicit
+`/c/c/user/follow` and `/c/c/user/unfollow` form contracts are adapted from
+TiebaLite's `UserProfileViewModel`, `MixedTiebaApiImpl.userProfileFlow`, and
+`OfficialTiebaApi` at that same commit. Tieba++ uses HTTPS and omits Android
+device and installation identifiers. The target portrait and short-lived `tbs`
+are consumed only by the immediate write, whose result is read back exactly
+once and is never retried as a write.
 The Galaxy2 CUID framing and Helios checksum implementation in
 `TiebaGalaxy2CUID.swift` are adapted from TiebaLite's `CuidUtils` and
 `utils/helios` helpers at that commit. This implementation deliberately replaces
