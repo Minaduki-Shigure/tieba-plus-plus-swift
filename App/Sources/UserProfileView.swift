@@ -894,13 +894,13 @@ private struct UserInteractionRestrictionsSheet: View {
         "禁止 TA 关注我",
         isOn: Binding(
           get: { viewModel.draft.blocksFollow },
-          set: viewModel.setBlocksFollow
+          set: { value in viewModel.setBlocksFollow(value) }
         )
       )
       Toggle(
         isOn: Binding(
           get: { viewModel.draft.blocksInteraction },
-          set: viewModel.setBlocksInteraction
+          set: { value in viewModel.setBlocksInteraction(value) }
         )
       ) {
         VStack(alignment: .leading, spacing: 3) {
@@ -914,7 +914,7 @@ private struct UserInteractionRestrictionsSheet: View {
         "禁止 TA 私信",
         isOn: Binding(
           get: { viewModel.draft.blocksChat },
-          set: viewModel.setBlocksChat
+          set: { value in viewModel.setBlocksChat(value) }
         )
       )
     }
