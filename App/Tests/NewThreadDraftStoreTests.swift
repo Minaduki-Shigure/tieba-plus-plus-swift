@@ -166,7 +166,12 @@ final class NewThreadDraftStoreTests: XCTestCase {
     let location = try makeNewThreadDraftTestLocation()
     defer { try? FileManager.default.removeItem(at: location.directory) }
     let key = NewThreadDraftKey(userID: 9, target: newThreadDraftTarget())!
-    let original = NewThreadDraft(key: key, title: "原标题", content: "原正文")!
+    let original = NewThreadDraft(
+      key: key,
+      title: "原标题",
+      content: "原正文",
+      updatedAt: Date(timeIntervalSince1970: 100)
+    )!
     let initialStore = FileNewThreadDraftStore(fileURL: location.file)
     try await initialStore.save(original)
     let originalBytes = try Data(contentsOf: location.file)
