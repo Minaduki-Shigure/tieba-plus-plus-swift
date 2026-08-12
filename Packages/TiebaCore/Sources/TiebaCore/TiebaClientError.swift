@@ -13,6 +13,10 @@ public enum TiebaClientError: Error, Sendable, Equatable {
   case invalidAuthenticatedResponse
   case forumNotFollowed
   case forumCheckInUnavailable
+  case officialBatchCheckInAuthorizationChanged
+  case officialBatchCheckInOutcomeUnknown(
+    dispatchedTargets: [TiebaOfficialBatchCheckInTarget]
+  )
   case threadAgreementWriteConflict
   case threadCloudFavoriteOutcomeUnknown
   case pollOutcomeUnknown
@@ -53,6 +57,10 @@ extension TiebaClientError: LocalizedError {
       "The forum must be followed before checking in."
     case .forumCheckInUnavailable:
       "Tieba did not advertise check-in state for this forum."
+    case .officialBatchCheckInAuthorizationChanged:
+      "The eligible batch check-in targets changed after authorization. Review them before retrying."
+    case .officialBatchCheckInOutcomeUnknown:
+      "The batch check-in was sent, but Tieba did not return a verifiable final result."
     case .threadAgreementWriteConflict:
       "A conflicting thread agreement operation completed; read the current state before retrying."
     case .threadCloudFavoriteOutcomeUnknown:

@@ -521,14 +521,19 @@ private enum TiebaNewThreadWaitOutcome: Sendable, Equatable {
 private struct TiebaOfficialBatchCheckInIdentity:
   Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
 {
-  let bduss: String
-  let stoken: String
-  let cookieName: TiebaBDUSSCookieName
+  private let bduss: String
+  private let stoken: String
+  private let cookieName: TiebaBDUSSCookieName
+  let authorizedTargets: [TiebaOfficialBatchCheckInTarget]
 
-  init(_ credential: TiebaSessionCredential) {
+  init(
+    credential: TiebaSessionCredential,
+    authorizedTargets: [TiebaOfficialBatchCheckInTarget]
+  ) {
     bduss = credential.bduss
     stoken = credential.stoken
     cookieName = credential.bdussCookieName
+    self.authorizedTargets = authorizedTargets
   }
 
   var description: String { "TiebaOfficialBatchCheckInIdentity(redacted)" }
@@ -540,13 +545,32 @@ private struct TiebaOfficialBatchCheckInFlight: Sendable {
   let id: UUID
   let identity: TiebaOfficialBatchCheckInIdentity
   let task: Task<TiebaOfficialBatchCheckInResult, Swift.Error>
+  var stage: TiebaOfficialBatchCheckInFlightStage
+
+  var isCompleted: Bool { stage == .completed }
+}
+
+private enum TiebaOfficialBatchCheckInFlightStage: Sendable, Equatable {
+  case queued
+  case preflight
+  case writeDispatched
+  case completed
+}
+
+private enum TiebaOfficialBatchCheckInWaitOutcome: Sendable, Equatable {
+  case completed
+  case cancelled
 }
 
 public actor TiebaAuthenticatedClient {
   nonisolated static func officialBatchCheckInIdentityDebugValues(
-    credential: TiebaSessionCredential
+    credential: TiebaSessionCredential,
+    authorizedTargets: [TiebaOfficialBatchCheckInTarget] = []
   ) -> (description: String, reflection: String, mirrorChildCount: Int) {
-    let identity = TiebaOfficialBatchCheckInIdentity(credential)
+    let identity = TiebaOfficialBatchCheckInIdentity(
+      credential: credential,
+      authorizedTargets: authorizedTargets
+    )
     return (
       description: String(describing: identity),
       reflection: String(reflecting: identity),
@@ -613,6 +637,10 @@ public actor TiebaAuthenticatedClient {
     TiebaForumCheckInResourceKey: [UUID: CheckedContinuation<Void, Never>]
   ]()
   private var officialBatchCheckInFlights = [Int64: TiebaOfficialBatchCheckInFlight]()
+  private var officialBatchCheckInWaiters = [
+    Int64: [UUID: CheckedContinuation<TiebaOfficialBatchCheckInWaitOutcome, Never>]
+  ]()
+  private var officialBatchCheckInSharedWaiterIDs = [Int64: Set<UUID>]()
   private var agreementFlights = [
     TiebaAgreementResourceKey: TiebaAgreementFlight
   ]()
@@ -1419,47 +1447,84 @@ public actor TiebaAuthenticatedClient {
 
   public func performOfficialBatchCheckIn(
     credential: TiebaSessionCredential,
-    expectedUserID: Int64
+    expectedUserID: Int64,
+    authorizedTargets: [TiebaOfficialBatchCheckInTarget]
   ) async throws -> TiebaOfficialBatchCheckInResult {
     try Task.checkCancellation()
-    let identity = TiebaOfficialBatchCheckInIdentity(credential)
+    let authorizedTargets = try canonicalOfficialBatchCheckInTargets(authorizedTargets)
+    let identity = TiebaOfficialBatchCheckInIdentity(
+      credential: credential,
+      authorizedTargets: authorizedTargets
+    )
     gate: while true {
-      while let flight = officialBatchCheckInFlights[expectedUserID] {
+      if let flight = officialBatchCheckInFlights[expectedUserID] {
         if flight.identity == identity {
-          return try await flight.task.value
+          return try await waitForOfficialBatchCheckInFlight(
+            expectedUserID: expectedUserID,
+            flightID: flight.id,
+            task: flight.task
+          )
         }
-        _ = await flight.task.result
-        if officialBatchCheckInFlights[expectedUserID]?.id == flight.id {
-          officialBatchCheckInFlights.removeValue(forKey: expectedUserID)
-        }
-        try Task.checkCancellation()
-      }
-      if let entry = forumCheckInFlights.first(where: { $0.key.userID == expectedUserID }) {
-        _ = await entry.value.task.result
-        clearForumCheckInFlight(resourceKey: entry.key, flightID: entry.value.id)
+        try await waitForOfficialBatchCheckInFlightCompletion(
+          expectedUserID: expectedUserID,
+          flightID: flight.id,
+          keepsWriteAlive: false
+        )
         try Task.checkCancellation()
         continue gate
       }
       break gate
     }
+    try Task.checkCancellation()
+    let flightID = UUID()
     let task = Task.detached { [self] in
-      try await executeOfficialBatchCheckIn(
+      try await executeOfficialBatchCheckInAfterCurrentForumCheckIns(
+        flightID: flightID,
         credential: credential,
-        expectedUserID: expectedUserID
+        expectedUserID: expectedUserID,
+        authorizedTargets: authorizedTargets
       )
     }
-    let flightID = UUID()
     officialBatchCheckInFlights[expectedUserID] = TiebaOfficialBatchCheckInFlight(
       id: flightID,
       identity: identity,
+      task: task,
+      stage: .queued
+    )
+    Task {
+      await finishOfficialBatchCheckInFlight(
+        expectedUserID: expectedUserID,
+        flightID: flightID,
+        task: task
+      )
+    }
+    return try await waitForOfficialBatchCheckInFlight(
+      expectedUserID: expectedUserID,
+      flightID: flightID,
       task: task
     )
-    defer {
-      if officialBatchCheckInFlights[expectedUserID]?.id == flightID {
-        officialBatchCheckInFlights.removeValue(forKey: expectedUserID)
-      }
-    }
-    return try await task.value
+  }
+
+  public func joinOfficialBatchCheckInIfInFlight(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    authorizedTargets: [TiebaOfficialBatchCheckInTarget]
+  ) async throws -> TiebaOfficialBatchCheckInResult? {
+    try Task.checkCancellation()
+    let authorizedTargets = try canonicalOfficialBatchCheckInTargets(authorizedTargets)
+    let identity = TiebaOfficialBatchCheckInIdentity(
+      credential: credential,
+      authorizedTargets: authorizedTargets
+    )
+    guard
+      let flight = officialBatchCheckInFlights[expectedUserID],
+      flight.identity == identity
+    else { return nil }
+    return try await waitForOfficialBatchCheckInFlight(
+      expectedUserID: expectedUserID,
+      flightID: flight.id,
+      task: flight.task
+    )
   }
 
   public func getForumMembership(
@@ -1538,13 +1603,6 @@ public actor TiebaAuthenticatedClient {
     forumName: String
   ) async throws -> TiebaForumAccountState {
     try Task.checkCancellation()
-    while let batchFlight = officialBatchCheckInFlights[expectedUserID] {
-      _ = await batchFlight.task.result
-      if officialBatchCheckInFlights[expectedUserID]?.id == batchFlight.id {
-        officialBatchCheckInFlights.removeValue(forKey: expectedUserID)
-      }
-      try Task.checkCancellation()
-    }
     let forumName = try requestFactory.normalizedForumName(forumName)
     let resourceKey = TiebaForumCheckInResourceKey(
       userID: expectedUserID,
@@ -1555,16 +1613,28 @@ public actor TiebaAuthenticatedClient {
       forumName: forumName
     )
 
-    while let flight = forumCheckInFlights[resourceKey] {
-      if flight.identity == identity {
-        registerSharedForumCheckInWaiter(flightID: flight.id)
-        defer { unregisterSharedForumCheckInWaiter(flightID: flight.id) }
-        return try await flight.task.value
+    gate: while true {
+      while let batchFlight = officialBatchCheckInFlights[expectedUserID] {
+        try await waitForOfficialBatchCheckInFlightCompletion(
+          expectedUserID: expectedUserID,
+          flightID: batchFlight.id,
+          keepsWriteAlive: false
+        )
+        try Task.checkCancellation()
       }
-      try await waitForForumCheckInFlight(
-        resourceKey: resourceKey,
-        flightID: flight.id
-      )
+      if let flight = forumCheckInFlights[resourceKey] {
+        if flight.identity == identity {
+          registerSharedForumCheckInWaiter(flightID: flight.id)
+          defer { unregisterSharedForumCheckInWaiter(flightID: flight.id) }
+          return try await flight.task.value
+        }
+        try await waitForForumCheckInFlight(
+          resourceKey: resourceKey,
+          flightID: flight.id
+        )
+        continue gate
+      }
+      break gate
     }
 
     try Task.checkCancellation()
@@ -3246,14 +3316,26 @@ public actor TiebaAuthenticatedClient {
   }
 
   private func executeOfficialBatchCheckIn(
+    flightID: UUID,
     credential: TiebaSessionCredential,
-    expectedUserID: Int64
+    expectedUserID: Int64,
+    authorizedTargets: [TiebaOfficialBatchCheckInTarget]
   ) async throws -> TiebaOfficialBatchCheckInResult {
     let context = try await getOfficialCheckInCatalogContext(
       credential: credential,
       expectedUserID: expectedUserID
     )
-    let targets = context.catalog.batchEligibleForums
+    let authorizedByID = Dictionary(
+      uniqueKeysWithValues: authorizedTargets.map { ($0.forumID, $0.canonicalForumName) }
+    )
+    for forum in context.catalog.forums {
+      if let authorizedName = authorizedByID[forum.id], authorizedName != forum.name {
+        throw TiebaClientError.officialBatchCheckInAuthorizationChanged
+      }
+    }
+    let targets = context.catalog.batchEligibleForums.filter {
+      authorizedByID[$0.id] == $0.name
+    }
     guard !targets.isEmpty else {
       return TiebaOfficialBatchCheckInResult(userID: expectedUserID, items: [])
     }
@@ -3264,14 +3346,50 @@ public actor TiebaAuthenticatedClient {
       tbs: context.tbs,
       forumIDs: targets.map(\.id)
     )
-    let body = try await send(
-      request,
-      maximumBodyBytes: Self.officialBatchCheckInResponseMaximumBytes
-    )
-    return try TiebaOfficialCheckInDecoder.batchResult(
-      from: body,
+    let dispatchedTargets = targets.map {
+      TiebaOfficialBatchCheckInTarget(forumID: $0.id, canonicalForumName: $0.name)
+    }
+    try beginOfficialBatchCheckInWrite(
       expectedUserID: expectedUserID,
-      requestedForums: targets
+      flightID: flightID
+    )
+    do {
+      let body = try await send(
+        request,
+        maximumBodyBytes: Self.officialBatchCheckInResponseMaximumBytes
+      )
+      return try TiebaOfficialCheckInDecoder.batchResult(
+        from: body,
+        expectedUserID: expectedUserID,
+        requestedForums: targets
+      )
+    } catch {
+      throw TiebaClientError.officialBatchCheckInOutcomeUnknown(
+        dispatchedTargets: dispatchedTargets
+      )
+    }
+  }
+
+  private func executeOfficialBatchCheckInAfterCurrentForumCheckIns(
+    flightID: UUID,
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    authorizedTargets: [TiebaOfficialBatchCheckInTarget]
+  ) async throws -> TiebaOfficialBatchCheckInResult {
+    while let entry = forumCheckInFlights.first(where: { $0.key.userID == expectedUserID }) {
+      _ = await entry.value.task.result
+      clearForumCheckInFlight(resourceKey: entry.key, flightID: entry.value.id)
+      try Task.checkCancellation()
+    }
+    try beginOfficialBatchCheckInPreflight(
+      expectedUserID: expectedUserID,
+      flightID: flightID
+    )
+    return try await executeOfficialBatchCheckIn(
+      flightID: flightID,
+      credential: credential,
+      expectedUserID: expectedUserID,
+      authorizedTargets: authorizedTargets
     )
   }
 
@@ -3812,6 +3930,230 @@ public actor TiebaAuthenticatedClient {
       shared: shared,
       conflict: forumCheckInConflictWaiters[resourceKey]?.count ?? 0
     )
+  }
+
+  func officialBatchCheckInFlightExists(expectedUserID: Int64) -> Bool {
+    officialBatchCheckInFlights[expectedUserID] != nil
+  }
+
+  func officialBatchCheckInWaiterCount(expectedUserID: Int64) -> Int {
+    officialBatchCheckInWaiters[expectedUserID]?.count ?? 0
+  }
+
+  func officialBatchCheckInFlightStageName(expectedUserID: Int64) -> String? {
+    officialBatchCheckInFlights[expectedUserID].map { String(describing: $0.stage) }
+  }
+
+  private func canonicalOfficialBatchCheckInTargets(
+    _ targets: [TiebaOfficialBatchCheckInTarget]
+  ) throws -> [TiebaOfficialBatchCheckInTarget] {
+    guard targets.count <= TiebaOfficialCheckInDecoder.maximumForumCount else {
+      throw TiebaClientError.invalidArgument("Too many batch check-in authorization targets.")
+    }
+    var seen = Set<Int64>()
+    return try targets.map { target in
+      guard target.forumID > 0, seen.insert(target.forumID).inserted else {
+        throw TiebaClientError.invalidArgument(
+          "Batch check-in authorization targets must have distinct positive forum IDs."
+        )
+      }
+      return TiebaOfficialBatchCheckInTarget(
+        forumID: target.forumID,
+        canonicalForumName: try TiebaOfficialCheckInDecoder.canonicalForumName(
+          target.canonicalForumName
+        )
+      )
+    }
+  }
+
+  private func waitForOfficialBatchCheckInFlight(
+    expectedUserID: Int64,
+    flightID: UUID,
+    task: Task<TiebaOfficialBatchCheckInResult, Swift.Error>
+  ) async throws -> TiebaOfficialBatchCheckInResult {
+    try await waitForOfficialBatchCheckInFlightCompletion(
+      expectedUserID: expectedUserID,
+      flightID: flightID
+    )
+    return try await task.value
+  }
+
+  private func waitForOfficialBatchCheckInFlightCompletion(
+    expectedUserID: Int64,
+    flightID: UUID,
+    keepsWriteAlive: Bool = true
+  ) async throws {
+    if Task.isCancelled,
+      let flight = officialBatchCheckInFlights[expectedUserID],
+      flight.id == flightID,
+      flight.stage == .queued || flight.stage == .preflight,
+      !keepsWriteAlive
+        || officialBatchCheckInSharedWaiterIDs[expectedUserID]?.isEmpty != false
+    {
+      cancelUnregisteredOfficialBatchCheckInWaiter(
+        expectedUserID: expectedUserID,
+        flightID: flightID,
+        keepsWriteAlive: keepsWriteAlive
+      )
+      throw CancellationError()
+    }
+    guard officialBatchCheckInFlights[expectedUserID]?.isCompleted == false else { return }
+    let waiterID = UUID()
+    let outcome: TiebaOfficialBatchCheckInWaitOutcome = await withTaskCancellationHandler {
+      await withCheckedContinuation {
+        (continuation: CheckedContinuation<TiebaOfficialBatchCheckInWaitOutcome, Never>) in
+        guard let flight = officialBatchCheckInFlights[expectedUserID], flight.id == flightID,
+          !flight.isCompleted
+        else {
+          continuation.resume(returning: .completed)
+          return
+        }
+        if Task.isCancelled,
+          flight.stage == .queued || flight.stage == .preflight
+        {
+          if keepsWriteAlive {
+            cancelUnregisteredOfficialBatchCheckInWaiter(
+              expectedUserID: expectedUserID,
+              flightID: flightID,
+              keepsWriteAlive: keepsWriteAlive
+            )
+          }
+          continuation.resume(returning: .cancelled)
+          return
+        }
+        officialBatchCheckInWaiters[expectedUserID, default: [:]][waiterID] = continuation
+        if keepsWriteAlive {
+          officialBatchCheckInSharedWaiterIDs[expectedUserID, default: []].insert(waiterID)
+        }
+      }
+    } onCancel: {
+      Task {
+        await self.cancelOfficialBatchCheckInWaiter(
+          expectedUserID: expectedUserID,
+          flightID: flightID,
+          waiterID: waiterID,
+          keepsWriteAlive: keepsWriteAlive
+        )
+      }
+    }
+    guard outcome == .completed else { throw CancellationError() }
+  }
+
+  private func cancelOfficialBatchCheckInWaiter(
+    expectedUserID: Int64,
+    flightID: UUID,
+    waiterID: UUID,
+    keepsWriteAlive: Bool
+  ) {
+    guard let flight = officialBatchCheckInFlights[expectedUserID], flight.id == flightID else {
+      return
+    }
+    if flight.stage == .writeDispatched || flight.stage == .completed {
+      return
+    }
+    guard var waiters = officialBatchCheckInWaiters[expectedUserID] else {
+      cancelUnregisteredOfficialBatchCheckInWaiter(
+        expectedUserID: expectedUserID,
+        flightID: flightID,
+        keepsWriteAlive: keepsWriteAlive
+      )
+      return
+    }
+    let continuation = waiters.removeValue(forKey: waiterID)
+    if var sharedWaiterIDs = officialBatchCheckInSharedWaiterIDs[expectedUserID] {
+      sharedWaiterIDs.remove(waiterID)
+      if sharedWaiterIDs.isEmpty {
+        officialBatchCheckInSharedWaiterIDs.removeValue(forKey: expectedUserID)
+      } else {
+        officialBatchCheckInSharedWaiterIDs[expectedUserID] = sharedWaiterIDs
+      }
+    }
+    if waiters.isEmpty {
+      officialBatchCheckInWaiters.removeValue(forKey: expectedUserID)
+    } else {
+      officialBatchCheckInWaiters[expectedUserID] = waiters
+    }
+    cancelOfficialBatchCheckInOwnerIfUnobservedBeforeDispatch(
+      expectedUserID: expectedUserID,
+      flightID: flightID,
+      keepsWriteAlive: keepsWriteAlive
+    )
+    continuation?.resume(returning: .cancelled)
+  }
+
+  private func cancelUnregisteredOfficialBatchCheckInWaiter(
+    expectedUserID: Int64,
+    flightID: UUID,
+    keepsWriteAlive: Bool
+  ) {
+    cancelOfficialBatchCheckInOwnerIfUnobservedBeforeDispatch(
+      expectedUserID: expectedUserID,
+      flightID: flightID,
+      keepsWriteAlive: keepsWriteAlive
+    )
+  }
+
+  private func cancelOfficialBatchCheckInOwnerIfUnobservedBeforeDispatch(
+    expectedUserID: Int64,
+    flightID: UUID,
+    keepsWriteAlive: Bool
+  ) {
+    guard
+      keepsWriteAlive,
+      officialBatchCheckInSharedWaiterIDs[expectedUserID]?.isEmpty != false,
+      let flight = officialBatchCheckInFlights[expectedUserID],
+      flight.id == flightID,
+      flight.stage == .queued || flight.stage == .preflight
+    else { return }
+    flight.task.cancel()
+  }
+
+  private func finishOfficialBatchCheckInFlight(
+    expectedUserID: Int64,
+    flightID: UUID,
+    task: Task<TiebaOfficialBatchCheckInResult, Swift.Error>
+  ) async {
+    let result = await task.result
+    guard
+      var flight = officialBatchCheckInFlights[expectedUserID],
+      flight.id == flightID
+    else { return }
+    flight.stage = .completed
+    _ = result
+    officialBatchCheckInFlights.removeValue(forKey: expectedUserID)
+    let waiters = officialBatchCheckInWaiters.removeValue(forKey: expectedUserID) ?? [:]
+    officialBatchCheckInSharedWaiterIDs.removeValue(forKey: expectedUserID)
+    for continuation in waiters.values {
+      continuation.resume(returning: .completed)
+    }
+  }
+
+  private func beginOfficialBatchCheckInPreflight(
+    expectedUserID: Int64,
+    flightID: UUID
+  ) throws {
+    try Task.checkCancellation()
+    guard
+      var flight = officialBatchCheckInFlights[expectedUserID],
+      flight.id == flightID,
+      flight.stage == .queued
+    else { throw CancellationError() }
+    flight.stage = .preflight
+    officialBatchCheckInFlights[expectedUserID] = flight
+  }
+
+  private func beginOfficialBatchCheckInWrite(
+    expectedUserID: Int64,
+    flightID: UUID
+  ) throws {
+    try Task.checkCancellation()
+    guard
+      var flight = officialBatchCheckInFlights[expectedUserID],
+      flight.id == flightID,
+      flight.stage == .preflight
+    else { throw CancellationError() }
+    flight.stage = .writeDispatched
+    officialBatchCheckInFlights[expectedUserID] = flight
   }
 
   private func registerSharedForumCheckInWaiter(flightID: UUID) {

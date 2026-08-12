@@ -31,6 +31,16 @@ public struct TiebaOfficialCheckInForum: Identifiable, Sendable, Hashable {
   }
 }
 
+public struct TiebaOfficialBatchCheckInTarget: Sendable, Hashable {
+  public let forumID: Int64
+  public let canonicalForumName: String
+
+  public init(forumID: Int64, canonicalForumName: String) {
+    self.forumID = forumID
+    self.canonicalForumName = canonicalForumName
+  }
+}
+
 public struct TiebaOfficialCheckInCatalog: Sendable, Hashable {
   public let userID: Int64
   public let forums: [TiebaOfficialCheckInForum]
@@ -61,6 +71,20 @@ public struct TiebaOfficialCheckInCatalog: Sendable, Hashable {
           && $0.level >= minimumBatchLevel
       }.prefix(maximumBatchCount)
     )
+  }
+
+  public var batchEligibleTargets: [TiebaOfficialBatchCheckInTarget] {
+    batchEligibleForums.map {
+      TiebaOfficialBatchCheckInTarget(forumID: $0.id, canonicalForumName: $0.name)
+    }
+  }
+
+  public var actionableCheckInTargets: [TiebaOfficialBatchCheckInTarget] {
+    forums.filter {
+      $0.checkInStatus == .pending && !$0.isForbidden
+    }.map {
+      TiebaOfficialBatchCheckInTarget(forumID: $0.id, canonicalForumName: $0.name)
+    }
   }
 }
 

@@ -334,6 +334,25 @@ struct ForumCheckInCatalogData: Hashable, Sendable {
   let officialBatchPolicy: ForumOfficialBatchCheckInPolicy?
 }
 
+struct ForumBatchCheckInTarget: Hashable, Sendable {
+  let forumID: Int64
+  let forumName: String
+}
+
+enum ForumBatchCheckInError: LocalizedError, Equatable, Sendable {
+  case authorizationChanged
+  case outcomeUnknown(dispatchedTargets: [ForumBatchCheckInTarget])
+
+  var errorDescription: String? {
+    switch self {
+    case .authorizationChanged:
+      "可签到贴吧已发生变化，本次没有发送官方批量签到。请重新读取状态并再次确认。"
+    case .outcomeUnknown:
+      "官方批量签到已经发送，但贴吧未返回可验证的最终结果。应用不会自动重试。"
+    }
+  }
+}
+
 enum ForumBatchCheckInOutcome: Hashable, Sendable {
   case confirmedSigned
   case rejected(message: String)
@@ -564,7 +583,8 @@ protocol AccountService: Sendable {
     session: StoredAccountSession
   ) async throws -> ForumCheckInCatalogData
   func batchCheckIn(
-    session: StoredAccountSession
+    session: StoredAccountSession,
+    authorizedTargets: [ForumBatchCheckInTarget]
   ) async throws -> ForumBatchCheckInData
   func threadAgreement(
     session: StoredAccountSession,
@@ -604,7 +624,8 @@ extension AccountService {
   }
 
   func batchCheckIn(
-    session: StoredAccountSession
+    session: StoredAccountSession,
+    authorizedTargets: [ForumBatchCheckInTarget]
   ) async throws -> ForumBatchCheckInData {
     throw BrowseError.unavailable("当前账户服务不支持官方一键签到。")
   }

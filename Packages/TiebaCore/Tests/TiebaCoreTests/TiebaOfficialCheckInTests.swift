@@ -295,6 +295,7 @@ final class TiebaOfficialCheckInTests: XCTestCase {
     XCTAssertEqual(catalog.minimumBatchLevel, 4)
     XCTAssertEqual(catalog.maximumBatchCount, 2)
     XCTAssertEqual(catalog.batchEligibleForums.map(\.id), [1])
+    XCTAssertEqual(catalog.actionableCheckInTargets.map(\.forumID), [1, 2])
     let snapshot = await transport.snapshot()
     XCTAssertEqual(snapshot.requests.count, 4)
     XCTAssertEqual(try formFields(snapshot.requests[2])["page_no"], "1")
@@ -338,6 +339,7 @@ final class TiebaOfficialCheckInTests: XCTestCase {
     let guide = guideJSON(
       forums: [
         forumJSON(id: 9, name: "unknown", level: 9, status: -1),
+        forumJSON(id: 10, name: "fresh", level: 9),
         forumJSON(id: 3, name: "first", level: 5),
         forumJSON(id: 4, name: "low", level: 3),
         forumJSON(id: 7, name: "forbidden", level: 9, forbidden: 1),
@@ -354,7 +356,7 @@ final class TiebaOfficialCheckInTests: XCTestCase {
     let transport = OfficialCheckInQueueTransport(
       responses: [
         .init(body: loginJSON()),
-        .init(body: eligibilityJSON(minimumLevel: 4, maximumCount: 2)),
+        .init(body: eligibilityJSON(minimumLevel: 4, maximumCount: 3)),
         .init(body: guide),
         .init(body: batch),
       ]
@@ -363,7 +365,13 @@ final class TiebaOfficialCheckInTests: XCTestCase {
 
     let result = try await client.performOfficialBatchCheckIn(
       credential: sessionCredential(),
-      expectedUserID: userID
+      expectedUserID: userID,
+      authorizedTargets: [
+        checkInTarget(id: 3, name: "first"),
+        checkInTarget(id: 4, name: "low"),
+        checkInTarget(id: 2, name: "second"),
+        checkInTarget(id: 8, name: "third"),
+      ]
     )
 
     XCTAssertEqual(result.userID, userID)
@@ -403,13 +411,193 @@ final class TiebaOfficialCheckInTests: XCTestCase {
 
     let result = try await client.performOfficialBatchCheckIn(
       credential: sessionCredential(),
-      expectedUserID: userID
+      expectedUserID: userID,
+      authorizedTargets: [checkInTarget(id: 1, name: "forum")]
     )
 
     XCTAssertTrue(result.items.isEmpty)
     let snapshot = await transport.snapshot()
     XCTAssertEqual(snapshot.requests.count, 3)
     XCTAssertFalse(snapshot.requests.contains { $0.url?.path == "/c/c/forum/msign" })
+  }
+
+  func testAuthorizedForumNameChangeFailsClosedBeforeWrite() async throws {
+    let transport = OfficialCheckInQueueTransport(
+      responses: [
+        .init(body: loginJSON()),
+        .init(body: eligibilityJSON(maximumCount: 1)),
+        .init(body: guideJSON(forums: [forumJSON(id: 1, name: "renamed", level: 5)])),
+      ]
+    )
+    let client = TiebaAuthenticatedClient(transport: transport)
+    await assertError(.officialBatchCheckInAuthorizationChanged) {
+      _ = try await client.performOfficialBatchCheckIn(
+        credential: self.sessionCredential(),
+        expectedUserID: self.userID,
+        authorizedTargets: [self.checkInTarget(id: 1, name: "original")]
+      )
+    }
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.requests.count, 3)
+    XCTAssertFalse(snapshot.requests.contains { $0.url?.path == "/c/c/forum/msign" })
+  }
+
+  func testPreflightCancellationCancelsOwnerWithoutBatchWrite() async throws {
+    let credential = sessionCredential()
+    let expectedUserID = userID
+    let authorizedTargets = [checkInTarget(id: 1, name: "one")]
+    let transport = OfficialCheckInQueueTransport(
+      responses: [.init(body: loginJSON(), blocksUntilCancelled: true)]
+    )
+    let client = TiebaAuthenticatedClient(transport: transport)
+    let caller = Task {
+      try await client.performOfficialBatchCheckIn(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        authorizedTargets: authorizedTargets
+      )
+    }
+    guard await transport.waitUntilRequestCount(1) else {
+      caller.cancel()
+      return XCTFail("Batch preflight did not start")
+    }
+    caller.cancel()
+    do {
+      _ = try await caller.value
+      XCTFail("Expected preflight cancellation")
+    } catch is CancellationError {
+      // Cancellation is only publishable before msign dispatch.
+    }
+    let snapshot = await transport.snapshot()
+    XCTAssertFalse(snapshot.requests.contains { $0.url?.path == "/c/c/forum/msign" })
+  }
+
+  func testOneSharedPreflightCallerCanCancelWhileOwnerContinuesOnce() async throws {
+    let credential = sessionCredential()
+    let expectedUserID = userID
+    let authorizedTargets = [checkInTarget(id: 1, name: "one")]
+    let transport = OfficialCheckInQueueTransport(
+      responses: successfulBatchResponses(id: 1, name: "one"),
+      blockedRequestIndex: 2
+    )
+    let client = TiebaAuthenticatedClient(transport: transport)
+    let first = Task {
+      try await client.performOfficialBatchCheckIn(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        authorizedTargets: authorizedTargets
+      )
+    }
+    guard await transport.waitUntilRequestCount(3) else {
+      first.cancel()
+      await transport.releaseBlockedRequest()
+      return XCTFail("Batch preflight did not reach the guide request")
+    }
+    let joined = Task {
+      try await client.performOfficialBatchCheckIn(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        authorizedTargets: authorizedTargets
+      )
+    }
+    guard await waitUntil({
+      await client.officialBatchCheckInWaiterCount(expectedUserID: expectedUserID) == 2
+    }) else {
+      joined.cancel()
+      first.cancel()
+      await transport.releaseBlockedRequest()
+      return XCTFail("Equivalent batch caller did not join the preflight")
+    }
+    joined.cancel()
+    do {
+      _ = try await joined.value
+      XCTFail("Expected joined caller cancellation")
+    } catch is CancellationError {
+      // The other shared caller keeps the preflight owner alive.
+    }
+    await transport.releaseBlockedRequest()
+    let result = try await first.value
+    XCTAssertEqual(result.items.map(\.forumID), [1])
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.requests.filter { $0.url?.path == "/c/c/forum/msign" }.count, 1)
+  }
+
+  func testPostDispatchCancellationWaitsForConfirmedResult() async throws {
+    let credential = sessionCredential()
+    let expectedUserID = userID
+    let authorizedTargets = [checkInTarget(id: 1, name: "one")]
+    let transport = OfficialCheckInQueueTransport(
+      responses: successfulBatchResponses(id: 1, name: "one"),
+      blockedRequestIndex: 3
+    )
+    let client = TiebaAuthenticatedClient(transport: transport)
+    let caller = Task {
+      try await client.performOfficialBatchCheckIn(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        authorizedTargets: authorizedTargets
+      )
+    }
+    guard await transport.waitUntilRequestCount(4) else {
+      caller.cancel()
+      await transport.releaseBlockedRequest()
+      return XCTFail("Batch write did not dispatch")
+    }
+    caller.cancel()
+    await transport.releaseBlockedRequest()
+    let result = try await caller.value
+    XCTAssertEqual(result.items.map(\.forumID), [1])
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.requests.filter { $0.url?.path == "/c/c/forum/msign" }.count, 1)
+  }
+
+  func testDispatchedTransportLossReturnsExactUnknownAndAllowsExplicitRetry() async throws {
+    let credential = sessionCredential()
+    let authorizedTargets = [checkInTarget(id: 1, name: "one")]
+    let expectedError = TiebaClientError.officialBatchCheckInOutcomeUnknown(
+      dispatchedTargets: authorizedTargets
+    )
+    let transport = OfficialCheckInQueueTransport(
+      responses: Array(successfulBatchResponses(id: 1, name: "one").prefix(3)) + [
+        .init(error: .transportFailure)
+      ] + successfulBatchResponses(id: 1, name: "one")
+    )
+    let client = TiebaAuthenticatedClient(transport: transport)
+    await assertError(expectedError) {
+      _ = try await client.performOfficialBatchCheckIn(
+        credential: credential,
+        expectedUserID: self.userID,
+        authorizedTargets: authorizedTargets
+      )
+    }
+    let retried = try await client.performOfficialBatchCheckIn(
+      credential: credential,
+      expectedUserID: userID,
+      authorizedTargets: authorizedTargets
+    )
+    XCTAssertEqual(retried.items.map(\.forumID), [1])
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.requests.filter { $0.url?.path == "/c/c/forum/msign" }.count, 2)
+  }
+
+  func testCompletedSuccessDoesNotCacheNextExplicitConfirmation() async throws {
+    let credential = sessionCredential()
+    let authorizedTargets = [checkInTarget(id: 1, name: "one")]
+    let transport = OfficialCheckInQueueTransport(
+      responses: successfulBatchResponses(id: 1, name: "one")
+        + successfulBatchResponses(id: 1, name: "one")
+    )
+    let client = TiebaAuthenticatedClient(transport: transport)
+    for _ in 0..<2 {
+      _ = try await client.performOfficialBatchCheckIn(
+        credential: credential,
+        expectedUserID: userID,
+        authorizedTargets: authorizedTargets
+      )
+    }
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.requests.count, 8)
+    XCTAssertEqual(snapshot.requests.filter { $0.url?.path == "/c/c/forum/msign" }.count, 2)
   }
 
   func testBatchDecoderRejectsMissingExtraDuplicateAndMismatchedResults() throws {
@@ -474,7 +662,8 @@ final class TiebaOfficialCheckInTests: XCTestCase {
     let firstTask = Task {
       try await client.performOfficialBatchCheckIn(
         credential: firstCredential,
-        expectedUserID: expectedUserID
+        expectedUserID: expectedUserID,
+        authorizedTargets: [TiebaOfficialBatchCheckInTarget(forumID: 1, canonicalForumName: "one")]
       )
     }
     guard await transport.waitUntilRequestCount(4) else {
@@ -483,7 +672,8 @@ final class TiebaOfficialCheckInTests: XCTestCase {
     let secondTask = Task {
       try await client.performOfficialBatchCheckIn(
         credential: secondCredential,
-        expectedUserID: expectedUserID
+        expectedUserID: expectedUserID,
+        authorizedTargets: [TiebaOfficialBatchCheckInTarget(forumID: 2, canonicalForumName: "two")]
       )
     }
     try await Task.sleep(for: .milliseconds(50))
@@ -518,7 +708,8 @@ final class TiebaOfficialCheckInTests: XCTestCase {
     let first = Task {
       try await client.performOfficialBatchCheckIn(
         credential: credential,
-        expectedUserID: expectedUserID
+        expectedUserID: expectedUserID,
+        authorizedTargets: [TiebaOfficialBatchCheckInTarget(forumID: 1, canonicalForumName: "one")]
       )
     }
     guard await transport.waitUntilRequestCount(4) else {
@@ -529,7 +720,8 @@ final class TiebaOfficialCheckInTests: XCTestCase {
     let joined = Task {
       try await client.performOfficialBatchCheckIn(
         credential: credential,
-        expectedUserID: expectedUserID
+        expectedUserID: expectedUserID,
+        authorizedTargets: [TiebaOfficialBatchCheckInTarget(forumID: 1, canonicalForumName: "one")]
       )
     }
     try await Task.sleep(for: .milliseconds(50))
@@ -543,6 +735,62 @@ final class TiebaOfficialCheckInTests: XCTestCase {
     XCTAssertEqual(firstResult.items.map(\.forumID), [1])
     let snapshot = await transport.snapshot()
     XCTAssertEqual(snapshot.requests.count, 4)
+    XCTAssertEqual(snapshot.requests.filter { $0.url?.path == "/c/c/forum/msign" }.count, 1)
+  }
+
+  func testJoinOnlyNeverCreatesBatchAndCanJoinAnEquivalentFlight() async throws {
+    let credential = sessionCredential()
+    let target = TiebaOfficialBatchCheckInTarget(forumID: 1, canonicalForumName: "one")
+    let transport = OfficialCheckInQueueTransport(
+      responses: [
+        .init(body: loginJSON()),
+        .init(body: eligibilityJSON(maximumCount: 1)),
+        .init(body: guideJSON(forums: [forumJSON(id: 1, name: "one", level: 5)])),
+        .init(body: batchJSON(items: [batchItemJSON(id: 1, name: "one")])),
+      ],
+      blockedRequestIndex: 3
+    )
+    let client = TiebaAuthenticatedClient(transport: transport)
+    let expectedUserID = userID
+
+    let missing = try await client.joinOfficialBatchCheckInIfInFlight(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      authorizedTargets: [target]
+    )
+    XCTAssertNil(missing)
+    let initialRequestCount = await transport.requestCount()
+    XCTAssertEqual(initialRequestCount, 0)
+
+    let owner = Task {
+      try await client.performOfficialBatchCheckIn(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        authorizedTargets: [target]
+      )
+    }
+    guard await transport.waitUntilRequestCount(4) else {
+      owner.cancel()
+      await transport.releaseBlockedRequest()
+      return XCTFail("Batch write did not start")
+    }
+    let joined = Task {
+      try await client.joinOfficialBatchCheckInIfInFlight(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        authorizedTargets: [target]
+      )
+    }
+    try await Task.sleep(for: .milliseconds(50))
+    let joinedRequestCount = await transport.requestCount()
+    XCTAssertEqual(joinedRequestCount, 4)
+    await transport.releaseBlockedRequest()
+
+    let ownerResult = try await owner.value
+    let joinedOptional = try await joined.value
+    let joinedResult = try XCTUnwrap(joinedOptional)
+    XCTAssertEqual(joinedResult, ownerResult)
+    let snapshot = await transport.snapshot()
     XCTAssertEqual(snapshot.requests.filter { $0.url?.path == "/c/c/forum/msign" }.count, 1)
   }
 
@@ -563,7 +811,8 @@ final class TiebaOfficialCheckInTests: XCTestCase {
     let batchTask = Task {
       try await client.performOfficialBatchCheckIn(
         credential: batchCredential,
-        expectedUserID: expectedUserID
+        expectedUserID: expectedUserID,
+        authorizedTargets: [TiebaOfficialBatchCheckInTarget(forumID: 1, canonicalForumName: "one")]
       )
     }
     guard await transport.waitUntilRequestCount(4) else {
@@ -620,7 +869,8 @@ final class TiebaOfficialCheckInTests: XCTestCase {
     let batchTask = Task {
       try await client.performOfficialBatchCheckIn(
         credential: batchCredential,
-        expectedUserID: expectedUserID
+        expectedUserID: expectedUserID,
+        authorizedTargets: [TiebaOfficialBatchCheckInTarget(forumID: 1, canonicalForumName: "one")]
       )
     }
     try await Task.sleep(for: .milliseconds(50))
@@ -635,6 +885,92 @@ final class TiebaOfficialCheckInTests: XCTestCase {
     XCTAssertEqual(snapshot.requests.map { $0.url?.path }, [
       "/c/f/frs/page", "/c/c/forum/sign", "/c/s/login", "/c/f/forum/getforumlist",
       "/c/f/forum/forumGuide", "/c/c/forum/msign",
+    ])
+  }
+
+  func testWaitingConflictingSingleRechecksBatchGateAfterOldSingleCompletes() async throws {
+    let oldSingleCredential = sessionCredential(marker: "a").bdussCredential
+    let waitingSingleCredential = sessionCredential(marker: "c").bdussCredential
+    let batchCredential = sessionCredential(marker: "b")
+    let expectedUserID = userID
+    let responses: [OfficialCheckInQueueTransport.Response] = [
+      .init(body: try forumAccountStateJSON(forumID: 2, name: "two", isCheckedIn: false)),
+      .init(body: singleCheckInJSON()),
+      .init(body: loginJSON()),
+      .init(body: eligibilityJSON(maximumCount: 1)),
+      .init(body: guideJSON(forums: [forumJSON(id: 1, name: "one", level: 5)])),
+      .init(body: batchJSON(items: [batchItemJSON(id: 1, name: "one")])),
+      .init(body: try forumAccountStateJSON(forumID: 2, name: "two", isCheckedIn: false)),
+      .init(body: singleCheckInJSON()),
+    ]
+    let transport = OfficialCheckInQueueTransport(
+      responses: responses,
+      blockedRequestIndex: 1,
+      additionalBlockedRequestIndices: [5]
+    )
+    let client = TiebaAuthenticatedClient(transport: transport)
+
+    let oldSingle = Task {
+      try await client.checkInToForum(
+        credential: oldSingleCredential,
+        expectedUserID: expectedUserID,
+        forumID: 2,
+        forumName: "two"
+      )
+    }
+    guard await transport.waitUntilRequestCount(2) else {
+      return XCTFail("Old single-forum write did not start")
+    }
+
+    let waitingSingle = Task {
+      try await client.checkInToForum(
+        credential: waitingSingleCredential,
+        expectedUserID: expectedUserID,
+        forumID: 2,
+        forumName: "two"
+      )
+    }
+    guard await waitUntil({
+      let counts = await client.forumCheckInWaiterCounts(
+        expectedUserID: expectedUserID,
+        forumID: 2
+      )
+      return counts.conflict == 1
+    }) else {
+      return XCTFail("Conflicting single-forum call did not enter its waiter")
+    }
+
+    let batch = Task {
+      try await client.performOfficialBatchCheckIn(
+        credential: batchCredential,
+        expectedUserID: expectedUserID,
+        authorizedTargets: [TiebaOfficialBatchCheckInTarget(forumID: 1, canonicalForumName: "one")]
+      )
+    }
+    guard await waitUntil({
+      await client.officialBatchCheckInFlightExists(expectedUserID: expectedUserID)
+    }) else {
+      return XCTFail("Batch flight was not registered while the old single write was blocked")
+    }
+    let blockedRequestCount = await transport.requestCount()
+    XCTAssertEqual(blockedRequestCount, 2)
+
+    await transport.releaseBlockedRequest(at: 1)
+    guard await transport.waitUntilRequestCount(6) else {
+      return XCTFail("Batch write did not start after the old single write")
+    }
+    try await Task.sleep(for: .milliseconds(50))
+    let batchRequestCount = await transport.requestCount()
+    XCTAssertEqual(batchRequestCount, 6)
+
+    await transport.releaseBlockedRequest(at: 5)
+    _ = try await oldSingle.value
+    _ = try await batch.value
+    _ = try await waitingSingle.value
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.requests.map { $0.url?.path }, [
+      "/c/f/frs/page", "/c/c/forum/sign", "/c/s/login", "/c/f/forum/getforumlist",
+      "/c/f/forum/forumGuide", "/c/c/forum/msign", "/c/f/frs/page", "/c/c/forum/sign",
     ])
   }
 
@@ -681,6 +1017,22 @@ final class TiebaOfficialCheckInTests: XCTestCase {
       checkInStatus: .pending,
       isForbidden: false
     )
+  }
+
+  private func checkInTarget(id: Int64, name: String) -> TiebaOfficialBatchCheckInTarget {
+    TiebaOfficialBatchCheckInTarget(forumID: id, canonicalForumName: name)
+  }
+
+  private func successfulBatchResponses(
+    id: Int64,
+    name: String
+  ) -> [OfficialCheckInQueueTransport.Response] {
+    [
+      .init(body: loginJSON()),
+      .init(body: eligibilityJSON(maximumCount: 1)),
+      .init(body: guideJSON(forums: [forumJSON(id: id, name: name, level: 5)])),
+      .init(body: batchJSON(items: [batchItemJSON(id: id, name: name)])),
+    ]
   }
 
   private func loginJSON(userID: Int64? = nil, tbs: String? = nil) -> Data {
@@ -867,16 +1219,45 @@ final class TiebaOfficialCheckInTests: XCTestCase {
       XCTFail("Unexpected error: \(error)")
     }
   }
+
+  private func waitUntil(
+    _ condition: () async -> Bool,
+    timeout: Duration = .seconds(2)
+  ) async -> Bool {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: timeout)
+    while clock.now < deadline {
+      if await condition() { return true }
+      await Task.yield()
+    }
+    return await condition()
+  }
 }
 
 private actor OfficialCheckInQueueTransport: TiebaTransport {
   struct Response: Sendable {
     let body: Data
     let statusCode: Int
+    let error: TiebaClientError?
+    let blocksUntilCancelled: Bool
 
-    init(body: Data, statusCode: Int = 200) {
+    init(
+      body: Data,
+      statusCode: Int = 200,
+      error: TiebaClientError? = nil,
+      blocksUntilCancelled: Bool = false
+    ) {
       self.body = body
       self.statusCode = statusCode
+      self.error = error
+      self.blocksUntilCancelled = blocksUntilCancelled
+    }
+
+    init(error: TiebaClientError) {
+      body = Data()
+      statusCode = 200
+      self.error = error
+      blocksUntilCancelled = false
     }
   }
 
@@ -888,19 +1269,26 @@ private actor OfficialCheckInQueueTransport: TiebaTransport {
   private let responses: [Response]
   private let enforcesMaximumBodyBytes: Bool
   private let blockedRequestIndex: Int?
+  private let blockedRequestIndices: Set<Int>
   private var requests = [URLRequest]()
   private var maximumBodyBytes = [Int?]()
-  private var isBlockedRequestReleased = false
-  private var blockedContinuation: CheckedContinuation<Void, Never>?
+  private var releasedBlockedRequestIndices = Set<Int>()
+  private var blockedContinuations = [Int: CheckedContinuation<Void, Never>]()
 
   init(
     responses: [Response],
     enforcesMaximumBodyBytes: Bool = false,
-    blockedRequestIndex: Int? = nil
+    blockedRequestIndex: Int? = nil,
+    additionalBlockedRequestIndices: Set<Int> = []
   ) {
     self.responses = responses
     self.enforcesMaximumBodyBytes = enforcesMaximumBodyBytes
     self.blockedRequestIndex = blockedRequestIndex
+    if let blockedRequestIndex {
+      blockedRequestIndices = additionalBlockedRequestIndices.union([blockedRequestIndex])
+    } else {
+      blockedRequestIndices = additionalBlockedRequestIndices
+    }
   }
 
   func send(_ request: URLRequest) async throws -> TiebaHTTPResponse {
@@ -918,15 +1306,19 @@ private actor OfficialCheckInQueueTransport: TiebaTransport {
     requests.append(request)
     self.maximumBodyBytes.append(maximumBodyBytes)
     let response = responses[index]
-    if index == blockedRequestIndex, !isBlockedRequestReleased {
+    if response.blocksUntilCancelled {
+      try await Task.sleep(for: .seconds(60))
+    }
+    if blockedRequestIndices.contains(index), !releasedBlockedRequestIndices.contains(index) {
       await withCheckedContinuation { continuation in
-        if isBlockedRequestReleased {
+        if releasedBlockedRequestIndices.contains(index) {
           continuation.resume()
         } else {
-          blockedContinuation = continuation
+          blockedContinuations[index] = continuation
         }
       }
     }
+    if let error = response.error { throw error }
     if enforcesMaximumBodyBytes,
       let maximumBodyBytes,
       response.body.count > maximumBodyBytes
@@ -951,10 +1343,10 @@ private actor OfficialCheckInQueueTransport: TiebaTransport {
     return requests.count >= count
   }
 
-  func releaseBlockedRequest() {
-    isBlockedRequestReleased = true
-    let continuation = blockedContinuation
-    blockedContinuation = nil
+  func releaseBlockedRequest(at requestedIndex: Int? = nil) {
+    guard let index = requestedIndex ?? blockedRequestIndex else { return }
+    releasedBlockedRequestIndices.insert(index)
+    let continuation = blockedContinuations.removeValue(forKey: index)
     continuation?.resume()
   }
 }

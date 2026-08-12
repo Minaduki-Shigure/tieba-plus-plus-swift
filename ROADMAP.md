@@ -13,7 +13,8 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source is
-versioned separately and currently serves `v0.59.0-alpha.1` (build 62).
+versioned separately and currently serves `v0.59.0-alpha.1` (build 62), which
+does not yet include the foreground batch-check-in work on `main`.
 
 | Capability area | Weight | Credited points | Current basis |
 | --- | ---: | ---: | --- |
@@ -22,9 +23,9 @@ versioned separately and currently serves `v0.59.0-alpha.1` (build 62).
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
 | Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, media preferences, reply-entry visibility, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, switching, a self-profile summary, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
-| Server writes, creation, and social actions | 15 | 9–10 | Forum/user follow and unfollow, server-side user interaction restrictions, check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, three plain-text reply targets, and plain-text new-topic creation have guarded implementations; real creation, poll and interaction-restriction success, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
+| Server writes, creation, and social actions | 15 | 10–11 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, three plain-text reply targets, and plain-text new-topic creation have guarded implementations; real batch-check-in behavior, creation, poll and interaction-restriction success, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
-| **Total** | **100** | **74–77** | Current full-product estimate |
+| **Total** | **100** | **75–78** | Current full-product estimate; roughly 22–25% remains |
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
 points, or roughly 91–95%. Concern and the foreground unread summary raise the
@@ -190,7 +191,13 @@ the source metadata is updated to that tested IPA.
 - Authoritative per-forum account membership state with explicit follow and
   unfollow confirmation
 - Authoritative per-forum check-in state and explicitly confirmed single-forum
-  check-in, with already-signed idempotence and no automatic or batch mode
+  check-in, with already-signed idempotence
+- Foreground-only one-click check-in from the account page, with an explicit
+  confirmation snapshot, a fresh official eligibility refresh, and a batch
+  dispatch limited to their intersection. Official rejections and dropped
+  targets never fall back to individual writes; an uncertain batch outcome is
+  reconciled only through authoritative per-forum reads and is never retried.
+  Background and automatic check-in are not implemented
 - Account-bound approval and cancellation on the canonical topic, ordinary
   floors, and both parent and child items in a full nested-reply page, with
   explicit confirmation and lease-guarded read-only recovery
@@ -229,13 +236,17 @@ the source metadata is updated to that tested IPA.
    favorites list, including valid, random, cross-account, and expired STOKEN
    cases and whether reading the list has any server-side side effect
 5. Real-device validation of canonical-topic, ordinary-floor, and full
-   nested-reply approval/cancellation, single-forum check-in, forum follow, and
-   user follow/unfollow in both directions, plus all three server-side user
-   interaction restrictions. Cover mutual-follow value `2`, the permission
-   field-deletion matrix and `0`/`1` meaning, idempotence, rate limits, expired
-   credentials, server errors, uncertain failures, mandatory read-only
-   reconciliation, cross-operation exclusion, account switching, and same-UID
-   credential rotation
+   nested-reply approval/cancellation, single-forum and foreground batch
+   check-in, forum follow, and user follow/unfollow in both directions, plus all
+   three server-side user interaction restrictions. For batch check-in, cover
+   partially eligible confirmation snapshots, newly eligible and removed
+   targets, official per-forum rejection, malformed or lost acknowledgements,
+   read-only reconciliation without retry or single-write fallback,
+   cancellation, and a second explicit run. Also cover mutual-follow value `2`,
+   the permission field-deletion matrix and `0`/`1` meaning, idempotence, rate
+   limits, expired credentials, server errors, uncertain failures, mandatory
+   read-only reconciliation, cross-operation exclusion, account switching, and
+   same-UID credential rotation
 6. Disposable-account validation of authenticated poll reads and command
    `309006` writes, including single- and multiple-choice polls, real option-ID
    binding, open/closed and already-voted states, malformed or stale options,
@@ -627,9 +638,10 @@ Only an explicit server end publishes the complete forum-ID set. Empty or
 duplicate-only continuations, invalid data, service failures, more than 100
 pages, or more than 5,000 retained forums fail closed rather than publishing a
 partial allowlist. The shared rows, page state, and lease are never persisted or
-reused across an app restart or account lease. These surfaces are read only and
-initiate no automatic account operation; they do not currently provide pinning,
-unfollow, or batch check-in controls.
+reused across an app restart or account lease. These list surfaces are read only
+and initiate no automatic account operation; they provide no inline pinning,
+unfollow, or check-in controls. The account page's separate foreground one-click
+flow consumes its own authoritative catalog and explicit confirmation snapshot.
 Opening a forum continues to use the separate, explicitly confirmed
 per-forum membership and check-in workflow. Client-side lease checks prevent a
 late page from being published under another local session, but successful
@@ -967,6 +979,20 @@ additionally requires authoritative per-forum sign state and rejects an
 unfollowed forum. All writes require explicit user confirmation and perform no
 write when the server already reports the requested state. Anonymous browsing
 must continue to work without creating, reading, or storing an account session.
+
+Foreground batch check-in uses the official forum catalog and batch endpoint,
+but user confirmation remains the write-authorization boundary. The client
+normalizes and binds the ordered official-batch subset shown for confirmation,
+then refreshes the official catalog immediately before dispatch and sends only
+its intersection with the fresh eligible set. Newly eligible forums are not
+silently added; official rejections and confirmed targets that drop out do not
+become single-forum writes. If the batch may have reached the server but its
+response is missing, malformed, oversized, or incomplete, the exact dispatched
+targets enter an outcome-unknown path. The App performs only authoritative
+per-forum reads, reports unresolved targets as unconfirmed, and does not retry
+the batch or degrade to individual writes. The flow remains foreground-only,
+explicitly initiated, memory-only, and subject to real-device validation; it
+does not implement TiebaLite's background or automatic sign-in.
 
 Plain-text replies use HTTPS protobuf command `309731` with client version
 `12.35.1.0`. Topic replies, ordinary-floor replies, and replies to a specific

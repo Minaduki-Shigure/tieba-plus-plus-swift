@@ -136,6 +136,20 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
     forumID: Int64,
     forumName: String
   ) async throws -> TiebaForumAccountState
+  func getOfficialCheckInCatalog(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64
+  ) async throws -> TiebaOfficialCheckInCatalog
+  func performOfficialBatchCheckIn(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    authorizedTargets: [TiebaOfficialBatchCheckInTarget]
+  ) async throws -> TiebaOfficialBatchCheckInResult
+  func joinOfficialBatchCheckInIfInFlight(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    authorizedTargets: [TiebaOfficialBatchCheckInTarget]
+  ) async throws -> TiebaOfficialBatchCheckInResult?
   func getThreadAgreement(
     credential: TiebaBDUSSCredential,
     expectedUserID: Int64,
@@ -195,6 +209,29 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
 }
 
 extension TiebaAuthenticatedAccountClient {
+  func getOfficialCheckInCatalog(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64
+  ) async throws -> TiebaOfficialCheckInCatalog {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
+  func performOfficialBatchCheckIn(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    authorizedTargets: [TiebaOfficialBatchCheckInTarget]
+  ) async throws -> TiebaOfficialBatchCheckInResult {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
+  func joinOfficialBatchCheckInIfInFlight(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    authorizedTargets: [TiebaOfficialBatchCheckInTarget]
+  ) async throws -> TiebaOfficialBatchCheckInResult? {
+    nil
+  }
+
   func getSelfProfile(
     credential: TiebaSessionCredential,
     expectedUserID: Int64
@@ -1271,6 +1308,58 @@ struct TiebaCoreAccountService: AccountService {
     return Self.accountStateData(response)
   }
 
+  func checkInCatalog(
+    session: StoredAccountSession
+  ) async throws -> ForumCheckInCatalogData {
+    guard session.id > 0, let credentials = session.credentials else {
+      throw BrowseError.unavailable("此账户需要重新登录，才能安全读取一键签到列表。")
+    }
+    let response: TiebaOfficialCheckInCatalog
+    do {
+      response = try await client.getOfficialCheckInCatalog(
+        credential: Self.coreSessionCredential(credentials),
+        expectedUserID: session.id
+      )
+      try Task.checkCancellation()
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.accountError(error)
+    }
+    return try Self.checkInCatalogData(response, expectedUserID: session.id)
+  }
+
+  func batchCheckIn(
+    session: StoredAccountSession,
+    authorizedTargets: [ForumBatchCheckInTarget]
+  ) async throws -> ForumBatchCheckInData {
+    guard session.id > 0, session.credentials != nil else {
+      throw BrowseError.unavailable("此账户需要重新登录，才能安全使用一键签到。")
+    }
+    let coreTargets = try Self.coreBatchCheckInTargets(authorizedTargets)
+    let response: TiebaOfficialBatchCheckInResult
+    do {
+      response = try await forumWriteCoordinator.performOfficialBatch(
+        session: session,
+        authorizedTargets: coreTargets
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch ForumAccountWriteCoordinatorError.conflictingOperationSettled {
+      throw BrowseError.unavailable("先前的贴吧账户操作已结束，请重新读取签到状态。")
+    } catch TiebaClientError.officialBatchCheckInAuthorizationChanged {
+      throw ForumBatchCheckInError.authorizationChanged
+    } catch TiebaClientError.officialBatchCheckInOutcomeUnknown(let dispatchedTargets) {
+      let mappedTargets = (try? Self.forumBatchCheckInTargets(dispatchedTargets)) ?? []
+      throw ForumBatchCheckInError.outcomeUnknown(
+        dispatchedTargets: mappedTargets
+      )
+    } catch {
+      throw Self.accountError(error)
+    }
+    return try Self.batchCheckInData(response, expectedUserID: session.id)
+  }
+
   func threadAgreement(
     session: StoredAccountSession,
     forumID: Int64,
@@ -1444,6 +1533,131 @@ struct TiebaCoreAccountService: AccountService {
       forumName: membership.forumName,
       isFollowed: membership.isFollowed
     )
+  }
+
+  private static func checkInCatalogData(
+    _ catalog: TiebaOfficialCheckInCatalog,
+    expectedUserID: Int64
+  ) throws -> ForumCheckInCatalogData {
+    let maximumCatalogCount = 10_000
+    let maximumOfficialBatchCount = 100
+    guard
+      expectedUserID > 0,
+      catalog.userID == expectedUserID,
+      catalog.forums.count <= maximumCatalogCount,
+      catalog.minimumBatchLevel >= 0,
+      catalog.maximumBatchCount >= 0,
+      catalog.maximumBatchCount <= maximumOfficialBatchCount
+    else {
+      throw BrowseError.unavailable("贴吧返回了不匹配的一键签到列表，请重新加载后再试。")
+    }
+    var seen = Set<Int64>()
+    let targets = try catalog.forums.map { forum -> ForumCheckInCatalogTarget in
+      let name = forum.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        .precomposedStringWithCanonicalMapping
+      guard
+        forum.id > 0,
+        !name.isEmpty,
+        name.utf8.count <= 1_024,
+        !name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+        forum.level >= 0,
+        seen.insert(forum.id).inserted
+      else {
+        throw BrowseError.unavailable("贴吧返回了无效的一键签到目标，请重新加载后再试。")
+      }
+      let status: ForumCheckInCatalogStatus = switch forum.checkInStatus {
+      case .unknown: .unknown
+      case .pending: .pending
+      case .checkedIn: .checkedIn
+      @unknown default:
+        throw BrowseError.unavailable("贴吧返回了未知的一键签到状态，请重新加载后再试。")
+      }
+      return ForumCheckInCatalogTarget(
+        forumID: forum.id,
+        forumName: name,
+        level: forum.level,
+        status: status,
+        isForbidden: forum.isForbidden
+      )
+    }
+    let policy = catalog.isBatchCheckInAvailable && catalog.maximumBatchCount > 0
+      ? ForumOfficialBatchCheckInPolicy(
+        minimumLevel: catalog.minimumBatchLevel,
+        maximumForumCount: catalog.maximumBatchCount
+      )
+      : nil
+    return ForumCheckInCatalogData(
+      userID: catalog.userID,
+      targets: targets,
+      officialBatchPolicy: policy
+    )
+  }
+
+  private static func batchCheckInData(
+    _ result: TiebaOfficialBatchCheckInResult,
+    expectedUserID: Int64
+  ) throws -> ForumBatchCheckInData {
+    guard result.userID == expectedUserID, expectedUserID > 0 else {
+      throw BrowseError.unavailable("贴吧返回了不匹配的一键签到结果，请重新加载后再试。")
+    }
+    var seen = Set<Int64>()
+    let results = try result.items.map { item -> ForumBatchCheckInResult in
+      let name = item.forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+        .precomposedStringWithCanonicalMapping
+      guard item.forumID > 0, !name.isEmpty, seen.insert(item.forumID).inserted else {
+        throw BrowseError.unavailable("贴吧返回了无效的一键签到结果，请重新加载后再试。")
+      }
+      let outcome: ForumBatchCheckInOutcome = switch item.disposition {
+      case .confirmed:
+        .confirmedSigned
+      case .rejected(_, let message):
+        .rejected(message: message.trimmingCharacters(in: .whitespacesAndNewlines))
+      @unknown default:
+        throw BrowseError.unavailable("贴吧返回了未知的一键签到结果，请重新加载后再试。")
+      }
+      return ForumBatchCheckInResult(
+        forumID: item.forumID,
+        forumName: name,
+        outcome: outcome
+      )
+    }
+    return ForumBatchCheckInData(userID: result.userID, results: results)
+  }
+
+  private static func coreBatchCheckInTargets(
+    _ targets: [ForumBatchCheckInTarget]
+  ) throws -> [TiebaOfficialBatchCheckInTarget] {
+    guard targets.count <= 10_000 else {
+      throw BrowseError.unavailable("一键签到授权目标过多，请重新读取状态后再试。")
+    }
+    var seen = Set<Int64>()
+    return try targets.map { target in
+      let name = target.forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+        .precomposedStringWithCanonicalMapping
+      guard
+        target.forumID > 0,
+        seen.insert(target.forumID).inserted,
+        !name.isEmpty,
+        name.utf8.count <= 1_024,
+        !name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+      else {
+        throw BrowseError.unavailable("一键签到授权目标无效，请重新读取状态后再试。")
+      }
+      return TiebaOfficialBatchCheckInTarget(
+        forumID: target.forumID,
+        canonicalForumName: name
+      )
+    }
+  }
+
+  private static func forumBatchCheckInTargets(
+    _ targets: [TiebaOfficialBatchCheckInTarget]
+  ) throws -> [ForumBatchCheckInTarget] {
+    let mapped = targets.map {
+      ForumBatchCheckInTarget(forumID: $0.forumID, forumName: $0.canonicalForumName)
+    }
+    _ = try coreBatchCheckInTargets(mapped)
+    return mapped
   }
 
   private static func userRelationshipData(
@@ -2451,6 +2665,42 @@ private struct ForumAccountWriteIdentity:
   }
 }
 
+private struct ForumOfficialBatchWriteIdentity:
+  Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let sessionRevision: UUID
+  private let bduss: String
+  private let stoken: String
+  private let cookieName: AccountBDUSSCookieName
+  let authorizedTargets: [TiebaOfficialBatchCheckInTarget]
+
+  init(
+    session: StoredAccountSession,
+    credentials: AccountCredentials,
+    authorizedTargets: [TiebaOfficialBatchCheckInTarget]
+  ) {
+    sessionRevision = session.sessionRevision
+    bduss = credentials.bduss
+    stoken = credentials.stoken
+    cookieName = credentials.bdussCookieName
+    self.authorizedTargets = authorizedTargets
+  }
+
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.sessionRevision == rhs.sessionRevision
+      && lhs.bduss == rhs.bduss
+      && lhs.stoken == rhs.stoken
+      && lhs.cookieName == rhs.cookieName
+      && lhs.authorizedTargets == rhs.authorizedTargets
+  }
+
+  var description: String { "ForumOfficialBatchWriteIdentity(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(self, children: ["sessionRevision": sessionRevision], displayStyle: .struct)
+  }
+}
+
 private actor ForumAccountWriteCoordinator {
   private struct Key: Hashable, Sendable {
     let userID: Int64
@@ -2464,8 +2714,23 @@ private actor ForumAccountWriteCoordinator {
     let task: Task<ForumAccountWriteResult, Error>
   }
 
+  private struct OfficialBatchEntry: Sendable {
+    let id: UUID
+    let identity: ForumOfficialBatchWriteIdentity
+    var activeCallerCount: Int
+  }
+
+  private enum OfficialBatchWaitOutcome: Sendable {
+    case completed
+    case cancelled
+  }
+
   private let client: any TiebaAuthenticatedAccountClient
   private var inFlight: [Key: Entry] = [:]
+  private var officialBatchInFlight: [Int64: OfficialBatchEntry] = [:]
+  private var officialBatchWaiters = [
+    Int64: [UUID: CheckedContinuation<OfficialBatchWaitOutcome, Never>]
+  ]()
   private var conflictWaiters = 0
 
   init(client: any TiebaAuthenticatedAccountClient) {
@@ -2487,6 +2752,15 @@ private actor ForumAccountWriteCoordinator {
       session: session,
       forumName: normalizedForumName
     )
+    if let batchEntry = officialBatchInFlight[expectedUserID] {
+      conflictWaiters += 1
+      defer { conflictWaiters -= 1 }
+      try await waitForOfficialBatchEntry(
+        userID: expectedUserID,
+        entryID: batchEntry.id
+      )
+      throw ForumAccountWriteCoordinatorError.conflictingOperationSettled
+    }
     if let entry = inFlight[key] {
       if entry.identity == identity, entry.operation == operation {
         return try await entry.task.value
@@ -2533,6 +2807,83 @@ private actor ForumAccountWriteCoordinator {
     return try await task.value
   }
 
+  func performOfficialBatch(
+    session: StoredAccountSession,
+    authorizedTargets: [TiebaOfficialBatchCheckInTarget]
+  ) async throws -> TiebaOfficialBatchCheckInResult {
+    try Task.checkCancellation()
+    guard session.id > 0, let credentials = session.credentials else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    let expectedUserID = session.id
+    let identity = ForumOfficialBatchWriteIdentity(
+      session: session,
+      credentials: credentials,
+      authorizedTargets: authorizedTargets
+    )
+    let credential = TiebaSessionCredential(
+      bduss: credentials.bduss,
+      stoken: credentials.stoken,
+      bdussCookieName: switch credentials.bdussCookieName {
+      case .bduss: .bduss
+      case .bdussBFESS: .bdussBFESS
+      }
+    )
+    if var entry = officialBatchInFlight[expectedUserID] {
+      if entry.identity == identity {
+        entry.activeCallerCount += 1
+        officialBatchInFlight[expectedUserID] = entry
+        var holdsEntry = true
+        defer {
+          if holdsEntry {
+            finishOfficialBatchCaller(for: expectedUserID, id: entry.id)
+          }
+        }
+        if let result = try await client.joinOfficialBatchCheckInIfInFlight(
+          credential: credential,
+          expectedUserID: expectedUserID,
+          authorizedTargets: authorizedTargets
+        ) {
+          return result
+        }
+
+        finishOfficialBatchCaller(for: expectedUserID, id: entry.id)
+        holdsEntry = false
+        try await waitForOfficialBatchEntry(userID: expectedUserID, entryID: entry.id)
+        throw ForumAccountWriteCoordinatorError.conflictingOperationSettled
+      }
+      conflictWaiters += 1
+      defer { conflictWaiters -= 1 }
+      try await waitForOfficialBatchEntry(userID: expectedUserID, entryID: entry.id)
+      throw ForumAccountWriteCoordinatorError.conflictingOperationSettled
+    }
+    var settledConflictingWrite = false
+    while let entry = inFlight.first(where: { $0.key.userID == expectedUserID }) {
+      settledConflictingWrite = true
+      conflictWaiters += 1
+      _ = await entry.value.task.result
+      conflictWaiters -= 1
+      clearEntry(for: entry.key, id: entry.value.id)
+      try Task.checkCancellation()
+    }
+    if settledConflictingWrite {
+      throw ForumAccountWriteCoordinatorError.conflictingOperationSettled
+    }
+
+    let entryID = UUID()
+    officialBatchInFlight[expectedUserID] = OfficialBatchEntry(
+      id: entryID,
+      identity: identity,
+      activeCallerCount: 1
+    )
+    defer { finishOfficialBatchCaller(for: expectedUserID, id: entryID) }
+    return try await client.performOfficialBatchCheckIn(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      authorizedTargets: authorizedTargets
+    )
+  }
+
   func conflictWaiterCount() -> Int {
     conflictWaiters
   }
@@ -2540,5 +2891,51 @@ private actor ForumAccountWriteCoordinator {
   private func clearEntry(for key: Key, id: UUID) {
     guard inFlight[key]?.id == id else { return }
     inFlight.removeValue(forKey: key)
+  }
+
+  private func waitForOfficialBatchEntry(userID: Int64, entryID: UUID) async throws {
+    try Task.checkCancellation()
+    guard officialBatchInFlight[userID]?.id == entryID else { return }
+    let waiterID = UUID()
+    let outcome: OfficialBatchWaitOutcome = await withTaskCancellationHandler {
+      await withCheckedContinuation { continuation in
+        guard !Task.isCancelled, officialBatchInFlight[userID]?.id == entryID else {
+          continuation.resume(returning: Task.isCancelled ? .cancelled : .completed)
+          return
+        }
+        officialBatchWaiters[userID, default: [:]][waiterID] = continuation
+      }
+    } onCancel: {
+      Task {
+        await self.cancelOfficialBatchWaiter(userID: userID, waiterID: waiterID)
+      }
+    }
+    guard outcome == .completed else { throw CancellationError() }
+    try Task.checkCancellation()
+  }
+
+  private func cancelOfficialBatchWaiter(userID: Int64, waiterID: UUID) {
+    guard var waiters = officialBatchWaiters[userID] else { return }
+    let continuation = waiters.removeValue(forKey: waiterID)
+    if waiters.isEmpty {
+      officialBatchWaiters.removeValue(forKey: userID)
+    } else {
+      officialBatchWaiters[userID] = waiters
+    }
+    continuation?.resume(returning: .cancelled)
+  }
+
+  private func finishOfficialBatchCaller(for userID: Int64, id: UUID) {
+    guard var entry = officialBatchInFlight[userID], entry.id == id else { return }
+    entry.activeCallerCount -= 1
+    guard entry.activeCallerCount == 0 else {
+      officialBatchInFlight[userID] = entry
+      return
+    }
+    officialBatchInFlight.removeValue(forKey: userID)
+    let waiters = officialBatchWaiters.removeValue(forKey: userID) ?? [:]
+    for continuation in waiters.values {
+      continuation.resume(returning: .completed)
+    }
   }
 }

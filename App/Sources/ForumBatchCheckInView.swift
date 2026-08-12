@@ -67,6 +67,8 @@ struct ForumBatchCheckInView: View {
       progressList(progress: progress, isStopping: true)
     case .completed(let summary):
       resultList(summary: summary, phase: .completed)
+    case .needsReview(let summary):
+      resultList(summary: summary, phase: .needsReview)
     case .failed(let summary):
       if let summary {
         resultList(summary: summary, phase: .failed)
@@ -105,12 +107,20 @@ struct ForumBatchCheckInView: View {
             .accessibilityLabel("开始为 \(summary.pending) 个贴吧签到")
             .accessibilityHint("确认后会在当前页面发起官方一键签到")
           }
+        case .needsReview:
+          Label(
+            "部分请求已派发，但贴吧未能权威确认结果。应用没有自动重试，请先重新读取状态。",
+            systemImage: "exclamationmark.shield"
+          )
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+          .accessibilityLabel("部分签到结果待核对")
+          .accessibilityHint("应用没有自动重试；请重新读取状态后再核对")
+
+          reloadButton
         case .completed, .failed:
-          Button(action: reload) {
-            Label("重新读取签到状态", systemImage: "arrow.clockwise")
-              .frame(maxWidth: .infinity, minHeight: 44)
-          }
-          .buttonStyle(.bordered)
+          reloadButton
         }
       }
 
@@ -121,6 +131,15 @@ struct ForumBatchCheckInView: View {
       guard phase != .ready || viewModel.pendingConfirmation == nil else { return }
       await viewModel.reload()
     }
+  }
+
+  private var reloadButton: some View {
+    Button(action: reload) {
+      Label("重新读取签到状态", systemImage: "arrow.clockwise")
+        .frame(maxWidth: .infinity, minHeight: 44)
+    }
+    .buttonStyle(.bordered)
+    .accessibilityHint("只重新读取状态，不会发送签到请求")
   }
 
   private func progressList(
@@ -156,6 +175,7 @@ struct ForumBatchCheckInView: View {
           outcomeCounts(
             succeeded: progress.succeeded,
             failed: progress.failed,
+            unconfirmed: progress.unconfirmed,
             skipped: progress.skipped,
             stopped: progress.stopped
           )
@@ -205,20 +225,20 @@ struct ForumBatchCheckInView: View {
           value: phase == .ready ? summary.pending : summary.succeeded
         )
         summaryMetric(
-          title: phase == .ready ? "可批签" : "失败",
-          value: phase == .ready ? summary.eligible : summary.failed
+          title: summaryThirdMetricTitle(summary: summary, phase: phase),
+          value: summaryThirdMetricValue(summary: summary, phase: phase)
         )
       }
       .accessibilityElement(children: .ignore)
       .accessibilityLabel(summaryAccessibilityValue(summary, phase: phase))
 
-      if summary.skipped > 0 || summary.stopped > 0 {
+      if shouldShowSupplementalCounts(summary: summary, phase: phase) {
         ViewThatFits(in: .horizontal) {
           HStack(spacing: 16) {
-            supplementalCountLabels(summary: summary)
+            supplementalCountLabels(summary: summary, phase: phase)
           }
           VStack(alignment: .leading, spacing: 6) {
-            supplementalCountLabels(summary: summary)
+            supplementalCountLabels(summary: summary, phase: phase)
           }
         }
         .font(.caption)
@@ -226,6 +246,15 @@ struct ForumBatchCheckInView: View {
       }
     }
     .padding(.vertical, 4)
+  }
+
+  private func shouldShowSupplementalCounts(
+    summary: ForumBatchCheckInSummary,
+    phase: ForumBatchCheckInPresentationPhase
+  ) -> Bool {
+    (phase != .ready && summary.unconfirmed > 0 && summary.failed > 0)
+      || summary.skipped > 0
+      || summary.stopped > 0
   }
 
   private func summaryMetric(title: String, value: Int) -> some View {
@@ -243,6 +272,7 @@ struct ForumBatchCheckInView: View {
   private func outcomeCounts(
     succeeded: Int,
     failed: Int,
+    unconfirmed: Int,
     skipped: Int,
     stopped: Int
   ) -> some View {
@@ -251,6 +281,7 @@ struct ForumBatchCheckInView: View {
         outcomeCountLabels(
           succeeded: succeeded,
           failed: failed,
+          unconfirmed: unconfirmed,
           skipped: skipped,
           stopped: stopped
         )
@@ -259,6 +290,7 @@ struct ForumBatchCheckInView: View {
         outcomeCountLabels(
           succeeded: succeeded,
           failed: failed,
+          unconfirmed: unconfirmed,
           skipped: skipped,
           stopped: stopped
         )
@@ -272,6 +304,7 @@ struct ForumBatchCheckInView: View {
   private func outcomeCountLabels(
     succeeded: Int,
     failed: Int,
+    unconfirmed: Int,
     skipped: Int,
     stopped: Int
   ) -> some View {
@@ -279,6 +312,10 @@ struct ForumBatchCheckInView: View {
       .foregroundStyle(.green)
     Label("失败 \(max(failed, 0))", systemImage: "exclamationmark.triangle.fill")
       .foregroundStyle(failed > 0 ? Color.red : Color.secondary)
+    if unconfirmed > 0 {
+      Label("待核对 \(unconfirmed)", systemImage: "questionmark.circle.fill")
+        .foregroundStyle(.orange)
+    }
     if skipped > 0 {
       Label("已跳过 \(skipped)", systemImage: "minus.circle")
         .foregroundStyle(.secondary)
@@ -290,7 +327,14 @@ struct ForumBatchCheckInView: View {
   }
 
   @ViewBuilder
-  private func supplementalCountLabels(summary: ForumBatchCheckInSummary) -> some View {
+  private func supplementalCountLabels(
+    summary: ForumBatchCheckInSummary,
+    phase: ForumBatchCheckInPresentationPhase
+  ) -> some View {
+    if phase != .ready, summary.unconfirmed > 0, summary.failed > 0 {
+      Label("失败 \(summary.failed)", systemImage: "exclamationmark.triangle.fill")
+        .foregroundStyle(.red)
+    }
     if summary.skipped > 0 {
       Label("已跳过 \(summary.skipped)", systemImage: "minus.circle")
         .foregroundStyle(.secondary)
@@ -361,9 +405,25 @@ struct ForumBatchCheckInView: View {
     switch phase {
     case .ready:
       return "共关注 \(summary.total) 个贴吧，待签到 \(summary.pending) 个，可官方批签 \(summary.eligible) 个，已跳过 \(summary.skipped) 个"
-    case .completed, .failed:
-      return "共关注 \(summary.total) 个贴吧，本次已处理 \(summary.processed) 个，成功 \(summary.succeeded) 个，失败 \(summary.failed) 个，已跳过 \(summary.skipped) 个，未执行 \(summary.stopped) 个"
+    case .completed, .needsReview, .failed:
+      return "共关注 \(summary.total) 个贴吧，本次已处理 \(summary.processed) 个，成功 \(summary.succeeded) 个，失败 \(summary.failed) 个，待核对 \(summary.unconfirmed) 个，已跳过 \(summary.skipped) 个，未执行 \(summary.stopped) 个"
     }
+  }
+
+  private func summaryThirdMetricTitle(
+    summary: ForumBatchCheckInSummary,
+    phase: ForumBatchCheckInPresentationPhase
+  ) -> String {
+    if phase == .ready { return "可批签" }
+    return summary.unconfirmed > 0 ? "待核对" : "失败"
+  }
+
+  private func summaryThirdMetricValue(
+    summary: ForumBatchCheckInSummary,
+    phase: ForumBatchCheckInPresentationPhase
+  ) -> Int {
+    if phase == .ready { return summary.eligible }
+    return summary.unconfirmed > 0 ? summary.unconfirmed : summary.failed
   }
 
   private func requestStartConfirmation() {
@@ -392,6 +452,7 @@ struct ForumBatchCheckInView: View {
 private enum ForumBatchCheckInPresentationPhase: Equatable {
   case ready
   case completed
+  case needsReview
   case failed
 
   func title(for summary: ForumBatchCheckInSummary) -> String {
@@ -400,11 +461,15 @@ private enum ForumBatchCheckInPresentationPhase: Equatable {
       if summary.pending > 0 { return "有 \(summary.pending) 个贴吧待签到" }
       return summary.skipped > 0 ? "今日没有可执行的签到" : "今日没有待签到贴吧"
     case .completed:
-      if summary.failed == 0, summary.stopped == 0 { return "一键签到已完成" }
+      if summary.failed == 0, summary.unconfirmed == 0, summary.stopped == 0 {
+        return "一键签到已完成"
+      }
       if summary.stopped > 0 { return "已停止后续签到" }
       return "一键签到已结束"
+    case .needsReview:
+      return "部分签到结果待核对"
     case .failed:
-      return summary.processed > 0 ? "部分签到结果未确认" : "一键签到未能开始"
+      return summary.processed > 0 ? "部分签到失败" : "一键签到未能开始"
     }
   }
 
@@ -414,9 +479,11 @@ private enum ForumBatchCheckInPresentationPhase: Equatable {
       if summary.pending > 0 { return "checkmark.seal" }
       return summary.skipped > 0 ? "minus.circle" : "checkmark.seal.fill"
     case .completed:
-      return summary.failed == 0 && summary.stopped == 0
+      return summary.failed == 0 && summary.unconfirmed == 0 && summary.stopped == 0
         ? "checkmark.circle.fill"
         : "exclamationmark.circle"
+    case .needsReview:
+      return "questionmark.circle.fill"
     case .failed:
       return "exclamationmark.triangle.fill"
     }
@@ -427,7 +494,11 @@ private enum ForumBatchCheckInPresentationPhase: Equatable {
     case .ready:
       return summary.pending == 0 && summary.skipped == 0 ? .green : .primary
     case .completed:
-      return summary.failed == 0 && summary.stopped == 0 ? .green : .primary
+      return summary.failed == 0 && summary.unconfirmed == 0 && summary.stopped == 0
+        ? .green
+        : .primary
+    case .needsReview:
+      return .orange
     case .failed:
       return .red
     }
@@ -482,6 +553,8 @@ private struct ForumBatchCheckInEntryRow: View {
     switch entry.outcome {
     case .failed(let message):
       outcomeDetail(title: "失败", message: message)
+    case .unconfirmed(let message):
+      outcomeDetail(title: "待核对", message: message)
     case .skipped(let message):
       outcomeDetail(title: "已跳过", message: message)
     default:
@@ -507,6 +580,7 @@ private struct ForumBatchCheckInEntryRow: View {
     case .inProgress: return "clock.arrow.circlepath"
     case .succeeded: return "checkmark.circle.fill"
     case .failed: return "exclamationmark.triangle.fill"
+    case .unconfirmed: return "questionmark.circle.fill"
     case .skipped: return "minus.circle"
     case .stopped: return "stop.circle"
     }
@@ -516,6 +590,7 @@ private struct ForumBatchCheckInEntryRow: View {
     switch entry.outcome {
     case .succeeded: return .green
     case .failed: return .red
+    case .unconfirmed: return .orange
     case .pending, .inProgress, .skipped, .stopped: return .secondary
     }
   }
@@ -526,6 +601,10 @@ private struct ForumBatchCheckInEntryRow: View {
     case .inProgress: return "正在签到"
     case .succeeded: return "签到成功"
     case .failed(let message): return message.isEmpty ? "签到失败" : "签到失败，\(message)"
+    case .unconfirmed(let message):
+      return message.isEmpty
+        ? "签到结果待核对，应用未自动重试"
+        : "签到结果待核对，应用未自动重试，\(message)"
     case .skipped(let message): return message.isEmpty ? "已跳过" : "已跳过，\(message)"
     case .stopped: return "未执行"
     }

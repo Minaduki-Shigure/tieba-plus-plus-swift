@@ -23,6 +23,7 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
           processed: 0,
           succeeded: 0,
           failed: 0,
+          unconfirmed: 0,
           skipped: 2,
           stopped: 0
         )
@@ -80,6 +81,13 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
     let singleForumIDs = await service.singleForumIDs()
     XCTAssertEqual(batchRequestCount, 1)
     XCTAssertEqual(singleForumIDs, [20])
+    let authorizedTargets = await service.lastAuthorizedTargets()
+    XCTAssertEqual(
+      authorizedTargets,
+      [
+        ForumBatchCheckInTarget(forumID: 10, forumName: "A")
+      ]
+    )
     XCTAssertEqual(
       viewModel.entries.map(\.outcome),
       [
@@ -99,6 +107,7 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
           processed: 2,
           succeeded: 2,
           failed: 0,
+          unconfirmed: 0,
           skipped: 2,
           stopped: 0
         )
@@ -138,6 +147,7 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
           processed: 0,
           succeeded: 0,
           failed: 0,
+          unconfirmed: 0,
           skipped: 0,
           stopped: 0
         )
@@ -147,7 +157,7 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
     XCTAssertNil(viewModel.pendingConfirmation)
   }
 
-  func testMissingRejectedAndMismatchedBatchResultsFallBackToSingleWrites() async {
+  func testBatchSuccessDoesNotWriteFreshlyDroppedOfficialTargets() async {
     let session = makeBatchSession(userID: 1)
     let vault = ForumBatchCheckInVaultSpy(session: session)
     let loaded = ForumCheckInCatalogData(
@@ -168,22 +178,9 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
         session.sessionRevision: .success(
           ForumBatchCheckInData(
             userID: 1,
-            results: [
-              ForumBatchCheckInResult(
-                forumID: 10,
-                forumName: "A",
-                outcome: .rejected(message: "busy")
-              ),
-              batchResult(id: 20, name: "wrong name"),
-              batchResult(id: 999, name: "extra"),
-            ]
+            results: [batchResult(id: 10, name: "A")]
           )
         )
-      ],
-      singleResults: [
-        10: .success(confirmedSingle(userID: 1, id: 10, name: "A")),
-        20: .success(confirmedSingle(userID: 1, id: 20, name: "B")),
-        30: .success(confirmedSingle(userID: 1, id: 30, name: "C")),
       ]
     )
     let viewModel = makeViewModel(vault: vault, service: service)
@@ -195,8 +192,90 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
     let batchRequestCount = await service.batchRequestCount()
     let singleForumIDs = await service.singleForumIDs()
     XCTAssertEqual(batchRequestCount, 1)
-    XCTAssertEqual(singleForumIDs, [10, 20, 30])
-    XCTAssertTrue(viewModel.entries.allSatisfy { $0.outcome == .succeeded })
+    XCTAssertEqual(singleForumIDs, [])
+    XCTAssertEqual(viewModel.entries.map(\.outcome), [.succeeded, .stopped, .stopped])
+    let authorizedTargets = await service.lastAuthorizedTargets()
+    XCTAssertEqual(
+      authorizedTargets,
+      [
+        ForumBatchCheckInTarget(forumID: 10, forumName: "A")
+      ]
+    )
+  }
+
+  func testBatchRejectionStopsAllLaterSingleWrites() async {
+    let session = makeBatchSession(userID: 1)
+    let vault = ForumBatchCheckInVaultSpy(session: session)
+    let loaded = ForumCheckInCatalogData(
+      userID: 1,
+      targets: [
+        target(10, "A", level: 5, status: .pending),
+        target(20, "B", level: 1, status: .pending),
+      ],
+      officialBatchPolicy: ForumOfficialBatchCheckInPolicy(
+        minimumLevel: 4,
+        maximumForumCount: 1
+      )
+    )
+    let service = ForumBatchCheckInServiceSpy(
+      catalogs: [session.sessionRevision: loaded],
+      batchResults: [
+        session.sessionRevision: .success(
+          ForumBatchCheckInData(
+            userID: 1,
+            results: [
+              ForumBatchCheckInResult(
+                forumID: 10,
+                forumName: "A",
+                outcome: .rejected(message: "busy")
+              )
+            ]
+          )
+        )
+      ]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+    viewModel.requestStartConfirmation()
+
+    await viewModel.confirmStart()
+
+    let singleForumIDs = await service.singleForumIDs()
+    XCTAssertEqual(singleForumIDs, [])
+    XCTAssertEqual(viewModel.entries.map(\.outcome), [.failed(message: "busy"), .stopped])
+  }
+
+  func testBatchResultForAuthorizedButNonOfficialTargetFailsClosed() async {
+    let session = makeBatchSession(userID: 1)
+    let vault = ForumBatchCheckInVaultSpy(session: session)
+    let service = ForumBatchCheckInServiceSpy(
+      catalogs: [session.sessionRevision: catalog(userID: 1)],
+      batchResults: [
+        session.sessionRevision: .success(
+          ForumBatchCheckInData(
+            userID: 1,
+            results: [batchResult(id: 20, name: "B")]
+          )
+        )
+      ]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+    viewModel.requestStartConfirmation()
+
+    await viewModel.confirmStart()
+
+    let singleForumIDs = await service.singleForumIDs()
+    XCTAssertEqual(singleForumIDs, [])
+    let outcomes = viewModel.entries.map(\.outcome)
+    if case .unconfirmed = outcomes[0] {} else {
+      XCTFail("expected the confirmed official target to be unconfirmed")
+    }
+    XCTAssertEqual(outcomes[1], .stopped)
+    guard case .needsReview(let summary) = viewModel.state else {
+      return XCTFail("expected a non-official batch result to fail closed")
+    }
+    XCTAssertEqual(summary.unconfirmed, 1)
   }
 
   func testCatalogCanonicalizesForumNamesBeforeAttributingBatchResults() async {
@@ -234,6 +313,29 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.entries.map(\.outcome), [.succeeded])
   }
 
+  func testStopCancelsPreflightBatchAndNeverStartsSingleWrites() async throws {
+    let session = makeBatchSession(userID: 1)
+    let vault = ForumBatchCheckInVaultSpy(session: session)
+    let service = ForumBatchCheckInServiceSpy(
+      catalogs: [session.sessionRevision: catalog(userID: 1)],
+      suspendsBatch: true
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+    viewModel.requestStartConfirmation()
+    let run = Task { await viewModel.confirmStart() }
+    try await waitForBatchCheckInTest { await service.batchRequestCount() == 1 }
+
+    viewModel.requestStop()
+    await run.value
+
+    let observedCancellation = await service.didObserveBatchCancellation()
+    let singleForumIDs = await service.singleForumIDs()
+    XCTAssertTrue(observedCancellation)
+    XCTAssertEqual(singleForumIDs, [])
+    XCTAssertEqual(Array(viewModel.entries.map(\.outcome).prefix(2)), [.stopped, .stopped])
+  }
+
   func testStopBeforeNextDispatchMarksOnlyUnstartedTargetsStopped() async throws {
     let session = makeBatchSession(userID: 1)
     let vault = ForumBatchCheckInVaultSpy(session: session)
@@ -264,6 +366,7 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
           processed: 0,
           succeeded: 0,
           failed: 0,
+          unconfirmed: 0,
           skipped: 0,
           stopped: 0,
           currentForumName: "F10"
@@ -286,6 +389,7 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
           processed: 1,
           succeeded: 1,
           failed: 0,
+          unconfirmed: 0,
           skipped: 0,
           stopped: 2
         )
@@ -497,16 +601,12 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
     )
   }
 
-  func testBatchTransportFailureFallsBackWithoutRetryingBatch() async {
+  func testBatchAuthorizationChangeStopsWithoutAnySingleWrite() async {
     let session = makeBatchSession(userID: 1)
     let vault = ForumBatchCheckInVaultSpy(session: session)
     let service = ForumBatchCheckInServiceSpy(
       catalogs: [session.sessionRevision: catalog(userID: 1)],
-      batchResults: [session.sessionRevision: .failure(.init(message: "batch lost"))],
-      singleResults: [
-        10: .success(confirmedSingle(userID: 1, id: 10, name: "A")),
-        20: .success(confirmedSingle(userID: 1, id: 20, name: "B")),
-      ]
+      batchResults: [session.sessionRevision: .batchFailure(.authorizationChanged)]
     )
     let viewModel = makeViewModel(vault: vault, service: service)
     await viewModel.loadIfNeeded()
@@ -517,7 +617,229 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
     let batchRequestCount = await service.batchRequestCount()
     let singleForumIDs = await service.singleForumIDs()
     XCTAssertEqual(batchRequestCount, 1)
-    XCTAssertEqual(singleForumIDs, [10, 20])
+    XCTAssertEqual(singleForumIDs, [])
+    XCTAssertTrue(viewModel.entries.allSatisfy { outcome in
+      switch outcome.outcome {
+      case .stopped, .skipped:
+        true
+      default:
+        false
+      }
+    })
+    guard case .failed = viewModel.state else {
+      return XCTFail("expected authorization change to require reload")
+    }
+  }
+
+  func testBatchOutcomeUnknownOnlyReadsDispatchedTargetsAndNeverWritesSingles() async {
+    let session = makeBatchSession(userID: 1)
+    let vault = ForumBatchCheckInVaultSpy(session: session)
+    let service = ForumBatchCheckInServiceSpy(
+      catalogs: [session.sessionRevision: catalog(userID: 1)],
+      batchResults: [
+        session.sessionRevision: .batchFailure(
+          .outcomeUnknown(
+            dispatchedTargets: [
+              ForumBatchCheckInTarget(forumID: 10, forumName: "A")
+            ]
+          )
+        )
+      ],
+      readbackResults: [
+        10: .success(unsignedSingle(userID: 1, id: 10, name: "A"))
+      ]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+    viewModel.requestStartConfirmation()
+
+    await viewModel.confirmStart()
+
+    let singleForumIDs = await service.singleForumIDs()
+    let readbackForumIDs = await service.readbackForumIDs()
+    XCTAssertEqual(singleForumIDs, [])
+    XCTAssertEqual(readbackForumIDs, [10])
+    XCTAssertEqual(
+      viewModel.entries.map(\.outcome),
+      [
+        .unconfirmed(
+          message: "官方批量签到已发送，但该贴吧的结果无法权威确认。应用没有自动重试，请重新读取状态。"
+        ),
+        .stopped,
+        .skipped(message: "贴吧未提供可确认的签到状态，已跳过。"),
+        .skipped(message: "贴吧标记该目标禁止签到，已跳过。"),
+      ]
+    )
+    guard case .needsReview(let summary) = viewModel.state else {
+      return XCTFail("expected a terminal review state")
+    }
+    XCTAssertEqual(summary.unconfirmed, 1)
+    XCTAssertEqual(summary.processed, 1)
+  }
+
+  func testInvalidOutcomeUnknownPayloadFailsClosedForEveryAuthorizedTarget() async {
+    let session = makeBatchSession(userID: 1)
+    let vault = ForumBatchCheckInVaultSpy(session: session)
+    let service = ForumBatchCheckInServiceSpy(
+      catalogs: [session.sessionRevision: catalog(userID: 1)],
+      batchResults: [
+        session.sessionRevision: .batchFailure(
+          .outcomeUnknown(
+            dispatchedTargets: [
+              ForumBatchCheckInTarget(forumID: 999, forumName: "unauthorized")
+            ]
+          )
+        )
+      ]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+    viewModel.requestStartConfirmation()
+
+    await viewModel.confirmStart()
+
+    let singleForumIDs = await service.singleForumIDs()
+    let readbackForumIDs = await service.readbackForumIDs()
+    XCTAssertEqual(singleForumIDs, [])
+    XCTAssertEqual(readbackForumIDs, [])
+    let unconfirmedCount = viewModel.entries.filter {
+      if case .unconfirmed = $0.outcome { return true }
+      return false
+    }.count
+    XCTAssertEqual(unconfirmedCount, 1)
+    guard case .needsReview(let summary) = viewModel.state else {
+      return XCTFail("expected invalid dispatched targets to fail closed")
+    }
+    XCTAssertEqual(summary.unconfirmed, 1)
+  }
+
+  func testOutcomeUnknownWithEveryDispatchedTargetReadBackSignedCompletesWithoutWrites() async {
+    let session = makeBatchSession(userID: 1)
+    let vault = ForumBatchCheckInVaultSpy(session: session)
+    let service = ForumBatchCheckInServiceSpy(
+      catalogs: [session.sessionRevision: catalog(userID: 1)],
+      batchResults: [
+        session.sessionRevision: .batchFailure(
+          .outcomeUnknown(
+            dispatchedTargets: [
+              ForumBatchCheckInTarget(forumID: 10, forumName: "A")
+            ]
+          )
+        )
+      ],
+      readbackResults: [
+        10: .success(confirmedSingle(userID: 1, id: 10, name: "A"))
+      ]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+    viewModel.requestStartConfirmation()
+
+    await viewModel.confirmStart()
+
+    let singleForumIDs = await service.singleForumIDs()
+    XCTAssertEqual(singleForumIDs, [])
+    XCTAssertEqual(Array(viewModel.entries.map(\.outcome).prefix(2)), [.succeeded, .stopped])
+    guard case .completed(let summary) = viewModel.state else {
+      return XCTFail("expected authoritative signed readback to complete")
+    }
+    XCTAssertEqual(summary.succeeded, 1)
+    XCTAssertEqual(summary.unconfirmed, 0)
+  }
+
+  func testAccountChangeDuringUnknownReadbackCannotMutateNewCatalog() async throws {
+    let oldSession = makeBatchSession(userID: 1, revision: UUID())
+    let newSession = makeBatchSession(userID: 1, revision: UUID())
+    let vault = ForumBatchCheckInVaultSpy(session: oldSession)
+    let sharedCatalog = ForumCheckInCatalogData(
+      userID: 1,
+      targets: [target(10, "A", level: 5, status: .pending)],
+      officialBatchPolicy: ForumOfficialBatchCheckInPolicy(
+        minimumLevel: 4,
+        maximumForumCount: 1
+      )
+    )
+    let service = ForumBatchCheckInServiceSpy(
+      catalogs: [
+        oldSession.sessionRevision: sharedCatalog,
+        newSession.sessionRevision: sharedCatalog,
+      ],
+      batchResults: [
+        oldSession.sessionRevision: .batchFailure(
+          .outcomeUnknown(
+            dispatchedTargets: [ForumBatchCheckInTarget(forumID: 10, forumName: "A")]
+          )
+        )
+      ],
+      readbackResults: [
+        10: .success(confirmedSingle(userID: 1, id: 10, name: "A"))
+      ],
+      suspendedReadbackForumIDs: [10]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+    viewModel.requestStartConfirmation()
+    let oldRun = Task { await viewModel.confirmStart() }
+    try await waitForBatchCheckInTest { await service.readbackForumIDs() == [10] }
+
+    await vault.replaceActive(with: newSession)
+    await viewModel.accountSessionDidChange()
+    let newReadyState = viewModel.state
+    XCTAssertEqual(viewModel.entries.map(\.outcome), [.pending])
+
+    await service.releaseReadbacks()
+    await oldRun.value
+
+    XCTAssertEqual(viewModel.state, newReadyState)
+    XCTAssertEqual(viewModel.entries.map(\.id), [10])
+    XCTAssertEqual(viewModel.entries.map(\.outcome), [.pending])
+    let singleForumIDs = await service.singleForumIDs()
+    XCTAssertEqual(singleForumIDs, [])
+  }
+
+  func testOldBatchCompletionCannotClearNewBatchCancellationHandle() async throws {
+    let oldSession = makeBatchSession(userID: 1, revision: UUID())
+    let newSession = makeBatchSession(userID: 1, revision: UUID())
+    let vault = ForumBatchCheckInVaultSpy(session: oldSession)
+    let service = ForumBatchCheckInServiceSpy(
+      catalogs: [
+        oldSession.sessionRevision: catalog(userID: 1),
+        newSession.sessionRevision: catalog(userID: 1),
+      ],
+      manuallySuspendedBatchRevisions: [oldSession.sessionRevision],
+      suspendsBatch: true
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+    viewModel.requestStartConfirmation()
+    let oldRun = Task { await viewModel.confirmStart() }
+    try await waitForBatchCheckInTest {
+      await service.batchRequestRevisions() == [oldSession.sessionRevision]
+    }
+
+    await vault.replaceActive(with: newSession)
+    await viewModel.accountSessionDidChange()
+    viewModel.requestStartConfirmation()
+    let newRun = Task { await viewModel.confirmStart() }
+    try await waitForBatchCheckInTest {
+      await service.batchRequestRevisions()
+        == [oldSession.sessionRevision, newSession.sessionRevision]
+    }
+
+    await service.releaseBatch(revision: oldSession.sessionRevision)
+    await oldRun.value
+    viewModel.requestStop()
+    do {
+      try await waitForBatchCheckInTest {
+        await service.cancelledBatchRevisions().contains(newSession.sessionRevision)
+      }
+    } catch {
+      newRun.cancel()
+      throw error
+    }
+    await newRun.value
+    let singleForumIDs = await service.singleForumIDs()
+    XCTAssertEqual(singleForumIDs, [])
   }
 
   func testAccountRevisionChangeDropsLateWriteResultAndReloadsNewCatalog() async throws {
@@ -748,10 +1070,16 @@ private struct ForumBatchCheckInTestFailure: LocalizedError, Sendable {
   var errorDescription: String? { message }
 }
 
+private enum ForumBatchCheckInServiceResult: Sendable {
+  case success(ForumBatchCheckInData)
+  case failure(ForumBatchCheckInTestFailure)
+  case batchFailure(ForumBatchCheckInError)
+}
+
 private actor ForumBatchCheckInServiceSpy: AccountService {
   private let catalogs: [UUID: ForumCheckInCatalogData]
   private let batchResults: [
-    UUID: Result<ForumBatchCheckInData, ForumBatchCheckInTestFailure>
+    UUID: ForumBatchCheckInServiceResult
   ]
   private let singleResults: [
     Int64: Result<ForumAccountStateData, ForumBatchCheckInTestFailure>
@@ -760,16 +1088,26 @@ private actor ForumBatchCheckInServiceSpy: AccountService {
     Int64: Result<ForumAccountStateData, ForumBatchCheckInTestFailure>
   ]
   private let suspendedSingleForumIDs: Set<Int64>
+  private let suspendedReadbackForumIDs: Set<Int64>
+  private let manuallySuspendedBatchRevisions: Set<UUID>
+  private let suspendsBatch: Bool
   private var batchRequests: [UUID] = []
+  private var batchAuthorizedTargets: [[ForumBatchCheckInTarget]] = []
+  private var batchCancellationObserved = false
+  private var cancelledBatches = Set<UUID>()
   private var singleRequests: [Int64] = []
   private var readbackRequests: [Int64] = []
+  private var readbacksReleased = false
+  private var readbackWaiters: [CheckedContinuation<Void, Never>] = []
+  private var releasedBatchRevisions = Set<UUID>()
+  private var batchWaiters = [UUID: [CheckedContinuation<Void, Never>]]()
   private var singlesReleased = false
   private var singleWaiters: [CheckedContinuation<Void, Never>] = []
 
   init(
     catalogs: [UUID: ForumCheckInCatalogData],
     batchResults: [
-      UUID: Result<ForumBatchCheckInData, ForumBatchCheckInTestFailure>
+      UUID: ForumBatchCheckInServiceResult
     ] = [:],
     singleResults: [
       Int64: Result<ForumAccountStateData, ForumBatchCheckInTestFailure>
@@ -777,13 +1115,19 @@ private actor ForumBatchCheckInServiceSpy: AccountService {
     readbackResults: [
       Int64: Result<ForumAccountStateData, ForumBatchCheckInTestFailure>
     ] = [:],
-    suspendedSingleForumIDs: Set<Int64> = []
+    suspendedSingleForumIDs: Set<Int64> = [],
+    suspendedReadbackForumIDs: Set<Int64> = [],
+    manuallySuspendedBatchRevisions: Set<UUID> = [],
+    suspendsBatch: Bool = false
   ) {
     self.catalogs = catalogs
     self.batchResults = batchResults
     self.singleResults = singleResults
     self.readbackResults = readbackResults
     self.suspendedSingleForumIDs = suspendedSingleForumIDs
+    self.suspendedReadbackForumIDs = suspendedReadbackForumIDs
+    self.manuallySuspendedBatchRevisions = manuallySuspendedBatchRevisions
+    self.suspendsBatch = suspendsBatch
   }
 
   func validate(credential: AccountCredentials) async throws -> ValidatedAccount {
@@ -812,6 +1156,9 @@ private actor ForumBatchCheckInServiceSpy: AccountService {
     forumName: String
   ) async throws -> ForumAccountStateData {
     readbackRequests.append(forumID)
+    if suspendedReadbackForumIDs.contains(forumID), !readbacksReleased {
+      await withCheckedContinuation { readbackWaiters.append($0) }
+    }
     guard let result = readbackResults[forumID] else {
       throw ForumBatchCheckInTestFailure(message: "unexpected account state")
     }
@@ -837,13 +1184,39 @@ private actor ForumBatchCheckInServiceSpy: AccountService {
   }
 
   func batchCheckIn(
-    session: StoredAccountSession
+    session: StoredAccountSession,
+    authorizedTargets: [ForumBatchCheckInTarget]
   ) async throws -> ForumBatchCheckInData {
     batchRequests.append(session.sessionRevision)
+    batchAuthorizedTargets.append(authorizedTargets)
+    if manuallySuspendedBatchRevisions.contains(session.sessionRevision),
+      !releasedBatchRevisions.contains(session.sessionRevision)
+    {
+      await withCheckedContinuation {
+        batchWaiters[session.sessionRevision, default: []].append($0)
+      }
+      try Task.checkCancellation()
+    }
+    if suspendsBatch {
+      do {
+        try await Task.sleep(for: .seconds(60))
+      } catch is CancellationError {
+        batchCancellationObserved = true
+        cancelledBatches.insert(session.sessionRevision)
+        throw CancellationError()
+      }
+    }
     guard let result = batchResults[session.sessionRevision] else {
       throw ForumBatchCheckInTestFailure(message: "unexpected batch write")
     }
-    return try result.get()
+    switch result {
+    case .success(let data):
+      return data
+    case .failure(let error):
+      throw error
+    case .batchFailure(let error):
+      throw error
+    }
   }
 
   func checkInToForum(
@@ -868,10 +1241,27 @@ private actor ForumBatchCheckInServiceSpy: AccountService {
     waiters.forEach { $0.resume() }
   }
 
+  func releaseReadbacks() {
+    readbacksReleased = true
+    let waiters = readbackWaiters
+    readbackWaiters.removeAll()
+    waiters.forEach { $0.resume() }
+  }
+
+  func releaseBatch(revision: UUID) {
+    releasedBatchRevisions.insert(revision)
+    let waiters = batchWaiters.removeValue(forKey: revision) ?? []
+    waiters.forEach { $0.resume() }
+  }
+
   func batchRequestCount() -> Int { batchRequests.count }
+  func batchRequestRevisions() -> [UUID] { batchRequests }
+  func lastAuthorizedTargets() -> [ForumBatchCheckInTarget]? { batchAuthorizedTargets.last }
+  func didObserveBatchCancellation() -> Bool { batchCancellationObserved }
   func singleRequestCount() -> Int { singleRequests.count }
   func singleForumIDs() -> [Int64] { singleRequests }
   func readbackForumIDs() -> [Int64] { readbackRequests }
+  func cancelledBatchRevisions() -> Set<UUID> { cancelledBatches }
 }
 
 private actor ForumBatchCheckInVaultSpy: AccountVault {

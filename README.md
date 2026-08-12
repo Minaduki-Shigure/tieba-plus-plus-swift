@@ -17,9 +17,9 @@ checks.
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, media preferences, reply-entry visibility, and a next-launch destination including the inbox |
-| Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, authenticated poll state, and experimental content approval |
-| Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, plain-text topic/floor/nested replies, and plain-text new-topic creation are in device validation; other writes stay disabled |
-| TiebaLite parity | Anonymous reading and media: about 91–95%; full product scope: about 74–77% |
+| Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
+| Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, plain-text topic/floor/nested replies, and plain-text new-topic creation are in device validation; other writes stay disabled |
+| TiebaLite parity | Anonymous reading and media: about 91–95%; full product scope: about 75–78% complete, with about 22–25% remaining |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.59.0-alpha.1` (build 62); later `main` features require a tagged release |
 
 ### Release and validation
@@ -68,6 +68,18 @@ checks.
   verified-complete snapshot to show personalized recommendations only from the
   active account's followed forums. This filtering is local: the anonymous
   recommendation request receives no account, credential, lease, or forum ID.
+  The account page now also offers a foreground-only one-click check-in after it
+  loads the authoritative forum catalog and the user explicitly confirms the
+  displayed target snapshot. Immediately before dispatch, the official batch
+  path refreshes the catalog and signs only the intersection of that fresh
+  eligible set and the confirmed snapshot; a newly eligible, unconfirmed forum
+  is never added. Forums rejected by the batch response or no longer present in
+  the dispatch set do not fall back to individual writes. If the batch response
+  is lost or cannot be proved complete, the App performs read-only per-forum
+  reconciliation for the exact dispatched targets and marks unresolved results
+  for review without retrying or sending individual check-ins. There is no
+  background or automatic check-in, and real-account behavior remains a
+  physical-device validation gate.
   Multi-image galleries can switch between horizontal and vertical one-image
   paging while retaining a stable selected occurrence and bounded zoom state. A
   server-provided dynamic-image candidate now remains separate from static and
@@ -135,8 +147,9 @@ checks.
   target-bound liked-forum pagination, the minimal self-profile request and its
   UID/session-lease race handling, target-bound interaction permissions,
   concern-feed, inbox summary, inbox
-  navigation and reply-action rebinding, plain-text reply contracts, and
-  plain-text new-topic and account-bound poll-vote contracts are
+  navigation and reply-action rebinding, single-forum and foreground batch
+  check-in safety contracts, plain-text reply contracts, and plain-text
+  new-topic and account-bound poll-vote contracts are
   covered by fixtures, while successful real-account self-profile and private
   reads, forum
   follow/unfollow, check-in, cloud-favorite changes, topic/post/subpost content
@@ -147,7 +160,8 @@ checks.
   to LiveContainer 3.7.0 or newer, or to SideStore. Its latest IPA is published
   only after the tag's package, anonymous integration, and simulator tests all
   pass. The source currently distributes `v0.59.0-alpha.1`; the newer `main`
-  features described above are not in that IPA yet.
+  features described above, including foreground one-click check-in, are not in
+  that IPA yet.
 - **Login hotfix:** `v0.54.0-alpha.1` can reach Tieba's account page without
   completing because its callback and Cookie matching are too strict.
   `v0.54.1-alpha.1` made that failure explicit and confirmed that iOS 18.7.2
@@ -284,12 +298,14 @@ checks.
   page checks the exact `userID + sessionRevision` lease before and after its
   request; account or forum-membership changes clear the snapshot. New list
   requests begin only while the home page, complete list, or selected filtered
-  recommendation page is active. These surfaces perform no automatic write,
-  retain nothing across accounts or app restarts, and currently provide no
-  pinning, unfollow, or batch check-in controls. A loaded forum
-  separately reads account-specific follow and check-in state and retains its
-  explicitly confirmed single-forum actions. Successful private-list retrieval
-  still requires physical-device validation and is not asserted by CI fixtures.
+  recommendation page is active. These list surfaces perform no automatic
+  write, retain nothing across accounts or app restarts, and provide no inline
+  pinning, unfollow, or check-in controls. A loaded forum separately reads
+  account-specific follow and check-in state and retains its explicitly
+  confirmed single-forum actions. The account page provides the distinct,
+  foreground-only one-click flow described below. Successful private-list
+  retrieval still requires physical-device validation and is not asserted by CI
+  fixtures.
 - **Current-account profile:** The account page reads a bounded, account-lease-
   bound authenticated summary containing identity, biography, relation counts,
   and reply count. Selecting it opens the same credential-free public profile
@@ -422,20 +438,28 @@ checks.
   permission write for that same account and target are mutually exclusive, so
   the later operation also settles through a read without dispatching a second
   kind of write.
-  Already-completed check-in and matching content state are idempotent. All
-  supported writes require explicit user confirmation. Automatic and batch
-  check-in are not implemented.
+  Already-completed check-in and matching content state are idempotent. The
+  foreground one-click flow binds the user's confirmation to an ordered forum
+  snapshot, refreshes official eligibility immediately before dispatch, and
+  sends only the intersection. Official batch rejections and targets removed by
+  that refresh never become individual check-in writes. Once a batch may have
+  reached the server, an uncertain response triggers read-only reconciliation
+  for the exact dispatched forums; unresolved outcomes remain visibly
+  unconfirmed, with no retry or single-write fallback. All supported writes
+  require explicit user confirmation. Background and automatic check-in are not
+  implemented.
 - **Unsupported operations:** Guess-based removal of unresolvable cloud-favorite
   rows, bulk cloud/local synchronization, disagreement and other reaction types,
   recommendation feedback, rich-media topic/reply creation, profile editing, content
-  deletion/reporting, automatic or batch check-in, notification mark-read/unread
+  deletion/reporting, background or automatic check-in, notification mark-read/unread
   reconciliation, background notification polling, and moderation remain
   unavailable until their request contracts and recovery paths have been
   validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, weighted estimate, protocol constraints, and next milestones.
-  The current `main` audit totals 74–77 of 100 weighted points; its anonymous
-  reading and media subtotal is about 91–95%. The largest remaining gaps are
+  The current `main` audit totals 75–78 of 100 weighted points, leaving about
+  22–25%; its anonymous reading and media subtotal remains about 91–95%. The
+  largest remaining gaps are
   rich-media creation, background unread handling, broader settings, remaining
   account/social actions, unresolvable cloud-favorite rows, and moderation.
 

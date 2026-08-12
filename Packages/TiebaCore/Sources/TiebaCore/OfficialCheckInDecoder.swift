@@ -238,7 +238,7 @@ enum TiebaOfficialCheckInDecoder {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
     let isForbidden = try strictBit(rawForbidden)
-    let name = try boundedText(rawName, maximumBytes: maximumForumNameBytes, allowsEmpty: false)
+    let name = try canonicalForumName(rawName)
     let avatar = try boundedText(
       rawAvatar,
       maximumBytes: maximumAvatarBytes,
@@ -406,6 +406,10 @@ enum TiebaOfficialCheckInDecoder {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
     return value
+  }
+
+  static func canonicalForumName(_ value: String) throws -> String {
+    try boundedText(value, maximumBytes: maximumForumNameBytes, allowsEmpty: false)
   }
 
   private static func canonicalText(_ value: String) -> String {
