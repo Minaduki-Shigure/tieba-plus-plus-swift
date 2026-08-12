@@ -848,14 +848,14 @@ final class NotificationsViewModelTests: XCTestCase {
     userID: Int64,
     kind: InboxKind,
     ids: [Int64],
-    page: Int,
+    page pageNumber: Int,
     hasMore: Bool
   ) -> InboxPage {
     page(
       userID: userID,
       kind: kind,
       messages: ids.map { message(id: $0) },
-      page: page,
+      page: pageNumber,
       hasMore: hasMore
     )
   }
