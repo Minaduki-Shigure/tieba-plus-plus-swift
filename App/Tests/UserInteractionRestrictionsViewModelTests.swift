@@ -519,9 +519,10 @@ private actor InteractionPermissionVaultSpy: AccountVault {
   func removeAll() async throws {}
 }
 
+@MainActor
 private func waitForInteractionPermissionTest(
   timeout: TimeInterval = 2,
-  condition: () async -> Bool
+  condition: @MainActor () async -> Bool
 ) async throws {
   let deadline = Date().addingTimeInterval(timeout)
   while !(await condition()) {

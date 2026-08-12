@@ -169,9 +169,10 @@ private func profileIdentityUUID(_ value: UInt8) -> UUID {
   UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, value))
 }
 
+@MainActor
 private func waitForProfileIdentityTest(
   timeout: TimeInterval = 2,
-  condition: () async -> Bool
+  condition: @MainActor () async -> Bool
 ) async throws {
   let deadline = Date().addingTimeInterval(timeout)
   while !(await condition()) {
