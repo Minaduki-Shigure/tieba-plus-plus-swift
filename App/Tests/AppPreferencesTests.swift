@@ -336,6 +336,10 @@ final class AppPreferencesTests: XCTestCase {
   @MainActor
   func testAccentColorUsesStableValuesTitlesAndDefault() {
     XCTAssertEqual(AppPreferenceKey.accentColor, "TiebaPlusPlus.accentColor")
+    XCTAssertEqual(
+      AppPreferenceKey.customAccentColorSeed,
+      "TiebaPlusPlus.customAccentColorSeed"
+    )
     XCTAssertEqual(AppAccentColor.allCases, [.blue, .indigo, .teal, .green, .rose])
     XCTAssertEqual(
       AppAccentColor.allCases.map(\.rawValue),
@@ -350,11 +354,60 @@ final class AppPreferencesTests: XCTestCase {
     XCTAssertEqual(AppAccentColor.resolved("rose"), .rose)
     XCTAssertEqual(AppAccentColor.resolved(""), .blue)
     XCTAssertEqual(AppAccentColor.resolved("future-value"), .blue)
-    XCTAssertEqual(EnvironmentValues().appAccentColor, .blue)
+    XCTAssertEqual(
+      AppAccentColorSelection.resolved("blue"),
+      .preset(.blue)
+    )
+    XCTAssertEqual(
+      AppAccentColorSelection.resolved("future-value"),
+      .preset(.blue)
+    )
+    XCTAssertEqual(
+      EnvironmentValues().appAccentColor,
+      AppAccentColorSelection.preset(.blue).style
+    )
 
     var environment = EnvironmentValues()
-    environment.appAccentColor = .teal
-    XCTAssertEqual(environment.appAccentColor, .teal)
+    environment.appAccentColor = AppAccentColorSelection.preset(.teal).style
+    XCTAssertEqual(
+      environment.appAccentColor,
+      AppAccentColorSelection.preset(.teal).style
+    )
+  }
+
+  @MainActor
+  func testAccentColorAppStorageFailsClosedForWrongDefaultsTypes() throws {
+    let suiteName = "AppPreferencesTests.accent-color-corruption.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let invalidObjects: [Any] = [
+      Data([0x12, 0x34]),
+      NSNumber(value: 42),
+      ["custom:123456"],
+      ["value": "custom:123456"],
+    ]
+
+    for invalidObject in invalidObjects {
+      defaults.set(invalidObject, forKey: AppPreferenceKey.accentColor)
+      defaults.set(invalidObject, forKey: AppPreferenceKey.customAccentColorSeed)
+
+      let activeStorage = AppStorage(
+        wrappedValue: AppAccentColor.defaultValue.rawValue,
+        AppPreferenceKey.accentColor,
+        store: defaults
+      )
+      let retainedStorage = AppStorage(
+        wrappedValue: "",
+        AppPreferenceKey.customAccentColorSeed,
+        store: defaults
+      )
+
+      XCTAssertEqual(
+        AppAccentColorSelection.resolved(activeStorage.wrappedValue),
+        .preset(.blue)
+      )
+      XCTAssertNil(AppAccentColorSeed(storageValue: retainedStorage.wrappedValue))
+    }
   }
 
   @MainActor

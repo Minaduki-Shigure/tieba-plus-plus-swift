@@ -941,14 +941,37 @@ can redraw an existing image without creating or canceling a request. Video
 covers, avatars, galleries, loading and failure placeholders, compact summaries,
 badges, and playback controls remain outside this modifier.
 
-Accent selection is also local presentation state. It stores only one bounded
-enum value in UserDefaults and must not enter a request, URL, cookie, account
-record, cache key, download policy, or content archive. Every palette entry has
-fixed light, dark, and increased-contrast variants; arbitrary input and remote
-theme data are unsupported. Semantic warning and destructive colors remain
-independent, while image viewers and video overlays keep their explicit white
-controls on black. System Web, Safari, and share surfaces continue to manage
-their own appearance.
+Accent selection is also local presentation state. UserDefaults may contain only
+one closed preset identifier or a length-bounded canonical `custom:RRGGBB` token;
+the optional retained custom editor seed uses that same ASCII, opaque, 24-bit
+sRGB grammar. An unknown, malformed, non-ASCII, alpha-bearing, or future active
+selection string must resolve read-only to the existing Tieba blue without being
+rewritten during parsing. An invalid retained editor seed is ignored, so the
+editor starts from the current valid selection instead. Neither value may enter
+a request, URL, cookie, account record, cache key, download policy, content
+archive, analytics, or log.
+
+The native picker binds an in-memory CGColor draft with opacity disabled.
+Conversion accepts only finite, bounded RGB or monochrome input that can be
+converted to extended sRGB, explicitly clips and quantizes it to opaque 8-bit
+sRGB, and fails closed for non-opaque, patterned, color-space-free, unsupported,
+unconvertible, or non-finite colors. Cancel, interactive dismissal, and restoring
+the editor's opening value must write nothing. Apply first stores the
+self-contained active selection token, then updates the optional retained editor
+seed; interruption between those writes cannot change or corrupt the active color.
+
+Every custom base deterministically derives independent light, dark,
+increased-contrast-light, and increased-contrast-dark values. Before use, the
+whole palette must satisfy the same tested semantic-surface thresholds as the
+curated presets: at least 4.5:1 in ordinary appearance, 7:1 with increased
+contrast, and 4.5:1 for the on-accent foreground. A derivation or validation
+failure falls back as one complete palette to the existing Tieba blue. The
+dynamic UIColor provider captures only that immutable validated palette and
+must not reread preferences. Remote theme data, alpha, wallpaper extraction,
+toolbar or status-bar theming, and archived Color or UIColor values remain
+unsupported. Semantic warning and destructive colors remain independent, while
+image viewers and video overlays keep their explicit white controls on black.
+System Web, Safari, and share surfaces continue to manage their own appearance.
 
 Manual image-cache clearing may evict only the process-local decoded-image and
 animation-frame `NSCache` instances. It must advance both generation barriers so a transfer

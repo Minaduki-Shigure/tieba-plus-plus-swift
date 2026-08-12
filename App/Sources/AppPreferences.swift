@@ -4,6 +4,7 @@ import SwiftUI
 enum AppPreferenceKey {
   static let appearance = "TiebaPlusPlus.appearance"
   static let accentColor = "TiebaPlusPlus.accentColor"
+  static let customAccentColorSeed = "TiebaPlusPlus.customAccentColorSeed"
   static let textSizeAdjustment = "TiebaPlusPlus.textSizeAdjustment"
   static let defaultForumSort = "TiebaPlusPlus.defaultForumSort"
   static let forumPrimaryAction = "TiebaPlusPlus.forumPrimaryAction"

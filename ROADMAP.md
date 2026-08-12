@@ -56,6 +56,8 @@ adding a weighted point.
 The configurable forum primary action likewise completes a narrow local habit
 setting by rearranging existing controls, so it remains inside the existing
 local-settings credit rather than adding a weighted point.
+The opaque custom accent closes another narrow customization gap without adding
+a data source or workflow, so it likewise adds no weighted point.
 
 ## Available
 
@@ -112,7 +114,8 @@ the source metadata is updated to that tested IPA.
 - Versioned local browsing history with delete, clear, and recording controls
 - Settings-level no-history mode using the existing browsing-history archive
 - Native system, light, and dark appearance selection
-- Persistent five-color accent selection with light, dark, and high-contrast variants
+- Persistent selection among five preset accents and one opaque custom sRGB
+  accent, with adaptive light, dark, and high-contrast variants
 - Persistent six-position app text-size adjustment relative to iOS Dynamic Type
 - Transient pure-reading mode plus one shared text-selection panel for visible
   topic and ordinary floors, inline nested-reply previews, and full-page parent
@@ -873,16 +876,23 @@ rendering decision and does not enter URL normalization, fetch policy, reload
 identity, transfer deduplication, decoding, or cache keys.
 
 TiebaLite exposes fixed themes, dynamic Android colors, and arbitrary custom
-colors. The first iOS adaptation keeps appearance mode independent and offers a
-bounded five-color accent palette instead of importing wallpaper, translucent,
-or arbitrary-HEX theme behavior. Each choice has explicit light, dark,
-high-contrast-light, and high-contrast-dark values plus a contrasting foreground
-for prominent controls. The default light blue exactly preserves the asset
-catalog color used before this setting existed. Root SwiftUI tint covers native
-controls and tint shape styles, while a matching enum environment supplies the
-concrete color needed by attributed strings, comment highlights, badges, and
-progress fills. System Safari, Web login, share sheets, semantic warning colors,
-and immersive media controls remain system-managed or explicitly white.
+colors. The iOS adaptation keeps appearance and accent independent, preserves
+five curated presets, and accepts one opaque custom sRGB base color. That base
+is never used directly across every appearance: a bounded, deterministic search
+derives separate light, dark, high-contrast-light, and high-contrast-dark values
+that retain the existing surface and foreground contrast contract. Preset raw
+values and their exact four palettes remain unchanged. Custom editing stays in
+one transient draft; only Apply stores the canonical value and selects it, while
+Cancel, interactive dismissal, and restoring the opening color write nothing.
+Switching to a preset retains the last valid custom base for later editing.
+
+Wallpaper and dynamic color extraction, translucent themes, Android toolbar
+backgrounds, and status-bar text controls are not imported. Root SwiftUI tint
+covers native controls and tint shape styles, while the matching environment
+supplies the concrete color needed by attributed strings, comment highlights,
+badges, and progress fills. System Safari, Web login, share sheets, semantic
+warning colors, and immersive media controls remain system-managed or explicitly
+white.
 
 Tieba++ now clears both memory and persistent image caches. The hardened media
 transport remains ephemeral with system URL caching disabled; persistence is an

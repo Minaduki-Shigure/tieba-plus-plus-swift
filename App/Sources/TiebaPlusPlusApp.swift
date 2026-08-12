@@ -90,7 +90,7 @@ struct TiebaPlusPlusApp: App {
   }
 
   var body: some Scene {
-    let resolvedAccentColor = AppAccentColor.resolved(accentColor)
+    let resolvedAccentColor = AppAccentColorSelection.resolved(accentColor).style
     let resolvedContentMediaLoadPolicy = ContentMediaLoadPolicy.resolved(contentMediaLoadPolicy)
     let contentMediaLoadBehavior = ContentMediaLoadBehavior.resolved(
       policy: resolvedContentMediaLoadPolicy,

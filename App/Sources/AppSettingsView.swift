@@ -19,6 +19,8 @@ struct AppSettingsView: View {
   private var appearance = AppAppearance.system.rawValue
   @AppStorage(AppPreferenceKey.accentColor)
   private var accentColor = AppAccentColor.defaultValue.rawValue
+  @AppStorage(AppPreferenceKey.customAccentColorSeed)
+  private var customAccentColorSeed = ""
   @AppStorage(AppPreferenceKey.textSizeAdjustment)
   private var textSizeAdjustment = AppTextSizeAdjustment.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.defaultForumSort)
@@ -85,13 +87,16 @@ struct AppSettingsView: View {
         }
 
         NavigationLink {
-          AppAccentColorSettingsView(selection: accentColorSelection)
+          AppAccentColorSettingsView(
+            selection: accentColorSelection,
+            savedCustomSeed: savedCustomAccentColorSeedSelection
+          )
         } label: {
           HStack(spacing: 10) {
             Label("强调色", systemImage: "paintpalette")
             Spacer(minLength: 12)
             Circle()
-              .fill(selectedAccentColor.color)
+              .fill(selectedAccentColor.style.color)
               .frame(width: 18, height: 18)
               .overlay {
                 Circle()
@@ -435,14 +440,21 @@ struct AppSettingsView: View {
     }
   }
 
-  private var selectedAccentColor: AppAccentColor {
-    AppAccentColor.resolved(accentColor)
+  private var selectedAccentColor: AppAccentColorSelection {
+    AppAccentColorSelection.resolved(accentColor)
   }
 
-  private var accentColorSelection: Binding<AppAccentColor> {
+  private var accentColorSelection: Binding<AppAccentColorSelection> {
     Binding(
       get: { selectedAccentColor },
-      set: { accentColor = $0.rawValue }
+      set: { accentColor = $0.storageValue }
+    )
+  }
+
+  private var savedCustomAccentColorSeedSelection: Binding<AppAccentColorSeed?> {
+    Binding(
+      get: { AppAccentColorSeed(storageValue: customAccentColorSeed) },
+      set: { customAccentColorSeed = $0?.storageValue ?? "" }
     )
   }
 

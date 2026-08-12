@@ -277,8 +277,9 @@ checks.
   filters cover list, profile, floor, nested-reply, and shared-origin surfaces
   without modifying network pagination. A separate default-off recommendation
   filter matches the active account's followed forums by stable forum ID.
-- **Appearance:** System, light, and dark themes, a bounded accent palette,
-  Dynamic Type-relative text sizing, compact previews, and optional combined
+- **Appearance:** System, light, and dark themes, five tested accent presets,
+  one locally stored opaque custom accent, Dynamic Type-relative text sizing,
+  compact previews, and optional combined
   nickname/username presentation are persistent local controls. Followed-forum
   cards can use an adaptive grid or a single column; accessibility text sizes
   always use one column so labels can expand without overlap.
