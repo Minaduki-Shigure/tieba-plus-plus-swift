@@ -1631,7 +1631,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
           url: SecureTiebaURL.media(video.streamURL),
           cover: SecureTiebaURL.media(video.coverURL),
           width: video.width,
-          height: video.height
+          height: video.height,
+          pageURL: SecureTiebaURL.videoPage(video.pageURL)
         )
       case .voice(let voice):
         guard let url = SecureTiebaURL.voice(md5: voice.md5) else {
@@ -1656,6 +1657,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
 }
 
 enum SecureTiebaURL {
+  static let maximumVideoPageURLBytes = 8_192
+
   private static let upgradeableHostSuffixes = [
     "baidu.com",
     "bdimg.com",
@@ -1797,6 +1800,18 @@ enum SecureTiebaURL {
     return normalized(url, allowHTTPUpgradeOnly: false)
   }
 
+  static func videoPage(_ url: URL?) -> URL? {
+    guard let url else { return nil }
+    let absoluteString = url.absoluteString
+    guard
+      absoluteString.utf8.count <= maximumVideoPageURLBytes,
+      !containsControlCharacters(absoluteString),
+      let decodedAbsoluteString = absoluteString.removingPercentEncoding,
+      !containsControlCharacters(decodedAbsoluteString)
+    else { return nil }
+    return web(url)
+  }
+
   static func voice(md5: String) -> URL? {
     let md5 = md5.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !md5.isEmpty else { return nil }
@@ -1839,6 +1854,10 @@ enum SecureTiebaURL {
       return nil
     }
     return requiresRebuild ? components.url : url
+  }
+
+  private static func containsControlCharacters(_ value: String) -> Bool {
+    value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
   }
 
   private static func isUpgradeable(_ host: String) -> Bool {

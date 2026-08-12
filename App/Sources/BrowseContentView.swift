@@ -9,6 +9,7 @@ struct BrowseContentView: View {
 
   @Environment(\.externalWebOpenMode) private var externalWebOpenMode
   @Environment(\.openExternalWeb) private var openExternalWeb
+  @Environment(\.openURL) private var openURL
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Environment(\.appAccentColor) private var appAccentColor
   @Environment(\.contentImagePreviewQuality) private var contentImagePreviewQuality
@@ -110,8 +111,10 @@ struct BrowseContentView: View {
           height: height
         )
       )
-    case .video(let url, let cover, let width, let height):
-      BrowseVideoView(url: url, coverURL: cover, width: width, height: height)
+    case .video(let video):
+      BrowseVideoView(video: video) { pageURL in
+        openVideoPage(pageURL)
+      }
     case .voice(let url, let duration):
       VoicePlaybackButton(url: url, duration: duration)
     case .text, .mention, .link, .emoticon, .unsupported:
@@ -140,6 +143,29 @@ struct BrowseContentView: View {
         }
       }
     )
+  }
+
+  private func openVideoPage(_ pageURL: URL) {
+    guard let pageURL = SecureTiebaURL.videoPage(pageURL) else { return }
+    switch BrowseContentLinkRouter.disposition(for: pageURL, mode: externalWebOpenMode) {
+    case .tieba(let target):
+      if case .user(let userID) = target, let onUserMention {
+        onUserMention(userID)
+      } else if let onTiebaLink {
+        onTiebaLink(target)
+      } else {
+        openURL(pageURL)
+      }
+    case .system(let url):
+      openURL(url)
+    case .inAppSafari(let url):
+      imageGalleryPresentation = nil
+      if !openExternalWeb(url) {
+        openURL(url)
+      }
+    case .rejected:
+      break
+    }
   }
 
   static func inlineText(
@@ -612,27 +638,60 @@ private struct BrowseImageView: View {
   }
 }
 
+enum BrowseVideoPrimaryAction: Equatable, Sendable {
+  case play(URL)
+  case openPage(URL)
+  case unavailable
+}
+
+enum BrowseVideoPresentationPolicy {
+  static func playbackURL(for video: BrowseVideoContent) -> URL? {
+    guard let url = video.url, VideoPlaybackURLPolicy.allows(url) else { return nil }
+    return url
+  }
+
+  static func pageURL(for video: BrowseVideoContent) -> URL? {
+    SecureTiebaURL.videoPage(video.pageURL)
+  }
+
+  static func showsFailurePageAction(
+    for video: BrowseVideoContent,
+    state: VideoPlaybackState
+  ) -> Bool {
+    guard case .failed = state else { return false }
+    return playbackURL(for: video) != nil && pageURL(for: video) != nil
+  }
+
+  static func primaryAction(for video: BrowseVideoContent) -> BrowseVideoPrimaryAction {
+    if let url = playbackURL(for: video) {
+      return .play(url)
+    }
+    if let pageURL = pageURL(for: video) {
+      return .openPage(pageURL)
+    }
+    return .unavailable
+  }
+}
+
 private struct BrowseVideoView: View {
-  let url: URL?
-  let coverURL: URL?
-  let width: Int
-  let height: Int
+  let video: BrowseVideoContent
+  let openPage: (URL) -> Void
 
   @State private var ownerID = UUID()
   @Environment(\.contentMediaLoadBehavior) private var contentMediaLoadBehavior
   @EnvironmentObject private var controller: VideoPlaybackController
 
   private var aspectRatio: CGFloat {
-    guard width > 0, height > 0 else { return 16 / 9 }
-    return min(max(CGFloat(width) / CGFloat(height), 0.5), 2)
+    guard video.width > 0, video.height > 0 else { return 16 / 9 }
+    return min(max(CGFloat(video.width) / CGFloat(video.height), 0.5), 2)
   }
 
   var body: some View {
     Group {
       if
-        let url,
+        let playbackURL,
         let sessionID = activeSessionID,
-        let player = controller.player(for: ownerID, url: url)
+        let player = controller.player(for: ownerID, url: playbackURL)
       {
         InlineVideoPlayer(
           player: player,
@@ -642,7 +701,7 @@ private struct BrowseVideoView: View {
         )
       } else {
         ZStack {
-          if let coverURL {
+          if let coverURL = video.cover {
             ContentRemoteImage(
               url: coverURL,
               maxPixelSize: 1_600,
@@ -683,7 +742,9 @@ private struct BrowseVideoView: View {
             Color.black.opacity(0.88)
               .accessibilityHidden(true)
           }
-          if let url {
+
+          switch BrowseVideoPresentationPolicy.primaryAction(for: video) {
+          case .play(let url):
             Button {
               controller.start(ownerID: ownerID, url: url)
             } label: {
@@ -693,17 +754,59 @@ private struct BrowseVideoView: View {
                 .foregroundStyle(.white, .black.opacity(0.55))
             }
             .accessibilityLabel("播放视频")
+            .accessibilityHint(
+              Text(failureMessage.map { "\($0) 再次尝试播放。" } ?? "开始播放")
+            )
+          case .openPage(let pageURL):
+            Button {
+              openPage(pageURL)
+            } label: {
+              Label("打开视频", systemImage: "safari")
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("在网页中打开")
+          case .unavailable:
+            Label("视频不可用", systemImage: "video.slash")
+              .font(.callout.weight(.medium))
+              .foregroundStyle(.white)
+              .padding(.horizontal, 10)
+              .padding(.vertical, 8)
+              .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 6))
           }
 
+        }
+        .overlay(alignment: .topLeading) {
           if let failureMessage {
             Text(failureMessage)
               .font(.caption.weight(.medium))
               .foregroundStyle(.white)
+              .lineLimit(2)
               .padding(.horizontal, 8)
               .padding(.vertical, 6)
-              .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
               .allowsHitTesting(false)
-              .accessibilityLabel(failureMessage)
+              .accessibilityHidden(true)
+          }
+        }
+        .overlay(alignment: .bottomTrailing) {
+          if showsFailurePageAction, let pageURL {
+            Button {
+              openPage(pageURL)
+            } label: {
+              Label("网页打开", systemImage: "safari")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 7)
+                .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("改用网页打开")
+            .padding(8)
           }
         }
       }
@@ -711,14 +814,35 @@ private struct BrowseVideoView: View {
     .aspectRatio(aspectRatio, contentMode: .fit)
     .frame(maxWidth: 560)
     .clipped()
-    .onChange(of: url) { controller.sourceDidChange(ownerID: ownerID, to: $0) }
+    .onChange(of: playbackURL) { controller.sourceDidChange(ownerID: ownerID, to: $0) }
     .onDisappear { controller.ownerDidDisappear(ownerID) }
+  }
+
+  private var playbackURL: URL? {
+    BrowseVideoPresentationPolicy.playbackURL(for: video)
+  }
+
+  private var pageURL: URL? {
+    BrowseVideoPresentationPolicy.pageURL(for: video)
+  }
+
+  private var showsFailurePageAction: Bool {
+    let state: VideoPlaybackState
+    if
+      controller.snapshot.ownerID == ownerID,
+      controller.snapshot.sourceURL == playbackURL
+    {
+      state = controller.snapshot.state
+    } else {
+      state = .idle
+    }
+    return BrowseVideoPresentationPolicy.showsFailurePageAction(for: video, state: state)
   }
 
   private var activeSessionID: UUID? {
     guard
       controller.snapshot.ownerID == ownerID,
-      controller.snapshot.sourceURL == url
+      controller.snapshot.sourceURL == playbackURL
     else { return nil }
     return controller.snapshot.sessionID
   }
@@ -726,7 +850,7 @@ private struct BrowseVideoView: View {
   private var failureMessage: String? {
     guard
       controller.snapshot.ownerID == ownerID,
-      controller.snapshot.sourceURL == url,
+      controller.snapshot.sourceURL == playbackURL,
       case .failed(let message) = controller.snapshot.state
     else { return nil }
     return message

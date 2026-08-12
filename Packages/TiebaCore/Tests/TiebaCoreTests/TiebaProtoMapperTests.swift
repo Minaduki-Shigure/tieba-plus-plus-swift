@@ -93,6 +93,99 @@ final class TiebaProtoMapperTests: XCTestCase {
     XCTAssertNil(image.dynamicURL)
   }
 
+  func testPbContentVideoPreservesOnlyHTTPPageURLs() throws {
+    let httpsVideo = try mappedPbContentVideo(
+      pageURL: " \nhttps://video.example/watch/42?q=swift\n "
+    )
+    XCTAssertEqual(httpsVideo.streamURL?.absoluteString, "https://video.example/stream.mp4")
+    XCTAssertEqual(httpsVideo.coverURL?.absoluteString, "https://img.example/video.jpg")
+    XCTAssertEqual(httpsVideo.pageURL?.absoluteString, "https://video.example/watch/42?q=swift")
+
+    let httpVideo = try mappedPbContentVideo(pageURL: "http://video.example/watch/42")
+    XCTAssertEqual(httpVideo.pageURL?.absoluteString, "http://video.example/watch/42")
+
+    let protocolRelativeVideo = try mappedPbContentVideo(pageURL: "//video.example/watch/42")
+    XCTAssertEqual(protocolRelativeVideo.pageURL?.absoluteString, "https://video.example/watch/42")
+
+    let maximumPrefix = "https://video.example/"
+    let maximumURL =
+      maximumPrefix
+      + String(repeating: "a", count: 8_192 - maximumPrefix.utf8.count)
+    XCTAssertEqual(
+      try mappedPbContentVideo(pageURL: maximumURL).pageURL?.absoluteString,
+      maximumURL
+    )
+
+    for unsafeURL in [
+      "file:///tmp/video.html",
+      "javascript:alert(1)",
+      "data:text/html;base64,PGgxPnZpZGVvPC9oMT4=",
+      "com.baidu.tieba://unidispatch/pb?tid=42",
+      "relative/video.html",
+      "https://user@video.example/watch/42",
+      "https://user:password@video.example/watch/42",
+      "//user:password@video.example/watch/42",
+      "https://video.example/watch/\n42",
+      "https://video.example/watch/\u{0}42",
+      "https:///missing-host",
+      maximumURL + "a",
+      String(repeating: " ", count: 8_193) + "https://video.example/watch/42",
+      "https://video.example/watch/42" + String(repeating: " ", count: 8_193),
+      "",
+    ] {
+      XCTAssertNil(try mappedPbContentVideo(pageURL: unsafeURL).pageURL, unsafeURL)
+    }
+  }
+
+  func testTiebaVideoInitializerDefaultsPageURLToNil() {
+    let sourceCompatibleVideo = TiebaVideo(
+      streamURL: nil,
+      coverURL: nil,
+      duration: 0,
+      width: 0,
+      height: 0,
+      viewCount: 0
+    )
+    XCTAssertNil(sourceCompatibleVideo.pageURL)
+  }
+
+  func testStructuredVideoInheritsUniqueInlineLandingPage() throws {
+    var fixture = ProtoFixtures.postPage().data
+    fixture.thread.originThreadInfo.content[2].text = "https://video.example/watch/42"
+
+    let page = TiebaProtoMapper.postPage(fixture)
+    let videoInfoVideo = try XCTUnwrap(
+      page.thread.content.fragments.compactMap { fragment -> TiebaVideo? in
+        guard case .video(let video) = fragment else { return nil }
+        return video.streamURL?.absoluteString == "https://video.example/thread.mp4" ? video : nil
+      }.first
+    )
+    XCTAssertEqual(
+      videoInfoVideo.pageURL?.absoluteString,
+      "https://video.example/watch/42"
+    )
+  }
+
+  func testStructuredVideoRejectsAmbiguousInlineLandingPages() throws {
+    var fixture = ProtoFixtures.postPage().data
+    fixture.thread.originThreadInfo.content[2].text = "https://video.example/watch/first"
+    var conflictingVideo = fixture.thread.originThreadInfo.content[2]
+    conflictingVideo.link = "https://video.example/other.mp4"
+    conflictingVideo.text = "https://video.example/watch/second"
+    fixture.thread.originThreadInfo.content.append(conflictingVideo)
+
+    var video = try structuredVideo(from: fixture)
+    XCTAssertNil(video.pageURL)
+
+    fixture.thread.originThreadInfo.content[2].link =
+      fixture.thread.originThreadInfo.videoInfo.videoURL
+    video = try structuredVideo(from: fixture)
+    XCTAssertEqual(
+      video.pageURL?.absoluteString,
+      "https://video.example/watch/first"
+    )
+  }
+
   func testUserReplyMappingBoundsOuterAndInnerCollectionsAndRejectsOverflowingTime() {
     var data = UserPostResIdl.DataRes()
     for groupIndex in 0...100 {
@@ -645,5 +738,37 @@ final class TiebaProtoMapperTests: XCTestCase {
     XCTAssertEqual(rules.rules.map(\.status), [1])
     XCTAssertEqual(rules.rules[0].content.fragments.count, 2)
     XCTAssertEqual(rules.author?.portrait, "moderator-portrait")
+  }
+
+  private func mappedPbContentVideo(pageURL: String) throws -> TiebaVideo {
+    var fixture = ProtoFixtures.threadPage().data
+    var video = PbContent()
+    video.type = 5
+    video.text = pageURL
+    video.link = "https://video.example/stream.mp4"
+    video.src = "https://img.example/video.jpg"
+    video.duringTime = 12
+    video.width = 1_280
+    video.height = 720
+    video.count = 30
+    fixture.threadList[0].firstPostContent.append(video)
+
+    let thread = try XCTUnwrap(TiebaProtoMapper.threadPage(fixture).threads.first)
+    return try XCTUnwrap(
+      thread.content.fragments.compactMap { fragment -> TiebaVideo? in
+        guard case .video(let video) = fragment else { return nil }
+        return video
+      }.first
+    )
+  }
+
+  private func structuredVideo(from fixture: PbPageResIdl.DataRes) throws -> TiebaVideo {
+    let page = TiebaProtoMapper.postPage(fixture)
+    return try XCTUnwrap(
+      page.thread.content.fragments.compactMap { fragment -> TiebaVideo? in
+        guard case .video(let video) = fragment else { return nil }
+        return video.streamURL?.absoluteString == "https://video.example/thread.mp4" ? video : nil
+      }.first
+    )
   }
 }

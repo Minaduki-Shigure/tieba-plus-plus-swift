@@ -928,6 +928,19 @@ App Transport Security, and redirects remain under AVFoundation's normal
 platform handling. The app adds no cleartext exception, custom certificate
 trust, redirect rewrite, or redirect credential injection.
 
+The separate video landing-page fallback is never passed to AVFoundation. Core
+accepts it only from the existing anonymous `PbContent.type == 5` text field and
+requires a credential-free HTTP(S) URL with a nonempty host, no control
+characters, and at most 8,192 UTF-8 bytes; protocol-relative values are upgraded
+to HTTPS. The App revalidates it and also rejects percent-decoded control
+characters before presenting an action. Rendering never fetches, persists,
+copies, or opens the landing page. A valid stream remains primary; missing or
+rejected media can expose a user-tapped Web action, and playback failure can
+expose a separate user-tapped fallback without automatic navigation. Supported
+Tieba destinations use the strict internal router, external HTTPS follows the
+selected browser policy, and HTTP is delegated to the system rather than
+embedded in Safari.
+
 One main-actor application coordinator issues at most one opaque playback lease
 across voice and video. A new voice or video lease is installed before the old
 participant is synchronously revoked, and a controller accepts a revocation

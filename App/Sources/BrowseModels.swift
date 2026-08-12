@@ -1385,6 +1385,28 @@ extension ContentAgreementTarget {
   }
 }
 
+struct BrowseVideoContent: Hashable, Sendable {
+  let url: URL?
+  let cover: URL?
+  let pageURL: URL?
+  let width: Int
+  let height: Int
+
+  init(
+    url: URL?,
+    cover: URL?,
+    width: Int,
+    height: Int,
+    pageURL: URL? = nil
+  ) {
+    self.url = url
+    self.cover = cover
+    self.pageURL = pageURL
+    self.width = width
+    self.height = height
+  }
+}
+
 enum BrowseContent: Hashable, Sendable {
   case text(String)
   case mention(name: String, userID: Int64)
@@ -1397,10 +1419,28 @@ enum BrowseContent: Hashable, Sendable {
     width: Int,
     height: Int
   )
-  case video(url: URL?, cover: URL?, width: Int, height: Int)
+  case video(BrowseVideoContent)
   case voice(url: URL, duration: Int)
   case emoticon(name: String, url: URL?)
   case unsupported(label: String)
+
+  static func video(
+    url: URL?,
+    cover: URL?,
+    width: Int,
+    height: Int,
+    pageURL: URL? = nil
+  ) -> Self {
+    .video(
+      BrowseVideoContent(
+        url: url,
+        cover: cover,
+        width: width,
+        height: height,
+        pageURL: pageURL
+      )
+    )
+  }
 }
 
 enum BrowseContentImageSourceResolver {

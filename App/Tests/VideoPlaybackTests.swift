@@ -7,6 +7,103 @@ import XCTest
 
 @MainActor
 final class VideoPlaybackTests: XCTestCase {
+  func testVideoPresentationPrefersValidPlaybackThenFallsBackToPage() throws {
+    let streamURL = try XCTUnwrap(URL(string: "https://video.example/movie.mp4"))
+    let pageURL = try XCTUnwrap(URL(string: "https://video.example/watch/42"))
+    let playable = BrowseVideoContent(
+      url: streamURL,
+      cover: nil,
+      width: 1_280,
+      height: 720,
+      pageURL: pageURL
+    )
+
+    XCTAssertEqual(
+      BrowseVideoPresentationPolicy.primaryAction(for: playable),
+      .play(streamURL)
+    )
+
+    let invalidStream = BrowseVideoContent(
+      url: try XCTUnwrap(URL(string: "http://video.example/movie.mp4")),
+      cover: nil,
+      width: 0,
+      height: 0,
+      pageURL: pageURL
+    )
+    XCTAssertEqual(
+      BrowseVideoPresentationPolicy.primaryAction(for: invalidStream),
+      .openPage(pageURL)
+    )
+
+    let pageOnly = BrowseVideoContent(
+      url: nil,
+      cover: nil,
+      width: 0,
+      height: 0,
+      pageURL: pageURL
+    )
+    XCTAssertEqual(
+      BrowseVideoPresentationPolicy.primaryAction(for: pageOnly),
+      .openPage(pageURL)
+    )
+  }
+
+  func testVideoPresentationNeverUsesUnsafePageOrStream() throws {
+    let invalid = BrowseVideoContent(
+      url: try XCTUnwrap(URL(string: "https://user@video.example/movie.mp4")),
+      cover: nil,
+      width: 0,
+      height: 0,
+      pageURL: try XCTUnwrap(URL(string: "javascript:alert(1)"))
+    )
+
+    XCTAssertNil(BrowseVideoPresentationPolicy.playbackURL(for: invalid))
+    XCTAssertNil(BrowseVideoPresentationPolicy.pageURL(for: invalid))
+    XCTAssertEqual(
+      BrowseVideoPresentationPolicy.primaryAction(for: invalid),
+      .unavailable
+    )
+  }
+
+  func testVideoFailureOffersPageOnlyAfterAPlayableStreamFails() throws {
+    let streamURL = try XCTUnwrap(URL(string: "https://video.example/movie.mp4"))
+    let pageURL = try XCTUnwrap(URL(string: "https://video.example/watch/42"))
+    let video = BrowseVideoContent(
+      url: streamURL,
+      cover: nil,
+      width: 1_280,
+      height: 720,
+      pageURL: pageURL
+    )
+
+    XCTAssertFalse(
+      BrowseVideoPresentationPolicy.showsFailurePageAction(for: video, state: .idle)
+    )
+    XCTAssertFalse(
+      BrowseVideoPresentationPolicy.showsFailurePageAction(for: video, state: .loading)
+    )
+    XCTAssertTrue(
+      BrowseVideoPresentationPolicy.showsFailurePageAction(
+        for: video,
+        state: .failed("视频加载失败。")
+      )
+    )
+
+    let pageOnly = BrowseVideoContent(
+      url: nil,
+      cover: nil,
+      width: 0,
+      height: 0,
+      pageURL: pageURL
+    )
+    XCTAssertFalse(
+      BrowseVideoPresentationPolicy.showsFailurePageAction(
+        for: pageOnly,
+        state: .failed("不应出现")
+      )
+    )
+  }
+
   func testURLPolicyAllowsOnlyCredentialFreeHTTPSWithoutFragments() throws {
     XCTAssertTrue(
       VideoPlaybackURLPolicy.allows(

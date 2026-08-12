@@ -224,6 +224,44 @@ final class SecureTiebaURLTests: XCTestCase {
     }
   }
 
+  func testVideoPageAcceptsBoundedCredentialFreeWebURL() throws {
+    let prefix = "https://example.com/watch/"
+    let boundedValue = prefix + String(
+      repeating: "a",
+      count: SecureTiebaURL.maximumVideoPageURLBytes - prefix.utf8.count
+    )
+    let boundedURL = try XCTUnwrap(URL(string: boundedValue))
+
+    XCTAssertEqual(SecureTiebaURL.videoPage(boundedURL), boundedURL)
+    XCTAssertEqual(
+      SecureTiebaURL.videoPage(URL(string: "http://example.com/watch/42"))?.absoluteString,
+      "http://example.com/watch/42"
+    )
+  }
+
+  func testVideoPageRejectsCredentialsNonWebOversizedAndControlCharacters() throws {
+    let prefix = "https://example.com/watch/"
+    let oversizedValue = prefix + String(
+      repeating: "a",
+      count: SecureTiebaURL.maximumVideoPageURLBytes - prefix.utf8.count + 1
+    )
+    let rejectedValues = [
+      "https://user@example.com/watch/42",
+      "https://user:password@example.com/watch/42",
+      "javascript:alert(1)",
+      "data:text/plain,secret",
+      "file:///private/data",
+      "https://example.com/watch/%0A",
+      "https://example.com/watch/%00",
+      oversizedValue,
+    ]
+
+    for rawValue in rejectedValues {
+      let url = try XCTUnwrap(URL(string: rawValue), "Could not construct test URL: \(rawValue)")
+      XCTAssertNil(SecureTiebaURL.videoPage(url), "Unexpectedly accepted: \(rawValue)")
+    }
+  }
+
   func testRejectsURLsContainingCredentials() throws {
     for rawValue in [
       "https://user@example.com/path",

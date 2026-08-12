@@ -182,6 +182,7 @@ public struct TiebaImage: Sendable, Hashable {
 public struct TiebaVideo: Sendable, Hashable {
   public let streamURL: URL?
   public let coverURL: URL?
+  public let pageURL: URL?
   public let duration: TimeInterval
   public let width: Int
   public let height: Int
@@ -193,10 +194,12 @@ public struct TiebaVideo: Sendable, Hashable {
     duration: TimeInterval,
     width: Int,
     height: Int,
-    viewCount: Int
+    viewCount: Int,
+    pageURL: URL? = nil
   ) {
     self.streamURL = streamURL
     self.coverURL = coverURL
+    self.pageURL = pageURL
     self.duration = duration
     self.width = width
     self.height = height

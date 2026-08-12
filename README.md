@@ -187,7 +187,10 @@ checks.
   coordinator. Starting new media pauses the prior item, inactive scenes pause
   playback, and playback never resumes implicitly. Voice files can be explicitly
   downloaded, validated, and passed to the system share sheet; Picture in Picture
-  is off.
+  is off. If a server video fragment has no stream accepted by the HTTPS playback
+  policy, a bounded credential-free HTTP(S) landing page can be opened only by
+  an explicit tap. A valid stream remains primary and playback failure never
+  redirects automatically.
 - **Links and sharing:** Supported Tieba links stay in the native router with
   post and reply context. External HTTPS links use the selected system or Safari
   presentation, while forum and thread sharing emits canonical HTTPS links.

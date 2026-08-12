@@ -126,7 +126,8 @@ final class BrowseViewModelTests: XCTestCase {
       duration: 12,
       width: 1280,
       height: 720,
-      viewCount: 30
+      viewCount: 30,
+      pageURL: try XCTUnwrap(URL(string: "https://video.example/watch/42"))
     )
     let author = TiebaUser(
       id: 8,
@@ -235,10 +236,96 @@ final class BrowseViewModelTests: XCTestCase {
     )
     XCTAssertTrue(
       mapped.contents.contains { content in
-        guard case .video(_, let cover, _, _) = content else { return false }
-        return cover?.absoluteString == "https://img.example/video.jpg"
+        guard case .video(let video) = content else { return false }
+        return video.cover?.absoluteString == "https://img.example/video.jpg"
+          && video.pageURL?.absoluteString == "https://video.example/watch/42"
       }
     )
+  }
+
+  func testBrowseVideoFactoryDefaultsPageURLToNil() {
+    let content = BrowseContent.video(
+      url: nil,
+      cover: nil,
+      width: 320,
+      height: 180
+    )
+
+    guard case .video(let video) = content else {
+      return XCTFail("Expected video content")
+    }
+    XCTAssertNil(video.pageURL)
+    XCTAssertEqual(video.width, 320)
+    XCTAssertEqual(video.height, 180)
+  }
+
+  func testVideoMappingSanitizesStreamAndPageURLIndependently() throws {
+    let safeStreamURL = try XCTUnwrap(URL(string: "https://video.example/stream.mp4"))
+    let safePageURL = try XCTUnwrap(URL(string: "https://video.example/watch/42"))
+    let credentialPageURL = try XCTUnwrap(
+      URL(string: "https://user:password@video.example/watch/42")
+    )
+    let nonWebStreamURL = try XCTUnwrap(URL(string: "ftp://video.example/stream.mp4"))
+    let thread = TiebaThread(
+      id: 42,
+      firstPostID: 43,
+      forumID: 7,
+      forumName: "swift",
+      title: "Video URL policy",
+      content: TiebaContent(fragments: [
+        .video(
+          TiebaVideo(
+            streamURL: safeStreamURL,
+            coverURL: nil,
+            duration: 12,
+            width: 1280,
+            height: 720,
+            viewCount: 30,
+            pageURL: credentialPageURL
+          )
+        ),
+        .video(
+          TiebaVideo(
+            streamURL: nonWebStreamURL,
+            coverURL: nil,
+            duration: 12,
+            width: 1280,
+            height: 720,
+            viewCount: 30,
+            pageURL: safePageURL
+          )
+        ),
+      ]),
+      author: nil,
+      kind: .video,
+      tabID: 0,
+      viewCount: 0,
+      replyCount: 0,
+      shareCount: 0,
+      agreeCount: 0,
+      disagreeCount: 0,
+      createdAt: nil,
+      lastReplyAt: nil,
+      isPinned: false,
+      isFeatured: false,
+      isShared: false,
+      isHidden: false,
+      isLive: false
+    )
+
+    let videos = TiebaCoreBrowseService.mapThread(thread).contents.compactMap {
+      content -> BrowseVideoContent? in
+      guard case .video(let video) = content else { return nil }
+      return video
+    }
+
+    XCTAssertEqual(videos.count, 2)
+    let streamOnlyVideo = try XCTUnwrap(videos.first)
+    let pageOnlyVideo = try XCTUnwrap(videos.dropFirst().first)
+    XCTAssertEqual(streamOnlyVideo.url, safeStreamURL)
+    XCTAssertNil(streamOnlyVideo.pageURL)
+    XCTAssertNil(pageOnlyVideo.url)
+    XCTAssertEqual(pageOnlyVideo.pageURL, safePageURL)
   }
 
   func testSearchThreadMappingPreservesAvailableCountsAndImages() throws {

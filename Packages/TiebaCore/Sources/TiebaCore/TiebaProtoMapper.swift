@@ -1005,6 +1005,10 @@ enum TiebaProtoMapper {
     video: VideoInfo,
     voices: [Voice]
   ) -> TiebaContent {
+    let structuredVideoPageURL = videoPageURL(
+      from: contentProtos.filter { $0.type == 5 },
+      matching: video
+    )
     var contentProtos = contentProtos
     contentProtos.removeAll { content in
       switch content.type {
@@ -1022,7 +1026,7 @@ enum TiebaProtoMapper {
     var fragments = content(contentProtos).fragments
     fragments.append(contentsOf: mediaProtos.map(mediaFragment))
     if hasVideo(video) {
-      fragments.append(.video(videoFragment(video)))
+      fragments.append(.video(videoFragment(video, pageURL: structuredVideoPageURL)))
     }
     fragments.append(
       contentsOf: voices.filter { !$0.voiceMd5.isEmpty }.map {
@@ -1238,7 +1242,8 @@ enum TiebaProtoMapper {
           duration: TimeInterval(proto.duringTime),
           width: Int(proto.width),
           height: Int(proto.height),
-          viewCount: Int(proto.count)
+          viewCount: Int(proto.count),
+          pageURL: videoPageURL(proto.text)
         )
       )
     case 10:
@@ -1280,14 +1285,15 @@ enum TiebaProtoMapper {
     )
   }
 
-  private static func videoFragment(_ proto: VideoInfo) -> TiebaVideo {
+  private static func videoFragment(_ proto: VideoInfo, pageURL: URL?) -> TiebaVideo {
     TiebaVideo(
       streamURL: remoteURL(proto.videoURL),
       coverURL: remoteURL(proto.thumbnailURL),
       duration: TimeInterval(proto.videoDuration),
       width: Int(proto.videoWidth),
       height: Int(proto.videoHeight),
-      viewCount: Int(proto.playCount)
+      viewCount: Int(proto.playCount),
+      pageURL: pageURL
     )
   }
 
@@ -1304,6 +1310,54 @@ enum TiebaProtoMapper {
       return nil
     }
     return scheme == "http" || scheme == "https" ? url : nil
+  }
+
+  private static func videoPageURL(_ rawValue: String) -> URL? {
+    guard rawValue.utf8.count <= 8_192 else { return nil }
+    let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard
+      !value.isEmpty,
+      !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    else { return nil }
+
+    let absoluteValue = value.hasPrefix("//") ? "https:\(value)" : value
+    guard
+      let components = URLComponents(string: absoluteValue),
+      components.user == nil,
+      components.password == nil,
+      let scheme = components.scheme?.lowercased(),
+      scheme == "http" || scheme == "https",
+      let host = components.host,
+      !host.isEmpty
+    else { return nil }
+    return components.url
+  }
+
+  private static func videoPageURL(
+    from contentProtos: [PbContent],
+    matching video: VideoInfo
+  ) -> URL? {
+    guard hasVideo(video) else { return nil }
+    let structuredStreamURL = remoteURL(video.videoURL)
+    let candidates = contentProtos.compactMap { proto -> (stream: URL?, page: URL)? in
+      guard let page = videoPageURL(proto.text) else { return nil }
+      return (remoteURL(proto.link), page)
+    }
+
+    let matchingPages = Set(
+      candidates.compactMap { candidate in
+        candidate.stream == structuredStreamURL ? candidate.page : nil
+      }
+    )
+    if matchingPages.count == 1 {
+      return matchingPages.first
+    }
+    if matchingPages.count > 1 {
+      return nil
+    }
+
+    let uniquePages = Set(candidates.map(\.page))
+    return uniquePages.count == 1 ? uniquePages.first : nil
   }
 
   private static func date(_ timestamp: Int64) -> Date? {

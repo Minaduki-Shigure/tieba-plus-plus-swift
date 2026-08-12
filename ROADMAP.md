@@ -94,6 +94,8 @@ the source metadata is updated to that tested IPA.
 - Strict internal routing for supported Tieba HTTPS, pasted official-scheme, and app links
 - Default-system external HTTPS opening with an optional in-app Safari view
 - Nested replies, images, video links, and voice playback
+- Explicit video landing-page fallback when a `PbContent` video has no accepted
+  native stream, using native Tieba routing and the selected browser policy
 - Application-scoped voice/video arbitration with one active playback lease,
   inactive-scene pausing, and no implicit resume
 - Single lazy video player with native AVKit inline/full-screen controls and
@@ -388,6 +390,18 @@ cancelled entry can complete only its matching pending cleanup, while a
 cancelled exit remains full-screen and keeps cleanup pending. Stale transitions
 cannot tear down a newer session, and another video cannot replace a non-inline
 item.
+
+TiebaLite also preserves the `PbContent.type == 5` text field as a video landing
+page. Tieba++ keeps that field independently from the media stream. Core trims
+only surrounding whitespace, accepts bounded credential-free HTTP(S) or
+protocol-relative URLs, and rejects control characters, non-Web schemes, empty
+hosts, credentials, and values over 8,192 UTF-8 bytes. The App repeats that
+boundary and rejects percent-decoded control characters. A stream passing the
+stricter HTTPS playback policy remains primary. Only when no playable stream
+exists does the card offer an explicit Web action; native playback failure may
+expose a separate explicit fallback but never opens it automatically. Supported
+Tieba links remain internal, external HTTPS follows the selected system/Safari
+preference, and HTTP remains system-owned.
 
 Voice sharing is an explicit, one-shot export. It uses a separate ephemeral
 credential-free HTTPS session, rejects redirects, non-200 and partial responses,

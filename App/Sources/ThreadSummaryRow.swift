@@ -17,8 +17,8 @@ enum ThreadSummaryPresentation {
   ) -> ThreadSummaryMedia? {
     guard !thread.isPinned else { return nil }
     if let cover = thread.contents.compactMap({ content -> URL? in
-      guard case .video(_, let cover, _, _) = content else { return nil }
-      return cover
+      guard case .video(let video) = content else { return nil }
+      return video.cover
     }).first {
       return .video(cover)
     }
