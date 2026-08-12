@@ -18,6 +18,7 @@ enum AppPreferenceKey {
   static let contentImagePreviewQuality = "TiebaPlusPlus.contentImagePreviewQuality"
   static let hidesThreadListMedia = "TiebaPlusPlus.hidesThreadListMedia"
   static let hidesReplyEntryPoints = "TiebaPlusPlus.hidesReplyEntryPoints"
+  static let showsPostAndReplyRiskNotice = "TiebaPlusPlus.showsPostAndReplyRiskNotice"
   static let darkensContentThumbnailsInDarkMode =
     "TiebaPlusPlus.darkensContentThumbnailsInDarkMode"
   static let showsBothUsernameAndNickname =
@@ -91,6 +92,7 @@ enum AppPreferenceDefaults {
   static let favoriteThreadsOpenOnlyAuthor = false
   static let favoriteThreadsOpenDescending = false
   static let hidesReplyEntryPoints = false
+  static let showsPostAndReplyRiskNotice = true
 }
 
 struct ReplyEntryVisibilityPolicy: Equatable, Sendable {

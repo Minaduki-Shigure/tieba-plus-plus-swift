@@ -52,6 +52,8 @@ struct AppSettingsView: View {
   private var hidesThreadListMedia = false
   @AppStorage(AppPreferenceKey.hidesReplyEntryPoints)
   private var hidesReplyEntryPoints = AppPreferenceDefaults.hidesReplyEntryPoints
+  @AppStorage(AppPreferenceKey.showsPostAndReplyRiskNotice)
+  private var showsPostAndReplyRiskNotice = AppPreferenceDefaults.showsPostAndReplyRiskNotice
   @AppStorage(AppPreferenceKey.darkensContentThumbnailsInDarkMode)
   private var darkensContentThumbnailsInDarkMode = true
   @AppStorage(AppPreferenceKey.showsBothUsernameAndNickname)
@@ -155,12 +157,16 @@ struct AppSettingsView: View {
       Section {
         Toggle("隐藏回复入口", isOn: $hidesReplyEntryPoints)
           .accessibilityIdentifier("settings-hide-reply-entry-points")
+
+        Toggle("发帖和回复风险提示", isOn: $showsPostAndReplyRiskNotice)
+          .accessibilityIdentifier("settings-post-reply-risk-notice")
       } header: {
         Text("阅读与回复")
       } footer: {
         Text(
           "开启后，会隐藏主题、楼层、楼中楼和消息列表中的回复按钮；"
-            + "不会隐藏回复内容或删除草稿。此设置只保存在本机，切换时不会发起网络请求。"
+            + "不会隐藏回复内容或删除草稿。风险提示默认开启，会在进入发帖或回复编辑器时显示；"
+            + "关闭后，实际发送或发布前仍需逐次确认。两项设置只保存在本机，切换时不会发起网络请求。"
         )
       }
 

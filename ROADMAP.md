@@ -21,7 +21,7 @@ does not yet include the foreground batch-check-in work on `main`.
 | Anonymous discovery, search, and forums | 20 | 18–19 | Core browsing, ranking, recommendations, categories, and search are implemented; feedback and a few niche discovery paths remain |
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
-| Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, media preferences, followed-forum layout, reply-entry visibility, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
+| Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, media preferences, followed-forum layout, reply-entry visibility, a default-on composer risk notice, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, switching, a self-profile summary, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 10–11 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, three plain-text reply targets, and plain-text new-topic creation have guarded implementations; real batch-check-in behavior, creation, poll and interaction-restriction success, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
@@ -44,6 +44,9 @@ existing local-settings credit but is too small to add a full weighted point.
 The followed-forum layout choice likewise improves the completeness of the
 existing local-settings credit but does not add a full weighted point because it
 reflows two existing surfaces without adding a data source or workflow.
+The composer-entry risk notice likewise completes one narrow TiebaLite habit
+setting and hardens an existing creation flow, but adds no new write target or
+workflow and therefore does not add a weighted point.
 
 ## Available
 
@@ -103,6 +106,8 @@ the source metadata is updated to that tested IPA.
 - Transient pure-reading mode and full textual floor copying
 - Default-off local hiding of topic, floor, nested-reply, and inbox quick-reply
   entry points without removing reply content, drafts, or an open composer
+- Default-on, locally configurable entry-risk notice for editable reply and
+  new-topic composers, separate from final submission confirmation
 - Home-screen recent-forum history, expanded by default and independently hideable
 - Canonical forum/thread sharing and browse-mode-aware thread-link copying
 - Strict internal routing for supported Tieba HTTPS, pasted official-scheme, and app links
@@ -939,6 +944,14 @@ currently decoded public textual fragments plus fixed `[图片]`, `[视频]`, an
 `[语音]` boundary markers; media URLs and nested replies are not synthesized into
 the copied text.
 
+The independent composer-risk preference is a default-on local Boolean. An
+editable reply or new-topic composer restores its draft before presenting the
+notice; continuing only unlocks editing, while returning preserves the draft.
+The notice is advisory and never authorizes a request. Final send or publish
+confirmation captures the exact target and text in an immutable, one-use
+snapshot; any edit, confirmation dismissal, account-session change, or page exit
+invalidates that pending snapshot.
+
 Local content filtering covers ordinary and channel forum thread lists, global
 and per-forum search results, public-profile activity, post floors, nested
 replies, and shared-thread origin cards. Keyword rules use case-sensitive
@@ -992,8 +1005,10 @@ forms the lease for every read and write, so switching accounts or logging the
 same UID in again discards late state from the older session. Check-in
 additionally requires authoritative per-forum sign state and rejects an
 unfollowed forum. All writes require explicit user confirmation and perform no
-write when the server already reports the requested state. Anonymous browsing
-must continue to work without creating, reading, or storing an account session.
+write when the server already reports the requested state. Acknowledging or
+disabling the composer-entry notice is never this write authorization. Anonymous
+browsing must continue to work without creating, reading, or storing an account
+session.
 
 Foreground batch check-in uses the official forum catalog and batch endpoint,
 but user confirmation remains the write-authorization boundary. The client

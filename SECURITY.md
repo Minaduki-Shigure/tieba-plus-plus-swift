@@ -365,11 +365,15 @@ cannot overwrite a mutation or the new account's state.
 Follow, unfollow, check-in, poll voting, topic, post, or nested-reply approval or
 cancellation, and each supported plain-text topic, floor, or nested-reply
 submission, plus plain-text new-topic creation, all require explicit user
-confirmation. Automatic, scheduled, and batch check-in are deliberately
-unsupported. `disagree` or downvote, rich-media topic/reply creation, editing,
-deletion, reporting, and every other authenticated content write remain
-unsupported and must not be inferred from the approval, reply, or new-topic
-endpoints.
+confirmation. For reply and new-topic creation, this confirmation must bind an
+immutable target-and-content snapshot immediately before dispatch. Editing,
+dismissing the confirmation, changing the account session, or leaving the page
+invalidates that snapshot. The configurable composer-entry risk notice is
+advisory and must never satisfy this confirmation requirement. Automatic,
+scheduled, and batch check-in are deliberately unsupported. `disagree` or
+downvote, rich-media topic/reply creation, editing, deletion, reporting, and
+every other authenticated content write remain unsupported and must not be
+inferred from the approval, reply, or new-topic endpoints.
 
 Poll voting requires a complete validated BDUSS/STOKEN session and a separate
 authenticated PB Page read. That response, rather than the anonymous result card,
@@ -1205,6 +1209,17 @@ ordinary notification navigation, copying, or agreement controls, and it must
 not erase a draft or close a composer that is already open. Account-session
 changes retain their stricter existing behavior and may still invalidate an
 inbox-originated composer whose credential binding is no longer current.
+
+The post-and-reply risk-notice preference is a default-on, nonsecret local
+Boolean in UserDefaults. Reading or changing the preference, presenting the
+notice, or choosing to continue editing must not itself resolve a target,
+perform submission preflight, delete a draft, or authorize an account request;
+the composer's ordinary account binding and draft lifecycle remain independent.
+Returning dismisses the composer through that ordinary lifecycle and must
+preserve, rather than delete, the restored draft. Disabling or acknowledging the
+notice must not bypass, pre-authorize, or weaken the final immutable-snapshot
+confirmation, account and target rebinding, session-lease checks, or no-retry
+boundary.
 
 Home-entry preferences are also nonsecret UserDefaults values. The start target
 must resolve through the closed home, post-ranking, hot-topic, inbox, local-

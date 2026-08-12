@@ -16,7 +16,7 @@ checks.
 | Area | Current state |
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
-| Local features | Available for history, favorites, filtering, appearance, media preferences, followed-forum layout, reply-entry visibility, and a next-launch destination including the inbox |
+| Local features | Available for history, favorites, filtering, appearance, media preferences, followed-forum layout, reply-entry visibility, a default-on posting/reply risk notice, and a next-launch destination including the inbox |
 | Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, plain-text topic/floor/nested replies, and plain-text new-topic creation are in device validation; other writes stay disabled |
 | TiebaLite parity | Anonymous reading and media: about 91–95%; full product scope: about 75–78% complete, with about 22–25% remaining |
@@ -269,7 +269,11 @@ checks.
 - **Reply controls:** A default-off local preference can hide topic, floor,
   nested-reply, and inbox quick-reply entry points without hiding reply content,
   read-only navigation, agreement controls, existing drafts, or an already-open
-  composer.
+  composer. A separate default-on local notice pauses an editable reply or
+  new-topic composer after its draft is restored and lets the user continue or
+  return without deleting that draft. It is advisory only: disabling or
+  acknowledging it never replaces the separate confirmation of the exact reply
+  or topic snapshot immediately before submission.
 - **Media policy:** Automatic, data-saving, or tap-to-load behavior and standard
   or high-definition preview selection apply to content media. Animation uses
   the same URL authorization and transfer limits as static images. Decoded images
@@ -428,10 +432,12 @@ checks.
   App starts and applies reconciliation only while the initiating account lease
   remains readable and current; a later account change discards its result. No
   uncertain failure retries a write. Reply and new-topic submissions additionally
-  serialize per account, share only an identical submission UUID, and permit
-  cancellation to stop the owner only before write dispatch. Once dispatched,
-  the owner finishes receipt parsing and exact-ID readback even if its view
-  disappears.
+  bind final confirmation to an immutable target-and-content snapshot; editing,
+  dismissing the confirmation, or an account-session change invalidates it before
+  dispatch. They serialize per account, share only an identical submission UUID,
+  and permit cancellation to stop the owner only before write dispatch. Once
+  dispatched, the owner finishes receipt parsing and exact-ID readback even if
+  its view disappears.
   Poll voting uses the same no-retry boundary: an identical canonical selection
   for one account and thread may share the active task, while a conflicting
   selection or credential receives only post-flight authoritative state. Every
@@ -451,7 +457,8 @@ checks.
   reached the server, an uncertain response triggers read-only reconciliation
   for the exact dispatched forums; unresolved outcomes remain visibly
   unconfirmed, with no retry or single-write fallback. All supported writes
-  require explicit user confirmation. Background and automatic check-in are not
+  require explicit user confirmation; the configurable composer-entry risk
+  notice is not that confirmation. Background and automatic check-in are not
   implemented.
 - **Unsupported operations:** Guess-based removal of unresolvable cloud-favorite
   rows, bulk cloud/local synchronization, disagreement and other reaction types,

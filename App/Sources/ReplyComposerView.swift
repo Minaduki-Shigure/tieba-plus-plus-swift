@@ -55,12 +55,16 @@ private struct ReplyComposerContentView: View {
 
   @State private var text = ""
   @State private var didHydrateDraft = false
-  @State private var isSendConfirmationPresented = false
+  @State private var pendingSubmission: TextReplySubmission?
   @State private var isDiscardConfirmationPresented = false
   @State private var isLaunchingSubmission = false
   @State private var isCheckingVisibility = false
   @State private var errorMessage: String?
   @State private var lifecycleGate = ReplyComposerLifecycleGate()
+  @State private var entryRiskNoticeGate = ComposerEntryRiskNoticeGate()
+  @State private var confirmationPreparationGate = SubmissionConfirmationPreparationGate()
+  @AppStorage(AppPreferenceKey.showsPostAndReplyRiskNotice)
+  private var showsPostAndReplyRiskNotice = AppPreferenceDefaults.showsPostAndReplyRiskNotice
   @FocusState private var editorIsFocused: Bool
 
   var body: some View {
@@ -120,7 +124,7 @@ private struct ReplyComposerContentView: View {
         .help("丢弃草稿")
 
         Button {
-          isSendConfirmationPresented = true
+          requestSubmissionConfirmation()
         } label: {
           if entry.isSubmitting || isLaunchingSubmission {
             ProgressView()
@@ -142,14 +146,29 @@ private struct ReplyComposerContentView: View {
       }
     }
     .confirmationDialog(
-      "发送这条回复？",
-      isPresented: $isSendConfirmationPresented,
+      ComposerEntryRiskNoticeCopy.standard.title,
+      isPresented: entryRiskNoticeIsPresented,
       titleVisibility: .visible
     ) {
-      Button("发送") { submitConfirmed() }
-      Button("取消", role: .cancel) {}
+      Button(ComposerEntryRiskNoticeCopy.standard.continueTitle) {
+        continueAfterEntryRiskNotice()
+      }
+      Button(ComposerEntryRiskNoticeCopy.standard.leaveTitle, role: .cancel) {
+        leaveFromEntryRiskNotice()
+      }
     } message: {
-      Text("回复会立即提交到贴吧。网络中断时结果可能无法确定；为避免重复回复，应用不会自动重发。")
+      Text(ComposerEntryRiskNoticeCopy.standard.message)
+    }
+    .confirmationDialog(
+      submissionConfirmationCopy.title,
+      isPresented: submissionConfirmationIsPresented,
+      titleVisibility: .visible,
+      presenting: pendingSubmission
+    ) { submission in
+      Button(submissionConfirmationCopy.actionTitle) { submitConfirmed(submission) }
+      Button("取消", role: .cancel) { pendingSubmission = nil }
+    } message: { _ in
+      Text(submissionConfirmationCopy.message)
     }
     .confirmationDialog(
       "丢弃草稿？",
@@ -171,7 +190,8 @@ private struct ReplyComposerContentView: View {
       await store.activate(context.target, for: scopeID)
       guard lifecycleGate.isCurrent(currentLifecycleID) else { return }
       hydrateDraftIfNeeded()
-      if presentation.allowsEditing {
+      resolveEntryRiskNoticeIfNeeded()
+      if editorAllowsEditing {
         editorIsFocused = true
       }
     }
@@ -190,6 +210,27 @@ private struct ReplyComposerContentView: View {
     }
     .onChange(of: entry.state) { _ in
       hydrateDraftIfNeeded()
+      if !presentation.allowsSubmission {
+        confirmationPreparationGate.cancel()
+        pendingSubmission = nil
+      }
+      resolveEntryRiskNoticeIfNeeded()
+    }
+    .onChange(of: text) { value in
+      if let pendingSubmission, pendingSubmission.content != value {
+        self.pendingSubmission = nil
+      }
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+      confirmationPreparationGate.cancel()
+      pendingSubmission = nil
+    }
+    .onChange(of: showsPostAndReplyRiskNotice) { isEnabled in
+      if !isEnabled, entryRiskNoticeGate.isPresented {
+        continueAfterEntryRiskNotice()
+      } else {
+        resolveEntryRiskNoticeIfNeeded()
+      }
     }
     .onDisappear(perform: persistAndDeactivate)
   }
@@ -209,13 +250,13 @@ private struct ReplyComposerContentView: View {
         .scrollContentBackground(.hidden)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .disabled(!presentation.allowsEditing)
+        .disabled(!editorAllowsEditing)
         .accessibilityLabel(context.composerTitle)
         .accessibilityIdentifier("reply-composer-editor")
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .contentShape(Rectangle())
-    .onTapGesture { editorIsFocused = presentation.allowsEditing }
+    .onTapGesture { editorIsFocused = editorAllowsEditing }
   }
 
   private func statusLabel(_ status: TextReplyComposerPresentation.Status) -> some View {
@@ -248,12 +289,14 @@ private struct ReplyComposerContentView: View {
 
   private var canRequestSubmission: Bool {
     submissionIsAllowed
-      && !isSendConfirmationPresented
+      && !confirmationPreparationGate.isPreparing
+      && pendingSubmission == nil
   }
 
   private var submissionIsAllowed: Bool {
     didHydrateDraft
       && presentation.allowsSubmission
+      && entryRiskNoticeGate.isResolved
       && TextReplyContentPolicy.isValid(text)
       && !isLaunchingSubmission
       && !isCheckingVisibility
@@ -262,9 +305,43 @@ private struct ReplyComposerContentView: View {
   private var canDiscardDraft: Bool {
     didHydrateDraft
       && presentation.allowsEditing
+      && entryRiskNoticeGate.isResolved
       && !text.isEmpty
       && !isLaunchingSubmission
       && !isCheckingVisibility
+      && !confirmationPreparationGate.isPreparing
+      && pendingSubmission == nil
+  }
+
+  private var editorAllowsEditing: Bool {
+    presentation.allowsEditing
+      && entryRiskNoticeGate.isResolved
+      && !confirmationPreparationGate.isPreparing
+      && pendingSubmission == nil
+  }
+
+  private var submissionConfirmationCopy: SubmissionConfirmationCopy {
+    .reply
+  }
+
+  private var entryRiskNoticeIsPresented: Binding<Bool> {
+    Binding(
+      get: { entryRiskNoticeGate.isPresented },
+      set: { isPresented in
+        if !isPresented, entryRiskNoticeGate.isPresented {
+          deferImplicitEntryRiskNoticeDismissal()
+        }
+      }
+    )
+  }
+
+  private var submissionConfirmationIsPresented: Binding<Bool> {
+    Binding(
+      get: { pendingSubmission != nil },
+      set: { isPresented in
+        if !isPresented { pendingSubmission = nil }
+      }
+    )
   }
 
   private var characterCountLabel: String {
@@ -278,7 +355,13 @@ private struct ReplyComposerContentView: View {
   private var autosaveTaskID: ReplyComposerAutosaveTaskID {
     ReplyComposerAutosaveTaskID(
       text: text,
-      shouldSave: didHydrateDraft && presentation.allowsEditing
+      shouldSave: didHydrateDraft
+        && presentation.allowsEditing
+        && entryRiskNoticeGate.isResolved
+        && !confirmationPreparationGate.isPreparing
+        && pendingSubmission == nil
+        && !isLaunchingSubmission
+        && !isCheckingVisibility
     )
   }
 
@@ -302,23 +385,71 @@ private struct ReplyComposerContentView: View {
     }
   }
 
-  private func submitConfirmed() {
-    guard submissionIsAllowed else { return }
-    isSendConfirmationPresented = false
+  private func requestSubmissionConfirmation() {
+    let preparationLifecycleID = lifecycleGate.lifecycleID
+    guard
+      canRequestSubmission,
+      let preparationID = confirmationPreparationGate.begin(
+        lifecycleID: preparationLifecycleID
+      )
+    else {
+      return
+    }
+    editorIsFocused = false
+
+    Task { @MainActor in
+      await Task.yield()
+      guard
+        lifecycleGate.isActive,
+        lifecycleGate.isCurrent(preparationLifecycleID),
+        confirmationPreparationGate.isCurrent(
+          preparationID,
+          lifecycleID: preparationLifecycleID
+        ),
+        pendingSubmission == nil,
+        let submission = SubmissionConfirmationPolicy.textReplySnapshot(
+          id: preparationID,
+          target: context.target,
+          content: text,
+          submissionAllowed: submissionIsAllowed
+        ),
+        confirmationPreparationGate.finish(preparationID),
+        SubmissionConfirmationPolicy.present(submission, pending: &pendingSubmission)
+      else {
+        _ = confirmationPreparationGate.finish(preparationID)
+        return
+      }
+    }
+  }
+
+  private func submitConfirmed(_ submission: TextReplySubmission) {
+    guard
+      lifecycleGate.isActive,
+      let submission = SubmissionConfirmationPolicy.consume(
+        submission,
+        pending: &pendingSubmission
+      )
+    else { return }
+    guard
+      SubmissionConfirmationPolicy.textReplySnapshotIsCurrent(
+        submission,
+        target: context.target,
+        content: text,
+        submissionAllowed: submissionIsAllowed
+      )
+    else { return }
     isLaunchingSubmission = true
     editorIsFocused = false
-    let submissionID = UUID()
-    let submittedText = text
 
     Task { @MainActor in
       defer { isLaunchingSubmission = false }
       do {
         let result = try await store.submit(
-          submittedText,
-          for: context.target,
-          submissionID: submissionID
+          submission.content,
+          for: submission.target,
+          submissionID: submission.id
         )
-        guard result.submissionID == submissionID, result.target == context.target else {
+        guard result.submissionID == submission.id, result.target == submission.target else {
           throw TextReplySubmissionError.submissionConflict
         }
         if case .confirmed(let created) = result.outcome {
@@ -330,6 +461,35 @@ private struct ReplyComposerContentView: View {
       } catch {
         errorMessage = error.localizedDescription
       }
+    }
+  }
+
+  private func resolveEntryRiskNoticeIfNeeded() {
+    guard didHydrateDraft, presentation.allowsEditing else { return }
+    _ = entryRiskNoticeGate.composerBecameReady(
+      showsNotice: showsPostAndReplyRiskNotice
+    )
+  }
+
+  private func continueAfterEntryRiskNotice() {
+    entryRiskNoticeGate.resolve()
+    if presentation.allowsEditing {
+      editorIsFocused = true
+    }
+  }
+
+  private func leaveFromEntryRiskNotice() {
+    entryRiskNoticeGate.resolve()
+    editorIsFocused = false
+    dismiss()
+  }
+
+  private func deferImplicitEntryRiskNoticeDismissal() {
+    entryRiskNoticeGate.beginImplicitDismissal()
+    Task { @MainActor in
+      await Task.yield()
+      guard entryRiskNoticeGate.implicitDismissalIsPending else { return }
+      leaveFromEntryRiskNotice()
     }
   }
 

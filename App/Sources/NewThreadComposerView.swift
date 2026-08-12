@@ -44,6 +44,7 @@ struct NewThreadComposerView: View {
 }
 
 private struct NewThreadComposerContentView: View {
+  @Environment(\.dismiss) private var dismiss
   @ObservedObject var entry: NewThreadSubmissionEntry
 
   let target: NewThreadTarget
@@ -57,7 +58,7 @@ private struct NewThreadComposerContentView: View {
   @State private var title = ""
   @State private var content = ""
   @State private var didHydrateDraft = false
-  @State private var isPublishConfirmationPresented = false
+  @State private var pendingSubmission: NewThreadSubmission?
   @State private var isDiscardConfirmationPresented = false
   @State private var isConfirmedResetConfirmationPresented = false
   @State private var isLaunchingSubmission = false
@@ -66,6 +67,10 @@ private struct NewThreadComposerContentView: View {
   @State private var pendingConfirmedReceipt: NewThreadReceipt?
   @State private var deliveredReceipt: NewThreadReceipt?
   @State private var lifecycleGate = ReplyComposerLifecycleGate()
+  @State private var entryRiskNoticeGate = ComposerEntryRiskNoticeGate()
+  @State private var confirmationPreparationGate = SubmissionConfirmationPreparationGate()
+  @AppStorage(AppPreferenceKey.showsPostAndReplyRiskNotice)
+  private var showsPostAndReplyRiskNotice = AppPreferenceDefaults.showsPostAndReplyRiskNotice
   @FocusState private var focusedField: FocusedField?
 
   private enum FocusedField: Hashable {
@@ -80,7 +85,7 @@ private struct NewThreadComposerContentView: View {
         .textInputAutocapitalization(.never)
         .autocorrectionDisabled()
         .lineLimit(1)
-        .disabled(!presentation.allowsEditing)
+        .disabled(!editorAllowsEditing)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .accessibilityIdentifier("new-thread-title")
@@ -88,6 +93,7 @@ private struct NewThreadComposerContentView: View {
           if value.count > NewThreadTitlePolicy.maximumCharacterCount {
             title = String(value.prefix(NewThreadTitlePolicy.maximumCharacterCount))
           }
+          invalidatePendingSubmissionIfNeeded(title: value, content: content)
         }
 
       HStack {
@@ -115,14 +121,17 @@ private struct NewThreadComposerContentView: View {
           .scrollContentBackground(.hidden)
           .padding(.horizontal, 12)
           .padding(.vertical, 8)
-          .disabled(!presentation.allowsEditing)
+          .disabled(!editorAllowsEditing)
           .accessibilityLabel("主题正文")
           .accessibilityIdentifier("new-thread-content")
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .contentShape(Rectangle())
       .onTapGesture {
-        if presentation.allowsEditing { focusedField = .content }
+        if editorAllowsEditing { focusedField = .content }
+      }
+      .onChange(of: content) { value in
+        invalidatePendingSubmissionIfNeeded(title: title, content: value)
       }
 
       Divider()
@@ -186,7 +195,7 @@ private struct NewThreadComposerContentView: View {
         .help("丢弃发帖草稿")
 
         Button {
-          isPublishConfirmationPresented = true
+          requestSubmissionConfirmation()
         } label: {
           if entry.isSubmitting || isLaunchingSubmission {
             ProgressView()
@@ -208,14 +217,29 @@ private struct NewThreadComposerContentView: View {
       }
     }
     .confirmationDialog(
-      "发布这个主题？",
-      isPresented: $isPublishConfirmationPresented,
+      ComposerEntryRiskNoticeCopy.standard.title,
+      isPresented: entryRiskNoticeIsPresented,
       titleVisibility: .visible
     ) {
-      Button("发布") { publishConfirmed() }
-      Button("取消", role: .cancel) {}
+      Button(ComposerEntryRiskNoticeCopy.standard.continueTitle) {
+        continueAfterEntryRiskNotice()
+      }
+      Button(ComposerEntryRiskNoticeCopy.standard.leaveTitle, role: .cancel) {
+        leaveFromEntryRiskNotice()
+      }
     } message: {
-      Text("主题会立即提交到贴吧。网络中断时结果可能无法确定；为避免重复发帖，应用不会自动重发。")
+      Text(ComposerEntryRiskNoticeCopy.standard.message)
+    }
+    .confirmationDialog(
+      submissionConfirmationCopy.title,
+      isPresented: submissionConfirmationIsPresented,
+      titleVisibility: .visible,
+      presenting: pendingSubmission
+    ) { submission in
+      Button(submissionConfirmationCopy.actionTitle) { publishConfirmed(submission) }
+      Button("取消", role: .cancel) { pendingSubmission = nil }
+    } message: { _ in
+      Text(submissionConfirmationCopy.message)
     }
     .confirmationDialog(
       "丢弃发帖草稿？",
@@ -251,7 +275,8 @@ private struct NewThreadComposerContentView: View {
       hydrateDraftIfNeeded()
       deliverPendingConfirmedThreadIfActive()
       guard deliveredReceipt == nil else { return }
-      if presentation.allowsEditing {
+      resolveEntryRiskNoticeIfNeeded()
+      if editorAllowsEditing {
         focusedField = title.isEmpty ? .title : .content
       }
     }
@@ -275,6 +300,22 @@ private struct NewThreadComposerContentView: View {
     }
     .onChange(of: entry.state) { _ in
       hydrateDraftIfNeeded()
+      if !presentation.allowsSubmission {
+        confirmationPreparationGate.cancel()
+        pendingSubmission = nil
+      }
+      resolveEntryRiskNoticeIfNeeded()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+      confirmationPreparationGate.cancel()
+      pendingSubmission = nil
+    }
+    .onChange(of: showsPostAndReplyRiskNotice) { isEnabled in
+      if !isEnabled, entryRiskNoticeGate.isPresented {
+        continueAfterEntryRiskNotice()
+      } else {
+        resolveEntryRiskNoticeIfNeeded()
+      }
     }
     .onDisappear(perform: persistAndDeactivate)
   }
@@ -330,12 +371,14 @@ private struct NewThreadComposerContentView: View {
 
   private var canRequestSubmission: Bool {
     submissionIsAllowed
-      && !isPublishConfirmationPresented
+      && !confirmationPreparationGate.isPreparing
+      && pendingSubmission == nil
   }
 
   private var submissionIsAllowed: Bool {
     didHydrateDraft
       && presentation.allowsSubmission
+      && entryRiskNoticeGate.isResolved
       && NewThreadTitlePolicy.isValid(title)
       && NewThreadContentPolicy.isValid(content)
       && !isLaunchingSubmission
@@ -345,9 +388,43 @@ private struct NewThreadComposerContentView: View {
   private var canDiscardDraft: Bool {
     didHydrateDraft
       && presentation.allowsEditing
+      && entryRiskNoticeGate.isResolved
       && (!title.isEmpty || !content.isEmpty)
       && !isLaunchingSubmission
       && !isCheckingVisibility
+      && !confirmationPreparationGate.isPreparing
+      && pendingSubmission == nil
+  }
+
+  private var editorAllowsEditing: Bool {
+    presentation.allowsEditing
+      && entryRiskNoticeGate.isResolved
+      && !confirmationPreparationGate.isPreparing
+      && pendingSubmission == nil
+  }
+
+  private var submissionConfirmationCopy: SubmissionConfirmationCopy {
+    .newThread
+  }
+
+  private var entryRiskNoticeIsPresented: Binding<Bool> {
+    Binding(
+      get: { entryRiskNoticeGate.isPresented },
+      set: { isPresented in
+        if !isPresented, entryRiskNoticeGate.isPresented {
+          deferImplicitEntryRiskNoticeDismissal()
+        }
+      }
+    )
+  }
+
+  private var submissionConfirmationIsPresented: Binding<Bool> {
+    Binding(
+      get: { pendingSubmission != nil },
+      set: { isPresented in
+        if !isPresented { pendingSubmission = nil }
+      }
+    )
   }
 
   private var titleCountLabel: String {
@@ -368,7 +445,13 @@ private struct NewThreadComposerContentView: View {
     NewThreadComposerAutosaveTaskID(
       title: title,
       content: content,
-      shouldSave: didHydrateDraft && presentation.allowsEditing
+      shouldSave: didHydrateDraft
+        && presentation.allowsEditing
+        && entryRiskNoticeGate.isResolved
+        && !confirmationPreparationGate.isPreparing
+        && pendingSubmission == nil
+        && !isLaunchingSubmission
+        && !isCheckingVisibility
     )
   }
 
@@ -393,32 +476,94 @@ private struct NewThreadComposerContentView: View {
     }
   }
 
-  private func publishConfirmed() {
-    isPublishConfirmationPresented = false
-    guard submissionIsAllowed else { return }
+  private func requestSubmissionConfirmation() {
+    let preparationLifecycleID = lifecycleGate.lifecycleID
+    guard
+      canRequestSubmission,
+      let preparationID = confirmationPreparationGate.begin(
+        lifecycleID: preparationLifecycleID
+      )
+    else {
+      return
+    }
+    focusedField = nil
+
+    Task { @MainActor in
+      await Task.yield()
+      guard
+        lifecycleGate.isActive,
+        lifecycleGate.isCurrent(preparationLifecycleID),
+        confirmationPreparationGate.isCurrent(
+          preparationID,
+          lifecycleID: preparationLifecycleID
+        ),
+        pendingSubmission == nil,
+        let submission = SubmissionConfirmationPolicy.newThreadSnapshot(
+          id: preparationID,
+          target: target,
+          title: title,
+          content: content,
+          submissionAllowed: submissionIsAllowed
+        ),
+        confirmationPreparationGate.finish(preparationID),
+        SubmissionConfirmationPolicy.present(submission, pending: &pendingSubmission)
+      else {
+        _ = confirmationPreparationGate.finish(preparationID)
+        return
+      }
+    }
+  }
+
+  private func invalidatePendingSubmissionIfNeeded(title: String?, content: String) {
+    guard let pendingSubmission else { return }
+    if !SubmissionConfirmationPolicy.newThreadSnapshotIsCurrent(
+      pendingSubmission,
+      target: target,
+      title: title,
+      content: content,
+      submissionAllowed: submissionIsAllowed
+    ) {
+      self.pendingSubmission = nil
+    }
+  }
+
+  private func publishConfirmed(_ submission: NewThreadSubmission) {
+    guard
+      lifecycleGate.isActive,
+      let submission = SubmissionConfirmationPolicy.consume(
+        submission,
+        pending: &pendingSubmission
+      )
+    else { return }
+    guard
+      SubmissionConfirmationPolicy.newThreadSnapshotIsCurrent(
+        submission,
+        target: target,
+        title: title,
+        content: content,
+        submissionAllowed: submissionIsAllowed
+      )
+    else { return }
     isLaunchingSubmission = true
     focusedField = nil
-    let submissionID = UUID()
-    let submittedTitle = title
-    let submittedContent = content
 
     Task { @MainActor in
       defer { isLaunchingSubmission = false }
       do {
         let result = try await store.submit(
-          title: submittedTitle,
-          content: submittedContent,
-          for: target,
-          submissionID: submissionID
+          title: submission.title,
+          content: submission.content,
+          for: submission.target,
+          submissionID: submission.id
         )
-        guard result.submissionID == submissionID, result.target == target else {
+        guard result.submissionID == submission.id, result.target == submission.target else {
           throw NewThreadSubmissionError.submissionConflict
         }
         if case .confirmed(let receipt) = result.outcome {
           pendingConfirmedReceipt = receipt
           deliverPendingConfirmedThreadIfActive(
-            title: submittedTitle,
-            content: submittedContent
+            title: submission.title ?? "",
+            content: submission.content
           )
         }
       } catch is CancellationError {
@@ -426,6 +571,35 @@ private struct NewThreadComposerContentView: View {
       } catch {
         errorMessage = error.localizedDescription
       }
+    }
+  }
+
+  private func resolveEntryRiskNoticeIfNeeded() {
+    guard didHydrateDraft, presentation.allowsEditing else { return }
+    _ = entryRiskNoticeGate.composerBecameReady(
+      showsNotice: showsPostAndReplyRiskNotice
+    )
+  }
+
+  private func continueAfterEntryRiskNotice() {
+    entryRiskNoticeGate.resolve()
+    if presentation.allowsEditing {
+      focusedField = title.isEmpty ? .title : .content
+    }
+  }
+
+  private func leaveFromEntryRiskNotice() {
+    entryRiskNoticeGate.resolve()
+    focusedField = nil
+    dismiss()
+  }
+
+  private func deferImplicitEntryRiskNoticeDismissal() {
+    entryRiskNoticeGate.beginImplicitDismissal()
+    Task { @MainActor in
+      await Task.yield()
+      guard entryRiskNoticeGate.implicitDismissalIsPending else { return }
+      leaveFromEntryRiskNotice()
     }
   }
 

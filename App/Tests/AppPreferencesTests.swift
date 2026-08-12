@@ -152,6 +152,26 @@ final class AppPreferencesTests: XCTestCase {
     XCTAssertTrue(reloadedDefaults.bool(forKey: AppPreferenceKey.hidesReplyEntryPoints))
   }
 
+  func testPostAndReplyRiskNoticeUsesStableKeyAndDefaultsOn() throws {
+    XCTAssertEqual(
+      AppPreferenceKey.showsPostAndReplyRiskNotice,
+      "TiebaPlusPlus.showsPostAndReplyRiskNotice"
+    )
+    XCTAssertTrue(AppPreferenceDefaults.showsPostAndReplyRiskNotice)
+
+    let suiteName = "AppPreferencesTests.post-reply-risk-notice.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    XCTAssertNil(defaults.object(forKey: AppPreferenceKey.showsPostAndReplyRiskNotice))
+    defaults.set(false, forKey: AppPreferenceKey.showsPostAndReplyRiskNotice)
+
+    let reloadedDefaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    XCTAssertFalse(
+      reloadedDefaults.bool(forKey: AppPreferenceKey.showsPostAndReplyRiskNotice)
+    )
+  }
+
   func testReplyEntryVisibilityPolicyMatrix() {
     for preferenceHidden in [false, true] {
       for pureReading in [false, true] {
