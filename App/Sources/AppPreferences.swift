@@ -9,6 +9,7 @@ enum AppPreferenceKey {
   static let homeStartDestination = "TiebaPlusPlus.homeStartDestination"
   static let homeShowsDiscovery = "TiebaPlusPlus.homeShowsDiscovery"
   static let homeShowsRecentForums = "TiebaPlusPlus.homeShowsRecentForums"
+  static let followedForumsLayout = "TiebaPlusPlus.followedForumsLayout"
   static let searchSuggestionsEnabled = "TiebaPlusPlus.searchSuggestionsEnabled"
   static let personalizedFollowedForumsOnly =
     "TiebaPlusPlus.personalizedFollowedForumsOnly"
@@ -177,6 +178,71 @@ enum AppStartDestination: String, CaseIterable, Hashable, Identifiable, Sendable
 
   static func resolved(_ rawValue: String) -> Self {
     Self(rawValue: rawValue) ?? defaultValue
+  }
+}
+
+enum FollowedForumsLayoutMode: String, CaseIterable, Hashable, Identifiable, Sendable {
+  case adaptive
+  case singleColumn
+
+  static let defaultValue = Self.adaptive
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .adaptive:
+      "自适应"
+    case .singleColumn:
+      "单列"
+    }
+  }
+
+  var toggled: Self {
+    switch self {
+    case .adaptive:
+      .singleColumn
+    case .singleColumn:
+      .adaptive
+    }
+  }
+
+  static func resolved(_ rawValue: String) -> Self {
+    Self(rawValue: rawValue) ?? defaultValue
+  }
+}
+
+enum FollowedForumsLayoutPolicy {
+  static let spacing: CGFloat = 10
+  static let adaptiveMinimumWidth: CGFloat = 180
+  static let adaptiveMaximumWidth: CGFloat = 360
+
+  static func effectiveMode(
+    preferred: FollowedForumsLayoutMode,
+    dynamicTypeSize: DynamicTypeSize
+  ) -> FollowedForumsLayoutMode {
+    dynamicTypeSize.isAccessibilitySize ? .singleColumn : preferred
+  }
+
+  static func columns(
+    preferred: FollowedForumsLayoutMode,
+    dynamicTypeSize: DynamicTypeSize
+  ) -> [GridItem] {
+    switch effectiveMode(preferred: preferred, dynamicTypeSize: dynamicTypeSize) {
+    case .adaptive:
+      [
+        GridItem(
+          .adaptive(
+            minimum: adaptiveMinimumWidth,
+            maximum: adaptiveMaximumWidth
+          ),
+          spacing: spacing,
+          alignment: .top
+        )
+      ]
+    case .singleColumn:
+      [GridItem(.flexible(), spacing: spacing, alignment: .top)]
+    }
   }
 }
 

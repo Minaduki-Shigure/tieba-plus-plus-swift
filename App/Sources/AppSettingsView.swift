@@ -29,6 +29,8 @@ struct AppSettingsView: View {
   private var homeShowsDiscovery = AppPreferenceDefaults.homeShowsDiscovery
   @AppStorage(AppPreferenceKey.homeShowsRecentForums)
   private var homeShowsRecentForums = true
+  @AppStorage(AppPreferenceKey.followedForumsLayout)
+  private var followedForumsLayout = FollowedForumsLayoutMode.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.favoriteThreadsOpenOnlyAuthor)
   private var favoriteThreadsOpenOnlyAuthor =
     AppPreferenceDefaults.favoriteThreadsOpenOnlyAuthor
@@ -173,10 +175,18 @@ struct AppSettingsView: View {
         Toggle("显示发现区", isOn: $homeShowsDiscovery)
 
         Toggle("显示最近访问的贴吧", isOn: $homeShowsRecentForums)
+
+        if AppDynamicTypeLayout.prefersMenuPickers(for: dynamicTypeSize) {
+          followedForumsLayoutPicker
+            .pickerStyle(.menu)
+        } else {
+          followedForumsLayoutPicker
+            .pickerStyle(.segmented)
+        }
       } header: {
         Text("首页")
       } footer: {
-        Text("启动首选页会在下次启动应用时生效。")
+        Text("启动首选页会在下次启动应用时生效；辅助功能字号下，关注贴吧固定使用单列。")
       }
 
       Section {
@@ -438,6 +448,21 @@ struct AppSettingsView: View {
       get: { AppStartDestination.resolved(homeStartDestination) },
       set: { homeStartDestination = $0.rawValue }
     )
+  }
+
+  private var followedForumsLayoutSelection: Binding<FollowedForumsLayoutMode> {
+    Binding(
+      get: { FollowedForumsLayoutMode.resolved(followedForumsLayout) },
+      set: { followedForumsLayout = $0.rawValue }
+    )
+  }
+
+  private var followedForumsLayoutPicker: some View {
+    Picker("关注贴吧布局", selection: followedForumsLayoutSelection) {
+      ForEach(FollowedForumsLayoutMode.allCases) { mode in
+        Text(mode.title).tag(mode)
+      }
+    }
   }
 
   private var contentMediaLoadPolicySelection: Binding<ContentMediaLoadPolicy> {

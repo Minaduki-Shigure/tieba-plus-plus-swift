@@ -9,6 +9,9 @@ struct FollowedForumsView: View {
 
   @State private var surfaceID = UUID()
   @EnvironmentObject private var viewModel: FollowedForumsViewModel
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @AppStorage(AppPreferenceKey.followedForumsLayout)
+  private var followedForumsLayout = FollowedForumsLayoutMode.defaultValue.rawValue
 
   init(
     browseService: any BrowseService & ForumPostSearchService & UserProfileService
@@ -40,54 +43,79 @@ struct FollowedForumsView: View {
     }
     .navigationTitle("关注的贴吧")
     .navigationBarTitleDisplayMode(.inline)
+    .toolbar {
+      if !dynamicTypeSize.isAccessibilitySize {
+        Button(action: toggleLayout) {
+          Image(systemName: preferredLayout == .adaptive ? "list.bullet" : "rectangle.grid.2x2")
+        }
+        .accessibilityLabel(preferredLayout == .adaptive ? "切换为单列" : "切换为自适应布局")
+        .help(preferredLayout == .adaptive ? "切换为单列" : "切换为自适应布局")
+        .accessibilityIdentifier("followed-forums-layout-toggle")
+      }
+    }
     .onAppear { viewModel.fullListSurfaceDidAppear(id: surfaceID) }
     .onDisappear { viewModel.fullListSurfaceDidDisappear(id: surfaceID) }
   }
 
   private var forumList: some View {
-    List {
-      ForEach(viewModel.forums) { forum in
-        NavigationLink {
-          ForumView(
-            forumName: forum.name,
-            service: browseService,
-            historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository
-          )
-        } label: {
-          VStack(alignment: .leading, spacing: 5) {
-            Text("\(forum.name)吧")
-              .font(.headline)
-            HStack(spacing: 12) {
-              if forum.level > 0 {
-                Label("等级 \(forum.level)", systemImage: "chart.line.uptrend.xyaxis")
-              }
-              if forum.experience > 0 {
-                Label(forum.experience.formatted(), systemImage: "sparkles")
-              }
+    ScrollView {
+      LazyVStack(spacing: 0) {
+        LazyVGrid(
+          columns: FollowedForumsLayoutPolicy.columns(
+            preferred: preferredLayout,
+            dynamicTypeSize: dynamicTypeSize
+          ),
+          alignment: .leading,
+          spacing: FollowedForumsLayoutPolicy.spacing
+        ) {
+          ForEach(viewModel.forums) { forum in
+            NavigationLink {
+              ForumView(
+                forumName: forum.name,
+                service: browseService,
+                historyRepository: historyRepository,
+                favoritesRepository: favoritesRepository,
+                searchHistoryRepository: searchHistoryRepository
+              )
+            } label: {
+              FollowedForumCard(forum: forum)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .buttonStyle(.plain)
           }
-          .padding(.vertical, 3)
         }
-        .onAppear { viewModel.loadMoreIfNeeded(current: forum) }
-      }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
 
-      if viewModel.isLoadingMore {
-        HStack {
-          Spacer()
-          ProgressView()
-          Spacer()
+        if viewModel.isLoadingMore {
+          HStack {
+            Spacer()
+            ProgressView()
+            Spacer()
+          }
+          .padding(.vertical, 12)
+        } else if let message = viewModel.loadMoreError {
+          LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+        } else if viewModel.canLoadNextPage {
+          Button(action: viewModel.loadNextPage) {
+            Label("加载更多", systemImage: "arrow.down.circle")
+          }
+          .buttonStyle(.bordered)
+          .padding(.bottom, 16)
+          .accessibilityIdentifier("followed-forums-load-more")
         }
-        .listRowSeparator(.hidden)
-      } else if let message = viewModel.loadMoreError {
-        LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
-          .listRowSeparator(.hidden)
       }
     }
-    .listStyle(.plain)
+    .background(Color(uiColor: .systemGroupedBackground))
     .refreshable { await viewModel.refresh() }
+  }
+
+  private var preferredLayout: FollowedForumsLayoutMode {
+    FollowedForumsLayoutMode.resolved(followedForumsLayout)
+  }
+
+  private func toggleLayout() {
+    followedForumsLayout = preferredLayout.toggled.rawValue
   }
 }

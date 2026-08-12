@@ -20,6 +20,82 @@ final class AppPreferencesTests: XCTestCase {
     XCTAssertEqual(AppStartDestination.resolved("future-value"), .home)
   }
 
+  func testFollowedForumsLayoutUsesStableValuesAndDefaultsToAdaptive() {
+    XCTAssertEqual(
+      AppPreferenceKey.followedForumsLayout,
+      "TiebaPlusPlus.followedForumsLayout"
+    )
+    XCTAssertEqual(FollowedForumsLayoutMode.defaultValue, .adaptive)
+    XCTAssertEqual(FollowedForumsLayoutMode.allCases, [.adaptive, .singleColumn])
+    XCTAssertEqual(
+      FollowedForumsLayoutMode.allCases.map(\.rawValue),
+      ["adaptive", "singleColumn"]
+    )
+    XCTAssertEqual(
+      FollowedForumsLayoutMode.allCases.map(\.title),
+      ["自适应", "单列"]
+    )
+    XCTAssertEqual(FollowedForumsLayoutMode.resolved("adaptive"), .adaptive)
+    XCTAssertEqual(FollowedForumsLayoutMode.resolved("singleColumn"), .singleColumn)
+    XCTAssertEqual(FollowedForumsLayoutMode.resolved("future-value"), .adaptive)
+    XCTAssertEqual(FollowedForumsLayoutMode.adaptive.toggled, .singleColumn)
+    XCTAssertEqual(FollowedForumsLayoutMode.singleColumn.toggled, .adaptive)
+  }
+
+  func testFollowedForumsLayoutPersistsInUserDefaults() throws {
+    let suiteName = "AppPreferencesTests.followed-forums-layout.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    XCTAssertNil(defaults.object(forKey: AppPreferenceKey.followedForumsLayout))
+    defaults.set(
+      FollowedForumsLayoutMode.singleColumn.rawValue,
+      forKey: AppPreferenceKey.followedForumsLayout
+    )
+
+    let reloadedDefaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    XCTAssertEqual(
+      FollowedForumsLayoutMode.resolved(
+        reloadedDefaults.string(forKey: AppPreferenceKey.followedForumsLayout) ?? ""
+      ),
+      .singleColumn
+    )
+  }
+
+  func testFollowedForumsLayoutForcesSingleColumnAtAccessibilitySizes() {
+    XCTAssertEqual(
+      FollowedForumsLayoutPolicy.effectiveMode(
+        preferred: .adaptive,
+        dynamicTypeSize: .xxxLarge
+      ),
+      .adaptive
+    )
+    XCTAssertEqual(
+      FollowedForumsLayoutPolicy.effectiveMode(
+        preferred: .singleColumn,
+        dynamicTypeSize: .large
+      ),
+      .singleColumn
+    )
+
+    let accessibilitySizes: [DynamicTypeSize] = [
+      .accessibility1,
+      .accessibility2,
+      .accessibility3,
+      .accessibility4,
+      .accessibility5,
+    ]
+    for size in accessibilitySizes {
+      XCTAssertEqual(
+        FollowedForumsLayoutPolicy.effectiveMode(
+          preferred: .adaptive,
+          dynamicTypeSize: size
+        ),
+        .singleColumn
+      )
+    }
+  }
+
   func testPersonalizedRecommendationIdentityIsStableAndRepairsInvalidStorage() throws {
     let suiteName = "AppPreferencesTests.personalized.\(UUID().uuidString)"
     let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

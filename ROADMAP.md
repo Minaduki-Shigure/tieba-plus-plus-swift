@@ -21,7 +21,7 @@ does not yet include the foreground batch-check-in work on `main`.
 | Anonymous discovery, search, and forums | 20 | 18–19 | Core browsing, ranking, recommendations, categories, and search are implemented; feedback and a few niche discovery paths remain |
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
-| Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, media preferences, reply-entry visibility, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
+| Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, media preferences, followed-forum layout, reply-entry visibility, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, switching, a self-profile summary, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 10–11 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, three plain-text reply targets, and plain-text new-topic creation have guarded implementations; real batch-check-in behavior, creation, poll and interaction-restriction success, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
@@ -41,6 +41,9 @@ the private-read row. The target-bound interaction-permission read is likewise
 credited with its guarded server-write workflow rather than duplicated. The
 inbox startup destination improves parity inside the
 existing local-settings credit but is too small to add a full weighted point.
+The followed-forum layout choice likewise improves the completeness of the
+existing local-settings credit but does not add a full weighted point because it
+reflows two existing surfaces without adding a data source or workflow.
 
 ## Available
 
@@ -63,6 +66,9 @@ the source metadata is updated to that tested IPA.
 - Default-off anonymous online suggestions for the home search field
 - Local home-entry customization with a next-launch home, ranking, topic,
   inbox, favorite, or history destination plus an optional discovery section
+- Persistent adaptive-grid or single-column followed-forum layout shared by the
+  six-item home projection and complete list, with accessibility-size fallback
+  and explicit full-list pagination independent from card appearance
 - Global post search with newest, oldest, and relevance sorting
 - Local keyword, user, and video filtering for global and per-forum search results
 - Local filtering for paginated public-profile activity
@@ -172,7 +178,8 @@ the source metadata is updated to that tested IPA.
   following, and follower views
 - App-scoped, memory-only followed-forum state shared by a six-item logged-in
   home projection, the active account's complete paginated list, and a selected
-  default-off followed-forum recommendation filter
+  default-off followed-forum recommendation filter, with a local layout setting
+  that performs no explicit refresh or account mutation
 - Separate Tieba cloud favorites with offset pagination, saved-post navigation,
   deleted-thread state, account-lease isolation, and confirmed list deletion only
   after raw thread/forum rebinding, plus confirmed thread-detail add, saved-floor
@@ -911,6 +918,14 @@ The resolved category updates semantic fonts and scale-aware controls throughout
 the app's SwiftUI hierarchy immediately; Safari, share sheets, and other system
 UI remain system-managed. Unknown stored values normalize to following the system.
 Appearance, sort, and text-size adjustment values are nonsecret local enums.
+The followed-forum layout setting adapts TiebaLite's `listSingle` choice into an
+iOS-native adaptive grid or single column. The home projection and complete
+list resolve the same stored enum, while accessibility Dynamic Type sizes force
+one effective column without overwriting the user's preference. Changing layout
+does not explicitly refresh, start image downloads, or mutate the account-bound
+followed-forum snapshot. The complete list requests another page only after the
+user selects its explicit load-more control; card appearance and layout reflow
+never authorize account traffic.
 No-history mode updates the recording flag inside the existing versioned
 history archive, so it does not create a competing source of truth or delete
 favorites. Pure-reading mode is transient and removes author chrome, filter

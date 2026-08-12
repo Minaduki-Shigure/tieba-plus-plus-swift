@@ -504,7 +504,10 @@ final class AccountViewModelTests: XCTestCase {
 
     viewModel.loadIfNeeded()
     try await waitForAccountState { viewModel.state == .loaded }
-    viewModel.loadMoreIfNeeded(current: try XCTUnwrap(viewModel.forums.last))
+    let surfaceID = UUID()
+    viewModel.fullListSurfaceDidAppear(id: surfaceID)
+    XCTAssertTrue(viewModel.canLoadNextPage)
+    viewModel.loadNextPage()
     try await waitForAccountState {
       await vault.activeSessionReadCount() == 3 && viewModel.state == .idle
     }
@@ -514,6 +517,7 @@ final class AccountViewModelTests: XCTestCase {
     XCTAssertFalse(viewModel.isLoadingMore)
     let requests = await service.followedRequestSnapshot()
     XCTAssertEqual(requests, [FollowedRequest(userID: 7, page: 1, pageSize: 50)])
+    viewModel.fullListSurfaceDidDisappear(id: surfaceID)
   }
 
   func testFollowedForumsRejectUnexpectedReturnedPageNumber() async throws {
@@ -609,7 +613,8 @@ final class AccountViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.state, .loaded)
     XCTAssertEqual(viewModel.indexState, .failed(expectedMessage))
     XCTAssertEqual(viewModel.loadMoreError, expectedMessage)
-    viewModel.loadMoreIfNeeded(current: try XCTUnwrap(viewModel.forums.last))
+    XCTAssertFalse(viewModel.canLoadNextPage)
+    viewModel.loadNextPage()
     XCTAssertFalse(viewModel.isLoadingMore)
     let requests = await service.followedRequestSnapshot()
     XCTAssertEqual(requests.map(\.page), [1, 2])
@@ -709,6 +714,70 @@ final class AccountViewModelTests: XCTestCase {
 
     XCTAssertEqual(FollowedForumsHomeProjection.maximumForumCount, 6)
     XCTAssertEqual(visibleForums, Array(forums.prefix(6)))
+  }
+
+  func testFullListRequiresExplicitCommandBeforeLoadingNextPage() async throws {
+    let vault = AccountVaultSpy(
+      sessions: [session(userID: 7, name: "active")],
+      activeUserID: 7
+    )
+    let firstPage = FollowedForumPageData(
+      forums: [forum(id: 1, name: "one")],
+      currentPage: 1,
+      hasMore: true
+    )
+    let secondPage = FollowedForumPageData(
+      forums: [forum(id: 2, name: "two")],
+      currentPage: 2,
+      hasMore: false
+    )
+    let service = AccountServiceSpy(
+      followedPages: [1: .success(firstPage), 2: .success(secondPage)]
+    )
+    let viewModel = FollowedForumsViewModel(service: service, vault: vault)
+    let surfaceID = UUID()
+
+    viewModel.fullListSurfaceDidAppear(id: surfaceID)
+    try await waitForAccountState { viewModel.state == .loaded }
+
+    XCTAssertTrue(viewModel.canLoadNextPage)
+    await Task.yield()
+    let requestsBeforeCommand = await service.followedRequestSnapshot()
+    XCTAssertTrue(viewModel.canLoadNextPage)
+    XCTAssertEqual(requestsBeforeCommand.map(\.page), [1])
+
+    viewModel.loadNextPage()
+    try await waitForAccountState { !viewModel.isLoadingMore && viewModel.forums.count == 2 }
+
+    XCTAssertFalse(viewModel.canLoadNextPage)
+    let requestsAfterCommand = await service.followedRequestSnapshot()
+    XCTAssertEqual(requestsAfterCommand.map(\.page), [1, 2])
+    viewModel.fullListSurfaceDidDisappear(id: surfaceID)
+  }
+
+  func testExplicitNextPageCommandRequiresAnActiveFullListSurface() async throws {
+    let vault = AccountVaultSpy(
+      sessions: [session(userID: 7, name: "active")],
+      activeUserID: 7
+    )
+    let firstPage = FollowedForumPageData(
+      forums: [forum(id: 1, name: "one")],
+      currentPage: 1,
+      hasMore: true
+    )
+    let service = AccountServiceSpy(followedPages: [1: .success(firstPage)])
+    let viewModel = FollowedForumsViewModel(service: service, vault: vault)
+
+    viewModel.loadIfNeeded()
+    try await waitForAccountState { viewModel.state == .loaded }
+    XCTAssertTrue(viewModel.canLoadNextPage)
+
+    viewModel.loadNextPage()
+    await Task.yield()
+
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1])
+    XCTAssertFalse(viewModel.isLoadingMore)
   }
 
   func testFullListSurfaceRegistrationIsIdempotentAndSupportsMultipleSurfaces() {

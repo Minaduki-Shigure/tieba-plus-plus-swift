@@ -16,7 +16,7 @@ checks.
 | Area | Current state |
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
-| Local features | Available for history, favorites, filtering, appearance, media preferences, reply-entry visibility, and a next-launch destination including the inbox |
+| Local features | Available for history, favorites, filtering, appearance, media preferences, followed-forum layout, reply-entry visibility, and a next-launch destination including the inbox |
 | Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, plain-text topic/floor/nested replies, and plain-text new-topic creation are in device validation; other writes stay disabled |
 | TiebaLite parity | Anonymous reading and media: about 91–95%; full product scope: about 75–78% complete, with about 22–25% remaining |
@@ -263,7 +263,9 @@ checks.
   filter matches the active account's followed forums by stable forum ID.
 - **Appearance:** System, light, and dark themes, a bounded accent palette,
   Dynamic Type-relative text sizing, compact previews, and optional combined
-  nickname/username presentation are persistent local controls.
+  nickname/username presentation are persistent local controls. Followed-forum
+  cards can use an adaptive grid or a single column; accessibility text sizes
+  always use one column so labels can expand without overlap.
 - **Reply controls:** A default-off local preference can hide topic, floor,
   nested-reply, and inbox quick-reply entry points without hiding reply content,
   read-only navigation, agreement controls, existing drafts, or an already-open
@@ -291,7 +293,10 @@ checks.
   must be logged in again before an STOKEN-dependent feature is available.
 - **Forum account state:** On current `main`, the logged-in home page projects at
   most six entries from the active account's followed-forum list and can open the
-  complete paginated list. A selected, default-off recommendation filter is a
+  complete paginated list. The home projection and complete list share a
+  persistent adaptive-grid or single-column layout preference, with an explicit
+  switch on the complete list. Layout changes are local and do not reload the
+  account snapshot. A selected, default-off recommendation filter is a
   third consumer of the same app-scoped, memory-only state. It publishes an
   allowlist only after the server explicitly ends pagination; partial, stalled,
   invalid, over-limit, signed-out, and failed results remain unavailable. Each

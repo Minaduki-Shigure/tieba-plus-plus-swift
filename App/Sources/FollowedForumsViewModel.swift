@@ -55,6 +55,13 @@ final class FollowedForumsViewModel: ObservableObject {
     !completeIndexSurfaceIDs.isEmpty
   }
 
+  var canLoadNextPage: Bool {
+    hasMore
+      && !isLoadingMore
+      && loadMoreError == nil
+      && state == .loaded
+  }
+
   func fullListSurfaceDidAppear(id: UUID) {
     fullListSurfaceIDs.insert(id)
     loadIfNeeded()
@@ -105,14 +112,8 @@ final class FollowedForumsViewModel: ObservableObject {
     beginNewEpoch(loadImmediately: loadImmediately)
   }
 
-  func loadMoreIfNeeded(current forum: FollowedForumItem) {
-    guard
-      forum.id == forums.last?.id,
-      hasMore,
-      !isLoadingMore,
-      loadMoreError == nil,
-      state == .loaded
-    else { return }
+  func loadNextPage() {
+    guard hasActiveFullListSurface, canLoadNextPage else { return }
     load(page: currentPage + 1, replacing: false)
   }
 

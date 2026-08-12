@@ -20,12 +20,15 @@ struct RootView: View {
   @State private var searchHistoryAction: GlobalSearchHistoryAction?
   @State private var linkErrorMessage: String?
   @Environment(\.scenePhase) private var scenePhase
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @EnvironmentObject private var mediaPlaybackCoordinator: MediaPlaybackCoordinator
   @EnvironmentObject private var followedForumsViewModel: FollowedForumsViewModel
   @AppStorage(AppPreferenceKey.homeShowsRecentForums)
   private var homeShowsRecentForums = true
   @AppStorage(AppPreferenceKey.homeShowsDiscovery)
   private var homeShowsDiscovery = AppPreferenceDefaults.homeShowsDiscovery
+  @AppStorage(AppPreferenceKey.followedForumsLayout)
+  private var followedForumsLayout = FollowedForumsLayoutMode.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.searchSuggestionsEnabled)
   private var searchSuggestionsEnabled = false
   @AppStorage(AppPreferenceKey.favoriteThreadsOpenOnlyAuthor)
@@ -447,14 +450,27 @@ struct RootView: View {
     )
     if !forums.isEmpty {
       Section("关注的贴吧") {
-        ForEach(forums) { forum in
-          Button {
-            path.append(.forum(forum.name))
-          } label: {
-            FollowedForumHomeRow(forum: forum)
+        LazyVGrid(
+          columns: FollowedForumsLayoutPolicy.columns(
+            preferred: FollowedForumsLayoutMode.resolved(followedForumsLayout),
+            dynamicTypeSize: dynamicTypeSize
+          ),
+          alignment: .leading,
+          spacing: FollowedForumsLayoutPolicy.spacing
+        ) {
+          ForEach(forums) { forum in
+            Button {
+              path.append(.forum(forum.name))
+            } label: {
+              FollowedForumCard(forum: forum)
+            }
+            .buttonStyle(.plain)
           }
-          .buttonStyle(.plain)
         }
+        .padding(.vertical, 2)
+        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
 
         NavigationLink(value: RootDestination.followedForums) {
           Label("查看全部", systemImage: "list.bullet")
@@ -749,57 +765,6 @@ enum RootDestination: Hashable {
 enum RootFollowedForumsActivationPolicy {
   static func isActive(path: [RootDestination]) -> Bool {
     path.isEmpty
-  }
-}
-
-private struct FollowedForumHomeRow: View {
-  let forum: FollowedForumItem
-
-  var body: some View {
-    HStack(spacing: 12) {
-      Image(systemName: "text.bubble")
-        .frame(width: 36, height: 36)
-        .background(Color.accentColor.opacity(0.12), in: Circle())
-        .foregroundStyle(Color.accentColor)
-        .accessibilityHidden(true)
-
-      VStack(alignment: .leading, spacing: 3) {
-        Text("\(forum.name)吧")
-          .foregroundStyle(.primary)
-          .lineLimit(1)
-
-        if forum.level > 0 || forum.experience > 0 {
-          HStack(spacing: 10) {
-            if forum.level > 0 {
-              Text("等级 \(forum.level)")
-            }
-            if forum.experience > 0 {
-              Text("经验 \(forum.experience.formatted())")
-            }
-          }
-          .font(.caption)
-          .foregroundStyle(.secondary)
-        }
-      }
-
-      Spacer(minLength: 0)
-      Image(systemName: "chevron.right")
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.tertiary)
-        .accessibilityHidden(true)
-    }
-    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-    .contentShape(Rectangle())
-    .accessibilityElement(children: .ignore)
-    .accessibilityLabel("\(forum.name)吧")
-    .accessibilityValue(accessibilityValue)
-  }
-
-  private var accessibilityValue: String {
-    var values = [String]()
-    if forum.level > 0 { values.append("等级 \(forum.level)") }
-    if forum.experience > 0 { values.append("经验 \(forum.experience)") }
-    return values.joined(separator: "，")
   }
 }
 
