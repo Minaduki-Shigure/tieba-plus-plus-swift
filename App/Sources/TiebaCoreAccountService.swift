@@ -2821,13 +2821,17 @@ private actor ForumAccountWriteCoordinator {
       credentials: credentials,
       authorizedTargets: authorizedTargets
     )
+    let cookieName: TiebaBDUSSCookieName
+    switch credentials.bdussCookieName {
+    case .bduss:
+      cookieName = .bduss
+    case .bdussBFESS:
+      cookieName = .bdussBFESS
+    }
     let credential = TiebaSessionCredential(
       bduss: credentials.bduss,
       stoken: credentials.stoken,
-      bdussCookieName: switch credentials.bdussCookieName {
-      case .bduss: .bduss
-      case .bdussBFESS: .bdussBFESS
-      }
+      bdussCookieName: cookieName
     )
     if var entry = officialBatchInFlight[expectedUserID] {
       if entry.identity == identity {
