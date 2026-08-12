@@ -149,7 +149,7 @@ struct ForumPrimaryActionPolicy: Equatable, Sendable {
 
   func canPerform(_ action: ForumPrimaryAction) -> Bool {
     guard toolbarAction == action else { return false }
-    switch action {
+    return switch action {
     case .newThread:
       hasNewThreadTarget
     case .refresh:
