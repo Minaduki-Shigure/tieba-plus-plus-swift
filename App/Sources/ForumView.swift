@@ -22,6 +22,8 @@ struct ForumView: View {
   @State private var navigationDestination: ForumNavigationDestination?
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Environment(\.accountAccess) private var accountAccess
+  @AppStorage(AppPreferenceKey.forumPrimaryAction)
+  private var forumPrimaryAction = ForumPrimaryAction.defaultValue.rawValue
 
   init(
     forumName: String,
@@ -80,15 +82,16 @@ struct ForumView: View {
           .accessibilityLabel("吧内搜索")
           .help("吧内搜索")
 
-          if let target = newThreadTarget {
+          if let action = primaryActionPolicy.toolbarAction {
             Button {
-              navigationDestination = .newThread(target)
+              performPrimaryAction(action, proxy: proxy)
             } label: {
-              Image(systemName: "square.and.pencil")
+              Image(systemName: action.systemImage)
             }
-            .accessibilityLabel("发布主题")
-            .help("发布主题")
-            .accessibilityIdentifier("forum-new-thread")
+            .disabled(!primaryActionPolicy.canPerform(action))
+            .accessibilityLabel(action.title)
+            .help(action.title)
+            .accessibilityIdentifier("forum-primary-action-\(action.rawValue)")
           }
 
           if let accountAccess, viewModel.forum.id > 0 {
@@ -174,6 +177,19 @@ struct ForumView: View {
     )
   }
 
+  private var selectedPrimaryAction: ForumPrimaryAction {
+    ForumPrimaryAction.resolved(forumPrimaryAction)
+  }
+
+  private var primaryActionPolicy: ForumPrimaryActionPolicy {
+    ForumPrimaryActionPolicy(
+      selected: selectedPrimaryAction,
+      hasNewThreadTarget: newThreadTarget != nil,
+      isLoading: viewModel.state == .loading,
+      hasThreads: !viewModel.threads.isEmpty
+    )
+  }
+
   private var forumNavigationPresented: Binding<Bool> {
     Binding(
       get: { navigationDestination != nil },
@@ -226,15 +242,25 @@ struct ForumView: View {
 
   private func forumActionsMenu(proxy: ScrollViewProxy) -> some View {
     Menu {
+      if let target = newThreadTarget {
+        Button {
+          openNewThread(target)
+        } label: {
+          Label("发布主题", systemImage: "square.and.pencil")
+        }
+
+        Divider()
+      }
+
       Button {
-        Task { @MainActor in await viewModel.refresh() }
+        refreshForum()
       } label: {
         Label("刷新", systemImage: "arrow.clockwise")
       }
       .disabled(viewModel.state == .loading)
 
       Button {
-        proxy.scrollTo(ForumScrollTarget.top, anchor: .top)
+        scrollToTop(proxy: proxy)
       } label: {
         Label("回到顶部", systemImage: "arrow.up.to.line")
       }
@@ -254,6 +280,39 @@ struct ForumView: View {
     }
     .accessibilityLabel("更多贴吧操作")
     .help("更多贴吧操作")
+  }
+
+  private func performPrimaryAction(
+    _ action: ForumPrimaryAction,
+    proxy: ScrollViewProxy
+  ) {
+    guard primaryActionPolicy.canPerform(action) else { return }
+    switch action {
+    case .newThread:
+      guard let target = newThreadTarget else { return }
+      openNewThread(target)
+    case .refresh:
+      refreshForum()
+    case .scrollToTop:
+      scrollToTop(proxy: proxy)
+    case .hidden:
+      return
+    }
+  }
+
+  private func openNewThread(_ target: NewThreadTarget) {
+    guard newThreadTarget == target else { return }
+    navigationDestination = .newThread(target)
+  }
+
+  private func refreshForum() {
+    guard viewModel.state != .loading else { return }
+    Task { @MainActor in await viewModel.refresh() }
+  }
+
+  private func scrollToTop(proxy: ScrollViewProxy) {
+    guard !viewModel.threads.isEmpty else { return }
+    proxy.scrollTo(ForumScrollTarget.top, anchor: .top)
   }
 
   private var optionsBar: some View {

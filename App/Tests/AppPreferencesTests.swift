@@ -5,6 +5,118 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class AppPreferencesTests: XCTestCase {
+  func testForumPrimaryActionUsesStableTiebaLiteValuesAndFallback() {
+    XCTAssertEqual(
+      AppPreferenceKey.forumPrimaryAction,
+      "TiebaPlusPlus.forumPrimaryAction"
+    )
+    XCTAssertEqual(ForumPrimaryAction.defaultValue, .newThread)
+    XCTAssertEqual(
+      ForumPrimaryAction.allCases,
+      [.newThread, .refresh, .scrollToTop, .hidden]
+    )
+    XCTAssertEqual(
+      ForumPrimaryAction.allCases.map(\.rawValue),
+      ["post", "refresh", "back_to_top", "hide"]
+    )
+    XCTAssertEqual(
+      ForumPrimaryAction.allCases.map(\.title),
+      ["发布主题", "刷新", "回到顶部", "隐藏"]
+    )
+    XCTAssertEqual(
+      ForumPrimaryAction.allCases.map(\.systemImage),
+      ["square.and.pencil", "arrow.clockwise", "arrow.up.to.line", "eye.slash"]
+    )
+    XCTAssertEqual(ForumPrimaryAction.resolved("refresh"), .refresh)
+    XCTAssertEqual(ForumPrimaryAction.resolved("back_to_top"), .scrollToTop)
+    XCTAssertEqual(ForumPrimaryAction.resolved("future-value"), .newThread)
+    XCTAssertEqual(ForumPrimaryAction.resolved(""), .newThread)
+  }
+
+  func testForumPrimaryActionPersistsInUserDefaults() throws {
+    let suiteName = "AppPreferencesTests.forum-primary-action.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    XCTAssertNil(defaults.object(forKey: AppPreferenceKey.forumPrimaryAction))
+    defaults.set(
+      ForumPrimaryAction.scrollToTop.rawValue,
+      forKey: AppPreferenceKey.forumPrimaryAction
+    )
+
+    let reloadedDefaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    XCTAssertEqual(
+      ForumPrimaryAction.resolved(
+        reloadedDefaults.string(forKey: AppPreferenceKey.forumPrimaryAction) ?? ""
+      ),
+      .scrollToTop
+    )
+  }
+
+  func testForumPrimaryActionPolicyKeepsOnlySelectedToolbarAction() {
+    let readySelections: [(ForumPrimaryAction, ForumPrimaryAction?)] = [
+      (.newThread, .newThread),
+      (.refresh, .refresh),
+      (.scrollToTop, .scrollToTop),
+      (.hidden, nil),
+    ]
+
+    for (selected, expectedToolbarAction) in readySelections {
+      let policy = ForumPrimaryActionPolicy(
+        selected: selected,
+        hasNewThreadTarget: true,
+        isLoading: false,
+        hasThreads: true
+      )
+
+      XCTAssertEqual(policy.toolbarAction, expectedToolbarAction)
+      for action in ForumPrimaryAction.allCases {
+        XCTAssertEqual(
+          policy.canPerform(action),
+          action == expectedToolbarAction
+        )
+      }
+    }
+  }
+
+  func testForumPrimaryActionPolicyRechecksPageCapabilities() {
+    let missingTarget = ForumPrimaryActionPolicy(
+      selected: .newThread,
+      hasNewThreadTarget: false,
+      isLoading: false,
+      hasThreads: true
+    )
+    XCTAssertEqual(missingTarget.toolbarAction, .newThread)
+    XCTAssertFalse(missingTarget.canPerform(.newThread))
+
+    let loading = ForumPrimaryActionPolicy(
+      selected: .refresh,
+      hasNewThreadTarget: true,
+      isLoading: true,
+      hasThreads: true
+    )
+    XCTAssertEqual(loading.toolbarAction, .refresh)
+    XCTAssertFalse(loading.canPerform(.refresh))
+
+    let empty = ForumPrimaryActionPolicy(
+      selected: .scrollToTop,
+      hasNewThreadTarget: true,
+      isLoading: false,
+      hasThreads: false
+    )
+    XCTAssertEqual(empty.toolbarAction, .scrollToTop)
+    XCTAssertFalse(empty.canPerform(.scrollToTop))
+
+    let hidden = ForumPrimaryActionPolicy(
+      selected: .hidden,
+      hasNewThreadTarget: true,
+      isLoading: false,
+      hasThreads: true
+    )
+    XCTAssertNil(hidden.toolbarAction)
+    XCTAssertFalse(hidden.canPerform(.hidden))
+  }
+
   func testHomeCustomizationUsesStableKeysAndDefaults() {
     XCTAssertEqual(
       AppPreferenceKey.homeStartDestination,

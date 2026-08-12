@@ -1195,8 +1195,14 @@ deduplication, and local-filter checks before display. Empty or duplicate-only
 responses must not replace the loaded snapshot, and automatic polling remains
 unsupported.
 
-Appearance, app text-size adjustment, and forum-sort preferences may store only
-bounded, nonsecret local values in UserDefaults. Text-size adjustment is a
+Appearance, app text-size adjustment, forum-sort, and forum primary-action
+preferences may store only bounded, nonsecret local values in UserDefaults.
+Changing the forum primary action must not read account storage, issue a request,
+or authorize a write. The selected toolbar action must recheck current page
+capability when pressed; selecting hidden removes only that shortcut, while
+new-topic creation remains governed by the existing target validation,
+account-session lease, draft isolation, and explicit submission confirmation.
+Text-size adjustment is a
 presentation-only offset from the current system Dynamic Type category and must
 not enter requests, account storage, archives, logs, or exported content. The
 no-history control must update the recording flag in

@@ -16,7 +16,7 @@ checks.
 | Area | Current state |
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
-| Local features | Available for history, favorites, filtering, appearance, media preferences, followed-forum layout, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
+| Local features | Available for history, favorites, filtering, appearance, media preferences, followed-forum layout, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
 | Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, plain-text topic/floor/nested replies, and plain-text new-topic creation are in device validation; other writes stay disabled |
 | TiebaLite parity | Anonymous reading and media: about 91–95%; full product scope: about 75–78% complete, with about 22–25% remaining |
@@ -191,7 +191,10 @@ checks.
   local history, and optional credential-free suggestions.
 - **Forum browsing:** Forum and channel lists support pagination, refresh,
   reply-time or creation-time sorting, server-defined classifications, and
-  bounded channel menus with independent cursors. A loaded forum offers an
+  bounded channel menus with independent cursors. The forum toolbar's primary
+  action can be set locally to publish, refresh, return to top, or hidden; the
+  complete refresh, return-to-top, share, and available publish actions remain
+  reachable from the More menu. A loaded forum offers an
   experimental, account-bound plain-text new-topic composer with an optional
   title, persistent per-account draft, explicit publish confirmation, and no
   automatic retry; a signed-out composer remains read only and asks for login.

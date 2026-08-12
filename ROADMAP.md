@@ -21,7 +21,7 @@ does not yet include the foreground batch-check-in work on `main`.
 | Anonymous discovery, search, and forums | 20 | 18–19 | Core browsing, ranking, recommendations, categories, and search are implemented; feedback and a few niche discovery paths remain |
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, shared text selection/copying, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
-| Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, media preferences, followed-forum layout, reply-entry visibility, a default-on composer risk notice, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
+| Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, media preferences, followed-forum layout, a configurable forum primary action, reply-entry visibility, a default-on composer risk notice, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, switching, a self-profile summary, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 10–11 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, three plain-text reply targets, and plain-text new-topic creation have guarded implementations; real batch-check-in behavior, creation, poll and interaction-restriction success, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
@@ -53,6 +53,9 @@ The shared selectable-text panel closes one narrow TiebaLite interaction gap
 across existing visible post and reply surfaces, but adds no data source or
 readable content, so it remains inside the existing reading credit rather than
 adding a weighted point.
+The configurable forum primary action likewise completes a narrow local habit
+setting by rearranging existing controls, so it remains inside the existing
+local-settings credit rather than adding a weighted point.
 
 ## Available
 
@@ -86,7 +89,9 @@ the source metadata is updated to that tested IPA.
 - Topic-only and topic-plus-reply search filters with target-aware navigation
 - Versioned, per-forum local search history with delete and clear controls
 - Forum thread list with pagination and pull to refresh
-- Forum toolbar quick actions adapting TiebaLite's configurable forum FAB
+- Persistent forum primary-action selection between publishing, refreshing,
+  returning to the top, or hiding the shortcut, while retaining publishing,
+  refresh, return-to-top, and sharing in the native More menu when applicable
 - Reply-time and creation-time forum sorting
 - Global default sorting with normalized per-forum sort memory
 - Server-defined forum channels with bounded server-provided sorting menus and cursor pagination
@@ -919,14 +924,17 @@ Channel-menu choices are remembered separately only while the current forum
 screen is alive, are revalidated when a menu changes, and never overwrite the
 global or per-forum topic-sort preference.
 
-Forum toolbar quick actions reuse the existing refresh transaction and a stable
-header anchor. Returning to the top does not reload, mutate pagination, or
-install a global scroll event; explicit refresh retains generation checks that
-reject stale pagination responses. TiebaLite exposes one configured forum FAB
-action at a time, including refresh or return to top. The iOS adaptation keeps
-both read-only actions in one fixed native menu instead of adding a persistent
-FAB preference. Sharing in that menu is the existing canonical share action,
-not an additional TiebaLite parity claim.
+The forum primary-action preference preserves TiebaLite's bounded
+`post`/`refresh`/`back_to_top`/`hide` values while presenting the selected action
+as a native toolbar control rather than an Android-style FAB. It is a nonsecret,
+local enum; changing it starts no request and unknown values resolve to publish.
+The action rechecks current page capability when pressed. Refresh reuses the
+existing generation-guarded transaction, and returning to the stable header
+anchor does not reload, mutate pagination, or install a global scroll event.
+The More menu retains refresh, return to top, canonical sharing, and, whenever
+the loaded forum has a valid creation target, publishing. Choosing hidden
+therefore removes only the primary shortcut and never removes the underlying
+available actions.
 
 TiebaLite implements text sizing as a fixed app-wide Android font-scale
 override. Tieba++ instead stores a relative adjustment from two steps smaller

@@ -6,6 +6,7 @@ enum AppPreferenceKey {
   static let accentColor = "TiebaPlusPlus.accentColor"
   static let textSizeAdjustment = "TiebaPlusPlus.textSizeAdjustment"
   static let defaultForumSort = "TiebaPlusPlus.defaultForumSort"
+  static let forumPrimaryAction = "TiebaPlusPlus.forumPrimaryAction"
   static let homeStartDestination = "TiebaPlusPlus.homeStartDestination"
   static let homeShowsDiscovery = "TiebaPlusPlus.homeShowsDiscovery"
   static let homeShowsRecentForums = "TiebaPlusPlus.homeShowsRecentForums"
@@ -93,6 +94,72 @@ enum AppPreferenceDefaults {
   static let favoriteThreadsOpenDescending = false
   static let hidesReplyEntryPoints = false
   static let showsPostAndReplyRiskNotice = true
+}
+
+enum ForumPrimaryAction: String, CaseIterable, Hashable, Identifiable, Sendable {
+  case newThread = "post"
+  case refresh
+  case scrollToTop = "back_to_top"
+  case hidden = "hide"
+
+  static let defaultValue = Self.newThread
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .newThread:
+      "发布主题"
+    case .refresh:
+      "刷新"
+    case .scrollToTop:
+      "回到顶部"
+    case .hidden:
+      "隐藏"
+    }
+  }
+
+  var systemImage: String {
+    switch self {
+    case .newThread:
+      "square.and.pencil"
+    case .refresh:
+      "arrow.clockwise"
+    case .scrollToTop:
+      "arrow.up.to.line"
+    case .hidden:
+      "eye.slash"
+    }
+  }
+
+  static func resolved(_ rawValue: String) -> Self {
+    Self(rawValue: rawValue) ?? defaultValue
+  }
+}
+
+struct ForumPrimaryActionPolicy: Equatable, Sendable {
+  let selected: ForumPrimaryAction
+  let hasNewThreadTarget: Bool
+  let isLoading: Bool
+  let hasThreads: Bool
+
+  var toolbarAction: ForumPrimaryAction? {
+    selected == .hidden ? nil : selected
+  }
+
+  func canPerform(_ action: ForumPrimaryAction) -> Bool {
+    guard toolbarAction == action else { return false }
+    switch action {
+    case .newThread:
+      hasNewThreadTarget
+    case .refresh:
+      !isLoading
+    case .scrollToTop:
+      hasThreads
+    case .hidden:
+      false
+    }
+  }
 }
 
 struct ReplyEntryVisibilityPolicy: Equatable, Sendable {

@@ -23,6 +23,8 @@ struct AppSettingsView: View {
   private var textSizeAdjustment = AppTextSizeAdjustment.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.defaultForumSort)
   private var defaultForumSort = ForumThreadSort.replyTime.rawValue
+  @AppStorage(AppPreferenceKey.forumPrimaryAction)
+  private var forumPrimaryAction = ForumPrimaryAction.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.homeStartDestination)
   private var homeStartDestination = AppStartDestination.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.homeShowsDiscovery)
@@ -121,6 +123,14 @@ struct AppSettingsView: View {
           defaultForumSortPicker
             .pickerStyle(.segmented)
         }
+
+        Picker("贴吧页主快捷操作", selection: forumPrimaryActionSelection) {
+          ForEach(ForumPrimaryAction.allCases) { action in
+            Text(action.title).tag(action)
+          }
+        }
+        .pickerStyle(.menu)
+        .accessibilityIdentifier("settings-forum-primary-action")
 
         Toggle(
           "不保存浏览记录",
@@ -456,6 +466,13 @@ struct AppSettingsView: View {
         Text(sort.title).tag(sort)
       }
     }
+  }
+
+  private var forumPrimaryActionSelection: Binding<ForumPrimaryAction> {
+    Binding(
+      get: { ForumPrimaryAction.resolved(forumPrimaryAction) },
+      set: { forumPrimaryAction = $0.rawValue }
+    )
   }
 
   private var homeStartDestinationSelection: Binding<AppStartDestination> {
