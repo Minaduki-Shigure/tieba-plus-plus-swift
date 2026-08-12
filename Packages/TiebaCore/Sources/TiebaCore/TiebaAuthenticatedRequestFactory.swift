@@ -25,6 +25,8 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let selfProfileClientVersion = "12.52.1.0"
   static let userFollowClientVersion = "11.10.8.6"
   static let userInteractionPermissionsClientVersion = "12.41.7.1"
+  static let officialCheckInClientVersion = "11.10.8.6"
+  static let officialCheckInGuideClientVersion = "12.41.7.1"
   static let selfProfileUserAgent =
     "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) "
     + "Version/4.0 Chrome/135.0.0.0 Mobile Safari/537.36 tieba/12.52.1.0"
@@ -112,6 +114,104 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       forHTTPHeaderField: "Cookie"
     )
     return request
+  }
+
+  func officialCheckInEligibility(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64
+  ) throws -> URLRequest {
+    try validate(credential)
+    guard expectedUserID > 0 else {
+      throw TiebaClientError.invalidArgument("Expected user ID must be positive.")
+    }
+    return try signedFormRequest(
+      path: "/c/f/forum/getforumlist",
+      fields: [
+        ("BDUSS", credential.bduss),
+        ("_client_version", Self.officialCheckInClientVersion),
+        ("stoken", credential.stoken),
+        ("user_id", String(expectedUserID)),
+      ],
+      userAgent: "bdtb for Android \(Self.officialCheckInClientVersion)",
+      cookie: "ka=open"
+    )
+  }
+
+  func officialCheckInGuide(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    tbs: String,
+    page: Int,
+    pageSize: Int
+  ) throws -> URLRequest {
+    try validate(credential)
+    guard expectedUserID > 0 else {
+      throw TiebaClientError.invalidArgument("Expected user ID must be positive.")
+    }
+    guard Self.isValidTBS(tbs) else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    guard (1...TiebaOfficialCheckInDecoder.maximumGuidePageCount).contains(page) else {
+      throw TiebaClientError.invalidArgument("Check-in catalog page is out of range.")
+    }
+    guard (1...100).contains(pageSize) else {
+      throw TiebaClientError.invalidArgument("Check-in catalog page size must be between 1 and 100.")
+    }
+    return try signedFormRequest(
+      path: "/c/f/forum/forumGuide",
+      fields: [
+        ("BDUSS", credential.bduss),
+        ("_client_version", Self.officialCheckInGuideClientVersion),
+        ("call_from", "3"),
+        ("page_no", String(page)),
+        ("res_num", String(pageSize)),
+        ("sort_type", "3"),
+        ("stoken", credential.stoken),
+        ("tbs", tbs),
+        ("top_forum_num", "0"),
+      ],
+      userAgent: "bdtb for Android \(Self.officialCheckInGuideClientVersion)",
+      cookie: "ka=open"
+    )
+  }
+
+  func officialBatchCheckIn(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    tbs: String,
+    forumIDs: [Int64]
+  ) throws -> URLRequest {
+    try validate(credential)
+    guard expectedUserID > 0 else {
+      throw TiebaClientError.invalidArgument("Expected user ID must be positive.")
+    }
+    guard Self.isValidTBS(tbs) else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    guard
+      !forumIDs.isEmpty,
+      forumIDs.count <= TiebaOfficialCheckInDecoder.maximumBatchCount,
+      forumIDs.allSatisfy({ $0 > 0 }),
+      Set(forumIDs).count == forumIDs.count
+    else {
+      throw TiebaClientError.invalidArgument("Batch check-in forum IDs are invalid.")
+    }
+    let encodedForumIDs = forumIDs.map(String.init).joined(separator: ",")
+    return try signedFormRequest(
+      host: Self.writeHost,
+      path: "/c/c/forum/msign",
+      fields: [
+        ("BDUSS", credential.bduss),
+        ("_client_version", Self.officialCheckInClientVersion),
+        ("authsid", "null"),
+        ("forum_ids", encodedForumIDs),
+        ("stoken", credential.stoken),
+        ("tbs", tbs),
+        ("user_id", String(expectedUserID)),
+      ],
+      userAgent: "bdtb for Android \(Self.officialCheckInClientVersion)",
+      cookie: "ka=open"
+    )
   }
 
   func selfProfile(

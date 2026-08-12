@@ -518,7 +518,42 @@ private enum TiebaNewThreadWaitOutcome: Sendable, Equatable {
   case cancelled
 }
 
+private struct TiebaOfficialBatchCheckInIdentity:
+  Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let bduss: String
+  let stoken: String
+  let cookieName: TiebaBDUSSCookieName
+
+  init(_ credential: TiebaSessionCredential) {
+    bduss = credential.bduss
+    stoken = credential.stoken
+    cookieName = credential.bdussCookieName
+  }
+
+  var description: String { "TiebaOfficialBatchCheckInIdentity(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror { Mirror(self, children: [:], displayStyle: .struct) }
+}
+
+private struct TiebaOfficialBatchCheckInFlight: Sendable {
+  let id: UUID
+  let identity: TiebaOfficialBatchCheckInIdentity
+  let task: Task<TiebaOfficialBatchCheckInResult, Swift.Error>
+}
+
 public actor TiebaAuthenticatedClient {
+  nonisolated static func officialBatchCheckInIdentityDebugValues(
+    credential: TiebaSessionCredential
+  ) -> (description: String, reflection: String, mirrorChildCount: Int) {
+    let identity = TiebaOfficialBatchCheckInIdentity(credential)
+    return (
+      description: String(describing: identity),
+      reflection: String(reflecting: identity),
+      mirrorChildCount: Array(identity.customMirror.children).count
+    )
+  }
+
   static let accountResponseMaximumBytes = 512 * 1_024
   static let selfProfileResponseMaximumBytes = 2 * 1_024 * 1_024
   static let userRelationshipResponseMaximumBytes = 2 * 1_024 * 1_024
@@ -538,6 +573,10 @@ public actor TiebaAuthenticatedClient {
   static let forumMembershipResponseMaximumBytes = 512 * 1_024
   static let forumFollowWriteResponseMaximumBytes = 64 * 1_024
   static let forumCheckInResponseMaximumBytes = 64 * 1_024
+  static let officialCheckInSessionResponseMaximumBytes = 512 * 1_024
+  static let officialCheckInEligibilityResponseMaximumBytes = 512 * 1_024
+  static let officialCheckInGuideResponseMaximumBytes = 2 * 1_024 * 1_024
+  static let officialBatchCheckInResponseMaximumBytes = 512 * 1_024
   static let agreementPageResponseMaximumBytes = 8 * 1_024 * 1_024
   static let subpostAgreementPageResponseMaximumBytes = 4 * 1_024 * 1_024
   static let threadAgreementWriteResponseMaximumBytes = 64 * 1_024
@@ -573,6 +612,7 @@ public actor TiebaAuthenticatedClient {
   private var forumCheckInConflictWaiters = [
     TiebaForumCheckInResourceKey: [UUID: CheckedContinuation<Void, Never>]
   ]()
+  private var officialBatchCheckInFlights = [Int64: TiebaOfficialBatchCheckInFlight]()
   private var agreementFlights = [
     TiebaAgreementResourceKey: TiebaAgreementFlight
   ]()
@@ -1367,6 +1407,61 @@ public actor TiebaAuthenticatedClient {
     )
   }
 
+  public func getOfficialCheckInCatalog(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64
+  ) async throws -> TiebaOfficialCheckInCatalog {
+    try await getOfficialCheckInCatalogContext(
+      credential: credential,
+      expectedUserID: expectedUserID
+    ).catalog
+  }
+
+  public func performOfficialBatchCheckIn(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64
+  ) async throws -> TiebaOfficialBatchCheckInResult {
+    try Task.checkCancellation()
+    let identity = TiebaOfficialBatchCheckInIdentity(credential)
+    gate: while true {
+      while let flight = officialBatchCheckInFlights[expectedUserID] {
+        if flight.identity == identity {
+          return try await flight.task.value
+        }
+        _ = await flight.task.result
+        if officialBatchCheckInFlights[expectedUserID]?.id == flight.id {
+          officialBatchCheckInFlights.removeValue(forKey: expectedUserID)
+        }
+        try Task.checkCancellation()
+      }
+      if let entry = forumCheckInFlights.first(where: { $0.key.userID == expectedUserID }) {
+        _ = await entry.value.task.result
+        clearForumCheckInFlight(resourceKey: entry.key, flightID: entry.value.id)
+        try Task.checkCancellation()
+        continue gate
+      }
+      break gate
+    }
+    let task = Task.detached { [self] in
+      try await executeOfficialBatchCheckIn(
+        credential: credential,
+        expectedUserID: expectedUserID
+      )
+    }
+    let flightID = UUID()
+    officialBatchCheckInFlights[expectedUserID] = TiebaOfficialBatchCheckInFlight(
+      id: flightID,
+      identity: identity,
+      task: task
+    )
+    defer {
+      if officialBatchCheckInFlights[expectedUserID]?.id == flightID {
+        officialBatchCheckInFlights.removeValue(forKey: expectedUserID)
+      }
+    }
+    return try await task.value
+  }
+
   public func getForumMembership(
     credential: TiebaBDUSSCredential,
     expectedUserID: Int64,
@@ -1443,6 +1538,13 @@ public actor TiebaAuthenticatedClient {
     forumName: String
   ) async throws -> TiebaForumAccountState {
     try Task.checkCancellation()
+    while let batchFlight = officialBatchCheckInFlights[expectedUserID] {
+      _ = await batchFlight.task.result
+      if officialBatchCheckInFlights[expectedUserID]?.id == batchFlight.id {
+        officialBatchCheckInFlights.removeValue(forKey: expectedUserID)
+      }
+      try Task.checkCancellation()
+    }
     let forumName = try requestFactory.normalizedForumName(forumName)
     let resourceKey = TiebaForumCheckInResourceKey(
       userID: expectedUserID,
@@ -3059,6 +3161,118 @@ public actor TiebaAuthenticatedClient {
         forumName: forumName
       )
     }
+  }
+
+  private func getOfficialCheckInCatalogContext(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64
+  ) async throws -> TiebaOfficialCheckInCatalogContext {
+    let sessionRequest = try requestFactory.validateSessionApp(credential: credential)
+    let sessionBody = try await send(
+      sessionRequest,
+      maximumBodyBytes: Self.officialCheckInSessionResponseMaximumBytes
+    )
+    let session = try TiebaOfficialCheckInDecoder.sessionContext(
+      from: sessionBody,
+      expectedUserID: expectedUserID
+    )
+    try Task.checkCancellation()
+
+    let eligibilityRequest = try requestFactory.officialCheckInEligibility(
+      credential: credential,
+      expectedUserID: expectedUserID
+    )
+    let eligibilityBody = try await send(
+      eligibilityRequest,
+      maximumBodyBytes: Self.officialCheckInEligibilityResponseMaximumBytes
+    )
+    let eligibility = try TiebaOfficialCheckInDecoder.eligibility(from: eligibilityBody)
+    try Task.checkCancellation()
+
+    let pageSize = 50
+    var page = 1
+    var forums = [TiebaOfficialCheckInForum]()
+    var seen = Set<Int64>()
+    var guideAllowsBatchCheckIn = true
+    var guideMinimumLevel = 0
+    while true {
+      let request = try requestFactory.officialCheckInGuide(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        tbs: session.tbs,
+        page: page,
+        pageSize: pageSize
+      )
+      let body = try await send(
+        request,
+        maximumBodyBytes: Self.officialCheckInGuideResponseMaximumBytes
+      )
+      let result = try TiebaOfficialCheckInDecoder.guidePage(
+        from: body,
+        expectedUserID: expectedUserID,
+        requestedPage: page,
+        pageSize: pageSize
+      )
+      guard page == 1 || result.advertisedMinimumLevel == guideMinimumLevel else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+      if page == 1 { guideMinimumLevel = result.advertisedMinimumLevel }
+      guideAllowsBatchCheckIn = guideAllowsBatchCheckIn && result.isBatchCheckInAvailable
+      for forum in result.forums {
+        guard seen.insert(forum.id).inserted else {
+          throw TiebaClientError.invalidAuthenticatedResponse
+        }
+        forums.append(forum)
+      }
+      guard forums.count <= TiebaOfficialCheckInDecoder.maximumForumCount else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+      guard result.hasMore else { break }
+      guard !result.forums.isEmpty else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+      page += 1
+    }
+
+    let minimumLevel = max(eligibility.minimumLevel, guideMinimumLevel)
+    let catalog = TiebaOfficialCheckInCatalog(
+      userID: expectedUserID,
+      forums: forums,
+      minimumBatchLevel: minimumLevel,
+      maximumBatchCount: eligibility.maximumCount,
+      isBatchCheckInAvailable: eligibility.isAvailable && guideAllowsBatchCheckIn
+    )
+    return TiebaOfficialCheckInCatalogContext(catalog: catalog, tbs: session.tbs)
+  }
+
+  private func executeOfficialBatchCheckIn(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64
+  ) async throws -> TiebaOfficialBatchCheckInResult {
+    let context = try await getOfficialCheckInCatalogContext(
+      credential: credential,
+      expectedUserID: expectedUserID
+    )
+    let targets = context.catalog.batchEligibleForums
+    guard !targets.isEmpty else {
+      return TiebaOfficialBatchCheckInResult(userID: expectedUserID, items: [])
+    }
+    try Task.checkCancellation()
+    let request = try requestFactory.officialBatchCheckIn(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      tbs: context.tbs,
+      forumIDs: targets.map(\.id)
+    )
+    let body = try await send(
+      request,
+      maximumBodyBytes: Self.officialBatchCheckInResponseMaximumBytes
+    )
+    return try TiebaOfficialCheckInDecoder.batchResult(
+      from: body,
+      expectedUserID: expectedUserID,
+      requestedForums: targets
+    )
   }
 
   private func getUserRelationshipContext(
