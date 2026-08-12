@@ -307,6 +307,49 @@ struct ForumCheckInData: Hashable, Sendable {
   let rank: Int
 }
 
+enum ForumCheckInCatalogStatus: Hashable, Sendable {
+  case unknown
+  case pending
+  case checkedIn
+}
+
+struct ForumCheckInCatalogTarget: Hashable, Identifiable, Sendable {
+  let forumID: Int64
+  let forumName: String
+  let level: Int
+  let status: ForumCheckInCatalogStatus
+  let isForbidden: Bool
+
+  var id: Int64 { forumID }
+}
+
+struct ForumOfficialBatchCheckInPolicy: Hashable, Sendable {
+  let minimumLevel: Int
+  let maximumForumCount: Int
+}
+
+struct ForumCheckInCatalogData: Hashable, Sendable {
+  let userID: Int64
+  let targets: [ForumCheckInCatalogTarget]
+  let officialBatchPolicy: ForumOfficialBatchCheckInPolicy?
+}
+
+enum ForumBatchCheckInOutcome: Hashable, Sendable {
+  case confirmedSigned
+  case rejected(message: String)
+}
+
+struct ForumBatchCheckInResult: Hashable, Sendable {
+  let forumID: Int64
+  let forumName: String
+  let outcome: ForumBatchCheckInOutcome
+}
+
+struct ForumBatchCheckInData: Hashable, Sendable {
+  let userID: Int64
+  let results: [ForumBatchCheckInResult]
+}
+
 struct ForumAccountStateData: Hashable, Sendable {
   let membership: ForumMembershipData
   let checkIn: ForumCheckInData?
@@ -517,6 +560,12 @@ protocol AccountService: Sendable {
     forumID: Int64,
     forumName: String
   ) async throws -> ForumAccountStateData
+  func checkInCatalog(
+    session: StoredAccountSession
+  ) async throws -> ForumCheckInCatalogData
+  func batchCheckIn(
+    session: StoredAccountSession
+  ) async throws -> ForumBatchCheckInData
   func threadAgreement(
     session: StoredAccountSession,
     forumID: Int64,
@@ -548,6 +597,18 @@ protocol AccountService: Sendable {
 }
 
 extension AccountService {
+  func checkInCatalog(
+    session: StoredAccountSession
+  ) async throws -> ForumCheckInCatalogData {
+    throw BrowseError.unavailable("当前账户服务不支持读取一键签到列表。")
+  }
+
+  func batchCheckIn(
+    session: StoredAccountSession
+  ) async throws -> ForumBatchCheckInData {
+    throw BrowseError.unavailable("当前账户服务不支持官方一键签到。")
+  }
+
   func selfProfile(
     session: StoredAccountSession
   ) async throws -> AccountProfileSummary {
