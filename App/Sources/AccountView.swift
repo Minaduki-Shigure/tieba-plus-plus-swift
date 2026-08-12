@@ -226,6 +226,18 @@ struct AccountView: View {
               Label("关注的贴吧", systemImage: "star")
             }
 
+            if activeAccount.hasFullCredentials {
+              NavigationLink {
+                ForumBatchCheckInView(
+                  access: AccountAccess(vault: vault, service: accountService)
+                )
+              } label: {
+                Label("一键签到", systemImage: "checkmark.seal")
+              }
+              .disabled(viewModel.isMutating)
+              .accessibilityHint("打开前台一键签到页面")
+            }
+
             NavigationLink {
               NotificationsView(
                 browseService: browseService,
