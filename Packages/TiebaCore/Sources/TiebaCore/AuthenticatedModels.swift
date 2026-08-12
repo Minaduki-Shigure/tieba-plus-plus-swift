@@ -115,6 +115,34 @@ public struct TiebaUserRelationship: Sendable, Hashable {
   }
 }
 
+public struct TiebaUserInteractionPermissions: Sendable, Hashable {
+  public let blocksFollow: Bool
+  public let blocksInteraction: Bool
+  public let blocksChat: Bool
+
+  public init(blocksFollow: Bool, blocksInteraction: Bool, blocksChat: Bool) {
+    self.blocksFollow = blocksFollow
+    self.blocksInteraction = blocksInteraction
+    self.blocksChat = blocksChat
+  }
+}
+
+public struct TiebaUserInteractionPermissionState: Sendable, Hashable {
+  public let userID: Int64
+  public let targetUserID: Int64
+  public let permissions: TiebaUserInteractionPermissions
+
+  public init(
+    userID: Int64,
+    targetUserID: Int64,
+    permissions: TiebaUserInteractionPermissions
+  ) {
+    self.userID = userID
+    self.targetUserID = targetUserID
+    self.permissions = permissions
+  }
+}
+
 public struct TiebaPollState: Sendable, Hashable {
   public let userID: Int64
   public let forumID: Int64

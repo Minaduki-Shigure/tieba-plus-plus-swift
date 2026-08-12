@@ -232,6 +232,41 @@ struct UserRelationshipData: Hashable, Sendable {
   let isFollowed: Bool
 }
 
+struct UserInteractionPermissions: Hashable, Sendable {
+  var blocksFollow: Bool
+  var blocksInteraction: Bool
+  var blocksChat: Bool
+
+  static let unrestricted = UserInteractionPermissions(
+    blocksFollow: false,
+    blocksInteraction: false,
+    blocksChat: false
+  )
+}
+
+struct UserInteractionPermissionData: Hashable, Sendable {
+  let userID: Int64
+  let targetUserID: Int64
+  let permissions: UserInteractionPermissions
+}
+
+enum UserInteractionPermissionError: LocalizedError, Equatable, Sendable {
+  case fullCredentialsRequired
+  case outcomeUnknown
+  case unavailable(String)
+
+  var errorDescription: String? {
+    switch self {
+    case .fullCredentialsRequired:
+      "此账户需要重新登录，才能安全读取或更新互动权限。"
+    case .outcomeUnknown:
+      "贴吧尚未确认互动权限是否保存成功。请重新加载权威状态后再决定是否重试。"
+    case .unavailable(let message):
+      message
+    }
+  }
+}
+
 struct PollVoteData: Hashable, Sendable {
   let userID: Int64
   let forumID: Int64
@@ -441,6 +476,15 @@ protocol AccountService: Sendable {
     targetUserID: Int64,
     isFollowed: Bool
   ) async throws -> UserRelationshipData
+  func userInteractionPermissions(
+    session: StoredAccountSession,
+    targetUserID: Int64
+  ) async throws -> UserInteractionPermissionData
+  func setUserInteractionPermissions(
+    session: StoredAccountSession,
+    targetUserID: Int64,
+    permissions: UserInteractionPermissions
+  ) async throws -> UserInteractionPermissionData
   func pollState(
     session: StoredAccountSession,
     forumID: Int64,
@@ -540,6 +584,21 @@ extension AccountService {
     isFollowed: Bool
   ) async throws -> UserRelationshipData {
     throw BrowseError.unavailable("当前账户服务不支持更新用户关注状态。")
+  }
+
+  func userInteractionPermissions(
+    session: StoredAccountSession,
+    targetUserID: Int64
+  ) async throws -> UserInteractionPermissionData {
+    throw UserInteractionPermissionError.unavailable("当前账户服务不支持读取用户互动权限。")
+  }
+
+  func setUserInteractionPermissions(
+    session: StoredAccountSession,
+    targetUserID: Int64,
+    permissions: UserInteractionPermissions
+  ) async throws -> UserInteractionPermissionData {
+    throw UserInteractionPermissionError.unavailable("当前账户服务不支持更新用户互动权限。")
   }
 
   func pollState(

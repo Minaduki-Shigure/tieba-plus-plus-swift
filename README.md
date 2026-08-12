@@ -17,9 +17,9 @@ checks.
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, media preferences, reply-entry visibility, and a next-launch destination including the inbox |
-| Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, authenticated poll state, and experimental content approval |
-| Server-side writes | Guarded forum and user follow/unfollow, check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, plain-text topic/floor/nested replies, and plain-text new-topic creation are in device validation; other writes stay disabled |
-| TiebaLite parity | Anonymous reading and media: about 91–95%; full product scope: about 73–76% |
+| Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, authenticated poll state, and experimental content approval |
+| Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, plain-text topic/floor/nested replies, and plain-text new-topic creation are in device validation; other writes stay disabled |
+| TiebaLite parity | Anonymous reading and media: about 91–95%; full product scope: about 74–77% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.59.0-alpha.1` (build 62); later `main` features require a tagged release |
 
 ### Release and validation
@@ -52,6 +52,15 @@ checks.
   follow value `2`; cancellation or account rotation cannot publish a late
   result. This minimum-field HTTPS contract remains a disposable-account
   validation gate.
+  The same profile menu now keeps local content filtering separate from a lazy,
+  account-bound server interaction-permission editor. For another user, it can
+  read and explicitly update whether that user may follow, interact with, or
+  privately message the active account. The read is first bound by the existing
+  authenticated profile probe. A changed state uses a fresh `tbs`, sends one
+  minimum-field HTTPS write at most, and always performs one raw permission
+  readback; an uncertain result is locked until an explicit reload. Follow and
+  interaction-permission writes for the same account and target cannot overlap.
+  Real-server field compatibility remains a disposable-account validation gate.
   A logged-in home page also shows at most six forums from the current account's
   followed-forum list and links to the complete paginated list. Both surfaces
   share one app-scoped, memory-only snapshot that is discarded when the account
@@ -124,13 +133,15 @@ checks.
   Authenticated flows never use real credentials in CI. Login binding, cloud
   favorite reads and mutations, including verified list deletion, followed-forum recommendation filtering,
   target-bound liked-forum pagination, the minimal self-profile request and its
-  UID/session-lease race handling, concern-feed, inbox summary, inbox
+  UID/session-lease race handling, target-bound interaction permissions,
+  concern-feed, inbox summary, inbox
   navigation and reply-action rebinding, plain-text reply contracts, and
   plain-text new-topic and account-bound poll-vote contracts are
   covered by fixtures, while successful real-account self-profile and private
   reads, forum
   follow/unfollow, check-in, cloud-favorite changes, topic/post/subpost content
-  approval, poll voting, user follow/unfollow, real reply creation, and real new-topic creation remain
+  approval, poll voting, user follow/unfollow, user interaction restrictions,
+  real reply creation, and real new-topic creation remain
   physical-device validation features in this alpha.
 - **App source:** Add [`sidestore-source.json`](https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json)
   to LiveContainer 3.7.0 or newer, or to SideStore. Its latest IPA is published
@@ -294,6 +305,17 @@ checks.
   cannot affect home shortcuts or recommendation filtering. Successful self and
   other-user retrieval, privacy-empty results, expired credentials, and account
   switching still require physical-device validation.
+- **User interaction restrictions:** Another user's profile keeps the existing
+  local block/allow actions separate from a server-side editor available only to
+  a complete active account session. The editor loads lazily and exposes the
+  three Tieba permission bits for following, interaction (reposts, comments,
+  reactions, and mentions), and private messages. It binds the target through an
+  authenticated profile probe, requires explicit save confirmation, sends one
+  changed-state write at most, and accepts only the mandatory permission
+  readback. Its state is memory-only and bound to `userID + sessionRevision`;
+  account changes synchronously invalidate and close it. Unknown write outcomes
+  disable further saves until an explicit authoritative reload. This remains a
+  disposable-account validation feature.
 - **Content approval state:** The canonical first floor, ordinary floors, and
   parent and child rows on a full nested-reply page independently read the active
   account's approval state and expose confirmed approve/cancel actions. Anonymous
@@ -394,20 +416,25 @@ checks.
   selection or credential receives only post-flight authoritative state. Every
   poll write, including one whose acknowledgement fails, performs exactly one
   authenticated readback and never dispatches a second vote.
+  User interaction-permission changes follow the same rule: equivalent changes
+  for one account and target share a flight; a conflicting permission set or
+  rotated credential waits and then reads only. A user follow write and a
+  permission write for that same account and target are mutually exclusive, so
+  the later operation also settles through a read without dispatching a second
+  kind of write.
   Already-completed check-in and matching content state are idempotent. All
   supported writes require explicit user confirmation. Automatic and batch
   check-in are not implemented.
 - **Unsupported operations:** Guess-based removal of unresolvable cloud-favorite
   rows, bulk cloud/local synchronization, disagreement and other reaction types,
-  recommendation feedback, rich-media topic/reply creation,
-  server-side user blocking, profile editing, content
+  recommendation feedback, rich-media topic/reply creation, profile editing, content
   deletion/reporting, automatic or batch check-in, notification mark-read/unread
   reconciliation, background notification polling, and moderation remain
   unavailable until their request contracts and recovery paths have been
   validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, weighted estimate, protocol constraints, and next milestones.
-  The current `main` audit totals 73–76 of 100 weighted points; its anonymous
+  The current `main` audit totals 74–77 of 100 weighted points; its anonymous
   reading and media subtotal is about 91–95%. The largest remaining gaps are
   rich-media creation, background unread handling, broader settings, remaining
   account/social actions, unresolvable cloud-favorite rows, and moderation.

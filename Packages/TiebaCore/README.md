@@ -62,10 +62,12 @@ if let userID = posts.posts[0].author?.id {
 The authenticated client supports BDUSS-only identity validation, full-session
 UID-consistency probes, followed and target-user liked forums, an account-bound concern feed,
 Tieba cloud-favorite reads and guarded thread-detail mutations, authoritative
-per-forum follow/check-in state, confirmed follow/unfollow, explicit
-single-forum check-in, and guarded account-bound poll voting. It also exposes
+per-forum follow/check-in state, confirmed forum and user follow/unfollow,
+target-bound server interaction restrictions, explicit single-forum check-in,
+and guarded account-bound poll voting. It also exposes
 guarded plain-text reply and new-topic creation for validation builds. Core
-single-flights equivalent check-in, cloud-favorite, and poll-vote calls and
+single-flights equivalent check-in, cloud-favorite, interaction-permission, and
+poll-vote calls and
 serializes conflicting identities for the same resource. The
 app's Keychain and account-service layers own persistence, credential-rotation
 leases, and mutual exclusion between follow and check-in. A conflicting App
@@ -356,7 +358,23 @@ subpost approval writes are implemented. Thread-detail cloud-favorite add,
 saved-position update, and removal plus verified single-item list removal are
 experimental validation-build features; notifications remain read-only.
 Automatic or batch check-in, unverified list deletion, bulk synchronization,
-rich-media topic/reply creation, and moderation remain unsupported.
+rich-media topic/reply creation, and moderation remain unsupported. Server-side
+user interaction restrictions are experimental: Core first binds the target with
+an authenticated profile probe, strictly decodes the three `0`/`1` permission
+bits, and follows any one-shot changed-state write with exactly one raw readback.
+It never retries an uncertain mutation, and it excludes a concurrent user-follow
+write for the same account and target.
+
+The permission read posts to `/c/u/user/getUserBlackInfo`; the write posts to
+`/c/c/user/setUserBlack`. Both use fixed client version `12.41.7.1`, user agent
+`bdtb for Android 12.41.7.1`, `Cookie: ka=open`, a 64 KiB response limit, and no
+hardware or install identifier. Read fields are limited to BDUSS, STOKEN,
+`black_uid`, client type/version, and `sign`. Write adds a fresh validated `tbs`
+and structured `perm_list` JSON containing exact integer `0`/`1` members
+`follow`, `interact`, and `chat`. Once dispatched, the write is followed by one
+raw permission readback even when its acknowledgement fails; a mismatch is a
+typed unknown result, not a retry. The bounded interaction-permission flight and
+the existing user-follow flight are mutually exclusive for one account/target.
 
 ## Tests
 

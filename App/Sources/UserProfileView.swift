@@ -23,6 +23,13 @@ struct UserProfilePortraitPresentation: Identifiable, Equatable, Sendable {
   }
 }
 
+private struct UserInteractionRestrictionsPresentation: Identifiable, Equatable, Sendable {
+  let targetUserID: Int64
+  let targetName: String
+
+  var id: Int64 { targetUserID }
+}
+
 struct UserLikedForumsPreviewPresentation: Equatable, Sendable {
   let reportedCount: Int
   let totalCount: Int
@@ -93,10 +100,13 @@ struct UserProfileView: View {
 
   @StateObject private var viewModel: UserProfileViewModel
   @StateObject private var repliesViewModel: UserRepliesViewModel
+  @StateObject private var accountIdentity = UserProfileAccountIdentityViewModel()
   @State private var selectedActivity: UserProfileActivity = .threads
   @State private var contentFilterMessage: String?
   @State private var portraitPresentation: UserProfilePortraitPresentation?
   @State private var relationKind: UserRelationKind?
+  @State private var interactionRestrictionsPresentation:
+    UserInteractionRestrictionsPresentation?
 
   init(
     userID: Int64,
@@ -137,21 +147,40 @@ struct UserProfileView: View {
       if showsUserFilterActions, let profile = viewModel.profile, profile.id > 0 {
         ToolbarItem(placement: .navigationBarTrailing) {
           Menu {
-            Button {
-              addUserRule(profile, to: .block)
-            } label: {
-              Label("加入屏蔽列表", systemImage: "hand.raised")
+            Section("本地内容过滤") {
+              Button {
+                addUserRule(profile, to: .block)
+              } label: {
+                Label("加入屏蔽列表", systemImage: "hand.raised")
+              }
+              Button {
+                addUserRule(profile, to: .allow)
+              } label: {
+                Label("加入白名单", systemImage: "checkmark.shield")
+              }
             }
-            Button {
-              addUserRule(profile, to: .allow)
-            } label: {
-              Label("加入白名单", systemImage: "checkmark.shield")
+
+            if let accountAccess, accountIdentity.isResolved,
+              let activeAccountUserID = accountIdentity.userID,
+              activeAccountUserID != profile.id
+            {
+              Section("贴吧账户") {
+                Button {
+                  interactionRestrictionsPresentation =
+                    UserInteractionRestrictionsPresentation(
+                      targetUserID: profile.id,
+                      targetName: profile.preferredName
+                    )
+                } label: {
+                  Label("互动权限", systemImage: "person.crop.circle.badge.xmark")
+                }
+              }
             }
           } label: {
             Image(systemName: "ellipsis.circle")
           }
-          .accessibilityLabel("用户规则")
-          .help("用户规则")
+          .accessibilityLabel("用户操作")
+          .help("用户操作")
         }
       }
     }
@@ -169,6 +198,16 @@ struct UserProfileView: View {
     .fullScreenCover(item: $portraitPresentation) { presentation in
       ImageViewer(url: presentation.sourceURL)
     }
+    .sheet(item: $interactionRestrictionsPresentation) { presentation in
+      if let accountAccess {
+        UserInteractionRestrictionsSheet(
+          targetUserID: presentation.targetUserID,
+          targetName: presentation.targetName,
+          access: accountAccess,
+          onClose: { interactionRestrictionsPresentation = nil }
+        )
+      }
+    }
     .navigationDestination(isPresented: relationsPresented) {
       if let relationKind {
         UserRelationsView(
@@ -182,14 +221,24 @@ struct UserProfileView: View {
       }
     }
     .task { viewModel.loadIfNeeded() }
+    .task { await accountIdentity.resolve(access: accountAccess) }
     .task(id: selectedActivity) {
       if selectedActivity == .replies {
         repliesViewModel.loadIfNeeded()
       }
     }
     .onDisappear {
+      interactionRestrictionsPresentation = nil
+      accountIdentity.invalidate()
       viewModel.cancel()
       repliesViewModel.cancel()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+      let token = accountIdentity.beginResolution()
+      Task {
+        @MainActor in
+        await accountIdentity.resolve(access: accountAccess, ifCurrent: token)
+      }
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       Task { @MainActor in
@@ -701,6 +750,194 @@ private struct UserProfileHeader: View {
     .buttonStyle(.plain)
     .accessibilityLabel("\(title) \(max(value, 0).formatted())")
     .help("查看\(title)列表")
+  }
+}
+
+private struct UserInteractionRestrictionsSheet: View {
+  @Environment(\.dismiss) private var dismiss
+  @StateObject private var viewModel: UserInteractionRestrictionsViewModel
+  private let targetName: String
+  private let onClose: @MainActor () -> Void
+
+  init(
+    targetUserID: Int64,
+    targetName: String,
+    access: AccountAccess,
+    onClose: @escaping @MainActor () -> Void
+  ) {
+    self.targetName = targetName
+    self.onClose = onClose
+    _viewModel = StateObject(
+      wrappedValue: UserInteractionRestrictionsViewModel(
+        targetUserID: targetUserID,
+        access: access
+      )
+    )
+  }
+
+  var body: some View {
+    NavigationStack {
+      Form {
+        statusSection
+        if showsControls {
+          restrictionsSection
+        }
+      }
+      .navigationTitle("互动权限")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("取消", action: close)
+            .disabled(viewModel.isMutating)
+        }
+        ToolbarItem(placement: .confirmationAction) {
+          Button("保存", action: viewModel.requestSaveConfirmation)
+            .disabled(!viewModel.canRequestSave)
+        }
+      }
+    }
+    .task { await viewModel.loadIfNeeded() }
+    .interactiveDismissDisabled(viewModel.preventsInteractiveDismiss)
+    .onDisappear { viewModel.presentationDidDisappear() }
+    .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+      viewModel.invalidateForAccountSessionChange()
+      onClose()
+      dismiss()
+    }
+    .confirmationDialog(
+      "保存互动权限？",
+      isPresented: Binding(
+        get: { viewModel.pendingConfirmation != nil },
+        set: { if !$0 { viewModel.cancelSaveConfirmation() } }
+      ),
+      titleVisibility: .visible
+    ) {
+      Button("保存") { viewModel.beginConfirmedSave() }
+      Button("取消", role: .cancel) { viewModel.cancelSaveConfirmation() }
+    } message: {
+      Text("这会修改当前贴吧账户对“\(targetName)”的服务器端互动限制。")
+    }
+    .alert(
+      "互动权限",
+      isPresented: Binding(
+        get: { viewModel.errorMessage != nil },
+        set: { if !$0 { viewModel.dismissError() } }
+      )
+    ) {
+      Button("好", role: .cancel) { viewModel.dismissError() }
+    } message: {
+      Text(viewModel.errorMessage ?? "无法读取或更新互动权限。")
+    }
+  }
+
+  @ViewBuilder
+  private var statusSection: some View {
+    switch viewModel.state {
+    case .idle, .loading:
+      Section {
+        HStack {
+          Spacer()
+          ProgressView("正在读取贴吧账户设置")
+          Spacer()
+        }
+      }
+    case .hidden:
+      Section {
+        Label("不能为当前账户本人设置互动权限。", systemImage: "person.crop.circle")
+          .foregroundStyle(.secondary)
+      }
+    case .signedOut:
+      Section {
+        Label("登录贴吧账户后可设置互动权限。", systemImage: "person.crop.circle.badge.exclamationmark")
+          .foregroundStyle(.secondary)
+      }
+    case .failed:
+      Section {
+        Button {
+          Task { @MainActor in await viewModel.reload() }
+        } label: {
+          Label("重新加载", systemImage: "arrow.clockwise")
+        }
+      } footer: {
+        Text("重新加载会放弃未保存的更改并读取服务器权威状态。")
+      }
+    case .outcomeUnknown:
+      Section {
+        Label("保存结果待确认", systemImage: "questionmark.circle")
+          .foregroundStyle(.secondary)
+        Button {
+          Task { @MainActor in await viewModel.reload() }
+        } label: {
+          Label("重新加载权威状态", systemImage: "arrow.clockwise")
+        }
+      } footer: {
+        Text("结果确认前不会再次提交，以免重复修改。")
+      }
+    case .ready:
+      EmptyView()
+    case .mutating:
+      Section {
+        HStack {
+          Spacer()
+          ProgressView("正在保存并确认")
+          Spacer()
+        }
+      } footer: {
+        Text("贴吧返回权威状态前请勿关闭此页面。")
+      }
+    }
+  }
+
+  private var restrictionsSection: some View {
+    Section("限制范围") {
+      Toggle(
+        "禁止 TA 关注我",
+        isOn: Binding(
+          get: { viewModel.draft.blocksFollow },
+          set: viewModel.setBlocksFollow
+        )
+      )
+      Toggle(
+        isOn: Binding(
+          get: { viewModel.draft.blocksInteraction },
+          set: viewModel.setBlocksInteraction
+        )
+      ) {
+        VStack(alignment: .leading, spacing: 3) {
+          Text("禁止 TA 互动")
+          Text("包括转发、评论、赞踩与 @")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      }
+      Toggle(
+        "禁止 TA 私信",
+        isOn: Binding(
+          get: { viewModel.draft.blocksChat },
+          set: viewModel.setBlocksChat
+        )
+      )
+    }
+    .disabled(!viewModel.isEditingEnabled)
+  }
+
+  private var showsControls: Bool {
+    switch viewModel.state {
+    case .ready, .mutating:
+      return true
+    case .outcomeUnknown:
+      return true
+    case .failed(let previous), .loading(let previous):
+      return previous != nil
+    case .idle, .hidden, .signedOut:
+      return false
+    }
+  }
+
+  private func close() {
+    guard !viewModel.isMutating else { return }
+    onClose()
+    dismiss()
   }
 }
 

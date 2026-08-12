@@ -498,6 +498,50 @@ enum TiebaAuthenticatedDecoder {
     try checkServerError(object)
   }
 
+  static func userInteractionPermissions(
+    from body: Data,
+    expectedUserID: Int64,
+    targetUserID: Int64
+  ) throws -> TiebaUserInteractionPermissionState {
+    guard expectedUserID > 0, targetUserID > 0, expectedUserID != targetUserID else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    let object = try responseObject(from: body)
+    let code = try requiredExactJSONInteger(object["error_code"])
+    if code != 0 {
+      throw TiebaClientError.server(
+        code: Int32(clamping: code),
+        message: errorMessage(object, nestedError: object["error"] as? [String: Any])
+      )
+    }
+    guard let permissionList = object["perm_list"] as? [String: Any] else {
+      throw TiebaClientError.invalidJSON
+    }
+    let follow = try requiredExactJSONBit(permissionList["follow"])
+    let interaction = try requiredExactJSONBit(permissionList["interact"])
+    let chat = try requiredExactJSONBit(permissionList["chat"])
+    return TiebaUserInteractionPermissionState(
+      userID: expectedUserID,
+      targetUserID: targetUserID,
+      permissions: TiebaUserInteractionPermissions(
+        blocksFollow: follow,
+        blocksInteraction: interaction,
+        blocksChat: chat
+      )
+    )
+  }
+
+  static func checkUserInteractionPermissionsWriteResponse(_ body: Data) throws {
+    let object = try responseObject(from: body)
+    let code = try requiredExactJSONInteger(object["error_code"])
+    guard code == 0 else {
+      throw TiebaClientError.server(
+        code: Int32(clamping: code),
+        message: errorMessage(object, nestedError: object["error"] as? [String: Any])
+      )
+    }
+  }
+
   static func checkThreadCloudFavoriteWriteResponse(_ body: Data) throws {
     let object = try responseObject(from: body)
     try checkServerError(object)
@@ -1137,6 +1181,26 @@ enum TiebaAuthenticatedDecoder {
       return Int64(value)
     default:
       return nil
+    }
+  }
+
+  private static func requiredExactJSONInteger(_ value: Any?) throws -> Int64 {
+    guard
+      let number = value as? NSNumber,
+      CFGetTypeID(number) != CFBooleanGetTypeID(),
+      !["f", "d"].contains(String(cString: number.objCType)),
+      let integer = Int64(number.stringValue)
+    else {
+      throw TiebaClientError.invalidJSON
+    }
+    return integer
+  }
+
+  private static func requiredExactJSONBit(_ value: Any?) throws -> Bool {
+    switch try requiredExactJSONInteger(value) {
+    case 0: return false
+    case 1: return true
+    default: throw TiebaClientError.invalidJSON
     }
   }
 

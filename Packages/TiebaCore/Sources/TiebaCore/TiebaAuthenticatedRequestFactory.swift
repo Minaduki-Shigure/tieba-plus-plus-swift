@@ -24,6 +24,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let concernClientVersion = "11.10.8.6"
   static let selfProfileClientVersion = "12.52.1.0"
   static let userFollowClientVersion = "11.10.8.6"
+  static let userInteractionPermissionsClientVersion = "12.41.7.1"
   static let selfProfileUserAgent =
     "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) "
     + "Version/4.0 Chrome/135.0.0.0 Mobile Safari/537.36 tieba/12.52.1.0"
@@ -33,6 +34,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let pollWriteUserAgent =
     "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) "
     + "Version/4.0 Chrome/135.0.0.0 Mobile Safari/537.36 tieba/12.35.1.0"
+  static let userInteractionPermissionsUserAgent = "bdtb for Android 12.41.7.1"
   static let maximumConcernPageTagBytes = 4_096
   static let writeHost = TiebaRequestFactory.serviceHost
   static let webIdentityHost = "tieba.baidu.com"
@@ -190,6 +192,77 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       clientUserToken: String(expectedUserID),
       cookie: "ka=open"
     )
+  }
+
+  func userInteractionPermissions(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64
+  ) throws -> URLRequest {
+    try validate(credential)
+    try validateDistinctUserIDs(expectedUserID: expectedUserID, targetUserID: targetUserID)
+    return try signedFormRequest(
+      path: "/c/u/user/getUserBlackInfo",
+      fields: [
+        ("BDUSS", credential.bduss),
+        ("_client_type", "2"),
+        ("_client_version", Self.userInteractionPermissionsClientVersion),
+        ("black_uid", String(targetUserID)),
+        ("stoken", credential.stoken),
+      ],
+      userAgent: Self.userInteractionPermissionsUserAgent,
+      cookie: "ka=open"
+    )
+  }
+
+  func setUserInteractionPermissions(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64,
+    tbs: String,
+    permissions: TiebaUserInteractionPermissions
+  ) throws -> URLRequest {
+    try validate(credential)
+    try validateDistinctUserIDs(expectedUserID: expectedUserID, targetUserID: targetUserID)
+    guard Self.isValidTBS(tbs) else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    let permissionList = try encodedUserInteractionPermissions(permissions)
+    return try signedFormRequest(
+      path: "/c/c/user/setUserBlack",
+      fields: [
+        ("BDUSS", credential.bduss),
+        ("_client_type", "2"),
+        ("_client_version", Self.userInteractionPermissionsClientVersion),
+        ("black_uid", String(targetUserID)),
+        ("perm_list", permissionList),
+        ("stoken", credential.stoken),
+        ("tbs", tbs),
+      ],
+      userAgent: Self.userInteractionPermissionsUserAgent,
+      cookie: "ka=open"
+    )
+  }
+
+  private func encodedUserInteractionPermissions(
+    _ permissions: TiebaUserInteractionPermissions
+  ) throws -> String {
+    let object: [String: Int] = [
+      "follow": permissions.blocksFollow ? 1 : 0,
+      "interact": permissions.blocksInteraction ? 1 : 0,
+      "chat": permissions.blocksChat ? 1 : 0,
+    ]
+    do {
+      let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+      guard let value = String(data: data, encoding: .utf8) else {
+        throw TiebaClientError.invalidArgument("Unable to encode interaction permissions.")
+      }
+      return value
+    } catch let error as TiebaClientError {
+      throw error
+    } catch {
+      throw TiebaClientError.invalidArgument("Unable to encode interaction permissions.")
+    }
   }
 
   func pollState(

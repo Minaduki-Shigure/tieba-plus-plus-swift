@@ -22,9 +22,9 @@ versioned separately and currently serves `v0.59.0-alpha.1` (build 62).
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
 | Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, media preferences, reply-entry visibility, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, switching, a self-profile summary, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
-| Server writes, creation, and social actions | 15 | 8–9 | Forum/user follow and unfollow, check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, three plain-text reply targets, and plain-text new-topic creation have guarded implementations; real creation and poll success, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
+| Server writes, creation, and social actions | 15 | 9–10 | Forum/user follow and unfollow, server-side user interaction restrictions, check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, three plain-text reply targets, and plain-text new-topic creation have guarded implementations; real creation, poll and interaction-restriction success, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
-| **Total** | **100** | **73–76** | Current full-product estimate |
+| **Total** | **100** | **74–77** | Current full-product estimate |
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
 points, or roughly 91–95%. Concern and the foreground unread summary raise the
@@ -36,7 +36,9 @@ credit until its pagination, privacy-empty, expired-session, and account-switch
 behavior has also been validated on physical devices.
 User relationship reads are required by the guarded follow workflow, so their
 incremental credit is counted in the server-write row rather than duplicated in
-the private-read row. The inbox startup destination improves parity inside the
+the private-read row. The target-bound interaction-permission read is likewise
+credited with its guarded server-write workflow rather than duplicated. The
+inbox startup destination improves parity inside the
 existing local-settings credit but is too small to add a full weighted point.
 
 ## Available
@@ -149,6 +151,11 @@ the source metadata is updated to that tested IPA.
 - Local case-sensitive literal-keyword and exact UID/name user block/allow lists
 - Placeholder or fully hidden presentation for locally blocked content
 - Local video-topic blocking and user-profile block/allow shortcuts
+- Lazy, account-bound server interaction restrictions on another user's profile,
+  with separate follow, interaction, and private-message bits, explicit save
+  confirmation, one changed-state write at most, mandatory readback, and
+  account-lease isolation; real-server behavior remains a disposable-account
+  validation gate
 - Independent local forum and thread favorites
 - Local pinned-forum ordering and explicit forum-favorite context actions
 - Saved-thread reading-position and browse-mode restoration
@@ -223,9 +230,11 @@ the source metadata is updated to that tested IPA.
    cases and whether reading the list has any server-side side effect
 5. Real-device validation of canonical-topic, ordinary-floor, and full
    nested-reply approval/cancellation, single-forum check-in, forum follow, and
-   user follow/unfollow in both directions. Cover mutual-follow value `2`,
-   idempotence, rate limits, expired credentials, server errors, uncertain
-   failures, mandatory read-only reconciliation, account switching, and same-UID
+   user follow/unfollow in both directions, plus all three server-side user
+   interaction restrictions. Cover mutual-follow value `2`, the permission
+   field-deletion matrix and `0`/`1` meaning, idempotence, rate limits, expired
+   credentials, server errors, uncertain failures, mandatory read-only
+   reconciliation, cross-operation exclusion, account switching, and same-UID
    credential rotation
 6. Disposable-account validation of authenticated poll reads and command
    `309006` writes, including single- and multiple-choice polls, real option-ID
@@ -577,6 +586,31 @@ viewing the active account, and rejects late results after logout, account
 switching, or same-UID reauthentication. Minimum-field server compatibility,
 rate limits, expired-session behavior, and both directions remain disposable-
 account validation gates, so this workflow receives only partial parity credit.
+
+The profile action menu separately exposes Tieba's server-side interaction
+restrictions for a distinct target. It does not reuse or modify the app's local
+user block/allow rules. Opening the editor first performs the same authenticated
+profile probe to bind the active UID, target UID, and complete session, then sends
+a signed HTTPS form to `/c/u/user/getUserBlackInfo`. The permission response does
+not echo either UID, so the returned `userID` and `targetUserID` remain caller-
+bound context rather than server assertions. All three `perm_list` members are
+required exact integer bits: `follow`, `interact`, and `chat`; the unrelated,
+unverified `is_black_white` field is ignored.
+
+Saving requires an explicit confirmation and a fresh profile/TBS preflight. The
+compact JSON sent to `/c/c/user/setUserBlack` uses `0` for allowed and `1` for
+blocked and contains only those three named members. A dispatched write is never
+retried and is followed by exactly one raw permission readback whether its
+acknowledgement succeeds, fails, or cannot be decoded. Only the exact requested
+readback is success; any missing or different state becomes outcome-unknown and
+the App locks further saves until an explicit reload. Equivalent operations share
+one flight. Conflicting permissions or rotated credentials wait and then only
+read, while different targets can proceed independently. Follow and interaction-
+permission writes for the same account and target also exclude each other, with
+the later operation settling through its own read. The App loads this editor only
+when opened and binds every result to the initiating `userID + sessionRevision`.
+Minimum-field acceptance, bit semantics, server errors, and both block/unblock
+directions remain disposable-account validation gates.
 
 Tieba's followed-forum list rejects anonymous requests. The logged-in home page
 projects at most the first six entries from the same app-scoped, memory-only state

@@ -77,6 +77,17 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
     targetUserID: Int64,
     isFollowed: Bool
   ) async throws -> TiebaUserRelationship
+  func getUserInteractionPermissionState(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64
+  ) async throws -> TiebaUserInteractionPermissionState
+  func setUserInteractionPermissions(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64,
+    permissions: TiebaUserInteractionPermissions
+  ) async throws -> TiebaUserInteractionPermissionState
   func getPollState(
     credential: TiebaSessionCredential,
     expectedUserID: Int64,
@@ -232,6 +243,23 @@ extension TiebaAuthenticatedAccountClient {
     targetUserID: Int64,
     isFollowed: Bool
   ) async throws -> TiebaUserRelationship {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
+  func getUserInteractionPermissionState(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64
+  ) async throws -> TiebaUserInteractionPermissionState {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
+  func setUserInteractionPermissions(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64,
+    permissions: TiebaUserInteractionPermissions
+  ) async throws -> TiebaUserInteractionPermissionState {
     throw TiebaClientError.invalidAuthenticatedResponse
   }
 
@@ -1003,6 +1031,74 @@ struct TiebaCoreAccountService: AccountService {
     )
   }
 
+  func userInteractionPermissions(
+    session: StoredAccountSession,
+    targetUserID: Int64
+  ) async throws -> UserInteractionPermissionData {
+    guard session.id > 0, targetUserID > 0, targetUserID != session.id else {
+      throw UserInteractionPermissionError.unavailable("互动权限目标用户无效。")
+    }
+    guard let credentials = session.credentials else {
+      throw UserInteractionPermissionError.fullCredentialsRequired
+    }
+
+    let response: TiebaUserInteractionPermissionState
+    do {
+      response = try await client.getUserInteractionPermissionState(
+        credential: Self.coreSessionCredential(credentials),
+        expectedUserID: session.id,
+        targetUserID: targetUserID
+      )
+      try Task.checkCancellation()
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.userInteractionPermissionError(error)
+    }
+    return try Self.userInteractionPermissionData(
+      response,
+      expectedUserID: session.id,
+      expectedTargetUserID: targetUserID
+    )
+  }
+
+  func setUserInteractionPermissions(
+    session: StoredAccountSession,
+    targetUserID: Int64,
+    permissions: UserInteractionPermissions
+  ) async throws -> UserInteractionPermissionData {
+    guard session.id > 0, targetUserID > 0, targetUserID != session.id else {
+      throw UserInteractionPermissionError.unavailable("互动权限目标用户无效。")
+    }
+    guard let credentials = session.credentials else {
+      throw UserInteractionPermissionError.fullCredentialsRequired
+    }
+
+    let response: TiebaUserInteractionPermissionState
+    do {
+      response = try await client.setUserInteractionPermissions(
+        credential: Self.coreSessionCredential(credentials),
+        expectedUserID: session.id,
+        targetUserID: targetUserID,
+        permissions: TiebaUserInteractionPermissions(
+          blocksFollow: permissions.blocksFollow,
+          blocksInteraction: permissions.blocksInteraction,
+          blocksChat: permissions.blocksChat
+        )
+      )
+      try Task.checkCancellation()
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.userInteractionPermissionError(error)
+    }
+    return try Self.userInteractionPermissionData(
+      response,
+      expectedUserID: session.id,
+      expectedTargetUserID: targetUserID
+    )
+  }
+
   func pollState(
     session: StoredAccountSession,
     forumID: Int64,
@@ -1368,6 +1464,46 @@ struct TiebaCoreAccountService: AccountService {
       userID: relationship.userID,
       targetUserID: relationship.targetUserID,
       isFollowed: relationship.isFollowed
+    )
+  }
+
+  private static func userInteractionPermissionData(
+    _ state: TiebaUserInteractionPermissionState,
+    expectedUserID: Int64,
+    expectedTargetUserID: Int64
+  ) throws -> UserInteractionPermissionData {
+    guard
+      expectedUserID > 0,
+      expectedTargetUserID > 0,
+      expectedUserID != expectedTargetUserID,
+      state.userID == expectedUserID,
+      state.targetUserID == expectedTargetUserID
+    else {
+      throw UserInteractionPermissionError.unavailable(
+        "贴吧返回了不匹配的互动权限，请重新加载后再试。"
+      )
+    }
+    return UserInteractionPermissionData(
+      userID: state.userID,
+      targetUserID: state.targetUserID,
+      permissions: UserInteractionPermissions(
+        blocksFollow: state.permissions.blocksFollow,
+        blocksInteraction: state.permissions.blocksInteraction,
+        blocksChat: state.permissions.blocksChat
+      )
+    )
+  }
+
+  private static func userInteractionPermissionError(
+    _ error: Error
+  ) -> UserInteractionPermissionError {
+    if let error = error as? TiebaClientError,
+      error == .userInteractionPermissionsOutcomeUnknown
+    {
+      return .outcomeUnknown
+    }
+    return .unavailable(
+      accountError(error).errorDescription ?? "账户请求失败，请稍后重试。"
     )
   }
 
@@ -1877,6 +2013,8 @@ struct TiebaCoreAccountService: AccountService {
       message = "云端收藏结果尚未确认；再次操作时会先重新读取状态，不会自动重发请求。"
     case .pollOutcomeUnknown:
       message = "贴吧尚未确认投票结果；请重新读取状态，不会自动重发投票。"
+    case .userInteractionPermissionsOutcomeUnknown:
+      message = "贴吧尚未确认互动权限结果；请重新读取状态，不会自动重发请求。"
     case .replyChallengeRequired, .replyOutcomeUnknown, .replySubmissionIDConflict:
       message = "账户请求失败，请稍后重试。"
     case .server(let code, _):

@@ -71,8 +71,9 @@ parameter and must remain credential-free. Authenticated request factories send
 only the fields required by the selected endpoint in the HTTPS request body,
 disable persistent cookie handling and URL credentials, reject all redirects,
 and never persist credentials or retain them beyond the active authenticated
-operation. Forum and user follow/unfollow and check-in writes may carry the fixed,
-noncredential header `Cookie: ka=open`; they must not attach a stored cookie jar.
+operation. Forum and user follow/unfollow, user interaction-permission, and
+check-in writes may carry the fixed, noncredential header `Cookie: ka=open`;
+they must not attach a stored cookie jar.
 Authenticated account, followed-forum, forum-state probe, and write responses
 have endpoint-specific transfer limits before decoding. MD5 is used only for
 compatibility with the unofficial request signature protocol, not for password
@@ -1274,6 +1275,39 @@ only read after it settles, and an uncertain failure must never automatically
 dispatch another write. Until a disposable account validates both directions,
 server errors, rate limits, expiry, cancellation, and minimal-field acceptance,
 the control remains an explicitly confirmed validation-build feature.
+
+Server-side user interaction restrictions require the same complete session and
+a distinct positive target UID. They are independent from the app's local user
+block/allow lists. Before the private permission read, Core performs the existing
+authenticated profile probe and requires the exact target UID; the subsequent
+`/c/u/user/getUserBlackInfo` JSON response does not echo the account or target,
+so those IDs are caller-bound context and not server identity assertions. The
+read form contains only BDUSS, STOKEN, `black_uid`, client type/version, and the
+signature. The write to `/c/c/user/setUserBlack` additionally contains one fresh
+validated `tbs` and a compact `perm_list` JSON object. Both requests use fixed
+client version `12.41.7.1`, fixed user agent `bdtb for Android 12.41.7.1`, the
+fixed noncredential `Cookie: ka=open`, and no
+CUID, IMEI, Android ID, IDFV, advertising, hardware, install, model, screen,
+location, stored-cookie-jar, or Authorization data.
+
+The decoder requires an exact integer zero error code and exact integer `0` or
+`1` values for `follow`, `interact`, and `chat`; booleans, floating-point values,
+missing members, and other values fail closed. Zero means allowed and one means
+blocked. The unverified `is_black_white` metadata is ignored. A changed state
+uses a fresh profile/TBS probe and sends at most one write. Its acknowledgement
+is not authoritative: exactly one raw permission readback follows every
+dispatched attempt, including transport or decode failure, and a missing or
+nonmatching readback becomes a typed outcome-unknown result without retry.
+Equivalent changes may share a bounded flight; conflicting states or credentials
+wait and then read only. A permission write and user follow write for the same
+account/target pair cannot overlap, and the later operation reads rather than
+dispatching after the first settles. The App opens the editor lazily, requires
+explicit confirmation, and accepts results only for the initiating
+`userID + sessionRevision`; an unknown outcome locks mutation until an explicit
+reload. Disposable-account validation must cover the minimal-field contract,
+all three bit directions, idempotence, cross-operation exclusion, known and
+uncertain failures, cancellation, logout, account switching, and same-UID
+credential rotation before this leaves validation builds.
 
 Report security issues privately to the repository owner rather than opening a
 public issue.

@@ -57,6 +57,64 @@ private enum TiebaUserFollowWaitOutcome: Sendable, Equatable {
   case cancelled
 }
 
+private struct TiebaUserInteractionPermissionsResourceKey: Hashable, Sendable {
+  let userID: Int64
+  let targetUserID: Int64
+}
+
+private struct TiebaUserInteractionPermissionsIdentity:
+  Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let credential: TiebaSessionCredential
+
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.credential.bduss == rhs.credential.bduss
+      && lhs.credential.stoken == rhs.credential.stoken
+      && lhs.credential.bdussCookieName == rhs.credential.bdussCookieName
+  }
+
+  var description: String { "TiebaUserInteractionPermissionsIdentity(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror { Mirror(self, children: [:], displayStyle: .struct) }
+}
+
+private struct TiebaUserInteractionPermissionsFlight:
+  Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let id: UUID
+  let identity: TiebaUserInteractionPermissionsIdentity
+  let permissions: TiebaUserInteractionPermissions
+  let task: Task<TiebaUserInteractionPermissionState, Swift.Error>
+  var stage: TiebaUserInteractionPermissionsFlightStage
+
+  var description: String { "TiebaUserInteractionPermissionsFlight(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(
+      self,
+      children: [
+        "id": id,
+        "identity": identity,
+        "permissions": permissions,
+        "stage": stage,
+      ],
+      displayStyle: .struct
+    )
+  }
+}
+
+private enum TiebaUserInteractionPermissionsFlightStage: Sendable, Equatable {
+  case queued
+  case preflight
+  case writeDispatched
+  case completed
+}
+
+private enum TiebaUserInteractionPermissionsWaitOutcome: Sendable, Equatable {
+  case completed
+  case cancelled
+}
+
 private struct TiebaPollResourceKey: Hashable, Sendable {
   let userID: Int64
   let forumID: Int64
@@ -465,6 +523,8 @@ public actor TiebaAuthenticatedClient {
   static let selfProfileResponseMaximumBytes = 2 * 1_024 * 1_024
   static let userRelationshipResponseMaximumBytes = 2 * 1_024 * 1_024
   static let userFollowWriteResponseMaximumBytes = 64 * 1_024
+  static let userInteractionPermissionsResponseMaximumBytes = 64 * 1_024
+  static let userInteractionPermissionsWriteResponseMaximumBytes = 64 * 1_024
   static let pollStateResponseMaximumBytes = 8 * 1_024 * 1_024
   static let pollWriteResponseMaximumBytes = 64 * 1_024
   static let webSessionResponseMaximumBytes = 256 * 1_024
@@ -491,6 +551,17 @@ public actor TiebaAuthenticatedClient {
   private var userFollowFlights = [TiebaUserFollowResourceKey: TiebaUserFollowFlight]()
   private var userFollowWaiters = [
     TiebaUserFollowResourceKey: [UUID: CheckedContinuation<TiebaUserFollowWaitOutcome, Never>]
+  ]()
+  private var userInteractionPermissionsFlights = [
+    TiebaUserInteractionPermissionsResourceKey: TiebaUserInteractionPermissionsFlight
+  ]()
+  private var userInteractionPermissionsWaiters = [
+    TiebaUserInteractionPermissionsResourceKey: [
+      UUID: CheckedContinuation<TiebaUserInteractionPermissionsWaitOutcome, Never>
+    ]
+  ]()
+  private var userInteractionPermissionsSharedWaiterIDs = [
+    TiebaUserInteractionPermissionsResourceKey: Set<UUID>
   ]()
   private var pollFlights = [TiebaPollResourceKey: TiebaPollFlight]()
   private var pollWaiters = [
@@ -623,6 +694,23 @@ public actor TiebaAuthenticatedClient {
     )
     let identity = TiebaUserFollowIdentity(credential: credential)
 
+    let permissionsKey = TiebaUserInteractionPermissionsResourceKey(
+      userID: expectedUserID,
+      targetUserID: targetUserID
+    )
+    if let permissionsFlight = userInteractionPermissionsFlights[permissionsKey] {
+      try await waitForUserInteractionPermissionsFlightCompletion(
+        resourceKey: permissionsKey,
+        flightID: permissionsFlight.id,
+        keepsWriteAlive: false
+      )
+      return try await getUserRelationship(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        targetUserID: targetUserID
+      )
+    }
+
     if let flight = userFollowFlights[resourceKey] {
       if flight.identity == identity, flight.isFollowed == isFollowed {
         return try await waitForUserFollowFlight(
@@ -665,6 +753,104 @@ public actor TiebaAuthenticatedClient {
       )
     }
     return try await waitForUserFollowFlight(
+      resourceKey: resourceKey,
+      flightID: flightID,
+      task: task
+    )
+  }
+
+  public func getUserInteractionPermissionState(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64
+  ) async throws -> TiebaUserInteractionPermissionState {
+    _ = try await getUserRelationshipContext(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      targetUserID: targetUserID
+    )
+    try Task.checkCancellation()
+    return try await getRawUserInteractionPermissionState(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      targetUserID: targetUserID
+    )
+  }
+
+  public func setUserInteractionPermissions(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64,
+    permissions: TiebaUserInteractionPermissions
+  ) async throws -> TiebaUserInteractionPermissionState {
+    try Task.checkCancellation()
+    let resourceKey = TiebaUserInteractionPermissionsResourceKey(
+      userID: expectedUserID,
+      targetUserID: targetUserID
+    )
+    let followKey = TiebaUserFollowResourceKey(
+      userID: expectedUserID,
+      targetUserID: targetUserID
+    )
+    if let followFlight = userFollowFlights[followKey] {
+      try await waitForUserFollowFlightCompletion(
+        resourceKey: followKey,
+        flightID: followFlight.id
+      )
+      return try await getUserInteractionPermissionState(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        targetUserID: targetUserID
+      )
+    }
+
+    let identity = TiebaUserInteractionPermissionsIdentity(credential: credential)
+    if let flight = userInteractionPermissionsFlights[resourceKey] {
+      if flight.identity == identity, flight.permissions == permissions {
+        return try await waitForUserInteractionPermissionsFlight(
+          resourceKey: resourceKey,
+          flightID: flight.id,
+          task: flight.task
+        )
+      }
+      try await waitForUserInteractionPermissionsFlightCompletion(
+        resourceKey: resourceKey,
+        flightID: flight.id,
+        keepsWriteAlive: false
+      )
+      return try await getUserInteractionPermissionState(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        targetUserID: targetUserID
+      )
+    }
+
+    let flightID = UUID()
+    let task: Task<TiebaUserInteractionPermissionState, Swift.Error> = Task.detached { [self] in
+      try await performUserInteractionPermissionsWrite(
+        resourceKey: resourceKey,
+        flightID: flightID,
+        credential: credential,
+        expectedUserID: expectedUserID,
+        targetUserID: targetUserID,
+        permissions: permissions
+      )
+    }
+    userInteractionPermissionsFlights[resourceKey] = TiebaUserInteractionPermissionsFlight(
+      id: flightID,
+      identity: identity,
+      permissions: permissions,
+      task: task,
+      stage: .queued
+    )
+    Task {
+      await finishUserInteractionPermissionsFlight(
+        resourceKey: resourceKey,
+        flightID: flightID,
+        task: task
+      )
+    }
+    return try await waitForUserInteractionPermissionsFlight(
       resourceKey: resourceKey,
       flightID: flightID,
       task: task
@@ -1734,6 +1920,67 @@ public actor TiebaAuthenticatedClient {
     // The acknowledgement does not bind a target or state. A successful
     // authenticated readback is therefore the only mutation result we expose.
     return reconciled
+  }
+
+  private func performUserInteractionPermissionsWrite(
+    resourceKey: TiebaUserInteractionPermissionsResourceKey,
+    flightID: UUID,
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64,
+    permissions: TiebaUserInteractionPermissions
+  ) async throws -> TiebaUserInteractionPermissionState {
+    try beginUserInteractionPermissionsPreflight(
+      resourceKey: resourceKey,
+      flightID: flightID
+    )
+    let current = try await getUserInteractionPermissionState(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      targetUserID: targetUserID
+    )
+    guard current.permissions != permissions else { return current }
+
+    let freshContext = try await getUserRelationshipContext(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      targetUserID: targetUserID
+    )
+    let request = try requestFactory.setUserInteractionPermissions(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      targetUserID: targetUserID,
+      tbs: freshContext.tbs,
+      permissions: permissions
+    )
+    try beginUserInteractionPermissionsWrite(
+      resourceKey: resourceKey,
+      flightID: flightID
+    )
+    do {
+      let body = try await send(
+        request,
+        maximumBodyBytes: Self.userInteractionPermissionsWriteResponseMaximumBytes
+      )
+      try TiebaAuthenticatedDecoder.checkUserInteractionPermissionsWriteResponse(body)
+    } catch {
+      // The write is one-shot. Its acknowledgement is not authoritative, so
+      // every dispatched attempt is reconciled by the same raw read below.
+    }
+
+    do {
+      let reconciled = try await getRawUserInteractionPermissionState(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        targetUserID: targetUserID
+      )
+      guard reconciled.permissions == permissions else {
+        throw TiebaClientError.userInteractionPermissionsOutcomeUnknown
+      }
+      return reconciled
+    } catch {
+      throw TiebaClientError.userInteractionPermissionsOutcomeUnknown
+    }
   }
 
   private func performPollVoteWrite(
@@ -2835,6 +3082,27 @@ public actor TiebaAuthenticatedClient {
     )
   }
 
+  private func getRawUserInteractionPermissionState(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    targetUserID: Int64
+  ) async throws -> TiebaUserInteractionPermissionState {
+    let request = try requestFactory.userInteractionPermissions(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      targetUserID: targetUserID
+    )
+    let body = try await send(
+      request,
+      maximumBodyBytes: Self.userInteractionPermissionsResponseMaximumBytes
+    )
+    return try TiebaAuthenticatedDecoder.userInteractionPermissions(
+      from: body,
+      expectedUserID: expectedUserID,
+      targetUserID: targetUserID
+    )
+  }
+
   private func waitForUserFollowFlight(
     resourceKey: TiebaUserFollowResourceKey,
     flightID: UUID,
@@ -2918,6 +3186,195 @@ public actor TiebaAuthenticatedClient {
     for continuation in waiters.values {
       continuation.resume(returning: .completed)
     }
+  }
+
+  private func waitForUserInteractionPermissionsFlight(
+    resourceKey: TiebaUserInteractionPermissionsResourceKey,
+    flightID: UUID,
+    task: Task<TiebaUserInteractionPermissionState, Swift.Error>
+  ) async throws -> TiebaUserInteractionPermissionState {
+    try await waitForUserInteractionPermissionsFlightCompletion(
+      resourceKey: resourceKey,
+      flightID: flightID
+    )
+    try Task.checkCancellation()
+    return try await task.value
+  }
+
+  private func waitForUserInteractionPermissionsFlightCompletion(
+    resourceKey: TiebaUserInteractionPermissionsResourceKey,
+    flightID: UUID,
+    keepsWriteAlive: Bool = true
+  ) async throws {
+    if Task.isCancelled {
+      cancelUnregisteredUserInteractionPermissionsWaiter(
+        resourceKey: resourceKey,
+        flightID: flightID,
+        keepsWriteAlive: keepsWriteAlive
+      )
+      throw CancellationError()
+    }
+    guard userInteractionPermissionsFlights[resourceKey]?.id == flightID else { return }
+    let waiterID = UUID()
+    let outcome: TiebaUserInteractionPermissionsWaitOutcome = await withTaskCancellationHandler {
+      await withCheckedContinuation {
+        (continuation: CheckedContinuation<TiebaUserInteractionPermissionsWaitOutcome, Never>) in
+        guard
+          !Task.isCancelled,
+          userInteractionPermissionsFlights[resourceKey]?.id == flightID
+        else {
+          if Task.isCancelled {
+            cancelUnregisteredUserInteractionPermissionsWaiter(
+              resourceKey: resourceKey,
+              flightID: flightID,
+              keepsWriteAlive: keepsWriteAlive
+            )
+          }
+          continuation.resume(returning: Task.isCancelled ? .cancelled : .completed)
+          return
+        }
+        userInteractionPermissionsWaiters[resourceKey, default: [:]][waiterID] = continuation
+        if keepsWriteAlive {
+          userInteractionPermissionsSharedWaiterIDs[resourceKey, default: []].insert(waiterID)
+        }
+      }
+    } onCancel: {
+      Task {
+        await self.cancelUserInteractionPermissionsWaiter(
+          resourceKey: resourceKey,
+          flightID: flightID,
+          waiterID: waiterID,
+          keepsWriteAlive: keepsWriteAlive
+        )
+      }
+    }
+    guard outcome == .completed else { throw CancellationError() }
+    try Task.checkCancellation()
+  }
+
+  private func cancelUserInteractionPermissionsWaiter(
+    resourceKey: TiebaUserInteractionPermissionsResourceKey,
+    flightID: UUID,
+    waiterID: UUID,
+    keepsWriteAlive: Bool
+  ) {
+    guard userInteractionPermissionsFlights[resourceKey]?.id == flightID else { return }
+    guard var waiters = userInteractionPermissionsWaiters[resourceKey] else {
+      cancelUnregisteredUserInteractionPermissionsWaiter(
+        resourceKey: resourceKey,
+        flightID: flightID,
+        keepsWriteAlive: keepsWriteAlive
+      )
+      return
+    }
+    let continuation = waiters.removeValue(forKey: waiterID)
+    if var sharedWaiterIDs = userInteractionPermissionsSharedWaiterIDs[resourceKey] {
+      sharedWaiterIDs.remove(waiterID)
+      if sharedWaiterIDs.isEmpty {
+        userInteractionPermissionsSharedWaiterIDs.removeValue(forKey: resourceKey)
+      } else {
+        userInteractionPermissionsSharedWaiterIDs[resourceKey] = sharedWaiterIDs
+      }
+    }
+    if waiters.isEmpty {
+      userInteractionPermissionsWaiters.removeValue(forKey: resourceKey)
+    } else {
+      userInteractionPermissionsWaiters[resourceKey] = waiters
+    }
+    if keepsWriteAlive,
+      userInteractionPermissionsSharedWaiterIDs[resourceKey]?.isEmpty != false,
+      let flight = userInteractionPermissionsFlights[resourceKey],
+      flight.stage == .queued || flight.stage == .preflight
+    {
+      flight.task.cancel()
+    }
+    continuation?.resume(returning: .cancelled)
+  }
+
+  private func cancelUnregisteredUserInteractionPermissionsWaiter(
+    resourceKey: TiebaUserInteractionPermissionsResourceKey,
+    flightID: UUID,
+    keepsWriteAlive: Bool
+  ) {
+    guard
+      keepsWriteAlive,
+      userInteractionPermissionsSharedWaiterIDs[resourceKey]?.isEmpty != false,
+      let flight = userInteractionPermissionsFlights[resourceKey],
+      flight.id == flightID,
+      flight.stage == .queued || flight.stage == .preflight
+    else { return }
+    flight.task.cancel()
+  }
+
+  private func finishUserInteractionPermissionsFlight(
+    resourceKey: TiebaUserInteractionPermissionsResourceKey,
+    flightID: UUID,
+    task: Task<TiebaUserInteractionPermissionState, Swift.Error>
+  ) async {
+    _ = await task.result
+    guard var flight = userInteractionPermissionsFlights[resourceKey], flight.id == flightID else {
+      return
+    }
+    flight.stage = .completed
+    userInteractionPermissionsFlights[resourceKey] = flight
+    userInteractionPermissionsFlights.removeValue(forKey: resourceKey)
+    let waiters = userInteractionPermissionsWaiters.removeValue(forKey: resourceKey) ?? [:]
+    userInteractionPermissionsSharedWaiterIDs.removeValue(forKey: resourceKey)
+    for continuation in waiters.values {
+      continuation.resume(returning: .completed)
+    }
+  }
+
+  func userInteractionPermissionsWaiterCount(
+    expectedUserID: Int64,
+    targetUserID: Int64
+  ) -> Int {
+    userInteractionPermissionsWaiters[
+      TiebaUserInteractionPermissionsResourceKey(
+        userID: expectedUserID,
+        targetUserID: targetUserID
+      )
+    ]?.count ?? 0
+  }
+
+  func userInteractionPermissionsFlightExists(
+    expectedUserID: Int64,
+    targetUserID: Int64
+  ) -> Bool {
+    userInteractionPermissionsFlights[
+      TiebaUserInteractionPermissionsResourceKey(
+        userID: expectedUserID,
+        targetUserID: targetUserID
+      )
+    ] != nil
+  }
+
+  private func beginUserInteractionPermissionsPreflight(
+    resourceKey: TiebaUserInteractionPermissionsResourceKey,
+    flightID: UUID
+  ) throws {
+    try Task.checkCancellation()
+    guard
+      var flight = userInteractionPermissionsFlights[resourceKey],
+      flight.id == flightID,
+      flight.stage == .queued
+    else { throw CancellationError() }
+    flight.stage = .preflight
+    userInteractionPermissionsFlights[resourceKey] = flight
+  }
+
+  private func beginUserInteractionPermissionsWrite(
+    resourceKey: TiebaUserInteractionPermissionsResourceKey,
+    flightID: UUID
+  ) throws {
+    try Task.checkCancellation()
+    guard
+      var flight = userInteractionPermissionsFlights[resourceKey],
+      flight.id == flightID,
+      flight.stage == .preflight
+    else { throw CancellationError() }
+    flight.stage = .writeDispatched
+    userInteractionPermissionsFlights[resourceKey] = flight
   }
 
   private func waitForPollFlight(
