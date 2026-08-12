@@ -624,13 +624,17 @@ final class TiebaProtoMapperTests: XCTestCase {
     var fixture = ProtoFixtures.postPage().data
     fixture.thread.originThreadInfo.pollInfo.title = " Favorite language? "
     fixture.thread.originThreadInfo.pollInfo.isMulti = 1
+    fixture.thread.originThreadInfo.pollInfo.isPolled = 1
+    fixture.thread.originThreadInfo.pollInfo.polledValue = "17"
     fixture.thread.originThreadInfo.pollInfo.totalNum = -4
     fixture.thread.originThreadInfo.pollInfo.totalPoll = -8
 
     var firstOption = PollInfo.PollOption()
+    firstOption.id = 1
     firstOption.text = " Swift "
     firstOption.num = 12
     var secondOption = PollInfo.PollOption()
+    secondOption.id = 2
     secondOption.text = " Objective-C "
     secondOption.num = -3
     fixture.thread.originThreadInfo.pollInfo.options = [firstOption, secondOption]
@@ -639,10 +643,38 @@ final class TiebaProtoMapperTests: XCTestCase {
 
     XCTAssertEqual(poll.title, "Favorite language?")
     XCTAssertTrue(poll.isMultipleChoice)
+    XCTAssertFalse(poll.isPolled)
+    XCTAssertTrue(poll.selectedOptionIDs.isEmpty)
     XCTAssertEqual(poll.participantCount, 0)
     XCTAssertEqual(poll.totalVoteCount, 0)
     XCTAssertEqual(poll.options.map(\.text), ["Swift", "Objective-C"])
+    XCTAssertEqual(poll.options.map(\.id), [1, 2])
     XCTAssertEqual(poll.options.map(\.voteCount), [12, 0])
+  }
+
+  func testPostPagePollDropsInvalidAndDuplicateOptionIdentities() throws {
+    var fixture = ProtoFixtures.postPage().data
+    fixture.thread.originThreadInfo.pollInfo.title = "Safe identities"
+    var missing = PollInfo.PollOption()
+    missing.id = 0
+    missing.text = "Missing"
+    var first = PollInfo.PollOption()
+    first.id = 1
+    first.text = "First"
+    var duplicate = PollInfo.PollOption()
+    duplicate.id = 1
+    duplicate.text = "Duplicate"
+    var second = PollInfo.PollOption()
+    second.id = 2
+    second.text = "Second"
+    fixture.thread.originThreadInfo.pollInfo.options = [missing, first, duplicate, second]
+
+    let poll = try XCTUnwrap(TiebaProtoMapper.postPage(fixture).poll)
+    XCTAssertEqual(poll.options.map(\.id), [1, 2])
+    XCTAssertEqual(poll.options.map(\.text), ["First", "Second"])
+
+    fixture.thread.originThreadInfo.pollInfo.options = [missing, first, duplicate]
+    XCTAssertNil(TiebaProtoMapper.postPage(fixture).poll)
   }
 
   func testPostPageIgnoresPollMetadataWithoutOptions() {
@@ -656,11 +688,16 @@ final class TiebaProtoMapperTests: XCTestCase {
   func testPostPagePrefersDirectPollWhenBothCarriersArePopulated() throws {
     var fixture = ProtoFixtures.postPage().data
     var directOption = PollInfo.PollOption()
+    directOption.id = 1
     directOption.text = "Direct option"
     directOption.num = 2
-    fixture.thread.pollInfo.options = [directOption]
+    var secondDirectOption = PollInfo.PollOption()
+    secondDirectOption.id = 3
+    secondDirectOption.text = "Another direct option"
+    fixture.thread.pollInfo.options = [directOption, secondDirectOption]
     fixture.thread.pollInfo.totalPoll = 2
     var mirroredOption = PollInfo.PollOption()
+    mirroredOption.id = 2
     mirroredOption.text = "Mirrored option"
     mirroredOption.num = 3
     fixture.thread.originThreadInfo.pollInfo.options = [mirroredOption]
@@ -668,7 +705,7 @@ final class TiebaProtoMapperTests: XCTestCase {
 
     let poll = try XCTUnwrap(TiebaProtoMapper.postPage(fixture).poll)
 
-    XCTAssertEqual(poll.options.map(\.text), ["Direct option"])
+    XCTAssertEqual(poll.options.map(\.text), ["Direct option", "Another direct option"])
   }
 
   func testPostPageKeepsSharedOriginPollOffOuterThread() throws {
@@ -676,9 +713,13 @@ final class TiebaProtoMapperTests: XCTestCase {
     fixture.thread.isShareThread = 1
     fixture.thread.originThreadInfo.tid = "900"
     var option = PollInfo.PollOption()
+    option.id = 1
     option.text = "Origin option"
     option.num = 5
-    fixture.thread.originThreadInfo.pollInfo.options = [option]
+    var secondOption = PollInfo.PollOption()
+    secondOption.id = 2
+    secondOption.text = "Second origin option"
+    fixture.thread.originThreadInfo.pollInfo.options = [option, secondOption]
     fixture.thread.originThreadInfo.pollInfo.totalPoll = 5
 
     let result = TiebaProtoMapper.postPage(fixture)
@@ -686,7 +727,7 @@ final class TiebaProtoMapperTests: XCTestCase {
     XCTAssertNil(result.poll)
     let origin = try XCTUnwrap(result.originThread)
     let originPoll = try XCTUnwrap(origin.poll)
-    XCTAssertEqual(originPoll.options.map(\.text), ["Origin option"])
+    XCTAssertEqual(originPoll.options.map(\.text), ["Origin option", "Second origin option"])
 
     fixture.thread.isShareThread = 2
     let unknownFlagResult = TiebaProtoMapper.postPage(fixture)

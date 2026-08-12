@@ -839,8 +839,8 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   func testPollProgressUsesVoteTotalFallbackAndClampsInvalidRatios() throws {
-    let first = BrowsePollOption(id: 0, text: "First", voteCount: 2)
-    let second = BrowsePollOption(id: 1, text: "Second", voteCount: 1)
+    let first = BrowsePollOption(id: 1, text: "First", voteCount: 2)
+    let second = BrowsePollOption(id: 2, text: "Second", voteCount: 1)
     let fallbackPoll = BrowsePoll(
       title: "Poll",
       isMultipleChoice: true,
@@ -858,7 +858,7 @@ final class BrowseViewModelTests: XCTestCase {
       isMultipleChoice: false,
       participantCount: -1,
       totalVoteCount: 1,
-      options: [BrowsePollOption(id: 0, text: "Too many", voteCount: 4)]
+      options: [BrowsePollOption(id: 1, text: "Too many", voteCount: 4)]
     )
     let option = try XCTUnwrap(inconsistentPoll.options.first)
     XCTAssertEqual(inconsistentPoll.progress(for: option), 1)
@@ -869,11 +869,47 @@ final class BrowseViewModelTests: XCTestCase {
       isMultipleChoice: false,
       participantCount: 0,
       totalVoteCount: 0,
-      options: [BrowsePollOption(id: 0, text: "None", voteCount: 0)]
+      options: [BrowsePollOption(id: 1, text: "None", voteCount: 0)]
     )
     let emptyOption = try XCTUnwrap(emptyTotalPoll.options.first)
     XCTAssertEqual(emptyTotalPoll.progress(for: emptyOption), 0)
     XCTAssertEqual(emptyTotalPoll.percentage(for: emptyOption), 0)
+  }
+
+  func testPollMappingPreservesAuthoritativeOptionIDsAndAccountMetadata() {
+    let mapped = TiebaCoreBrowseService.mapPoll(
+      TiebaPoll(
+        title: "Mapped poll",
+        isMultipleChoice: true,
+        isPolled: true,
+        selectedOptionIDs: [42],
+        tips: "A tip",
+        endTimestamp: 2_000,
+        status: 1,
+        participantCount: 5,
+        totalVoteCount: 6,
+        options: [
+          TiebaPollOption(id: 7, text: "Seven", voteCount: 2),
+          TiebaPollOption(
+            id: 42,
+            text: "Forty-two",
+            voteCount: 4,
+            image: "https://example.com/poll.png"
+          ),
+        ]
+      )
+    )
+
+    XCTAssertEqual(mapped.options.map(\.id), [7, 42])
+    XCTAssertEqual(mapped.selectedOptionIDs, [42])
+    XCTAssertTrue(mapped.isPolled)
+    XCTAssertEqual(mapped.tips, "A tip")
+    XCTAssertEqual(mapped.endTimestamp, 2_000)
+    XCTAssertEqual(mapped.status, 1)
+    XCTAssertEqual(
+      mapped.options.last?.imageURL,
+      URL(string: "https://example.com/poll.png")
+    )
   }
 
   func testBrowseMappingPreservesReadOnlyPostAndCommentMetadata() {
@@ -6434,8 +6470,8 @@ private enum Fixtures {
       participantCount: 10,
       totalVoteCount: 10,
       options: [
-        BrowsePollOption(id: 0, text: "Swift", voteCount: 8),
-        BrowsePollOption(id: 1, text: "Objective-C", voteCount: 2),
+        BrowsePollOption(id: 1, text: "Swift", voteCount: 8),
+        BrowsePollOption(id: 2, text: "Objective-C", voteCount: 2),
       ]
     )
   }

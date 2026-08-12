@@ -789,6 +789,7 @@ struct ThreadView: View {
                 VStack(spacing: 0) {
                   PostView(
                     post: firstPost,
+                    forumID: viewModel.thread.forumID,
                     agreementTarget: viewModel.agreementTarget(forPostID: firstPost.id),
                     agreementFallbackScore: viewModel.thread.agreeScore,
                     originThread: viewModel.originThread,
@@ -870,6 +871,7 @@ struct ThreadView: View {
                 VStack(spacing: 0) {
                   PostView(
                     post: post,
+                    forumID: viewModel.thread.forumID,
                     agreementTarget: viewModel.agreementTarget(forPostID: post.id),
                     agreementFallbackScore: post.agreeScore,
                     originThread: nil,
@@ -1504,6 +1506,7 @@ enum ContentAgreementControlPresentation: Equatable {
 
 private struct PostView: View {
   let post: BrowsePost
+  let forumID: Int64
   let agreementTarget: ContentAgreementTarget?
   let agreementFallbackScore: Int
   let originThread: BrowseThread?
@@ -1524,6 +1527,7 @@ private struct PostView: View {
   let openComments: (Int64?) -> Void
 
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
+  @Environment(\.accountAccess) private var accountAccess
   @Environment(\.contentAgreementStore) private var contentAgreementStore
 
   var body: some View {
@@ -1561,7 +1565,17 @@ private struct PostView: View {
       }
 
       if let poll {
-        PollResultsCard(poll: poll)
+        if let accountAccess {
+          PollVoteControl(
+            anonymousPoll: poll,
+            forumID: forumID,
+            threadID: post.threadID,
+            access: accountAccess,
+            isReadOnly: isPureReadingMode
+          )
+        } else {
+          PollResultsCard(poll: poll)
+        }
       }
 
       if let presentation = InlineCommentPreviewPresentation(
@@ -1852,45 +1866,166 @@ private struct ContentAgreementFixedLabel: View {
   }
 }
 
-private struct PollResultsCard: View {
-  let poll: BrowsePoll
+private struct PollVoteControl: View {
+  @StateObject private var viewModel: PollVoteViewModel
+  @State private var showsConfirmation = false
+
+  let anonymousPoll: BrowsePoll
+  let isReadOnly: Bool
 
   @Environment(\.appAccentColor) private var appAccentColor
 
+  init(
+    anonymousPoll: BrowsePoll,
+    forumID: Int64,
+    threadID: Int64,
+    access: AccountAccess,
+    isReadOnly: Bool
+  ) {
+    self.anonymousPoll = anonymousPoll
+    self.isReadOnly = isReadOnly
+    _viewModel = StateObject(
+      wrappedValue: PollVoteViewModel(
+        anonymousPoll: anonymousPoll,
+        forumID: forumID,
+        threadID: threadID,
+        access: access
+      )
+    )
+  }
+
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      VStack(alignment: .leading, spacing: 5) {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-          Label("投票结果", systemImage: "chart.bar.fill")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.tint)
-          Spacer(minLength: 8)
-          Label(
-            poll.isMultipleChoice ? "多选" : "单选",
-            systemImage: poll.isMultipleChoice ? "checklist" : "checkmark.circle"
-          )
+    VStack(alignment: .leading, spacing: 0) {
+      if presentsSelection {
+        selectionCard
+      } else {
+        PollResultsCard(
+          poll: displayedPoll,
+          status: resultStatus,
+          retry: resultCanReload ? reload : nil
+        )
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .task(id: isReadOnly) {
+      guard !isReadOnly else { return }
+      await viewModel.loadIfNeeded()
+    }
+    .onChange(of: anonymousPoll) { poll in
+      viewModel.replaceAnonymousSnapshot(poll)
+    }
+    .onChange(of: isReadOnly) { readOnly in
+      if readOnly {
+        showsConfirmation = false
+        viewModel.presentationDidDisappear()
+      }
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+      showsConfirmation = false
+      let token = viewModel.invalidateForAccountSessionChange()
+      guard !isReadOnly else { return }
+      Task { @MainActor in
+        await viewModel.reloadAfterAccountSessionChange(ifCurrent: token)
+      }
+    }
+    .onDisappear {
+      showsConfirmation = false
+      viewModel.presentationDidDisappear()
+    }
+    .confirmationDialog(
+      "提交投票？",
+      isPresented: $showsConfirmation,
+      titleVisibility: .visible
+    ) {
+      Button("确认投票") {
+        showsConfirmation = false
+        viewModel.beginSubmitSelection()
+      }
+      Button("取消", role: .cancel) { showsConfirmation = false }
+    } message: {
+      Text(confirmationMessage)
+    }
+    .alert("无法完成投票", isPresented: errorIsPresented) {
+      if resultCanReload {
+        Button("重新读取") {
+          viewModel.dismissError()
+          reload()
+        }
+      }
+      Button("好", role: .cancel) { viewModel.dismissError() }
+    } message: {
+      Text(viewModel.errorMessage ?? "无法确认投票状态。")
+    }
+  }
+
+  private var presentsSelection: Bool {
+    guard !isReadOnly else { return false }
+    switch viewModel.state {
+    case .ready:
+      return viewModel.isSelectionEnabled
+    case .submitting:
+      return true
+    case .idle, .signedOut, .loading, .failed, .outcomeUnknown:
+      return false
+    }
+  }
+
+  private var displayedPoll: BrowsePoll {
+    isReadOnly ? anonymousPoll : viewModel.displayedPoll
+  }
+
+  private var selectionCard: some View {
+    let poll = displayedPoll
+    let isSubmitting: Bool
+    if case .submitting = viewModel.state {
+      isSubmitting = true
+    } else {
+      isSubmitting = false
+    }
+
+    return VStack(alignment: .leading, spacing: 12) {
+      PollCardHeader(poll: poll, showsResultsLabel: false)
+
+      if !poll.tips.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        Text(poll.tips)
           .font(.caption)
           .foregroundStyle(.secondary)
-          .fixedSize()
-        }
-
-        Text(pollTitle)
-          .font(.subheadline.weight(.semibold))
-          .foregroundStyle(.primary)
           .fixedSize(horizontal: false, vertical: true)
       }
 
-      VStack(alignment: .leading, spacing: 12) {
+      VStack(alignment: .leading, spacing: 8) {
         ForEach(poll.options) { option in
-          pollOption(option)
+          selectionRow(option, poll: poll, isSubmitting: isSubmitting)
         }
       }
 
-      Text("\(compactCount(poll.participantCount)) 人参与")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .monospacedDigit()
-        .accessibilityLabel("\(max(poll.participantCount, 0).formatted()) 人参与")
+      HStack(spacing: 10) {
+        Text("\(compactPollCount(poll.participantCount)) 人参与")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .monospacedDigit()
+          .accessibilityLabel("\(max(poll.participantCount, 0).formatted()) 人参与")
+
+        Spacer(minLength: 8)
+
+        Button {
+          showsConfirmation = true
+        } label: {
+          if isSubmitting {
+            HStack(spacing: 7) {
+              ProgressView()
+                .controlSize(.small)
+              Text("提交中")
+            }
+          } else {
+            Label("投票", systemImage: "paperplane.fill")
+          }
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.small)
+        .disabled(!viewModel.canSubmit || isSubmitting || isReadOnly)
+        .accessibilityIdentifier("poll-submit")
+      }
     }
     .padding(12)
     .background(Color(uiColor: .secondarySystemGroupedBackground))
@@ -1902,47 +2037,369 @@ private struct PollResultsCard: View {
     .accessibilityElement(children: .contain)
   }
 
+  private func selectionRow(
+    _ option: BrowsePollOption,
+    poll: BrowsePoll,
+    isSubmitting: Bool
+  ) -> some View {
+    let isSelected = viewModel.selectedOptionIDs.contains(option.id)
+    let symbol: String
+    if poll.isMultipleChoice {
+      symbol = isSelected ? "checkmark.square.fill" : "square"
+    } else {
+      symbol = isSelected ? "checkmark.circle.fill" : "circle"
+    }
+
+    return Button {
+      viewModel.toggleSelection(optionID: option.id)
+    } label: {
+      HStack(alignment: .center, spacing: 10) {
+        Image(systemName: symbol)
+          .font(.title3)
+          .foregroundStyle(isSelected ? appAccentColor.color : Color.secondary)
+          .frame(width: 24, height: 24)
+
+        PollOptionThumbnail(url: option.imageURL)
+
+        Text(pollOptionTitle(option))
+          .font(.subheadline)
+          .foregroundStyle(.primary)
+          .multilineTextAlignment(.leading)
+          .fixedSize(horizontal: false, vertical: true)
+          .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+      }
+      .padding(.horizontal, 10)
+      .padding(.vertical, 4)
+      .background(
+        isSelected ? appAccentColor.color.opacity(0.08) : Color(uiColor: .systemBackground)
+      )
+      .clipShape(RoundedRectangle(cornerRadius: 6))
+      .overlay {
+        RoundedRectangle(cornerRadius: 6)
+          .stroke(
+            isSelected
+              ? appAccentColor.color.opacity(0.7)
+              : Color(uiColor: .separator).opacity(0.35),
+            lineWidth: 0.75
+          )
+      }
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .disabled(isSubmitting || isReadOnly || !viewModel.isSelectionEnabled)
+    .accessibilityLabel(pollOptionTitle(option))
+    .accessibilityValue(isSelected ? "已选择" : "未选择")
+    .accessibilityIdentifier("poll-option-\(option.id)")
+  }
+
+  private var resultStatus: PollResultStatus? {
+    guard !isReadOnly else { return .readOnly }
+    let poll = displayedPoll
+    switch viewModel.state {
+    case .idle:
+      return nil
+    case .signedOut:
+      return .signedOut
+    case .loading:
+      return .loading
+    case .ready:
+      if poll.isClosed(at: Date()) { return .closed }
+      if poll.isPolled { return .participated }
+      return isReadOnly ? .readOnly : nil
+    case .submitting:
+      return .submitting
+    case .failed:
+      return .failed
+    case .outcomeUnknown:
+      return .outcomeUnknown
+    }
+  }
+
+  private var resultCanReload: Bool {
+    guard !isReadOnly else { return false }
+    switch viewModel.state {
+    case .failed, .outcomeUnknown:
+      return true
+    case .idle, .signedOut, .loading, .ready, .submitting:
+      return false
+    }
+  }
+
+  private var confirmationMessage: String {
+    let selectedTitles = displayedPoll.options.compactMap { option in
+      viewModel.selectedOptionIDs.contains(option.id)
+        ? String(pollOptionTitle(option).prefix(40))
+        : nil
+    }
+    let visibleTitles = selectedTitles.prefix(3)
+    var summary = visibleTitles.joined(separator: "、")
+    if selectedTitles.count > visibleTitles.count {
+      summary += "等 \(selectedTitles.count) 项"
+    }
+    guard !summary.isEmpty else { return "投票提交后不可撤销。" }
+    return "将选择“\(summary)”。投票提交后不可撤销。"
+  }
+
+  private var errorIsPresented: Binding<Bool> {
+    Binding(
+      get: { !isReadOnly && viewModel.errorMessage != nil },
+      set: { isPresented in
+        if !isPresented { viewModel.dismissError() }
+      }
+    )
+  }
+
+  private func reload() {
+    guard !isReadOnly else { return }
+    showsConfirmation = false
+    Task { @MainActor in await viewModel.reload() }
+  }
+}
+
+private enum PollResultStatus {
+  case signedOut
+  case loading
+  case readOnly
+  case participated
+  case closed
+  case submitting
+  case failed
+  case outcomeUnknown
+
+  var title: String {
+    switch self {
+    case .signedOut: "未登录"
+    case .loading: "正在读取"
+    case .readOnly: "只读"
+    case .participated: "已参与"
+    case .closed: "已截止"
+    case .submitting: "提交中"
+    case .failed: "读取失败"
+    case .outcomeUnknown: "结果待确认"
+    }
+  }
+
+  var systemImage: String {
+    switch self {
+    case .signedOut: "person.crop.circle.badge.questionmark"
+    case .loading, .submitting: "hourglass"
+    case .readOnly: "eye"
+    case .participated: "checkmark.circle.fill"
+    case .closed: "clock.badge.xmark"
+    case .failed: "exclamationmark.triangle"
+    case .outcomeUnknown: "questionmark.circle"
+    }
+  }
+}
+
+private struct PollCardHeader: View {
+  let poll: BrowsePoll
+  let showsResultsLabel: Bool
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 5) {
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        Label(
+          showsResultsLabel ? "投票结果" : "投票",
+          systemImage: showsResultsLabel ? "chart.bar.fill" : "checkmark.circle"
+        )
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.tint)
+        Spacer(minLength: 8)
+        Label(
+          poll.isMultipleChoice ? "多选" : "单选",
+          systemImage: poll.isMultipleChoice ? "checklist" : "checkmark.circle"
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .fixedSize()
+      }
+
+      Text(pollTitle)
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(.primary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+  }
+
   private var pollTitle: String {
     let title = poll.title.trimmingCharacters(in: .whitespacesAndNewlines)
     return title.isEmpty ? "投票" : title
+  }
+}
+
+private struct PollOptionThumbnail: View {
+  let url: URL?
+
+  var body: some View {
+    if let url {
+      ContentRemoteImage(
+        url: url,
+        maxPixelSize: 384,
+        loadAccessibilityLabel: "加载投票选项图片"
+      ) { phase in
+        switch phase {
+        case .success(let asset, _):
+          RemoteImageAssetView(asset: asset, contentMode: .fill)
+        case .empty:
+          ZStack {
+            Color(uiColor: .tertiarySystemFill)
+            ProgressView().controlSize(.mini)
+          }
+        case .loadRequired:
+          pollOptionImagePlaceholder(systemImage: "arrow.down.circle")
+        case .failure:
+          pollOptionImagePlaceholder(systemImage: "photo.badge.exclamationmark")
+        }
+      }
+      .frame(width: 48, height: 48)
+      .clipShape(RoundedRectangle(cornerRadius: 4))
+      .accessibilityHidden(true)
+    }
+  }
+
+  private func pollOptionImagePlaceholder(systemImage: String) -> some View {
+    ZStack {
+      Color(uiColor: .tertiarySystemFill)
+      Image(systemName: systemImage)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+  }
+}
+
+private struct PollResultsCard: View {
+  let poll: BrowsePoll
+  let status: PollResultStatus?
+  let retry: (() -> Void)?
+
+  @Environment(\.appAccentColor) private var appAccentColor
+
+  init(
+    poll: BrowsePoll,
+    status: PollResultStatus? = nil,
+    retry: (() -> Void)? = nil
+  ) {
+    self.poll = poll
+    self.status = status
+    self.retry = retry
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      PollCardHeader(poll: poll, showsResultsLabel: true)
+
+      if !poll.tips.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        Text(poll.tips)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+
+      VStack(alignment: .leading, spacing: 12) {
+        ForEach(poll.options) { option in
+          pollOption(option)
+        }
+      }
+
+      HStack(spacing: 10) {
+        Text("\(compactPollCount(poll.participantCount)) 人参与")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .monospacedDigit()
+          .accessibilityLabel("\(max(poll.participantCount, 0).formatted()) 人参与")
+
+        Spacer(minLength: 8)
+
+        if let status {
+          Label(status.title, systemImage: status.systemImage)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+            .fixedSize()
+        }
+
+        if let retry {
+          Button(action: retry) {
+            Image(systemName: "arrow.clockwise")
+              .frame(width: 24, height: 24)
+          }
+          .buttonStyle(.plain)
+          .foregroundStyle(.tint)
+          .accessibilityLabel("重新读取投票状态")
+          .help("重新读取投票状态")
+          .accessibilityIdentifier("poll-reload")
+        }
+      }
+    }
+    .padding(12)
+    .background(Color(uiColor: .secondarySystemGroupedBackground))
+    .clipShape(RoundedRectangle(cornerRadius: 6))
+    .overlay {
+      RoundedRectangle(cornerRadius: 6)
+        .stroke(Color(uiColor: .separator).opacity(0.45), lineWidth: 0.5)
+    }
+    .accessibilityElement(children: .contain)
   }
 
   private func pollOption(_ option: BrowsePollOption) -> some View {
     let percentage = poll.percentage(for: option)
     let voteCount = max(option.voteCount, 0)
-    let text = option.text.isEmpty ? "选项 \(option.id + 1)" : option.text
+    let text = pollOptionTitle(option)
+    let isSelected = poll.isSelected(option.id)
 
     return VStack(alignment: .leading, spacing: 6) {
-      HStack(alignment: .firstTextBaseline, spacing: 10) {
-        Text(text)
-          .font(.subheadline)
-          .fixedSize(horizontal: false, vertical: true)
-          .frame(maxWidth: .infinity, alignment: .leading)
-        Text("\(compactCount(voteCount)) 票 · \(percentage)%")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .monospacedDigit()
-          .fixedSize()
-      }
+      HStack(alignment: .center, spacing: 10) {
+        PollOptionThumbnail(url: option.imageURL)
 
-      GeometryReader { geometry in
-        ZStack(alignment: .leading) {
-          Capsule()
-            .fill(Color(uiColor: .tertiarySystemFill))
-          Capsule()
-            .fill(appAccentColor.color.opacity(0.65))
-            .frame(width: geometry.size.width * CGFloat(poll.progress(for: option)))
+        VStack(alignment: .leading, spacing: 4) {
+          HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(text)
+              .font(.subheadline)
+              .fontWeight(isSelected ? .semibold : .regular)
+              .foregroundStyle(isSelected ? appAccentColor.color : Color.primary)
+              .fixedSize(horizontal: false, vertical: true)
+              .frame(maxWidth: .infinity, alignment: .leading)
+            Text("\(compactPollCount(voteCount)) 票 · \(percentage)%")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .monospacedDigit()
+              .fixedSize()
+          }
+
+          GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+              Capsule()
+                .fill(Color(uiColor: .tertiarySystemFill))
+              Capsule()
+                .fill(appAccentColor.color.opacity(isSelected ? 0.85 : 0.65))
+                .frame(width: geometry.size.width * CGFloat(poll.progress(for: option)))
+            }
+          }
+          .frame(height: 5)
+        }
+
+        if isSelected {
+          Image(systemName: "checkmark.circle.fill")
+            .foregroundStyle(appAccentColor.color)
+            .accessibilityHidden(true)
         }
       }
-      .frame(height: 5)
     }
     .accessibilityElement(children: .ignore)
-    .accessibilityLabel("\(text)，\(voteCount.formatted()) 票，\(percentage)%")
+    .accessibilityLabel(
+      "\(text)，\(voteCount.formatted()) 票，\(percentage)%\(isSelected ? "，已选择" : "")"
+    )
   }
+}
 
-  private func compactCount(_ value: Int64) -> String {
-    max(value, 0).formatted(.number.notation(.compactName))
-  }
+private func pollOptionTitle(_ option: BrowsePollOption) -> String {
+  let title = option.text.trimmingCharacters(in: .whitespacesAndNewlines)
+  guard !title.isEmpty else { return "未命名选项" }
+  return title.count > 200 ? "\(title.prefix(200))..." : title
+}
+
+private func compactPollCount(_ value: Int64) -> String {
+  max(value, 0).formatted(.number.notation(.compactName))
 }
 
 private struct OriginThreadCard: View {

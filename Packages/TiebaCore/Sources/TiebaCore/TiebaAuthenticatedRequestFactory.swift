@@ -18,6 +18,8 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let cloudFavoritesClientVersion = "11.10.8.6"
   static let threadCloudFavoriteClientVersion = "12.41.7.1"
   static let textReplyClientVersion = "12.35.1.0"
+  static let pollReadClientVersion = "12.52.1.0"
+  static let pollWriteClientVersion = "11.10.8.6"
   static let newThreadClientVersion = "7.2.0.0"
   static let concernClientVersion = "11.10.8.6"
   static let selfProfileClientVersion = "12.52.1.0"
@@ -25,6 +27,12 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let selfProfileUserAgent =
     "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) "
     + "Version/4.0 Chrome/135.0.0.0 Mobile Safari/537.36 tieba/12.52.1.0"
+  static let pollReadUserAgent =
+    "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) "
+    + "Version/4.0 Chrome/135.0.0.0 Mobile Safari/537.36 tieba/12.52.1.0"
+  static let pollWriteUserAgent =
+    "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) "
+    + "Version/4.0 Chrome/135.0.0.0 Mobile Safari/537.36 tieba/12.35.1.0"
   static let maximumConcernPageTagBytes = 4_096
   static let writeHost = TiebaRequestFactory.serviceHost
   static let webIdentityHost = "tieba.baidu.com"
@@ -181,6 +189,129 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       userAgent: Self.selfProfileUserAgent,
       clientUserToken: String(expectedUserID),
       cookie: "ka=open"
+    )
+  }
+
+  func pollState(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64
+  ) throws -> URLRequest {
+    try validatePollContext(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID
+    )
+    try validateConfiguration()
+
+    var common = CommonReq()
+    common.clientType = 2
+    common.clientVersion = Self.pollReadClientVersion
+    common.bduss = credential.bduss
+    common.stoken = credential.stoken
+    common.userAgent = Self.pollReadUserAgent
+
+    var data = PbPageReqIdl.DataReq()
+    data.common = common
+    data.kz = threadID
+    data.forumID = forumID
+    data.pn = 1
+    data.rn = 2
+
+    var message = PbPageReqIdl()
+    message.data = data
+    return try authenticatedProtobufReadRequest(
+      path: "/c/f/pb/page",
+      command: 302_001,
+      message: message,
+      fields: [("stoken", credential.stoken)],
+      userAgent: Self.pollReadUserAgent,
+      clientUserToken: String(expectedUserID),
+      cookie: "ka=open"
+    )
+  }
+
+  func submitPollVote(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    selectedOptionIDs: [Int32]
+  ) throws -> URLRequest {
+    let optionIDs = try validatePollVoteArguments(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      selectedOptionIDs: selectedOptionIDs
+    )
+
+    var data = AddPollPostReqIdl.DataReq()
+    data.threadID = UInt64(threadID)
+    data.options = optionIDs.map(String.init).joined(separator: ",")
+    data.forumID = UInt64(forumID)
+
+    var message = AddPollPostReqIdl()
+    message.data = data
+    return try authenticatedProtobufWriteRequest(
+      path: "/c/c/post/addPollPost",
+      command: 309_006,
+      message: message,
+      fields: [
+        ("BDUSS", credential.bduss),
+        ("_client_type", "2"),
+        ("_client_version", Self.pollWriteClientVersion),
+        ("stoken", credential.stoken),
+      ],
+      userAgent: Self.pollWriteUserAgent,
+      clientUserToken: String(expectedUserID),
+      cookie: "ka=open"
+    )
+  }
+
+  func validatePollVoteArguments(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    selectedOptionIDs: [Int32]
+  ) throws -> [Int32] {
+    try validatePollContext(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID
+    )
+    return try canonicalPollOptionIDs(selectedOptionIDs)
+  }
+
+  func canonicalPollOptionIDs(_ selectedOptionIDs: [Int32]) throws -> [Int32] {
+    guard !selectedOptionIDs.isEmpty, selectedOptionIDs.count <= 100 else {
+      throw TiebaClientError.invalidArgument("A poll vote must select between 1 and 100 options.")
+    }
+    guard selectedOptionIDs.allSatisfy({ $0 > 0 }) else {
+      throw TiebaClientError.invalidArgument("Poll option IDs must be positive.")
+    }
+    guard Set(selectedOptionIDs).count == selectedOptionIDs.count else {
+      throw TiebaClientError.invalidArgument("Poll option IDs must not contain duplicates.")
+    }
+    return selectedOptionIDs.sorted()
+  }
+
+  private func validatePollContext(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64
+  ) throws {
+    try validate(credential)
+    try validateAgreementContext(
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      target: nil
     )
   }
 

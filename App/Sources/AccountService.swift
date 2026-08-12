@@ -232,6 +232,33 @@ struct UserRelationshipData: Hashable, Sendable {
   let isFollowed: Bool
 }
 
+struct PollVoteData: Hashable, Sendable {
+  let userID: Int64
+  let forumID: Int64
+  let threadID: Int64
+  let poll: BrowsePoll
+}
+
+enum PollVoteError: LocalizedError, Equatable, Sendable {
+  case invalidSelection
+  case fullCredentialsRequired
+  case outcomeUnknown
+  case unavailable(String)
+
+  var errorDescription: String? {
+    switch self {
+    case .invalidSelection:
+      "请选择有效的投票选项。"
+    case .fullCredentialsRequired:
+      "此账户需要重新登录，才能安全参与投票。"
+    case .outcomeUnknown:
+      "贴吧尚未确认投票结果。请重新加载权威状态后再决定是否重试。"
+    case .unavailable(let message):
+      message
+    }
+  }
+}
+
 struct ForumMembershipData: Hashable, Sendable {
   let userID: Int64
   let forumID: Int64
@@ -414,6 +441,17 @@ protocol AccountService: Sendable {
     targetUserID: Int64,
     isFollowed: Bool
   ) async throws -> UserRelationshipData
+  func pollState(
+    session: StoredAccountSession,
+    forumID: Int64,
+    threadID: Int64
+  ) async throws -> PollVoteData
+  func submitPollVote(
+    session: StoredAccountSession,
+    forumID: Int64,
+    threadID: Int64,
+    selectedOptionIDs: Set<Int32>
+  ) async throws -> PollVoteData
   func forumMembership(
     session: StoredAccountSession,
     forumID: Int64,
@@ -502,6 +540,23 @@ extension AccountService {
     isFollowed: Bool
   ) async throws -> UserRelationshipData {
     throw BrowseError.unavailable("当前账户服务不支持更新用户关注状态。")
+  }
+
+  func pollState(
+    session: StoredAccountSession,
+    forumID: Int64,
+    threadID: Int64
+  ) async throws -> PollVoteData {
+    throw PollVoteError.unavailable("当前账户服务不支持读取投票状态。")
+  }
+
+  func submitPollVote(
+    session: StoredAccountSession,
+    forumID: Int64,
+    threadID: Int64,
+    selectedOptionIDs: Set<Int32>
+  ) async throws -> PollVoteData {
+    throw PollVoteError.unavailable("当前账户服务不支持提交投票。")
   }
 
   func cloudFavorites(

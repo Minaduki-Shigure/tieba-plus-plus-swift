@@ -57,6 +57,67 @@ private enum TiebaUserFollowWaitOutcome: Sendable, Equatable {
   case cancelled
 }
 
+private struct TiebaPollResourceKey: Hashable, Sendable {
+  let userID: Int64
+  let forumID: Int64
+  let threadID: Int64
+}
+
+private struct TiebaPollFlightIdentity:
+  Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let credential: TiebaSessionCredential
+
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.credential.bduss == rhs.credential.bduss
+      && lhs.credential.stoken == rhs.credential.stoken
+      && lhs.credential.bdussCookieName == rhs.credential.bdussCookieName
+  }
+
+  var description: String { "TiebaPollFlightIdentity(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror { Mirror(self, children: [:], displayStyle: .struct) }
+}
+
+private struct TiebaPollFlight:
+  Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let id: UUID
+  let identity: TiebaPollFlightIdentity
+  let selectedOptionIDs: [Int32]
+  let task: Task<TiebaPollState, Swift.Error>
+  var stage: TiebaPollFlightStage
+
+  var isCompleted: Bool { stage == .completed }
+
+  var description: String { "TiebaPollFlight(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(
+      self,
+      children: [
+        "id": id,
+        "identity": identity,
+        "selectedOptionIDs": selectedOptionIDs,
+        "stage": stage,
+      ],
+      displayStyle: .struct
+    )
+  }
+}
+
+private enum TiebaPollFlightStage: Sendable, Equatable {
+  case queued
+  case preflight
+  case writeDispatched
+  case completed
+}
+
+private enum TiebaPollWaitOutcome: Sendable, Equatable {
+  case completed
+  case cancelled
+}
+
 private struct TiebaForumCheckInIdentity:
   Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
 {
@@ -404,6 +465,8 @@ public actor TiebaAuthenticatedClient {
   static let selfProfileResponseMaximumBytes = 2 * 1_024 * 1_024
   static let userRelationshipResponseMaximumBytes = 2 * 1_024 * 1_024
   static let userFollowWriteResponseMaximumBytes = 64 * 1_024
+  static let pollStateResponseMaximumBytes = 8 * 1_024 * 1_024
+  static let pollWriteResponseMaximumBytes = 64 * 1_024
   static let webSessionResponseMaximumBytes = 256 * 1_024
   static let followedForumsResponseMaximumBytes = 2 * 1_024 * 1_024
   static let cloudFavoritesResponseMaximumBytes = 2 * 1_024 * 1_024
@@ -429,6 +492,11 @@ public actor TiebaAuthenticatedClient {
   private var userFollowWaiters = [
     TiebaUserFollowResourceKey: [UUID: CheckedContinuation<TiebaUserFollowWaitOutcome, Never>]
   ]()
+  private var pollFlights = [TiebaPollResourceKey: TiebaPollFlight]()
+  private var pollWaiters = [
+    TiebaPollResourceKey: [UUID: CheckedContinuation<TiebaPollWaitOutcome, Never>]
+  ]()
+  private var pollSharedWaiterIDs = [TiebaPollResourceKey: Set<UUID>]()
   private var forumCheckInFlights = [TiebaForumCheckInResourceKey: TiebaForumCheckInFlight]()
   private var forumCheckInSharedWaiterCounts = [UUID: Int]()
   private var forumCheckInConflictWaiters = [
@@ -597,6 +665,106 @@ public actor TiebaAuthenticatedClient {
       )
     }
     return try await waitForUserFollowFlight(
+      resourceKey: resourceKey,
+      flightID: flightID,
+      task: task
+    )
+  }
+
+  public func getPollState(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64
+  ) async throws -> TiebaPollState {
+    let request = try requestFactory.pollState(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID
+    )
+    let response: PbPageResIdl = try await sendProtobuf(
+      request,
+      maximumBodyBytes: Self.pollStateResponseMaximumBytes
+    )
+    return try TiebaAuthenticatedDecoder.pollState(
+      from: response,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID
+    )
+  }
+
+  public func submitPollVote(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    selectedOptionIDs: [Int32]
+  ) async throws -> TiebaPollState {
+    try Task.checkCancellation()
+    let canonicalOptionIDs = try requestFactory.validatePollVoteArguments(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      selectedOptionIDs: selectedOptionIDs
+    )
+    let resourceKey = TiebaPollResourceKey(
+      userID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID
+    )
+    let identity = TiebaPollFlightIdentity(credential: credential)
+
+    if let flight = pollFlights[resourceKey] {
+      if flight.identity == identity, flight.selectedOptionIDs == canonicalOptionIDs {
+        return try await waitForPollFlight(
+          resourceKey: resourceKey,
+          flightID: flight.id,
+          task: flight.task
+        )
+      }
+      try await waitForPollFlightCompletion(
+        resourceKey: resourceKey,
+        flightID: flight.id,
+        keepsWriteAlive: false
+      )
+      return try await getPollState(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID
+      )
+    }
+
+    let flightID = UUID()
+    let task: Task<TiebaPollState, Swift.Error> = Task.detached { [self] in
+      try await performPollVoteWrite(
+        resourceKey: resourceKey,
+        flightID: flightID,
+        credential: credential,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID,
+        selectedOptionIDs: canonicalOptionIDs
+      )
+    }
+    pollFlights[resourceKey] = TiebaPollFlight(
+      id: flightID,
+      identity: identity,
+      selectedOptionIDs: canonicalOptionIDs,
+      task: task,
+      stage: .queued
+    )
+    Task {
+      await finishPollFlight(
+        resourceKey: resourceKey,
+        flightID: flightID,
+        task: task
+      )
+    }
+    return try await waitForPollFlight(
       resourceKey: resourceKey,
       flightID: flightID,
       task: task
@@ -1566,6 +1734,78 @@ public actor TiebaAuthenticatedClient {
     // The acknowledgement does not bind a target or state. A successful
     // authenticated readback is therefore the only mutation result we expose.
     return reconciled
+  }
+
+  private func performPollVoteWrite(
+    resourceKey: TiebaPollResourceKey,
+    flightID: UUID,
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    selectedOptionIDs: [Int32]
+  ) async throws -> TiebaPollState {
+    try beginPollPreflight(resourceKey: resourceKey, flightID: flightID)
+    let current = try await getPollState(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID
+    )
+    let selection = Set(selectedOptionIDs)
+    if current.poll.isPolled, current.poll.selectedOptionIDs == selection {
+      return current
+    }
+    guard !current.poll.isPolled else {
+      throw TiebaClientError.invalidArgument("This account has already voted in the poll.")
+    }
+    guard !current.poll.isClosed() else {
+      throw TiebaClientError.invalidArgument("This poll is closed.")
+    }
+    let availableOptionIDs = Set(current.poll.options.map(\.id))
+    guard selection.isSubset(of: availableOptionIDs) else {
+      throw TiebaClientError.invalidArgument("The poll selection contains an unknown option.")
+    }
+    guard current.poll.isMultipleChoice || selectedOptionIDs.count == 1 else {
+      throw TiebaClientError.invalidArgument("This poll accepts only one option.")
+    }
+
+    let request = try requestFactory.submitPollVote(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      selectedOptionIDs: selectedOptionIDs
+    )
+    try beginPollWrite(resourceKey: resourceKey, flightID: flightID)
+    do {
+      let response: AddPollPostResIdl = try await sendProtobuf(
+        request,
+        maximumBodyBytes: Self.pollWriteResponseMaximumBytes
+      )
+      try TiebaAuthenticatedDecoder.checkPollWriteResponse(response)
+    } catch {
+      // A dispatched one-shot vote is never automatically replayed. The same
+      // authoritative readback below decides whether its result is publishable.
+    }
+
+    do {
+      let reconciled = try await getPollState(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID
+      )
+      guard
+        reconciled.poll.isPolled,
+        reconciled.poll.selectedOptionIDs == selection
+      else {
+        throw TiebaClientError.pollOutcomeUnknown
+      }
+      return reconciled
+    } catch {
+      throw TiebaClientError.pollOutcomeUnknown
+    }
   }
 
   private func performTextReplySubmission(
@@ -2678,6 +2918,181 @@ public actor TiebaAuthenticatedClient {
     for continuation in waiters.values {
       continuation.resume(returning: .completed)
     }
+  }
+
+  private func waitForPollFlight(
+    resourceKey: TiebaPollResourceKey,
+    flightID: UUID,
+    task: Task<TiebaPollState, Swift.Error>
+  ) async throws -> TiebaPollState {
+    try await waitForPollFlightCompletion(resourceKey: resourceKey, flightID: flightID)
+    try Task.checkCancellation()
+    return try await task.value
+  }
+
+  private func waitForPollFlightCompletion(
+    resourceKey: TiebaPollResourceKey,
+    flightID: UUID,
+    keepsWriteAlive: Bool = true
+  ) async throws {
+    if Task.isCancelled {
+      cancelUnregisteredPollWaiter(
+        resourceKey: resourceKey,
+        flightID: flightID,
+        keepsWriteAlive: keepsWriteAlive
+      )
+      throw CancellationError()
+    }
+    guard pollFlights[resourceKey]?.id == flightID else { return }
+    let waiterID = UUID()
+    let outcome: TiebaPollWaitOutcome = await withTaskCancellationHandler {
+      await withCheckedContinuation {
+        (continuation: CheckedContinuation<TiebaPollWaitOutcome, Never>) in
+        guard !Task.isCancelled, pollFlights[resourceKey]?.id == flightID else {
+          if Task.isCancelled {
+            cancelUnregisteredPollWaiter(
+              resourceKey: resourceKey,
+              flightID: flightID,
+              keepsWriteAlive: keepsWriteAlive
+            )
+          }
+          continuation.resume(returning: Task.isCancelled ? .cancelled : .completed)
+          return
+        }
+        pollWaiters[resourceKey, default: [:]][waiterID] = continuation
+        if keepsWriteAlive {
+          pollSharedWaiterIDs[resourceKey, default: []].insert(waiterID)
+        }
+      }
+    } onCancel: {
+      Task {
+        await self.cancelPollWaiter(
+          resourceKey: resourceKey,
+          flightID: flightID,
+          waiterID: waiterID,
+          keepsWriteAlive: keepsWriteAlive
+        )
+      }
+    }
+    guard outcome == .completed else { throw CancellationError() }
+    try Task.checkCancellation()
+  }
+
+  private func cancelPollWaiter(
+    resourceKey: TiebaPollResourceKey,
+    flightID: UUID,
+    waiterID: UUID,
+    keepsWriteAlive: Bool
+  ) {
+    guard pollFlights[resourceKey]?.id == flightID else { return }
+    guard var waiters = pollWaiters[resourceKey] else {
+      cancelUnregisteredPollWaiter(
+        resourceKey: resourceKey,
+        flightID: flightID,
+        keepsWriteAlive: keepsWriteAlive
+      )
+      return
+    }
+    let continuation = waiters.removeValue(forKey: waiterID)
+    if var sharedWaiterIDs = pollSharedWaiterIDs[resourceKey] {
+      sharedWaiterIDs.remove(waiterID)
+      if sharedWaiterIDs.isEmpty {
+        pollSharedWaiterIDs.removeValue(forKey: resourceKey)
+      } else {
+        pollSharedWaiterIDs[resourceKey] = sharedWaiterIDs
+      }
+    }
+    if waiters.isEmpty {
+      pollWaiters.removeValue(forKey: resourceKey)
+    } else {
+      pollWaiters[resourceKey] = waiters
+    }
+    if keepsWriteAlive,
+      pollSharedWaiterIDs[resourceKey]?.isEmpty != false,
+      let flight = pollFlights[resourceKey],
+      flight.stage == .queued || flight.stage == .preflight
+    {
+      flight.task.cancel()
+    }
+    continuation?.resume(returning: .cancelled)
+  }
+
+  private func cancelUnregisteredPollWaiter(
+    resourceKey: TiebaPollResourceKey,
+    flightID: UUID,
+    keepsWriteAlive: Bool
+  ) {
+    guard
+      keepsWriteAlive,
+      pollSharedWaiterIDs[resourceKey]?.isEmpty != false,
+      let flight = pollFlights[resourceKey],
+      flight.id == flightID,
+      flight.stage == .queued || flight.stage == .preflight
+    else { return }
+    flight.task.cancel()
+  }
+
+  func pollWaiterCount(
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64
+  ) -> Int {
+    pollWaiters[
+      TiebaPollResourceKey(userID: expectedUserID, forumID: forumID, threadID: threadID)
+    ]?.count ?? 0
+  }
+
+  private func finishPollFlight(
+    resourceKey: TiebaPollResourceKey,
+    flightID: UUID,
+    task: Task<TiebaPollState, Swift.Error>
+  ) async {
+    _ = await task.result
+    guard var flight = pollFlights[resourceKey], flight.id == flightID else { return }
+    flight.stage = .completed
+    pollFlights[resourceKey] = flight
+    pollFlights.removeValue(forKey: resourceKey)
+    let waiters = pollWaiters.removeValue(forKey: resourceKey) ?? [:]
+    pollSharedWaiterIDs.removeValue(forKey: resourceKey)
+    for continuation in waiters.values {
+      continuation.resume(returning: .completed)
+    }
+  }
+
+  func pollFlightExists(
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64
+  ) -> Bool {
+    pollFlights[
+      TiebaPollResourceKey(userID: expectedUserID, forumID: forumID, threadID: threadID)
+    ] != nil
+  }
+
+  private func beginPollPreflight(
+    resourceKey: TiebaPollResourceKey,
+    flightID: UUID
+  ) throws {
+    try Task.checkCancellation()
+    guard var flight = pollFlights[resourceKey], flight.id == flightID else {
+      throw CancellationError()
+    }
+    guard flight.stage == .queued else { throw CancellationError() }
+    flight.stage = .preflight
+    pollFlights[resourceKey] = flight
+  }
+
+  private func beginPollWrite(
+    resourceKey: TiebaPollResourceKey,
+    flightID: UUID
+  ) throws {
+    try Task.checkCancellation()
+    guard var flight = pollFlights[resourceKey], flight.id == flightID else {
+      throw CancellationError()
+    }
+    guard flight.stage == .preflight else { throw CancellationError() }
+    flight.stage = .writeDispatched
+    pollFlights[resourceKey] = flight
   }
 
   private func waitForForumCheckInFlight(

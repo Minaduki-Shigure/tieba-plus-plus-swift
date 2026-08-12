@@ -115,6 +115,20 @@ public struct TiebaUserRelationship: Sendable, Hashable {
   }
 }
 
+public struct TiebaPollState: Sendable, Hashable {
+  public let userID: Int64
+  public let forumID: Int64
+  public let threadID: Int64
+  public let poll: TiebaPoll
+
+  public init(userID: Int64, forumID: Int64, threadID: Int64, poll: TiebaPoll) {
+    self.userID = userID
+    self.forumID = forumID
+    self.threadID = threadID
+    self.poll = poll
+  }
+}
+
 public struct TiebaConcernPage: Sendable, Hashable {
   public let requestedUserID: Int64
   public let threads: [TiebaThread]

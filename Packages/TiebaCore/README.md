@@ -62,10 +62,11 @@ if let userID = posts.posts[0].author?.id {
 The authenticated client supports BDUSS-only identity validation, full-session
 UID-consistency probes, followed and target-user liked forums, an account-bound concern feed,
 Tieba cloud-favorite reads and guarded thread-detail mutations, authoritative
-per-forum follow/check-in state, confirmed follow/unfollow, and explicit
-single-forum check-in. It also exposes guarded plain-text reply and new-topic
-creation for validation builds. Core single-flights equivalent check-in and cloud-favorite
-calls and serializes conflicting identities for the same resource. The
+per-forum follow/check-in state, confirmed follow/unfollow, explicit
+single-forum check-in, and guarded account-bound poll voting. It also exposes
+guarded plain-text reply and new-topic creation for validation builds. Core
+single-flights equivalent check-in, cloud-favorite, and poll-vote calls and
+serializes conflicting identities for the same resource. The
 app's Keychain and account-service layers own persistence, credential-rotation
 leases, and mutual exclusion between follow and check-in. A conflicting App
 call waits for the active write to settle and then reconciles by reading; it is
@@ -254,6 +255,21 @@ not advertise a usable sign state; it is not permission to attempt a write.
   `threadCloudFavoriteOutcomeUnknown` error.
   Equivalent operations share one task; conflicting credentials or markers wait
   and then only reread.
+- Poll voting first uses an authenticated PB Page read with fixed client version
+  `12.52.1.0`; both the protobuf common block and HTTP header carry the matching
+  fixed user agent. The read binds the expected account UID, forum ID, thread ID,
+  real positive option IDs, selection mode, previous selection, and open state.
+  It prefers a direct poll and permits the ordinary thread's mirrored origin only
+  when that carrier's TID exactly matches the requested thread; an unbound or
+  shared origin poll is never attributed to the outer thread. A legal explicitly
+  confirmed selection sends one HTTPS
+  protobuf command `309006` with only the complete session, client type/version,
+  signature, forum/thread IDs, and canonical selected IDs. Hardware,
+  installation, advertising, location, and screen identifiers are omitted.
+  Identical account/thread/selection calls share one flight; conflicts wait and
+  only reread. Every dispatched write receives exactly one authenticated
+  readback, is never retried, and reports an unknown outcome unless the requested
+  selection is verified.
 - The authenticated FRS forum-state probe binds the returned user ID, forum ID,
   normalized forum name, follow state, optional sign-user ID, and 26-character
   lowercase hexadecimal `tbs` to the request. The `tbs` remains internal and is

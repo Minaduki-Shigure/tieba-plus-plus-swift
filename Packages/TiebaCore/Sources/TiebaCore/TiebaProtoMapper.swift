@@ -982,21 +982,54 @@ enum TiebaProtoMapper {
   }
 
   private static func poll(_ proto: PollInfo) -> TiebaPoll? {
-    let options = proto.options.map { option in
-      TiebaPollOption(
-        text: option.text.trimmingCharacters(in: .whitespacesAndNewlines),
-        voteCount: max(option.num, 0)
+    let title = proto.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    let tips = proto.tips.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard
+      isBoundedPollText(title, maximumBytes: 16 * 1_024),
+      isBoundedPollText(tips, maximumBytes: 16 * 1_024)
+    else { return nil }
+    var seenOptionIDs = Set<Int32>()
+    var options = [TiebaPollOption]()
+    options.reserveCapacity(min(proto.options.count, 100))
+    for option in proto.options.prefix(100) {
+      guard option.id > 0, seenOptionIDs.insert(option.id).inserted else { continue }
+      let text = option.text.trimmingCharacters(in: .whitespacesAndNewlines)
+      let image = option.image.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard
+        isBoundedPollText(text, maximumBytes: 16 * 1_024),
+        isBoundedPollText(image, maximumBytes: 4 * 1_024)
+      else { continue }
+      options.append(
+        TiebaPollOption(
+          id: option.id,
+          text: text.precomposedStringWithCanonicalMapping,
+          voteCount: max(option.num, 0),
+          image: image.precomposedStringWithCanonicalMapping
+        )
       )
     }
-    guard !options.isEmpty else { return nil }
+    guard options.count >= 2 else { return nil }
 
     return TiebaPoll(
-      title: proto.title.trimmingCharacters(in: .whitespacesAndNewlines),
+      type: proto.type,
+      title: title.precomposedStringWithCanonicalMapping,
       isMultipleChoice: proto.isMulti == 1,
+      // Anonymous browse responses are never authoritative account state.
+      isPolled: false,
+      selectedOptionIDs: [],
+      tips: tips.precomposedStringWithCanonicalMapping,
+      endTimestamp: Int64(max(proto.endTime, 0)),
+      status: max(proto.status, 0),
+      lastTimestamp: Int64(proto.lastTime),
       participantCount: max(proto.totalNum, 0),
       totalVoteCount: max(proto.totalPoll, 0),
       options: options
     )
+  }
+
+  private static func isBoundedPollText(_ value: String, maximumBytes: Int) -> Bool {
+    value.utf8.count <= maximumBytes
+      && !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
   }
 
   private static func assembledContent(

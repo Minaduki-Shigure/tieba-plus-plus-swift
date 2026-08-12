@@ -642,34 +642,63 @@ public struct TiebaOriginThread: Identifiable, Sendable, Hashable {
 }
 
 public struct TiebaPollOption: Sendable, Hashable {
+  public let id: Int32
   public let text: String
   public let voteCount: Int64
+  public let image: String
 
-  public init(text: String, voteCount: Int64) {
+  public init(id: Int32 = 0, text: String, voteCount: Int64, image: String = "") {
+    self.id = id
     self.text = text
     self.voteCount = voteCount
+    self.image = image
   }
 }
 
 public struct TiebaPoll: Sendable, Hashable {
+  public let type: Int32
   public let title: String
   public let isMultipleChoice: Bool
+  public let isPolled: Bool
+  public let selectedOptionIDs: Set<Int32>
+  public let tips: String
+  public let endTimestamp: Int64
+  public let status: Int32
+  public let lastTimestamp: Int64
   public let participantCount: Int64
   public let totalVoteCount: Int64
   public let options: [TiebaPollOption]
 
   public init(
+    type: Int32 = 0,
     title: String,
     isMultipleChoice: Bool,
+    isPolled: Bool = false,
+    selectedOptionIDs: Set<Int32> = [],
+    tips: String = "",
+    endTimestamp: Int64 = 0,
+    status: Int32 = 0,
+    lastTimestamp: Int64 = 0,
     participantCount: Int64,
     totalVoteCount: Int64,
     options: [TiebaPollOption]
   ) {
+    self.type = type
     self.title = title
     self.isMultipleChoice = isMultipleChoice
+    self.isPolled = isPolled
+    self.selectedOptionIDs = selectedOptionIDs
+    self.tips = tips
+    self.endTimestamp = endTimestamp
+    self.status = status
+    self.lastTimestamp = lastTimestamp
     self.participantCount = participantCount
     self.totalVoteCount = totalVoteCount
     self.options = options
+  }
+
+  public func isClosed(at date: Date = Date()) -> Bool {
+    status != 0 || (endTimestamp > 0 && endTimestamp <= Int64(date.timeIntervalSince1970))
   }
 }
 

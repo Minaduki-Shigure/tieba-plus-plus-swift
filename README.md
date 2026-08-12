@@ -17,9 +17,9 @@ checks.
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, media preferences, reply-entry visibility, and a next-launch destination including the inbox |
-| Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, and experimental content approval |
-| Server-side writes | Guarded forum and user follow/unfollow, check-in, content approval, thread-detail and verified list-level cloud-favorite changes, plain-text topic/floor/nested replies, and plain-text new-topic creation are in device validation; other writes stay disabled |
-| TiebaLite parity | Anonymous reading and media: about 91–95%; full product scope: about 72–75% |
+| Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, authenticated poll state, and experimental content approval |
+| Server-side writes | Guarded forum and user follow/unfollow, check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, plain-text topic/floor/nested replies, and plain-text new-topic creation are in device validation; other writes stay disabled |
+| TiebaLite parity | Anonymous reading and media: about 91–95%; full product scope: about 73–76% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.59.0-alpha.1` (build 62); later `main` features require a tagged release |
 
 ### Release and validation
@@ -100,6 +100,18 @@ checks.
   Confirmed creation retains a bounded local receipt marker across restart so a
   crash cannot silently reopen the old body for resubmission; the next composer
   requires an explicit “开始新主题” action before clearing that marker.
+  Poll result cards remain credential-free and read only. A logged-in thread can
+  separately read authoritative poll state from an authenticated PB response,
+  including the real option IDs and the account's selected IDs. Only an open,
+  unvoted poll with a legal selection exposes the explicitly confirmed vote
+  action. The complete account credential sends one minimum-field HTTPS PB write
+  for command `309006` at most; hardware and installation identifiers are omitted.
+  Identical selections for the same account and thread share one flight, while a
+  different selection or credential waits and then performs only a read. Every
+  dispatched write is followed by one authoritative authenticated readback, and
+  an uncertain outcome is never retried. The App accepts the result only while
+  the initiating `userID + sessionRevision` lease remains current. Real-account
+  success and failure behavior remains a disposable-account device-validation gate.
   The account page also reads TiebaLite's reply-plus-mention summary on demand
   and displays it beside the message entry. This summary is memory-only, bound
   to the exact account lease, and never cleared locally when the entry opens.
@@ -114,11 +126,11 @@ checks.
   target-bound liked-forum pagination, the minimal self-profile request and its
   UID/session-lease race handling, concern-feed, inbox summary, inbox
   navigation and reply-action rebinding, plain-text reply contracts, and
-  plain-text new-topic contracts are
+  plain-text new-topic and account-bound poll-vote contracts are
   covered by fixtures, while successful real-account self-profile and private
   reads, forum
   follow/unfollow, check-in, cloud-favorite changes, topic/post/subpost content
-  approval, user follow/unfollow, real reply creation, and real new-topic creation remain
+  approval, poll voting, user follow/unfollow, real reply creation, and real new-topic creation remain
   physical-device validation features in this alpha.
 - **App source:** Add [`sidestore-source.json`](https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json)
   to LiveContainer 3.7.0 or newer, or to SideStore. Its latest IPA is published
@@ -165,10 +177,13 @@ checks.
 - **Thread reading:** Ascending, descending, and hot order, only-author mode,
   page jumps, anchored opening, earlier-page loading, first-floor context, and
   explicit latest-reply checks are implemented with cursor validation.
-- **Replies and metadata:** Floors, nested replies, parent context, polls,
+- **Replies and metadata:** Floors, nested replies, parent context, read-only
+  anonymous poll results,
   shared-thread origins, author levels, moderator roles, IP locations, and
   approval scores are preserved where returned by the server. A logged-in
-  account can explicitly approve or cancel approval on the canonical topic,
+  account can separately read authoritative poll state and submit one legal
+  selection after explicit confirmation; it can also explicitly approve or
+  cancel approval on the canonical topic,
   ordinary floors, and individual replies on the full nested-reply page. Inline
   nested-reply previews remain read only.
 - **Images:** Responsive image groups open in a zoomable gallery with horizontal
@@ -336,6 +351,17 @@ checks.
   `sessionRevision`; only an explicit new login can start a fresh attempt. The
   request deliberately omits Android device fingerprints and therefore remains
   a disposable-account validation feature.
+- **Poll voting:** Anonymous poll cards remain read only and never receive an
+  account credential. With a complete active session, a separate authenticated
+  PB read binds the account, forum, thread, real option IDs, open/closed state,
+  and previous selection. The App enables voting only while that authoritative
+  state is open and unvoted and the chosen IDs are legal for its single- or
+  multiple-choice mode. After explicit confirmation, command `309006` is sent at
+  most once over minimum-field HTTPS and is always followed by one authenticated
+  readback. Same-resource identical selections coalesce; conflicting selections
+  or credentials wait and then read without writing. The App publishes only to
+  the initiating `userID + sessionRevision` lease. Disposable-account validation
+  is still required before this can leave validation builds.
 - **Credential boundary:** Anonymous and authenticated requests use isolated,
   ephemeral clients. The vault stores only the same-snapshot BDUSS/STOKEN pair
   accepted by the UID-consistency probes and its actual BDUSS Cookie name;
@@ -363,12 +389,17 @@ checks.
   cancellation to stop the owner only before write dispatch. Once dispatched,
   the owner finishes receipt parsing and exact-ID readback even if its view
   disappears.
+  Poll voting uses the same no-retry boundary: an identical canonical selection
+  for one account and thread may share the active task, while a conflicting
+  selection or credential receives only post-flight authoritative state. Every
+  poll write, including one whose acknowledgement fails, performs exactly one
+  authenticated readback and never dispatches a second vote.
   Already-completed check-in and matching content state are idempotent. All
   supported writes require explicit user confirmation. Automatic and batch
   check-in are not implemented.
 - **Unsupported operations:** Guess-based removal of unresolvable cloud-favorite
   rows, bulk cloud/local synchronization, disagreement and other reaction types,
-  recommendation feedback, rich-media topic/reply creation, poll submission,
+  recommendation feedback, rich-media topic/reply creation,
   server-side user blocking, profile editing, content
   deletion/reporting, automatic or batch check-in, notification mark-read/unread
   reconciliation, background notification polling, and moderation remain
@@ -376,7 +407,7 @@ checks.
   validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, weighted estimate, protocol constraints, and next milestones.
-  The current `main` audit totals 72–75 of 100 weighted points; its anonymous
+  The current `main` audit totals 73–76 of 100 weighted points; its anonymous
   reading and media subtotal is about 91–95%. The largest remaining gaps are
   rich-media creation, background unread handling, broader settings, remaining
   account/social actions, unresolvable cloud-favorite rows, and moderation.

@@ -3,6 +3,8 @@
     {
       "protoFiles": [
         "AccessState.proto",
+        "AddPollPostReqIdl.proto",
+        "AddPollPostResIdl.proto",
         "AddPostReqIdl.proto",
         "AddPostResIdl.proto",
         "Agree.proto",

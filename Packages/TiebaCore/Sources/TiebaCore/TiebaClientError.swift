@@ -15,6 +15,7 @@ public enum TiebaClientError: Error, Sendable, Equatable {
   case forumCheckInUnavailable
   case threadAgreementWriteConflict
   case threadCloudFavoriteOutcomeUnknown
+  case pollOutcomeUnknown
   case replyChallengeRequired(message: String)
   case replyOutcomeUnknown
   case replySubmissionIDConflict
@@ -55,6 +56,8 @@ extension TiebaClientError: LocalizedError {
       "A conflicting thread agreement operation completed; read the current state before retrying."
     case .threadCloudFavoriteOutcomeUnknown:
       "The cloud-favorite write was sent, but Tieba did not return a verifiable final state."
+    case .pollOutcomeUnknown:
+      "The poll vote was sent, but Tieba did not return a verifiable final selection."
     case .replyChallengeRequired(let message):
       message.isEmpty
         ? "Tieba requires additional verification before this reply can be submitted."

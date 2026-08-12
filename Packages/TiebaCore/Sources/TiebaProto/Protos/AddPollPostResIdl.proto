@@ -1,0 +1,14 @@
+// Minimal response for /c/c/post/addPollPost?cmd=309006&format=protobuf.
+syntax = "proto3";
+
+import "Error.proto";
+
+message AddPollPostResIdl {
+    message DataRes {
+        int32 error_code = 1;
+        string error_msg = 2;
+    }
+
+    DataRes data = 1;
+    Error error = 2;
+}

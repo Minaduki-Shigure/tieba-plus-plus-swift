@@ -72,6 +72,17 @@ and remove that marker, are adapted from TiebaLite commit
 `268f388c7824ae2c8f6ed549827a943ec8a7f352`. The authenticated `PbPage`
 response supplies a short-lived `anti.tbs` value for the immediately following
 remove request; it is not exposed by the public model or persisted.
+The complete `PollInfo`/`PollOption` response fields and the minimal
+`AddPollPostReqIdl`/`AddPollPostResIdl` schemas used for account-bound poll
+submission are adapted from TiebaLite commit
+`268f388c7824ae2c8f6ed549827a943ec8a7f352`. Tieba++ sends only credentials,
+forum/thread IDs, and selected option IDs; Android hardware, installation,
+advertising, location, and screen fields are omitted. Every write is preceded
+and followed by an authenticated, identity-bound `PbPage` read and is never
+retried automatically. The authenticated state read uses TiebaLite's
+`12.52.1.0` PB Page protocol family. The write multipart body preserves the
+effective `11.10.8.6` client-version field while its Mozilla-style request user
+agent identifies the endpoint's `12.35.1.0` protocol family.
 The minimal `AddPostReqIdl` and `AddPostResIdl` schemas, their response-only
 anti-abuse dependency closure, and the three plain-text reply field layouts for
 `/c/c/post/add?cmd=309731&format=protobuf` are adapted from TiebaLite commit

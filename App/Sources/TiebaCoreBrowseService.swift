@@ -892,19 +892,25 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     )
   }
 
-  private static func mapPoll(_ poll: TiebaPoll) -> BrowsePoll {
+  static func mapPoll(_ poll: TiebaPoll) -> BrowsePoll {
     BrowsePoll(
       title: poll.title,
       isMultipleChoice: poll.isMultipleChoice,
       participantCount: max(poll.participantCount, 0),
       totalVoteCount: max(poll.totalVoteCount, 0),
-      options: poll.options.enumerated().map { index, option in
+      options: poll.options.map { option in
         BrowsePollOption(
-          id: index,
+          id: option.id,
           text: option.text,
-          voteCount: max(option.voteCount, 0)
+          voteCount: max(option.voteCount, 0),
+          imageURL: SecureTiebaURL.media(option.image)
         )
-      }
+      },
+      isPolled: poll.isPolled,
+      selectedOptionIDs: poll.selectedOptionIDs,
+      tips: poll.tips,
+      endTimestamp: poll.endTimestamp,
+      status: poll.status
     )
   }
 

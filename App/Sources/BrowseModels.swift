@@ -155,9 +155,17 @@ struct ForumChannelPageData: Sendable {
 }
 
 struct BrowsePollOption: Identifiable, Hashable, Sendable {
-  let id: Int
+  let id: Int32
   let text: String
   let voteCount: Int64
+  let imageURL: URL?
+
+  init(id: Int32, text: String, voteCount: Int64, imageURL: URL? = nil) {
+    self.id = id
+    self.text = text
+    self.voteCount = voteCount
+    self.imageURL = imageURL
+  }
 }
 
 struct BrowsePoll: Hashable, Sendable {
@@ -166,6 +174,47 @@ struct BrowsePoll: Hashable, Sendable {
   let participantCount: Int64
   let totalVoteCount: Int64
   let options: [BrowsePollOption]
+  let isPolled: Bool
+  let selectedOptionIDs: Set<Int32>
+  let tips: String
+  let endTimestamp: Int64
+  let status: Int32
+
+  init(
+    title: String,
+    isMultipleChoice: Bool,
+    participantCount: Int64,
+    totalVoteCount: Int64,
+    options: [BrowsePollOption],
+    isPolled: Bool = false,
+    selectedOptionIDs: Set<Int32> = [],
+    tips: String = "",
+    endTimestamp: Int64 = 0,
+    status: Int32 = 0
+  ) {
+    self.title = title
+    self.isMultipleChoice = isMultipleChoice
+    self.participantCount = participantCount
+    self.totalVoteCount = totalVoteCount
+    self.options = options
+    self.isPolled = isPolled
+    self.selectedOptionIDs = selectedOptionIDs
+    self.tips = tips
+    self.endTimestamp = endTimestamp
+    self.status = status
+  }
+
+  func isClosed(at date: Date) -> Bool {
+    status != 0 || (endTimestamp > 0 && endTimestamp <= Int64(date.timeIntervalSince1970))
+  }
+
+  func canVote(at date: Date) -> Bool {
+    !isPolled && !isClosed(at: date) && !options.isEmpty
+  }
+
+  func isSelected(_ optionID: Int32) -> Bool {
+    selectedOptionIDs.contains(optionID)
+  }
 
   func progress(for option: BrowsePollOption) -> Double {
     let declaredTotal = Double(max(totalVoteCount, 0))

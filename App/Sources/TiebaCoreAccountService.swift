@@ -77,6 +77,19 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
     targetUserID: Int64,
     isFollowed: Bool
   ) async throws -> TiebaUserRelationship
+  func getPollState(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64
+  ) async throws -> TiebaPollState
+  func submitPollVote(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    selectedOptionIDs: [Int32]
+  ) async throws -> TiebaPollState
   func getNotifications(
     credential: TiebaBDUSSCredential,
     expectedUserID: Int64,
@@ -219,6 +232,25 @@ extension TiebaAuthenticatedAccountClient {
     targetUserID: Int64,
     isFollowed: Bool
   ) async throws -> TiebaUserRelationship {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
+  func getPollState(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64
+  ) async throws -> TiebaPollState {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
+  func submitPollVote(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    selectedOptionIDs: [Int32]
+  ) async throws -> TiebaPollState {
     throw TiebaClientError.invalidAuthenticatedResponse
   }
 
@@ -971,6 +1003,79 @@ struct TiebaCoreAccountService: AccountService {
     )
   }
 
+  func pollState(
+    session: StoredAccountSession,
+    forumID: Int64,
+    threadID: Int64
+  ) async throws -> PollVoteData {
+    guard session.id > 0, forumID > 0, threadID > 0 else {
+      throw PollVoteError.unavailable("投票所属的贴吧或主题无效。")
+    }
+    guard let credentials = session.credentials else {
+      throw PollVoteError.fullCredentialsRequired
+    }
+
+    let response: TiebaPollState
+    do {
+      response = try await client.getPollState(
+        credential: Self.coreSessionCredential(credentials),
+        expectedUserID: session.id,
+        forumID: forumID,
+        threadID: threadID
+      )
+      try Task.checkCancellation()
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.pollVoteError(error)
+    }
+    return try Self.pollVoteData(
+      response,
+      expectedUserID: session.id,
+      expectedForumID: forumID,
+      expectedThreadID: threadID
+    )
+  }
+
+  func submitPollVote(
+    session: StoredAccountSession,
+    forumID: Int64,
+    threadID: Int64,
+    selectedOptionIDs: Set<Int32>
+  ) async throws -> PollVoteData {
+    guard session.id > 0, forumID > 0, threadID > 0,
+      !selectedOptionIDs.isEmpty,
+      selectedOptionIDs.allSatisfy({ $0 > 0 })
+    else {
+      throw PollVoteError.invalidSelection
+    }
+    guard let credentials = session.credentials else {
+      throw PollVoteError.fullCredentialsRequired
+    }
+
+    let response: TiebaPollState
+    do {
+      response = try await client.submitPollVote(
+        credential: Self.coreSessionCredential(credentials),
+        expectedUserID: session.id,
+        forumID: forumID,
+        threadID: threadID,
+        selectedOptionIDs: selectedOptionIDs.sorted()
+      )
+      try Task.checkCancellation()
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.pollVoteError(error)
+    }
+    return try Self.pollVoteData(
+      response,
+      expectedUserID: session.id,
+      expectedForumID: forumID,
+      expectedThreadID: threadID
+    )
+  }
+
   func forumMembership(
     session: StoredAccountSession,
     forumID: Int64,
@@ -1263,6 +1368,43 @@ struct TiebaCoreAccountService: AccountService {
       userID: relationship.userID,
       targetUserID: relationship.targetUserID,
       isFollowed: relationship.isFollowed
+    )
+  }
+
+  private static func pollVoteData(
+    _ state: TiebaPollState,
+    expectedUserID: Int64,
+    expectedForumID: Int64,
+    expectedThreadID: Int64
+  ) throws -> PollVoteData {
+    guard
+      state.userID == expectedUserID,
+      state.forumID == expectedForumID,
+      state.threadID == expectedThreadID
+    else {
+      throw PollVoteError.unavailable("贴吧返回了不匹配的投票状态，请重新加载后再试。")
+    }
+    return PollVoteData(
+      userID: state.userID,
+      forumID: state.forumID,
+      threadID: state.threadID,
+      poll: TiebaCoreBrowseService.mapPoll(state.poll)
+    )
+  }
+
+  private static func pollVoteError(_ error: Error) -> PollVoteError {
+    if let error = error as? TiebaClientError {
+      switch error {
+      case .pollOutcomeUnknown:
+        return .outcomeUnknown
+      case .invalidArgument:
+        return .invalidSelection
+      default:
+        break
+      }
+    }
+    return .unavailable(
+      accountError(error).errorDescription ?? "账户请求失败，请稍后重试。"
     )
   }
 
@@ -1733,6 +1875,8 @@ struct TiebaCoreAccountService: AccountService {
       message = "先前的主题点赞操作已结束，请重新读取当前状态。"
     case .threadCloudFavoriteOutcomeUnknown:
       message = "云端收藏结果尚未确认；再次操作时会先重新读取状态，不会自动重发请求。"
+    case .pollOutcomeUnknown:
+      message = "贴吧尚未确认投票结果；请重新读取状态，不会自动重发投票。"
     case .replyChallengeRequired, .replyOutcomeUnknown, .replySubmissionIDConflict:
       message = "账户请求失败，请稍后重试。"
     case .server(let code, _):

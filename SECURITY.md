@@ -361,7 +361,7 @@ share only their expected-target union. Scope changes, a write in progress, or
 an account switch must invalidate or epoch-guard stale batch results so they
 cannot overwrite a mutation or the new account's state.
 
-Follow, unfollow, check-in, topic, post, or nested-reply approval or
+Follow, unfollow, check-in, poll voting, topic, post, or nested-reply approval or
 cancellation, and each supported plain-text topic, floor, or nested-reply
 submission, plus plain-text new-topic creation, all require explicit user
 confirmation. Automatic, scheduled, and batch check-in are deliberately
@@ -369,6 +369,41 @@ unsupported. `disagree` or downvote, rich-media topic/reply creation, editing,
 deletion, reporting, and every other authenticated content write remain
 unsupported and must not be inferred from the approval, reply, or new-topic
 endpoints.
+
+Poll voting requires a complete validated BDUSS/STOKEN session and a separate
+authenticated PB Page read. That response, rather than the anonymous result card,
+must bind the expected account UID, forum ID, and thread ID and supply the
+authoritative poll state. Every option ID must be positive and unique; returned
+selected IDs must be a subset of those real option IDs and must agree with the
+single- or multiple-choice flag. The App may construct a vote only while the
+authoritative poll is open, the account has not already voted, and the requested
+selection has legal cardinality and contains only those IDs. Option position,
+label text, vote count, and anonymous presentation state must never become a
+write target.
+
+After explicit confirmation, Core may send at most one PB POST to
+`https://tiebac.baidu.com/c/c/post/addPollPost?cmd=309006&format=protobuf`.
+The authenticated state read uses the `12.52.1.0` PB Page protocol family. The
+write multipart request contains only the PB payload plus `BDUSS`, `_client_type`,
+`_client_version=11.10.8.6`, and `stoken`, with the endpoint's Mozilla-style
+`tieba/12.35.1.0` user agent; it must not add CUID, IMEI, Android ID, OAID,
+IDFV, advertising ID, model, hardware, installation, location, screen, or other
+telemetry fields. The payload carries the exact forum and thread IDs plus a
+canonical list of real selected option IDs. Redirects remain rejected and the
+ordinary TLS and response-size boundaries remain in force.
+
+A poll write response is only an acknowledgement. Every dispatched vote,
+including one followed by a server, decode, cancellation, or transport error,
+must perform exactly one authoritative authenticated PB readback. The write is
+never retried. The authenticated client may single-flight the entire operation
+only for the same resource, credential, and canonical selection. A different
+selection or credential waits for the active flight and then performs only that
+read; it must not enqueue a second vote. The App additionally binds reads,
+writes, and publication to the initiating `userID + sessionRevision` lease and
+discards results after logout, account switching, or same-UID credential
+rotation. Until a disposable account validates minimal-field acceptance and the
+success, rejection, uncertain, concurrency, cancellation, and lease-race cases,
+poll voting remains a validation-build feature.
 
 Plain-text new-topic creation requires a validated complete BDUSS/STOKEN session
 and a fresh authenticated FRS preflight binding the exact UID, positive forum ID,
@@ -568,9 +603,18 @@ the normal credential-free thread request and must not forward response metadata
 
 Poll result cards are decoded only from the existing anonymous post response.
 An ordinary thread may use its mirrored origin object as the poll carrier, but a
-shared thread's origin poll must never be attributed to the outer thread. The
-anonymous UI is strictly read-only and must not expose selection state, collect
-votes, call a submission endpoint, or attach account credentials.
+mirror is authoritative only when its decimal TID exactly matches the requested
+outer thread. A missing, malformed, mismatched, or shared origin poll must never
+be attributed to that outer thread. The
+anonymous UI is strictly read-only and must not expose account selection state,
+collect votes, call a submission endpoint, or attach account credentials. Any
+interactive control must be backed by the separate authenticated state and vote
+contract above; the anonymous object can provide presentation fallback only and
+must never authorize or target the write.
+Pure-reading mode renders only that anonymous result snapshot: entering it
+cancels and clears the presentation's authenticated poll task, account changes
+cannot restart that task while the mode remains active, and leaving the mode is
+required before a fresh account-bound poll read can begin.
 
 Post author levels, IP locations, and public net approval scores originate in the
 anonymous post response. An IP location is server-supplied public author context,
@@ -1204,6 +1248,15 @@ binding, server-generated untitled display titles, challenge and moderation
 delay, pre-dispatch cancellation, post-dispatch transport loss, foreground and
 background transitions, same-UID credential rotation, account switching, and
 proof that every submission dispatches at most one write.
+Poll validation must additionally cover authoritative option IDs and selection
+state, single- and multiple-choice cardinality, open, closed, and already-voted
+polls, malformed or changed options, minimum-field command `309006` acceptance,
+known server rejection, uncertain post-dispatch failure followed by exactly one
+readback and no retry, identical-selection sharing, conflicting-selection and
+rotated-credential read-only recovery, cancellation, logout, and account
+switching. Synthetic CI fixtures are not proof of successful real-account voting;
+the feature remains gated on one disposable account exercised on a physical
+device.
 
 User relationship mutation requires a complete validated BDUSS/STOKEN session
 and is unavailable on the active account's own profile. Its preflight and

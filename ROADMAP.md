@@ -22,9 +22,9 @@ versioned separately and currently serves `v0.59.0-alpha.1` (build 62).
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
 | Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, media preferences, reply-entry visibility, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, switching, a self-profile summary, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
-| Server writes, creation, and social actions | 15 | 7–8 | Forum/user follow and unfollow, check-in, approval, verified list/thread-detail cloud-favorite mutations, three plain-text reply targets, and plain-text new-topic creation have guarded implementations; real creation success, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
+| Server writes, creation, and social actions | 15 | 8–9 | Forum/user follow and unfollow, check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, three plain-text reply targets, and plain-text new-topic creation have guarded implementations; real creation and poll success, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
-| **Total** | **100** | **72–75** | Current full-product estimate |
+| **Total** | **100** | **73–76** | Current full-product estimate |
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
 points, or roughly 91–95%. Concern and the foreground unread summary raise the
@@ -130,6 +130,10 @@ the source metadata is updated to that tested IPA.
 - Full nested-reply pages with parent-floor context and bidirectional anchored pagination
 - Shared-thread origin cards with original content, media, and navigation
 - Anonymous single- and multiple-choice poll result cards
+- Account-bound authoritative poll state and explicitly confirmed single- or
+  multiple-choice voting with real option IDs, one minimum-field HTTPS write at
+  most, mandatory readback, and exact account-lease isolation; real-account
+  behavior remains a disposable-account validation gate
 - Read-only scores, author forum levels, bounded moderator roles, and IP locations
 - Lossless nested-reply context and public-profile links for user mentions
 - Public user profiles opened from post and nested-reply authors
@@ -223,27 +227,33 @@ the source metadata is updated to that tested IPA.
    idempotence, rate limits, expired credentials, server errors, uncertain
    failures, mandatory read-only reconciliation, account switching, and same-UID
    credential rotation
-6. Real-device validation of the minimal HTTPS ReplyMe, AtMe, and `/c/s/msg`
+6. Disposable-account validation of authenticated poll reads and command
+   `309006` writes, including single- and multiple-choice polls, real option-ID
+   binding, open/closed and already-voted states, malformed or stale options,
+   known server rejection, post-dispatch transport loss, mandatory readback,
+   identical-selection sharing, conflicting-selection read-only recovery,
+   cancellation, account switching, and same-UID credential rotation
+7. Real-device validation of the minimal HTTPS ReplyMe, AtMe, and `/c/s/msg`
    summary requests, including the summary field-deletion matrix, count parity,
    and whether either summary or list retrieval changes server unread state,
    plus ordinary post and child-reply action relocation, unavailable targets,
    and account switching before composer presentation
-7. Real-device validation of the minimal authenticated self-profile request,
+8. Real-device validation of the minimal authenticated self-profile request,
    including successful V12 field deletion, absent `is_login`, empty biography,
    expired and cross-account credentials, response UID binding, account switching,
    and same-UID credential rotation
-8. Real-device validation of the account-bound concern request, including the
+9. Real-device validation of the account-bound concern request, including the
    signed-field deletion matrix, empty-account and expired-session envelopes,
    cursor replay, and whether list retrieval changes recommendation state
-9. Real-device validation of explicit cloud-favorite list/detail removal, add,
+10. Real-device validation of explicit cloud-favorite list/detail removal, add,
    and saved-floor updates, including unresolvable deleted rows, STOKEN rejection,
    idempotence, uncertain-write readback, concurrency, session rotation, and
    account switching
-10. Disposable-account validation of all three plain-text reply targets,
+11. Disposable-account validation of all three plain-text reply targets,
    including minimum-field deletion, missing/random/expired/cross-account
    STOKEN and TBS, challenge and permission failures, post-dispatch loss,
    exact-PID visibility, account rotation, and duplicate-send prevention
-11. Disposable-account validation of plain-text new-topic creation, followed by
+12. Disposable-account validation of plain-text new-topic creation, followed by
    rich-media topic/reply creation, broader settings parity, remaining account
    activity, and moderation tools
 
@@ -1072,14 +1082,31 @@ Recommendation reasons are retained for future protocol work, but the legacy
 dislike endpoint is a separate write and is not exposed by this read-only
 milestone.
 
-Anonymous poll cards are read-only. Current post responses place an ordinary
+Anonymous poll cards remain read-only. Current post responses place an ordinary
 thread's poll in its mirrored `origin_thread_info`, while that same field belongs
 to the original topic when the outer thread is a share. The mapper keeps those
 owners distinct, prefers an authoritative direct poll when present, and uses the
 ordinary thread's mirror as a compatibility fallback.
 Percentages use the server's total option-vote count, with a sanitized option-sum
 fallback for missing totals; zero and inconsistent totals cannot produce an
-invalid or oversized progress bar. Poll submission remains unsupported.
+invalid or oversized progress bar. This anonymous model never authorizes a vote
+and never receives account credentials.
+
+When a complete account session is active, the App may overlay a separate
+authenticated PB read that binds the exact account UID, forum ID, thread ID,
+positive unique option IDs, single- or multiple-choice mode, selected IDs, and
+open/closed state. A vote is eligible only when this authoritative state is open,
+the account has not voted, and every selected real option ID belongs to the poll
+with legal cardinality. After explicit confirmation, the complete credential may
+send the minimum-field HTTPS PB command `309006` at most once without hardware,
+installation, advertising, location, or screen identifiers. An identical
+canonical selection for the same resource and credential shares the complete
+flight. A conflicting selection or rotated credential waits for that flight and
+then performs only an authoritative read. Every dispatched write, regardless of
+its acknowledgement outcome, is followed by exactly one authenticated readback;
+uncertain failures never retry the vote. The App checks the initiating
+`userID + sessionRevision` lease around the operation and discards late state.
+Successful real-account voting remains a disposable-account validation gate.
 
 Post and nested-reply headers preserve the public author context already present
 in anonymous responses: the author's level in that forum, bounded forum-moderator
