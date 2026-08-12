@@ -1895,6 +1895,10 @@ private struct PollVoteControl: View {
   }
 
   var body: some View {
+    alertContent
+  }
+
+  private var pollContent: some View {
     VStack(alignment: .leading, spacing: 0) {
       if presentsSelection {
         selectionCard
@@ -1902,11 +1906,15 @@ private struct PollVoteControl: View {
         PollResultsCard(
           poll: displayedPoll,
           status: resultStatus,
-          retry: resultCanReload ? reload : nil
+          retry: resultReloadAction
         )
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  private var lifecycleContent: some View {
+    pollContent
     .task(id: isReadOnly) {
       guard !isReadOnly else { return }
       await viewModel.loadIfNeeded()
@@ -1932,6 +1940,10 @@ private struct PollVoteControl: View {
       showsConfirmation = false
       viewModel.presentationDidDisappear()
     }
+  }
+
+  private var confirmationContent: some View {
+    lifecycleContent
     .confirmationDialog(
       "提交投票？",
       isPresented: $showsConfirmation,
@@ -1945,6 +1957,10 @@ private struct PollVoteControl: View {
     } message: {
       Text(confirmationMessage)
     }
+  }
+
+  private var alertContent: some View {
+    confirmationContent
     .alert("无法完成投票", isPresented: errorIsPresented) {
       if resultCanReload {
         Button("重新读取") {
@@ -2123,6 +2139,11 @@ private struct PollVoteControl: View {
     case .idle, .signedOut, .loading, .ready, .submitting:
       return false
     }
+  }
+
+  private var resultReloadAction: (() -> Void)? {
+    guard resultCanReload else { return nil }
+    return { reload() }
   }
 
   private var confirmationMessage: String {
