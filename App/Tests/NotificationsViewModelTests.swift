@@ -291,6 +291,476 @@ final class NotificationsViewModelTests: XCTestCase {
     XCTAssertTrue(viewModel.messages.isEmpty)
   }
 
+  func testInitialRefreshResolvesBlockedSnapshotBeforePublishingMessages() async throws {
+    let active = session(userID: 7)
+    let vault = NotificationsVaultSpy(session: active)
+    let blocked = message(id: 11, content: "blocked notification")
+    let snapshot = filterSnapshot(displayMode: .placeholder, blockedKeyword: "blocked")
+    let repository = NotificationsContentFilterRepositorySpy(
+      scripts: [.gated(snapshot)]
+    )
+    let service = NotificationsServiceSpy(
+      scripts: [
+        .init(userID: 7, kind: .replies, requestedPage: 1): [
+          .init(
+            page: page(
+              userID: 7,
+              kind: .replies,
+              messages: [blocked],
+              page: 1,
+              hasMore: false
+            )
+          )
+        ]
+      ]
+    )
+    let viewModel = NotificationsViewModel(
+      service: service,
+      vault: vault,
+      contentFilterRepository: repository
+    )
+
+    let refresh = Task { await viewModel.refresh() }
+    try await waitForNotificationsTest { await repository.readCount() == 1 }
+
+    XCTAssertEqual(viewModel.state, .loading)
+    XCTAssertTrue(viewModel.isResolvingContentFilter)
+    XCTAssertTrue(viewModel.messages.isEmpty)
+    let pendingRequestCount = await service.requestCount()
+    XCTAssertEqual(pendingRequestCount, 0)
+
+    await repository.releaseNextGatedSnapshot()
+    await refresh.value
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertFalse(viewModel.isResolvingContentFilter)
+    XCTAssertEqual(viewModel.messages, [blocked])
+    XCTAssertEqual(viewModel.messagePresentations.map(\.visibility), [.placeholder])
+    let completedRequestCount = await service.requestCount()
+    XCTAssertEqual(completedRequestCount, 1)
+  }
+
+  func testLateCancelledReplacementCannotRestoreFilterLoadingState() async throws {
+    let active = session(userID: 7)
+    let vault = NotificationsVaultSpy(session: active)
+    let staleSnapshot = filterSnapshot(displayMode: .hidden, blockedKeyword: "Message")
+    let repository = NotificationsContentFilterRepositorySpy(
+      scripts: [
+        .gated(staleSnapshot),
+        .snapshot(.empty),
+      ]
+    )
+    let service = NotificationsServiceSpy(
+      scripts: [
+        .init(userID: 7, kind: .replies, requestedPage: 1): [
+          .init(page: page(userID: 7, kind: .replies, ids: [12], page: 1, hasMore: false))
+        ]
+      ]
+    )
+    let viewModel = NotificationsViewModel(
+      service: service,
+      vault: vault,
+      contentFilterRepository: repository
+    )
+
+    let staleRefresh = Task { await viewModel.refresh() }
+    try await waitForNotificationsTest { await repository.readCount() == 1 }
+    XCTAssertTrue(viewModel.isResolvingContentFilter)
+
+    await viewModel.refresh()
+    XCTAssertEqual(viewModel.messages.map(\.id), [12])
+    XCTAssertFalse(viewModel.isResolvingContentFilter)
+
+    await repository.releaseNextGatedSnapshot()
+    await staleRefresh.value
+
+    XCTAssertEqual(viewModel.messages.map(\.id), [12])
+    XCTAssertFalse(viewModel.isResolvingContentFilter)
+    XCTAssertEqual(viewModel.contentFilterSnapshot, .empty)
+    let requestCount = await service.requestCount()
+    XCTAssertEqual(requestCount, 1)
+  }
+
+  func testInitialFilterGateReadsLatestAccountBeforePrivateRequest() async throws {
+    let oldSession = session(userID: 7, revision: uuid(7))
+    let newSession = session(userID: 8, revision: uuid(8))
+    let vault = NotificationsVaultSpy(session: oldSession)
+    let repository = NotificationsContentFilterRepositorySpy(
+      scripts: [.gated(.empty)]
+    )
+    let service = NotificationsServiceSpy(
+      scripts: [
+        .init(userID: 8, kind: .replies, requestedPage: 1): [
+          .init(page: page(userID: 8, kind: .replies, ids: [81], page: 1, hasMore: false))
+        ]
+      ]
+    )
+    let viewModel = NotificationsViewModel(
+      service: service,
+      vault: vault,
+      contentFilterRepository: repository
+    )
+
+    let refresh = Task { await viewModel.refresh() }
+    try await waitForNotificationsTest { await repository.readCount() == 1 }
+    await vault.replaceActive(with: newSession)
+
+    let requestCountBeforeRelease = await service.requestCount()
+    XCTAssertEqual(requestCountBeforeRelease, 0)
+    await repository.releaseNextGatedSnapshot()
+    await refresh.value
+
+    XCTAssertEqual(viewModel.messages.map(\.id), [81])
+    let requests = await service.requestsSnapshot()
+    XCTAssertEqual(requests.map(\.userID), [8])
+  }
+
+  func testPlaceholderAndHiddenProjectionPreserveRawPaginationTail() async throws {
+    let active = session(userID: 7)
+    let vault = NotificationsVaultSpy(session: active)
+    let visible = message(id: 11, content: "ordinary notification")
+    let blockedTail = message(id: 12, content: "blocked-tail notification")
+    let placeholderSnapshot = filterSnapshot(
+      displayMode: .placeholder,
+      blockedKeyword: "blocked-tail"
+    )
+    let hiddenSnapshot = filterSnapshot(
+      displayMode: .hidden,
+      blockedKeyword: "blocked-tail"
+    )
+    let repository = NotificationsContentFilterRepositorySpy(
+      scripts: [
+        .snapshot(placeholderSnapshot),
+        .snapshot(hiddenSnapshot),
+      ]
+    )
+    let service = NotificationsServiceSpy(
+      scripts: [
+        .init(userID: 7, kind: .replies, requestedPage: 1): [
+          .init(
+            page: page(
+              userID: 7,
+              kind: .replies,
+              messages: [visible, blockedTail],
+              page: 1,
+              hasMore: true
+            )
+          )
+        ]
+      ]
+    )
+    let viewModel = NotificationsViewModel(
+      service: service,
+      vault: vault,
+      contentFilterRepository: repository
+    )
+
+    await viewModel.refresh()
+
+    XCTAssertEqual(viewModel.messagePresentations.map(\.visibility), [.visible, .placeholder])
+    XCTAssertEqual(viewModel.displayableMessages.map(\.id), [11, 12])
+    XCTAssertEqual(viewModel.paginationTail?.id, 12)
+
+    viewModel.contentFilterDidChange()
+    try await waitForNotificationsTest {
+      await repository.readCount() == 2 && !viewModel.isResolvingContentFilter
+    }
+
+    XCTAssertEqual(viewModel.messages.map(\.id), [11, 12])
+    XCTAssertEqual(viewModel.messagePresentations.map(\.visibility), [.visible, .hidden])
+    XCTAssertEqual(viewModel.displayableMessages.map(\.id), [11])
+    XCTAssertEqual(viewModel.paginationTail?.id, 12)
+  }
+
+  func testAllHiddenInitialPageWaitsForExplicitContinuationBeforeLoadingNextPage() async throws {
+    let active = session(userID: 7)
+    let vault = NotificationsVaultSpy(session: active)
+    let snapshot = filterSnapshot(displayMode: .hidden, blockedKeyword: "Message")
+    let repository = NotificationsContentFilterRepositorySpy(
+      scripts: [.snapshot(snapshot)]
+    )
+    let service = NotificationsServiceSpy(
+      scripts: [
+        .init(userID: 7, kind: .replies, requestedPage: 1): [
+          .init(page: page(userID: 7, kind: .replies, ids: [11, 12], page: 1, hasMore: true))
+        ],
+        .init(userID: 7, kind: .replies, requestedPage: 2): [
+          .init(page: page(userID: 7, kind: .replies, ids: [13], page: 2, hasMore: false))
+        ],
+      ]
+    )
+    let viewModel = NotificationsViewModel(
+      service: service,
+      vault: vault,
+      contentFilterRepository: repository
+    )
+
+    await viewModel.refresh()
+
+    XCTAssertTrue(viewModel.displayableMessages.isEmpty)
+    XCTAssertTrue(viewModel.requiresExplicitPagination)
+    XCTAssertEqual(viewModel.paginationTail?.id, 12)
+    let initialRequestCount = await service.requestCount()
+    XCTAssertEqual(initialRequestCount, 1)
+
+    viewModel.loadMoreIfNeeded(current: try XCTUnwrap(viewModel.paginationTail))
+    for _ in 0..<20 { await Task.yield() }
+    let requestCountAfterAutomaticAttempt = await service.requestCount()
+    XCTAssertEqual(requestCountAfterAutomaticAttempt, 1)
+
+    viewModel.continuePagination()
+    try await waitForNotificationsTest { viewModel.messages.map(\.id) == [11, 12, 13] }
+
+    XCTAssertTrue(viewModel.displayableMessages.isEmpty)
+    XCTAssertFalse(viewModel.requiresExplicitPagination)
+    let requests = await service.requestsSnapshot()
+    XCTAssertEqual(requests.map(\.requestedPage), [1, 2])
+  }
+
+  func testFilterChangeOnlyReprojectsAndPausesAutomaticPagination() async throws {
+    let active = session(userID: 7)
+    let vault = NotificationsVaultSpy(session: active)
+    let changedSnapshot = filterSnapshot(displayMode: .hidden, blockedKeyword: "Message 12")
+    let repository = NotificationsContentFilterRepositorySpy(
+      scripts: [
+        .snapshot(.empty),
+        .snapshot(changedSnapshot),
+      ]
+    )
+    let service = NotificationsServiceSpy(
+      scripts: [
+        .init(userID: 7, kind: .replies, requestedPage: 1): [
+          .init(page: page(userID: 7, kind: .replies, ids: [11, 12], page: 1, hasMore: true))
+        ]
+      ]
+    )
+    let viewModel = NotificationsViewModel(
+      service: service,
+      vault: vault,
+      contentFilterRepository: repository
+    )
+    await viewModel.refresh()
+    let rawTail = try XCTUnwrap(viewModel.paginationTail)
+
+    viewModel.contentFilterDidChange()
+    try await waitForNotificationsTest {
+      await repository.readCount() == 2 && !viewModel.isResolvingContentFilter
+    }
+
+    XCTAssertEqual(viewModel.messages.map(\.id), [11, 12])
+    XCTAssertEqual(viewModel.displayableMessages.map(\.id), [11])
+    XCTAssertEqual(viewModel.paginationTail, rawTail)
+    XCTAssertTrue(viewModel.pausesAutomaticPagination)
+    XCTAssertTrue(viewModel.requiresExplicitPagination)
+    let requestCountAfterReprojection = await service.requestCount()
+    XCTAssertEqual(requestCountAfterReprojection, 1)
+
+    viewModel.loadMoreIfNeeded(current: rawTail)
+    for _ in 0..<20 { await Task.yield() }
+
+    let requestCountAfterAutomaticAttempt = await service.requestCount()
+    XCTAssertEqual(requestCountAfterAutomaticAttempt, 1)
+  }
+
+  func testReentryPausesPaginationOnlyWhenRereadSnapshotChanged() async throws {
+    let active = session(userID: 7)
+    let vault = NotificationsVaultSpy(session: active)
+    let changedSnapshot = filterSnapshot(displayMode: .hidden, blockedKeyword: "Message 12")
+    let repository = NotificationsContentFilterRepositorySpy(
+      scripts: [
+        .snapshot(.empty),
+        .snapshot(changedSnapshot),
+      ]
+    )
+    let service = NotificationsServiceSpy(
+      scripts: [
+        .init(userID: 7, kind: .replies, requestedPage: 1): [
+          .init(page: page(userID: 7, kind: .replies, ids: [11, 12], page: 1, hasMore: true))
+        ]
+      ]
+    )
+    let viewModel = NotificationsViewModel(
+      service: service,
+      vault: vault,
+      contentFilterRepository: repository
+    )
+    await viewModel.refresh()
+
+    viewModel.loadIfNeeded()
+    try await waitForNotificationsTest {
+      await repository.readCount() == 2 && !viewModel.isResolvingContentFilter
+    }
+
+    XCTAssertEqual(viewModel.messages.map(\.id), [11, 12])
+    XCTAssertEqual(viewModel.displayableMessages.map(\.id), [11])
+    XCTAssertTrue(viewModel.pausesAutomaticPagination)
+    XCTAssertTrue(viewModel.requiresExplicitPagination)
+    viewModel.loadMoreIfNeeded(current: try XCTUnwrap(viewModel.paginationTail))
+    for _ in 0..<20 { await Task.yield() }
+    let requestCount = await service.requestCount()
+    XCTAssertEqual(requestCount, 1)
+  }
+
+  func testReentryWithUnchangedSnapshotKeepsAutomaticPaginationEnabled() async throws {
+    let active = session(userID: 7)
+    let vault = NotificationsVaultSpy(session: active)
+    let repository = NotificationsContentFilterRepositorySpy(
+      scripts: [
+        .snapshot(.empty),
+        .snapshot(.empty),
+      ]
+    )
+    let service = NotificationsServiceSpy(
+      scripts: [
+        .init(userID: 7, kind: .replies, requestedPage: 1): [
+          .init(page: page(userID: 7, kind: .replies, ids: [11], page: 1, hasMore: true))
+        ]
+      ]
+    )
+    let viewModel = NotificationsViewModel(
+      service: service,
+      vault: vault,
+      contentFilterRepository: repository
+    )
+    await viewModel.refresh()
+
+    viewModel.loadIfNeeded()
+    try await waitForNotificationsTest {
+      await repository.readCount() == 2 && !viewModel.isResolvingContentFilter
+    }
+
+    XCTAssertFalse(viewModel.pausesAutomaticPagination)
+    XCTAssertFalse(viewModel.requiresExplicitPagination)
+    let requestCount = await service.requestCount()
+    XCTAssertEqual(requestCount, 1)
+  }
+
+  func testPlaceholderAndHiddenMessagesCannotCreateReplyIntent() async throws {
+    let active = session(userID: 7)
+    let blocked = message(id: 11, content: "blocked notification")
+
+    for displayMode in [ContentFilterDisplayMode.placeholder, .hidden] {
+      let vault = NotificationsVaultSpy(session: active)
+      let snapshot = filterSnapshot(displayMode: displayMode, blockedKeyword: "blocked")
+      let repository = NotificationsContentFilterRepositorySpy(
+        scripts: [.snapshot(snapshot)]
+      )
+      let service = NotificationsServiceSpy(
+        scripts: [
+          .init(userID: 7, kind: .replies, requestedPage: 1): [
+            .init(
+              page: page(
+                userID: 7,
+                kind: .replies,
+                messages: [blocked],
+                page: 1,
+                hasMore: false
+              )
+            )
+          ]
+        ]
+      )
+      let viewModel = NotificationsViewModel(
+        service: service,
+        vault: vault,
+        contentFilterRepository: repository
+      )
+
+      await viewModel.refresh()
+
+      XCTAssertEqual(viewModel.messagePresentations.first?.visibility, displayMode.visibility)
+      XCTAssertNil(viewModel.replyIntent(for: blocked))
+    }
+  }
+
+  func testSnapshotReadFailurePreservesLastKnownGoodProjection() async throws {
+    let active = session(userID: 7)
+    let vault = NotificationsVaultSpy(session: active)
+    let snapshot = filterSnapshot(displayMode: .hidden, blockedKeyword: "blocked")
+    let blocked = message(id: 11, content: "blocked notification")
+    let repository = NotificationsContentFilterRepositorySpy(
+      scripts: [
+        .snapshot(snapshot),
+        .failure,
+      ]
+    )
+    let service = NotificationsServiceSpy(
+      scripts: [
+        .init(userID: 7, kind: .replies, requestedPage: 1): [
+          .init(
+            page: page(
+              userID: 7,
+              kind: .replies,
+              messages: [blocked],
+              page: 1,
+              hasMore: false
+            )
+          )
+        ]
+      ]
+    )
+    let viewModel = NotificationsViewModel(
+      service: service,
+      vault: vault,
+      contentFilterRepository: repository
+    )
+    await viewModel.refresh()
+
+    viewModel.contentFilterDidChange()
+    try await waitForNotificationsTest {
+      await repository.readCount() == 2 && !viewModel.isResolvingContentFilter
+    }
+
+    XCTAssertEqual(viewModel.contentFilterSnapshot, snapshot)
+    XCTAssertEqual(viewModel.messagePresentations.map(\.visibility), [.hidden])
+    XCTAssertTrue(viewModel.displayableMessages.isEmpty)
+    let requestCount = await service.requestCount()
+    XCTAssertEqual(requestCount, 1)
+  }
+
+  func testLateRuleSnapshotCannotOverwriteNewerProjection() async throws {
+    let active = session(userID: 7)
+    let vault = NotificationsVaultSpy(session: active)
+    let staleSnapshot = filterSnapshot(displayMode: .hidden, blockedKeyword: "Message")
+    let newestSnapshot = filterSnapshot(displayMode: .placeholder, blockedKeyword: "Message 11")
+    let repository = NotificationsContentFilterRepositorySpy(
+      scripts: [
+        .snapshot(.empty),
+        .gated(staleSnapshot),
+        .snapshot(newestSnapshot),
+      ]
+    )
+    let service = NotificationsServiceSpy(
+      scripts: [
+        .init(userID: 7, kind: .replies, requestedPage: 1): [
+          .init(page: page(userID: 7, kind: .replies, ids: [11], page: 1, hasMore: false))
+        ]
+      ]
+    )
+    let viewModel = NotificationsViewModel(
+      service: service,
+      vault: vault,
+      contentFilterRepository: repository
+    )
+    await viewModel.refresh()
+
+    viewModel.contentFilterDidChange()
+    try await waitForNotificationsTest { await repository.readCount() == 2 }
+    viewModel.contentFilterDidChange()
+    try await waitForNotificationsTest {
+      await repository.readCount() == 3 && !viewModel.isResolvingContentFilter
+    }
+
+    XCTAssertEqual(viewModel.contentFilterSnapshot, newestSnapshot)
+    XCTAssertEqual(viewModel.messagePresentations.map(\.visibility), [.placeholder])
+    await repository.releaseNextGatedSnapshot()
+    for _ in 0..<20 { await Task.yield() }
+    XCTAssertEqual(viewModel.contentFilterSnapshot, newestSnapshot)
+    XCTAssertEqual(viewModel.messagePresentations.map(\.visibility), [.placeholder])
+    let requestCount = await service.requestCount()
+    XCTAssertEqual(requestCount, 1)
+  }
+
   func testHiddenPreferenceCancelsPendingReplyRoute() throws {
     let intent = try XCTUnwrap(
       InboxReplyIntent(
@@ -381,22 +851,44 @@ final class NotificationsViewModelTests: XCTestCase {
     page: Int,
     hasMore: Bool
   ) -> InboxPage {
+    page(
+      userID: userID,
+      kind: kind,
+      messages: ids.map { message(id: $0) },
+      page: page,
+      hasMore: hasMore
+    )
+  }
+
+  private func page(
+    userID: Int64,
+    kind: InboxKind,
+    messages: [InboxMessage],
+    page: Int,
+    hasMore: Bool
+  ) -> InboxPage {
     InboxPage(
       userID: userID,
       kind: kind,
-      messages: ids.map(message),
+      messages: messages,
       currentPage: page,
       hasMore: hasMore
     )
   }
 
-  private func message(id: Int64) -> InboxMessage {
+  private func message(
+    id: Int64,
+    content: String? = nil,
+    senderID: Int64? = nil,
+    senderUsername: String? = nil,
+    senderDisplayName: String? = nil
+  ) -> InboxMessage {
     InboxMessage(
       id: id,
       sender: InboxSender(
-        id: 100 + id,
-        username: "sender-\(id)",
-        displayName: "Sender \(id)",
+        id: senderID ?? 100 + id,
+        username: senderUsername ?? "sender-\(id)",
+        displayName: senderDisplayName ?? "Sender \(id)",
         portraitURL: nil,
         isFriend: false,
         isFan: false
@@ -406,7 +898,7 @@ final class NotificationsViewModelTests: XCTestCase {
       postID: id,
       quotedPostID: nil,
       title: "Thread \(id)",
-      content: "Message \(id)",
+      content: content ?? "Message \(id)",
       quotedContent: "",
       forumName: "swift",
       createdAt: Date(timeIntervalSince1970: TimeInterval(id)),
@@ -414,6 +906,17 @@ final class NotificationsViewModelTests: XCTestCase {
       isFirstPost: false,
       isUnread: true,
       threadType: 0
+    )
+  }
+
+  private func filterSnapshot(
+    displayMode: ContentFilterDisplayMode,
+    blockedKeyword: String
+  ) -> ContentFilterSnapshot {
+    ContentFilterSnapshot(
+      displayMode: displayMode,
+      blockVideos: false,
+      rules: [.keyword(blockedKeyword, list: .block)]
     )
   }
 
@@ -441,6 +944,86 @@ private struct NotificationsResponseScript: Sendable {
 private struct NotificationsTestFailure: LocalizedError, Sendable {
   let message: String
   var errorDescription: String? { message }
+}
+
+private extension ContentFilterDisplayMode {
+  var visibility: LocalContentVisibility {
+    switch self {
+    case .placeholder:
+      .placeholder
+    case .hidden:
+      .hidden
+    }
+  }
+}
+
+private enum NotificationsContentFilterScript: Sendable {
+  case snapshot(ContentFilterSnapshot)
+  case gated(ContentFilterSnapshot)
+  case failure
+}
+
+private actor NotificationsContentFilterRepositorySpy: ContentFilterRepository {
+  private var scripts: [NotificationsContentFilterScript]
+  private var gatedSnapshots: [(
+    ContentFilterSnapshot,
+    CheckedContinuation<ContentFilterSnapshot, Never>
+  )] = []
+  private var reads = 0
+
+  init(scripts: [NotificationsContentFilterScript]) {
+    self.scripts = scripts
+  }
+
+  func snapshot() async throws -> ContentFilterSnapshot {
+    reads += 1
+    guard !scripts.isEmpty else {
+      throw NotificationsTestFailure(message: "Missing content filter script")
+    }
+    let script = scripts.removeFirst()
+    switch script {
+    case .snapshot(let snapshot):
+      return snapshot
+    case .gated(let snapshot):
+      return await withCheckedContinuation { continuation in
+        gatedSnapshots.append((snapshot, continuation))
+      }
+    case .failure:
+      throw NotificationsTestFailure(message: "Content filter read failed")
+    }
+  }
+
+  func add(_ rule: ContentFilterRule) async throws -> ContentFilterRule {
+    throw NotificationsTestFailure(message: "Unexpected content filter mutation")
+  }
+
+  func delete(id: UUID) async throws {
+    throw NotificationsTestFailure(message: "Unexpected content filter mutation")
+  }
+
+  func deleteAll(in list: ContentFilterList) async throws {
+    throw NotificationsTestFailure(message: "Unexpected content filter mutation")
+  }
+
+  func setDisplayMode(_ mode: ContentFilterDisplayMode) async throws {
+    throw NotificationsTestFailure(message: "Unexpected content filter mutation")
+  }
+
+  func setBlockVideos(_ blockVideos: Bool) async throws {
+    throw NotificationsTestFailure(message: "Unexpected content filter mutation")
+  }
+
+  func reset() async throws {
+    throw NotificationsTestFailure(message: "Unexpected content filter mutation")
+  }
+
+  func readCount() -> Int { reads }
+
+  func releaseNextGatedSnapshot() {
+    guard !gatedSnapshots.isEmpty else { return }
+    let (snapshot, continuation) = gatedSnapshots.removeFirst()
+    continuation.resume(returning: snapshot)
+  }
 }
 
 private actor NotificationsServiceSpy: AccountService {

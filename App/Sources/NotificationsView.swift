@@ -19,6 +19,7 @@ struct NotificationsView: View {
       & ForumInformationService,
     accountService: any AccountService,
     vault: any AccountVault,
+    contentFilterRepository: any ContentFilterRepository,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository
@@ -30,7 +31,11 @@ struct NotificationsView: View {
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
     _viewModel = StateObject(
-      wrappedValue: NotificationsViewModel(service: accountService, vault: vault)
+      wrappedValue: NotificationsViewModel(
+        service: accountService,
+        vault: vault,
+        contentFilterRepository: contentFilterRepository
+      )
     )
   }
 
@@ -72,14 +77,22 @@ struct NotificationsView: View {
       if hidden { invalidatePendingReplyRouteForHiddenPreference() }
     }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+      invalidatePendingReplyRouteForAccountChange()
       viewModel.accountSessionDidChange()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
+      invalidatePendingReplyRouteForContentFilterChange()
+      viewModel.contentFilterDidChange()
     }
     .onDisappear(perform: viewModel.cancel)
   }
 
   @ViewBuilder
   private var content: some View {
-    if viewModel.messages.isEmpty {
+    if viewModel.isResolvingContentFilter {
+      ProgressView()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    } else if viewModel.messages.isEmpty {
       switch viewModel.state {
       case .idle, .loading:
         ProgressView()
@@ -101,31 +114,45 @@ struct NotificationsView: View {
 
   private var messageList: some View {
     List {
-      ForEach(viewModel.messages) { message in
-        HStack(alignment: .center, spacing: 8) {
-          NavigationLink {
-            notificationDestination(for: message)
-          } label: {
-            NotificationMessageRow(message: message)
-              .frame(maxWidth: .infinity, alignment: .leading)
+      if viewModel.displayableMessages.isEmpty {
+        Label(filteredEmptyTitle, systemImage: "eye.slash")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
+          .padding(.vertical, 8)
+          .listRowSeparator(.hidden)
+          .accessibilityElement(children: .combine)
+      } else {
+        ForEach(viewModel.displayableMessages) { presentation in
+          LocallyFilteredContent(
+            visibility: presentation.visibility,
+            placeholder: "已屏蔽此消息"
+          ) {
+            interactiveMessageRow(presentation.message)
           }
-
-          if replyEntriesVisible {
-            Button {
-              guard replyEntriesVisible else { return }
-              prepareReply(to: message)
-            } label: {
-              Image(systemName: "arrowshape.turn.up.left")
-                .foregroundStyle(.tint)
-                .frame(width: 36, height: 36)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.borderless)
-            .accessibilityLabel("回复 \(message.sender.preferredName)")
-            .help("回复此消息")
-          }
+          .frame(minHeight: 44)
         }
-        .onAppear { viewModel.loadMoreIfNeeded(current: message) }
+      }
+
+      if viewModel.requiresExplicitPagination {
+        Button(action: viewModel.continuePagination) {
+          Label("继续加载", systemImage: "arrow.down.circle")
+            .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .disabled(viewModel.isLoadingMore || viewModel.loadMoreError != nil)
+        .listRowSeparator(.hidden)
+      } else if viewModel.hasNextPage, let rawTail = viewModel.paginationTail {
+        Color.clear
+          .frame(height: 1)
+          .id(
+            "notifications-\(viewModel.selectedKind.rawValue)-pagination-"
+              + "\(rawTail.id)-\(viewModel.messages.count)"
+              + "-\(viewModel.paginationEpoch)"
+          )
+          .listRowInsets(EdgeInsets())
+          .listRowSeparator(.hidden)
+          .accessibilityHidden(true)
+          .onAppear { viewModel.loadMoreIfNeeded(current: rawTail) }
       }
 
       if viewModel.isLoadingMore {
@@ -142,6 +169,36 @@ struct NotificationsView: View {
     }
     .listStyle(.plain)
     .refreshable { await viewModel.refresh() }
+  }
+
+  private func interactiveMessageRow(_ message: InboxMessage) -> some View {
+    HStack(alignment: .center, spacing: 8) {
+      NavigationLink {
+        notificationDestination(for: message)
+      } label: {
+        NotificationMessageRow(message: message)
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+
+      if replyEntriesVisible {
+        Button {
+          guard replyEntriesVisible else { return }
+          prepareReply(to: message)
+        } label: {
+          Image(systemName: "arrowshape.turn.up.left")
+            .foregroundStyle(.tint)
+            .frame(width: 36, height: 36)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("回复 \(message.sender.preferredName)")
+        .help("回复此消息")
+      }
+    }
+  }
+
+  private var filteredEmptyTitle: String {
+    viewModel.selectedKind == .replies ? "暂无可显示的回复消息" : "暂无可显示的提及消息"
   }
 
   @ViewBuilder
@@ -219,7 +276,7 @@ struct NotificationsView: View {
   }
 
   private func prepareReply(to message: InboxMessage) {
-    guard replyEntriesVisible else { return }
+    guard replyEntriesVisible, !viewModel.isResolvingContentFilter else { return }
     replyNotice = nil
     guard
       let intent = InboxReplyIntentAdmissionPolicy.admittedIntent(
@@ -236,6 +293,16 @@ struct NotificationsView: View {
   private func invalidatePendingReplyRouteForHiddenPreference() {
     guard replyRouteState.cancelPending() else { return }
     replyNotice = "已在设置中隐藏回复入口，未打开回复编辑器。"
+  }
+
+  private func invalidatePendingReplyRouteForAccountChange() {
+    guard replyRouteState.cancelPending() else { return }
+    replyNotice = "账户已变化，未打开回复编辑器。"
+  }
+
+  private func invalidatePendingReplyRouteForContentFilterChange() {
+    guard replyRouteState.cancelPending() else { return }
+    replyNotice = "本地屏蔽规则已变化，未打开回复编辑器。"
   }
 
   private func markReplyRouteEstablished(_ intent: InboxReplyIntent) {

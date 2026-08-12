@@ -569,6 +569,17 @@ extension ContentFilterSnapshot {
     )
   }
 
+  func visibility(for message: InboxMessage) -> LocalContentVisibility {
+    visibility(
+      isBlocked: blocksKeyword(message.content)
+        || blocksUser(
+          id: message.sender.id,
+          preferredName: message.sender.displayName,
+          username: message.sender.username
+        )
+    )
+  }
+
   func visibility(for user: BrowseRelatedUser) -> LocalContentVisibility {
     visibility(
       isBlocked: blocksKeyword(user.displayName)

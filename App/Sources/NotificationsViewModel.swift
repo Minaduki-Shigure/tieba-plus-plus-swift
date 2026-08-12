@@ -1,6 +1,13 @@
 import Combine
 import Foundation
 
+struct InboxMessagePresentation: Identifiable, Hashable, Sendable {
+  let message: InboxMessage
+  let visibility: LocalContentVisibility
+
+  var id: Int64 { message.id }
+}
+
 @MainActor
 final class NotificationsViewModel: ObservableObject {
   @Published private(set) var selectedKind: InboxKind
@@ -8,28 +15,67 @@ final class NotificationsViewModel: ObservableObject {
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
   @Published private(set) var loadMoreError: String?
+  @Published private(set) var contentFilterSnapshot = ContentFilterSnapshot.empty
+  @Published private(set) var isResolvingContentFilter = false
+  @Published private(set) var paginationEpoch = 0
+  @Published private(set) var pausesAutomaticPagination = false
 
   private let service: any AccountService
   private let vault: any AccountVault
+  private let contentFilterRepository: any ContentFilterRepository
   private var currentPage = 0
   private var hasMore = true
   private var loadedLease: InboxSessionLease?
   private var loadTask: Task<Void, Never>?
+  private var contentFilterTask: Task<Void, Never>?
   private var epoch = 0
+  private var contentFilterEpoch = 0
 
   init(
     service: any AccountService,
     vault: any AccountVault,
+    contentFilterRepository: any ContentFilterRepository = EmptyContentFilterRepository(),
     selectedKind: InboxKind = .replies
   ) {
     self.service = service
     self.vault = vault
+    self.contentFilterRepository = contentFilterRepository
     self.selectedKind = selectedKind
   }
 
+  var messagePresentations: [InboxMessagePresentation] {
+    messages.map {
+      InboxMessagePresentation(
+        message: $0,
+        visibility: contentFilterSnapshot.visibility(for: $0)
+      )
+    }
+  }
+
+  var displayableMessages: [InboxMessagePresentation] {
+    messagePresentations.filter { $0.visibility != .hidden }
+  }
+
+  var paginationTail: InboxMessage? { messages.last }
+
+  var hasNextPage: Bool { hasMore }
+
+  var requiresExplicitPagination: Bool {
+    hasMore && (pausesAutomaticPagination || displayableMessages.isEmpty)
+  }
+
   func loadIfNeeded() {
-    guard state == .idle else { return }
-    reload()
+    switch state {
+    case .idle:
+      reload()
+    case .loaded:
+      refreshContentFilter(
+        pausingAutomaticPagination: false,
+        pausingIfSnapshotChanges: true
+      )
+    case .loading, .failed:
+      break
+    }
   }
 
   func select(_ kind: InboxKind) {
@@ -53,11 +99,51 @@ final class NotificationsViewModel: ObservableObject {
     beginNewEpoch(loadImmediately: true)
   }
 
+  func contentFilterDidChange() {
+    refreshContentFilter(
+      pausingAutomaticPagination: true,
+      pausingIfSnapshotChanges: false
+    )
+  }
+
+  private func refreshContentFilter(
+    pausingAutomaticPagination: Bool,
+    pausingIfSnapshotChanges: Bool
+  ) {
+    contentFilterEpoch &+= 1
+    let requestedEpoch = contentFilterEpoch
+    contentFilterTask?.cancel()
+    isResolvingContentFilter = true
+    if pausingAutomaticPagination, hasMore, !messages.isEmpty {
+      pausesAutomaticPagination = true
+    }
+    let repository = contentFilterRepository
+    contentFilterTask = Task {
+      let snapshot = await Self.readContentFilterSnapshot(from: repository)
+      guard requestedEpoch == contentFilterEpoch, !Task.isCancelled else { return }
+      if let snapshot {
+        if
+          pausingIfSnapshotChanges,
+          snapshot != contentFilterSnapshot,
+          hasMore,
+          !messages.isEmpty
+        {
+          pausesAutomaticPagination = true
+        }
+        contentFilterSnapshot = snapshot
+      }
+      isResolvingContentFilter = false
+      contentFilterTask = nil
+    }
+  }
+
   func replyIntent(for message: InboxMessage) -> InboxReplyIntent? {
     guard
       state == .loaded,
       let loadedLease,
-      messages.contains(message)
+      messages.contains(message),
+      !isResolvingContentFilter,
+      contentFilterSnapshot.visibility(for: message) == .visible
     else { return nil }
     return InboxReplyIntent(
       message: message,
@@ -70,10 +156,26 @@ final class NotificationsViewModel: ObservableObject {
     guard
       message.id == messages.last?.id,
       hasMore,
+      !requiresExplicitPagination,
+      !isResolvingContentFilter,
       !isLoadingMore,
       loadMoreError == nil,
       state == .loaded
     else { return }
+    load(page: currentPage + 1, replacing: false)
+  }
+
+  func continuePagination() {
+    guard
+      !messages.isEmpty,
+      hasMore,
+      requiresExplicitPagination,
+      !isResolvingContentFilter,
+      !isLoadingMore,
+      loadMoreError == nil,
+      state == .loaded
+    else { return }
+    pausesAutomaticPagination = false
     load(page: currentPage + 1, replacing: false)
   }
 
@@ -83,8 +185,13 @@ final class NotificationsViewModel: ObservableObject {
   }
 
   func cancel() {
+    let shouldRearmPagination = !messages.isEmpty && isLoadingMore && hasMore
     invalidateTask()
+    invalidateContentFilterTask()
     isLoadingMore = false
+    if shouldRearmPagination {
+      paginationEpoch &+= 1
+    }
     if state == .loading {
       state = messages.isEmpty ? .idle : .loaded
     }
@@ -92,11 +199,13 @@ final class NotificationsViewModel: ObservableObject {
 
   private func beginNewEpoch(loadImmediately: Bool) {
     invalidateTask()
+    invalidateContentFilterTask()
     currentPage = 0
     hasMore = true
     loadedLease = nil
     messages = []
     loadMoreError = nil
+    pausesAutomaticPagination = false
     state = loadImmediately ? .loading : .idle
     if loadImmediately {
       load(page: 1, replacing: true)
@@ -107,9 +216,14 @@ final class NotificationsViewModel: ObservableObject {
     guard page > 0 else { return }
     let service = service
     let vault = vault
+    let contentFilterRepository = contentFilterRepository
     let requestedKind = selectedKind
+    let requestedContentFilterEpoch = contentFilterEpoch
     epoch &+= 1
     let requestEpoch = epoch
+    if replacing {
+      isResolvingContentFilter = true
+    }
     if !replacing {
       isLoadingMore = true
       loadMoreError = nil
@@ -123,9 +237,27 @@ final class NotificationsViewModel: ObservableObject {
         }
       }
       do {
+        if replacing {
+          let replacementFilterSnapshot = await Self.readContentFilterSnapshot(
+            from: contentFilterRepository
+          )
+          try Task.checkCancellation()
+          guard requestEpoch == epoch else { return }
+          if
+            let replacementFilterSnapshot,
+            requestedContentFilterEpoch == contentFilterEpoch
+          {
+            contentFilterSnapshot = replacementFilterSnapshot
+          }
+          if requestedContentFilterEpoch == contentFilterEpoch {
+            isResolvingContentFilter = false
+          }
+        }
         guard let sessionBeforeRequest = try await vault.activeSession() else {
           throw BrowseError.unavailable("请先登录账户。")
         }
+        try Task.checkCancellation()
+        guard requestEpoch == epoch else { return }
         let lease = InboxSessionLease(sessionBeforeRequest)
         guard replacing || loadedLease == lease else {
           discardResultsFromChangedSession(requestEpoch: requestEpoch)
@@ -158,6 +290,9 @@ final class NotificationsViewModel: ObservableObject {
         // A duplicate-only page cannot provide a new row whose appearance would advance paging.
         hasMore = response.hasMore && (replacing || mergedMessages.count > priorCount)
         loadedLease = lease
+        if !hasMore {
+          pausesAutomaticPagination = false
+        }
         messages = mergedMessages
         state = .loaded
       } catch is CancellationError {
@@ -181,6 +316,7 @@ final class NotificationsViewModel: ObservableObject {
     loadedLease = nil
     messages = []
     loadMoreError = nil
+    pausesAutomaticPagination = false
     state = .idle
   }
 
@@ -188,6 +324,13 @@ final class NotificationsViewModel: ObservableObject {
     epoch &+= 1
     loadTask?.cancel()
     loadTask = nil
+  }
+
+  private func invalidateContentFilterTask() {
+    contentFilterEpoch &+= 1
+    contentFilterTask?.cancel()
+    contentFilterTask = nil
+    isResolvingContentFilter = false
   }
 
   private func merge(
@@ -212,6 +355,16 @@ final class NotificationsViewModel: ObservableObject {
     let expectedPage = replacing ? 1 : currentPage + 1
     guard requestedPage == expectedPage, page.currentPage == requestedPage else {
       throw BrowseError.unavailable("贴吧返回了异常的消息页码，请重新加载后再试。")
+    }
+  }
+
+  private static func readContentFilterSnapshot(
+    from repository: any ContentFilterRepository
+  ) async -> ContentFilterSnapshot? {
+    do {
+      return try await repository.snapshot()
+    } catch {
+      return nil
     }
   }
 }

@@ -14,18 +14,24 @@ implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source is
 versioned separately and currently serves `v0.59.0-alpha.1` (build 62), which
-does not yet include the foreground batch-check-in work on `main`.
+represents the earlier 57–62% full-product scope. It predates all of the
+main-only work described after the current-alpha section in `README.md`, not
+only foreground batch check-in.
 
 | Capability area | Weight | Credited points | Current basis |
 | --- | ---: | ---: | --- |
 | Anonymous discovery, search, and forums | 20 | 18–19 | Core browsing, ranking, recommendations, categories, and search are implemented; feedback and a few niche discovery paths remain |
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, shared text selection/copying, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
-| Local data, settings, and customization | 10 | 6 | History, favorites, filtering, appearance, text size, media preferences, followed-forum layout, a configurable forum primary action, reply-entry visibility, a default-on composer risk notice, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
+| Local data, settings, and customization | 10 | 6 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, followed-forum layout, a configurable forum primary action, reply-entry visibility, a default-on composer risk notice, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, switching, a self-profile summary, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 10–11 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, three plain-text reply targets, and plain-text new-topic creation have guarded implementations; real batch-check-in behavior, creation, poll and interaction-restriction success, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
 | **Total** | **100** | **75–78** | Current full-product estimate; roughly 22–25% remains |
+
+This is a source-workflow coverage estimate, not a release-readiness or
+physical-device-validation percentage. The public `v0.59.0-alpha.1` IPA and the
+current `main` source must therefore be reported separately.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
 points, or roughly 91–95%. Concern and the foreground unread summary raise the
@@ -58,6 +64,9 @@ setting by rearranging existing controls, so it remains inside the existing
 local-settings credit rather than adding a weighted point.
 The opaque custom accent closes another narrow customization gap without adding
 a data source or workflow, so it likewise adds no weighted point.
+The foreground inbox projection closes another filtering-surface gap without
+adding a data source or workflow, so it also remains inside the existing local-
+settings and private-read credit rather than adding a weighted point.
 
 ## Available
 
@@ -209,8 +218,9 @@ the source metadata is updated to that tested IPA.
   after raw thread/forum rebinding, plus confirmed thread-detail add, saved-floor
   update, and removal with read-only reconciliation
 - Foreground ReplyMe and AtMe inbox with account-lease isolation, refresh,
-  bounded pagination, safe thread navigation, and explicit reply actions bound
-  to the active account lease
+  bounded pagination, safe thread navigation, explicit reply actions bound to
+  the active account lease, and a local content/sender filter projection that
+  preserves the raw message pages
 - Foreground, memory-only reply-plus-mention summary beside the account page's
   message entry, with exact account-lease isolation, no local clearing, a
   privacy-minimized signed HTTPS form, and no background polling
@@ -317,6 +327,20 @@ entirely in memory. A `userID + sessionRevision` lease is checked before and
 after every page request so an account switch cannot display a previous
 account's private response.
 
+The inbox's local filter projection inspects only `message.content` and the
+sender's exact UID, nickname, and username. Message titles, quoted content,
+forum labels, routing metadata, and other fields do not participate. A
+placeholder discloses no message-specific content and constructs neither a
+navigation destination nor a reply action; a hidden result constructs no row.
+The ordered raw message array, current page, and has-more decision remain
+authoritative. A rule change rereads the local archive and reprojects only the
+already loaded messages in memory, without requesting those pages again. It also
+pauses automatic load-more until the user explicitly continues, preventing a
+rule edit from silently starting another private request. If the archive reread
+fails, the inbox retains the last successfully accepted snapshot; before any
+successful read it uses an empty snapshot. This behavior is fail-open local
+presentation, not a confidentiality or access-control boundary.
+
 Notification pagination is strictly one-based and a returned page must match the
 requested page. Positive thread, post, and sender IDs and zero-or-one flags are
 validated before an item is exposed. Ordinary notifications can reopen a stable
@@ -344,7 +368,8 @@ it with the requested UID and the App checks the exact
 `userID + sessionRevision` lease before and after the request. The inbox does not poll in
 the background, clear the badge locally, or send a mark-read request. Whether
 summary or list retrieval has an implicit server-side read effect remains a
-physical-device validation item.
+physical-device validation item. The unread summary continues to use the raw
+server `replyme + atme` counts and is not changed by local inbox filtering.
 
 The concern feed uses HTTPS protobuf command `309474` only after the user selects
 its Explore channel; page-style TabView preloading and inactive account changes
@@ -993,11 +1018,12 @@ invalidates that pending snapshot.
 
 Local content filtering covers ordinary and channel forum thread lists, global
 and per-forum search results, public-profile activity, post floors, nested
-replies, and shared-thread origin cards. Keyword rules use case-sensitive
-literal substring matching; user rules match an exact positive UID or exact
-name. An allow rule takes precedence only within the same matching domain and
-inspected field: a user allow rule does not override a blocked keyword, and a
-keyword allowed in one field does not override a blocked match in another.
+replies, shared-thread origin cards, and the foreground inbox. Keyword rules
+use case-sensitive literal substring matching; user rules match an exact
+positive UID or exact name. An allow rule takes precedence only within the same
+matching domain and inspected field: a user allow rule does not override a
+blocked keyword, and a keyword allowed in one field does not override a blocked
+match in another.
 Blocked content can remain as a placeholder or be fully hidden. In per-forum
 search, the matched entity and its displayed topic or parent-floor context are
 filtered independently. A blocked context can be replaced or omitted without
@@ -1010,8 +1036,10 @@ Filtering annotates the raw models instead of removing them, so page and cursor
 progression still uses every server result even when an entire visible page is
 hidden. Inaccessible raw-tail sentinels can therefore advance through hidden
 global-search, per-forum-search, and public-profile pages without exposing their
-content. Regular-expression rules are intentionally unsupported until a
-bounded or non-backtracking implementation is available.
+content. The private inbox uses the same raw-state rule but, after a filter
+change, replaces automatic continuation with an explicit user action and does
+not refetch loaded pages. Regular-expression rules are intentionally unsupported
+until a bounded or non-backtracking implementation is available.
 
 Each authenticated milestone remains gated on protocol tests, credential
 isolation, and real-device validation. Forum follow/unfollow, check-in, and

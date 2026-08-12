@@ -120,6 +120,192 @@ final class ContentFilterTests: XCTestCase {
     XCTAssertEqual(allowedByUsername.visibility(for: author), .visible)
   }
 
+  func testInboxMessageContentUsesConfiguredDisplayModeAndIgnoresVideoSwitch() {
+    let placeholder = ContentFilterSnapshot(
+      displayMode: .placeholder,
+      blockVideos: false,
+      rules: [.keyword("blocked content", list: .block)]
+    )
+    let hidden = ContentFilterSnapshot(
+      displayMode: .hidden,
+      blockVideos: false,
+      rules: [.keyword("blocked content", list: .block)]
+    )
+    let videoOnly = ContentFilterSnapshot(
+      displayMode: .hidden,
+      blockVideos: true,
+      rules: []
+    )
+
+    XCTAssertEqual(
+      placeholder.visibility(for: inboxMessage(content: "contains blocked content")),
+      .placeholder
+    )
+    XCTAssertEqual(
+      hidden.visibility(for: inboxMessage(content: "contains blocked content")),
+      .hidden
+    )
+    XCTAssertEqual(
+      placeholder.visibility(for: inboxMessage(content: "ordinary content")),
+      .visible
+    )
+    XCTAssertEqual(
+      videoOnly.visibility(for: inboxMessage(content: "[视频]", threadType: 40)),
+      .visible
+    )
+  }
+
+  func testInboxMessageSenderRulesMatchUIDDisplayNameAndUsername() {
+    let message = inboxMessage(
+      senderID: 7,
+      senderDisplayName: "Sender Display",
+      senderUsername: "sender-account"
+    )
+    let cases: [(ContentFilterRule, String)] = [
+      (.user(id: 7, name: "", list: .block), "UID"),
+      (.user(id: nil, name: "Sender Display", list: .block), "display name"),
+      (.user(id: nil, name: "sender-account", list: .block), "username"),
+    ]
+
+    for (rule, field) in cases {
+      let snapshot = ContentFilterSnapshot(
+        displayMode: .placeholder,
+        blockVideos: false,
+        rules: [rule]
+      )
+      XCTAssertEqual(
+        snapshot.visibility(for: message),
+        .placeholder,
+        "Expected sender \(field) to match"
+      )
+    }
+  }
+
+  func testInboxMessageAllowRulesRemainIsolatedToKeywordAndSenderDomains() {
+    let keywordAllowed = ContentFilterSnapshot(
+      displayMode: .placeholder,
+      blockVideos: false,
+      rules: [
+        .keyword("广告", list: .block),
+        .keyword("可信广告", list: .allow),
+      ]
+    )
+    XCTAssertEqual(
+      keywordAllowed.visibility(for: inboxMessage(content: "可信广告")),
+      .visible
+    )
+
+    let senderAllowed = ContentFilterSnapshot(
+      displayMode: .placeholder,
+      blockVideos: false,
+      rules: [
+        .user(id: nil, name: "Blocked Display", list: .block),
+        .user(id: nil, name: "trusted-account", list: .allow),
+      ]
+    )
+    let trustedSender = inboxMessage(
+      senderDisplayName: "Blocked Display",
+      senderUsername: "trusted-account"
+    )
+    XCTAssertEqual(senderAllowed.visibility(for: trustedSender), .visible)
+
+    let userAllowDoesNotExemptContent = ContentFilterSnapshot(
+      displayMode: .hidden,
+      blockVideos: false,
+      rules: [
+        .user(id: 7, name: "", list: .allow),
+        .keyword("blocked content", list: .block),
+      ]
+    )
+    XCTAssertEqual(
+      userAllowDoesNotExemptContent.visibility(
+        for: inboxMessage(senderID: 7, content: "blocked content")
+      ),
+      .hidden
+    )
+
+    let keywordAllowDoesNotExemptSender = ContentFilterSnapshot(
+      displayMode: .hidden,
+      blockVideos: false,
+      rules: [
+        .keyword("trusted content", list: .allow),
+        .user(id: 7, name: "", list: .block),
+      ]
+    )
+    XCTAssertEqual(
+      keywordAllowDoesNotExemptSender.visibility(
+        for: inboxMessage(senderID: 7, content: "trusted content")
+      ),
+      .hidden
+    )
+  }
+
+  func testInboxMessageExcludesContextAndQuotedUserFromFiltering() {
+    let keywordSnapshot = ContentFilterSnapshot(
+      displayMode: .hidden,
+      blockVideos: false,
+      rules: [.keyword("excluded sentinel", list: .block)]
+    )
+    let keywordCases: [(InboxMessage, String)] = [
+      (inboxMessage(title: "excluded sentinel"), "title"),
+      (inboxMessage(quotedContent: "excluded sentinel"), "quoted content"),
+      (inboxMessage(forumName: "excluded sentinel"), "forum name"),
+    ]
+    for (message, field) in keywordCases {
+      XCTAssertEqual(
+        keywordSnapshot.visibility(for: message),
+        .visible,
+        "Expected \(field) to stay outside keyword matching"
+      )
+    }
+
+    let quotedUser = inboxSender(
+      id: 91,
+      displayName: "Quoted Display",
+      username: "quoted-account"
+    )
+    let quotedUserRules: [(ContentFilterRule, String)] = [
+      (.user(id: 91, name: "", list: .block), "quoted user UID"),
+      (.user(id: nil, name: "Quoted Display", list: .block), "quoted display name"),
+      (.user(id: nil, name: "quoted-account", list: .block), "quoted username"),
+    ]
+    for (rule, field) in quotedUserRules {
+      let snapshot = ContentFilterSnapshot(
+        displayMode: .hidden,
+        blockVideos: false,
+        rules: [rule]
+      )
+      XCTAssertEqual(
+        snapshot.visibility(for: inboxMessage(quotedUser: quotedUser)),
+        .visible,
+        "Expected \(field) to stay outside sender matching"
+      )
+    }
+  }
+
+  func testInboxMessageEmptySenderNamesDoNotMatchSynthesizedPreferredName() {
+    let message = inboxMessage(
+      senderID: 7,
+      senderDisplayName: "",
+      senderUsername: ""
+    )
+    XCTAssertEqual(message.sender.preferredName, "用户 7")
+
+    let syntheticName = ContentFilterSnapshot(
+      displayMode: .placeholder,
+      blockVideos: false,
+      rules: [.user(id: nil, name: "用户 7", list: .block)]
+    )
+    XCTAssertEqual(syntheticName.visibility(for: message), .visible)
+
+    let exactUID = ContentFilterSnapshot(
+      displayMode: .placeholder,
+      blockVideos: false,
+      rules: [.user(id: 7, name: "", list: .block)]
+    )
+    XCTAssertEqual(exactUID.visibility(for: message), .placeholder)
+  }
+
   func testPostAndCommentUseLosslessVisiblePlainText() {
     let snapshot = ContentFilterSnapshot(
       displayMode: .hidden,
@@ -618,6 +804,55 @@ final class ContentFilterTests: XCTestCase {
       contents: [],
       authorID: authorID,
       authorUsername: authorUsername
+    )
+  }
+
+  private func inboxMessage(
+    senderID: Int64 = 7,
+    senderDisplayName: String = "Sender Display",
+    senderUsername: String = "sender-account",
+    title: String = "Thread title",
+    content: String = "ordinary content",
+    quotedContent: String = "quoted content",
+    forumName: String = "swift",
+    quotedUser: InboxSender? = nil,
+    threadType: Int = 0
+  ) -> InboxMessage {
+    InboxMessage(
+      id: 101,
+      sender: inboxSender(
+        id: senderID,
+        displayName: senderDisplayName,
+        username: senderUsername
+      ),
+      quotedUser: quotedUser,
+      threadID: 201,
+      postID: 101,
+      quotedPostID: quotedUser == nil ? nil : 99,
+      title: title,
+      content: content,
+      quotedContent: quotedContent,
+      forumName: forumName,
+      createdAt: Date(timeIntervalSince1970: 100),
+      isFloorReply: false,
+      isFirstPost: false,
+      isUnread: true,
+      threadType: threadType
+    )
+  }
+
+  private func inboxSender(
+    id: Int64,
+    displayName: String,
+    username: String
+  ) -> InboxSender {
+    InboxSender(
+      id: id,
+      username: username,
+      displayName: displayName,
+      portraitURL: nil,
+      isFriend: false,
+      isFan: false
     )
   }
 

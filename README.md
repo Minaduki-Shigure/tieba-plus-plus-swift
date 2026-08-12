@@ -19,7 +19,7 @@ checks.
 | Local features | Available for history, favorites, filtering, appearance, media preferences, followed-forum layout, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
 | Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, plain-text topic/floor/nested replies, and plain-text new-topic creation are in device validation; other writes stay disabled |
-| TiebaLite parity | Anonymous reading and media: about 91–95%; full product scope: about 75–78% complete, with about 22–25% remaining |
+| TiebaLite parity | Current `main` source: about 75% of full product scope (estimated range 75–78%, with 22–25% remaining); anonymous reading and media: about 91–95%. The public `v0.59.0-alpha.1` IPA remains about 57–62% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.59.0-alpha.1` (build 62); later `main` features require a tagged release |
 
 ### Release and validation
@@ -146,8 +146,8 @@ checks.
   IPA passes the release checks.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
   XcodeGen 2.45.4 or newer.
-- **Automated checks:** GitHub Actions runs package tests and an unsigned
-  simulator build, validates the app source, and verifies its public IPA hash.
+- **Automated checks:** GitHub Actions runs package tests and the complete iOS
+  simulator test target, validates the app source, and verifies its public IPA hash.
   Authenticated flows never use real credentials in CI. Login binding, cloud
   favorite reads and mutations, including verified list deletion, followed-forum recommendation filtering,
   target-bound liked-forum pagination, the minimal self-profile request and its
@@ -161,7 +161,7 @@ checks.
   follow/unfollow, check-in, cloud-favorite changes, topic/post/subpost content
   approval, poll voting, user follow/unfollow, user interaction restrictions,
   real reply creation, and real new-topic creation remain
-  physical-device validation features in this alpha.
+  physical-device validation features in the current `main` source.
 - **App source:** Add [`sidestore-source.json`](https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json)
   to LiveContainer 3.7.0 or newer, or to SideStore. Its latest IPA is published
   only after the tag's package, anonymous integration, and simulator tests all
@@ -274,9 +274,10 @@ checks.
   can be pinned as home shortcuts; saved threads retain position and browse mode
   and can apply explicit only-author or descending overrides.
 - **Filtering:** Local literal-keyword, exact user block/allow, and video-topic
-  filters cover list, profile, floor, nested-reply, and shared-origin surfaces
-  without modifying network pagination. A separate default-off recommendation
-  filter matches the active account's followed forums by stable forum ID.
+  filters cover list, profile, floor, nested-reply, shared-origin, and foreground
+  inbox surfaces without discarding their raw server pagination. A separate
+  default-off recommendation filter matches the active account's followed forums
+  by stable forum ID.
 - **Appearance:** System, light, and dark themes, five tested accent presets,
   one locally stored opaque custom accent, Dynamic Type-relative text sizing,
   compact previews, and optional combined
@@ -378,8 +379,18 @@ checks.
   message title, body, forum label, and `quote_pid` never participate in the write
   target. A missing or mismatched target, cancellation, or account change leaves
   the fallback navigation available but opens no composer and sends no write. No
-  background polling or explicit mark-read request is implemented. The account
-  page separately requests a foreground unread summary and shows the sum of
+  background polling or explicit mark-read request is implemented. The local
+  inbox filter checks only `message.content` plus the sender's exact UID,
+  nickname, and username; the title, quoted content, forum label, and other
+  fields do not participate. A placeholder exposes no message-specific content,
+  navigation, or reply action, and a hidden message exposes no row. The original
+  ordered messages and page state remain in memory. A rule change reprojects only
+  those loaded messages, makes no repeat inbox request, and pauses automatic
+  pagination until the user explicitly continues. If the rule archive cannot be
+  reread, the inbox retains its last successfully loaded snapshot; before the
+  first successful read it uses an empty snapshot. This is a presentation
+  preference, not a confidentiality or access-control boundary. The account page
+  separately requests an unfiltered foreground unread summary and shows the sum of
   `replyme + atme` beside the message entry; the optional `fans` count is parsed
   but is not included in that badge. A zero count is hidden and larger counts
   are capped visually while accessibility retains the exact value. The badge is
@@ -490,8 +501,11 @@ checks.
   validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, weighted estimate, protocol constraints, and next milestones.
-  The current `main` audit totals 75–78 of 100 weighted points, leaving about
-  22–25%; its anonymous reading and media subtotal remains about 91–95%. The
+  The current `main` source audit totals 75–78 of 100 weighted points, leaving
+  about 22–25%; its anonymous reading and media subtotal remains about 91–95%.
+  This measures implemented end-to-end workflows with partial credit for
+  device-validation gates; it is not a claim that every path is release-ready.
+  The public `v0.59.0-alpha.1` IPA remains at the earlier 57–62% scope. The
   largest remaining gaps are
   rich-media creation, background unread handling, broader settings, remaining
   account/social actions, unresolvable cloud-favorite rows, and moderation.

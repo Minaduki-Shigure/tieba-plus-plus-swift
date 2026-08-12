@@ -272,6 +272,20 @@ thread and child plus one positive server-resolved parent. That parent is locked
 before any adjacent page is accepted. A deleted or missing child fails closed and
 offers only ordinary owning-thread navigation.
 
+Inbox filtering is a local presentation projection over the retained private
+response. It may inspect only `message.content` and the sender's UID, nickname,
+and username. The title, quoted content or author, forum label, `quote_pid`, and
+other routing fields must not participate. A placeholder may disclose only a
+generic blocked-message label and must construct neither a navigation
+destination nor a reply control; a hidden message must construct no row. The
+original message IDs, order, current page, and has-more state remain authoritative.
+A rule-change notification may only reread the local archive and reproject the
+already loaded array; it must not refetch those pages. If another page exists,
+automatic pagination pauses until the user explicitly continues. A failed reread
+retains the last successfully accepted in-memory snapshot, while a first-load
+failure uses the empty snapshot. This fail-open behavior is a presentation
+preference, not a confidentiality or access-control boundary.
+
 The foreground unread summary uses a separate signed HTTPS `/c/s/msg` form that
 contains only BDUSS, `_client_version=8.2.2`, `bookmark=1`, and `sign`. It sends
 no Cookie, STOKEN, client UID header, CUID, hardware identifier, model, screen
@@ -284,7 +298,8 @@ request context rather than server proof. The App checks the same
 snapshot on logout, switching, or same-UID credential rotation. The inbox
 performs no background polling, explicit mark-read request, or local badge
 clearing. An implicit server-side unread change caused by summary or list
-retrieval remains a documented real-device validation question.
+retrieval remains a documented real-device validation question. Local inbox
+filtering must not alter the raw `replyme + atme` summary or its badge.
 
 Before any forum write, the fresh FRS probe must bind the response user ID,
 forum ID, normalized forum name, `is_like`, and `anti.tbs` to the requested
@@ -802,7 +817,9 @@ A hidden final item or fully hidden page must still be able to trigger
 pagination through an inaccessible raw-tail sentinel; the app must not reveal
 the filtered row or repeatedly request a duplicate-only page. The public search
 media marker may be used only to enforce the local video switch and must not add
-a media request.
+a media request. The foreground inbox is intentionally stricter after a rule
+change: it retains the same raw pagination state but requires an explicit user
+action before another private page request.
 
 Raw-tail pagination applies only to content hidden by local rules. When a
 public-profile response declares its activity hidden, that server privacy state

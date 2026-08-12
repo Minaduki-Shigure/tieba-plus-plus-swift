@@ -21,6 +21,7 @@ struct RootView: View {
   @State private var linkErrorMessage: String?
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.contentFilterRepository) private var contentFilterRepository
   @EnvironmentObject private var mediaPlaybackCoordinator: MediaPlaybackCoordinator
   @EnvironmentObject private var followedForumsViewModel: FollowedForumsViewModel
   @AppStorage(AppPreferenceKey.homeShowsRecentForums)
@@ -297,6 +298,7 @@ struct RootView: View {
             browseService: service,
             accountService: accountService,
             vault: accountVault,
+            contentFilterRepository: contentFilterRepository,
             historyRepository: historyRepository,
             favoritesRepository: favoritesRepository,
             searchHistoryRepository: searchHistoryRepository

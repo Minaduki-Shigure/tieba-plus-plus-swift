@@ -10,6 +10,7 @@ struct AccountView: View {
   let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
+  @Environment(\.contentFilterRepository) private var contentFilterRepository
   @StateObject private var viewModel: AccountViewModel
   @StateObject private var profileSummaryViewModel: ActiveAccountProfileSummaryViewModel
   @StateObject private var unreadSummaryViewModel: InboxUnreadSummaryViewModel
@@ -243,6 +244,7 @@ struct AccountView: View {
                 browseService: browseService,
                 accountService: accountService,
                 vault: vault,
+                contentFilterRepository: contentFilterRepository,
                 historyRepository: historyRepository,
                 favoritesRepository: favoritesRepository,
                 searchHistoryRepository: searchHistoryRepository
