@@ -157,11 +157,11 @@ final class AnimatedRemoteImageTests: XCTestCase {
   func testDecodeSchedulerLimitsConcurrencyAndCancelsQueuedWork() async throws {
     let scheduler = RemoteImageIODecodeScheduler(maxConcurrentDecodes: 2)
     let probe = DecodeConcurrencyProbe()
-    let first = Task.detached {
-      try await scheduler.decode { try probe.run(value: 1) }
+    let first = Task.detached(priority: .userInitiated) {
+      try await scheduler.decode(priority: .userInitiated) { try probe.run(value: 1) }
     }
-    let second = Task.detached {
-      try await scheduler.decode { try probe.run(value: 2) }
+    let second = Task.detached(priority: .userInitiated) {
+      try await scheduler.decode(priority: .userInitiated) { try probe.run(value: 2) }
     }
     defer {
       first.cancel()
@@ -169,10 +169,13 @@ final class AnimatedRemoteImageTests: XCTestCase {
       probe.releaseAll()
     }
     let didEnterTwoDecodes = await probe.waitUntilEntered(2)
-    XCTAssertTrue(didEnterTwoDecodes)
+    guard didEnterTwoDecodes else {
+      XCTFail("Timed out waiting for both decode workers")
+      return
+    }
 
-    let queued = Task.detached {
-      try await scheduler.decode { try probe.run(value: 3) }
+    let queued = Task.detached(priority: .userInitiated) {
+      try await scheduler.decode(priority: .userInitiated) { try probe.run(value: 3) }
     }
     try await Task.sleep(for: .milliseconds(20))
     XCTAssertEqual(probe.enteredCount, 2)
