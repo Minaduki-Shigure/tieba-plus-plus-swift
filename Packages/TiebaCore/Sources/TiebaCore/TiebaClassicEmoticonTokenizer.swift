@@ -1,11 +1,11 @@
 import Foundation
 import TiebaProto
 
-public enum TiebaClassicEmoticonContentToken: Sendable, Equatable {
+enum TiebaClassicEmoticonContentToken: Sendable, Equatable {
   case text(String)
   case emoticon(String)
 
-  public static func == (lhs: Self, rhs: Self) -> Bool {
+  static func == (lhs: Self, rhs: Self) -> Bool {
     switch (lhs, rhs) {
     case (.text(let lhs), .text(let rhs)), (.emoticon(let lhs), .emoticon(let rhs)):
       return lhs.utf8.elementsEqual(rhs.utf8)
@@ -18,7 +18,19 @@ public enum TiebaClassicEmoticonContentToken: Sendable, Equatable {
 public enum TiebaClassicEmoticonTokenizer {
   private static let readbackTextTypes: Set<UInt32> = [0, 9, 18, 27, 40]
 
-  public static func submissionTokens(
+  /// Returns byte-exact, type-tagged tokens suitable for cross-layer visibility proofs.
+  public static func submissionProofTokens(in value: String) -> [[UInt8]]? {
+    submissionTokens(in: value)?.map { token in
+      switch token {
+      case .text(let text):
+        [UInt8(0)] + Array(text.utf8)
+      case .emoticon(let name):
+        [UInt8(1)] + Array(name.utf8)
+      }
+    }
+  }
+
+  static func submissionTokens(
     in value: String
   ) -> [TiebaClassicEmoticonContentToken]? {
     var tokens = [TiebaClassicEmoticonContentToken]()

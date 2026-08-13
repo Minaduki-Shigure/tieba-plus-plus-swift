@@ -74,6 +74,21 @@ final class TiebaTextReplyTests: XCTestCase, @unchecked Sendable {
     XCTAssertNil(TiebaClassicEmoticonCatalog.token(for: " 滑稽"))
   }
 
+  func testSubmissionProofTokensPreserveTypeAndUTF8BytesAcrossModuleBoundary() {
+    XCTAssertEqual(
+      TiebaClassicEmoticonTokenizer.submissionProofTokens(in: "前#(滑稽)后"),
+      [
+        [UInt8(0)] + Array("前".utf8),
+        [UInt8(1)] + Array("滑稽".utf8),
+        [UInt8(0)] + Array("后".utf8),
+      ]
+    )
+    XCTAssertNotEqual(
+      TiebaClassicEmoticonTokenizer.submissionProofTokens(in: "#(滑稽)"),
+      TiebaClassicEmoticonTokenizer.submissionProofTokens(in: "滑稽")
+    )
+  }
+
   func testSubmissionDescriptionAndReflectionRedactContentAndForumName() {
     let secretContent = "private draft body"
     let secretForumName = "private-forum"

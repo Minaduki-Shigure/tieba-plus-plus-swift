@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import TiebaCore
 
 struct ReplyComposerView: View {
   @Environment(\.textReplySubmissionStore) private var submissionStore
@@ -661,7 +662,7 @@ enum TextReplyVisibilityProof {
   ) -> String? {
     guard
       TextReplyContentPolicy.isValid(expectedContent),
-      let expectedTokens = TiebaClassicEmoticonTokenizer.submissionTokens(
+      let expectedTokens = TiebaClassicEmoticonTokenizer.submissionProofTokens(
         in: expectedContent
       ),
       let observedTokens = contentTokens(from: contents, allowsMentions: allowsMentions),
@@ -673,15 +674,15 @@ enum TextReplyVisibilityProof {
   private static func contentTokens(
     from contents: [BrowseContent],
     allowsMentions: Bool
-  ) -> [TiebaClassicEmoticonContentToken]? {
-    var result = [TiebaClassicEmoticonContentToken]()
+  ) -> [[UInt8]]? {
+    var result = [[UInt8]]()
     for content in contents {
       switch content {
       case .text(let fragment):
         appendTextToken(fragment, to: &result)
       case .emoticon(let name, _):
         guard TiebaClassicEmoticonCatalog.token(for: name) != nil else { return nil }
-        result.append(.emoticon(name))
+        result.append([UInt8(1)] + Array(name.utf8))
       case .mention(let name, _) where allowsMentions:
         appendTextToken(name.hasPrefix("@") ? name : "@\(name)", to: &result)
       case .mention:
@@ -731,13 +732,13 @@ enum TextReplyVisibilityProof {
 
   private static func appendTextToken(
     _ value: String,
-    to tokens: inout [TiebaClassicEmoticonContentToken]
+    to tokens: inout [[UInt8]]
   ) {
     guard !value.isEmpty else { return }
-    if case .text(let previous)? = tokens.last {
-      tokens[tokens.count - 1] = .text(previous + value)
+    if tokens.last?.first == 0 {
+      tokens[tokens.count - 1].append(contentsOf: value.utf8)
     } else {
-      tokens.append(.text(value))
+      tokens.append([UInt8(0)] + Array(value.utf8))
     }
   }
 }
