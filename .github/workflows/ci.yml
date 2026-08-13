@@ -30,6 +30,8 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Validate source metadata
         run: ruby Scripts/validate_sidestore_source.rb
+      - name: Test source publication tooling
+        run: ruby Scripts/test_update_sidestore_source.rb
       - name: Verify published IPA
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: |

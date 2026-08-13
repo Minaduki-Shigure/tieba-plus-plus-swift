@@ -33,7 +33,7 @@ jobs:
       - name: Verify release tag and version
         run: |
           set -euo pipefail
-          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[1-9][0-9]*)?$ ]]; then
             echo "Unsupported release tag: $RELEASE_TAG" >&2
             exit 1
           fi
@@ -168,7 +168,7 @@ jobs:
           set -Eeuo pipefail
           trap 'status=$?; echo "::error file=.github/workflows/build-ipa.yml::Release command failed at shell line $LINENO: $BASH_COMMAND (exit $status)"; exit "$status"' ERR
           asset_name="$(basename "$IPA_PATH")"
-          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[1-9][0-9]*)?$ ]]; then
             echo "Unsupported release tag: $RELEASE_TAG" >&2
             exit 1
           fi
@@ -335,3 +335,65 @@ jobs:
             echo "- Size: \`$ipa_size\` bytes"
             echo "- SHA-256: \`$ipa_sha256\`"
           } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          ref: ${{ env.RELEASE_SHA }}
+          path: release-source
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: main
+          path: source-update
+      - name: Publish app source metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          trap 'status=$?; echo "::error file=sidestore-source.json::Source publication failed at shell line $LINENO: $BASH_COMMAND (exit $status)"; exit "$status"' ERR
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
+          release_date="$(jq -r '.published_at[0:10]' <<< "$release_json")"
+          if [[ ! "$release_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+            echo "Release API returned an invalid publication date" >&2
+            exit 1
+          fi
+          description="Tieba++ $RELEASE_TAG 已通过核心测试、iOS 模拟器测试、匿名集成门禁和 IPA 完整性检查。此版本为无签名 IPA，供 SideStore 或 LiveContainer 自签名安装；详细功能与安全边界请参阅仓库文档。"
+
+          ruby source-update/Scripts/update_sidestore_source.rb \
+            --source source-update/sidestore-source.json \
+            --project release-source/project.yml \
+            --ipa "$IPA_PATH" \
+            --tag "$RELEASE_TAG" \
+            --date "$release_date" \
+            --description "$description"
+          ruby source-update/Scripts/validate_sidestore_source.rb \
+            --source source-update/sidestore-source.json \
+            --project source-update/project.yml \
+            --ipa "$IPA_PATH"
+
+          git -C source-update config user.name github-actions[bot]
+          git -C source-update config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git -C source-update add sidestore-source.json
+          if git -C source-update diff --cached --quiet; then
+            echo "App source already contains $RELEASE_TAG."
+            exit 0
+          fi
+          git -C source-update commit -m "chore: publish $RELEASE_TAG app source"
+
+          for attempt in 1 2 3; do
+            git -C source-update fetch origin main
+            if ! git -C source-update rebase origin/main; then
+              git -C source-update rebase --abort || true
+              echo "main changed the app source concurrently; refusing an automatic merge." >&2
+              exit 1
+            fi
+            ruby source-update/Scripts/validate_sidestore_source.rb \
+              --source source-update/sidestore-source.json \
+              --project source-update/project.yml \
+              --ipa "$IPA_PATH"
+            if git -C source-update push origin HEAD:main; then
+              exit 0
+            fi
+            echo "Source push attempt $attempt failed; refreshing main before retry." >&2
+          done
+          echo "Unable to publish app source after three attempts" >&2
+          exit 1

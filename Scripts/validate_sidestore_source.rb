@@ -205,7 +205,7 @@ class SideStoreSourceValidator
     validate_https_url(app["iconURL"], "source.apps[0].iconURL", expected: icon_url)
     assert(app["tintColor"] == TINT_COLOR, "source app tintColor must be #{TINT_COLOR}")
     assert(app["category"] == "social", "source app category must be \"social\"")
-    assert(app["beta"] == true, "source app beta must be true while releases are prereleases")
+    assert([true, false].include?(app["beta"]), "source app beta must be a boolean")
 
     if app.key?("screenshotURLs")
       screenshots = app["screenshotURLs"]
@@ -249,6 +249,8 @@ class SideStoreSourceValidator
            "latest source buildNumber must match CURRENT_PROJECT_VERSION")
     assert(first["minOSVersion"] == metadata[:minimum_os],
            "latest source minOSVersion must match the project deployment target")
+    assert(parsed_versions.first[:prerelease] == beta,
+           "source app beta must match the latest release channel")
 
     pairs = versions.map { |version| [version["version"], version["buildVersion"]] }
     assert(pairs.uniq.length == pairs.length, "source versions must have unique version/buildVersion pairs")
@@ -289,12 +291,12 @@ class SideStoreSourceValidator
       assert((maximum <=> minimum) >= 0, "#{path}.maxOSVersion must not be lower than minOSVersion")
     end
 
-    validate_release_url(version["downloadURL"], path, version_string, beta: beta)
+    prerelease = validate_release_url(version["downloadURL"], path, version_string)
 
-    { date: date, semantic: semantic, build: build_version.to_i }
+    { date: date, semantic: semantic, build: build_version.to_i, prerelease: prerelease }
   end
 
-  def validate_release_url(value, path, version, beta:)
+  def validate_release_url(value, path, version)
     uri = validate_https_url(value, "#{path}.downloadURL")
     assert(uri.host == "github.com", "#{path}.downloadURL must be hosted on github.com")
     assert(uri.query.nil? && uri.fragment.nil?, "#{path}.downloadURL must not contain a query or fragment")
@@ -308,13 +310,11 @@ class SideStoreSourceValidator
 
     tag = segments[-2]
     asset = segments[-1]
-    tag_pattern = if beta
-                    /\Av#{Regexp.escape(version)}-(?:alpha|beta|rc)\.[1-9]\d*\z/
-                  else
-                    /\Av#{Regexp.escape(version)}\z/
-                  end
+    stable_tag = "v#{version}"
+    tag_pattern = /\A#{Regexp.escape(stable_tag)}(?:-(?:alpha|beta|rc)\.[1-9]\d*)?\z/
     assert(tag.match?(tag_pattern), "#{path}.downloadURL tag does not match version #{version}")
     assert(asset == ASSET_NAME, "#{path}.downloadURL asset must be #{ASSET_NAME}")
+    tag != stable_tag
   end
 
   def validate_ipa(version)
@@ -381,13 +381,17 @@ end
 repository_root = File.expand_path("..", __dir__)
 options = {
   source_path: File.join(repository_root, "sidestore-source.json"),
+  project_path: File.join(repository_root, "project.yml"),
   ipa_path: nil
 }
 
 parser = OptionParser.new do |opts|
-  opts.banner = "Usage: #{File.basename($PROGRAM_NAME)} [--source PATH] [--ipa PATH]"
+  opts.banner = "Usage: #{File.basename($PROGRAM_NAME)} [--source PATH] [--project PATH] [--ipa PATH]"
   opts.on("--source PATH", "Source JSON (default: repository sidestore-source.json)") do |path|
     options[:source_path] = File.expand_path(path)
+  end
+  opts.on("--project PATH", "XcodeGen project.yml (default: repository project.yml)") do |path|
+    options[:project_path] = File.expand_path(path)
   end
   opts.on("--ipa PATH", "Compare source size and SHA-256 with a local IPA") do |path|
     options[:ipa_path] = path
@@ -404,7 +408,7 @@ begin
 
   validator = SideStoreSourceValidator.new(
     source_path: options[:source_path],
-    project_path: File.join(repository_root, "project.yml"),
+    project_path: options[:project_path],
     ipa_path: options[:ipa_path]
   )
   validator.validate!
