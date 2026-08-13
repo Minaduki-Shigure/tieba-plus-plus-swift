@@ -409,7 +409,10 @@ checks.
   content and inline nested-reply previews remain separate read-only snapshots.
 - **Private inbox:** The account page opens foreground-only ReplyMe and AtMe
   lists with refresh and bounded page-number pagination. Ordinary notifications
-  can reopen the exact post. A nested-reply notification sends only its child ID
+  can reopen the exact post. A visible sender avatar or name separately opens
+  that sender's credential-free public profile when the notification carries a
+  strict positive UID; the message body retains its original post/reply target.
+  A nested-reply notification sends only its child ID
   to the public floor resolver, validates the returned thread, parent, and child,
   and opens the exact reply without trusting the ambiguous legacy `quote_pid`
   field. Each supported row also exposes an explicit reply action bound to the

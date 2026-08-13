@@ -51,8 +51,9 @@ existing local-settings credit but is too small to add a full weighted point.
 The followed-forum layout choice likewise improves the completeness of the
 existing local-settings credit but does not add a full weighted point because it
 reflows two existing surfaces without adding a data source or workflow.
-The account-isolated followed-forum pin archive, in contrast, completes a full
-TiebaLite local-management workflow across the home projection and complete list.
+The account-isolated followed-forum pin archive, in contrast, completes
+TiebaLite's local pinned-forum management workflow and presents it consistently
+in the iOS home projection and complete list.
 It adds one local-settings point because persistence, exact loaded-row projection,
 context actions, account switching, unfollow cleanup, and failure recovery are
 covered together without adding an authenticated request.
@@ -256,7 +257,8 @@ the source metadata is updated to that tested IPA.
 - Foreground ReplyMe and AtMe inbox with account-lease isolation, refresh,
   bounded pagination, safe thread navigation, explicit reply actions bound to
   the active account lease, and a local content/sender filter projection that
-  preserves the raw message pages
+  preserves the raw message pages; a visible sender avatar or name opens that
+  sender's credential-free public profile only for a strict positive UID
 - Foreground, memory-only reply, mention, and optional fan-reminder summary on
   the account page, with separate message and fan badges, an existing public
   follower-list destination, exact account-lease isolation, no local clearing,
