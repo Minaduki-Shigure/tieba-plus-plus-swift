@@ -904,7 +904,9 @@ struct TiebaCoreAccountService: AccountService {
           id: $0.id,
           name: $0.name,
           level: $0.level,
-          experience: $0.experience
+          experience: $0.experience,
+          avatarURL: SecureTiebaURL.media($0.avatar),
+          slogan: $0.slogan
         )
       },
       currentPage: response.pagination.currentPage,

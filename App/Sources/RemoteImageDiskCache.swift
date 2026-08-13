@@ -96,6 +96,12 @@ protocol RemoteImagePersistentCacheProviding: Sendable {
     kind: RemoteImageDownloadKind
   ) async throws -> RemoteImageFileLease?
 
+  func cachedDownload(
+    from url: URL,
+    kind: RemoteImageDownloadKind,
+    namespace: String
+  ) async throws -> RemoteImageFileLease?
+
   func currentGenerationToken() async -> RemoteImageDiskCacheGenerationToken
 
   func storeValidated(
@@ -105,8 +111,51 @@ protocol RemoteImagePersistentCacheProviding: Sendable {
     generationToken: RemoteImageDiskCacheGenerationToken
   ) async throws
 
+  func storeValidated(
+    _ lease: RemoteImageFileLease,
+    requestedURL: URL,
+    kind: RemoteImageDownloadKind,
+    namespace: String,
+    generationToken: RemoteImageDiskCacheGenerationToken
+  ) async throws
+
   func usage() async -> RemoteImageDiskCacheUsage
   func clear() async -> RemoteImageDiskCacheClearResult
+}
+
+extension RemoteImagePersistentCacheProviding {
+  func cachedDownload(
+    from url: URL,
+    kind: RemoteImageDownloadKind,
+    namespace: String
+  ) async throws -> RemoteImageFileLease? {
+    switch DownsampledImageURLPolicy(rawValue: namespace) {
+    case .some(.remoteImage):
+      return try await cachedDownload(from: url, kind: kind)
+    case .some(.forumAvatar), .none:
+      return nil
+    }
+  }
+
+  func storeValidated(
+    _ lease: RemoteImageFileLease,
+    requestedURL: URL,
+    kind: RemoteImageDownloadKind,
+    namespace: String,
+    generationToken: RemoteImageDiskCacheGenerationToken
+  ) async throws {
+    switch DownsampledImageURLPolicy(rawValue: namespace) {
+    case .some(.remoteImage):
+      try await storeValidated(
+        lease,
+        requestedURL: requestedURL,
+        kind: kind,
+        generationToken: generationToken
+      )
+    case .some(.forumAvatar), .none:
+      return
+    }
+  }
 }
 
 actor RemoteImageDiskCache: RemoteImagePersistentCacheProviding {
@@ -978,11 +1027,39 @@ struct PersistentRemoteImageDownloader: RemoteImageDownloading,
     )
   }
 
+  func download(
+    from url: URL,
+    kind: RemoteImageDownloadKind,
+    networkAccess: RemoteImageNetworkAccess,
+    redirectURLValidator: @escaping @Sendable (URL) -> Bool,
+    onProgress: @escaping @Sendable (RemoteImageDownloadProgress) -> Void
+  ) async throws -> RemoteImageFileLease {
+    guard RemoteImageURLPolicy.allows(url), redirectURLValidator(url) else {
+      throw RemoteImageDownloadError.invalidURL
+    }
+    try Task.checkCancellation()
+    return try await networkDownloader.download(
+      from: url,
+      kind: kind,
+      networkAccess: networkAccess,
+      redirectURLValidator: redirectURLValidator,
+      onProgress: onProgress
+    )
+  }
+
   func cachedDownload(
     from url: URL,
     kind: RemoteImageDownloadKind
   ) async throws -> RemoteImageFileLease? {
     try await cache.cachedDownload(from: url, kind: kind)
+  }
+
+  func cachedDownload(
+    from url: URL,
+    kind: RemoteImageDownloadKind,
+    namespace: String
+  ) async throws -> RemoteImageFileLease? {
+    try await cache.cachedDownload(from: url, kind: kind, namespace: namespace)
   }
 
   func currentGenerationToken() async -> RemoteImageDiskCacheGenerationToken {
@@ -999,6 +1076,22 @@ struct PersistentRemoteImageDownloader: RemoteImageDownloading,
       lease,
       requestedURL: requestedURL,
       kind: kind,
+      generationToken: generationToken
+    )
+  }
+
+  func storeValidated(
+    _ lease: RemoteImageFileLease,
+    requestedURL: URL,
+    kind: RemoteImageDownloadKind,
+    namespace: String,
+    generationToken: RemoteImageDiskCacheGenerationToken
+  ) async throws {
+    try await cache.storeValidated(
+      lease,
+      requestedURL: requestedURL,
+      kind: kind,
+      namespace: namespace,
       generationToken: generationToken
     )
   }

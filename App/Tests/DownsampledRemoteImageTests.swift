@@ -69,6 +69,16 @@ final class DownsampledRemoteImageTests: XCTestCase {
         currentResourceID: .init(url: firstURL, maxPixelSize: 721)
       )
     )
+    XCTAssertFalse(
+      DownsampledRemoteImageStateDecision.canRenderStoredPhase(
+        storedResourceID: stored,
+        currentResourceID: .init(
+          url: firstURL,
+          maxPixelSize: 720,
+          urlPolicyID: "forum-avatar"
+        )
+      )
+    )
   }
 
   func testAttemptIdentityRejectsLateEventsAfterSameResourceReload() {
@@ -176,6 +186,28 @@ final class DownsampledRemoteImageTests: XCTestCase {
     XCTAssertEqual(recordedKinds, [.preview])
     let recordedNetworkAccesses = await downloader.recordedNetworkAccesses()
     XCTAssertEqual(recordedNetworkAccesses, [.economicalOnly])
+  }
+
+  func testScopedURLPolicyRejectsInitialURLBeforeDownload() async throws {
+    let downloader = RecordingRemoteImageDownloader(imageData: try makeJPEGData())
+    let repository = DownsampledImageRepository(downloader: downloader)
+    let url = try XCTUnwrap(URL(string: "https://example.com/disallowed-avatar.jpg"))
+
+    do {
+      _ = try await repository.image(
+        at: url,
+        maxPixelSize: 160,
+        fetchPolicy: .allowNetwork(.preview),
+        urlPolicy: .forumAvatar,
+        onProgress: { _ in }
+      )
+      XCTFail("Expected scoped forum-avatar policy to reject the URL")
+    } catch DownsampledImageError.invalidResponse {
+      // Expected.
+    }
+
+    let recordedKinds = await downloader.recordedKinds()
+    XCTAssertTrue(recordedKinds.isEmpty)
   }
 
   func testColdCacheOnlyMissDoesNotStartDownload() async throws {

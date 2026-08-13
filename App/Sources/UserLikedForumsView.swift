@@ -2,32 +2,6 @@ import Combine
 import Foundation
 import SwiftUI
 
-enum UserLikedForumAvatarPolicy {
-  private static let allowedHostSuffixes = [
-    "baidu.com",
-    "bdimg.com",
-    "bdstatic.com",
-    "bcebos.com",
-    "baidubce.com",
-  ]
-
-  static func displayURL(_ url: URL?) -> URL? {
-    guard
-      let url,
-      let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-      components.scheme?.lowercased() == "https",
-      components.user == nil,
-      components.password == nil,
-      components.port == nil || components.port == 443,
-      let host = components.host?.lowercased(),
-      allowedHostSuffixes.contains(where: { suffix in
-        host == suffix || host.hasSuffix(".\(suffix)")
-      })
-    else { return nil }
-    return url
-  }
-}
-
 struct UserLikedForumsView: View {
   let browseService:
     any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
@@ -160,9 +134,10 @@ private struct UserLikedForumRow: View {
   var body: some View {
     HStack(alignment: .center, spacing: 12) {
       AvatarView(
-        url: UserLikedForumAvatarPolicy.displayURL(forum.avatarURL),
+        url: ForumAvatarDisplayPolicy.displayURL(forum.avatarURL),
         name: forum.name,
-        size: 44
+        size: 44,
+        urlPolicy: .forumAvatar
       )
       VStack(alignment: .leading, spacing: 4) {
         Text("\(forum.name)吧")

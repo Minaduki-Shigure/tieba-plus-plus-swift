@@ -26,9 +26,36 @@ enum DownsampledImageFetchPolicy: Hashable, Sendable {
   case allowEconomicalNetwork(RemoteImageDownloadKind)
 }
 
+enum DownsampledImageURLPolicy: String, Hashable, Sendable {
+  case remoteImage = "remote-image"
+  case forumAvatar = "forum-avatar"
+
+  var id: String { rawValue }
+
+  func allows(_ url: URL) -> Bool {
+    switch self {
+    case .remoteImage:
+      RemoteImageURLPolicy.allows(url)
+    case .forumAvatar:
+      ForumAvatarDisplayPolicy.allows(url)
+    }
+  }
+}
+
 struct DownsampledRemoteImageResourceID: Hashable, Sendable {
   let url: URL?
   let maxPixelSize: Int
+  let urlPolicyID: String
+
+  init(
+    url: URL?,
+    maxPixelSize: Int,
+    urlPolicyID: String = DownsampledImageURLPolicy.remoteImage.id
+  ) {
+    self.url = url
+    self.maxPixelSize = maxPixelSize
+    self.urlPolicyID = urlPolicyID
+  }
 }
 
 enum DownsampledRemoteImageStateDecision {
@@ -72,6 +99,7 @@ struct DownsampledRemoteImage<Content: View>: View {
   let url: URL?
   let maxPixelSize: Int
   let fetchPolicy: DownsampledImageFetchPolicy
+  let urlPolicy: DownsampledImageURLPolicy
   let reloadID: Int
   let onAttemptCompletion: @MainActor (DownsampledRemoteImageAttemptOutcome) -> Void
   @ViewBuilder let content: (
@@ -89,6 +117,7 @@ struct DownsampledRemoteImage<Content: View>: View {
     let url: URL?
     let maxPixelSize: Int
     let fetchPolicy: DownsampledImageFetchPolicy
+    let urlPolicyID: String
     let reloadID: Int
   }
 
@@ -103,6 +132,7 @@ struct DownsampledRemoteImage<Content: View>: View {
       fetchPolicy: .allowNetwork(
         RemoteImageDownloadPolicy.kind(forMaxPixelSize: maxPixelSize)
       ),
+      urlPolicy: .remoteImage,
       onAttemptCompletion: { _ in },
       content: content
     )
@@ -112,6 +142,7 @@ struct DownsampledRemoteImage<Content: View>: View {
     url: URL?,
     maxPixelSize: Int,
     fetchPolicy: DownsampledImageFetchPolicy,
+    urlPolicy: DownsampledImageURLPolicy = .remoteImage,
     reloadID: Int = 0,
     onAttemptCompletion: @escaping @MainActor (
       DownsampledRemoteImageAttemptOutcome
@@ -121,6 +152,7 @@ struct DownsampledRemoteImage<Content: View>: View {
     self.url = url
     self.maxPixelSize = maxPixelSize
     self.fetchPolicy = fetchPolicy
+    self.urlPolicy = urlPolicy
     self.reloadID = reloadID
     self.onAttemptCompletion = onAttemptCompletion
     self.content = { phase, _ in content(phase) }
@@ -130,6 +162,7 @@ struct DownsampledRemoteImage<Content: View>: View {
     url: URL?,
     maxPixelSize: Int,
     fetchPolicy: DownsampledImageFetchPolicy,
+    urlPolicy: DownsampledImageURLPolicy = .remoteImage,
     reloadID: Int = 0,
     onAttemptCompletion: @escaping @MainActor (
       DownsampledRemoteImageAttemptOutcome
@@ -142,6 +175,7 @@ struct DownsampledRemoteImage<Content: View>: View {
     self.url = url
     self.maxPixelSize = maxPixelSize
     self.fetchPolicy = fetchPolicy
+    self.urlPolicy = urlPolicy
     self.reloadID = reloadID
     self.onAttemptCompletion = onAttemptCompletion
     self.content = progressContent
@@ -152,12 +186,17 @@ struct DownsampledRemoteImage<Content: View>: View {
       url: url,
       maxPixelSize: maxPixelSize,
       fetchPolicy: fetchPolicy,
+      urlPolicyID: urlPolicy.id,
       reloadID: reloadID
     )
   }
 
   private var resourceID: DownsampledRemoteImageResourceID {
-    DownsampledRemoteImageResourceID(url: url, maxPixelSize: maxPixelSize)
+    DownsampledRemoteImageResourceID(
+      url: url,
+      maxPixelSize: maxPixelSize,
+      urlPolicyID: urlPolicy.id
+    )
   }
 
   private var hasSuccessfulPhase: Bool {
@@ -200,6 +239,7 @@ struct DownsampledRemoteImage<Content: View>: View {
             at: url,
             maxPixelSize: maxPixelSize,
             fetchPolicy: fetchPolicy,
+            urlPolicy: urlPolicy,
             onProgress: { progress in
               Task { @MainActor in
                 guard DownsampledRemoteImageStateDecision.canAcceptEvent(
@@ -300,15 +340,17 @@ actor DownsampledImageRepository {
   private struct CacheKey: Hashable, Sendable {
     let urlString: String
     let maxPixelSize: Int
+    let urlPolicyID: String
 
     var storageKey: NSString {
-      "\(maxPixelSize)|\(urlString)" as NSString
+      "\(urlPolicyID)|\(maxPixelSize)|\(urlString)" as NSString
     }
   }
 
   private struct InFlightKey: Hashable, Sendable {
     let cacheKey: CacheKey
     let fetchPolicy: DownsampledImageFetchPolicy
+    let urlPolicyID: String
   }
 
   private struct LoadedImage: @unchecked Sendable {
@@ -419,6 +461,7 @@ actor DownsampledImageRepository {
       at: url,
       maxPixelSize: requestedSize,
       fetchPolicy: fetchPolicy,
+      urlPolicy: .remoteImage,
       onProgress: { _ in }
     )
   }
@@ -427,16 +470,18 @@ actor DownsampledImageRepository {
     at url: URL,
     maxPixelSize requestedSize: Int,
     fetchPolicy: DownsampledImageFetchPolicy,
+    urlPolicy: DownsampledImageURLPolicy = .remoteImage,
     onProgress: @escaping @Sendable (DownsampledRemoteImageLoadProgress) -> Void
   ) async throws -> DownsampledImageAsset {
     try Task.checkCancellation()
-    guard RemoteImageURLPolicy.allows(url) else {
+    guard RemoteImageURLPolicy.allows(url), urlPolicy.allows(url) else {
       throw DownsampledImageError.invalidResponse
     }
     let maxPixelSize = min(max(requestedSize, 64), 4_096)
     let cacheKey = CacheKey(
       urlString: url.absoluteString,
-      maxPixelSize: maxPixelSize
+      maxPixelSize: maxPixelSize,
+      urlPolicyID: urlPolicy.id
     )
     if !isClearingAllCaches, let cached = cache.object(forKey: cacheKey.storageKey) {
       return cached.asset
@@ -469,7 +514,8 @@ actor DownsampledImageRepository {
 
     let inFlightKey = InFlightKey(
       cacheKey: cacheKey,
-      fetchPolicy: fetchPolicy
+      fetchPolicy: fetchPolicy,
+      urlPolicyID: urlPolicy.id
     )
     let waiterID = UUID()
     let waiter = InFlightRequest.Waiter(onProgress: onProgress)
@@ -498,7 +544,8 @@ actor DownsampledImageRepository {
           do {
             cachedLease = try await persistentCache.cachedDownload(
               from: url,
-              kind: downloadKind
+              kind: downloadKind,
+              namespace: urlPolicy.id
             )
           } catch is CancellationError {
             throw CancellationError()
@@ -551,6 +598,7 @@ actor DownsampledImageRepository {
             from: url,
             kind: downloadKind,
             networkAccess: networkAccess,
+            redirectURLValidator: urlPolicy.allows,
             onProgress: { progress in
               Task {
                 await self.receive(
@@ -561,6 +609,10 @@ actor DownsampledImageRepository {
               }
             }
           )
+          guard
+            RemoteImageURLPolicy.allows(lease.sourceURL),
+            urlPolicy.allows(lease.sourceURL)
+          else { throw RemoteImageDownloadError.invalidResponse }
         } catch let error as RemoteImageDownloadError {
           switch error {
           case .responseTooLarge:
@@ -612,6 +664,7 @@ actor DownsampledImageRepository {
             loaded.sourceLease,
             requestedURL: url,
             kind: downloadKind,
+            namespace: urlPolicy.id,
             generationToken: persistentGenerationToken
           )
         } catch is CancellationError {

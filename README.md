@@ -64,9 +64,11 @@ checks.
   A logged-in home page also shows at most six forums from the current account's
   followed-forum list and links to the complete paginated list. Both surfaces
   share one app-scoped, memory-only snapshot that is discarded when the account
-  session or a forum relationship changes. A default-off setting can reuse a
-  verified-complete snapshot to show personalized recommendations only from the
-  active account's followed forums. This filtering is local: the anonymous
+  session or a forum relationship changes. Their cards preserve the bounded
+  server-supplied forum avatar and slogan; unavailable or disallowed images fall
+  back locally without another metadata request. A default-off setting can reuse
+  a verified-complete snapshot to show personalized recommendations only from
+  the active account's followed forums. This filtering is local: the anonymous
   recommendation request receives no account, credential, lease, or forum ID.
   The account page now also offers a foreground-only one-click check-in after it
   loads the authoritative forum catalog and the user explicitly confirms the

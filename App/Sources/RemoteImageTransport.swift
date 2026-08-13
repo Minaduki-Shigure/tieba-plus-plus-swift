@@ -222,6 +222,14 @@ protocol RemoteImageDownloading: Sendable {
     networkAccess: RemoteImageNetworkAccess,
     onProgress: @escaping @Sendable (RemoteImageDownloadProgress) -> Void
   ) async throws -> RemoteImageFileLease
+
+  func download(
+    from url: URL,
+    kind: RemoteImageDownloadKind,
+    networkAccess: RemoteImageNetworkAccess,
+    redirectURLValidator: @escaping @Sendable (URL) -> Bool,
+    onProgress: @escaping @Sendable (RemoteImageDownloadProgress) -> Void
+  ) async throws -> RemoteImageFileLease
 }
 
 extension RemoteImageDownloading {
@@ -232,6 +240,29 @@ extension RemoteImageDownloading {
     onProgress: @escaping @Sendable (RemoteImageDownloadProgress) -> Void
   ) async throws -> RemoteImageFileLease {
     try await download(from: url, kind: kind, networkAccess: networkAccess)
+  }
+
+  func download(
+    from url: URL,
+    kind: RemoteImageDownloadKind,
+    networkAccess: RemoteImageNetworkAccess,
+    redirectURLValidator: @escaping @Sendable (URL) -> Bool,
+    onProgress: @escaping @Sendable (RemoteImageDownloadProgress) -> Void
+  ) async throws -> RemoteImageFileLease {
+    guard RemoteImageURLPolicy.allows(url), redirectURLValidator(url) else {
+      throw RemoteImageDownloadError.invalidURL
+    }
+    let lease = try await download(
+      from: url,
+      kind: kind,
+      networkAccess: networkAccess,
+      onProgress: onProgress
+    )
+    guard
+      RemoteImageURLPolicy.allows(lease.sourceURL),
+      redirectURLValidator(lease.sourceURL)
+    else { throw RemoteImageDownloadError.invalidResponse }
+    return lease
   }
 
   func download(from url: URL, kind: RemoteImageDownloadKind) async throws
@@ -307,9 +338,25 @@ final class BoundedHTTPSRemoteImageTransport: RemoteImageDownloading, @unchecked
     kind: RemoteImageDownloadKind,
     networkAccess: RemoteImageNetworkAccess,
     onProgress: @escaping @Sendable (RemoteImageDownloadProgress) -> Void
+  ) async throws -> RemoteImageFileLease {
+    try await download(
+      from: url,
+      kind: kind,
+      networkAccess: networkAccess,
+      redirectURLValidator: RemoteImageURLPolicy.allows,
+      onProgress: onProgress
+    )
+  }
+
+  func download(
+    from url: URL,
+    kind: RemoteImageDownloadKind,
+    networkAccess: RemoteImageNetworkAccess,
+    redirectURLValidator: @escaping @Sendable (URL) -> Bool,
+    onProgress: @escaping @Sendable (RemoteImageDownloadProgress) -> Void
   ) async throws -> RemoteImageFileLease
   {
-    guard RemoteImageURLPolicy.allows(url) else {
+    guard RemoteImageURLPolicy.allows(url), redirectURLValidator(url) else {
       throw RemoteImageDownloadError.invalidURL
     }
 
@@ -317,6 +364,7 @@ final class BoundedHTTPSRemoteImageTransport: RemoteImageDownloading, @unchecked
     let delegate = BoundedHTTPSRemoteImageTaskDelegate(
       maximumResponseBytes: maximumResponseBytes,
       networkAccess: networkAccess,
+      redirectURLValidator: redirectURLValidator,
       onProgress: onProgress
     )
     let temporaryDownloadURL: URL
@@ -342,7 +390,8 @@ final class BoundedHTTPSRemoteImageTransport: RemoteImageDownloading, @unchecked
       let response = urlResponse as? HTTPURLResponse,
       (200..<300).contains(response.statusCode),
       let finalURL = response.url,
-      RemoteImageURLPolicy.allows(finalURL)
+      RemoteImageURLPolicy.allows(finalURL),
+      redirectURLValidator(finalURL)
     else { throw RemoteImageDownloadError.invalidResponse }
     guard
       !RemoteImageDownloadPolicy.exceedsLimit(
@@ -447,6 +496,7 @@ final class BoundedHTTPSRemoteImageTaskDelegate: NSObject,
 
   private let maximumResponseBytes: Int64
   private let networkAccess: RemoteImageNetworkAccess
+  private let redirectURLValidator: @Sendable (URL) -> Bool
   private let onProgress: @Sendable (RemoteImageDownloadProgress) -> Void
   private let state = State()
   private let progressAccumulator = RemoteImageProgressAccumulator()
@@ -458,10 +508,12 @@ final class BoundedHTTPSRemoteImageTaskDelegate: NSObject,
   init(
     maximumResponseBytes: Int64,
     networkAccess: RemoteImageNetworkAccess,
+    redirectURLValidator: @escaping @Sendable (URL) -> Bool = RemoteImageURLPolicy.allows,
     onProgress: @escaping @Sendable (RemoteImageDownloadProgress) -> Void
   ) {
     self.maximumResponseBytes = maximumResponseBytes
     self.networkAccess = networkAccess
+    self.redirectURLValidator = redirectURLValidator
     self.onProgress = onProgress
   }
 
@@ -472,6 +524,14 @@ final class BoundedHTTPSRemoteImageTaskDelegate: NSObject,
     newRequest request: URLRequest,
     completionHandler: @escaping @Sendable (URLRequest?) -> Void
   ) {
+    guard
+      let redirectURL = request.url,
+      RemoteImageURLPolicy.allows(redirectURL),
+      redirectURLValidator(redirectURL)
+    else {
+      completionHandler(nil)
+      return
+    }
     completionHandler(
       RemoteImageURLPolicy.sanitizedRedirectRequest(
         request,

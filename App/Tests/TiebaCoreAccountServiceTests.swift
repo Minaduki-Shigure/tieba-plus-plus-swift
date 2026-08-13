@@ -297,6 +297,49 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     )
   }
 
+  func testFollowedForumsMapsForumPresentationMetadata() async throws {
+    let response = TiebaFollowedForumPage(
+      accountUserID: 7,
+      targetUserID: 7,
+      forums: [
+        TiebaFollowedForum(
+          id: 42,
+          name: "swift",
+          level: 12,
+          experience: 345,
+          avatar: "http://imgsrc.baidu.com/forum/swift.png",
+          slogan: "Swift community"
+        )
+      ],
+      pagination: TiebaPagination(
+        pageSize: 50,
+        currentPage: 2,
+        totalPages: 0,
+        totalCount: 0,
+        hasMore: false,
+        hasPrevious: true
+      )
+    )
+    let service = TiebaCoreAccountService(
+      client: LegacyFollowedForumsClient(response: response)
+    )
+
+    let page = try await service.followedForums(
+      session: session(),
+      page: 2,
+      pageSize: 50
+    )
+
+    XCTAssertEqual(page.currentPage, 2)
+    XCTAssertFalse(page.hasMore)
+    XCTAssertEqual(page.forums.map(\.id), [42])
+    XCTAssertEqual(
+      page.forums.first?.avatarURL?.absoluteString,
+      "https://imgsrc.baidu.com/forum/swift.png"
+    )
+    XCTAssertEqual(page.forums.first?.slogan, "Swift community")
+  }
+
   func testLikedForumsRejectsMismatchedResponseContext() async throws {
     let expectedPagination = TiebaPagination(
       pageSize: 50,

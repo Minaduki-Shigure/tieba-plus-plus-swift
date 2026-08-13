@@ -71,6 +71,9 @@ The floor-level cloud-favorite marker and context action close a TiebaLite
 reading-workflow gap by exposing the existing confirmed thread-detail mutation
 at an exact retained floor. They add no endpoint or write target, so they remain
 inside the existing server-write credit rather than adding a weighted point.
+The followed-forum avatar and slogan presentation similarly preserves optional
+metadata that the existing authenticated response and Core decoder already
+carried. It adds neither a data source nor a workflow, so it adds no weighted point.
 
 ## Available
 
@@ -216,7 +219,9 @@ the source metadata is updated to that tested IPA.
 - App-scoped, memory-only followed-forum state shared by a six-item logged-in
   home projection, the active account's complete paginated list, and a selected
   default-off followed-forum recommendation filter, with a local layout setting
-  that performs no explicit refresh or account mutation
+  that performs no explicit refresh or account mutation. Home and complete-list
+  cards preserve the existing response's optional avatar and slogan, with a
+  local fallback for absent or disallowed images
 - Separate Tieba cloud favorites with offset pagination, saved-post navigation,
   deleted-thread state, account-lease isolation, and confirmed list deletion only
   after raw thread/forum rebinding, plus confirmed thread-detail add, saved-floor

@@ -57,6 +57,60 @@ final class RemoteImageDiskCacheTests: XCTestCase {
     XCTAssertEqual(networkCallCount, 0)
   }
 
+  func testScopedPolicyRejectsDisallowedPersistentHitBeforeNetwork() async throws {
+    let environment = try DiskCacheTestEnvironment()
+    defer { environment.remove() }
+    let cache = environment.makeCache()
+    let url = try XCTUnwrap(URL(string: "https://example.com/disallowed-avatar.jpg"))
+    try await store(Data("cached".utf8), for: url, in: cache, environment: environment)
+    let network = DiskCacheNetworkSpy(
+      data: Data("network".utf8),
+      directoryURL: environment.networkDirectoryURL
+    )
+    let downloader = PersistentRemoteImageDownloader(
+      cache: cache,
+      networkDownloader: network
+    )
+
+    do {
+      _ = try await downloader.download(
+        from: url,
+        kind: .preview,
+        networkAccess: .unrestricted,
+        redirectURLValidator: ForumAvatarDisplayPolicy.allows,
+        onProgress: { _ in }
+      )
+      XCTFail("Expected scoped avatar policy to reject the cached URL")
+    } catch RemoteImageDownloadError.invalidURL {
+      // Expected.
+    }
+
+    let networkCallCount = await network.callCount()
+    XCTAssertEqual(networkCallCount, 0)
+  }
+
+  func testScopedNamespaceDoesNotReuseDefaultPersistentEntry() async throws {
+    let environment = try DiskCacheTestEnvironment()
+    defer { environment.remove() }
+    let cache = environment.makeCache()
+    let url = try XCTUnwrap(URL(string: "https://imgsrc.baidu.com/forum/avatar.jpg"))
+    try await store(Data("default-policy".utf8), for: url, in: cache, environment: environment)
+
+    let scopedHit = try await cache.cachedDownload(
+      from: url,
+      kind: .preview,
+      namespace: DownsampledImageURLPolicy.forumAvatar.id
+    )
+    let defaultHit = try await cache.cachedDownload(
+      from: url,
+      kind: .preview,
+      namespace: DownsampledImageURLPolicy.remoteImage.id
+    )
+
+    XCTAssertNil(scopedHit)
+    XCTAssertNotNil(defaultHit)
+  }
+
   func testDifferentRequestedURLsAreIsolated() async throws {
     let environment = try DiskCacheTestEnvironment()
     defer { environment.remove() }

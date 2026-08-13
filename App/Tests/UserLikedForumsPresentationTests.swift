@@ -11,7 +11,7 @@ final class UserLikedForumsPresentationTests: XCTestCase {
       "https://example.bcebos.com/forum/avatar.png",
     ] {
       let url = try XCTUnwrap(URL(string: rawValue))
-      XCTAssertEqual(UserLikedForumAvatarPolicy.displayURL(url), url)
+      XCTAssertEqual(ForumAvatarDisplayPolicy.displayURL(url), url)
     }
   }
 
@@ -22,7 +22,7 @@ final class UserLikedForumsPresentationTests: XCTestCase {
       "https://notbaidu.com/avatar.png",
     ] {
       let url = try XCTUnwrap(URL(string: rawValue))
-      XCTAssertNil(UserLikedForumAvatarPolicy.displayURL(url))
+      XCTAssertNil(ForumAvatarDisplayPolicy.displayURL(url))
     }
   }
 
@@ -33,7 +33,7 @@ final class UserLikedForumsPresentationTests: XCTestCase {
       "https://himg.bdimg.com:8443/avatar.png",
     ] {
       let url = try XCTUnwrap(URL(string: rawValue))
-      XCTAssertNil(UserLikedForumAvatarPolicy.displayURL(url))
+      XCTAssertNil(ForumAvatarDisplayPolicy.displayURL(url))
     }
   }
 }

@@ -90,6 +90,50 @@ final class RemoteImageTransportTests: XCTestCase {
     }
   }
 
+  func testScopedRequirementRejectsDisallowedFinalSourceFromLegacyConformer() async throws {
+    let finalURL = try XCTUnwrap(URL(string: "https://example.com/final-avatar.jpg"))
+    let downloader: any RemoteImageDownloading = LegacyLeaseDownloadProbe(finalURL: finalURL)
+    let requestedURL = try XCTUnwrap(
+      URL(string: "https://imgsrc.baidu.com/forum/requested-avatar.jpg")
+    )
+
+    do {
+      _ = try await downloader.download(
+        from: requestedURL,
+        kind: .preview,
+        networkAccess: .unrestricted,
+        redirectURLValidator: ForumAvatarDisplayPolicy.allows,
+        onProgress: { _ in }
+      )
+      XCTFail("Expected the scoped policy to reject the final source URL")
+    } catch RemoteImageDownloadError.invalidResponse {
+      // Expected.
+    }
+  }
+
+  func testScopedRequirementRejectsInsecureInitialURLBeforeCallingLegacyConformer() async throws {
+    let finalURL = try XCTUnwrap(
+      URL(string: "https://imgsrc.baidu.com/forum/final-avatar.jpg")
+    )
+    let downloader: any RemoteImageDownloading = LegacyLeaseDownloadProbe(finalURL: finalURL)
+    let requestedURL = try XCTUnwrap(
+      URL(string: "http://imgsrc.baidu.com/forum/requested-avatar.jpg")
+    )
+
+    do {
+      _ = try await downloader.download(
+        from: requestedURL,
+        kind: .preview,
+        networkAccess: .unrestricted,
+        redirectURLValidator: { _ in true },
+        onProgress: { _ in }
+      )
+      XCTFail("Expected the generic HTTPS policy to reject the initial URL")
+    } catch RemoteImageDownloadError.invalidURL {
+      // Expected.
+    }
+  }
+
   func testURLPolicyAllowsOnlyCredentialFreeHTTPSURLsWithHosts() throws {
     XCTAssertTrue(RemoteImageURLPolicy.allows(try XCTUnwrap(URL(string: "https://img.example/a"))))
 
@@ -366,6 +410,65 @@ final class RemoteImageTransportTests: XCTestCase {
     XCTAssertEqual(recorder.snapshot().count, 1)
   }
 
+  func testDownloadDelegateAppliesResourceSpecificRedirectPolicy() throws {
+    let session = URLSession(configuration: .ephemeral)
+    let task = session.downloadTask(
+      with: try XCTUnwrap(URL(string: "https://imgsrc.baidu.com/forum/avatar.png"))
+    )
+    defer {
+      task.cancel()
+      session.invalidateAndCancel()
+    }
+    let delegate = BoundedHTTPSRemoteImageTaskDelegate(
+      maximumResponseBytes: 100,
+      networkAccess: .unrestricted,
+      redirectURLValidator: ForumAvatarDisplayPolicy.allows,
+      onProgress: { _ in }
+    )
+    let response = try XCTUnwrap(
+      HTTPURLResponse(
+        url: try XCTUnwrap(URL(string: "https://imgsrc.baidu.com/forum/avatar.png")),
+        statusCode: 302,
+        httpVersion: nil,
+        headerFields: nil
+      )
+    )
+
+    let completionRecorder = RemoteImageRedirectCompletionRecorder()
+    delegate.urlSession(
+      session,
+      task: task,
+      willPerformHTTPRedirection: response,
+      newRequest: URLRequest(
+        url: try XCTUnwrap(URL(string: "https://himg.bdimg.com/forum/avatar.png"))
+      ),
+      completionHandler: { completionRecorder.record($0, for: "allowed") }
+    )
+    XCTAssertEqual(completionRecorder.request(for: "allowed")?.url?.host, "himg.bdimg.com")
+
+    delegate.urlSession(
+      session,
+      task: task,
+      willPerformHTTPRedirection: response,
+      newRequest: URLRequest(
+        url: try XCTUnwrap(URL(string: "https://example.com/avatar.png"))
+      ),
+      completionHandler: { completionRecorder.record($0, for: "unrelated") }
+    )
+    XCTAssertNil(completionRecorder.request(for: "unrelated"))
+
+    delegate.urlSession(
+      session,
+      task: task,
+      willPerformHTTPRedirection: response,
+      newRequest: URLRequest(
+        url: try XCTUnwrap(URL(string: "https://himg.bdimg.com:8443/forum/avatar.png"))
+      ),
+      completionHandler: { completionRecorder.record($0, for: "nonstandard-port") }
+    )
+    XCTAssertNil(completionRecorder.request(for: "nonstandard-port"))
+  }
+
   func testDownloadRejectsNonSuccessHTTPResponse() async throws {
     let transport = makeTransport(temporaryDirectory: makeTemporaryDirectoryURL())
     let url = try XCTUnwrap(URL(string: "https://remote-image.test/not-found"))
@@ -562,6 +665,30 @@ private struct LegacyDownloadProbe: RemoteImageDownloading {
   }
 }
 
+private struct LegacyLeaseDownloadProbe: RemoteImageDownloading {
+  let finalURL: URL
+
+  func download(
+    from url: URL,
+    kind: RemoteImageDownloadKind,
+    networkAccess: RemoteImageNetworkAccess
+  ) async throws -> RemoteImageFileLease {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let fileURL = directory.appendingPathComponent("image")
+    try Data("image".utf8).write(to: fileURL)
+    return RemoteImageFileLease(
+      fileURL: fileURL,
+      cleanupDirectoryURL: directory,
+      sourceURL: finalURL,
+      mimeType: "image/jpeg",
+      suggestedFilename: "image.jpg",
+      byteCount: 5
+    )
+  }
+}
+
 private final class RemoteImageProgressRecorder: @unchecked Sendable {
   private let lock = NSLock()
   private var progress = [RemoteImageDownloadProgress]()
@@ -594,5 +721,22 @@ private final class RemoteImageRequestRecorder: @unchecked Sendable {
     lock.lock()
     defer { lock.unlock() }
     return requestsByPath[path]
+  }
+}
+
+private final class RemoteImageRedirectCompletionRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var requests = [String: URLRequest?]()
+
+  func record(_ request: URLRequest?, for key: String) {
+    lock.lock()
+    requests[key] = request
+    lock.unlock()
+  }
+
+  func request(for key: String) -> URLRequest? {
+    lock.lock()
+    defer { lock.unlock() }
+    return requests[key] ?? nil
   }
 }

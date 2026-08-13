@@ -116,6 +116,20 @@ continuations, invalid page data, transport failure, more than 100 pages, or mor
 than 5,000 retained forums keep the index unavailable. No row, page cursor,
 complete forum-ID set, or lease is stored across accounts or app launches.
 
+Optional followed-forum avatars and slogans are decoded only inside the same
+bounded authenticated response; displaying them does not issue a second metadata
+request. Core trims and bounds both fields and drops control-bearing values. The
+App normalizes an avatar through the shared media URL boundary, then exposes it
+to the remote-image pipeline only when it is HTTPS, credential-free, uses the
+default HTTPS port, and belongs to an exact Baidu CDN suffix allowlist. A rejected
+or missing avatar falls back locally. Every redirect and the final response URL
+must satisfy that same scoped policy; a disallowed redirect is not followed.
+Scoped avatar requests cannot reuse or populate the generic persistent image
+cache; decoded in-memory entries and in-flight work are isolated by policy. An
+absent slogan leaves the existing level and experience presentation intact.
+Neither field affects forum identity,
+pagination, recommendation filtering, navigation, or any account write.
+
 These surfaces are read only: displaying or paginating them must not pin,
 unfollow, check in, or issue any other write automatically, and they currently
 offer no pinning, unfollow, or batch check-in control. The endpoint response does
