@@ -472,6 +472,59 @@ final class NotificationsViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.paginationTail?.id, 12)
   }
 
+  func testSenderProfileRouteRequiresVisibleMessageAndPositiveSenderID() throws {
+    let message = message(id: 11, senderID: 711)
+    let visible = InboxMessagePresentation(message: message, visibility: .visible)
+
+    let route = try XCTUnwrap(NotificationSenderProfileRoute(presentation: visible))
+
+    XCTAssertEqual(route.userID, 711)
+    for visibility in [LocalContentVisibility.placeholder, .hidden] {
+      XCTAssertNil(
+        NotificationSenderProfileRoute(
+          presentation: InboxMessagePresentation(message: message, visibility: visibility)
+        )
+      )
+    }
+    for invalidSenderID in [Int64.zero, -1] {
+      XCTAssertNil(
+        NotificationSenderProfileRoute(
+          presentation: InboxMessagePresentation(
+            message: self.message(id: 12, senderID: invalidSenderID),
+            visibility: .visible
+          )
+        )
+      )
+    }
+  }
+
+  func testSenderProfileRouteProjectionDoesNotChangePaginationOrRequests() async throws {
+    let active = session(userID: 7)
+    let vault = NotificationsVaultSpy(session: active)
+    let service = NotificationsServiceSpy(
+      scripts: [
+        .init(userID: 7, kind: .replies, requestedPage: 1): [
+          .init(page: page(userID: 7, kind: .replies, ids: [11, 12], page: 1, hasMore: true))
+        ]
+      ]
+    )
+    let viewModel = NotificationsViewModel(service: service, vault: vault)
+    await viewModel.refresh()
+    let rawTail = try XCTUnwrap(viewModel.paginationTail)
+    let messageTargets = viewModel.messages.map(\.navigationTarget)
+    let requestsBeforeProjection = await service.requestsSnapshot()
+
+    let senderRoutes = viewModel.messagePresentations.compactMap {
+      NotificationSenderProfileRoute(presentation: $0)
+    }
+    let requestsAfterProjection = await service.requestsSnapshot()
+
+    XCTAssertEqual(senderRoutes.map(\.userID), [111, 112])
+    XCTAssertEqual(viewModel.messages.map(\.navigationTarget), messageTargets)
+    XCTAssertEqual(viewModel.paginationTail, rawTail)
+    XCTAssertEqual(requestsAfterProjection, requestsBeforeProjection)
+  }
+
   func testAllHiddenInitialPageWaitsForExplicitContinuationBeforeLoadingNextPage() async throws {
     let active = session(userID: 7)
     let vault = NotificationsVaultSpy(session: active)

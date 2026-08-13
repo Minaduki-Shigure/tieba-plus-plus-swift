@@ -128,7 +128,7 @@ struct NotificationsView: View {
             visibility: presentation.visibility,
             placeholder: "已屏蔽此消息"
           ) {
-            interactiveMessageRow(presentation.message)
+            interactiveMessageRow(presentation)
           }
           .frame(minHeight: 44)
         }
@@ -171,14 +171,29 @@ struct NotificationsView: View {
     .refreshable { await viewModel.refresh() }
   }
 
-  private func interactiveMessageRow(_ message: InboxMessage) -> some View {
-    HStack(alignment: .center, spacing: 8) {
-      NavigationLink {
-        notificationDestination(for: message)
-      } label: {
-        NotificationMessageRow(message: message)
-          .frame(maxWidth: .infinity, alignment: .leading)
+  private func interactiveMessageRow(_ presentation: InboxMessagePresentation) -> some View {
+    let message = presentation.message
+    let senderRoute = NotificationSenderProfileRoute(presentation: presentation)
+
+    return HStack(alignment: .center, spacing: 8) {
+      HStack(alignment: .top, spacing: 12) {
+        notificationSenderAvatar(message: message, route: senderRoute)
+
+        VStack(alignment: .leading, spacing: 5) {
+          notificationMessageHeader(message: message, route: senderRoute)
+
+          NavigationLink {
+            notificationDestination(for: message)
+          } label: {
+            NotificationMessageBody(message: message)
+              .frame(maxWidth: .infinity, minHeight: 44, alignment: .topLeading)
+              .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+        }
+        .padding(.vertical, 3)
       }
+      .frame(maxWidth: .infinity, alignment: .leading)
 
       if replyEntriesVisible {
         Button {
@@ -187,13 +202,97 @@ struct NotificationsView: View {
         } label: {
           Image(systemName: "arrowshape.turn.up.left")
             .foregroundStyle(.tint)
-            .frame(width: 36, height: 36)
+            .frame(width: 44, height: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
         .accessibilityLabel("回复 \(message.sender.preferredName)")
         .help("回复此消息")
       }
+    }
+  }
+
+  @ViewBuilder
+  private func notificationSenderAvatar(
+    message: InboxMessage,
+    route: NotificationSenderProfileRoute?
+  ) -> some View {
+    if let route {
+      NavigationLink {
+        notificationSenderDestination(for: route)
+      } label: {
+        NotificationMessageAvatar(message: message)
+          .frame(width: 44, height: 44)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("查看 \(message.sender.preferredName) 的主页")
+    } else {
+      NotificationMessageAvatar(message: message)
+        .frame(width: 44, height: 44)
+    }
+  }
+
+  @ViewBuilder
+  private func notificationSenderName(
+    message: InboxMessage,
+    route: NotificationSenderProfileRoute?
+  ) -> some View {
+    if let route {
+      NavigationLink {
+        notificationSenderDestination(for: route)
+      } label: {
+        NotificationMessageSenderName(message: message)
+          .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("查看 \(message.sender.preferredName) 的主页")
+    } else {
+      NotificationMessageSenderName(message: message)
+        .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+    }
+  }
+
+  @ViewBuilder
+  private func notificationMessageHeader(
+    message: InboxMessage,
+    route: NotificationSenderProfileRoute?
+  ) -> some View {
+    if let createdAt = message.createdAt {
+      ViewThatFits(in: .horizontal) {
+        HStack(alignment: .center, spacing: 6) {
+          notificationSenderName(message: message, route: route)
+          notificationUnreadIndicator(message: message)
+          Spacer(minLength: 0)
+          NotificationMessageTimestamp(createdAt: createdAt)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+
+        VStack(alignment: .leading, spacing: 0) {
+          HStack(alignment: .center, spacing: 6) {
+            notificationSenderName(message: message, route: route)
+            notificationUnreadIndicator(message: message)
+          }
+          NotificationMessageTimestamp(createdAt: createdAt)
+        }
+      }
+    } else {
+      HStack(alignment: .center, spacing: 6) {
+        notificationSenderName(message: message, route: route)
+        notificationUnreadIndicator(message: message)
+        Spacer(minLength: 0)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func notificationUnreadIndicator(message: InboxMessage) -> some View {
+    if message.isUnread {
+      Circle()
+        .fill(.tint)
+        .frame(width: 7, height: 7)
+        .accessibilityLabel("未读")
     }
   }
 
@@ -224,6 +323,18 @@ struct NotificationsView: View {
         showsDismissButton: false
       )
     }
+  }
+
+  private func notificationSenderDestination(
+    for route: NotificationSenderProfileRoute
+  ) -> some View {
+    UserProfileView(
+      userID: route.userID,
+      service: browseService,
+      historyRepository: historyRepository,
+      favoritesRepository: favoritesRepository,
+      searchHistoryRepository: searchHistoryRepository
+    )
   }
 
   @ViewBuilder
@@ -331,6 +442,17 @@ struct NotificationsView: View {
   }
 }
 
+struct NotificationSenderProfileRoute: Hashable, Sendable {
+  let userID: Int64
+
+  init?(presentation: InboxMessagePresentation) {
+    guard presentation.visibility == .visible, presentation.message.sender.id > 0 else {
+      return nil
+    }
+    userID = presentation.message.sender.id
+  }
+}
+
 struct NotificationsReplyRouteState: Equatable {
   private(set) var intent: InboxReplyIntent?
   private(set) var isEstablished = false
@@ -360,72 +482,80 @@ struct NotificationsReplyRouteState: Equatable {
   }
 }
 
-private struct NotificationMessageRow: View {
+private struct NotificationMessageAvatar: View {
   let message: InboxMessage
 
   var body: some View {
-    HStack(alignment: .top, spacing: 12) {
-      AvatarView(
-        url: message.sender.portraitURL,
-        name: message.sender.preferredName,
-        size: 42
-      )
+    AvatarView(
+      url: message.sender.portraitURL,
+      name: message.sender.preferredName,
+      size: 42
+    )
+  }
+}
 
-      VStack(alignment: .leading, spacing: 5) {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-          Text(message.sender.preferredName)
-            .font(.headline)
-            .lineLimit(1)
-          if message.isUnread {
-            Circle()
-              .fill(.tint)
-              .frame(width: 7, height: 7)
-              .accessibilityLabel("未读")
-          }
-          Spacer(minLength: 0)
-          if let createdAt = message.createdAt {
-            Text(createdAt, style: .relative)
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-        }
+private struct NotificationMessageSenderName: View {
+  let message: InboxMessage
 
-        if !message.content.isEmpty {
-          Text(message.content)
-            .font(.body)
-            .foregroundStyle(.primary)
-            .lineLimit(4)
-        }
+  var body: some View {
+    Text(message.sender.preferredName)
+      .font(.headline)
+      .foregroundStyle(.primary)
+      .lineLimit(2)
+  }
+}
 
-        if !message.quotedContent.isEmpty {
-          Text(message.quotedContent)
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .lineLimit(2)
-            .padding(.leading, 8)
-            .overlay(alignment: .leading) {
-              Rectangle()
-                .fill(.quaternary)
-                .frame(width: 2)
-            }
-        }
+private struct NotificationMessageTimestamp: View {
+  let createdAt: Date
 
-        HStack(spacing: 8) {
-          if !message.title.isEmpty {
-            Text(message.title)
-              .lineLimit(1)
-          } else if !message.forumName.isEmpty {
-            Text("\(message.forumName)吧")
-              .lineLimit(1)
-          }
-          if message.isFloorReply {
-            Label("楼中楼", systemImage: "bubble.left.and.bubble.right")
-          }
-        }
-        .font(.caption)
-        .foregroundStyle(.secondary)
+  var body: some View {
+    Text(createdAt, style: .relative)
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      .lineLimit(1)
+      .fixedSize(horizontal: true, vertical: false)
+  }
+}
+
+private struct NotificationMessageBody: View {
+  let message: InboxMessage
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 5) {
+      if !message.content.isEmpty {
+        Text(message.content)
+          .font(.body)
+          .foregroundStyle(.primary)
+          .lineLimit(4)
       }
-      .padding(.vertical, 3)
+
+      if !message.quotedContent.isEmpty {
+        Text(message.quotedContent)
+          .font(.callout)
+          .foregroundStyle(.secondary)
+          .lineLimit(2)
+          .padding(.leading, 8)
+          .overlay(alignment: .leading) {
+            Rectangle()
+              .fill(.quaternary)
+              .frame(width: 2)
+          }
+      }
+
+      HStack(spacing: 8) {
+        if !message.title.isEmpty {
+          Text(message.title)
+            .lineLimit(1)
+        } else if !message.forumName.isEmpty {
+          Text("\(message.forumName)吧")
+            .lineLimit(1)
+        }
+        if message.isFloorReply {
+          Label("楼中楼", systemImage: "bubble.left.and.bubble.right")
+        }
+      }
+      .font(.caption)
+      .foregroundStyle(.secondary)
     }
   }
 }
