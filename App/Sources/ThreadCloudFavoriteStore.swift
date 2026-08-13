@@ -207,7 +207,8 @@ final class ThreadCloudFavoriteStore {
     let removed = try await setMarkedPostID(
       nil,
       for: target,
-      requiredLease: expectedSession.lease
+      requiredLease: expectedSession.lease,
+      requiredPreviousSnapshot: current
     )
     guard !removed.isFavorited else {
       throw BrowseError.unavailable("贴吧没有确认移除云端收藏，请重新读取当前状态。")
@@ -316,13 +317,33 @@ final class ThreadCloudFavoriteStore {
     _ markedPostID: Int64?,
     for target: ThreadCloudFavoriteTarget
   ) async throws -> ThreadCloudFavoriteSnapshot {
-    try await setMarkedPostID(markedPostID, for: target, requiredLease: nil)
+    try await setMarkedPostID(
+      markedPostID,
+      for: target,
+      requiredLease: nil,
+      requiredPreviousSnapshot: nil
+    )
+  }
+
+  @discardableResult
+  func setMarkedPostID(
+    _ markedPostID: Int64?,
+    for target: ThreadCloudFavoriteTarget,
+    replacing expectedPreviousSnapshot: ThreadCloudFavoriteSnapshot
+  ) async throws -> ThreadCloudFavoriteSnapshot {
+    try await setMarkedPostID(
+      markedPostID,
+      for: target,
+      requiredLease: nil,
+      requiredPreviousSnapshot: expectedPreviousSnapshot
+    )
   }
 
   private func setMarkedPostID(
     _ markedPostID: Int64?,
     for target: ThreadCloudFavoriteTarget,
-    requiredLease: ThreadCloudFavoriteSessionLease?
+    requiredLease: ThreadCloudFavoriteSessionLease?,
+    requiredPreviousSnapshot: ThreadCloudFavoriteSnapshot?
   ) async throws -> ThreadCloudFavoriteSnapshot {
     guard markedPostID.map({ $0 > 0 }) ?? true else {
       throw BrowseError.unavailable("云端收藏位置无效，请滚动到有效楼层后再试。")
@@ -335,6 +356,13 @@ final class ThreadCloudFavoriteStore {
       let entryLease = entries[target]?.lease
       if flight.lease == entryLease, generationMatches(lease: flight.lease) {
         if flight.requestedMarkedPostID == markedPostID {
+          if let requiredPreviousSnapshot {
+            guard entries[target]?.displayedSnapshot == requiredPreviousSnapshot else {
+              throw BrowseError.unavailable(
+                "云端收藏状态已变化，请重新读取并确认后再操作。"
+              )
+            }
+          }
           return try await flight.task.value
         }
         let waitingGeneration = generation
@@ -359,6 +387,9 @@ final class ThreadCloudFavoriteStore {
     else {
       throw BrowseError.unavailable("请先读取当前云端收藏状态。")
     }
+    if let requiredPreviousSnapshot, previous != requiredPreviousSnapshot {
+      throw BrowseError.unavailable("云端收藏状态已变化，请重新读取并确认后再操作。")
+    }
     guard previous.markedPostID != markedPostID else { return previous }
 
     let preflightGeneration = generation
@@ -380,8 +411,17 @@ final class ThreadCloudFavoriteStore {
       preflightGeneration == generation,
       ThreadCloudFavoriteSessionLease(session) == expectedLease,
       entry.lease == expectedLease,
+      case .ready(let currentSnapshot) = entry.state,
+      currentSnapshot == previous,
+      mutationFlights[target]?.lease != expectedLease,
+      requiredPreviousSnapshot == nil || entry.displayedSnapshot == requiredPreviousSnapshot,
       generationMatches(lease: expectedLease)
-    else { throw CancellationError() }
+    else {
+      if generationMatches(lease: expectedLease), entry.lease == expectedLease {
+        throw BrowseError.unavailable("云端收藏状态已变化，请重新读取并确认后再操作。")
+      }
+      throw CancellationError()
+    }
     try Task.checkCancellation()
 
     readFlights[target]?.task.cancel()
@@ -636,14 +676,72 @@ struct ThreadCloudFavoritePosition: Equatable, Sendable {
   }
 }
 
+struct ThreadCloudFavoriteFloorPresentation: Equatable {
+  let isCurrentPosition: Bool
+  let action: ThreadCloudFavoritePendingAction?
+
+  init(
+    post: BrowsePost,
+    target: ThreadCloudFavoriteTarget,
+    entryTarget: ThreadCloudFavoriteTarget,
+    state: ThreadCloudFavoriteEntryState,
+    isPureReadingMode: Bool
+  ) {
+    guard
+      target == entryTarget,
+      post.localVisibility == .visible,
+      let position = ThreadCloudFavoritePosition(post: post, threadID: target.threadID)
+    else {
+      isCurrentPosition = false
+      action = nil
+      return
+    }
+
+    let displayedSnapshot: ThreadCloudFavoriteSnapshot?
+    switch state {
+    case .loading(let previous), .failed(let previous, _):
+      displayedSnapshot = previous
+    case .ready(let snapshot), .mutating(let snapshot, _):
+      displayedSnapshot = snapshot
+    case .unknown, .signedOut:
+      displayedSnapshot = nil
+    }
+    isCurrentPosition = displayedSnapshot?.markedPostID == position.postID
+
+    guard !isPureReadingMode, case .ready(let snapshot) = state else {
+      action = nil
+      return
+    }
+    if snapshot.markedPostID == position.postID {
+      action = .remove(target: target, previous: snapshot)
+    } else if snapshot.isFavorited {
+      action = .update(
+        target: target,
+        position: position,
+        previous: snapshot
+      )
+    } else {
+      action = .add(target: target, position: position, previous: snapshot)
+    }
+  }
+}
+
 enum ThreadCloudFavoritePendingAction: Equatable {
-  case add(target: ThreadCloudFavoriteTarget, position: ThreadCloudFavoritePosition)
-  case update(target: ThreadCloudFavoriteTarget, position: ThreadCloudFavoritePosition)
-  case remove(target: ThreadCloudFavoriteTarget)
+  case add(
+    target: ThreadCloudFavoriteTarget,
+    position: ThreadCloudFavoritePosition,
+    previous: ThreadCloudFavoriteSnapshot
+  )
+  case update(
+    target: ThreadCloudFavoriteTarget,
+    position: ThreadCloudFavoritePosition,
+    previous: ThreadCloudFavoriteSnapshot
+  )
+  case remove(target: ThreadCloudFavoriteTarget, previous: ThreadCloudFavoriteSnapshot)
 
   var requestedMarkedPostID: Int64? {
     switch self {
-    case .add(_, let position), .update(_, let position):
+    case .add(_, let position, _), .update(_, let position, _):
       position.postID
     case .remove:
       nil
@@ -674,9 +772,9 @@ enum ThreadCloudFavoritePendingAction: Equatable {
 
   var message: String {
     switch self {
-    case .add(_, let position):
+    case .add(_, let position, _):
       "这会使用当前贴吧账户收藏本主题，并将阅读位置保存到第 \(position.floor) 楼。"
-    case .update(_, let position):
+    case .update(_, let position, _):
       "这会使用当前贴吧账户把本主题的云端阅读位置更新到第 \(position.floor) 楼。"
     case .remove:
       "这会使用当前贴吧账户移除本主题的云端收藏。"
@@ -688,10 +786,191 @@ enum ThreadCloudFavoritePendingAction: Equatable {
     return false
   }
 
+  var floorMenuTitle: String {
+    switch self {
+    case .add(_, let position, _):
+      "收藏到第 \(position.floor) 楼"
+    case .update(_, let position, _):
+      "更新云收藏到第 \(position.floor) 楼"
+    case .remove:
+      "移除云端收藏"
+    }
+  }
+
+  var floorMenuSystemImage: String {
+    switch self {
+    case .add:
+      "star"
+    case .update:
+      "bookmark.circle"
+    case .remove:
+      "trash"
+    }
+  }
+
   var target: ThreadCloudFavoriteTarget {
     switch self {
-    case .add(let target, _), .update(let target, _), .remove(let target):
+    case .add(let target, _, _), .update(let target, _, _), .remove(let target, _):
       target
+    }
+  }
+
+  var previousSnapshot: ThreadCloudFavoriteSnapshot {
+    switch self {
+    case .add(_, _, let previous), .update(_, _, let previous), .remove(_, let previous):
+      previous
+    }
+  }
+}
+
+enum ThreadCloudFavoriteActionAdmissionPolicy {
+  static func admits(
+    _ action: ThreadCloudFavoritePendingAction,
+    target: ThreadCloudFavoriteTarget,
+    state: ThreadCloudFavoriteEntryState,
+    retainedPost: BrowsePost?
+  ) -> Bool {
+    guard action.target == target, case .ready(let snapshot) = state else {
+      return false
+    }
+
+    guard snapshot == action.previousSnapshot else { return false }
+    switch action {
+    case .add(_, let position, _):
+      return !action.previousSnapshot.isFavorited
+        && positionMatchesRetainedPost(position, post: retainedPost, target: target)
+    case .update(_, let position, _):
+      return action.previousSnapshot.isFavorited
+        && snapshot.markedPostID != position.postID
+        && positionMatchesRetainedPost(position, post: retainedPost, target: target)
+    case .remove:
+      return action.previousSnapshot.isFavorited
+    }
+  }
+
+  private static func positionMatchesRetainedPost(
+    _ position: ThreadCloudFavoritePosition,
+    post: BrowsePost?,
+    target: ThreadCloudFavoriteTarget
+  ) -> Bool {
+    guard let post, post.localVisibility == .visible else { return false }
+    return ThreadCloudFavoritePosition(post: post, threadID: target.threadID) == position
+  }
+}
+
+struct ThreadCloudFavoriteFloorMarkerSlot: View {
+  let store: ThreadCloudFavoriteStore?
+  let target: ThreadCloudFavoriteTarget?
+  let post: BrowsePost
+  let isPureReadingMode: Bool
+
+  @ViewBuilder
+  var body: some View {
+    if let store, let target {
+      ThreadCloudFavoriteFloorMarker(
+        entry: store.entry(for: target),
+        target: target,
+        post: post,
+        isPureReadingMode: isPureReadingMode
+      )
+    }
+  }
+}
+
+private struct ThreadCloudFavoriteFloorMarker: View {
+  @ObservedObject private var entry: ThreadCloudFavoriteEntry
+  let target: ThreadCloudFavoriteTarget
+  let post: BrowsePost
+  let isPureReadingMode: Bool
+
+  init(
+    entry: ThreadCloudFavoriteEntry,
+    target: ThreadCloudFavoriteTarget,
+    post: BrowsePost,
+    isPureReadingMode: Bool
+  ) {
+    _entry = ObservedObject(wrappedValue: entry)
+    self.target = target
+    self.post = post
+    self.isPureReadingMode = isPureReadingMode
+  }
+
+  var body: some View {
+    let presentation = ThreadCloudFavoriteFloorPresentation(
+      post: post,
+      target: target,
+      entryTarget: entry.target,
+      state: entry.state,
+      isPureReadingMode: isPureReadingMode
+    )
+    if presentation.isCurrentPosition {
+      Image(systemName: "star.fill")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.tint)
+        .accessibilityLabel("第 \(post.floor) 楼是贴吧云收藏位置")
+        .accessibilityIdentifier("thread-cloud-favorite-position-\(post.id)")
+    }
+  }
+}
+
+struct ThreadCloudFavoriteFloorMenuSlot: View {
+  let store: ThreadCloudFavoriteStore?
+  let target: ThreadCloudFavoriteTarget?
+  let post: BrowsePost
+  let isPureReadingMode: Bool
+  let requestAction: (ThreadCloudFavoritePendingAction) -> Void
+
+  @ViewBuilder
+  var body: some View {
+    if let store, let target {
+      ThreadCloudFavoriteFloorMenu(
+        entry: store.entry(for: target),
+        target: target,
+        post: post,
+        isPureReadingMode: isPureReadingMode,
+        requestAction: requestAction
+      )
+    }
+  }
+}
+
+private struct ThreadCloudFavoriteFloorMenu: View {
+  @ObservedObject private var entry: ThreadCloudFavoriteEntry
+  let target: ThreadCloudFavoriteTarget
+  let post: BrowsePost
+  let isPureReadingMode: Bool
+  let requestAction: (ThreadCloudFavoritePendingAction) -> Void
+
+  init(
+    entry: ThreadCloudFavoriteEntry,
+    target: ThreadCloudFavoriteTarget,
+    post: BrowsePost,
+    isPureReadingMode: Bool,
+    requestAction: @escaping (ThreadCloudFavoritePendingAction) -> Void
+  ) {
+    _entry = ObservedObject(wrappedValue: entry)
+    self.target = target
+    self.post = post
+    self.isPureReadingMode = isPureReadingMode
+    self.requestAction = requestAction
+  }
+
+  @ViewBuilder
+  var body: some View {
+    let presentation = ThreadCloudFavoriteFloorPresentation(
+      post: post,
+      target: target,
+      entryTarget: entry.target,
+      state: entry.state,
+      isPureReadingMode: isPureReadingMode
+    )
+    if let action = presentation.action {
+      Button(role: action.isDestructive ? .destructive : nil) {
+        requestAction(action)
+      } label: {
+        Label(action.floorMenuTitle, systemImage: action.floorMenuSystemImage)
+      }
+      .accessibilityIdentifier("thread-floor-cloud-favorite-\(post.id)")
     }
   }
 }
@@ -777,14 +1056,20 @@ private struct ThreadCloudFavoriteControl: View {
       Menu {
         if let currentPosition {
           Button {
-            requestAction(.update(target: entry.target, position: currentPosition))
+            requestAction(
+              .update(
+                target: entry.target,
+                position: currentPosition,
+                previous: snapshot
+              )
+            )
           } label: {
             Label("更新到第 \(currentPosition.floor) 楼", systemImage: "bookmark.circle")
           }
           .disabled(snapshot.markedPostID == currentPosition.postID)
         }
         Button(role: .destructive) {
-          requestAction(.remove(target: entry.target))
+          requestAction(.remove(target: entry.target, previous: snapshot))
         } label: {
           Label("移除云端收藏", systemImage: "trash")
         }
@@ -799,7 +1084,9 @@ private struct ThreadCloudFavoriteControl: View {
     } else {
       Button {
         guard let currentPosition else { return }
-        requestAction(.add(target: entry.target, position: currentPosition))
+        requestAction(
+          .add(target: entry.target, position: currentPosition, previous: snapshot)
+        )
       } label: {
         Image(systemName: "star")
           .frame(width: 24, height: 24)

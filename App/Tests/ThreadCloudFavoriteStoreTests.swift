@@ -727,6 +727,112 @@ final class ThreadCloudFavoriteStoreTests: XCTestCase {
     XCTAssertEqual(writeCount, 0)
   }
 
+  func testSnapshotBoundMutationRejectsStaleConfirmationBeforeSessionRead() async throws {
+    let session = favoriteSession(revisionComponent: 31)
+    let target = favoriteTarget(threadID: 34)
+    let current = favoriteSnapshot(134)
+    let vault = ThreadCloudFavoriteVaultSpy(session: session)
+    let service = ThreadCloudFavoriteStoreServiceSpy(
+      readResults: [
+        FavoriteReadKey(session: session, target: target): [
+          .success(favoriteData(session: session, target: target, markedPostID: 134))
+        ]
+      ]
+    )
+    let store = makeFavoriteStore(vault: vault, service: service)
+    await store.activate(target, for: UUID())
+    XCTAssertEqual(store.entry(for: target).state, .ready(current))
+    let sessionReadsBeforeMutation = await vault.activeSessionReadCount()
+
+    do {
+      _ = try await store.setMarkedPostID(
+        135,
+        for: target,
+        replacing: favoriteSnapshot(nil)
+      )
+      XCTFail("stale confirmation should fail")
+    } catch {
+      XCTAssertEqual(
+        error.localizedDescription,
+        "云端收藏状态已变化，请重新读取并确认后再操作。"
+      )
+    }
+
+    let sessionReadsAfterMutation = await vault.activeSessionReadCount()
+    let writeCount = await service.writeCount()
+    XCTAssertEqual(sessionReadsAfterMutation, sessionReadsBeforeMutation)
+    XCTAssertEqual(writeCount, 0)
+    XCTAssertEqual(store.entry(for: target).state, .ready(current))
+  }
+
+  func testSnapshotBoundMutationRechecksAfterSuspendedSessionPreflight() async throws {
+    let session = favoriteSession(revisionComponent: 32)
+    let target = favoriteTarget(threadID: 35)
+    let previous = favoriteSnapshot(nil)
+    let vault = ThreadCloudFavoriteVaultSpy(session: session)
+    let service = ThreadCloudFavoriteStoreServiceSpy(
+      readResults: [
+        FavoriteReadKey(session: session, target: target): [
+          .success(favoriteData(session: session, target: target, markedPostID: nil))
+        ]
+      ],
+      writeResults: [
+        FavoriteWriteKey(session: session, target: target, markedPostID: 352): [
+          .success(favoriteData(session: session, target: target, markedPostID: 352))
+        ]
+      ],
+      suspendedWriteRevisions: [session.sessionRevision]
+    )
+    let store = makeFavoriteStore(vault: vault, service: service)
+    await store.activate(target, for: UUID())
+    let baselineSessionReads = await vault.activeSessionReadCount()
+    await vault.suspendReads()
+
+    let stale = Task { () -> String? in
+      do {
+        _ = try await store.setMarkedPostID(351, for: target, replacing: previous)
+        return nil
+      } catch {
+        return error.localizedDescription
+      }
+    }
+    try await waitForThreadCloudFavoriteStoreTest {
+      await vault.activeSessionReadCount() == baselineSessionReads + 1
+    }
+
+    let winner = Task {
+      try await store.setMarkedPostID(352, for: target, replacing: previous)
+    }
+    try await waitForThreadCloudFavoriteStoreTest {
+      await vault.activeSessionReadCount() == baselineSessionReads + 2
+    }
+    await vault.releaseNewestRead()
+    try await waitForThreadCloudFavoriteStoreTest {
+      await service.writeCount() == 1
+    }
+    XCTAssertEqual(
+      store.entry(for: target).state,
+      .mutating(previous: previous, requestedMarkedPostID: 352)
+    )
+
+    await vault.releaseOldestRead()
+    let staleMessage = await stale.value
+    XCTAssertEqual(
+      staleMessage,
+      "云端收藏状态已变化，请重新读取并确认后再操作。"
+    )
+    let writeCountBeforeRelease = await service.writeCount()
+    XCTAssertEqual(writeCountBeforeRelease, 1)
+
+    await vault.releaseReads()
+    await service.releaseWrites(for: session.sessionRevision)
+    let winnerSnapshot = try await winner.value
+    let finalWriteCount = await service.writeCount()
+    XCTAssertEqual(winnerSnapshot, favoriteSnapshot(352))
+    XCTAssertEqual(finalWriteCount, 1)
+    XCTAssertEqual(store.entry(for: target).state, .ready(favoriteSnapshot(352)))
+  }
+
   func testBoundedCacheRetainsActiveAndNewlyReturnedEntryUntilActivation() async throws {
     let session = favoriteSession(revisionComponent: 14)
     let target = favoriteTarget(threadID: 22)
@@ -786,12 +892,20 @@ final class ThreadCloudFavoriteStoreTests: XCTestCase {
     )
 
     let validPosition = position!
-    let add = ThreadCloudFavoritePendingAction.add(target: target, position: validPosition)
+    let add = ThreadCloudFavoritePendingAction.add(
+      target: target,
+      position: validPosition,
+      previous: favoriteSnapshot(nil)
+    )
     let update = ThreadCloudFavoritePendingAction.update(
       target: target,
-      position: validPosition
+      position: validPosition,
+      previous: favoriteSnapshot(114)
     )
-    let remove = ThreadCloudFavoritePendingAction.remove(target: target)
+    let remove = ThreadCloudFavoritePendingAction.remove(
+      target: target,
+      previous: favoriteSnapshot(115)
+    )
     XCTAssertEqual(add.requestedMarkedPostID, 115)
     XCTAssertEqual(update.requestedMarkedPostID, 115)
     XCTAssertNil(remove.requestedMarkedPostID)
@@ -1077,7 +1191,7 @@ private final class ThreadCloudFavoriteNotificationRecorder: @unchecked Sendable
 
 private actor ThreadCloudFavoriteVaultSpy: AccountVault {
   private var session: StoredAccountSession?
-  private let suspendsReads: Bool
+  private var suspendsReads: Bool
   private var readsReleased = false
   private var readWaiters = [CheckedContinuation<Void, Never>]()
   private var readCount = 0
@@ -1104,6 +1218,21 @@ private actor ThreadCloudFavoriteVaultSpy: AccountVault {
 
   func replaceActive(with session: StoredAccountSession?) {
     self.session = session
+  }
+
+  func suspendReads() {
+    suspendsReads = true
+    readsReleased = false
+  }
+
+  func releaseNewestRead() {
+    guard let waiter = readWaiters.popLast() else { return }
+    waiter.resume()
+  }
+
+  func releaseOldestRead() {
+    guard !readWaiters.isEmpty else { return }
+    readWaiters.removeFirst().resume()
   }
 
   func releaseReads() {

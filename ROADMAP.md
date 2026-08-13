@@ -67,6 +67,10 @@ a data source or workflow, so it likewise adds no weighted point.
 The foreground inbox projection closes another filtering-surface gap without
 adding a data source or workflow, so it also remains inside the existing local-
 settings and private-read credit rather than adding a weighted point.
+The floor-level cloud-favorite marker and context action close a TiebaLite
+reading-workflow gap by exposing the existing confirmed thread-detail mutation
+at an exact retained floor. They add no endpoint or write target, so they remain
+inside the existing server-write credit rather than adding a weighted point.
 
 ## Available
 
@@ -216,7 +220,9 @@ the source metadata is updated to that tested IPA.
 - Separate Tieba cloud favorites with offset pagination, saved-post navigation,
   deleted-thread state, account-lease isolation, and confirmed list deletion only
   after raw thread/forum rebinding, plus confirmed thread-detail add, saved-floor
-  update, and removal with read-only reconciliation
+  update, and removal with read-only reconciliation. Exact visible floors expose
+  the same snapshot-bound actions from their context menu, and the confirmed
+  marker is shown only on its exact PID
 - Foreground ReplyMe and AtMe inbox with account-lease isolation, refresh,
   bounded pagination, safe thread navigation, explicit reply actions bound to
   the active account lease, and a local content/sender filter projection that

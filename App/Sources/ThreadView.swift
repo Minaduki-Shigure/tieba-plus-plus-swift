@@ -355,6 +355,7 @@ struct ThreadView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       cancelPictureGallery()
+      pendingCloudFavoriteAction = nil
       clearSelectableTextRoute()
       Task { @MainActor in
         visiblePost = nil
@@ -853,6 +854,8 @@ struct ThreadView: View {
                     openTiebaLink: openTiebaLink,
                     requestAgreementChange: requestAgreementChange,
                     retryAgreement: retryAgreement,
+                    cloudFavoriteTarget: threadCloudFavoriteTarget,
+                    requestCloudFavoriteAction: requestFloorCloudFavoriteAction,
                     requestReply: replyEntriesVisible ? {
                       requestReply(to: firstPost)
                     } : nil,
@@ -936,6 +939,8 @@ struct ThreadView: View {
                     openTiebaLink: openTiebaLink,
                     requestAgreementChange: requestAgreementChange,
                     retryAgreement: retryAgreement,
+                    cloudFavoriteTarget: threadCloudFavoriteTarget,
+                    requestCloudFavoriteAction: requestFloorCloudFavoriteAction,
                     requestReply: replyEntriesVisible ? {
                       requestReply(to: post)
                     } : nil,
@@ -1261,17 +1266,21 @@ struct ThreadView: View {
   private var currentCloudFavoritePosition: ThreadCloudFavoritePosition? {
     let threadID = viewModel.thread.id
     if let visiblePost,
+       effectiveVisibility(for: visiblePost) == .visible,
        let position = ThreadCloudFavoritePosition(post: visiblePost, threadID: threadID)
     {
       return position
     }
     if let firstPost = viewModel.firstPost,
+       effectiveVisibility(for: firstPost) == .visible,
        let position = ThreadCloudFavoritePosition(post: firstPost, threadID: threadID)
     {
       return position
     }
     return viewModel.posts.lazy.compactMap {
-      ThreadCloudFavoritePosition(post: $0, threadID: threadID)
+      effectiveVisibility(for: $0) == .visible
+        ? ThreadCloudFavoritePosition(post: $0, threadID: threadID)
+        : nil
     }.first
   }
 
@@ -1320,6 +1329,7 @@ struct ThreadView: View {
   }
 
   private func togglePureReadingMode() {
+    pendingCloudFavoriteAction = nil
     if !isPureReadingMode {
       pendingAgreementChange = nil
       agreementErrorMessage = nil
@@ -1371,18 +1381,28 @@ struct ThreadView: View {
   }
 
   private func requestCloudFavoriteAction(_ action: ThreadCloudFavoritePendingAction) {
+    guard cloudFavoriteActionIsCurrent(action) else { return }
     pendingAgreementChange = nil
     pendingCloudFavoriteAction = action
   }
 
+  private func requestFloorCloudFavoriteAction(_ action: ThreadCloudFavoritePendingAction) {
+    guard !isPureReadingMode else { return }
+    requestCloudFavoriteAction(action)
+  }
+
   private func confirmCloudFavoriteAction(_ action: ThreadCloudFavoritePendingAction) {
     pendingCloudFavoriteAction = nil
-    guard let threadCloudFavoriteStore else { return }
+    guard let threadCloudFavoriteStore, cloudFavoriteActionIsCurrent(action) else {
+      cloudFavoriteErrorMessage = "云端收藏状态或目标已变化，请重新读取并确认后再试。"
+      return
+    }
     Task { @MainActor in
       do {
         try await threadCloudFavoriteStore.setMarkedPostID(
           action.requestedMarkedPostID,
-          for: action.target
+          for: action.target,
+          replacing: action.previousSnapshot
         )
       } catch is CancellationError {
         return
@@ -1390,6 +1410,24 @@ struct ThreadView: View {
         cloudFavoriteErrorMessage = error.localizedDescription
       }
     }
+  }
+
+  private func cloudFavoriteActionIsCurrent(
+    _ action: ThreadCloudFavoritePendingAction
+  ) -> Bool {
+    guard
+      let threadCloudFavoriteStore,
+      let target = threadCloudFavoriteTarget,
+      action.target == target
+    else { return false }
+    let retainedPost = action.requestedMarkedPostID.flatMap(viewModel.post(withID:))
+      .flatMap { effectiveVisibility(for: $0) == .visible ? $0 : nil }
+    return ThreadCloudFavoriteActionAdmissionPolicy.admits(
+      action,
+      target: target,
+      state: threadCloudFavoriteStore.entry(for: target).state,
+      retainedPost: retainedPost
+    )
   }
 
   private func retryCloudFavorite(_ target: ThreadCloudFavoriteTarget) {
@@ -1583,6 +1621,8 @@ private struct PostView: View {
   let openTiebaLink: (TiebaLinkTarget) -> Void
   let requestAgreementChange: (ContentAgreementTarget, Bool) -> Void
   let retryAgreement: (ContentAgreementTarget) -> Void
+  let cloudFavoriteTarget: ThreadCloudFavoriteTarget?
+  let requestCloudFavoriteAction: (ThreadCloudFavoritePendingAction) -> Void
   let requestReply: (() -> Void)?
   let openComments: (Int64?) -> Void
   let selectText: (String) -> Void
@@ -1590,11 +1630,15 @@ private struct PostView: View {
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
   @Environment(\.accountAccess) private var accountAccess
   @Environment(\.contentAgreementStore) private var contentAgreementStore
+  @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       if isPureReadingMode {
-        pureReadingContext
+        HStack(alignment: .top, spacing: 8) {
+          pureReadingContext
+          cloudFavoriteFloorMarker
+        }
       } else {
         authorRow
       }
@@ -1668,6 +1712,13 @@ private struct PostView: View {
           )
         }
       }
+      ThreadCloudFavoriteFloorMenuSlot(
+        store: threadCloudFavoriteStore,
+        target: cloudFavoriteTarget,
+        post: post,
+        isPureReadingMode: isPureReadingMode,
+        requestAction: requestCloudFavoriteAction
+      )
     }
   }
 
@@ -1698,6 +1749,8 @@ private struct PostView: View {
         retry: retryAgreement
       )
 
+      cloudFavoriteFloorMarker
+
       if let requestReply {
         Button(action: requestReply) {
           Image(systemName: "arrowshape.turn.up.left")
@@ -1707,6 +1760,16 @@ private struct PostView: View {
         .help(post.floor == 1 ? "回复主题" : "回复本楼")
       }
     }
+  }
+
+  private var cloudFavoriteFloorMarker: some View {
+    ThreadCloudFavoriteFloorMarkerSlot(
+      store: threadCloudFavoriteStore,
+      target: cloudFavoriteTarget,
+      post: post,
+      isPureReadingMode: isPureReadingMode
+    )
+    .frame(width: 24, height: 24)
   }
 
   private var pureReadingContext: some View {

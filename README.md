@@ -96,7 +96,10 @@ checks.
   and clears it together with decoded memory and animation-frame caches.
   A logged-in thread can also read its account-bound Tieba cloud-favorite state and,
   after explicit confirmation, add it at the last visible floor, update the saved
-  floor, or remove it. Every mutation is followed by a read-only reconciliation;
+  floor, or remove it. A visible floor's context menu can perform the same exact
+  add, move, or remove action, and the server-confirmed saved floor carries a
+  dedicated marker. Loading, failed, filtered, and pure-reading floor surfaces
+  never expose a mutation action. Every mutation is followed by a read-only reconciliation;
   an uncertain write is never retried. The cloud-favorites list can also remove
   one item after a separate destructive confirmation. It first resolves the raw
   anonymous PB thread/forum identity, then requires the existing authenticated
@@ -149,7 +152,8 @@ checks.
 - **Automated checks:** GitHub Actions runs package tests and the complete iOS
   simulator test target, validates the app source, and verifies its public IPA hash.
   Authenticated flows never use real credentials in CI. Login binding, cloud
-  favorite reads and mutations, including verified list deletion, followed-forum recommendation filtering,
+  favorite reads and mutations, including floor-level marker/action admission,
+  stale-confirmation rejection and verified list deletion, followed-forum recommendation filtering,
   target-bound liked-forum pagination, the minimal self-profile request and its
   UID/session-lease race handling, target-bound interaction permissions,
   concern-feed, inbox summary, inbox
@@ -210,7 +214,10 @@ checks.
 
 - **Thread reading:** Ascending, descending, and hot order, only-author mode,
   page jumps, anchored opening, earlier-page loading, first-floor context, and
-  explicit latest-reply checks are implemented with cursor validation.
+  explicit latest-reply checks are implemented with cursor validation. For a
+  logged-in account with an authoritative cloud-favorite snapshot, a visible
+  floor's context menu can save, move, or remove the exact cloud marker after a
+  separate confirmation; the exact saved PID is marked in the floor content.
 - **Replies and metadata:** Floors, nested replies, parent context, read-only
   anonymous poll results,
   shared-thread origins, author levels, moderator roles, IP locations, and

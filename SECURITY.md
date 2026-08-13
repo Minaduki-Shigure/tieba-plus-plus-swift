@@ -247,6 +247,20 @@ list removal invalidates offset pagination and rebuilds from offset zero. A
 matching change received while a list page is in flight invalidates that response
 so a stale pre-change snapshot cannot resurrect the removed row.
 
+A floor-level cloud-favorite action is derived only from a retained public post
+whose positive ID, positive floor, thread ID, and local visible state match the
+current thread target. Its confirmation captures the complete authoritative
+pre-mutation snapshot. Immediately before dispatch, the App and Store both
+require that exact target and snapshot still be current; add and update also
+require the identical retained post ID and floor. The Store repeats this check
+after its asynchronous account-session preflight and rejects a competing
+mutation flight. A stale confirmation therefore performs no write and cannot
+remove or overwrite a marker changed by another surface. Loading, mutating,
+failed, signed-out, locally filtered, and pure-reading floor presentations offer
+no mutation action. The floor marker is read-only presentation derived from the
+authoritative or last confirmed snapshot; the requested write PID is never used
+optimistically.
+
 Private ReplyMe and AtMe lists are foreground-only authenticated reads. ReplyMe
 must use `https://tiebac.baidu.com/c/u/feed/replyme?cmd=303007` with a Protobuf
 body whose common data contains only BDUSS and the fixed client version plus the
