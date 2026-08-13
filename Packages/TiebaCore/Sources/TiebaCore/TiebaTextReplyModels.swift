@@ -9,7 +9,7 @@ public enum TiebaTextReplyContentPolicy {
       !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
       value.count <= maximumCharacterCount,
       value.utf8.count <= maximumUTF8ByteCount,
-      !value.contains("#(")
+      TiebaClassicEmoticonTokenizer.submissionTokens(in: value) != nil
     else { return false }
 
     return !value.unicodeScalars.contains { scalar in
@@ -67,6 +67,27 @@ public struct TiebaTextReplySubmission:
       ],
       displayStyle: .struct
     )
+  }
+
+  public static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.submissionID == rhs.submissionID
+      && lhs.forumID == rhs.forumID
+      && lhs.forumName == rhs.forumName
+      && lhs.threadID == rhs.threadID
+      && lhs.target == rhs.target
+      && lhs.content.utf8.elementsEqual(rhs.content.utf8)
+  }
+
+  public func hash(into hasher: inout Hasher) {
+    hasher.combine(submissionID)
+    hasher.combine(forumID)
+    hasher.combine(forumName)
+    hasher.combine(threadID)
+    hasher.combine(target)
+    hasher.combine(content.utf8.count)
+    for byte in content.utf8 {
+      hasher.combine(byte)
+    }
   }
 }
 

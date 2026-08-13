@@ -68,19 +68,58 @@ final class ReplyPresentationTests: XCTestCase {
 
   func testExactPlainTextProofPreservesWhitespaceAndJoinsOnlyTextFragments() {
     let content = TextReplyVisibilityProof.exactPlainText(
-      from: [.text("  first\n"), .text("second  ")]
+      from: [.text("  first\n"), .text("second  ")],
+      matching: "  first\nsecond  "
     )
 
     XCTAssertEqual(content, "  first\nsecond  ")
   }
 
-  func testExactPlainTextProofRejectsProjectedMentionsAndRichContent() {
+  func testExactPlainTextProofPreservesStructuredMentionsAndRejectsOtherRichContent() {
+    XCTAssertEqual(
+      TextReplyVisibilityProof.exactPlainText(
+        from: [.mention(name: "target", userID: 7), .text(" body")],
+        matching: "@target body"
+      ),
+      "@target body"
+    )
     XCTAssertNil(
       TextReplyVisibilityProof.exactPlainText(
-        from: [.mention(name: "target", userID: 7), .text(" body")]
+        from: [.unsupported(label: "unknown")],
+        matching: "unknown"
       )
     )
-    XCTAssertNil(TextReplyVisibilityProof.exactPlainText(from: [.unsupported(label: "unknown")]))
+  }
+
+  func testExactPlainTextProofRestoresOnlyCatalogEmoticonWireTokens() {
+    XCTAssertEqual(
+      TextReplyVisibilityProof.exactPlainText(
+        from: [.text("前"), .emoticon(name: "滑稽", url: nil), .text("后")],
+        matching: "前#(滑稽)后"
+      ),
+      "前#(滑稽)后"
+    )
+    XCTAssertNil(
+      TextReplyVisibilityProof.exactPlainText(
+        from: [.text("前"), .emoticon(name: "服务端未知表情", url: nil), .text("后")],
+        matching: "前#(滑稽)后"
+      )
+    )
+  }
+
+  func testExactProofRejectsTextThatMerelyLooksLikeAnEmoticonAndByteNormalization() {
+    XCTAssertNil(
+      TextReplyVisibilityProof.exactPlainText(
+        from: [.text("前#(滑稽)后")],
+        matching: "前#(滑稽)后"
+      )
+    )
+    XCTAssertNil(
+      TextReplyVisibilityProof.exactPlainText(
+        from: [.text("\u{E9}")],
+        matching: "e\u{301}"
+      )
+    )
   }
 
   func testNestedReplyProofUsesStructuredMarkerAndPreservesExactBody() {
@@ -105,7 +144,8 @@ final class ReplyPresentationTests: XCTestCase {
     XCTAssertEqual(
       TextReplyVisibilityProof.exactNestedReplyBody(
         from: comment,
-        expectedReplyToUserID: 9
+        expectedReplyToUserID: 9,
+        matching: "  first\nsecond  "
       ),
       "  first\nsecond  "
     )
@@ -142,13 +182,15 @@ final class ReplyPresentationTests: XCTestCase {
     XCTAssertNil(
       TextReplyVisibilityProof.exactNestedReplyBody(
         from: wrongTarget,
-        expectedReplyToUserID: 8
+        expectedReplyToUserID: 8,
+        matching: "body"
       )
     )
     XCTAssertNil(
       TextReplyVisibilityProof.exactNestedReplyBody(
         from: projectedPrefix,
-        expectedReplyToUserID: 9
+        expectedReplyToUserID: 9,
+        matching: "body"
       )
     )
   }
@@ -173,9 +215,39 @@ final class ReplyPresentationTests: XCTestCase {
     XCTAssertEqual(
       TextReplyVisibilityProof.exactNestedReplyBody(
         from: comment,
-        expectedReplyToUserID: 9
+        expectedReplyToUserID: 9,
+        matching: " body"
       ),
       " body"
+    )
+  }
+
+  func testNestedReplyProofRestoresCatalogEmoticonAfterStructuredPrefix() {
+    let comment = BrowseComment(
+      id: 106,
+      authorID: 11,
+      authorName: "current-user",
+      authorPortraitURL: nil,
+      createdAt: nil,
+      contents: [
+        .text("回复 "),
+        .mention(name: "target", userID: 9),
+        .text(" :前"),
+        .emoticon(name: "哈哈", url: nil),
+        .text("后"),
+      ],
+      replyToUserID: 9,
+      threadID: 100,
+      parentPostID: 102
+    )
+
+    XCTAssertEqual(
+      TextReplyVisibilityProof.exactNestedReplyBody(
+        from: comment,
+        expectedReplyToUserID: 9,
+        matching: "前#(哈哈)后"
+      ),
+      "前#(哈哈)后"
     )
   }
 

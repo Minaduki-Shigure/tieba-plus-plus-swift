@@ -87,6 +87,144 @@ final class InlineCommentPreviewTests: XCTestCase {
     XCTAssertTrue(mixed.showsAllCommentsAction)
   }
 
+  func testReplyPresentationBindsExactVisibleCommentAndStableAccessibilityID() throws {
+    let target = comment(id: 31, threadID: 10, parentPostID: 20)
+    let parent = post(totalCount: 1, comments: [target])
+
+    let presentation = try XCTUnwrap(
+      InlineCommentReplyPresentation(
+        thread: thread(),
+        parentPost: parent,
+        comment: target,
+        replyEntriesVisible: true
+      )
+    )
+
+    XCTAssertEqual(
+      presentation.context.target.destination,
+      .subpost(parentPostID: 20, subpostID: 31)
+    )
+    XCTAssertEqual(presentation.context.kind, .subpost)
+    XCTAssertEqual(presentation.context.replyingToName, "Commenter 31")
+    XCTAssertEqual(presentation.context.replyingToUserID, target.authorID)
+    XCTAssertEqual(presentation.accessibilityIdentifier, "inline-comment-reply-31")
+  }
+
+  func testReplyPresentationAcceptsCommentUnderExactFirstPost() throws {
+    let target = comment(id: 31, threadID: 10, parentPostID: 100)
+    let parent = post(
+      id: 100,
+      floor: 1,
+      totalCount: 1,
+      comments: [target]
+    )
+
+    let presentation = try XCTUnwrap(
+      InlineCommentReplyPresentation(
+        thread: thread(),
+        parentPost: parent,
+        comment: target,
+        replyEntriesVisible: true
+      )
+    )
+
+    XCTAssertEqual(
+      presentation.context.target.destination,
+      .subpost(parentPostID: 100, subpostID: 31)
+    )
+    XCTAssertEqual(presentation.context.kind, .subpost)
+  }
+
+  func testReplyPresentationRejectsDisabledFilteredAndStaleComments() {
+    let target = comment(id: 31, threadID: 10, parentPostID: 20)
+    let parent = post(totalCount: 1, comments: [target])
+
+    XCTAssertNil(
+      InlineCommentReplyPresentation(
+        thread: thread(),
+        parentPost: parent,
+        comment: target,
+        replyEntriesVisible: false
+      )
+    )
+    for visibility in [LocalContentVisibility.placeholder, .hidden] {
+      let filtered = comment(
+        id: 31,
+        visibility: visibility,
+        threadID: 10,
+        parentPostID: 20
+      )
+      let filteredParent = post(totalCount: 1, comments: [filtered])
+      XCTAssertNil(
+        InlineCommentReplyPresentation(
+          thread: thread(),
+          parentPost: filteredParent,
+          comment: filtered,
+          replyEntriesVisible: true
+        )
+      )
+    }
+    XCTAssertNil(
+      InlineCommentReplyPresentation(
+        thread: thread(),
+        parentPost: parent,
+        comment: comment(id: 32, threadID: 10, parentPostID: 20),
+        replyEntriesVisible: true
+      )
+    )
+    for visibility in [LocalContentVisibility.placeholder, .hidden] {
+      XCTAssertNil(
+        InlineCommentReplyPresentation(
+          thread: thread(),
+          parentPost: parent.withLocalVisibility(visibility),
+          comment: target,
+          replyEntriesVisible: true
+        )
+      )
+    }
+  }
+
+  func testReplyPresentationRejectsMismatchedThreadAndParentIdentifiers() {
+    for invalid in [
+      comment(id: 31, threadID: 11, parentPostID: 20),
+      comment(id: 31, threadID: 10, parentPostID: 21),
+    ] {
+      let parent = post(totalCount: 1, comments: [invalid])
+      XCTAssertNil(
+        InlineCommentReplyPresentation(
+          thread: thread(),
+          parentPost: parent,
+          comment: invalid,
+          replyEntriesVisible: true
+        )
+      )
+    }
+  }
+
+  func testReplyPresentationRejectsDuplicateCommentIdentifiers() {
+    let target = comment(id: 31, threadID: 10, parentPostID: 20)
+    let duplicate = BrowseComment(
+      id: target.id,
+      authorID: 999,
+      authorName: "Different author",
+      authorPortraitURL: nil,
+      createdAt: nil,
+      contents: [.text("different content")],
+      threadID: 10,
+      parentPostID: 20
+    )
+    let parent = post(totalCount: 2, comments: [target, duplicate])
+
+    XCTAssertNil(
+      InlineCommentReplyPresentation(
+        thread: thread(),
+        parentPost: parent,
+        comment: target,
+        replyEntriesVisible: true
+      )
+    )
+  }
+
   func testCopyProjectionUsesLabelsAndFixedMediaMarkersWithoutResourceURLs() throws {
     let linkURL = try XCTUnwrap(URL(string: "https://secret.example/path"))
     let imageURL = try XCTUnwrap(URL(string: "https://secret.example/image.jpg"))
@@ -125,11 +263,35 @@ final class InlineCommentPreviewTests: XCTestCase {
     XCTAssertNil(CommentsRoute(threadID: 10, postID: 20, commentID: 0))
   }
 
-  private func post(totalCount: Int, comments: [BrowseComment]) -> BrowsePost {
+  private func thread() -> BrowseThread {
+    BrowseThread(
+      id: 10,
+      forumID: 7,
+      forumName: "swift",
+      title: "Thread",
+      excerpt: "",
+      authorName: "Author",
+      replyCount: 1,
+      viewCount: 2,
+      createdAt: nil,
+      lastReplyAt: nil,
+      contents: [.text("first")],
+      authorID: 9,
+      authorAvatarURL: nil,
+      firstPostID: 100
+    )
+  }
+
+  private func post(
+    id: Int64 = 20,
+    floor: Int = 2,
+    totalCount: Int,
+    comments: [BrowseComment]
+  ) -> BrowsePost {
     BrowsePost(
-      id: 20,
+      id: id,
       threadID: 10,
-      floor: 2,
+      floor: floor,
       authorID: 7,
       authorName: "Parent",
       authorPortraitURL: nil,
@@ -143,7 +305,9 @@ final class InlineCommentPreviewTests: XCTestCase {
 
   private func comment(
     id: Int64,
-    visibility: LocalContentVisibility = .visible
+    visibility: LocalContentVisibility = .visible,
+    threadID: Int64 = 0,
+    parentPostID: Int64 = 0
   ) -> BrowseComment {
     BrowseComment(
       id: id,
@@ -152,7 +316,9 @@ final class InlineCommentPreviewTests: XCTestCase {
       authorPortraitURL: nil,
       createdAt: nil,
       contents: [.text("comment \(id)")],
-      localVisibility: visibility
+      localVisibility: visibility,
+      threadID: threadID,
+      parentPostID: parentPostID
     )
   }
 }

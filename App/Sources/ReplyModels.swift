@@ -171,6 +171,7 @@ struct TextReplyComposerContext: Identifiable, Hashable, Sendable {
   let kind: Kind
   let floor: Int?
   let replyingToName: String?
+  let replyingToUserID: Int64?
 
   var id: String { target.id }
 
@@ -182,6 +183,7 @@ struct TextReplyComposerContext: Identifiable, Hashable, Sendable {
     self.kind = .thread
     self.floor = nil
     self.replyingToName = nil
+    self.replyingToUserID = nil
   }
 
   init?(thread: BrowseThread, post: BrowsePost) {
@@ -190,6 +192,7 @@ struct TextReplyComposerContext: Identifiable, Hashable, Sendable {
     self.kind = .post
     self.floor = post.floor
     self.replyingToName = Self.preferredName(post.authorName, fallback: post.authorUsername)
+    self.replyingToUserID = nil
   }
 
   init?(thread: BrowseThread, parentPost: CommentParentPostContext) {
@@ -209,6 +212,7 @@ struct TextReplyComposerContext: Identifiable, Hashable, Sendable {
       self.kind = .thread
       self.floor = nil
       self.replyingToName = nil
+      self.replyingToUserID = nil
       return
     }
     guard let target = TextReplyTarget(thread: thread, parentPost: parentPost) else {
@@ -221,6 +225,7 @@ struct TextReplyComposerContext: Identifiable, Hashable, Sendable {
       parentPost.authorName,
       fallback: parentPost.authorUsername
     )
+    self.replyingToUserID = nil
   }
 
   init?(
@@ -229,6 +234,7 @@ struct TextReplyComposerContext: Identifiable, Hashable, Sendable {
     comment: BrowseComment
   ) {
     guard
+      comment.authorID > 0,
       let target = TextReplyTarget(
         thread: thread,
         parentPostID: parentPostID,
@@ -241,6 +247,29 @@ struct TextReplyComposerContext: Identifiable, Hashable, Sendable {
     self.replyingToName = Self.preferredName(
       comment.authorName,
       fallback: comment.authorUsername
+    )
+    self.replyingToUserID = comment.authorID
+  }
+
+  init?(
+    thread: BrowseThread,
+    parentPost: BrowsePost,
+    comment: BrowseComment
+  ) {
+    let isExactFirstPost = parentPost.id == thread.firstPostID
+      && parentPost.floor == 1
+    let isExactReplyPost = parentPost.id != thread.firstPostID
+      && parentPost.floor > 1
+    guard
+      parentPost.id > 0,
+      parentPost.threadID == thread.id,
+      isExactFirstPost || isExactReplyPost,
+      parentPost.inlineComments.filter({ $0.id == comment.id }) == [comment]
+    else { return nil }
+    self.init(
+      thread: thread,
+      parentPostID: parentPost.id,
+      comment: comment
     )
   }
 
@@ -281,6 +310,21 @@ struct TextReplySubmission:
   var description: String { "TextReplySubmission(redacted)" }
   var debugDescription: String { description }
   var customMirror: Mirror { Mirror(self, children: [:], displayStyle: .struct) }
+
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.id == rhs.id
+      && lhs.target == rhs.target
+      && lhs.content.utf8.elementsEqual(rhs.content.utf8)
+  }
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine(id)
+    hasher.combine(target)
+    hasher.combine(content.utf8.count)
+    for byte in content.utf8 {
+      hasher.combine(byte)
+    }
+  }
 }
 
 enum TextReplyReceipt: Hashable, Codable, Sendable {

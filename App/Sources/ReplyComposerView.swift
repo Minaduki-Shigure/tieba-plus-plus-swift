@@ -6,7 +6,7 @@ struct ReplyComposerView: View {
 
   let context: TextReplyComposerContext
   let verifyVisibility:
-    @MainActor (TextReplyReceipt) async throws -> TextReplyVisibilityConfirmation?
+    @MainActor (TextReplyReceipt, String) async throws -> TextReplyVisibilityConfirmation?
   let onConfirmed: @MainActor (CreatedTextReply) -> Void
 
   @State private var scopeID = UUID()
@@ -50,22 +50,24 @@ private struct ReplyComposerContentView: View {
   let store: TextReplySubmissionStore
   let scopeID: UUID
   let verifyVisibility:
-    @MainActor (TextReplyReceipt) async throws -> TextReplyVisibilityConfirmation?
+    @MainActor (TextReplyReceipt, String) async throws -> TextReplyVisibilityConfirmation?
   let onConfirmed: @MainActor (CreatedTextReply) -> Void
 
   @State private var text = ""
+  @State private var textSelection = ComposerTextSelection.start
   @State private var didHydrateDraft = false
   @State private var pendingSubmission: TextReplySubmission?
   @State private var isDiscardConfirmationPresented = false
   @State private var isLaunchingSubmission = false
   @State private var isCheckingVisibility = false
   @State private var errorMessage: String?
+  @State private var isEmoticonPickerPresented = false
   @State private var lifecycleGate = ReplyComposerLifecycleGate()
   @State private var entryRiskNoticeGate = ComposerEntryRiskNoticeGate()
   @State private var confirmationPreparationGate = SubmissionConfirmationPreparationGate()
   @AppStorage(AppPreferenceKey.showsPostAndReplyRiskNotice)
   private var showsPostAndReplyRiskNotice = AppPreferenceDefaults.showsPostAndReplyRiskNotice
-  @FocusState private var editorIsFocused: Bool
+  @State private var editorIsFocused = false
 
   var body: some View {
     VStack(spacing: 0) {
@@ -114,6 +116,17 @@ private struct ReplyComposerContentView: View {
     .background(Color(uiColor: .systemBackground))
     .toolbar {
       ToolbarItemGroup(placement: .navigationBarTrailing) {
+        Button {
+          editorIsFocused = false
+          isEmoticonPickerPresented = true
+        } label: {
+          Image(systemName: "face.smiling")
+        }
+        .disabled(!editorAllowsEditing)
+        .accessibilityLabel("插入经典表情")
+        .help("插入经典表情")
+        .accessibilityIdentifier("reply-composer-emoticon")
+
         Button {
           isDiscardConfirmationPresented = true
         } label: {
@@ -185,6 +198,10 @@ private struct ReplyComposerContentView: View {
     } message: {
       Text(errorMessage ?? "回复操作失败。")
     }
+    .sheet(isPresented: $isEmoticonPickerPresented, onDismiss: restoreEditorFocus) {
+      ClassicEmoticonPicker(onSelect: insertClassicEmoticon)
+        .presentationDetents([.medium, .large])
+    }
     .task {
       let currentLifecycleID = lifecycleGate.beginAppearance()
       await store.activate(context.target, for: scopeID)
@@ -214,16 +231,23 @@ private struct ReplyComposerContentView: View {
         confirmationPreparationGate.cancel()
         pendingSubmission = nil
       }
+      if !presentation.allowsEditing {
+        isEmoticonPickerPresented = false
+      }
       resolveEntryRiskNoticeIfNeeded()
     }
     .onChange(of: text) { value in
-      if let pendingSubmission, pendingSubmission.content != value {
+      if
+        let pendingSubmission,
+        !pendingSubmission.content.utf8.elementsEqual(value.utf8)
+      {
         self.pendingSubmission = nil
       }
     }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
       confirmationPreparationGate.cancel()
       pendingSubmission = nil
+      isEmoticonPickerPresented = false
     }
     .onChange(of: showsPostAndReplyRiskNotice) { isEnabled in
       if !isEnabled, entryRiskNoticeGate.isPresented {
@@ -245,14 +269,14 @@ private struct ReplyComposerContentView: View {
           .allowsHitTesting(false)
       }
 
-      TextEditor(text: $text)
-        .focused($editorIsFocused)
-        .scrollContentBackground(.hidden)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .disabled(!editorAllowsEditing)
-        .accessibilityLabel(context.composerTitle)
-        .accessibilityIdentifier("reply-composer-editor")
+      ComposerTextEditor(
+        text: $text,
+        selection: $textSelection,
+        isFocused: $editorIsFocused,
+        isEditable: editorAllowsEditing,
+        accessibilityLabel: context.composerTitle,
+        accessibilityIdentifier: "reply-composer-editor"
+      )
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .contentShape(Rectangle())
@@ -381,6 +405,7 @@ private struct ReplyComposerContentView: View {
       return
     default:
       text = entry.draft?.content ?? ""
+      textSelection = ComposerTextSelection(location: text.utf16.count, length: 0)
       didHydrateDraft = true
     }
   }
@@ -496,14 +521,15 @@ private struct ReplyComposerContentView: View {
   private func checkVisibility() {
     guard
       !isCheckingVisibility,
-      case .acceptedAwaitingVisibility(let receipt) = entry.state
+      case .acceptedAwaitingVisibility(let receipt) = entry.state,
+      let expectedContent = entry.draft?.content
     else { return }
     isCheckingVisibility = true
 
     Task { @MainActor in
       defer { isCheckingVisibility = false }
       do {
-        guard let confirmation = try await verifyVisibility(receipt) else {
+        guard let confirmation = try await verifyVisibility(receipt, expectedContent) else {
           errorMessage = "贴吧返回的内容仍不足以确认这条回复；草稿会继续保留，请勿重复发送。"
           return
         }
@@ -531,11 +557,33 @@ private struct ReplyComposerContentView: View {
       do {
         try await store.discardDraft(for: context.target)
         text = ""
+        textSelection = .start
       } catch is CancellationError {
         return
       } catch {
         errorMessage = error.localizedDescription
       }
+    }
+  }
+
+  private func insertClassicEmoticon(_ token: String) {
+    guard
+      editorAllowsEditing,
+      let result = ComposerTextInsertionPolicy.replacingSelection(
+        in: text,
+        selection: textSelection,
+        with: token
+      ),
+      result.text.count <= TextReplyContentPolicy.maximumCharacterCount,
+      result.text.utf8.count <= TextReplyContentPolicy.maximumUTF8ByteCount
+    else { return }
+    text = result.text
+    textSelection = result.selection
+  }
+
+  private func restoreEditorFocus() {
+    if editorAllowsEditing {
+      editorIsFocused = true
     }
   }
 
@@ -606,18 +654,49 @@ extension TextReplyComposerContext {
 }
 
 enum TextReplyVisibilityProof {
-  static func exactPlainText(from contents: [BrowseContent]) -> String? {
-    var result = ""
+  static func exactPlainText(
+    from contents: [BrowseContent],
+    matching expectedContent: String,
+    allowsMentions: Bool = true
+  ) -> String? {
+    guard
+      TextReplyContentPolicy.isValid(expectedContent),
+      let expectedTokens = TiebaClassicEmoticonTokenizer.submissionTokens(
+        in: expectedContent
+      ),
+      let observedTokens = contentTokens(from: contents, allowsMentions: allowsMentions),
+      observedTokens == expectedTokens
+    else { return nil }
+    return expectedContent
+  }
+
+  private static func contentTokens(
+    from contents: [BrowseContent],
+    allowsMentions: Bool
+  ) -> [TiebaClassicEmoticonContentToken]? {
+    var result = [TiebaClassicEmoticonContentToken]()
     for content in contents {
-      guard case .text(let fragment) = content else { return nil }
-      result.append(contentsOf: fragment)
+      switch content {
+      case .text(let fragment):
+        appendTextToken(fragment, to: &result)
+      case .emoticon(let name, _):
+        guard TiebaClassicEmoticonCatalog.token(for: name) != nil else { return nil }
+        result.append(.emoticon(name))
+      case .mention(let name, _) where allowsMentions:
+        appendTextToken(name.hasPrefix("@") ? name : "@\(name)", to: &result)
+      case .mention:
+        return nil
+      case .link, .image, .video, .voice, .unsupported:
+        return nil
+      }
     }
-    return TextReplyContentPolicy.isValid(result) ? result : nil
+    return result
   }
 
   static func exactNestedReplyBody(
     from comment: BrowseComment,
-    expectedReplyToUserID: Int64
+    expectedReplyToUserID: Int64,
+    matching expectedContent: String
   ) -> String? {
     guard
       expectedReplyToUserID > 0,
@@ -629,19 +708,35 @@ enum TextReplyVisibilityProof {
       userID == expectedReplyToUserID
     else { return nil }
 
-    var suffix = ""
-    for content in comment.contents.dropFirst(2) {
-      guard case .text(let fragment) = content else { return nil }
-      suffix.append(contentsOf: fragment)
-    }
-    if suffix.hasPrefix(" :") {
-      suffix.removeFirst(2)
-    } else if suffix.hasPrefix(":") {
-      suffix.removeFirst()
+    var bodyContents = Array(comment.contents.dropFirst(2))
+    guard case .text(var separatorAndText)? = bodyContents.first else { return nil }
+    if separatorAndText.hasPrefix(" :") {
+      separatorAndText.removeFirst(2)
+    } else if separatorAndText.hasPrefix(":") {
+      separatorAndText.removeFirst()
+    } else { return nil }
+    if separatorAndText.isEmpty {
+      bodyContents.removeFirst()
     } else {
-      return nil
+      bodyContents[0] = .text(separatorAndText)
     }
-    return TextReplyContentPolicy.isValid(suffix) ? suffix : nil
+    return exactPlainText(
+      from: bodyContents,
+      matching: expectedContent,
+      allowsMentions: false
+    )
+  }
+
+  private static func appendTextToken(
+    _ value: String,
+    to tokens: inout [TiebaClassicEmoticonContentToken]
+  ) {
+    guard !value.isEmpty else { return }
+    if case .text(let previous)? = tokens.last {
+      tokens[tokens.count - 1] = .text(previous + value)
+    } else {
+      tokens.append(.text(value))
+    }
   }
 }
 

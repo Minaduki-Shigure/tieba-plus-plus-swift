@@ -257,7 +257,15 @@ extension TiebaAuthenticatedDecoder {
     else {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
-    guard visibleText(post.content) == content else {
+    guard
+      let submittedTokens = TiebaClassicEmoticonTokenizer.submissionTokens(in: content),
+      let readbackTokens = TiebaClassicEmoticonTokenizer.readbackTokens(
+        in: post.content,
+        maximumUTF8ByteCount: TiebaTextReplyContentPolicy.maximumUTF8ByteCount,
+        allowsMentions: true
+      ),
+      readbackTokens == submittedTokens
+    else {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
     return .post(postID: postID, floor: Int(post.floor))
@@ -337,7 +345,15 @@ extension TiebaAuthenticatedDecoder {
         throw TiebaClientError.invalidAuthenticatedResponse
       }
     } else {
-      guard visibleText(subpost.content) == content else {
+      guard
+        let submittedTokens = TiebaClassicEmoticonTokenizer.submissionTokens(in: content),
+        let readbackTokens = TiebaClassicEmoticonTokenizer.readbackTokens(
+          in: subpost.content,
+          maximumUTF8ByteCount: TiebaTextReplyContentPolicy.maximumUTF8ByteCount,
+          allowsMentions: true
+        ),
+        readbackTokens == submittedTokens
+      else {
         throw TiebaClientError.invalidAuthenticatedResponse
       }
     }
@@ -461,28 +477,6 @@ extension TiebaAuthenticatedDecoder {
     return TextReplyUserIdentity(id: id, displayName: displayName, portrait: portrait)
   }
 
-  private static func visibleText(_ content: [PbContent]) -> String? {
-    var result = ""
-    for fragment in content {
-      switch fragment.type {
-      case 0, 9, 18, 27, 40:
-        result += fragment.text
-      case 1:
-        result += fragment.text.isEmpty ? fragment.link : fragment.text
-      case 2, 11:
-        result += fragment.c
-      case 4:
-        result += fragment.text
-      default:
-        return nil
-      }
-      guard result.utf8.count <= TiebaTextReplyContentPolicy.maximumUTF8ByteCount + 2_048 else {
-        return nil
-      }
-    }
-    return result
-  }
-
   private static func textReplyChallengeMessage(_ response: AddPostResIdl) -> String? {
     guard response.hasData else { return nil }
     let data = response.data
@@ -557,7 +551,7 @@ extension TiebaAuthenticatedDecoder {
     let prefix = fragments[0]
     let mention = fragments[1]
     guard
-      [UInt32(0), 9, 18, 27, 40].contains(prefix.type),
+      [UInt32(0), UInt32(9), UInt32(18), UInt32(27), UInt32(40)].contains(prefix.type),
       prefix.text.trimmingCharacters(in: .whitespacesAndNewlines) == "回复",
       mention.type == 4,
       mention.uid == replyUserID
@@ -565,8 +559,17 @@ extension TiebaAuthenticatedDecoder {
 
     let suffixFragments = Array(fragments.dropFirst(2))
     guard !suffixFragments.contains(where: { $0.type == 4 }) else { return false }
-    guard let suffix = visibleText(suffixFragments) else { return false }
-    return suffix == ":\(content)" || suffix == " :\(content)"
+    guard
+      let submittedTokens = TiebaClassicEmoticonTokenizer.submissionTokens(in: content),
+      let suffixTokens = TiebaClassicEmoticonTokenizer.readbackTokens(
+        in: suffixFragments,
+        maximumUTF8ByteCount: TiebaTextReplyContentPolicy.maximumUTF8ByteCount + 2
+      ),
+      let bodyTokens = TiebaClassicEmoticonTokenizer.droppingNestedReplySeparator(
+        from: suffixTokens
+      )
+    else { return false }
+    return bodyTokens == submittedTokens
   }
 
   private static func hasVcodeExtraSignal(_ extra: VcodeExtra) -> Bool {

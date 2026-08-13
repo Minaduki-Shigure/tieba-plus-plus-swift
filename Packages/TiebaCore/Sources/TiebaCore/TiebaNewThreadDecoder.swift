@@ -160,7 +160,15 @@ extension TiebaAuthenticatedDecoder {
         directID: firstPost.authorID,
         nested: firstPost.hasAuthor ? firstPost.author : nil
       ) == context.userID,
-      newThreadVisibleText(firstPost.content) == submission.content
+      let submittedTokens = TiebaClassicEmoticonTokenizer.submissionTokens(
+        in: submission.content
+      ),
+      let readbackTokens = TiebaClassicEmoticonTokenizer.readbackTokens(
+        in: firstPost.content,
+        maximumUTF8ByteCount: TiebaNewThreadContentPolicy.maximumContentUTF8ByteCount,
+        allowsMentions: true
+      ),
+      readbackTokens == submittedTokens
     else {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
@@ -296,27 +304,5 @@ extension TiebaAuthenticatedDecoder {
     guard directID == 0 || nestedID == 0 || directID == nestedID else { return nil }
     let resolved = directID > 0 ? directID : nestedID
     return resolved > 0 ? resolved : nil
-  }
-
-  private static func newThreadVisibleText(_ content: [PbContent]) -> String? {
-    var result = ""
-    for fragment in content {
-      switch fragment.type {
-      case 0, 9, 18, 27, 40:
-        result += fragment.text
-      case 1:
-        result += fragment.text.isEmpty ? fragment.link : fragment.text
-      case 2, 11:
-        result += fragment.c
-      case 4:
-        result += fragment.text
-      default:
-        return nil
-      }
-      guard result.utf8.count <= TiebaNewThreadContentPolicy.maximumContentUTF8ByteCount else {
-        return nil
-      }
-    }
-    return result
   }
 }

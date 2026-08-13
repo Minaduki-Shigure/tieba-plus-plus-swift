@@ -12,7 +12,7 @@ final class PostCopyTextTests: XCTestCase {
         .mention(name: "reader", userID: 7),
         .text("\n"),
         .link(label: "文档", url: try XCTUnwrap(URL(string: "https://example.com"))),
-        .emoticon(name: "[笑]", url: nil),
+        .emoticon(name: "呵呵", url: nil),
         .unsupported(label: "未知内容"),
         .image(
           thumbnail: try XCTUnwrap(URL(string: "https://example.com/thumb.jpg")),
@@ -27,7 +27,7 @@ final class PostCopyTextTests: XCTestCase {
 
     XCTAssertEqual(
       PostCopyText.text(threadTitle: " A thread ", post: post),
-      "A thread\nhello @reader\n文档[笑][未知内容]\n[图片]\n[视频]"
+      "A thread\nhello @reader\n文档#(呵呵)[未知内容]\n[图片]\n[视频]"
     )
   }
 
@@ -89,19 +89,25 @@ final class PostCopyTextTests: XCTestCase {
         ),
         .video(url: video, cover: cover, width: 1, height: 1, pageURL: page),
         .voice(url: voice, duration: 3),
-        .emoticon(name: "[笑]", url: emoticon),
+        .emoticon(name: "哈哈", url: emoticon),
       ]
     )
 
     let projection = try XCTUnwrap(PostCopyText.text(threadTitle: nil, post: post))
 
-    XCTAssertEqual(projection, "@reader\n[图片]\n[视频]\n[语音]\n[笑]")
+    XCTAssertEqual(projection, "@reader\n[图片]\n[视频]\n[语音]\n#(哈哈)")
     for sentinel in [
       "thumb", "full", "original", "dynamic", "video", "cover", "page", "voice",
       "emote", "token=", "8675309",
     ] {
       XCTAssertFalse(projection.contains(sentinel), "Projection leaked \(sentinel)")
     }
+  }
+
+  func testUnknownEmoticonNameFallsBackWithoutInventingWireSyntax() {
+    let post = makePost(floor: 2, contents: [.emoticon(name: "未来表情", url: nil)])
+
+    XCTAssertEqual(PostCopyText.text(threadTitle: nil, post: post), "未来表情")
   }
 
   func testFirstFloorOmitsTitleWhenCallingSurfaceDoesNotAuthorizeIt() {

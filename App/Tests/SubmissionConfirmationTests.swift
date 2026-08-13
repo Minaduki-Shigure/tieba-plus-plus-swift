@@ -147,6 +147,48 @@ final class SubmissionConfirmationTests: XCTestCase {
     )
   }
 
+  func testReplyAndNewThreadSnapshotsTreatCanonicalUnicodeByteChangesAsEdits() throws {
+    let decomposed = "e\u{301}"
+    let precomposed = "\u{E9}"
+    XCTAssertEqual(decomposed, precomposed)
+
+    let replyTarget = try replyConfirmationTarget()
+    let reply = try XCTUnwrap(
+      SubmissionConfirmationPolicy.textReplySnapshot(
+        target: replyTarget,
+        content: decomposed,
+        submissionAllowed: true
+      )
+    )
+    XCTAssertFalse(
+      SubmissionConfirmationPolicy.textReplySnapshotIsCurrent(
+        reply,
+        target: replyTarget,
+        content: precomposed,
+        submissionAllowed: true
+      )
+    )
+
+    let threadTarget = try XCTUnwrap(NewThreadTarget(forumID: 7, forumName: "swift"))
+    let thread = try XCTUnwrap(
+      SubmissionConfirmationPolicy.newThreadSnapshot(
+        target: threadTarget,
+        title: nil,
+        content: decomposed,
+        submissionAllowed: true
+      )
+    )
+    XCTAssertFalse(
+      SubmissionConfirmationPolicy.newThreadSnapshotIsCurrent(
+        thread,
+        target: threadTarget,
+        title: nil,
+        content: precomposed,
+        submissionAllowed: true
+      )
+    )
+  }
+
   func testNewThreadSnapshotNormalizesTitleAndRejectsChanges() throws {
     let target = try XCTUnwrap(NewThreadTarget(forumID: 7, forumName: "swift"))
     let snapshot = try XCTUnwrap(

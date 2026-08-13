@@ -109,6 +109,23 @@ struct NewThreadSubmission:
     )
   }
 
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.id == rhs.id
+      && lhs.target == rhs.target
+      && lhs.title == rhs.title
+      && lhs.content.utf8.elementsEqual(rhs.content.utf8)
+  }
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine(id)
+    hasher.combine(target)
+    hasher.combine(title)
+    hasher.combine(content.utf8.count)
+    for byte in content.utf8 {
+      hasher.combine(byte)
+    }
+  }
+
 }
 
 struct NewThreadReceipt: Hashable, Codable, Sendable {

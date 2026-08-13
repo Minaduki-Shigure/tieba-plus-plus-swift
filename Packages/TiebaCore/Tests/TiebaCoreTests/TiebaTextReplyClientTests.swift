@@ -178,7 +178,7 @@ final class TiebaTextReplyClientTests: XCTestCase, @unchecked Sendable {
 
   func testSameSubmissionSharesOneFlightAndConflictingIdentityIsRejected() async throws {
     let target = TiebaTextReplyTarget.thread(firstPostID: firstPostID)
-    let submission = makeSubmission(target: target)
+    let submission = makeSubmission(target: target, content: "e\u{301}")
     let transport = TextReplyStateTransport(target: target, blocksWrites: true)
     let client = TiebaAuthenticatedClient(transport: transport)
     let first = Task {
@@ -212,6 +212,23 @@ final class TiebaTextReplyClientTests: XCTestCase, @unchecked Sendable {
         credential: credential(),
         expectedUserID: firstUserID,
         submission: conflict
+      )
+    }
+    let canonicallyEquivalentConflict = TiebaTextReplySubmission(
+      submissionID: submission.submissionID,
+      forumID: submission.forumID,
+      forumName: submission.forumName,
+      threadID: submission.threadID,
+      target: submission.target,
+      content: "\u{E9}"
+    )
+    XCTAssertEqual(submission.content, canonicallyEquivalentConflict.content)
+    XCTAssertNotEqual(submission, canonicallyEquivalentConflict)
+    await assertClientError(.replySubmissionIDConflict) {
+      _ = try await client.submitTextReply(
+        credential: credential(),
+        expectedUserID: firstUserID,
+        submission: canonicallyEquivalentConflict
       )
     }
     await transport.releaseWrites()

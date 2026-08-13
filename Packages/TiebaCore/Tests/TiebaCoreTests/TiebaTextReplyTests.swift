@@ -22,6 +22,10 @@ final class TiebaTextReplyTests: XCTestCase, @unchecked Sendable {
 
   func testContentPolicyPreservesUsefulWhitespaceAndRejectsUnsafeInput() {
     XCTAssertTrue(TiebaTextReplyContentPolicy.isValid("  hello\nworld  "))
+    XCTAssertTrue(TiebaTextReplyContentPolicy.isValid("前#(呵呵)#(哈哈)后"))
+    XCTAssertTrue(TiebaTextReplyContentPolicy.isValid("ordinary (text)"))
+    XCTAssertTrue(TiebaTextReplyContentPolicy.isValid("函数(x) + #foo + (#name) + 前)后"))
+    XCTAssertTrue(TiebaTextReplyContentPolicy.isValid("括号中的表情 (#(呵呵))"))
     XCTAssertTrue(
       TiebaTextReplyContentPolicy.isValid(
         String(repeating: "a", count: TiebaTextReplyContentPolicy.maximumCharacterCount)
@@ -29,7 +33,13 @@ final class TiebaTextReplyTests: XCTestCase, @unchecked Sendable {
     )
     XCTAssertFalse(TiebaTextReplyContentPolicy.isValid(" \n\t "))
     XCTAssertFalse(TiebaTextReplyContentPolicy.isValid("text\u{0000}"))
-    XCTAssertFalse(TiebaTextReplyContentPolicy.isValid("#(pic,1,2,3)"))
+    for invalid in [
+      "#()", "#(不存在)", "#(呵 呵)", "#(呵呵,extra)", "#(#(呵呵))",
+      "#(呵呵", "#(pic,1,2,3)", "#(reply)",
+      "#(reply, portrait, name)",
+    ] {
+      XCTAssertFalse(TiebaTextReplyContentPolicy.isValid(invalid), invalid)
+    }
     XCTAssertFalse(
       TiebaTextReplyContentPolicy.isValid(
         String(repeating: "a", count: TiebaTextReplyContentPolicy.maximumCharacterCount + 1)
@@ -43,6 +53,25 @@ final class TiebaTextReplyTests: XCTestCase, @unchecked Sendable {
         )
       )
     )
+  }
+
+  func testClassicEmoticonCatalogIsFixedAndReturnsOnlyExactWireTokens() {
+    let expectedNames = [
+      "呵呵", "哈哈", "吐舌", "啊", "酷", "怒", "开心", "汗", "泪", "黑线",
+      "鄙视", "不高兴", "真棒", "钱", "疑问", "阴险", "吐", "咦", "委屈", "花心",
+      "呼~", "笑眼", "冷", "太开心", "滑稽", "勉强", "狂汗", "乖", "睡觉", "惊哭",
+      "生气", "惊讶", "喷", "爱心", "心碎", "玫瑰", "礼物", "彩虹", "星星月亮", "太阳",
+      "钱币", "灯泡", "茶杯", "蛋糕", "音乐", "haha", "胜利", "大拇指", "弱", "OK",
+    ]
+    XCTAssertEqual(TiebaClassicEmoticonCatalog.names, expectedNames)
+    for name in expectedNames {
+      let token = "#(\(name))"
+      XCTAssertEqual(TiebaClassicEmoticonCatalog.token(for: name), token)
+      XCTAssertTrue(TiebaTextReplyContentPolicy.isValid("前\(token)后"))
+    }
+    XCTAssertEqual(TiebaClassicEmoticonCatalog.token(for: "滑稽"), "#(滑稽)")
+    XCTAssertNil(TiebaClassicEmoticonCatalog.token(for: "不存在"))
+    XCTAssertNil(TiebaClassicEmoticonCatalog.token(for: " 滑稽"))
   }
 
   func testSubmissionDescriptionAndReflectionRedactContentAndForumName() {
@@ -66,7 +95,10 @@ final class TiebaTextReplyTests: XCTestCase, @unchecked Sendable {
   }
 
   func testThreadReplyRequestUsesSignedMinimalContract() throws {
-    let submission = makeSubmission(target: .thread(firstPostID: firstPostID))
+    let submission = makeSubmission(
+      target: .thread(firstPostID: firstPostID),
+      content: "前e\u{301}#(呵呵)后"
+    )
     let request = try makeRequest(submission: submission)
     let parsed = try parseMultipart(request)
     let message = try AddPostReqIdl(serializedBytes: parsed.protobuf)
@@ -126,7 +158,10 @@ final class TiebaTextReplyTests: XCTestCase, @unchecked Sendable {
   }
 
   func testPostReplyRequestBindsParentAndServerDerivedAuthor() throws {
-    let submission = makeSubmission(target: .post(postID: parentPostID))
+    let submission = makeSubmission(
+      target: .post(postID: parentPostID),
+      content: "前e\u{301}#(哈哈)后"
+    )
     let message = try AddPostReqIdl(
       serializedBytes: parseMultipart(
         makeRequest(submission: submission, replyUserID: 8_008)
@@ -147,7 +182,7 @@ final class TiebaTextReplyTests: XCTestCase, @unchecked Sendable {
   func testSubpostReplyRequestBuildsOnlyTheProtocolOwnedReplyMarker() throws {
     let submission = makeSubmission(
       target: .subpost(parentPostID: parentPostID, subpostID: targetSubpostID),
-      content: "plain body"
+      content: "前#(滑稽)后"
     )
     let message = try AddPostReqIdl(
       serializedBytes: parseMultipart(
@@ -162,7 +197,7 @@ final class TiebaTextReplyTests: XCTestCase, @unchecked Sendable {
 
     XCTAssertEqual(
       message.data.content,
-      "回复 #(reply, portrait-token, Target User) :plain body"
+      "回复 #(reply, portrait-token, Target User) :前#(滑稽)后"
     )
     XCTAssertEqual(message.data.replyUid, "9009")
     XCTAssertEqual(message.data.quoteID, String(parentPostID))
@@ -194,6 +229,42 @@ final class TiebaTextReplyTests: XCTestCase, @unchecked Sendable {
       )
     ) { XCTAssertEqual($0 as? TiebaClientError, .invalidAuthenticatedResponse) }
 
+  }
+
+  func testSubpostReplyRejectsServerIdentityThatCanAlterReplyMarkerStructure() {
+    let nested = makeSubmission(
+      target: .subpost(parentPostID: parentPostID, subpostID: targetSubpostID)
+    )
+    for unsafeDisplayName in [
+      "Target, injected",
+      "Target (injected",
+      "Target) #(pic,1,2,3)",
+      "Target #(reply",
+    ] {
+      XCTAssertThrowsError(
+        try makeRequest(
+          submission: nested,
+          replyUserID: 9_009,
+          replyUserDisplayName: unsafeDisplayName,
+          replyUserPortrait: "portrait-token"
+        )
+      ) { XCTAssertEqual($0 as? TiebaClientError, .invalidAuthenticatedResponse) }
+    }
+    for unsafePortrait in [
+      "portrait, injected",
+      "portrait(injected",
+      "portrait) #(pic,1,2,3)",
+      "portrait #(reply",
+    ] {
+      XCTAssertThrowsError(
+        try makeRequest(
+          submission: nested,
+          replyUserID: 9_009,
+          replyUserDisplayName: "Target User",
+          replyUserPortrait: unsafePortrait
+        )
+      ) { XCTAssertEqual($0 as? TiebaClientError, .invalidAuthenticatedResponse) }
+    }
   }
 
   func testReceiptDecoderReturnsTypedIdentifiersAndPrefersUserMessage() throws {
@@ -460,6 +531,240 @@ final class TiebaTextReplyTests: XCTestCase, @unchecked Sendable {
     ) { XCTAssertEqual($0 as? TiebaClientError, .invalidAuthenticatedResponse) }
   }
 
+  func testReadbackMatchesAdjacentTextAndStructuredType2And11Emoticons() throws {
+    let content = "前#(呵呵)#(哈哈)后"
+    var response = pageResponse(
+      locatedPostID: createdPostID,
+      locatedFloor: 3,
+      locatedAuthorID: userID,
+      locatedContent: "unused"
+    )
+    response.data.postList[0].content = [
+      contentFragment(type: 0, text: "前"),
+      contentFragment(type: 2, c: "呵呵"),
+      contentFragment(type: 11, c: "哈哈"),
+      contentFragment(type: 0, text: "后"),
+    ]
+
+    XCTAssertEqual(
+      try TiebaAuthenticatedDecoder.verifiedTextReplyPost(
+        from: response,
+        expectedUserID: userID,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        postID: createdPostID,
+        content: content
+      ),
+      .post(postID: createdPostID, floor: 3)
+    )
+  }
+
+  func testSubpostReadbackMatchesStructuredEmoticonWithoutNestedPrefix() throws {
+    let parent = try TiebaAuthenticatedDecoder.textReplyPageContext(
+      from: pageResponse(
+        locatedPostID: parentPostID,
+        locatedFloor: 2,
+        locatedAuthorID: 8_008,
+        locatedContent: "parent"
+      ),
+      expectedUserID: userID,
+      forumID: forumID,
+      forumName: forumName,
+      threadID: threadID,
+      target: .post(postID: parentPostID)
+    )
+    var response = floorResponse(
+      subpostID: createdPostID,
+      subpostAuthorID: userID,
+      subpostAuthorName: "Current User",
+      subpostAuthorPortrait: "current-portrait",
+      subpostContent: "unused"
+    )
+    response.data.subpostList[0].content = [
+      contentFragment(type: 0, text: "前"),
+      contentFragment(type: 11, c: "哈哈"),
+      contentFragment(type: 0, text: "后"),
+    ]
+
+    XCTAssertEqual(
+      try TiebaAuthenticatedDecoder.verifiedTextReplySubpost(
+        from: response,
+        context: parent,
+        newSubpostID: createdPostID,
+        content: "前#(哈哈)后"
+      ),
+      .subpost(parentPostID: parentPostID, subpostID: createdPostID)
+    )
+  }
+
+  func testReadbackRejectsUnknownWrongTypeAndType0FakeEmoticons() throws {
+    let content = "前#(呵呵)后"
+    for fragment in [
+      contentFragment(type: 2, c: "不存在"),
+      contentFragment(type: 3, c: "呵呵"),
+      contentFragment(type: 0, text: "#(呵呵)"),
+    ] {
+      var response = pageResponse(
+        locatedPostID: createdPostID,
+        locatedFloor: 3,
+        locatedAuthorID: userID,
+        locatedContent: "unused"
+      )
+      response.data.postList[0].content = [
+        contentFragment(type: 0, text: "前"), fragment,
+        contentFragment(type: 0, text: "后"),
+      ]
+      XCTAssertThrowsError(
+        try TiebaAuthenticatedDecoder.verifiedTextReplyPost(
+          from: response,
+          expectedUserID: userID,
+          forumID: forumID,
+          forumName: forumName,
+          threadID: threadID,
+          postID: createdPostID,
+          content: content
+        )
+      ) { XCTAssertEqual($0 as? TiebaClientError, .invalidAuthenticatedResponse) }
+    }
+
+    var mention = pageResponse(
+      locatedPostID: createdPostID,
+      locatedFloor: 3,
+      locatedAuthorID: userID,
+      locatedContent: "unused"
+    )
+    mention.data.postList[0].content = [
+      contentFragment(type: 0, text: "前"),
+      contentFragment(type: 4, text: "#(呵呵)"),
+      contentFragment(type: 0, text: "后"),
+    ]
+    XCTAssertThrowsError(
+      try TiebaAuthenticatedDecoder.verifiedTextReplyPost(
+        from: mention,
+        expectedUserID: userID,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        postID: createdPostID,
+        content: content
+      )
+    ) { XCTAssertEqual($0 as? TiebaClientError, .invalidAuthenticatedResponse) }
+  }
+
+  func testReadbackComparesPlainTextByWireBytesWithoutNFCNormalization() throws {
+    let decomposed = "e\u{301}"
+    let precomposed = "\u{E9}"
+    XCTAssertEqual(decomposed, precomposed)
+
+    XCTAssertThrowsError(
+      try TiebaAuthenticatedDecoder.verifiedTextReplyPost(
+        from: pageResponse(
+          locatedPostID: createdPostID,
+          locatedFloor: 3,
+          locatedAuthorID: userID,
+          locatedContent: precomposed
+        ),
+        expectedUserID: userID,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        postID: createdPostID,
+        content: decomposed
+      )
+    ) { XCTAssertEqual($0 as? TiebaClientError, .invalidAuthenticatedResponse) }
+  }
+
+  func testReadbackPreservesExistingStructuredMentionEquivalence() throws {
+    var response = pageResponse(
+      locatedPostID: createdPostID,
+      locatedFloor: 3,
+      locatedAuthorID: userID,
+      locatedContent: "unused"
+    )
+    response.data.postList[0].content = [
+      contentFragment(type: 4, text: "@Target"),
+      contentFragment(type: 0, text: " #(呵呵)"),
+    ]
+    response.data.postList[0].content[1] = contentFragment(type: 0, text: " ")
+    response.data.postList[0].content.append(contentFragment(type: 2, c: "呵呵"))
+
+    XCTAssertEqual(
+      try TiebaAuthenticatedDecoder.verifiedTextReplyPost(
+        from: response,
+        expectedUserID: userID,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        postID: createdPostID,
+        content: "@Target #(呵呵)"
+      ),
+      .post(postID: createdPostID, floor: 3)
+    )
+  }
+
+  func testNestedReadbackComparesStructuredEmoticonSuffix() throws {
+    let parent = try TiebaAuthenticatedDecoder.textReplyPageContext(
+      from: pageResponse(
+        locatedPostID: parentPostID,
+        locatedFloor: 2,
+        locatedAuthorID: 8_008,
+        locatedContent: "parent"
+      ),
+      expectedUserID: userID,
+      forumID: forumID,
+      forumName: forumName,
+      threadID: threadID,
+      target: .subpost(parentPostID: parentPostID, subpostID: targetSubpostID)
+    )
+    let context = try TiebaAuthenticatedDecoder.textReplySubpostContext(
+      from: floorResponse(
+        subpostID: targetSubpostID,
+        subpostAuthorID: 9_009,
+        subpostAuthorName: "Target User",
+        subpostAuthorPortrait: "portrait-token",
+        subpostContent: "target"
+      ),
+      parentContext: parent,
+      subpostID: targetSubpostID
+    )
+    var response = floorResponse(
+      subpostID: createdPostID,
+      subpostAuthorID: userID,
+      subpostAuthorName: "Current User",
+      subpostAuthorPortrait: "current-portrait",
+      subpostContent: "unused",
+      replyMentionUserID: 9_009
+    )
+    response.data.subpostList[0].content = Array(
+      response.data.subpostList[0].content.prefix(2)
+    ) + [
+      contentFragment(type: 0, text: " :前"),
+      contentFragment(type: 2, c: "呵呵"),
+      contentFragment(type: 0, text: "后"),
+    ]
+
+    XCTAssertEqual(
+      try TiebaAuthenticatedDecoder.verifiedTextReplySubpost(
+        from: response,
+        context: context,
+        newSubpostID: createdPostID,
+        content: "前#(呵呵)后"
+      ),
+      .subpost(parentPostID: parentPostID, subpostID: createdPostID)
+    )
+
+    response.data.subpostList[0].content[3] = contentFragment(type: 0, text: "#(呵呵)")
+    XCTAssertThrowsError(
+      try TiebaAuthenticatedDecoder.verifiedTextReplySubpost(
+        from: response,
+        context: context,
+        newSubpostID: createdPostID,
+        content: "前#(呵呵)后"
+      )
+    ) { XCTAssertEqual($0 as? TiebaClientError, .invalidAuthenticatedResponse) }
+  }
+
   func testSubpostReadbackRejectsExactIDWithWrongMention() throws {
     let parent = try TiebaAuthenticatedDecoder.textReplyPageContext(
       from: pageResponse(
@@ -594,6 +899,18 @@ final class TiebaTextReplyTests: XCTestCase, @unchecked Sendable {
     XCTAssertTrue(data.hasShowCustomFigure, file: file, line: line)
     XCTAssertEqual(data.isShowBless, 0, file: file, line: line)
     XCTAssertTrue(data.hasIsShowBless, file: file, line: line)
+  }
+
+  private func contentFragment(
+    type: UInt32,
+    text: String = "",
+    c: String = ""
+  ) -> PbContent {
+    var fragment = PbContent()
+    fragment.type = type
+    fragment.text = text
+    fragment.c = c
+    return fragment
   }
 
   private func assertNoDeviceMetadata(

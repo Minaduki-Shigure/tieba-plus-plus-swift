@@ -1,8 +1,9 @@
 # TiebaLite parity roadmap
 
 Tieba++ is an independent Swift application implementation. TiebaLite is used as
-a product reference for expected workflows; the only adapted source material is
-the minimal attributed protobuf schema documented in TiebaProto's `NOTICE.md`.
+a product reference for expected workflows. Adapted interoperability material is
+limited to the attributed protobuf schemas and fixed classic-emoticon wire-name
+catalog documented in TiebaProto's `NOTICE.md`.
 This audit was last compared with TiebaLite `4.0-dev` at commit
 [`268f388c`](https://github.com/zzc10086/TiebaLite/tree/268f388c7824ae2c8f6ed549827a943ec8a7f352).
 
@@ -25,9 +26,9 @@ only foreground batch check-in.
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
 | Local data, settings, and customization | 10 | 6 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, followed-forum layout, a configurable forum primary action, reply-entry visibility, a default-on composer risk notice, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, switching, a self-profile summary, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
-| Server writes, creation, and social actions | 15 | 11–12 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, three plain-text reply targets, plain-text new-topic creation, and credential-free official reporting entry points have guarded implementations; real batch-check-in behavior, creation, poll and interaction-restriction success, rich media, unresolvable cloud rows, native reporting, and most reactions remain unavailable or unvalidated |
+| Server writes, creation, and social actions | 15 | 12–13 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, three text/classic-emoticon reply targets, equivalent new-topic creation, direct inline-preview reply entry, and credential-free official reporting entry points have guarded implementations; real batch-check-in behavior, creation, poll and interaction-restriction success, uploaded media, unresolvable cloud rows, native reporting, and most reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
-| **Total** | **100** | **76–79** | Current full-product estimate; roughly 21–24% remains |
+| **Total** | **100** | **77–80** | Current full-product estimate; roughly 20–23% remains |
 
 This is a source-workflow coverage estimate, not a release-readiness or
 physical-device-validation percentage. The public `v0.59.0-alpha.1` IPA and the
@@ -83,6 +84,11 @@ not claim native reporting parity: the credential-free preflight only resolves a
 strictly bound HTTPS form URL, `SFSafariViewController` receives no App Keychain
 credentials, cannot bind Safari's Baidu identity to the active App account, and
 cannot infer whether the user submitted or cancelled the form.
+The fixed classic-emoticon catalog and inline-preview reply entry together close
+one bounded TiebaLite creation-workflow gap and therefore add one weighted point.
+They reuse the existing three write targets and add no endpoint: only exact,
+compiled `#(name)` tokens are accepted, while images, voice, arbitrary markers,
+and remotely supplied sending choices remain unsupported.
 
 ## Available
 
@@ -263,12 +269,13 @@ the source metadata is updated to that tested IPA.
 - Account-bound approval and cancellation on the canonical topic, ordinary
   floors, and both parent and child items in a full nested-reply page, with
   explicit confirmation and lease-guarded read-only recovery
-- Experimental native plain-text composers for replying to the topic, an
+- Experimental native text/classic-emoticon composers for replying to the topic, an
   ordinary floor, or a specific nested reply including one under the canonical
   first floor, with exact target rebinding, account-level write serialization,
   persistent per-target drafts, strict challenge/accepted/unknown states, and
-  exact-PID readback without write retry
-- Experimental native plain-text new-topic creation from a loaded forum, with an
+  structured exact-PID readback without write retry; visible inline nested-reply
+  previews expose the same exact-target composer without another network request
+- Experimental native text/classic-emoticon new-topic creation from a loaded forum, with an
   optional bounded title, fresh account/forum/TBS preflight, one signed HTTPS
   write, persistent per-account-and-forum drafts, strict
   challenge/accepted/unknown states, and exact TID/PID readback without retry
@@ -337,12 +344,13 @@ the source metadata is updated to that tested IPA.
    and saved-floor updates, including unresolvable deleted rows, STOKEN rejection,
    idempotence, uncertain-write readback, concurrency, session rotation, and
    account switching
-11. Disposable-account validation of all three plain-text reply targets,
+11. Disposable-account validation of all three text/classic-emoticon reply targets,
    including minimum-field deletion, missing/random/expired/cross-account
    STOKEN and TBS, challenge and permission failures, post-dispatch loss,
-   exact-PID visibility, account rotation, and duplicate-send prevention
-12. Disposable-account validation of plain-text new-topic creation, followed by
-   rich-media topic/reply creation, broader settings parity, remaining account
+   exact-PID visibility, all 50 fixed catalog tokens, type-2/type-11 readback,
+   inline-preview entry, account rotation, and duplicate-send prevention
+12. Disposable-account validation of text/classic-emoticon new-topic creation,
+   followed by image and other rich-media topic/reply creation, broader settings parity, remaining account
    activity, and moderation tools
 13. Real-device validation of the official report-form handoff, including
    browser login state, report reasons, captcha/SMS challenges, cancellation,
@@ -1129,12 +1137,14 @@ the batch or degrade to individual writes. The flow remains foreground-only,
 explicitly initiated, memory-only, and subject to real-device validation; it
 does not implement TiebaLite's background or automatic sign-in.
 
-Plain-text replies use HTTPS protobuf command `309731` with client version
+Text and fixed-catalog classic-emoticon replies use HTTPS protobuf command `309731` with client version
 `12.35.1.0`. Topic replies, ordinary-floor replies, and replies to a specific
 nested reply share one endpoint but have distinct `post_from`, parent, quoted,
 and subpost fields. A nested reply alone receives the protocol-owned `reply`
-marker, built from the freshly read target identity; user-supplied rich-content
-markers are rejected. The minimal request contains BDUSS, STOKEN, fresh TBS,
+marker, built from the freshly read target identity. The composer may insert one
+of 50 fixed classic `#(name)` tokens at the current UTF-16 selection. A
+fail-closed tokenizer rejects unknown, malformed, nested, image, `reply`, and
+all other user-supplied rich-content markers. The minimal request contains BDUSS, STOKEN, fresh TBS,
 fixed client metadata, and the required business fields, but no IMEI, Android
 ID, OAID, ZID, installation history, screen, location, or advertising identifier.
 If a real device proves those omitted fingerprint fields mandatory, the feature
@@ -1151,7 +1161,7 @@ account has one reply-write tail; an identical submission UUID shares its owner,
 while a different payload reusing that UUID is rejected. Cancellation before
 dispatch guarantees zero write. After dispatch, the owner continues even if its
 caller or view disappears. A valid returned PID is read exactly once: a matching
-author, body, parent, and marker confirms success; a genuinely absent PID becomes
+author, structured text/emoticon body, parent, and marker confirms success; a genuinely absent PID becomes
 accepted-awaiting-visibility; any visible mismatch or lost receipt becomes an
 unknown outcome. Neither case resends the write.
 
@@ -1167,13 +1177,14 @@ can be unlocked only by an explicit new login. Composer navigation uses the
 native stack without a custom back gesture, including cancellation of an
 interactive edge swipe.
 
-Plain-text new topics use one signed HTTPS form at `/c/c/thread/add` after a
+Text and fixed-catalog classic-emoticon new topics use one signed HTTPS form at `/c/c/thread/add` after a
 fresh authenticated FRS read binds the active UID, positive forum ID, canonical
 forum name, trusted account display name, and valid TBS. The optional title is
 limited to 31 Swift characters and 124 UTF-8 bytes; the body uses the same
-10,000-character and 32 KiB plain-text bounds as replies. Titles reject control
+10,000-character and 32 KiB wire-text bounds as replies. Titles reject control
 characters; bodies preserve line breaks and tabs while rejecting other
-unsupported controls. Both reject Tieba rich-content markers. The minimal form
+unsupported controls. Titles reject all markers; bodies accept only the same
+fixed classic-emoticon catalog and reject every other Tieba rich-content marker. The minimal form
 follows the observed
 TiebaLite contract but deliberately omits Android hardware, advertising,
 installation, screen, network, and telemetry identifiers; every redirect is
@@ -1185,7 +1196,7 @@ performs no write. After dispatch, transport loss, malformed receipts, or
 mismatched readback become an unknown outcome and are never resent. A positive
 TID/PID receipt is confirmed only when an authenticated first-floor readback
 matches the account, forum, thread, author, explicit title when supplied, and
-exact plain-text body. Temporary first-floor absence remains
+exact structured text/emoticon body. Temporary first-floor absence remains
 accepted-awaiting-visibility. The App persists a non-sendable marker before the
 write, isolates drafts by account and forum, locks challenge and unknown states,
 and allows an untitled topic's server-generated display title only after all

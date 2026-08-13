@@ -717,7 +717,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     }
     guard TiebaTextReplyContentPolicy.isValid(submission.content) else {
       throw TiebaClientError.invalidArgument(
-        "Reply content is empty, too large, contains unsupported control characters, or contains a Tieba rich-content marker."
+        "Reply content is empty, too large, contains unsupported control characters, or contains an unsupported Tieba rich-content marker."
       )
     }
     return try normalizedForumName(submission.forumName)
@@ -737,7 +737,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       )
     else {
       throw TiebaClientError.invalidArgument(
-        "The new-thread title or content is invalid, too large, contains unsupported control characters, or contains a Tieba rich-content marker."
+        "The new-thread title or content is invalid, too large, contains unsupported control characters, or contains an unsupported Tieba rich-content marker."
       )
     }
     return try normalizedForumName(submission.forumName)
@@ -891,13 +891,13 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       guard let replyUserID, replyUserID > 0, let replyUserDisplayName else {
         throw TiebaClientError.invalidAuthenticatedResponse
       }
-      let displayName = try validatedReplyMetadata(
+      let displayName = try validatedReplyMarkerComponent(
         replyUserDisplayName,
         name: "Reply-user display name",
         maximumBytes: 512,
         allowsEmpty: false
       )
-      let portrait = try validatedReplyMetadata(
+      let portrait = try validatedReplyMarkerComponent(
         replyUserPortrait ?? "",
         name: "Reply-user portrait",
         maximumBytes: 2_048,
@@ -1804,6 +1804,29 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       (allowsEmpty || !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty),
       value.utf8.count <= maximumBytes,
       !value.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    return value
+  }
+
+  private func validatedReplyMarkerComponent(
+    _ rawValue: String,
+    name: String,
+    maximumBytes: Int,
+    allowsEmpty: Bool
+  ) throws -> String {
+    let value = try validatedReplyMetadata(
+      rawValue,
+      name: name,
+      maximumBytes: maximumBytes,
+      allowsEmpty: allowsEmpty
+    )
+    guard
+      !value.contains(","),
+      !value.contains("("),
+      !value.contains(")"),
+      !value.contains("#(")
     else {
       throw TiebaClientError.invalidAuthenticatedResponse
     }

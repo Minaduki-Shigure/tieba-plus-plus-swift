@@ -847,7 +847,10 @@ struct CommentsView: View {
     .background(.regularMaterial)
   }
 
-  private func verifyReplyVisibility(_ receipt: TextReplyReceipt) async throws
+  private func verifyReplyVisibility(
+    _ receipt: TextReplyReceipt,
+    expectedContent: String
+  ) async throws
     -> TextReplyVisibilityConfirmation?
   {
     switch receipt {
@@ -860,7 +863,10 @@ struct CommentsView: View {
         post.threadID == viewModel.threadID,
         post.id != thread.firstPostID,
         post.floor > 1,
-        let content = TextReplyVisibilityProof.exactPlainText(from: post.contents)
+        let content = TextReplyVisibilityProof.exactPlainText(
+          from: post.contents,
+          matching: expectedContent
+        )
       else { return nil }
       return TextReplyVisibilityConfirmation(
         created: .post(postID: post.id, floor: post.floor),
@@ -868,22 +874,7 @@ struct CommentsView: View {
         content: content
       )
     case .subpost(let parentPostID, let subpostID):
-      let expectedNestedReplyUserID: Int64?
-      if
-        let context = replyComposerContext,
-        case .subpost(let expectedParentPostID, let targetSubpostID) =
-          context.target.destination
-      {
-        guard
-          expectedParentPostID == parentPostID,
-          let targetComment = viewModel.comments.first(where: { $0.id == targetSubpostID }),
-          targetComment.parentPostID == parentPostID,
-          targetComment.authorID > 0
-        else { return nil }
-        expectedNestedReplyUserID = targetComment.authorID
-      } else {
-        expectedNestedReplyUserID = nil
-      }
+      guard let context = replyComposerContext else { return nil }
       guard
         parentPostID == viewModel.parentPost?.id,
         let comment = await viewModel.verifyAndRelocateAcceptedReply(commentID: subpostID),
@@ -892,13 +883,25 @@ struct CommentsView: View {
         comment.parentPostID == parentPostID
       else { return nil }
       let content: String?
-      if let expectedNestedReplyUserID {
+      switch context.target.destination {
+      case .subpost(let expectedParentPostID, _):
+        guard
+          expectedParentPostID == parentPostID,
+          let expectedNestedReplyUserID = context.replyingToUserID
+        else { return nil }
         content = TextReplyVisibilityProof.exactNestedReplyBody(
           from: comment,
-          expectedReplyToUserID: expectedNestedReplyUserID
+          expectedReplyToUserID: expectedNestedReplyUserID,
+          matching: expectedContent
         )
-      } else {
-        content = TextReplyVisibilityProof.exactPlainText(from: comment.contents)
+      case .post(let expectedParentPostID):
+        guard expectedParentPostID == parentPostID else { return nil }
+        content = TextReplyVisibilityProof.exactPlainText(
+          from: comment.contents,
+          matching: expectedContent
+        )
+      case .thread:
+        return nil
       }
       guard let content else { return nil }
       return TextReplyVisibilityConfirmation(

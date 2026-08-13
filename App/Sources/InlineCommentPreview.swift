@@ -17,9 +17,36 @@ struct InlineCommentPreviewPresentation: Hashable, Sendable {
   }
 }
 
+struct InlineCommentReplyPresentation: Hashable, Sendable {
+  let context: TextReplyComposerContext
+  let accessibilityIdentifier: String
+
+  init?(
+    thread: BrowseThread,
+    parentPost: BrowsePost,
+    comment: BrowseComment,
+    replyEntriesVisible: Bool
+  ) {
+    guard
+      replyEntriesVisible,
+      parentPost.localVisibility == .visible,
+      comment.localVisibility == .visible,
+      let context = TextReplyComposerContext(
+        thread: thread,
+        parentPost: parentPost,
+        comment: comment
+      )
+    else { return nil }
+    self.context = context
+    self.accessibilityIdentifier = "inline-comment-reply-\(comment.id)"
+  }
+}
+
 struct InlineCommentPreviewCard: View {
   let presentation: InlineCommentPreviewPresentation
   let openComments: (Int64?) -> Void
+  let replyPresentation: (BrowseComment) -> InlineCommentReplyPresentation?
+  let requestReply: (BrowseComment) -> Void
   let reportTarget: (BrowseComment) -> ContentReportTarget?
   let selectText: (String) -> Void
 
@@ -31,9 +58,14 @@ struct InlineCommentPreviewCard: View {
         }
         switch comment.localVisibility {
         case .visible:
+          let commentReplyPresentation = replyPresentation(comment)
           InlineCommentPreviewRow(
             comment: comment,
             action: { openComments(comment.id) },
+            replyPresentation: commentReplyPresentation,
+            requestReply: commentReplyPresentation == nil
+              ? nil
+              : { requestReply(comment) },
             reportTarget: reportTarget(comment),
             selectText: selectText
           )
@@ -81,6 +113,8 @@ struct InlineCommentPreviewCard: View {
 private struct InlineCommentPreviewRow: View {
   let comment: BrowseComment
   let action: () -> Void
+  let replyPresentation: InlineCommentReplyPresentation?
+  let requestReply: (() -> Void)?
   let reportTarget: ContentReportTarget?
   let selectText: (String) -> Void
 
@@ -92,25 +126,47 @@ private struct InlineCommentPreviewRow: View {
   }
 
   var body: some View {
-    Button(action: action) {
-      previewText
-        .font(.subheadline)
-        .foregroundStyle(.primary)
-        .lineLimit(showsBothNames ? 5 : 4)
-        .minimumScaleFactor(0.75)
-        .multilineTextAlignment(.leading)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 9)
-        .contentShape(Rectangle())
+    HStack(alignment: .center, spacing: 8) {
+      Button(action: action) {
+        previewText
+          .font(.subheadline)
+          .foregroundStyle(.primary)
+          .lineLimit(showsBothNames ? 5 : 4)
+          .minimumScaleFactor(0.75)
+          .multilineTextAlignment(.leading)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.vertical, 9)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel(accessibilityText)
+
+      if let replyPresentation, let requestReply {
+        Button(action: requestReply) {
+          Image(systemName: "arrowshape.turn.up.left")
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .accessibilityLabel(
+          "回复 \(replyPresentation.context.replyingToName ?? "此用户")"
+        )
+        .accessibilityIdentifier(replyPresentation.accessibilityIdentifier)
+        .help("回复此条")
+      }
     }
-    .buttonStyle(.plain)
-    .accessibilityLabel(accessibilityText)
     .contextMenu {
       if let copyText = PostCopyText.text(comment: comment) {
         Button {
           selectText(copyText)
         } label: {
           Label("选择文字", systemImage: "text.cursor")
+        }
+      }
+      if replyPresentation != nil, let requestReply {
+        Button(action: requestReply) {
+          Label("回复此条", systemImage: "arrowshape.turn.up.left")
         }
       }
       ContentReportMenuItem(

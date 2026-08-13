@@ -84,7 +84,7 @@ retried automatically. The authenticated state read uses TiebaLite's
 effective `11.10.8.6` client-version field while its Mozilla-style request user
 agent identifies the endpoint's `12.35.1.0` protocol family.
 The minimal `AddPostReqIdl` and `AddPostResIdl` schemas, their response-only
-anti-abuse dependency closure, and the three plain-text reply field layouts for
+anti-abuse dependency closure, and the three text-body reply field layouts for
 `/c/c/post/add?cmd=309731&format=protobuf` are adapted from TiebaLite commit
 `268f388c7824ae2c8f6ed549827a943ec8a7f352`, specifically
 `AddPostRequestData.proto`, `AddPostResponseData.proto`, `ReplyPage.kt`, and
@@ -92,10 +92,14 @@ anti-abuse dependency closure, and the three plain-text reply field layouts for
 version and a short-lived `anti.tbs` value from an immediately preceding,
 account-bound `PbPage` or `PbFloor` read. Android hardware, installation,
 location, advertising, OAID, ZID, and screen fields are deliberately omitted.
-User-supplied Tieba rich-content markers are rejected; the only marker emitted
-by this implementation is the protocol-owned nested-reply prefix derived from
-the freshly read target user. A valid server receipt is followed only by an
-exact-ID readback and is never retried as a write.
+The fixed 50-name classic-emoticon wire catalog and `#(name)` insertion behavior
+are adapted from TiebaLite's `EmoticonManager.kt` and `ReplyPage.kt` at that same
+commit. No TiebaLite or Baidu emoticon bitmap is copied or downloaded. Unknown,
+malformed, nested, image, `reply`, and every other user-supplied rich-content
+marker are rejected; the nested-reply prefix remains protocol-owned and is
+derived only from the freshly read target user. A valid server receipt is
+followed only by an exact-ID, structured-token readback and is never retried as
+a write.
 The minimal `forum.sign_in_info` and nested `SignInfo.user_info` fields used to
 read server-authoritative per-forum check-in state are adapted from the same
 TiebaLite commit.

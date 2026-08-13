@@ -65,7 +65,8 @@ Tieba cloud-favorite reads and guarded thread-detail mutations, authoritative
 per-forum follow/check-in state, confirmed forum and user follow/unfollow,
 target-bound server interaction restrictions, explicit single-forum check-in,
 and guarded account-bound poll voting. It also exposes
-guarded plain-text reply and new-topic creation for validation builds. Core
+guarded text and fixed-catalog classic-emoticon reply and new-topic creation for
+validation builds. Core
 single-flights equivalent check-in, cloud-favorite, interaction-permission, and
 poll-vote calls and
 serializes conflicting identities for the same resource. The
@@ -143,7 +144,7 @@ let newThread = try await authenticatedClient.submitNewThread(
         forumID: favoriteForumID,
         forumName: "swift",
         title: "Optional title",
-        content: "Plain-text body"
+        content: "Text body #(呵呵)"
     )
 )
 ```
@@ -330,11 +331,14 @@ not advertise a usable sign state; it is not permission to attempt a write.
   request or bounded write flight. Credential values are redacted from public
   debug descriptions and mirrors, and the FRS anti-CSRF value is not exposed by
   the public API.
-- Plain-text new topics use one signed HTTPS `/c/c/thread/add` form only after a
+- Text and fixed-catalog classic-emoticon new topics use one signed HTTPS
+  `/c/c/thread/add` form only after a
   fresh FRS response binds the expected UID, forum ID/name, trusted display name,
   and valid TBS. Titles are capped at 31 Swift characters and 124 UTF-8 bytes;
-  bodies use the 10,000-character/32 KiB reply bounds. Rich markers and
-  unsupported control characters are rejected. The minimal form omits
+  bodies use the 10,000-character/32 KiB reply bounds. Bodies may contain only
+  ordinary text and exact tokens from the compiled 50-name classic-emoticon
+  catalog; titles and all unsupported rich markers are rejected. Unsupported
+  control characters are also rejected. The minimal form omits
   hardware-derived and advertising fields,
   rejects every redirect, and has a 128 KiB response limit. Per-account writes
   are serialized; equal submission UUIDs share a flight, conflicting reuse is

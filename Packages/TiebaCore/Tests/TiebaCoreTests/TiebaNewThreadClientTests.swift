@@ -189,7 +189,7 @@ final class TiebaNewThreadClientTests: XCTestCase, @unchecked Sendable {
 
     await assertClientError(
       .invalidArgument(
-        "The new-thread title or content is invalid, too large, contains unsupported control characters, or contains a Tieba rich-content marker."
+        "The new-thread title or content is invalid, too large, contains unsupported control characters, or contains an unsupported Tieba rich-content marker."
       )
     ) {
       _ = try await client.verifyNewThreadVisibility(
@@ -281,7 +281,7 @@ final class TiebaNewThreadClientTests: XCTestCase, @unchecked Sendable {
   }
 
   func testSameSubmissionSharesOneFlightAndConflictingIdentityIsRejected() async throws {
-    let submission = makeSubmission()
+    let submission = makeSubmission(content: "e\u{301}")
     let transport = NewThreadStateTransport(forumID: forumID, blocksWrites: true)
     let client = TiebaAuthenticatedClient(transport: transport)
     let first = Task {
@@ -314,6 +314,22 @@ final class TiebaNewThreadClientTests: XCTestCase, @unchecked Sendable {
         credential: credential(),
         expectedUserID: firstUserID,
         submission: conflict
+      )
+    }
+    let canonicallyEquivalentConflict = TiebaNewThreadSubmission(
+      submissionID: submission.submissionID,
+      forumID: submission.forumID,
+      forumName: submission.forumName,
+      title: submission.title,
+      content: "\u{E9}"
+    )
+    XCTAssertEqual(submission.content, canonicallyEquivalentConflict.content)
+    XCTAssertNotEqual(submission, canonicallyEquivalentConflict)
+    await assertClientError(.newThreadSubmissionIDConflict) {
+      _ = try await client.submitNewThread(
+        credential: credential(),
+        expectedUserID: firstUserID,
+        submission: canonicallyEquivalentConflict
       )
     }
     await assertClientError(.newThreadSubmissionIDConflict) {

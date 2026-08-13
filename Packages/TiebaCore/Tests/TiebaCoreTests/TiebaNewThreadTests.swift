@@ -26,8 +26,9 @@ final class TiebaNewThreadTests: XCTestCase {
     XCTAssertFalse(TiebaNewThreadContentPolicy.isValidTitle(oversizedSingleCharacter))
     XCTAssertFalse(TiebaNewThreadContentPolicy.isValidTitle("line\nbreak"))
     XCTAssertFalse(TiebaNewThreadContentPolicy.isValidTitle("#(pic,1,2,3)"))
+    XCTAssertFalse(TiebaNewThreadContentPolicy.isValidTitle("#(呵呵)"))
 
-    XCTAssertTrue(TiebaNewThreadContentPolicy.isValidContent("正文\n第二行\t🙂"))
+    XCTAssertTrue(TiebaNewThreadContentPolicy.isValidContent("正文#(呵呵)#(哈哈)\n第二行\t🙂"))
     XCTAssertFalse(TiebaNewThreadContentPolicy.isValidContent(""))
     XCTAssertFalse(TiebaNewThreadContentPolicy.isValidContent("#(pic,1,2,3)"))
     XCTAssertFalse(TiebaNewThreadContentPolicy.isValidContent("unsafe\u{0}"))
@@ -61,7 +62,7 @@ final class TiebaNewThreadTests: XCTestCase {
   func testRequestUsesSignedHTTPSMinimalContractAndPreservesFormText() throws {
     let submission = makeSubmission(
       title: "题目 +%&=🙂",
-      content: "第一行\n第二行 +%&=🙂"
+      content: "第一行e\u{301}#(呵呵)\n第二行 +%&=🙂"
     )
     let request = try makeRequest(submission: submission)
     let parsed = try newThreadForm(request)
@@ -331,6 +332,99 @@ final class TiebaNewThreadTests: XCTestCase {
     )
   }
 
+  func testReadbackConfirmsStructuredType2And11EmoticonsAmongAdjacentText() throws {
+    let content = "前#(呵呵)#(哈哈)后"
+    let submission = makeSubmission(title: "A title", content: content)
+    let receipt = TiebaNewThreadReceipt(threadID: threadID, firstPostID: firstPostID)
+    let fragments = [
+      contentFragment(type: 0, text: "前"),
+      contentFragment(type: 2, c: "呵呵"),
+      contentFragment(type: 11, c: "哈哈"),
+      contentFragment(type: 0, text: "后"),
+    ]
+    XCTAssertEqual(
+      try TiebaAuthenticatedDecoder.verifiedNewThread(
+        from: newThreadPageResponse(
+          title: submission.title,
+          content: "unused",
+          contentFragments: fragments
+        ),
+        context: newThreadContext(),
+        submission: submission,
+        receipt: receipt
+      ),
+      receipt
+    )
+  }
+
+  func testReadbackRejectsUnknownWrongTypeAndType0FakeEmoticons() {
+    let content = "前#(呵呵)后"
+    let submission = makeSubmission(title: "A title", content: content)
+    let receipt = TiebaNewThreadReceipt(threadID: threadID, firstPostID: firstPostID)
+    for fragment in [
+      contentFragment(type: 2, c: "不存在"),
+      contentFragment(type: 3, c: "呵呵"),
+      contentFragment(type: 0, text: "#(呵呵)"),
+    ] {
+      XCTAssertThrowsError(
+        try TiebaAuthenticatedDecoder.verifiedNewThread(
+          from: newThreadPageResponse(
+            title: submission.title,
+            content: "unused",
+            contentFragments: [
+              contentFragment(type: 0, text: "前"), fragment,
+              contentFragment(type: 0, text: "后"),
+            ]
+          ),
+          context: newThreadContext(),
+          submission: submission,
+          receipt: receipt
+        )
+      ) { XCTAssertEqual($0 as? TiebaClientError, .invalidAuthenticatedResponse) }
+    }
+  }
+
+  func testReadbackComparesPlainTextByWireBytesWithoutNFCNormalization() {
+    let decomposed = "e\u{301}"
+    let precomposed = "\u{E9}"
+    XCTAssertEqual(decomposed, precomposed)
+    let submission = makeSubmission(title: "A title", content: decomposed)
+
+    XCTAssertThrowsError(
+      try TiebaAuthenticatedDecoder.verifiedNewThread(
+        from: newThreadPageResponse(title: submission.title, content: precomposed),
+        context: newThreadContext(),
+        submission: submission,
+        receipt: TiebaNewThreadReceipt(threadID: threadID, firstPostID: firstPostID)
+      )
+    ) { XCTAssertEqual($0 as? TiebaClientError, .invalidAuthenticatedResponse) }
+  }
+
+  func testReadbackPreservesExistingStructuredMentionEquivalence() throws {
+    let submission = makeSubmission(
+      title: "A title",
+      content: "@Target #(哈哈)"
+    )
+    let receipt = TiebaNewThreadReceipt(threadID: threadID, firstPostID: firstPostID)
+    XCTAssertEqual(
+      try TiebaAuthenticatedDecoder.verifiedNewThread(
+        from: newThreadPageResponse(
+          title: submission.title,
+          content: "unused",
+          contentFragments: [
+            contentFragment(type: 4, text: "@Target"),
+            contentFragment(type: 0, text: " "),
+            contentFragment(type: 11, c: "哈哈"),
+          ]
+        ),
+        context: newThreadContext(),
+        submission: submission,
+        receipt: receipt
+      ),
+      receipt
+    )
+  }
+
   func testReadbackRejectsForumAccountThreadTitleBodyAndAuthorMismatch() {
     let submission = makeSubmission(title: "A title", content: "body")
     let receipt = TiebaNewThreadReceipt(threadID: threadID, firstPostID: firstPostID)
@@ -476,6 +570,7 @@ final class TiebaNewThreadTests: XCTestCase {
     authorID: Int64? = nil,
     title: String,
     content: String,
+    contentFragments: [PbContent]? = nil,
     includesFirstPost: Bool = true
   ) -> PbPageResIdl {
     let resolvedUserID = userID ?? self.userID
@@ -507,7 +602,7 @@ final class TiebaNewThreadTests: XCTestCase {
     post.tid = resolvedThreadID
     post.authorID = resolvedAuthorID
     post.author = author
-    post.content = [fragment]
+    post.content = contentFragments ?? [fragment]
     var page = Page()
     page.currentPage = 1
     page.totalPage = 1
@@ -521,5 +616,17 @@ final class TiebaNewThreadTests: XCTestCase {
     var response = PbPageResIdl()
     response.data = data
     return response
+  }
+
+  private func contentFragment(
+    type: UInt32,
+    text: String = "",
+    c: String = ""
+  ) -> PbContent {
+    var fragment = PbContent()
+    fragment.type = type
+    fragment.text = text
+    fragment.c = c
+    return fragment
   }
 }

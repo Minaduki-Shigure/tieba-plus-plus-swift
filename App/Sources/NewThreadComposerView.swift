@@ -57,6 +57,7 @@ private struct NewThreadComposerContentView: View {
 
   @State private var title = ""
   @State private var content = ""
+  @State private var contentSelection = ComposerTextSelection.start
   @State private var didHydrateDraft = false
   @State private var pendingSubmission: NewThreadSubmission?
   @State private var isDiscardConfirmationPresented = false
@@ -64,6 +65,7 @@ private struct NewThreadComposerContentView: View {
   @State private var isLaunchingSubmission = false
   @State private var isCheckingVisibility = false
   @State private var errorMessage: String?
+  @State private var isEmoticonPickerPresented = false
   @State private var pendingConfirmedReceipt: NewThreadReceipt?
   @State private var deliveredReceipt: NewThreadReceipt?
   @State private var lifecycleGate = ReplyComposerLifecycleGate()
@@ -116,14 +118,14 @@ private struct NewThreadComposerContentView: View {
             .allowsHitTesting(false)
         }
 
-        TextEditor(text: $content)
-          .focused($focusedField, equals: .content)
-          .scrollContentBackground(.hidden)
-          .padding(.horizontal, 12)
-          .padding(.vertical, 8)
-          .disabled(!editorAllowsEditing)
-          .accessibilityLabel("主题正文")
-          .accessibilityIdentifier("new-thread-content")
+        ComposerTextEditor(
+          text: $content,
+          selection: $contentSelection,
+          isFocused: contentEditorIsFocused,
+          isEditable: editorAllowsEditing,
+          accessibilityLabel: "主题正文",
+          accessibilityIdentifier: "new-thread-content"
+        )
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .contentShape(Rectangle())
@@ -185,6 +187,17 @@ private struct NewThreadComposerContentView: View {
     .background(Color(uiColor: .systemBackground))
     .toolbar {
       ToolbarItemGroup(placement: .navigationBarTrailing) {
+        Button {
+          focusedField = nil
+          isEmoticonPickerPresented = true
+        } label: {
+          Image(systemName: "face.smiling")
+        }
+        .disabled(!editorAllowsEditing)
+        .accessibilityLabel("插入经典表情")
+        .help("插入经典表情")
+        .accessibilityIdentifier("new-thread-emoticon")
+
         Button {
           isDiscardConfirmationPresented = true
         } label: {
@@ -266,6 +279,10 @@ private struct NewThreadComposerContentView: View {
     } message: {
       Text(errorMessage ?? "发帖操作失败。")
     }
+    .sheet(isPresented: $isEmoticonPickerPresented, onDismiss: restoreContentEditorFocus) {
+      ClassicEmoticonPicker(onSelect: insertClassicEmoticon)
+        .presentationDetents([.medium, .large])
+    }
     .task {
       let currentLifecycleID = lifecycleGate.beginAppearance()
       deliverPendingConfirmedThreadIfActive()
@@ -304,11 +321,15 @@ private struct NewThreadComposerContentView: View {
         confirmationPreparationGate.cancel()
         pendingSubmission = nil
       }
+      if !presentation.allowsEditing {
+        isEmoticonPickerPresented = false
+      }
       resolveEntryRiskNoticeIfNeeded()
     }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
       confirmationPreparationGate.cancel()
       pendingSubmission = nil
+      isEmoticonPickerPresented = false
     }
     .onChange(of: showsPostAndReplyRiskNotice) { isEnabled in
       if !isEnabled, entryRiskNoticeGate.isPresented {
@@ -358,6 +379,19 @@ private struct NewThreadComposerContentView: View {
 
   private var presentation: NewThreadComposerPresentation {
     NewThreadComposerPresentation(state: entry.state)
+  }
+
+  private var contentEditorIsFocused: Binding<Bool> {
+    Binding(
+      get: { focusedField == .content },
+      set: { isFocused in
+        if isFocused {
+          focusedField = .content
+        } else if focusedField == .content {
+          focusedField = nil
+        }
+      }
+    )
   }
 
   private var titleIsWithinLimits: Bool {
@@ -472,6 +506,7 @@ private struct NewThreadComposerContentView: View {
     default:
       title = entry.draft?.title ?? ""
       content = entry.draft?.content ?? ""
+      contentSelection = ComposerTextSelection(location: content.utf16.count, length: 0)
       didHydrateDraft = true
     }
   }
@@ -654,6 +689,7 @@ private struct NewThreadComposerContentView: View {
         try await store.discardDraft(for: target)
         title = ""
         content = ""
+        contentSelection = .start
       } catch is CancellationError {
         return
       } catch {
@@ -669,6 +705,7 @@ private struct NewThreadComposerContentView: View {
         try await store.discardDraft(for: target)
         title = ""
         content = ""
+        contentSelection = .start
         pendingConfirmedReceipt = nil
         deliveredReceipt = nil
         focusedField = .title
@@ -684,6 +721,27 @@ private struct NewThreadComposerContentView: View {
     guard case .confirmed(let receipt) = entry.state, didHydrateDraft else { return }
     pendingConfirmedReceipt = receipt
     deliverPendingConfirmedThreadIfActive()
+  }
+
+  private func insertClassicEmoticon(_ token: String) {
+    guard
+      editorAllowsEditing,
+      let result = ComposerTextInsertionPolicy.replacingSelection(
+        in: content,
+        selection: contentSelection,
+        with: token
+      ),
+      result.text.count <= NewThreadContentPolicy.maximumCharacterCount,
+      result.text.utf8.count <= NewThreadContentPolicy.maximumUTF8ByteCount
+    else { return }
+    content = result.text
+    contentSelection = result.selection
+  }
+
+  private func restoreContentEditorFocus() {
+    if editorAllowsEditing {
+      focusedField = .content
+    }
   }
 
   private func persistAndDeactivate() {

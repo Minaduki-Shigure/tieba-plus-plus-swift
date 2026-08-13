@@ -1,4 +1,5 @@
 import SwiftUI
+import TiebaCore
 
 struct BrowseContentView: View {
   let contents: [BrowseContent]
@@ -190,7 +191,9 @@ struct BrowseContentView: View {
         fragment.link = url
         fragment.foregroundColor = accentColor
       case .emoticon(let name, _):
-        fragment = AttributedString(name)
+        fragment = AttributedString(
+          TiebaClassicEmoticonCatalog.token(for: name) ?? name
+        )
       case .unsupported(let label):
         fragment = AttributedString("[\(label)]")
       case .image, .video, .voice:

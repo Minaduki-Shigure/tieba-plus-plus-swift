@@ -61,6 +61,25 @@ public struct TiebaNewThreadSubmission:
       displayStyle: .struct
     )
   }
+
+  public static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.submissionID == rhs.submissionID
+      && lhs.forumID == rhs.forumID
+      && lhs.forumName == rhs.forumName
+      && lhs.title == rhs.title
+      && lhs.content.utf8.elementsEqual(rhs.content.utf8)
+  }
+
+  public func hash(into hasher: inout Hasher) {
+    hasher.combine(submissionID)
+    hasher.combine(forumID)
+    hasher.combine(forumName)
+    hasher.combine(title)
+    hasher.combine(content.utf8.count)
+    for byte in content.utf8 {
+      hasher.combine(byte)
+    }
+  }
 }
 
 public struct TiebaNewThreadReceipt: Sendable, Hashable, Codable {

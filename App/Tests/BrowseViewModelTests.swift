@@ -1340,6 +1340,21 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testInlineTextShowsCanonicalEmoticonTokenAndFallsBackForUnknownName() {
+    let text = BrowseContentView.inlineText(
+      [
+        .text("前"),
+        .emoticon(name: "滑稽", url: nil),
+        .text("中"),
+        .emoticon(name: "未知表情", url: nil),
+        .text("后"),
+      ]
+    )
+
+    XCTAssertEqual(String(text.characters), "前#(滑稽)中未知表情后")
+  }
+
+  @MainActor
   func testForumInitialLoadSucceeds() async throws {
     let service = ScriptedBrowseService()
     let forum = Fixtures.forum(name: "Swift")

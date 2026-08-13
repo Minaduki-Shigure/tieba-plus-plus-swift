@@ -2,8 +2,9 @@
 
 An independent, native SwiftUI client for browsing Baidu Tieba. The application
 code and assets are implemented independently from public protocol research;
-the minimal attributed protobuf schemas used for interoperability are documented
-in `Packages/TiebaCore/Sources/TiebaProto/NOTICE.md`.
+the attributed protobuf schemas and fixed classic-emoticon wire-name catalog
+used for interoperability are documented in
+`Packages/TiebaCore/Sources/TiebaProto/NOTICE.md`.
 
 ## Status
 
@@ -18,8 +19,8 @@ checks.
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, media preferences, followed-forum layout, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
 | Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
-| Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, plain-text topic/floor/nested replies, and plain-text new-topic creation are in device validation. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
-| TiebaLite parity | Current `main` source: about 76% of full product scope (estimated range 76–79%, with 21–24% remaining); anonymous reading and media: about 91–95%. The public `v0.59.0-alpha.1` IPA remains about 57–62% |
+| Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, and equivalent new-topic creation are in device validation. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
+| TiebaLite parity | Current `main` source: about 77% of full product scope (estimated range 77–80%, with 20–23% remaining); anonymous reading and media: about 91–95%. The public `v0.59.0-alpha.1` IPA remains about 57–62% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.59.0-alpha.1` (build 62); later `main` features require a tagged release |
 
 ### Release and validation
@@ -107,8 +108,12 @@ checks.
   anonymous PB thread/forum identity, then requires the existing authenticated
   UID/forum/thread preflight before the single write; an unresolvable deleted
   item sends no write. Logged-in thread and full nested-reply
-  pages also expose experimental, draft-backed plain-text composers for replying
-  to the topic, an ordinary floor, or a specific nested reply. The write is sent
+  pages also expose experimental, draft-backed composers for replying to the
+  topic, an ordinary floor, or a specific nested reply. A visible inline
+  nested-reply preview can open the same exact-target composer without first
+  opening the full reply page. The body supports ordinary text plus a fixed,
+  bundled catalog of 50 classic Tieba emoticon tokens selected at the current
+  text selection; it does not download or bundle remote emoticon artwork. The write is sent
   at most once, a valid server PID is read back by exact identity, and challenge,
   accepted-but-not-yet-visible, and unknown outcomes remain distinct. Inbox reply
   actions first relocate the exact ordinary post or child reply and recheck the
@@ -116,7 +121,7 @@ checks.
   legacy `quote_pid` and display payload never become a write target; failed
   relocation or a changed session opens no composer and dispatches no write.
   A loaded forum now also exposes an experimental native composer for a new
-  plain-text topic with an optional title. It binds the active account, exact
+  text-and-classic-emoticon topic with an optional title. It binds the active account, exact
   forum ID and canonical forum name through a fresh FRS preflight, persists the
   account-scoped draft before dispatch, sends one signed HTTPS write at most,
   and verifies the returned topic and first-floor IDs by authenticated readback.
@@ -171,7 +176,7 @@ checks.
   UID/session-lease race handling, target-bound interaction permissions,
   concern-feed, inbox summary, inbox
   navigation and reply-action rebinding, single-forum and foreground batch
-  check-in safety contracts, plain-text reply contracts, and plain-text
+  check-in safety contracts, text/classic-emoticon reply contracts, and equivalent
   new-topic and account-bound poll-vote contracts are
   covered by fixtures, while successful real-account self-profile and private
   reads, forum
@@ -212,7 +217,7 @@ checks.
   action can be set locally to publish, refresh, return to top, or hidden; the
   complete refresh, return-to-top, share, and available publish actions remain
   reachable from the More menu. A loaded forum offers an
-  experimental, account-bound plain-text new-topic composer with an optional
+  experimental, account-bound text-and-classic-emoticon new-topic composer with an optional
   title, persistent per-account draft, explicit publish confirmation, and no
   automatic retry; a signed-out composer remains read only and asks for login.
 - **Public information:** Forum introductions, statistics, rules, moderator
@@ -438,9 +443,12 @@ checks.
   independent local favorites archive. Successful authenticated reads and writes
   over the minimal HTTPS contracts still require disposable-account device
   validation.
-- **Plain-text replies:** Current `main` can reply to a topic, an ordinary floor,
+- **Text and classic-emoticon replies:** Current `main` can reply to a topic, an ordinary floor,
   or a specific nested reply, including one under the canonical first floor,
-  from native, draft-backed composers. Replying to the first-floor parent itself
+  from native, draft-backed composers. A visible inline nested-reply preview has
+  a direct exact-target reply action. Bodies may include only ordinary text and
+  the fixed 50-name classic-emoticon catalog; all other rich markers remain
+  invalid. Replying to the first-floor parent itself
   remains a topic reply rather than an ordinary-floor reply. Targets are rebuilt
   only from validated page models and rebound by an authenticated PB
   Page/Floor read before the single write. Drafts are isolated by account and
@@ -517,15 +525,15 @@ checks.
   implemented.
 - **Unsupported operations:** Guess-based removal of unresolvable cloud-favorite
   rows, bulk cloud/local synchronization, disagreement and other reaction types,
-  recommendation feedback, rich-media topic/reply creation, profile editing, content
+  recommendation feedback, image/voice and arbitrary rich-media topic/reply creation, profile editing, content
   deletion, native or credential-injected reporting, background or automatic check-in, notification mark-read/unread
   reconciliation, background notification polling, and moderation remain
   unavailable until their request contracts and recovery paths have been
   validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, weighted estimate, protocol constraints, and next milestones.
-  The current `main` source audit totals 76–79 of 100 weighted points, leaving
-  about 21–24%; its anonymous reading and media subtotal remains about 91–95%.
+  The current `main` source audit totals 77–80 of 100 weighted points, leaving
+  about 20–23%; its anonymous reading and media subtotal remains about 91–95%.
   This measures implemented end-to-end workflows with partial credit for
   device-validation gates; it is not a claim that every path is release-ready.
   The public `v0.59.0-alpha.1` IPA remains at the earlier 57–62% scope. The

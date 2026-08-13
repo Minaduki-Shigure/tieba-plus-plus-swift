@@ -607,6 +607,23 @@ struct ThreadView: View {
     }
   }
 
+  private func requestReply(
+    toCommentID commentID: Int64,
+    inParentPostID parentPostID: Int64
+  ) {
+    guard
+      let parentPost = viewModel.post(withID: parentPostID),
+      let comment = parentPost.inlineComments.first(where: { $0.id == commentID }),
+      let presentation = InlineCommentReplyPresentation(
+        thread: viewModel.thread,
+        parentPost: parentPost,
+        comment: comment,
+        replyEntriesVisible: replyEntriesVisible
+      )
+    else { return }
+    replyComposerContext = presentation.context
+  }
+
   private func consumeInboxReplyIntentIfReady() async {
     let pendingIntent = pendingInboxReplyIntent
     guard
@@ -730,7 +747,10 @@ struct ThreadView: View {
     }
   }
 
-  private func verifyReplyVisibility(_ receipt: TextReplyReceipt) async throws
+  private func verifyReplyVisibility(
+    _ receipt: TextReplyReceipt,
+    expectedContent: String
+  ) async throws
     -> TextReplyVisibilityConfirmation?
   {
     switch receipt {
@@ -741,7 +761,10 @@ struct ThreadView: View {
         post.threadID == viewModel.thread.id,
         post.id != viewModel.thread.firstPostID,
         post.floor > 1,
-        let content = TextReplyVisibilityProof.exactPlainText(from: post.contents)
+        let content = TextReplyVisibilityProof.exactPlainText(
+          from: post.contents,
+          matching: expectedContent
+        )
       else { return nil }
       return TextReplyVisibilityConfirmation(
         created: .post(postID: post.id, floor: post.floor),
@@ -756,9 +779,29 @@ struct ThreadView: View {
         ),
         comment.id == subpostID,
         comment.threadID == viewModel.thread.id,
-        comment.parentPostID == parentPostID,
-        let content = TextReplyVisibilityProof.exactPlainText(from: comment.contents)
+        comment.parentPostID == parentPostID
       else { return nil }
+      let content: String?
+      guard let context = replyComposerContext else { return nil }
+      switch context.target.destination {
+      case .subpost(let expectedParentPostID, _):
+        guard expectedParentPostID == parentPostID else { return nil }
+        guard let expectedReplyToUserID = context.replyingToUserID else { return nil }
+        content = TextReplyVisibilityProof.exactNestedReplyBody(
+          from: comment,
+          expectedReplyToUserID: expectedReplyToUserID,
+          matching: expectedContent
+        )
+      case .post(let expectedParentPostID):
+        guard expectedParentPostID == parentPostID else { return nil }
+        content = TextReplyVisibilityProof.exactPlainText(
+          from: comment.contents,
+          matching: expectedContent
+        )
+      case .thread:
+        return nil
+      }
+      guard let content else { return nil }
       return TextReplyVisibilityConfirmation(
         created: .subpost(parentPostID: parentPostID, subpostID: subpostID),
         authorUserID: comment.authorID,
@@ -873,6 +916,14 @@ struct ThreadView: View {
                     requestReply: replyEntriesVisible ? {
                       requestReply(to: firstPost)
                     } : nil,
+                    requestInlineCommentReply: replyEntriesVisible
+                      ? { comment in
+                        requestReply(
+                          toCommentID: comment.id,
+                          inParentPostID: firstPost.id
+                        )
+                      }
+                      : nil,
                     reportThread: viewModel.thread,
                     reportTarget: isPureReadingMode
                       ? nil
@@ -962,6 +1013,14 @@ struct ThreadView: View {
                     requestReply: replyEntriesVisible ? {
                       requestReply(to: post)
                     } : nil,
+                    requestInlineCommentReply: replyEntriesVisible
+                      ? { comment in
+                        requestReply(
+                          toCommentID: comment.id,
+                          inParentPostID: post.id
+                        )
+                      }
+                      : nil,
                     reportThread: viewModel.thread,
                     reportTarget: isPureReadingMode
                       ? nil
@@ -1646,6 +1705,7 @@ private struct PostView: View {
   let cloudFavoriteTarget: ThreadCloudFavoriteTarget?
   let requestCloudFavoriteAction: (ThreadCloudFavoritePendingAction) -> Void
   let requestReply: (() -> Void)?
+  let requestInlineCommentReply: ((BrowseComment) -> Void)?
   let reportThread: BrowseThread
   let reportTarget: ContentReportTarget?
   let openComments: (Int64?) -> Void
@@ -1714,6 +1774,19 @@ private struct PostView: View {
         InlineCommentPreviewCard(
           presentation: presentation,
           openComments: openComments,
+          replyPresentation: { comment in
+            InlineCommentReplyPresentation(
+              thread: reportThread,
+              parentPost: post,
+              comment: comment,
+              replyEntriesVisible: requestInlineCommentReply != nil
+            )
+          },
+          requestReply: { comment in
+            if let requestInlineCommentReply {
+              requestInlineCommentReply(comment)
+            }
+          },
           reportTarget: { comment in
             guard !isPureReadingMode else { return nil }
             return ContentReportTarget(

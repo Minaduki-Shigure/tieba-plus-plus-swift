@@ -413,8 +413,8 @@ an account switch must invalidate or epoch-guard stale batch results so they
 cannot overwrite a mutation or the new account's state.
 
 Follow, unfollow, check-in, poll voting, topic, post, or nested-reply approval or
-cancellation, and each supported plain-text topic, floor, or nested-reply
-submission, plus plain-text new-topic creation, all require explicit user
+cancellation, and each supported text/classic-emoticon topic, floor, or nested-reply
+submission, plus equivalent new-topic creation, all require explicit user
 confirmation. For reply and new-topic creation, this confirmation must bind an
 immutable target-and-content snapshot immediately before dispatch. Editing,
 dismissing the confirmation, changing the account session, or leaving the page
@@ -424,6 +424,20 @@ scheduled, and batch check-in are deliberately unsupported. `disagree` or
 downvote, rich-media topic/reply creation, editing, deletion, native reporting, and
 every other authenticated content write remain unsupported and must not be
 inferred from the approval, reply, or new-topic endpoints.
+
+Text and fixed-catalog classic-emoticon replies use only the existing signed
+protobuf `309731` endpoint for topic, ordinary-floor, and nested-reply targets.
+The composer accepts ordinary text plus exact `#(name)` tokens from the compiled
+50-name catalog; unknown, malformed, nested, image, `reply`, and every other
+user-supplied rich marker fail closed before a request is built. A visible inline
+nested-reply preview can open the same composer only after the current post
+snapshot rebinds one unique visible comment to its thread and parent IDs. For a
+nested write, the protocol-owned `reply` marker is built only from freshly read
+target identity fields, and marker separators or parentheses in those fields
+invalidate the response rather than being interpolated. A positive receipt is
+confirmed by one exact-ID readback whose text bytes and type-2/type-11 emoticon
+tokens match the frozen submission; text that merely resembles an emoticon is
+not equivalent. No dispatched write is automatically retried.
 
 Poll voting requires a complete validated BDUSS/STOKEN session and a separate
 authenticated PB Page read. That response, rather than the anonymous result card,
@@ -460,7 +474,7 @@ rotation. Until a disposable account validates minimal-field acceptance and the
 success, rejection, uncertain, concurrency, cancellation, and lease-race cases,
 poll voting remains a validation-build feature.
 
-Plain-text new-topic creation requires a validated complete BDUSS/STOKEN session
+Text and fixed-catalog classic-emoticon new-topic creation requires a validated complete BDUSS/STOKEN session
 and a fresh authenticated FRS preflight binding the exact UID, positive forum ID,
 canonical forum name, trusted display name, and valid TBS. It may then send at
 most one signed HTTPS POST to `https://tiebac.baidu.com/c/c/thread/add`. The form
@@ -471,15 +485,19 @@ OAID, nonempty CUID/ZID, model, screen, location, installation history,
 advertising data, or randomized telemetry, and every redirect is rejected.
 
 Titles are optional and bounded to 31 Swift characters and 124 UTF-8 bytes;
-bodies use the reply policy's 10,000-character and 32 KiB limits. Titles reject
-control characters; bodies preserve CR, LF, and tab while rejecting other
-unsupported controls. Tieba rich-content markers are rejected. An identical submission
+bodies use the reply policy's 10,000-character and 32 KiB wire-text limits. Titles reject
+control characters and all markers; bodies preserve CR, LF, and tab while rejecting other
+unsupported controls. Only the fixed compiled classic-emoticon catalog may emit
+complete `#(name)` tokens. Unknown, malformed, nested, image, `reply`, and every
+other user-supplied rich-content marker are rejected without normalization. The
+catalog contains names only: no remote or copied emoticon artwork is bundled or
+downloaded. An identical submission
 UUID shares one owner, conflicting reuse fails, and all new-topic writes for one
 UID are serialized. Cancellation before dispatch performs no write. Once the
 write is dispatched, it is never automatically retried: an unparseable receipt,
 transport loss, or mismatched authenticated readback becomes an unknown outcome.
 A positive TID/PID is confirmed only by an exact account, forum, thread, first-
-floor author, explicit-title, and body match. A missing first floor remains
+floor author, explicit-title, and structured text/emoticon body match. A missing first floor remains
 accepted-awaiting-visibility; an untitled topic may accept a server-generated
 display title only when every other proof matches.
 
@@ -1355,8 +1373,8 @@ switch to a different UID while reads or writes are in flight. It must also
 confirm that shared batch reads do not duplicate requests, scope removal stops
 protecting removed targets, a late batch cannot overwrite a confirmed write or a
 new account, signed-out browsing makes no authenticated call, inline previews
-remain static, and complete-page parent and child controls both require explicit
-confirmation. Check-in validation must additionally cover an unfollowed forum,
+expose no approval mutation, and complete-page parent and child controls both
+require explicit confirmation. Check-in validation must additionally cover an unfollowed forum,
 missing sign state, already-signed idempotence, returned-UID mismatch, and the
 same-forum follow/check-in exclusion rule. Cloud-favorite validation must cover
 list and thread-detail remove, add, saved-position update, an unresolvable deleted
@@ -1366,12 +1384,18 @@ failure, an uncertain write followed by exactly one readback and no second write
 nominal success followed by mandatory readback, identical-operation sharing,
 conflicting-operation read-only reconciliation, logout, same-UID session
   rotation, and a switch to another UID while either read or write is in flight.
-Plain-text new-topic validation must additionally cover titled and untitled
-topics, Chinese/emoji/newline/form-reserved characters, exact forum and author
+Text/classic-emoticon new-topic validation must additionally cover titled and untitled
+topics, Chinese/Unicode/newline/form-reserved characters, all 50 catalog names,
+type-2/type-11 structured readback, exact forum and author
 binding, server-generated untitled display titles, challenge and moderation
 delay, pre-dispatch cancellation, post-dispatch transport loss, foreground and
 background transitions, same-UID credential rotation, account switching, and
 proof that every submission dispatches at most one write.
+Text/classic-emoticon reply validation must cover all three targets, the inline
+preview entry, current-snapshot rebinding, all 50 catalog names, type-2/type-11
+structured readback, type-0 lookalikes, unsafe reply-marker identity fields,
+pre-dispatch cancellation, uncertain transport failure followed by exactly one
+readback and no second write, session rotation, and account switching.
 Poll validation must additionally cover authoritative option IDs and selection
 state, single- and multiple-choice cardinality, open, closed, and already-voted
 polls, malformed or changed options, minimum-field command `309006` acceptance,

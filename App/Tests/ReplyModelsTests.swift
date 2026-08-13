@@ -130,6 +130,37 @@ final class ReplyModelsTests: XCTestCase {
     )
   }
 
+  func testExactPostSubpostFactoryRequiresCurrentCommentSnapshot() throws {
+    let thread = replyThread()
+    let comment = replyComment(id: 702, threadID: 70, parentPostID: 701)
+    let parent = replyPost(
+      id: 701,
+      threadID: 70,
+      floor: 2,
+      inlineComments: [comment]
+    )
+
+    let context = try XCTUnwrap(
+      TextReplyComposerContext(
+        thread: thread,
+        parentPost: parent,
+        comment: comment
+      )
+    )
+    XCTAssertEqual(
+      context.target.destination,
+      .subpost(parentPostID: 701, subpostID: 702)
+    )
+    XCTAssertEqual(context.replyingToUserID, comment.authorID)
+    XCTAssertNil(
+      TextReplyComposerContext(
+        thread: thread,
+        parentPost: parent,
+        comment: replyComment(id: 703, threadID: 70, parentPostID: 701)
+      )
+    )
+  }
+
   func testComposerContextKeepsDisplayMetadataOutOfTargetIdentity() throws {
     let thread = replyThread()
     let first = try XCTUnwrap(
@@ -424,7 +455,8 @@ private func replyPost(
   threadID: Int64,
   floor: Int,
   authorName: String = "Author",
-  authorUsername: String = "author-id"
+  authorUsername: String = "author-id",
+  inlineComments: [BrowseComment] = []
 ) -> BrowsePost {
   BrowsePost(
     id: id,
@@ -437,7 +469,8 @@ private func replyPost(
     nestedReplyCount: 0,
     isThreadAuthor: floor == 1,
     contents: [.text("post")],
-    authorUsername: authorUsername
+    authorUsername: authorUsername,
+    inlineComments: inlineComments
   )
 }
 

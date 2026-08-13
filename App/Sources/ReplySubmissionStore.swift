@@ -483,7 +483,7 @@ final class TextReplySubmissionStore {
     }
     guard
       confirmation.authorUserID == lease.userID,
-      confirmation.content == draft.content
+      confirmation.content.utf8.elementsEqual(draft.content.utf8)
     else {
       throw TextReplySubmissionError.invalidSubmission
     }

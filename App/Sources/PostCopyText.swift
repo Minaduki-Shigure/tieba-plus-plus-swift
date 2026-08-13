@@ -1,4 +1,5 @@
 import Foundation
+import TiebaCore
 
 enum PostCopyText {
   static func text(threadTitle: String?, post: BrowsePost) -> String? {
@@ -84,7 +85,7 @@ enum BrowseContentCopyText {
     case .link(let label, let url):
       label.isEmpty ? url.host ?? "[链接]" : label
     case .emoticon(let name, _):
-      name
+      TiebaClassicEmoticonCatalog.token(for: name) ?? name
     case .unsupported(let label):
       "[\(label)]"
     case .image:
