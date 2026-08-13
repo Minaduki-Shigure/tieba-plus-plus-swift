@@ -70,7 +70,7 @@ struct FollowedForumsView: View {
 
   private var forumList: some View {
     let projection = viewModel.forumProjection
-    ScrollView {
+    return ScrollView {
       LazyVStack(spacing: 0) {
         if !projection.pinned.isEmpty {
           groupHeader("置顶", systemImage: "pin.fill")
