@@ -44,7 +44,8 @@ enum ComposerTextInsertionPolicy {
     guard
       !insertion.isEmpty,
       selection.isValid(for: text),
-      let range = Range(selection.nsRange, in: text)
+      let range = Range(selection.nsRange, in: text),
+      NSRange(range, in: text) == selection.nsRange
     else { return nil }
 
     let updated = text.replacingCharacters(in: range, with: insertion)

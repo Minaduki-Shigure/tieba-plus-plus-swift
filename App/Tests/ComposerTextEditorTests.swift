@@ -63,6 +63,13 @@ final class ComposerTextEditorTests: XCTestCase {
         with: "#(哈哈)"
       )
     )
+    XCTAssertNil(
+      ComposerTextInsertionPolicy.replacingSelection(
+        in: "😀",
+        selection: ComposerTextSelection(location: 0, length: 1),
+        with: "#(哈哈)"
+      )
+    )
   }
 
   func testCatalogRejectsUnknownOrNonCanonicalNamesBeforeInsertion() {
