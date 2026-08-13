@@ -347,8 +347,9 @@ The account unread summary uses `POST https://tiebac.baidu.com/c/s/msg` with a
 signed form restricted to BDUSS, `_client_version=8.2.2`, and `bookmark=1` plus
 the generated signature. It sends no Cookie, STOKEN, UID header, or Android
 device and telemetry fields. The JSON body is limited to 64 KiB and strictly
-decodes bounded integer `replyme`, `atme`, and optional `fans` values. The
-returned UID is explicitly the caller's expected-UID context because this
+decodes bounded integer `replyme`, `atme`, and optional `fans` values; an absent
+or null `fans` field remains unavailable rather than becoming zero. The returned
+UID is explicitly the caller's expected-UID context because this
 response does not independently prove an account identity; the application must
 still bind the result to its current session lease.
 

@@ -18,6 +18,16 @@ final class TiebaNotificationAccountMappingTests: XCTestCase {
     XCTAssertEqual(mapped.totalCount, 7)
   }
 
+  func testMapsMissingFanReminderAsUnavailable() throws {
+    let mapped = try TiebaCoreAccountService.inboxUnreadSummaryData(
+      TiebaInboxUnreadSummary(userID: 7, replyCount: 3, mentionCount: 4),
+      expectedUserID: 7
+    )
+
+    XCTAssertNil(mapped.fanCount)
+    XCTAssertEqual(mapped.totalCount, 7)
+  }
+
   func testRejectsCrossAccountAndInvalidInboxUnreadSummaries() {
     XCTAssertThrowsError(
       try TiebaCoreAccountService.inboxUnreadSummaryData(
@@ -34,6 +44,18 @@ final class TiebaNotificationAccountMappingTests: XCTestCase {
     XCTAssertThrowsError(
       try TiebaCoreAccountService.inboxUnreadSummaryData(
         TiebaInboxUnreadSummary(userID: 7, replyCount: -1, mentionCount: 2),
+        expectedUserID: 7
+      )
+    ) { error in
+      XCTAssertEqual(
+        error.localizedDescription,
+        "贴吧返回了无效的未读消息计数，请重新加载后再试。"
+      )
+    }
+
+    XCTAssertThrowsError(
+      try TiebaCoreAccountService.inboxUnreadSummaryData(
+        TiebaInboxUnreadSummary(userID: 7, replyCount: 1, mentionCount: 2, fanCount: -1),
         expectedUserID: 7
       )
     ) { error in

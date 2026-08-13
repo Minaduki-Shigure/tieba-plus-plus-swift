@@ -17,7 +17,7 @@ checks.
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, media preferences, followed-forum layout, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
-| Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with an account-bound unread badge and authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
+| Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, plain-text topic/floor/nested replies, and plain-text new-topic creation are in device validation; other writes stay disabled |
 | TiebaLite parity | Current `main` source: about 75% of full product scope (estimated range 75–78%, with 22–25% remaining); anonymous reading and media: about 91–95%. The public `v0.59.0-alpha.1` IPA remains about 57–62% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.59.0-alpha.1` (build 62); later `main` features require a tagged release |
@@ -138,9 +138,12 @@ checks.
   an uncertain outcome is never retried. The App accepts the result only while
   the initiating `userID + sessionRevision` lease remains current. Real-account
   success and failure behavior remains a disposable-account device-validation gate.
-  The account page also reads TiebaLite's reply-plus-mention summary on demand
-  and displays it beside the message entry. This summary is memory-only, bound
-  to the exact account lease, and never cleared locally when the entry opens.
+  The account page also reads Tieba's reply, mention, and optional fan-reminder
+  summary on demand. Reply plus mention remains the message badge; a separate
+  fan-reminder entry shows the server count only when that field is present and
+  opens the existing credential-free public follower list. This summary is
+  memory-only, bound to the exact account lease, refreshed when the account page
+  returns, and never cleared locally when either entry opens.
   Visible topic and floor text, inline nested-reply previews, and parent and
   child rows on a full nested-reply page now open one shared transient selection
   panel from their context menus. It reuses the existing public-text projection,
@@ -400,11 +403,14 @@ checks.
   first successful read it uses an empty snapshot. This is a presentation
   preference, not a confidentiality or access-control boundary. The account page
   separately requests an unfiltered foreground unread summary and shows the sum of
-  `replyme + atme` beside the message entry; the optional `fans` count is parsed
-  but is not included in that badge. A zero count is hidden and larger counts
-  are capped visually while accessibility retains the exact value. The badge is
-  never cleared locally when the inbox opens and is discarded on logout,
-  account switching, or same-UID credential rotation.
+  `replyme + atme` beside the message entry. The optional `fans` field remains
+  separate: when present, it drives a distinct fan-reminder entry that opens the
+  existing credential-free public follower list; when absent, the App does not
+  infer zero. Zero counts hide their badges and larger counts are capped visually
+  while accessibility retains the exact value. Neither entry clears a count
+  locally when opened, and the whole snapshot is discarded on logout, account
+  switching, or same-UID credential rotation. No local baseline is used to infer
+  new or lost followers.
 - **Concern feed:** Logged-in Explore adds a foreground-only concern channel.
   Page-style preloading cannot start it: the request begins only after the user
   selects the channel. Refresh replaces the snapshot; load-more preserves the

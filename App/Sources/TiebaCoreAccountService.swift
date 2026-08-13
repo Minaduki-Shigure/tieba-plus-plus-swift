@@ -1867,8 +1867,11 @@ struct TiebaCoreAccountService: AccountService {
     guard summary.userID == expectedUserID, expectedUserID > 0 else {
       throw BrowseError.unavailable("贴吧返回了不匹配的未读消息摘要，请重新加载后再试。")
     }
-    let counts = [summary.replyCount, summary.mentionCount, summary.fanCount]
-    guard counts.allSatisfy({ (0...Int(Int32.max)).contains($0) }) else {
+    let requiredCounts = [summary.replyCount, summary.mentionCount]
+    guard
+      requiredCounts.allSatisfy({ (0...Int(Int32.max)).contains($0) }),
+      summary.fanCount.map({ (0...Int(Int32.max)).contains($0) }) ?? true
+    else {
       throw BrowseError.unavailable("贴吧返回了无效的未读消息计数，请重新加载后再试。")
     }
     return InboxUnreadSummary(

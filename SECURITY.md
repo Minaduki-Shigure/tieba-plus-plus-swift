@@ -319,15 +319,22 @@ contains only BDUSS, `_client_version=8.2.2`, `bookmark=1`, and `sign`. It sends
 no Cookie, STOKEN, client UID header, CUID, hardware identifier, model, screen
 metadata, or telemetry. The response is capped at 64 KiB and must contain a zero
 error code plus bounded nonnegative integer `replyme` and `atme` values;
-`fans` is optional, is validated when present, and is not included in the badge.
+`fans` is optional, remains unavailable when absent or null, and is validated
+when present. It is excluded from the message badge and may only drive a
+separate fan-reminder presentation for the same active account.
 Because the envelope does not independently identify the account, its UID is
 request context rather than server proof. The App checks the same
 `userID + sessionRevision` lease before and after the request and synchronously clears the
 snapshot on logout, switching, or same-UID credential rotation. The inbox
 performs no background polling, explicit mark-read request, or local badge
-clearing. An implicit server-side unread change caused by summary or list
-retrieval remains a documented real-device validation question. Local inbox
-filtering must not alter the raw `replyme + atme` summary or its badge.
+clearing. The fan-reminder entry opens the existing credential-free public
+follower list, not an authenticated notification endpoint; opening it does not
+locally clear `fans`. No baseline is persisted or compared, and the App does not
+claim that a reminder count identifies new followers or that a profile-count
+change identifies follows or unfollows. An implicit server-side unread change
+caused by summary or list retrieval remains a documented real-device validation
+question. Local inbox filtering must not alter the raw `replyme + atme` summary,
+the optional `fans` value, or either badge.
 
 Before any forum write, the fresh FRS probe must bind the response user ID,
 forum ID, normalized forum name, `is_like`, and `anti.tbs` to the requested

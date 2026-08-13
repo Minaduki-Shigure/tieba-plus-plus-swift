@@ -23,11 +23,11 @@ enum TiebaInboxUnreadSummaryDecoder {
 
     let replyCount = try count(message["replyme"])
     let mentionCount = try count(message["atme"])
-    let fanCount: Int
+    let fanCount: Int?
     if let rawFanCount = message["fans"], !(rawFanCount is NSNull) {
       fanCount = try count(rawFanCount)
     } else {
-      fanCount = 0
+      fanCount = nil
     }
 
     return TiebaInboxUnreadSummary(

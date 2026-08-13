@@ -146,7 +146,7 @@ struct InboxUnreadSummary: Hashable, Sendable {
   let userID: Int64
   let replyCount: Int
   let mentionCount: Int
-  let fanCount: Int
+  let fanCount: Int?
 
   var totalCount: Int {
     let replyCount = max(replyCount, 0)

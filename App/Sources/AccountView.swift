@@ -73,7 +73,7 @@ struct AccountView: View {
     }
     .task {
       profileSummaryViewModel.loadIfNeeded()
-      unreadSummaryViewModel.loadIfNeeded()
+      unreadSummaryViewModel.reload()
       await viewModel.loadIfNeeded()
     }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
@@ -253,6 +253,21 @@ struct AccountView: View {
               messageNavigationLabel
             }
 
+            NavigationLink {
+              UserRelationsView(
+                userID: activeAccount.id,
+                initialKind: .followers,
+                service: browseService,
+                historyRepository: historyRepository,
+                favoritesRepository: favoritesRepository,
+                searchHistoryRepository: searchHistoryRepository
+              )
+            } label: {
+              fanReminderNavigationLabel
+            }
+            .disabled(viewModel.isMutating)
+            .accessibilityHint("打开公开粉丝列表")
+
             if activeAccount.hasFullCredentials {
               NavigationLink {
                 CloudFavoritesView(
@@ -335,6 +350,14 @@ struct AccountView: View {
     return summary.userID != activeUserID
   }
 
+  private var fanReminderPresentation: FanReminderPresentation? {
+    guard
+      let activeUserID = viewModel.activeAccount?.id,
+      let summary = unreadSummaryViewModel.summary
+    else { return nil }
+    return FanReminderPresentation(summary: summary, activeUserID: activeUserID)
+  }
+
   private var messageNavigationLabel: some View {
     let presentation = unreadBadgePresentation
     return HStack(spacing: 10) {
@@ -394,6 +417,76 @@ struct AccountView: View {
       return unreadBadgePresentation.accessibilityValue
     }
   }
+
+  private var fanReminderNavigationLabel: some View {
+    let presentation = fanReminderPresentation
+    return HStack(spacing: 10) {
+      Label("粉丝提醒", systemImage: "person.2")
+      Spacer(minLength: 8)
+      if let badgeText = presentation?.badgeText {
+        Text(badgeText)
+          .font(.caption2.weight(.semibold))
+          .monospacedDigit()
+          .foregroundStyle(.white)
+          .lineLimit(1)
+          .padding(.horizontal, 7)
+          .frame(minWidth: 24, minHeight: 20)
+          .background(Color.red, in: Capsule())
+          .accessibilityHidden(true)
+      }
+      if unreadSummaryViewModel.state == .loading
+        || (hasUnreadSummaryAccountMismatch && viewModel.isMutating)
+      {
+        ProgressView()
+          .controlSize(.small)
+          .frame(minWidth: 24, minHeight: 20)
+          .accessibilityHidden(true)
+      } else if unreadSummaryViewModel.state.isFailed || hasUnreadSummaryAccountMismatch {
+        Image(systemName: "exclamationmark.triangle.fill")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .frame(minWidth: 24, minHeight: 20)
+          .accessibilityHidden(true)
+      } else if
+        unreadSummaryViewModel.state == .loaded,
+        presentation?.isUnavailable == true
+      {
+        Image(systemName: "questionmark.circle")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .frame(minWidth: 24, minHeight: 20)
+          .accessibilityHidden(true)
+      }
+    }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("粉丝提醒")
+    .accessibilityValue(fanReminderAccessibilityValue)
+  }
+
+  private var fanReminderAccessibilityValue: String {
+    if hasUnreadSummaryAccountMismatch {
+      return viewModel.isMutating ? "正在切换账户" : "账户状态已变化，请重新加载"
+    }
+    if unreadSummaryViewModel.state.isFailed {
+      guard let presentation = fanReminderPresentation else {
+        return "粉丝提醒暂不可用"
+      }
+      return presentation.accessibilityValue(refreshFailed: true)
+    }
+    switch unreadSummaryViewModel.state {
+    case .loading:
+      guard let presentation = fanReminderPresentation else {
+        return "正在读取粉丝提醒"
+      }
+      return "\(presentation.accessibilityValue)，正在更新"
+    case .failed:
+      return "粉丝提醒暂不可用"
+    case .idle:
+      return "粉丝提醒尚未读取"
+    case .loaded:
+      return fanReminderPresentation?.accessibilityValue ?? "服务端未提供粉丝提醒计数"
+    }
+  }
 }
 
 struct InboxUnreadBadgePresentation: Equatable, Sendable {
@@ -424,6 +517,39 @@ struct InboxUnreadBadgePresentation: Equatable, Sendable {
 
   var accessibilityValue: String {
     count == 0 ? "没有未读回复或提及" : "\(count) 条未读回复或提及"
+  }
+
+  func accessibilityValue(refreshFailed: Bool) -> String {
+    refreshFailed ? "\(accessibilityValue)，当前更新失败" : accessibilityValue
+  }
+}
+
+struct FanReminderPresentation: Equatable, Sendable {
+  let count: Int?
+
+  init(summary: InboxUnreadSummary) {
+    count = summary.fanCount.map { max($0, 0) }
+  }
+
+  init?(summary: InboxUnreadSummary, activeUserID: Int64) {
+    guard summary.userID == activeUserID else { return nil }
+    self.init(summary: summary)
+  }
+
+  init(count: Int) {
+    self.count = max(count, 0)
+  }
+
+  var badgeText: String? {
+    guard let count, count > 0 else { return nil }
+    return count > 99 ? "99+" : String(count)
+  }
+
+  var isUnavailable: Bool { count == nil }
+
+  var accessibilityValue: String {
+    guard let count else { return "服务端未提供粉丝提醒计数" }
+    return count == 0 ? "没有粉丝提醒" : "\(count) 条粉丝提醒"
   }
 
   func accessibilityValue(refreshFailed: Bool) -> String {

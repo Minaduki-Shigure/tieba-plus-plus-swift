@@ -352,13 +352,13 @@ public struct TiebaInboxUnreadSummary: Sendable, Hashable {
   public let userID: Int64
   public let replyCount: Int
   public let mentionCount: Int
-  public let fanCount: Int
+  public let fanCount: Int?
 
   public init(
     userID: Int64,
     replyCount: Int,
     mentionCount: Int,
-    fanCount: Int = 0
+    fanCount: Int? = nil
   ) {
     self.userID = userID
     self.replyCount = replyCount

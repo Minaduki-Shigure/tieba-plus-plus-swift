@@ -74,6 +74,9 @@ inside the existing server-write credit rather than adding a weighted point.
 The followed-forum avatar and slogan presentation similarly preserves optional
 metadata that the existing authenticated response and Core decoder already
 carried. It adds neither a data source nor a workflow, so it adds no weighted point.
+The separate fan-reminder entry consumes the existing optional `fans` field and
+opens the already credited public follower list. It adds no endpoint, background
+work, persistence, or weighted point.
 
 ## Available
 
@@ -232,9 +235,10 @@ the source metadata is updated to that tested IPA.
   bounded pagination, safe thread navigation, explicit reply actions bound to
   the active account lease, and a local content/sender filter projection that
   preserves the raw message pages
-- Foreground, memory-only reply-plus-mention summary beside the account page's
-  message entry, with exact account-lease isolation, no local clearing, a
-  privacy-minimized signed HTTPS form, and no background polling
+- Foreground, memory-only reply, mention, and optional fan-reminder summary on
+  the account page, with separate message and fan badges, an existing public
+  follower-list destination, exact account-lease isolation, no local clearing,
+  a privacy-minimized signed HTTPS form, and no background polling
 - Exact nested-notification positioning through the public child-only resolver,
   with parent locking, bidirectional pagination, history continuity, and an
   owning-thread fallback when the target is unavailable; a reply action opens the
@@ -306,8 +310,10 @@ the source metadata is updated to that tested IPA.
    identical-selection sharing, conflicting-selection read-only recovery,
    cancellation, account switching, and same-UID credential rotation
 7. Real-device validation of the minimal HTTPS ReplyMe, AtMe, and `/c/s/msg`
-   summary requests, including the summary field-deletion matrix, count parity,
-   and whether either summary or list retrieval changes server unread state,
+   summary requests, including the summary field-deletion matrix, reply, mention,
+   and optional fan-reminder count parity, whether `fans` denotes a pending
+   reminder count, and whether either summary or list retrieval changes server
+   unread state,
    plus ordinary post and child-reply action relocation, unavailable targets,
    and account switching before composer presentation
 8. Real-device validation of the minimal authenticated self-profile request,
@@ -371,8 +377,10 @@ match before opening the existing composer. A missing or mismatched target,
 cancellation, or session change opens no composer and sends no write; normal
 fallback navigation remains available. Once presented, the existing draft,
 explicit confirmation, authenticated target rebinding, and non-retry outcome
-rules apply unchanged. A separate `/c/s/msg` request reads a bounded
-`replyme + atme` count for the account-page badge. Its form contains only BDUSS,
+rules apply unchanged. A separate `/c/s/msg` request reads bounded `replyme`,
+`atme`, and optional `fans` counts for the account page. Reply plus mention drives
+the message badge; the optional fan count drives a separate public-follower-list
+entry. Its form contains only BDUSS,
 client version, `bookmark`, and signature; it sends no Cookie, STOKEN, UID
 header, or device identifier. The response does not prove a UID, so Core labels
 it with the requested UID and the App checks the exact
@@ -380,7 +388,9 @@ it with the requested UID and the App checks the exact
 the background, clear the badge locally, or send a mark-read request. Whether
 summary or list retrieval has an implicit server-side read effect remains a
 physical-device validation item. The unread summary continues to use the raw
-server `replyme + atme` counts and is not changed by local inbox filtering.
+server counts and is not changed by local inbox filtering. The App keeps a
+missing `fans` field distinct from zero, stores no follower baseline, and does
+not infer new or lost followers from reminder or profile-count changes.
 
 The concern feed uses HTTPS protobuf command `309474` only after the user selects
 its Explore channel; page-style TabView preloading and inactive account changes

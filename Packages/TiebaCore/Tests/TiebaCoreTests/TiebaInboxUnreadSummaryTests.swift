@@ -82,7 +82,7 @@ final class TiebaInboxUnreadSummaryTests: XCTestCase {
     XCTAssertEqual(summary.totalCount, 15)
   }
 
-  func testDecoderDefaultsMissingOrNullFansToZero() throws {
+  func testDecoderPreservesMissingOrNullFansAsUnavailable() throws {
     for raw in [
       #"{"error_code":0,"message":{"replyme":0,"atme":"0"}}"#,
       #"{"error_code":0,"message":{"replyme":0,"atme":"0","fans":null}}"#,
@@ -90,9 +90,17 @@ final class TiebaInboxUnreadSummaryTests: XCTestCase {
       let summary = try decode(raw)
       XCTAssertEqual(summary.replyCount, 0)
       XCTAssertEqual(summary.mentionCount, 0)
-      XCTAssertEqual(summary.fanCount, 0)
+      XCTAssertNil(summary.fanCount)
       XCTAssertEqual(summary.totalCount, 0)
     }
+  }
+
+  func testDecoderPreservesExplicitZeroFansAsAvailable() throws {
+    let summary = try decode(
+      #"{"error_code":0,"message":{"replyme":0,"atme":0,"fans":0}}"#
+    )
+
+    XCTAssertEqual(summary.fanCount, 0)
   }
 
   func testDecoderAcceptsMaximumBoundedCount() throws {
@@ -189,7 +197,7 @@ final class TiebaInboxUnreadSummaryTests: XCTestCase {
     XCTAssertEqual(summary.userID, userID)
     XCTAssertEqual(summary.replyCount, 2)
     XCTAssertEqual(summary.mentionCount, 3)
-    XCTAssertEqual(summary.fanCount, 0)
+    XCTAssertNil(summary.fanCount)
     XCTAssertEqual(summary.totalCount, 5)
     let snapshot = await transport.snapshot()
     XCTAssertEqual(snapshot.requests.count, 1)

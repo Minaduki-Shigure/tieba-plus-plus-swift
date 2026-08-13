@@ -152,6 +152,7 @@ final class InboxUnreadSummaryViewModelTests: XCTestCase {
       active.sessionRevision: [
         .failure("summary unavailable"),
         .value(summary(userID: 8, replies: 1, mentions: 2)),
+        .value(summary(userID: 7, replies: 1, mentions: 2, fans: -1)),
         .value(summary(userID: 7, replies: 6, mentions: 7)),
       ]
     ])
@@ -165,6 +166,13 @@ final class InboxUnreadSummaryViewModelTests: XCTestCase {
     XCTAssertEqual(
       viewModel.state,
       .failed("贴吧返回了不匹配的未读消息摘要，请重新加载后再试。")
+    )
+    XCTAssertNil(viewModel.summary)
+
+    await viewModel.refresh()
+    XCTAssertEqual(
+      viewModel.state,
+      .failed("贴吧返回了无效的未读消息计数，请重新加载后再试。")
     )
     XCTAssertNil(viewModel.summary)
 
@@ -199,6 +207,31 @@ final class InboxUnreadSummaryViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.state, .loaded)
   }
 
+  func testReloadAfterCancelRefreshesAuthoritativeFanReminderCount() async throws {
+    let active = session(userID: 7, revision: uuid(1))
+    let initial = summary(userID: 7, replies: 2, mentions: 3, fans: 5)
+    let refreshed = summary(userID: 7, replies: 2, mentions: 3, fans: 0)
+    let vault = InboxUnreadSummaryVaultSpy(session: active)
+    let service = InboxUnreadSummaryServiceSpy(scripts: [
+      active.sessionRevision: [.value(initial), .value(refreshed)]
+    ])
+    let viewModel = InboxUnreadSummaryViewModel(service: service, vault: vault)
+
+    await viewModel.refresh()
+    XCTAssertEqual(viewModel.summary?.fanCount, 5)
+    viewModel.cancel()
+
+    viewModel.reload()
+    try await waitForInboxUnreadSummaryTest {
+      await service.requestCount() == 2 && viewModel.summary?.fanCount == 0
+    }
+
+    XCTAssertEqual(viewModel.summary?.fanCount, 0)
+    XCTAssertEqual(viewModel.state, .loaded)
+    let requests = await service.requestsSnapshot()
+    XCTAssertEqual(requests.count, 2)
+  }
+
   private func session(
     userID: Int64,
     revision: UUID,
@@ -221,7 +254,7 @@ final class InboxUnreadSummaryViewModelTests: XCTestCase {
     userID: Int64,
     replies: Int,
     mentions: Int,
-    fans: Int = 0
+    fans: Int? = nil
   ) -> InboxUnreadSummary {
     InboxUnreadSummary(
       userID: userID,
