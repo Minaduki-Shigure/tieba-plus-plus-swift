@@ -353,6 +353,20 @@ struct RootView: View {
       } message: {
         Text(favoritesViewModel.operationError ?? "未知错误")
       }
+      .alert(
+        "无法读取或更新置顶贴吧",
+        isPresented: Binding(
+          get: {
+            followedForumsViewModel.pinOperationError != nil
+              && !followedForumsViewModel.hasActiveFullListSurface
+          },
+          set: { if !$0 { followedForumsViewModel.dismissPinOperationError() } }
+        )
+      ) {
+        Button("好", action: followedForumsViewModel.dismissPinOperationError)
+      } message: {
+        Text(followedForumsViewModel.pinOperationError ?? "未知错误")
+      }
     }
     .onAppear {
       favoritesViewModel.reload()
@@ -447,9 +461,7 @@ struct RootView: View {
 
   @ViewBuilder
   private var followedForumsSection: some View {
-    let forums = FollowedForumsHomeProjection.visibleForums(
-      from: followedForumsViewModel.forums
-    )
+    let forums = followedForumsViewModel.homeForums
     if !forums.isEmpty {
       Section("关注的贴吧") {
         LazyVGrid(
@@ -461,12 +473,18 @@ struct RootView: View {
           spacing: FollowedForumsLayoutPolicy.spacing
         ) {
           ForEach(forums) { forum in
+            let isPinned = followedForumsViewModel.isPinned(forum)
             Button {
               path.append(.forum(forum.name))
             } label: {
-              FollowedForumCard(forum: forum)
+              FollowedForumCard(forum: forum, isPinned: isPinned)
             }
             .buttonStyle(.plain)
+            .followedForumContextMenu(
+              forum: forum,
+              isPinned: isPinned,
+              setPinned: { followedForumsViewModel.setPinned(forum, isPinned: $0) }
+            )
           }
         }
         .padding(.vertical, 2)

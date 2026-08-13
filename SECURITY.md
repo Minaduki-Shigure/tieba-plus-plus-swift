@@ -130,9 +130,11 @@ absent slogan leaves the existing level and experience presentation intact.
 Neither field affects forum identity,
 pagination, recommendation filtering, navigation, or any account write.
 
-These surfaces are read only: displaying or paginating them must not pin,
-unfollow, check in, or issue any other write automatically, and they currently
-offer no pinning, unfollow, or batch check-in control. The endpoint response does
+These surfaces remain read only with respect to Tieba: displaying, paginating,
+or locally reordering them must not follow, unfollow, check in, or issue another
+account request automatically. Their context menus may update only the separate
+local pin archive or explicitly copy the public forum name; they offer no inline
+server unfollow or batch check-in control. The endpoint response does
 not itself establish the active account's identity, so the two-sided lease check
 is protection against stale local publication, not proof that the server honored
 the requested UID. Successful private-list retrieval and server-side account
@@ -838,6 +840,19 @@ compatibility must not be described as metadata-preserving. Copying a saved
 forum name requires an explicit context-menu action and writes only the
 normalized public forum name; this feature must never read the clipboard or
 copy account data.
+
+Followed-forum pins use a separate schema-v1 JSON archive. Each record contains
+only a positive account UID, positive forum ID, normalized bounded public forum
+name, and local pin timestamp. The archive is size- and count-bounded, written by
+atomic replacement, excluded from backup, protected after first device unlock on
+iOS, and refuses to overwrite malformed or future-schema data. Projection requires
+the same account plus an exact forum ID and normalized name already present in the
+loaded authenticated snapshot. Missing, renamed, or not-yet-loaded rows are not
+fabricated and do not trigger pagination or metadata requests. Pin mutations are
+serialized; account/session changes clear visible pin state synchronously, and a
+late old-account result cannot publish into the new account. Confirmed unfollow
+removes only the matching account/forum record. Copying remains an explicit write
+of the public forum name to the pasteboard and never reads existing clipboard data.
 
 The favorite-thread opening preferences are two default-off UserDefaults
 booleans evaluated only after an explicit selection in the local-favorites

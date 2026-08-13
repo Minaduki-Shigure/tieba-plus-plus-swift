@@ -64,7 +64,11 @@ struct TiebaPlusPlusApp: App {
     self.accountVault = accountVault
     self.accountService = accountService
     _followedForumsViewModel = StateObject(
-      wrappedValue: FollowedForumsViewModel(service: accountService, vault: accountVault)
+      wrappedValue: FollowedForumsViewModel(
+        service: accountService,
+        vault: accountVault,
+        pinRepository: FileFollowedForumPinsStore.live()
+      )
     )
     let accountAccess = AccountAccess(vault: accountVault, service: accountService)
     self.contentAgreementStore = ContentAgreementStore(access: accountAccess)

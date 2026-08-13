@@ -17,10 +17,10 @@ checks.
 | Area | Current state |
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
-| Local features | Available for history, favorites, filtering, appearance, media preferences, followed-forum layout, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
+| Local features | Available for history, favorites, filtering, appearance, media preferences, account-isolated followed-forum pinning and layout, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
 | Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, and equivalent new-topic creation are in device validation. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
-| TiebaLite parity | Current `main` source: about 77% of full product scope (estimated range 77–80%, with 20–23% remaining); anonymous reading and media: about 91–95%. The public `v0.59.0-alpha.1` IPA remains about 57–62% |
+| TiebaLite parity | Current `main` source: about 80% of full product scope (estimated range 78–81%, with 19–22% remaining); anonymous reading and media: about 91–95%. The public `v0.59.0-alpha.1` IPA remains about 57–62% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.59.0-alpha.1` (build 62); later `main` features require a tagged release |
 
 ### Release and validation
@@ -67,7 +67,10 @@ checks.
   share one app-scoped, memory-only snapshot that is discarded when the account
   session or a forum relationship changes. Their cards preserve the bounded
   server-supplied forum avatar and slogan; unavailable or disallowed images fall
-  back locally without another metadata request. A default-off setting can reuse
+  back locally without another metadata request. An account-isolated local archive
+  can pin exact, already loaded forums on both surfaces; pinned rows move to the
+  front without loading another page, and the same context menu can unpin or copy
+  the public forum name. A default-off setting can reuse
   a verified-complete snapshot to show personalized recommendations only from
   the active account's followed forums. This filtering is local: the anonymous
   recommendation request receives no account, credential, lease, or forum ID.
@@ -168,7 +171,8 @@ checks.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
   XcodeGen 2.45.4 or newer.
 - **Automated checks:** GitHub Actions runs package tests and the complete iOS
-  simulator test target, validates the app source, and verifies its public IPA hash.
+  simulator test target, validates the app source, tests its release-metadata
+  updater, and verifies its public IPA hash.
   Authenticated flows never use real credentials in CI. Login binding, cloud
   favorite reads and mutations, including floor-level marker/action admission,
   stale-confirmation rejection and verified list deletion, followed-forum recommendation filtering,
@@ -187,7 +191,10 @@ checks.
 - **App source:** Add [`sidestore-source.json`](https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json)
   to LiveContainer 3.7.0 or newer, or to SideStore. Its latest IPA is published
   only after the tag's package, anonymous integration, and simulator tests all
-  pass. The source currently distributes `v0.59.0-alpha.1`; the newer `main`
+  pass. After the release asset is published and reverified, the release workflow
+  derives its date, download URL, byte size, and SHA-256 and updates the source
+  atomically; version or concurrent-source mismatches fail closed. The source
+  currently distributes `v0.59.0-alpha.1`; the newer `main`
   features described above, including foreground one-click check-in, are not in
   that IPA yet.
 - **Login hotfix:** `v0.54.0-alpha.1` can reach Tieba's account page without
@@ -309,6 +316,12 @@ checks.
   nickname/username presentation are persistent local controls. Followed-forum
   cards can use an adaptive grid or a single column; accessibility text sizes
   always use one column so labels can expand without overlap.
+- **Followed-forum pins:** The logged-in home projection and complete followed-
+  forum list share account-isolated local pin ordering. Only an exact forum ID and
+  normalized name already present in the authoritative loaded snapshot can move;
+  stale or not-yet-loaded pins create no row and cause no pagination. Context
+  menus pin, unpin, or copy the public forum name, and confirmed unfollow cleans
+  only the matching account's pin.
 - **Reply controls:** A default-off local preference can hide topic, floor,
   nested-reply, and inbox quick-reply entry points without hiding reply content,
   read-only navigation, agreement controls, existing drafts, or an already-open
@@ -354,9 +367,11 @@ checks.
   page checks the exact `userID + sessionRevision` lease before and after its
   request; account or forum-membership changes clear the snapshot. New list
   requests begin only while the home page, complete list, or selected filtered
-  recommendation page is active. These list surfaces perform no automatic
-  write, retain nothing across accounts or app restarts, and provide no inline
-  pinning, unfollow, or check-in controls. A loaded forum separately reads
+  recommendation page is active. The private server snapshot remains memory-only
+  and performs no automatic account write. A separate versioned local archive
+  retains pins across launches and isolates them by positive account UID; it only
+  reorders exact rows already present in that snapshot and never loads another
+  page. The lists provide no inline server unfollow or check-in control. A loaded forum separately reads
   account-specific follow and check-in state and retains its explicitly
   confirmed single-forum actions. The account page provides the distinct,
   foreground-only one-click flow described below. Successful private-list
@@ -532,8 +547,8 @@ checks.
   validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, weighted estimate, protocol constraints, and next milestones.
-  The current `main` source audit totals 77–80 of 100 weighted points, leaving
-  about 20–23%; its anonymous reading and media subtotal remains about 91–95%.
+  The current `main` source audit totals 78–81 of 100 weighted points, leaving
+  about 19–22%; its anonymous reading and media subtotal remains about 91–95%.
   This measures implemented end-to-end workflows with partial credit for
   device-validation gates; it is not a claim that every path is release-ready.
   The public `v0.59.0-alpha.1` IPA remains at the earlier 57–62% scope. The
@@ -587,7 +602,9 @@ The distribution target is SideStore-compatible self-signing. The public
 can be added directly to LiveContainer 3.7.0 or newer, or to SideStore. Each
 listed IPA is an unsigned GitHub Release asset that must be signed by the
 installer; its byte size and SHA-256 are checked against the source by CI. App
-Store distribution is not currently a project goal.
+source updates are generated only from the tested tag snapshot and the published
+IPA, then revalidated against `main` before an atomic commit. App Store
+distribution is not currently a project goal.
 
 ```text
 https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json

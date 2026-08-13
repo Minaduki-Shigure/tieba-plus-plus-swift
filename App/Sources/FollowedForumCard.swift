@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 enum ForumAvatarDisplayPolicy {
   private static let allowedHostSuffixes = [
@@ -53,6 +54,12 @@ struct FollowedForumCardPresentation: Equatable, Sendable {
 
 struct FollowedForumCard: View {
   let forum: FollowedForumItem
+  let isPinned: Bool
+
+  init(forum: FollowedForumItem, isPinned: Bool = false) {
+    self.forum = forum
+    self.isPinned = isPinned
+  }
 
   var body: some View {
     let presentation = FollowedForumCardPresentation(forum: forum)
@@ -86,6 +93,13 @@ struct FollowedForumCard: View {
       }
 
       Spacer(minLength: 0)
+
+      if isPinned {
+        Image(systemName: "pin.fill")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.tint)
+          .accessibilityHidden(true)
+      }
     }
     .padding(10)
     .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
@@ -100,6 +114,51 @@ struct FollowedForumCard: View {
     .contentShape(Rectangle())
     .accessibilityElement(children: .ignore)
     .accessibilityLabel("\(forum.name)吧")
-    .accessibilityValue(presentation.accessibilityValue)
+    .accessibilityValue(
+      [isPinned ? "已置顶" : "", presentation.accessibilityValue]
+        .filter { !$0.isEmpty }
+        .joined(separator: "，")
+    )
+  }
+}
+
+private struct FollowedForumContextMenuModifier: ViewModifier {
+  let forum: FollowedForumItem
+  let isPinned: Bool
+  let setPinned: (Bool) -> Void
+
+  func body(content: Content) -> some View {
+    content.contextMenu {
+      Button {
+        setPinned(!isPinned)
+      } label: {
+        Label(
+          isPinned ? "取消置顶" : "置顶",
+          systemImage: isPinned ? "pin.slash" : "pin"
+        )
+      }
+
+      Button {
+        UIPasteboard.general.string = forum.name
+      } label: {
+        Label("复制吧名", systemImage: "doc.on.doc")
+      }
+    }
+  }
+}
+
+extension View {
+  func followedForumContextMenu(
+    forum: FollowedForumItem,
+    isPinned: Bool,
+    setPinned: @escaping (Bool) -> Void
+  ) -> some View {
+    modifier(
+      FollowedForumContextMenuModifier(
+        forum: forum,
+        isPinned: isPinned,
+        setPinned: setPinned
+      )
+    )
   }
 }

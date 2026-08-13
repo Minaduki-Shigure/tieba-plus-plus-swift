@@ -328,6 +328,44 @@ final class AccountViewModelTests: XCTestCase {
     XCTAssertEqual(requests.map(\.userID), [7, 7])
   }
 
+  func testUnfollowRemovesOnlyTheMatchingAccountPinBeforeReload() async throws {
+    let vault = AccountVaultSpy(
+      sessions: [session(userID: 7, name: "active")],
+      activeUserID: 7
+    )
+    let page = FollowedForumPageData(
+      forums: [forum(id: 1, name: "one"), forum(id: 2, name: "two")],
+      currentPage: 1,
+      hasMore: false
+    )
+    let service = AccountServiceSpy(followedPages: [1: .success(page)])
+    let pins = TransientFollowedForumPinsStore()
+    try await pins.setPin(accountID: 7, forumID: 1, forumName: "one")
+    try await pins.setPin(accountID: 7, forumID: 2, forumName: "two")
+    try await pins.setPin(accountID: 8, forumID: 1, forumName: "one")
+    let viewModel = FollowedForumsViewModel(
+      service: service,
+      vault: vault,
+      pinRepository: pins
+    )
+    viewModel.loadIfNeeded()
+    try await waitForAccountState { viewModel.forumProjection.pinned.count == 2 }
+
+    viewModel.forumMembershipDidChange(
+      ForumMembershipChange(accountID: 7, forumID: 1, isFollowed: false)
+    )
+    try await waitForAccountState {
+      await service.followedRequestSnapshot().count == 2
+        && viewModel.state == .loaded
+        && viewModel.forumProjection.pinned.map(\.id) == [2]
+    }
+
+    let firstAccountPins = try await pins.pins(accountID: 7)
+    let secondAccountPins = try await pins.pins(accountID: 8)
+    XCTAssertEqual(firstAccountPins.map(\.forumID), [2])
+    XCTAssertEqual(secondAccountPins.map(\.forumID), [1])
+  }
+
   func testFollowedForumAccountChangeDropsCachedSession() async throws {
     let vault = AccountVaultSpy(
       sessions: [
@@ -353,6 +391,307 @@ final class AccountViewModelTests: XCTestCase {
     }
 
     let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests.map(\.userID), [7, 8])
+    XCTAssertEqual(requests.map(\.page), [1, 1])
+  }
+
+  func testFollowedForumPinsSwitchAccountsWithoutAddingNetworkRequests() async throws {
+    let vault = AccountVaultSpy(
+      sessions: [
+        session(userID: 7, name: "first"),
+        session(userID: 8, name: "second"),
+      ],
+      activeUserID: 7
+    )
+    let page = FollowedForumPageData(
+      forums: [forum(id: 1, name: "one"), forum(id: 2, name: "two")],
+      currentPage: 1,
+      hasMore: true
+    )
+    let service = AccountServiceSpy(followedPages: [1: .success(page)])
+    let pins = TransientFollowedForumPinsStore()
+    try await pins.setPin(
+      accountID: 7,
+      forumID: 2,
+      forumName: "two",
+      pinnedAt: Date(timeIntervalSince1970: 20)
+    )
+    try await pins.setPin(
+      accountID: 8,
+      forumID: 1,
+      forumName: "one",
+      pinnedAt: Date(timeIntervalSince1970: 30)
+    )
+    try await pins.setPin(
+      accountID: 7,
+      forumID: 99,
+      forumName: "not-loaded",
+      pinnedAt: Date(timeIntervalSince1970: 40)
+    )
+    let viewModel = FollowedForumsViewModel(
+      service: service,
+      vault: vault,
+      pinRepository: pins
+    )
+    viewModel.loadIfNeeded()
+    try await waitForAccountState {
+      viewModel.state == .loaded && viewModel.homeForums.map(\.id) == [2, 1]
+    }
+    let firstAccountRequests = await service.followedRequestSnapshot()
+    XCTAssertEqual(firstAccountRequests.map(\.page), [1])
+
+    try await vault.switchActive(to: 8)
+    viewModel.accountSessionDidChange()
+    XCTAssertTrue(viewModel.forums.isEmpty)
+    XCTAssertTrue(viewModel.followedForumPins.isEmpty)
+    try await waitForAccountState {
+      await service.followedRequestSnapshot().count == 2
+        && viewModel.state == .loaded
+        && viewModel.homeForums.map(\.id) == [1, 2]
+    }
+
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests.map(\.userID), [7, 8])
+    XCTAssertEqual(requests.map(\.page), [1, 1])
+    XCTAssertTrue(viewModel.canLoadNextPage)
+  }
+
+  func testDelayedUnfollowForInactiveAccountOnlyCleansThatAccountsPin() async throws {
+    let vault = AccountVaultSpy(
+      sessions: [session(userID: 8, name: "active")],
+      activeUserID: 8
+    )
+    let page = FollowedForumPageData(
+      forums: [forum(id: 1, name: "one")],
+      currentPage: 1,
+      hasMore: false
+    )
+    let service = AccountServiceSpy(followedPages: [1: .success(page)])
+    let pins = TransientFollowedForumPinsStore()
+    try await pins.setPin(accountID: 7, forumID: 1, forumName: "one")
+    try await pins.setPin(accountID: 8, forumID: 1, forumName: "one")
+    let viewModel = FollowedForumsViewModel(
+      service: service,
+      vault: vault,
+      pinRepository: pins
+    )
+    viewModel.loadIfNeeded()
+    try await waitForAccountState { viewModel.forumProjection.pinned.map(\.id) == [1] }
+
+    viewModel.forumMembershipDidChange(
+      ForumMembershipChange(accountID: 7, forumID: 1, isFollowed: false)
+    )
+    try await waitForAccountState {
+      guard let oldAccountPins = try? await pins.pins(accountID: 7) else { return false }
+      return oldAccountPins.isEmpty
+    }
+
+    let currentPins = try await pins.pins(accountID: 8)
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(currentPins.map(\.forumID), [1])
+    XCTAssertEqual(viewModel.forumProjection.pinned.map(\.id), [1])
+    XCTAssertEqual(requests.map(\.page), [1])
+  }
+
+  func testPinningLoadedForumChangesProjectionWithoutNetworkRequest() async throws {
+    let vault = AccountVaultSpy(
+      sessions: [session(userID: 7, name: "active")],
+      activeUserID: 7
+    )
+    let page = FollowedForumPageData(
+      forums: [forum(id: 1, name: "one"), forum(id: 2, name: "two")],
+      currentPage: 1,
+      hasMore: true
+    )
+    let service = AccountServiceSpy(followedPages: [1: .success(page)])
+    let pins = TransientFollowedForumPinsStore()
+    let viewModel = FollowedForumsViewModel(
+      service: service,
+      vault: vault,
+      pinRepository: pins
+    )
+    viewModel.loadIfNeeded()
+    try await waitForAccountState { viewModel.state == .loaded }
+
+    viewModel.setPinned(forum(id: 2, name: "two"), isPinned: true)
+    try await waitForAccountState { viewModel.homeForums.map(\.id) == [2, 1] }
+
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1])
+    XCTAssertTrue(viewModel.canLoadNextPage)
+  }
+
+  func testQueuedPinThenUnpinPersistsInCallOrder() async throws {
+    let vault = AccountVaultSpy(
+      sessions: [session(userID: 7, name: "active")],
+      activeUserID: 7
+    )
+    let target = forum(id: 1, name: "one")
+    let page = FollowedForumPageData(
+      forums: [target],
+      currentPage: 1,
+      hasMore: false
+    )
+    let service = AccountServiceSpy(followedPages: [1: .success(page)])
+    let pins = SuspendedFollowedForumPinsRepository(suspendsFirstSet: true)
+    addTeardownBlock { _ = await pins.releaseFirstSet() }
+    let viewModel = FollowedForumsViewModel(
+      service: service,
+      vault: vault,
+      pinRepository: pins
+    )
+    viewModel.loadIfNeeded()
+    try await waitForAccountState { viewModel.state == .loaded }
+
+    viewModel.setPinned(target, isPinned: true)
+    await pins.waitUntilFirstSetStarts()
+    viewModel.setPinned(target, isPinned: false)
+    let released = await pins.releaseFirstSet()
+    XCTAssertTrue(released)
+    try await waitForAccountState {
+      await pins.mutationSnapshot().count == 2 && !viewModel.isPinned(target)
+    }
+
+    let mutations = await pins.mutationSnapshot()
+    let finalPins = try await pins.pins(accountID: 7)
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(mutations, [
+      .pin(accountID: 7, forumID: 1),
+      .unpin(accountID: 7, forumID: 1),
+    ])
+    XCTAssertTrue(finalPins.isEmpty)
+    XCTAssertEqual(requests.map(\.page), [1])
+  }
+
+  func testPinCompletingAfterAccountSwitchCannotPublishIntoNewAccount() async throws {
+    let vault = AccountVaultSpy(
+      sessions: [
+        session(userID: 7, name: "first"),
+        session(userID: 8, name: "second"),
+      ],
+      activeUserID: 7
+    )
+    let first = forum(id: 1, name: "one")
+    let second = forum(id: 2, name: "two")
+    let page = FollowedForumPageData(
+      forums: [first, second],
+      currentPage: 1,
+      hasMore: false
+    )
+    let service = AccountServiceSpy(followedPages: [1: .success(page)])
+    let secondAccountPin = try XCTUnwrap(
+      FollowedForumPin(
+        accountID: 8,
+        forumID: 2,
+        forumName: "two",
+        pinnedAt: Date(timeIntervalSince1970: 20)
+      )
+    )
+    let pins = SuspendedFollowedForumPinsRepository(
+      initialPins: [secondAccountPin],
+      suspendsFirstSet: true
+    )
+    addTeardownBlock { _ = await pins.releaseFirstSet() }
+    let viewModel = FollowedForumsViewModel(
+      service: service,
+      vault: vault,
+      pinRepository: pins
+    )
+    viewModel.loadIfNeeded()
+    try await waitForAccountState { viewModel.state == .loaded }
+
+    viewModel.setPinned(first, isPinned: true)
+    await pins.waitUntilFirstSetStarts()
+    try await vault.switchActive(to: 8)
+    viewModel.accountSessionDidChange()
+    XCTAssertTrue(viewModel.forums.isEmpty)
+    XCTAssertTrue(viewModel.followedForumPins.isEmpty)
+    let released = await pins.releaseFirstSet()
+    XCTAssertTrue(released)
+    try await waitForAccountState {
+      await service.followedRequestSnapshot().count == 2
+        && viewModel.state == .loaded
+        && viewModel.homeForums.map(\.id) == [2, 1]
+    }
+
+    let oldAccountPins = try await pins.pins(accountID: 7)
+    let currentAccountPins = try await pins.pins(accountID: 8)
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(oldAccountPins.map(\.forumID), [1])
+    XCTAssertEqual(currentAccountPins.map(\.forumID), [2])
+    XCTAssertEqual(viewModel.forumProjection.pinned.map(\.id), [2])
+    XCTAssertNil(viewModel.pinOperationError)
+    XCTAssertEqual(requests.map(\.userID), [7, 8])
+    XCTAssertEqual(requests.map(\.page), [1, 1])
+  }
+
+  func testUnfollowCleanupCompletingAfterSwitchCannotReloadOrPublishOldAccount() async throws {
+    let vault = AccountVaultSpy(
+      sessions: [
+        session(userID: 7, name: "first"),
+        session(userID: 8, name: "second"),
+      ],
+      activeUserID: 7
+    )
+    let first = forum(id: 1, name: "one")
+    let second = forum(id: 2, name: "two")
+    let page = FollowedForumPageData(
+      forums: [first, second],
+      currentPage: 1,
+      hasMore: false
+    )
+    let service = AccountServiceSpy(followedPages: [1: .success(page)])
+    let firstAccountPin = try XCTUnwrap(
+      FollowedForumPin(
+        accountID: 7,
+        forumID: 1,
+        forumName: "one",
+        pinnedAt: Date(timeIntervalSince1970: 10)
+      )
+    )
+    let secondAccountPin = try XCTUnwrap(
+      FollowedForumPin(
+        accountID: 8,
+        forumID: 2,
+        forumName: "two",
+        pinnedAt: Date(timeIntervalSince1970: 20)
+      )
+    )
+    let pins = SuspendedFollowedForumPinsRepository(
+      initialPins: [firstAccountPin, secondAccountPin],
+      suspendsFirstRemove: true
+    )
+    addTeardownBlock { _ = await pins.releaseFirstRemove() }
+    let viewModel = FollowedForumsViewModel(
+      service: service,
+      vault: vault,
+      pinRepository: pins
+    )
+    viewModel.loadIfNeeded()
+    try await waitForAccountState { viewModel.forumProjection.pinned.map(\.id) == [1] }
+
+    viewModel.forumMembershipDidChange(
+      ForumMembershipChange(accountID: 7, forumID: 1, isFollowed: false)
+    )
+    await pins.waitUntilFirstRemoveStarts()
+    try await vault.switchActive(to: 8)
+    viewModel.accountSessionDidChange()
+    let released = await pins.releaseFirstRemove()
+    XCTAssertTrue(released)
+    try await waitForAccountState {
+      await service.followedRequestSnapshot().count == 2
+        && viewModel.state == .loaded
+        && viewModel.homeForums.map(\.id) == [2, 1]
+    }
+    await Task.yield()
+
+    let oldAccountPins = try await pins.pins(accountID: 7)
+    let currentAccountPins = try await pins.pins(accountID: 8)
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertTrue(oldAccountPins.isEmpty)
+    XCTAssertEqual(currentAccountPins.map(\.forumID), [2])
+    XCTAssertEqual(viewModel.forumProjection.pinned.map(\.id), [2])
+    XCTAssertNil(viewModel.pinOperationError)
     XCTAssertEqual(requests.map(\.userID), [7, 8])
     XCTAssertEqual(requests.map(\.page), [1, 1])
   }
@@ -474,6 +813,40 @@ final class AccountViewModelTests: XCTestCase {
     let requests = await service.followedRequestSnapshot()
     XCTAssertTrue(requests.isEmpty)
     XCTAssertEqual(viewModel.state, .idle)
+  }
+
+  func testMembershipChangeBeforeInitialLeaseInvalidatesSuspendedRequest() async throws {
+    let activeSession = session(userID: 7, name: "active")
+    let vault = SuspendedActiveSessionReadVault(
+      session: activeSession,
+      suspendedReadNumber: 1
+    )
+    addTeardownBlock { _ = await vault.releaseSuspendedRead() }
+    let replacement = FollowedForumPageData(
+      forums: [forum(id: 2, name: "replacement")],
+      currentPage: 1,
+      hasMore: false
+    )
+    let service = AccountServiceSpy(followedPages: [1: .success(replacement)])
+    let viewModel = FollowedForumsViewModel(service: service, vault: vault)
+
+    viewModel.loadIfNeeded()
+    await vault.waitUntilReadIsSuspended()
+    viewModel.forumMembershipDidChange(
+      ForumMembershipChange(accountID: 7, forumID: 1, isFollowed: true)
+    )
+    try await waitForAccountState {
+      viewModel.state == .loaded && viewModel.forums.map(\.id) == [2]
+    }
+
+    let released = await vault.releaseSuspendedRead()
+    XCTAssertTrue(released)
+    await Task.yield()
+
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests, [FollowedRequest(userID: 7, page: 1, pageSize: 50)])
+    XCTAssertEqual(viewModel.forums.map(\.id), [2])
+    XCTAssertEqual(viewModel.state, .loaded)
   }
 
   func testFollowedForumsDoNotRequestNextPageWhenLeaseChangedBeforeRequest() async throws {
@@ -897,6 +1270,109 @@ private struct CredentialLengths: Equatable, Sendable {
 private struct AccountTestFailure: LocalizedError, Sendable {
   let message: String
   var errorDescription: String? { message }
+}
+
+private enum FollowedForumPinsMutation: Equatable, Sendable {
+  case pin(accountID: Int64, forumID: Int64)
+  case unpin(accountID: Int64, forumID: Int64)
+}
+
+private actor SuspendedFollowedForumPinsRepository: FollowedForumPinsRepository {
+  private var storedPins: [FollowedForumPin]
+  private var suspendsFirstSet: Bool
+  private var suspendsFirstRemove: Bool
+  private var mutations: [FollowedForumPinsMutation] = []
+  private var firstSetContinuation: CheckedContinuation<Void, Never>?
+  private var firstRemoveContinuation: CheckedContinuation<Void, Never>?
+  private var firstSetStarted = false
+  private var firstRemoveStarted = false
+  private var firstSetWaiters: [CheckedContinuation<Void, Never>] = []
+  private var firstRemoveWaiters: [CheckedContinuation<Void, Never>] = []
+
+  init(
+    initialPins: [FollowedForumPin] = [],
+    suspendsFirstSet: Bool = false,
+    suspendsFirstRemove: Bool = false
+  ) {
+    storedPins = initialPins
+    self.suspendsFirstSet = suspendsFirstSet
+    self.suspendsFirstRemove = suspendsFirstRemove
+  }
+
+  func pins(accountID: Int64) async throws -> [FollowedForumPin] {
+    storedPins
+      .filter { $0.accountID == accountID }
+      .sorted {
+        if $0.pinnedAt != $1.pinnedAt { return $0.pinnedAt > $1.pinnedAt }
+        return $0.forumID < $1.forumID
+      }
+  }
+
+  func setPin(
+    accountID: Int64,
+    forumID: Int64,
+    forumName: String,
+    pinnedAt: Date
+  ) async throws {
+    if suspendsFirstSet {
+      suspendsFirstSet = false
+      firstSetStarted = true
+      let waiters = firstSetWaiters
+      firstSetWaiters.removeAll()
+      waiters.forEach { $0.resume() }
+      await withCheckedContinuation { firstSetContinuation = $0 }
+    }
+    guard
+      let pin = FollowedForumPin(
+        accountID: accountID,
+        forumID: forumID,
+        forumName: forumName,
+        pinnedAt: pinnedAt
+      )
+    else { throw FollowedForumPinsStoreError.invalidForum }
+    storedPins.removeAll { $0.key == pin.key }
+    storedPins.append(pin)
+    mutations.append(.pin(accountID: accountID, forumID: forumID))
+  }
+
+  func removePin(accountID: Int64, forumID: Int64) async throws {
+    if suspendsFirstRemove {
+      suspendsFirstRemove = false
+      firstRemoveStarted = true
+      let waiters = firstRemoveWaiters
+      firstRemoveWaiters.removeAll()
+      waiters.forEach { $0.resume() }
+      await withCheckedContinuation { firstRemoveContinuation = $0 }
+    }
+    storedPins.removeAll { $0.accountID == accountID && $0.forumID == forumID }
+    mutations.append(.unpin(accountID: accountID, forumID: forumID))
+  }
+
+  func waitUntilFirstSetStarts() async {
+    if firstSetStarted { return }
+    await withCheckedContinuation { firstSetWaiters.append($0) }
+  }
+
+  func waitUntilFirstRemoveStarts() async {
+    if firstRemoveStarted { return }
+    await withCheckedContinuation { firstRemoveWaiters.append($0) }
+  }
+
+  func releaseFirstSet() -> Bool {
+    guard let continuation = firstSetContinuation else { return false }
+    firstSetContinuation = nil
+    continuation.resume()
+    return true
+  }
+
+  func releaseFirstRemove() -> Bool {
+    guard let continuation = firstRemoveContinuation else { return false }
+    firstRemoveContinuation = nil
+    continuation.resume()
+    return true
+  }
+
+  func mutationSnapshot() -> [FollowedForumPinsMutation] { mutations }
 }
 
 private actor AccountServiceSpy: AccountService {

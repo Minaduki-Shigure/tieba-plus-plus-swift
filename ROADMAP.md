@@ -24,11 +24,11 @@ only foreground batch check-in.
 | Anonymous discovery, search, and forums | 20 | 18–19 | Core browsing, ranking, recommendations, categories, and search are implemented; feedback and a few niche discovery paths remain |
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, shared text selection/copying, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
-| Local data, settings, and customization | 10 | 6 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, followed-forum layout, a configurable forum primary action, reply-entry visibility, a default-on composer risk notice, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
+| Local data, settings, and customization | 10 | 7 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, account-isolated followed-forum pinning and layout, a configurable forum primary action, reply-entry visibility, a default-on composer risk notice, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, switching, a self-profile summary, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 12–13 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, three text/classic-emoticon reply targets, equivalent new-topic creation, direct inline-preview reply entry, and credential-free official reporting entry points have guarded implementations; real batch-check-in behavior, creation, poll and interaction-restriction success, uploaded media, unresolvable cloud rows, native reporting, and most reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
-| **Total** | **100** | **77–80** | Current full-product estimate; roughly 20–23% remains |
+| **Total** | **100** | **78–81** | Current full-product estimate; roughly 19–22% remains |
 
 This is a source-workflow coverage estimate, not a release-readiness or
 physical-device-validation percentage. The public `v0.59.0-alpha.1` IPA and the
@@ -51,6 +51,11 @@ existing local-settings credit but is too small to add a full weighted point.
 The followed-forum layout choice likewise improves the completeness of the
 existing local-settings credit but does not add a full weighted point because it
 reflows two existing surfaces without adding a data source or workflow.
+The account-isolated followed-forum pin archive, in contrast, completes a full
+TiebaLite local-management workflow across the home projection and complete list.
+It adds one local-settings point because persistence, exact loaded-row projection,
+context actions, account switching, unfollow cleanup, and failure recovery are
+covered together without adding an authenticated request.
 The composer-entry risk notice likewise completes one narrow TiebaLite habit
 setting and hardens an existing creation flow, but adds no new write target or
 workflow and therefore does not add a weighted point.
@@ -114,6 +119,9 @@ the source metadata is updated to that tested IPA.
 - Persistent adaptive-grid or single-column followed-forum layout shared by the
   six-item home projection and complete list, with accessibility-size fallback
   and explicit full-list pagination independent from card appearance
+- Account-isolated local followed-forum pins shared by the home projection and
+  complete list, with pin, unpin, and copy-name context actions; only exact loaded
+  rows are reordered, so stale pins neither fabricate cards nor load another page
 - Global post search with newest, oldest, and relevance sorting
 - Local keyword, user, and video filtering for global and per-forum search results
 - Local filtering for paginated public-profile activity
@@ -236,7 +244,9 @@ the source metadata is updated to that tested IPA.
   default-off followed-forum recommendation filter, with a local layout setting
   that performs no explicit refresh or account mutation. Home and complete-list
   cards preserve the existing response's optional avatar and slogan, with a
-  local fallback for absent or disallowed images
+  local fallback for absent or disallowed images. A separate account-isolated
+  local archive pins exact already-loaded rows across both list surfaces without
+  adding a private request
 - Separate Tieba cloud favorites with offset pagination, saved-post navigation,
   deleted-thread state, account-lease isolation, and confirmed list deletion only
   after raw thread/forum rebinding, plus confirmed thread-detail add, saved-floor
@@ -740,9 +750,15 @@ Only an explicit server end publishes the complete forum-ID set. Empty or
 duplicate-only continuations, invalid data, service failures, more than 100
 pages, or more than 5,000 retained forums fail closed rather than publishing a
 partial allowlist. The shared rows, page state, and lease are never persisted or
-reused across an app restart or account lease. These list surfaces are read only
-and initiate no automatic account operation; they provide no inline pinning,
-unfollow, or check-in controls. The account page's separate foreground one-click
+reused across an app restart or account lease. A separate bounded local pin
+archive persists only positive account UID, forum ID, normalized public name, and
+pin time. It projects only exact rows already loaded for that account, orders
+pinned rows newest first, leaves all other rows in server order, and never requests
+another page. Home and complete-list context menus pin, unpin, or explicitly copy
+the forum name; stale pins create no row, and confirmed unfollow removes only the
+matching account's pin. These local actions initiate no automatic server
+operation, and the lists still provide no inline unfollow or check-in controls.
+The account page's separate foreground one-click
 flow consumes its own authoritative catalog and explicit confirmation snapshot.
 Opening a forum continues to use the separate, explicitly confirmed
 per-forum membership and check-in workflow. Client-side lease checks prevent a

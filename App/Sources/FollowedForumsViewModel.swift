@@ -26,20 +26,31 @@ final class FollowedForumsViewModel: ObservableObject {
   @Published private(set) var loadMoreError: String?
   @Published private(set) var isSignedOut = false
   @Published private(set) var indexState: FollowedForumIndexState = .idle
+  @Published private(set) var followedForumPins: [FollowedForumPin] = []
+  @Published private(set) var pinOperationError: String?
 
   private let service: any AccountService
   private let vault: any AccountVault
+  private let pinRepository: any FollowedForumPinsRepository
   private var loadedLease: FollowedForumsSessionLease?
+  private var requestLease: FollowedForumsSessionLease?
+  private var pinAccountID: Int64?
   private var currentPage = 0
   private var hasMore = true
   private var loadTask: Task<Void, Never>?
   private var epoch = 0
   private var fullListSurfaceIDs = Set<UUID>()
   private var completeIndexSurfaceIDs = Set<UUID>()
+  private var pinMutationTask: Task<Void, Never>?
 
-  init(service: any AccountService, vault: any AccountVault) {
+  init(
+    service: any AccountService,
+    vault: any AccountVault,
+    pinRepository: any FollowedForumPinsRepository = TransientFollowedForumPinsStore()
+  ) {
     self.service = service
     self.vault = vault
+    self.pinRepository = pinRepository
   }
 
   func loadIfNeeded() {
@@ -60,6 +71,44 @@ final class FollowedForumsViewModel: ObservableObject {
       && !isLoadingMore
       && loadMoreError == nil
       && state == .loaded
+  }
+
+  var forumProjection: FollowedForumsProjection {
+    FollowedForumPinProjection.make(
+      forums: forums,
+      pins: followedForumPins,
+      accountID: pinAccountID ?? 0
+    )
+  }
+
+  var homeForums: [FollowedForumItem] {
+    FollowedForumsHomeProjection.visibleForums(from: forumProjection.all)
+  }
+
+  func isPinned(_ forum: FollowedForumItem) -> Bool {
+    guard
+      let accountID = pinAccountID,
+      let normalizedName = FollowedForumPin.normalizedForumName(forum.name)
+    else { return false }
+    let newestPin = followedForumPins
+      .filter { $0.accountID == accountID && $0.forumID == forum.id }
+      .max {
+        if $0.pinnedAt != $1.pinnedAt { return $0.pinnedAt < $1.pinnedAt }
+        return $0.forumName > $1.forumName
+      }
+    return newestPin?.forumName == normalizedName
+  }
+
+  private func removeInactiveAccountPin(_ change: ForumMembershipChange) {
+    let pinRepository = pinRepository
+    let previousTask = pinMutationTask
+    pinMutationTask = Task {
+      await previousTask?.value
+      try? await pinRepository.removePin(
+        accountID: change.accountID,
+        forumID: change.forumID
+      )
+    }
   }
 
   func fullListSurfaceDidAppear(id: UUID) {
@@ -108,8 +157,86 @@ final class FollowedForumsViewModel: ObservableObject {
     _ change: ForumMembershipChange,
     loadImmediately: Bool = true
   ) {
-    if let loadedLease, loadedLease.userID != change.accountID { return }
-    beginNewEpoch(loadImmediately: loadImmediately)
+    if let activeLease = loadedLease ?? requestLease,
+      activeLease.userID != change.accountID
+    {
+      if !change.isFollowed {
+        removeInactiveAccountPin(change)
+      }
+      return
+    }
+    guard !change.isFollowed else {
+      beginNewEpoch(loadImmediately: loadImmediately)
+      return
+    }
+
+    beginNewEpoch(loadImmediately: false)
+    let requestEpoch = epoch
+    let pinRepository = pinRepository
+    let previousTask = pinMutationTask
+    pinMutationTask = Task {
+      await previousTask?.value
+      var cleanupError: String?
+      do {
+        try await pinRepository.removePin(
+          accountID: change.accountID,
+          forumID: change.forumID
+        )
+      } catch {
+        cleanupError = error.localizedDescription
+      }
+      guard requestEpoch == epoch else { return }
+      if loadImmediately {
+        beginNewEpoch(loadImmediately: true)
+      }
+      if let cleanupError {
+        pinOperationError = cleanupError
+      }
+    }
+  }
+
+  func setPinned(_ forum: FollowedForumItem, isPinned: Bool) {
+    guard
+      let lease = loadedLease,
+      lease.userID > 0,
+      pinAccountID == lease.userID,
+      forums.contains(where: {
+        $0.id == forum.id
+          && FollowedForumPin.normalizedForumName($0.name)
+            == FollowedForumPin.normalizedForumName(forum.name)
+      })
+    else { return }
+
+    let pinRepository = pinRepository
+    let previousTask = pinMutationTask
+    pinMutationTask = Task {
+      await previousTask?.value
+      do {
+        if isPinned {
+          try await pinRepository.setPin(
+            accountID: lease.userID,
+            forumID: forum.id,
+            forumName: forum.name
+          )
+        } else {
+          try await pinRepository.removePin(
+            accountID: lease.userID,
+            forumID: forum.id
+          )
+        }
+        let pins = try await pinRepository.pins(accountID: lease.userID)
+        guard loadedLease == lease, pinAccountID == lease.userID else { return }
+        followedForumPins = pins
+        pinOperationError = nil
+      } catch {
+        guard loadedLease == lease, pinAccountID == lease.userID else { return }
+        pinOperationError = error.localizedDescription
+      }
+    }
+  }
+
+  func dismissPinOperationError() {
+    pinOperationError = nil
   }
 
   func loadNextPage() {
@@ -155,7 +282,11 @@ final class FollowedForumsViewModel: ObservableObject {
     currentPage = 0
     hasMore = true
     loadedLease = nil
+    requestLease = nil
+    pinAccountID = nil
     forums = []
+    followedForumPins = []
+    pinOperationError = nil
     isLoadingMore = false
     loadMoreError = nil
     isSignedOut = false
@@ -184,6 +315,7 @@ final class FollowedForumsViewModel: ObservableObject {
       defer {
         if requestEpoch == epoch {
           isLoadingMore = false
+          requestLease = nil
           loadTask = nil
         }
       }
@@ -208,6 +340,19 @@ final class FollowedForumsViewModel: ObservableObject {
             discardResultsFromChangedSession(requestEpoch: requestEpoch)
             return
           }
+          requestLease = lease
+          var replacementPins: [FollowedForumPin]?
+          var replacementPinError: String?
+          if requestReplacesSnapshot {
+            do {
+              replacementPins = try await pinRepository.pins(accountID: lease.userID)
+            } catch {
+              replacementPins = []
+              replacementPinError = error.localizedDescription
+            }
+            try Task.checkCancellation()
+            guard requestEpoch == epoch else { return }
+          }
           let response = try await service.followedForums(
             session: sessionBeforeRequest,
             page: requestedPage,
@@ -220,6 +365,13 @@ final class FollowedForumsViewModel: ObservableObject {
           guard let sessionAfterRequest, lease.matches(sessionAfterRequest) else {
             discardResultsFromChangedSession(requestEpoch: requestEpoch)
             return
+          }
+          if requestReplacesSnapshot {
+            pinAccountID = lease.userID
+            followedForumPins = replacementPins ?? []
+            if let replacementPinError {
+              pinOperationError = replacementPinError
+            }
           }
           let continues = try apply(
             response,
@@ -335,6 +487,7 @@ final class FollowedForumsViewModel: ObservableObject {
     epoch &+= 1
     loadTask?.cancel()
     loadTask = nil
+    requestLease = nil
   }
 
   private func merge(

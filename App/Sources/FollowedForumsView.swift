@@ -41,6 +41,17 @@ struct FollowedForumsView: View {
         forumList
       }
     }
+    .alert(
+      "无法读取或更新置顶贴吧",
+      isPresented: Binding(
+        get: { viewModel.pinOperationError != nil },
+        set: { if !$0 { viewModel.dismissPinOperationError() } }
+      )
+    ) {
+      Button("好", action: viewModel.dismissPinOperationError)
+    } message: {
+      Text(viewModel.pinOperationError ?? "未知错误")
+    }
     .navigationTitle("关注的贴吧")
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
@@ -58,33 +69,20 @@ struct FollowedForumsView: View {
   }
 
   private var forumList: some View {
+    let projection = viewModel.forumProjection
     ScrollView {
       LazyVStack(spacing: 0) {
-        LazyVGrid(
-          columns: FollowedForumsLayoutPolicy.columns(
-            preferred: preferredLayout,
-            dynamicTypeSize: dynamicTypeSize
-          ),
-          alignment: .leading,
-          spacing: FollowedForumsLayoutPolicy.spacing
-        ) {
-          ForEach(viewModel.forums) { forum in
-            NavigationLink {
-              ForumView(
-                forumName: forum.name,
-                service: browseService,
-                historyRepository: historyRepository,
-                favoritesRepository: favoritesRepository,
-                searchHistoryRepository: searchHistoryRepository
-              )
-            } label: {
-              FollowedForumCard(forum: forum)
-            }
-            .buttonStyle(.plain)
-          }
+        if !projection.pinned.isEmpty {
+          groupHeader("置顶", systemImage: "pin.fill")
+          forumGrid(projection.pinned, isPinned: true)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+
+        if !projection.unpinned.isEmpty {
+          if !projection.pinned.isEmpty {
+            groupHeader("其他关注", systemImage: "star")
+          }
+          forumGrid(projection.unpinned, isPinned: false)
+        }
 
         if viewModel.isLoadingMore {
           HStack {
@@ -109,6 +107,48 @@ struct FollowedForumsView: View {
     }
     .background(Color(uiColor: .systemGroupedBackground))
     .refreshable { await viewModel.refresh() }
+  }
+
+  private func forumGrid(_ forums: [FollowedForumItem], isPinned: Bool) -> some View {
+    LazyVGrid(
+      columns: FollowedForumsLayoutPolicy.columns(
+        preferred: preferredLayout,
+        dynamicTypeSize: dynamicTypeSize
+      ),
+      alignment: .leading,
+      spacing: FollowedForumsLayoutPolicy.spacing
+    ) {
+      ForEach(forums) { forum in
+        NavigationLink {
+          ForumView(
+            forumName: forum.name,
+            service: browseService,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
+          )
+        } label: {
+          FollowedForumCard(forum: forum, isPinned: isPinned)
+        }
+        .buttonStyle(.plain)
+        .followedForumContextMenu(
+          forum: forum,
+          isPinned: isPinned,
+          setPinned: { viewModel.setPinned(forum, isPinned: $0) }
+        )
+      }
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 12)
+  }
+
+  private func groupHeader(_ title: String, systemImage: String) -> some View {
+    Label(title, systemImage: systemImage)
+      .font(.subheadline.weight(.semibold))
+      .foregroundStyle(.secondary)
+      .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+      .padding(.horizontal, 16)
+      .accessibilityAddTraits(.isHeader)
   }
 
   private var preferredLayout: FollowedForumsLayoutMode {
