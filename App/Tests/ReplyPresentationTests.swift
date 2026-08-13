@@ -130,7 +130,7 @@ final class ReplyPresentationTests: XCTestCase {
       authorPortraitURL: nil,
       createdAt: nil,
       contents: [
-        .text("回复 "),
+        .text("回复"),
         .mention(name: "target", userID: 9),
         .text(":  first\n"),
         .text("second  "),

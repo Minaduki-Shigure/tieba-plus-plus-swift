@@ -702,7 +702,9 @@ enum TextReplyVisibilityProof {
       expectedReplyToUserID > 0,
       comment.replyToUserID == expectedReplyToUserID,
       comment.contents.count >= 3,
-      case .text("回复 ") = comment.contents[0],
+      case .text(let prefix) = comment.contents[0],
+      prefix.utf8.elementsEqual("回复".utf8)
+        || prefix.utf8.elementsEqual("回复 ".utf8),
       case .mention(let name, let userID) = comment.contents[1],
       !name.isEmpty,
       userID == expectedReplyToUserID
