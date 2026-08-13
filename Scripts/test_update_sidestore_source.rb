@@ -21,6 +21,7 @@ class SideStoreSourceUpdaterTest < Minitest::Test
     @ipa_path = File.join(@directory, "TiebaPlusPlus-SideStore.ipa")
     FileUtils.cp(File.join(REPOSITORY_ROOT, "sidestore-source.json"), @source_path)
     FileUtils.cp(File.join(REPOSITORY_ROOT, "project.yml"), @project_path)
+    write_pre_release_source_fixture
     File.binwrite(@ipa_path, "deterministic fake IPA for metadata tests\n")
     set_project_version(version: "0.60.0", build: "63")
   end
@@ -104,10 +105,13 @@ class SideStoreSourceUpdaterTest < Minitest::Test
   def test_rejects_existing_identity_with_a_different_artifact
     updater = make_updater
     assert updater.update!
-    File.binwrite(@ipa_path, "different IPA bytes\n")
+    original = File.binread(@ipa_path)
+    File.binwrite(@ipa_path, original.tr("a-z", "n-za-m"))
+    assert_equal original.bytesize, File.size(@ipa_path)
 
     error = assert_raises(SourceUpdateError) { updater.update! }
     assert_includes error.message, "different immutable fields"
+    assert_includes error.message, "sha256"
   end
 
   def test_rejects_future_source_schema_without_overwriting_it
@@ -129,6 +133,28 @@ class SideStoreSourceUpdaterTest < Minitest::Test
   end
 
   private
+
+  def write_pre_release_source_fixture
+    source = JSON.parse(File.read(@source_path))
+    app = source.fetch("apps").fetch(0)
+    app["beta"] = true
+    app["versions"] = [
+      {
+        "version" => "0.59.0",
+        "buildVersion" => "62",
+        "buildNumber" => "62",
+        "date" => "2026-08-05",
+        "localizedDescription" => "固定的发布前测试基线。",
+        "downloadURL" =>
+          "https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/releases/download/" \
+          "v0.59.0-alpha.1/TiebaPlusPlus-SideStore.ipa",
+        "size" => 1,
+        "sha256" => "0" * 64,
+        "minOSVersion" => "16.0"
+      }
+    ]
+    File.write(@source_path, JSON.pretty_generate(source) + "\n")
+  end
 
   def make_updater(tag: "v0.60.0-alpha.1")
     SideStoreSourceUpdater.new(

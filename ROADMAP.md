@@ -13,11 +13,10 @@ The estimate below measures end-user workflow scope in the current `main`
 source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
-credit. Ranges reflect remaining edge-case uncertainty. The public app source is
-versioned separately and currently serves `v0.59.0-alpha.1` (build 62), which
-represents the earlier 57–62% full-product scope. It predates all of the
-main-only work described after the current-alpha section in `README.md`, not
-only foreground batch check-in.
+credit. Ranges reflect remaining edge-case uncertainty. The public app source
+currently serves `v0.60.0-alpha.1` (build 63), whose app-code snapshot contains
+the workflows measured by this audit. Later `main` work must still pass a tagged
+release before it becomes installable from that source.
 
 | Capability area | Weight | Credited points | Current basis |
 | --- | ---: | ---: | --- |
@@ -31,8 +30,9 @@ only foreground batch check-in.
 | **Total** | **100** | **78–81** | Current full-product estimate; roughly 19–22% remains |
 
 This is a source-workflow coverage estimate, not a release-readiness or
-physical-device-validation percentage. The public `v0.59.0-alpha.1` IPA and the
-current `main` source must therefore be reported separately.
+physical-device-validation percentage. The public `v0.60.0-alpha.1` app-code
+snapshot and current `main` therefore share the 78–81% scope estimate, while
+their experimental account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
 points, or roughly 91–95%. Concern and the foreground unread summary raise the
