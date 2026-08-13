@@ -202,15 +202,18 @@ final class AnimatedRemoteImageTests: XCTestCase {
   func testDecodeSchedulerCancelsActiveDetachedWork() async throws {
     let scheduler = RemoteImageIODecodeScheduler(maxConcurrentDecodes: 1)
     let probe = DecodeConcurrencyProbe()
-    let request = Task.detached {
-      try await scheduler.decode { try probe.run(value: 1) }
+    let request = Task.detached(priority: .userInitiated) {
+      try await scheduler.decode(priority: .userInitiated) { try probe.run(value: 1) }
     }
     defer {
       request.cancel()
       probe.releaseAll()
     }
     let didEnterDecode = await probe.waitUntilEntered(1)
-    XCTAssertTrue(didEnterDecode)
+    guard didEnterDecode else {
+      XCTFail("Timed out waiting for the active decode worker")
+      return
+    }
 
     request.cancel()
     switch await request.result {
