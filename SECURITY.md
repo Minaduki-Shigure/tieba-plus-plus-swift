@@ -421,7 +421,7 @@ dismissing the confirmation, changing the account session, or leaving the page
 invalidates that snapshot. The configurable composer-entry risk notice is
 advisory and must never satisfy this confirmation requirement. Automatic,
 scheduled, and batch check-in are deliberately unsupported. `disagree` or
-downvote, rich-media topic/reply creation, editing, deletion, reporting, and
+downvote, rich-media topic/reply creation, editing, deletion, native reporting, and
 every other authenticated content write remain unsupported and must not be
 inferred from the approval, reply, or new-topic endpoints.
 
@@ -745,12 +745,23 @@ described above.
 Parent-floor links, media, profiles, and text selection/copying reuse the same
 strict routing, credential-free media, transient selection panel, and
 text-projection policies as ordinary post content.
+The report entry is not an authenticated App write. For an exact visible topic,
+floor, or nested reply, the anonymous client may POST only `category=1` and the
+positive post ID to the exact HTTPS `checkjubao` endpoint with cookies disabled,
+a 64 KiB response limit, and no redirects. The response URL must remain bound to
+that ID and is rebuilt from exact `tieba.baidu.com` host, report path, and fixed
+query fields as HTTPS. It opens only in `SFSafariViewController`; the App does
+not inject BDUSS/STOKEN, read browser cookies, inspect the page, infer a submit,
+or retry a report. It also cannot verify that Safari's Baidu account matches the
+active App account; the user must check the identity on the official page. A
+browser login, captcha, or SMS challenge may still be required. Image and
+private-message evidence remain outside this boundary.
 Parent and child filtering use one immutable rule snapshot; hiding the parent or
 anchor must not expose filtered content, alter pagination identity, or synthesize
 a pasteboard value. A visible parent or child may expose only the separately
 authenticated, confirmation-gated approval or cancellation control described
-above. Reply, `disagree`, downvote, create, edit, delete, report, and all other
-authenticated write operations remain unavailable.
+above. Reply, `disagree`, downvote, create, edit, delete, native report
+submission, and all other authenticated write operations remain unavailable.
 
 Internal navigation uses one strict parser for exact `tieba.baidu.com` HTTP(S)
 forum/thread URLs, supported `com.baidu.tieba` forum/thread route text, and the

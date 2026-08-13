@@ -3,7 +3,8 @@ import TiebaCore
 
 struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchService,
   SearchSuggestionService, HotTopicService, HotThreadService, UserProfileService,
-  PersonalizedFeedService, ForumInformationService, ThreadPictureGalleryService
+  PersonalizedFeedService, ForumInformationService, ThreadPictureGalleryService,
+  ContentReportService
 {
   private let client: TiebaClient
   private let contentFilterRepository: any ContentFilterRepository
@@ -14,6 +15,16 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
   ) {
     self.client = client
     self.contentFilterRepository = contentFilterRepository
+  }
+
+  func reportPageURL(postID: Int64) async throws -> URL {
+    do {
+      return try await client.getReportPage(postID: postID).url
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
   }
 
   func pictureIdentifier(for imageURL: URL) -> String? {

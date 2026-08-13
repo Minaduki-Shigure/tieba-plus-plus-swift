@@ -5,7 +5,8 @@ import TiebaCore
 @main
 @MainActor
 struct TiebaPlusPlusApp: App {
-  @StateObject private var externalWebPresentation = ExternalWebPresentationModel()
+  @StateObject private var externalWebPresentation: ExternalWebPresentationModel
+  @StateObject private var contentReportCoordinator: ContentReportCoordinator
   @StateObject private var contentMediaNetworkMonitor = ContentMediaNetworkMonitor()
   @StateObject private var mediaPlaybackCoordinator: MediaPlaybackCoordinator
   @StateObject private var voicePlaybackController: VoicePlaybackController
@@ -83,9 +84,19 @@ struct TiebaPlusPlusApp: App {
     )
     self.contentFilterRepository = contentFilterRepository
     let browseClient = TiebaClient(configuration: clientConfiguration)
-    self.service = TiebaCoreBrowseService(
+    let browseService = TiebaCoreBrowseService(
       client: browseClient,
       contentFilterRepository: contentFilterRepository
+    )
+    self.service = browseService
+    let externalWebPresentation = ExternalWebPresentationModel()
+    _externalWebPresentation = StateObject(wrappedValue: externalWebPresentation)
+    _contentReportCoordinator = StateObject(
+      wrappedValue: ContentReportCoordinator(
+        vault: accountVault,
+        service: browseService,
+        presentation: externalWebPresentation
+      )
     )
   }
 
@@ -116,6 +127,7 @@ struct TiebaPlusPlusApp: App {
       .environment(\.threadCloudFavoriteStore, threadCloudFavoriteStore)
       .environment(\.textReplySubmissionStore, textReplySubmissionStore)
       .environment(\.newThreadSubmissionStore, newThreadSubmissionStore)
+      .environment(\.contentReportCoordinator, contentReportCoordinator)
       .appTextSizeAdjustment(AppTextSizeAdjustment.resolved(textSizeAdjustment))
       .environment(\.appAccentColor, resolvedAccentColor)
       .environment(\.contentFilterRepository, contentFilterRepository)
@@ -160,6 +172,7 @@ struct TiebaPlusPlusApp: App {
         .allowsHitTesting(false)
         .accessibilityHidden(true)
       }
+      .contentReportPresentation(contentReportCoordinator)
       .tint(resolvedAccentColor.color)
       .preferredColorScheme(AppAppearance.resolved(appearance).colorScheme)
     }

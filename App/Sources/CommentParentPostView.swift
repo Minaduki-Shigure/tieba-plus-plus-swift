@@ -14,6 +14,7 @@ struct CommentParentPostView: View {
   let requestAgreementChange: (ContentAgreementTarget, Bool) -> Void
   let retryAgreement: (ContentAgreementTarget) -> Void
   let requestReply: (() -> Void)?
+  let reportTarget: ContentReportTarget?
   let selectText: (String) -> Void
 
   @Environment(\.contentAgreementStore) private var contentAgreementStore
@@ -90,6 +91,11 @@ struct CommentParentPostView: View {
           )
         }
       }
+      ContentReportMenuItem(
+        target: reportTarget,
+        title: reportActionTitle,
+        accessibilityIdentifier: "comments-report-parent-\(post.id)"
+      )
     }
     .accessibilityIdentifier("comments-parent-post")
   }
@@ -100,6 +106,13 @@ struct CommentParentPostView: View {
       pureReading: false,
       contextAvailable: requestReply != nil
     ).showsReplyEntry
+  }
+
+  private var reportActionTitle: String {
+    guard reportTarget?.kind == .post, post.floor > 1 else {
+      return reportTarget?.actionTitle ?? "举报父楼"
+    }
+    return "举报第 \(post.floor) 楼"
   }
 
   private var authorIdentity: some View {

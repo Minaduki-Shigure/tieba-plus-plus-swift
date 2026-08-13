@@ -7,11 +7,13 @@ struct CommentsView: View {
   @Environment(\.appAccentColor) private var appAccentColor
   @Environment(\.accountAccess) private var accountAccess
   @Environment(\.contentAgreementStore) private var contentAgreementStore
+  @Environment(\.contentReportCoordinator) private var contentReportCoordinator
   @Environment(\.hidesReplyEntryPoints) private var hidesReplyEntryPoints
   @StateObject private var viewModel: CommentsViewModel
   @State private var linkedTarget: TiebaLinkTarget?
   @State private var highlightedComment: CommentHighlightToken?
   @State private var agreementScopeID = UUID()
+  @State private var reportScopeID = UUID()
   @State private var pendingAgreementChange: PendingContentAgreementChange?
   @State private var agreementErrorMessage: String?
   @State private var hasRecordedDirectVisit = false
@@ -172,6 +174,9 @@ struct CommentsView: View {
                       }
                     }
                     : nil,
+                  reportTarget: viewModel.thread.flatMap { thread in
+                    ContentReportTarget(thread: thread, parentPost: parentPost)
+                  },
                   selectText: presentSelectableText
                 )
               }
@@ -274,6 +279,10 @@ struct CommentsView: View {
                         Label("回复此条", systemImage: "arrowshape.turn.up.left")
                       }
                     }
+                    ContentReportMenuItem(
+                      target: reportTarget(for: comment),
+                      accessibilityIdentifier: "comments-report-subpost-\(comment.id)"
+                    )
                   }
                 }
                 .id(CommentsListItemID.comment(comment.id))
@@ -366,6 +375,7 @@ struct CommentsView: View {
       }
     }
     .navigationTitle(navigationTitle)
+    .environment(\.contentReportScopeID, reportScopeID)
     .navigationBarTitleDisplayMode(.inline)
     .confirmationDialog(
       pendingAgreementChange?.confirmationTitle ?? "更新点赞状态？",
@@ -448,6 +458,7 @@ struct CommentsView: View {
       )
     }
     .onDisappear {
+      contentReportCoordinator?.invalidate(scopeID: reportScopeID)
       pendingAgreementChange = nil
       selectableTextPresentation = nil
       contentAgreementStore?.removeScope(agreementScopeID)
@@ -460,6 +471,7 @@ struct CommentsView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       selectableTextPresentation = nil
+      contentReportCoordinator?.invalidate(scopeID: reportScopeID)
       Task { @MainActor in viewModel.reload() }
     }
     .onChange(of: hidesReplyEntryPoints) { isHidden in
@@ -599,6 +611,18 @@ struct CommentsView: View {
       let parentPostID = viewModel.parentPost?.id
     else { return nil }
     return TextReplyComposerContext(
+      thread: thread,
+      parentPostID: parentPostID,
+      comment: comment
+    )
+  }
+
+  private func reportTarget(for comment: BrowseComment) -> ContentReportTarget? {
+    guard
+      let thread = viewModel.thread,
+      let parentPostID = viewModel.parentPost?.id
+    else { return nil }
+    return ContentReportTarget(
       thread: thread,
       parentPostID: parentPostID,
       comment: comment

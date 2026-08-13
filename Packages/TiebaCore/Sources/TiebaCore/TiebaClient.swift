@@ -290,10 +290,12 @@ public actor TiebaClient {
 
   private let requestFactory: TiebaRequestFactory
   private let transport: any TiebaTransport
+  private let reportPageTransport: any TiebaTransport
 
   public init(configuration: TiebaClientConfiguration = .init()) {
     self.requestFactory = TiebaRequestFactory(configuration: configuration)
     self.transport = URLSessionTiebaTransport()
+    self.reportPageTransport = URLSessionTiebaTransport(redirectPolicy: .rejectAll)
   }
 
   init(
@@ -302,6 +304,17 @@ public actor TiebaClient {
   ) {
     self.requestFactory = TiebaRequestFactory(configuration: configuration)
     self.transport = transport
+    self.reportPageTransport = transport
+  }
+
+  init(
+    configuration: TiebaClientConfiguration = .init(),
+    transport: any TiebaTransport,
+    reportPageTransport: any TiebaTransport
+  ) {
+    self.requestFactory = TiebaRequestFactory(configuration: configuration)
+    self.transport = transport
+    self.reportPageTransport = reportPageTransport
   }
 
   public func getThreads(
@@ -450,6 +463,16 @@ public actor TiebaClient {
       maximumBodyBytes: TiebaPicturePagePolicy.maximumResponseBodyBytes
     )
     return try TiebaPicturePageDecoder.page(from: body, expectedForumID: forumID)
+  }
+
+  public func getReportPage(postID: Int64) async throws -> TiebaReportPage {
+    let request = try requestFactory.reportPage(postID: postID)
+    let body = try await send(
+      request,
+      maximumBodyBytes: TiebaReportPagePolicy.maximumResponseBodyBytes,
+      using: reportPageTransport
+    )
+    return try TiebaReportPageDecoder.page(from: body, expectedPostID: postID)
   }
 
   public func getComments(
@@ -724,11 +747,13 @@ public actor TiebaClient {
 
   private func send(
     _ request: URLRequest,
-    maximumBodyBytes: Int? = nil
+    maximumBodyBytes: Int? = nil,
+    using selectedTransport: (any TiebaTransport)? = nil
   ) async throws -> Data {
     let response: TiebaHTTPResponse
     do {
-      response = try await transport.send(
+      let selectedTransport = selectedTransport ?? transport
+      response = try await selectedTransport.send(
         request,
         maximumBodyBytes: maximumBodyBytes
       )

@@ -25,9 +25,9 @@ only foreground batch check-in.
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
 | Local data, settings, and customization | 10 | 6 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, followed-forum layout, a configurable forum primary action, reply-entry visibility, a default-on composer risk notice, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, switching, a self-profile summary, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
-| Server writes, creation, and social actions | 15 | 10–11 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, three plain-text reply targets, and plain-text new-topic creation have guarded implementations; real batch-check-in behavior, creation, poll and interaction-restriction success, rich media, unresolvable cloud rows, and most reactions remain unavailable or unvalidated |
+| Server writes, creation, and social actions | 15 | 11–12 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, three plain-text reply targets, plain-text new-topic creation, and credential-free official reporting entry points have guarded implementations; real batch-check-in behavior, creation, poll and interaction-restriction success, rich media, unresolvable cloud rows, native reporting, and most reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
-| **Total** | **100** | **75–78** | Current full-product estimate; roughly 22–25% remains |
+| **Total** | **100** | **76–79** | Current full-product estimate; roughly 21–24% remains |
 
 This is a source-workflow coverage estimate, not a release-readiness or
 physical-device-validation percentage. The public `v0.59.0-alpha.1` IPA and the
@@ -77,6 +77,12 @@ carried. It adds neither a data source nor a workflow, so it adds no weighted po
 The separate fan-reminder entry consumes the existing optional `fans` field and
 opens the already credited public follower list. It adds no endpoint, background
 work, persistence, or weighted point.
+The official-report handoff closes the end-user reporting-entry gap for visible
+topics, floors, and nested replies and therefore adds one weighted point. It does
+not claim native reporting parity: the credential-free preflight only resolves a
+strictly bound HTTPS form URL, `SFSafariViewController` receives no App Keychain
+credentials, cannot bind Safari's Baidu identity to the active App account, and
+cannot infer whether the user submitted or cancelled the form.
 
 ## Available
 
@@ -272,6 +278,10 @@ the source metadata is updated to that tested IPA.
 - Short-lived `tbs` availability for at most the immediately following write,
   without Keychain persistence or exposure to application models
 - Isolated anonymous and authenticated networking clients
+- Login-gated official report-form handoff for exact visible topic, floor, and
+  nested-reply IDs, using a minimum-field credential-free HTTPS preflight,
+  canonical HTTPS route rebuilding, SafariServices handoff, and no App
+  credential injection, browser-account identity claim, or submission-state inference
 
 ## Next milestones
 
@@ -334,6 +344,13 @@ the source metadata is updated to that tested IPA.
 12. Disposable-account validation of plain-text new-topic creation, followed by
    rich-media topic/reply creation, broader settings parity, remaining account
    activity, and moderation tools
+13. Real-device validation of the official report-form handoff, including
+   browser login state, report reasons, captcha/SMS challenges, cancellation,
+   account rotation during preflight, and unsupported image/private-message
+   evidence. A future native reporter requires separate minimum-field captures
+   for `/mo/q/tbs`, `/mg/o/complaint/wise/querytpl`, and
+   `/mg/o/complaint/wise/submit`; Keychain credentials must not be injected into
+   a remotely updated general-purpose WebView.
 
 The foreground inbox deliberately does not copy TiebaLite's cleartext JSON
 transport or its Android hardware parameters. ReplyMe uses the current HTTPS

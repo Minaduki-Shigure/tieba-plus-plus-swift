@@ -21,6 +21,7 @@ struct ThreadView: View {
   @State private var pictureGalleryRoute: ThreadImageGalleryRoute?
   @State private var pictureGalleryPolicyTask: Task<Void, Never>?
   @State private var agreementScopeID = UUID()
+  @State private var reportScopeID = UUID()
   @State private var pendingAgreementChange: PendingContentAgreementChange?
   @State private var agreementErrorMessage: String?
   @State private var cloudFavoriteScopeID = UUID()
@@ -38,6 +39,7 @@ struct ThreadView: View {
   @Environment(\.contentFilterRepository) private var contentFilterRepository
   @Environment(\.contentAgreementStore) private var contentAgreementStore
   @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
+  @Environment(\.contentReportCoordinator) private var contentReportCoordinator
   private let historySnapshot: ThreadHistorySnapshot?
   private let linkRoute: TiebaThreadRoute?
   private let onInboxReplyComposerPresented: ((InboxReplyIntent) -> Void)?
@@ -90,6 +92,7 @@ struct ThreadView: View {
       }
     }
     .navigationTitle(threadNavigationTitle)
+    .environment(\.contentReportScopeID, reportScopeID)
     .navigationBarTitleDisplayMode(.inline)
     .safeAreaInset(edge: .top, spacing: 0) {
       if !isPureReadingMode {
@@ -154,6 +157,10 @@ struct ThreadView: View {
         )
         .accessibilityLabel("跳转页码")
         .help("跳转页码")
+
+        if !isPureReadingMode {
+          ContentReportTopicMenu(target: topicReportTarget)
+        }
       }
     }
     .alert("跳转页码", isPresented: $showsPageJump) {
@@ -329,6 +336,7 @@ struct ThreadView: View {
         persistBrowseOptions(viewModel.options)
       }
       cancelPictureGallery()
+      contentReportCoordinator?.invalidate(scopeID: reportScopeID)
       pendingAgreementChange = nil
       pendingCloudFavoriteAction = nil
       clearSelectableTextRoute()
@@ -355,6 +363,7 @@ struct ThreadView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       cancelPictureGallery()
+      contentReportCoordinator?.invalidate(scopeID: reportScopeID)
       pendingCloudFavoriteAction = nil
       clearSelectableTextRoute()
       Task { @MainActor in
@@ -570,6 +579,11 @@ struct ThreadView: View {
   private var topicReplyContext: TextReplyComposerContext? {
     guard let firstPost = viewModel.firstPost else { return nil }
     return TextReplyComposerContext(thread: viewModel.thread, firstPost: firstPost)
+  }
+
+  private var topicReportTarget: ContentReportTarget? {
+    guard let firstPost = viewModel.firstPost else { return nil }
+    return ContentReportTarget(thread: viewModel.thread, post: firstPost)
   }
 
   private var replyEntriesVisible: Bool {
@@ -859,6 +873,10 @@ struct ThreadView: View {
                     requestReply: replyEntriesVisible ? {
                       requestReply(to: firstPost)
                     } : nil,
+                    reportThread: viewModel.thread,
+                    reportTarget: isPureReadingMode
+                      ? nil
+                      : ContentReportTarget(thread: viewModel.thread, post: firstPost),
                     openComments: { commentID in
                       presentComments(
                         threadID: firstPost.threadID,
@@ -944,6 +962,10 @@ struct ThreadView: View {
                     requestReply: replyEntriesVisible ? {
                       requestReply(to: post)
                     } : nil,
+                    reportThread: viewModel.thread,
+                    reportTarget: isPureReadingMode
+                      ? nil
+                      : ContentReportTarget(thread: viewModel.thread, post: post),
                     openComments: { commentID in
                       presentComments(
                         threadID: post.threadID,
@@ -1624,6 +1646,8 @@ private struct PostView: View {
   let cloudFavoriteTarget: ThreadCloudFavoriteTarget?
   let requestCloudFavoriteAction: (ThreadCloudFavoritePendingAction) -> Void
   let requestReply: (() -> Void)?
+  let reportThread: BrowseThread
+  let reportTarget: ContentReportTarget?
   let openComments: (Int64?) -> Void
   let selectText: (String) -> Void
 
@@ -1690,6 +1714,14 @@ private struct PostView: View {
         InlineCommentPreviewCard(
           presentation: presentation,
           openComments: openComments,
+          reportTarget: { comment in
+            guard !isPureReadingMode else { return nil }
+            return ContentReportTarget(
+              thread: reportThread,
+              parentPostID: post.id,
+              comment: comment
+            )
+          },
           selectText: selectText
         )
       }
@@ -1712,6 +1744,13 @@ private struct PostView: View {
           )
         }
       }
+      if !isPureReadingMode {
+        ContentReportMenuItem(
+          target: reportTarget,
+          title: reportActionTitle,
+          accessibilityIdentifier: "thread-report-post-\(post.id)"
+        )
+      }
       ThreadCloudFavoriteFloorMenuSlot(
         store: threadCloudFavoriteStore,
         target: cloudFavoriteTarget,
@@ -1720,6 +1759,13 @@ private struct PostView: View {
         requestAction: requestCloudFavoriteAction
       )
     }
+  }
+
+  private var reportActionTitle: String {
+    guard reportTarget?.kind == .post, post.floor > 1 else {
+      return reportTarget?.actionTitle ?? "举报本楼"
+    }
+    return "举报第 \(post.floor) 楼"
   }
 
   private var authorRow: some View {

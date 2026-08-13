@@ -18,8 +18,8 @@ checks.
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, media preferences, followed-forum layout, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
 | Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
-| Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, plain-text topic/floor/nested replies, and plain-text new-topic creation are in device validation; other writes stay disabled |
-| TiebaLite parity | Current `main` source: about 75% of full product scope (estimated range 75–78%, with 22–25% remaining); anonymous reading and media: about 91–95%. The public `v0.59.0-alpha.1` IPA remains about 57–62% |
+| Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, plain-text topic/floor/nested replies, and plain-text new-topic creation are in device validation. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
+| TiebaLite parity | Current `main` source: about 76% of full product scope (estimated range 76–79%, with 21–24% remaining); anonymous reading and media: about 91–95%. The public `v0.59.0-alpha.1` IPA remains about 57–62% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.59.0-alpha.1` (build 62); later `main` features require a tagged release |
 
 ### Release and validation
@@ -150,6 +150,14 @@ checks.
   supports partial system selection and an explicit copy-all action, and presents
   or dismisses without a network request, account read, persistent write, or
   implicit pasteboard write.
+  The same visible topic, floor, inline nested-reply, parent-floor, and full
+  nested-reply surfaces now expose a login-gated route to Tieba's official
+  report form. A credential-free, two-field HTTPS preflight resolves the exact
+  post ID; the returned route is accepted only after exact host, path, query,
+  and target binding and is rebuilt as HTTPS. The form opens in
+  `SFSafariViewController`: the App never injects its Keychain BDUSS/STOKEN,
+  cannot observe submission, and cannot prove that the browser's Baidu account
+  matches the active App account. The user must verify or complete browser login.
   These main-only changes will not enter the public app source until a tagged
   IPA passes the release checks.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
@@ -510,14 +518,14 @@ checks.
 - **Unsupported operations:** Guess-based removal of unresolvable cloud-favorite
   rows, bulk cloud/local synchronization, disagreement and other reaction types,
   recommendation feedback, rich-media topic/reply creation, profile editing, content
-  deletion/reporting, background or automatic check-in, notification mark-read/unread
+  deletion, native or credential-injected reporting, background or automatic check-in, notification mark-read/unread
   reconciliation, background notification polling, and moderation remain
   unavailable until their request contracts and recovery paths have been
   validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, weighted estimate, protocol constraints, and next milestones.
-  The current `main` source audit totals 75–78 of 100 weighted points, leaving
-  about 22–25%; its anonymous reading and media subtotal remains about 91–95%.
+  The current `main` source audit totals 76–79 of 100 weighted points, leaving
+  about 21–24%; its anonymous reading and media subtotal remains about 91–95%.
   This measures implemented end-to-end workflows with partial credit for
   device-validation gates; it is not a claim that every path is release-ready.
   The public `v0.59.0-alpha.1` IPA remains at the earlier 57–62% scope. The

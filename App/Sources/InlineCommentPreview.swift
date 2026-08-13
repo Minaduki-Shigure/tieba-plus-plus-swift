@@ -20,6 +20,7 @@ struct InlineCommentPreviewPresentation: Hashable, Sendable {
 struct InlineCommentPreviewCard: View {
   let presentation: InlineCommentPreviewPresentation
   let openComments: (Int64?) -> Void
+  let reportTarget: (BrowseComment) -> ContentReportTarget?
   let selectText: (String) -> Void
 
   var body: some View {
@@ -33,6 +34,7 @@ struct InlineCommentPreviewCard: View {
           InlineCommentPreviewRow(
             comment: comment,
             action: { openComments(comment.id) },
+            reportTarget: reportTarget(comment),
             selectText: selectText
           )
         case .placeholder:
@@ -79,6 +81,7 @@ struct InlineCommentPreviewCard: View {
 private struct InlineCommentPreviewRow: View {
   let comment: BrowseComment
   let action: () -> Void
+  let reportTarget: ContentReportTarget?
   let selectText: (String) -> Void
 
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
@@ -110,6 +113,10 @@ private struct InlineCommentPreviewRow: View {
           Label("选择文字", systemImage: "text.cursor")
         }
       }
+      ContentReportMenuItem(
+        target: reportTarget,
+        accessibilityIdentifier: "inline-comment-report-\(comment.id)"
+      )
     }
   }
 
