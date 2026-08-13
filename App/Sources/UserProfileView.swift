@@ -298,65 +298,80 @@ struct UserProfileView: View {
 
   private var publicThreadsSection: some View {
     Section {
-        if viewModel.isActivityHidden {
-          Label("该用户未公开主题", systemImage: "eye.slash")
-            .foregroundStyle(.secondary)
-        } else if viewModel.threads.isEmpty {
-          Label("暂无公开主题", systemImage: "text.bubble")
-            .foregroundStyle(.secondary)
-        } else if !viewModel.hasDisplayableThreads {
-          Label("暂无可显示的公开主题", systemImage: "eye.slash")
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
-            .padding(.vertical, 8)
-            .listRowSeparator(.hidden)
-            .accessibilityElement(children: .combine)
-        } else {
-          ForEach(viewModel.displayableThreads) { thread in
-            LocallyFilteredContent(
-              visibility: thread.localVisibility,
-              placeholder: "已屏蔽此公开主题"
-            ) {
-              NavigationLink {
-                ThreadView(
-                  thread: thread,
-                  service: service,
-                  historyRepository: historyRepository,
-                  favoritesRepository: favoritesRepository,
-                  searchHistoryRepository: searchHistoryRepository
-                )
-              } label: {
-                UserActivityThreadRow(thread: thread)
-              }
-            }
-            .frame(minHeight: 44)
-          }
+      switch viewModel.threadState {
+      case .idle, .loading:
+        HStack {
+          Spacer()
+          ProgressView()
+          Spacer()
         }
-
-        if !viewModel.isActivityHidden, let lastThread = viewModel.threads.last {
-          Color.clear
-            .frame(height: 1)
-            .id(
-              "user-profile-thread-pagination-\(lastThread.id)-\(viewModel.threads.count)-\(viewModel.threadPaginationEpoch)"
-            )
-            .listRowInsets(EdgeInsets())
-            .listRowSeparator(.hidden)
-            .accessibilityHidden(true)
-            .onAppear { viewModel.loadMoreIfNeeded(current: lastThread) }
-        }
-
-        if viewModel.isLoadingMore {
-          HStack {
-            Spacer()
-            ProgressView()
-            Spacer()
-          }
+        .listRowSeparator(.hidden)
+      case .failed(let message):
+        ErrorStateView(message: message, retry: viewModel.retryInitialThreads)
           .listRowSeparator(.hidden)
-        } else if let message = viewModel.loadMoreError {
-          LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
+      case .loaded:
+        Group {
+          if viewModel.isActivityHidden {
+            Label("该用户未公开主题", systemImage: "eye.slash")
+              .foregroundStyle(.secondary)
+          } else if viewModel.threads.isEmpty {
+            Label("暂无公开主题", systemImage: "text.bubble")
+              .foregroundStyle(.secondary)
+          } else if !viewModel.hasDisplayableThreads {
+            Label("暂无可显示的公开主题", systemImage: "eye.slash")
+              .font(.callout)
+              .foregroundStyle(.secondary)
+              .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
+              .padding(.vertical, 8)
+              .listRowSeparator(.hidden)
+              .accessibilityElement(children: .combine)
+          } else {
+            ForEach(viewModel.displayableThreads) { thread in
+              LocallyFilteredContent(
+                visibility: thread.localVisibility,
+                placeholder: "已屏蔽此公开主题"
+              ) {
+                NavigationLink {
+                  ThreadView(
+                    thread: thread,
+                    service: service,
+                    historyRepository: historyRepository,
+                    favoritesRepository: favoritesRepository,
+                    searchHistoryRepository: searchHistoryRepository
+                  )
+                } label: {
+                  UserActivityThreadRow(thread: thread)
+                }
+              }
+              .frame(minHeight: 44)
+            }
+          }
+
+          if !viewModel.isActivityHidden, let lastThread = viewModel.threads.last {
+            Color.clear
+              .frame(height: 1)
+              .id(
+                "user-profile-thread-pagination-\(lastThread.id)-\(viewModel.threads.count)-\(viewModel.threadPaginationEpoch)"
+              )
+              .listRowInsets(EdgeInsets())
+              .listRowSeparator(.hidden)
+              .accessibilityHidden(true)
+              .onAppear { viewModel.loadMoreIfNeeded(current: lastThread) }
+          }
+
+          if viewModel.isLoadingMore {
+            HStack {
+              Spacer()
+              ProgressView()
+              Spacer()
+            }
             .listRowSeparator(.hidden)
+          } else if let message = viewModel.loadMoreError {
+            LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
+              .listRowSeparator(.hidden)
+          }
         }
+      }
     } header: {
       if let profile = viewModel.profile {
         Text("公开主题 \(profile.threadCount.formatted())")

@@ -6,6 +6,7 @@ final class UserProfileViewModel: ObservableObject {
   @Published private(set) var profile: BrowseUserProfile?
   @Published private(set) var threads: [BrowseThread] = []
   @Published private(set) var state: LoadState = .idle
+  @Published private(set) var threadState: LoadState = .idle
   @Published private(set) var isLoadingMore = false
   @Published private(set) var loadMoreError: String?
   @Published private(set) var isActivityHidden = false
@@ -16,8 +17,10 @@ final class UserProfileViewModel: ObservableObject {
   private let service: any UserProfileService
   private var currentPage = 0
   private var hasMore = true
-  private var loadTask: Task<Void, Never>?
-  private var loadGeneration = 0
+  private var profileTask: Task<Void, Never>?
+  private var threadTask: Task<Void, Never>?
+  private var profileGeneration = 0
+  private var threadGeneration = 0
 
   init(userID: Int64, service: any UserProfileService) {
     self.userID = userID
@@ -33,30 +36,31 @@ final class UserProfileViewModel: ObservableObject {
   }
 
   func loadIfNeeded() {
-    guard state == .idle else { return }
-    reload()
+    if state == .idle {
+      reload()
+    } else if state == .loaded, threadState == .idle {
+      reloadThreads()
+    }
   }
 
   func reload() {
-    invalidateCurrentLoad()
-    profile = nil
-    threads = []
-    currentPage = 0
-    hasMore = true
-    isActivityHidden = false
-    isLoadingMore = false
-    loadMoreError = nil
-    state = .loading
-    loadInitialPage()
+    _ = beginFullReload()
   }
 
   func refresh() async {
-    reload()
-    await loadTask?.value
+    let tasks = beginFullReload()
+    await tasks.profile.value
+    await tasks.threads.value
+  }
+
+  func retryInitialThreads() {
+    guard case .failed = threadState else { return }
+    reloadThreads()
   }
 
   func reloadThreadsAfterContentFilterChange() {
-    reload()
+    guard state != .idle || threadState != .idle else { return }
+    reloadThreads()
   }
 
   func loadMoreIfNeeded(current thread: BrowseThread) {
@@ -66,7 +70,7 @@ final class UserProfileViewModel: ObservableObject {
       hasMore,
       !isLoadingMore,
       loadMoreError == nil,
-      state == .loaded
+      threadState == .loaded
     else { return }
     loadThreads(page: currentPage + 1)
   }
@@ -77,14 +81,15 @@ final class UserProfileViewModel: ObservableObject {
       loadMoreError != nil,
       hasMore,
       !isLoadingMore,
-      state == .loaded
+      threadState == .loaded
     else { return }
     loadThreads(page: currentPage + 1)
   }
 
   func cancel() {
     let shouldRearmPagination = !threads.isEmpty && isLoadingMore
-    invalidateCurrentLoad()
+    cancelProfileLoad()
+    cancelThreadLoad()
     isLoadingMore = false
     if shouldRearmPagination {
       threadPaginationEpoch &+= 1
@@ -92,53 +97,115 @@ final class UserProfileViewModel: ObservableObject {
     if state == .loading {
       state = profile == nil ? .idle : .loaded
     }
+    if threadState == .loading {
+      threadState = .idle
+    }
   }
 
-  private func loadInitialPage() {
+  private func beginFullReload() -> (
+    profile: Task<Void, Never>,
+    threads: Task<Void, Never>
+  ) {
+    cancelProfileLoad()
+    resetThreads()
+    profile = nil
+    state = .loading
+    threadState = .loading
+    let profileTask = loadProfile()
+    let threadTask = loadInitialThreads()
+    return (profileTask, threadTask)
+  }
+
+  private func reloadThreads() {
+    resetThreads()
+    threadState = .loading
+    _ = loadInitialThreads()
+  }
+
+  private func resetThreads() {
+    cancelThreadLoad()
+    threads = []
+    currentPage = 0
+    hasMore = true
+    isActivityHidden = false
+    isLoadingMore = false
+    loadMoreError = nil
+  }
+
+  @discardableResult
+  private func loadProfile() -> Task<Void, Never> {
     let service = service
     let userID = userID
-    loadGeneration &+= 1
-    let generation = loadGeneration
-    loadTask = Task {
+    profileGeneration &+= 1
+    let generation = profileGeneration
+    let task = Task {
       defer {
-        if generation == loadGeneration {
-          loadTask = nil
+        if generation == profileGeneration {
+          profileTask = nil
         }
       }
       do {
-        async let profileRequest = service.userProfile(userID: userID)
-        async let threadsRequest = service.userThreads(userID: userID, page: 1, pageSize: 20)
-        let (loadedProfile, response) = try await (profileRequest, threadsRequest)
+        let loadedProfile = try await service.userProfile(userID: userID)
         try Task.checkCancellation()
-        guard generation == loadGeneration else { return }
+        guard generation == profileGeneration else { return }
         profile = loadedProfile
+        state = .loaded
+      } catch is CancellationError {
+        return
+      } catch {
+        guard generation == profileGeneration, !Task.isCancelled else { return }
+        state = .failed(error.localizedDescription)
+      }
+    }
+    profileTask = task
+    return task
+  }
+
+  @discardableResult
+  private func loadInitialThreads() -> Task<Void, Never> {
+    let service = service
+    let userID = userID
+    threadGeneration &+= 1
+    let generation = threadGeneration
+    let task = Task {
+      defer {
+        if generation == threadGeneration {
+          threadTask = nil
+        }
+      }
+      do {
+        let response = try await service.userThreads(userID: userID, page: 1, pageSize: 20)
+        try Task.checkCancellation()
+        guard generation == threadGeneration else { return }
         threads = unique(response.threads)
         currentPage = response.currentPage
         hasMore = response.hasMore
         isActivityHidden = response.isHidden
-        state = .loaded
+        threadState = .loaded
         threadPaginationEpoch &+= 1
       } catch is CancellationError {
         return
       } catch {
-        guard generation == loadGeneration, !Task.isCancelled else { return }
-        state = .failed(error.localizedDescription)
+        guard generation == threadGeneration, !Task.isCancelled else { return }
+        threadState = .failed(error.localizedDescription)
       }
     }
+    threadTask = task
+    return task
   }
 
   private func loadThreads(page: Int) {
     let service = service
     let userID = userID
-    loadGeneration &+= 1
-    let generation = loadGeneration
+    threadGeneration &+= 1
+    let generation = threadGeneration
     loadMoreError = nil
     isLoadingMore = true
-    loadTask = Task {
+    let task = Task {
       defer {
-        if generation == loadGeneration {
+        if generation == threadGeneration {
           isLoadingMore = false
-          loadTask = nil
+          threadTask = nil
         }
       }
       do {
@@ -148,7 +215,7 @@ final class UserProfileViewModel: ObservableObject {
           pageSize: 20
         )
         try Task.checkCancellation()
-        guard generation == loadGeneration else { return }
+        guard generation == threadGeneration else { return }
         let merged = merge(threads, response.threads)
         let addedItems = merged.count > threads.count
         threads = merged
@@ -158,16 +225,23 @@ final class UserProfileViewModel: ObservableObject {
       } catch is CancellationError {
         return
       } catch {
-        guard generation == loadGeneration, !Task.isCancelled else { return }
+        guard generation == threadGeneration, !Task.isCancelled else { return }
         loadMoreError = error.localizedDescription
       }
     }
+    threadTask = task
   }
 
-  private func invalidateCurrentLoad() {
-    loadGeneration &+= 1
-    loadTask?.cancel()
-    loadTask = nil
+  private func cancelProfileLoad() {
+    profileGeneration &+= 1
+    profileTask?.cancel()
+    profileTask = nil
+  }
+
+  private func cancelThreadLoad() {
+    threadGeneration &+= 1
+    threadTask?.cancel()
+    threadTask = nil
   }
 
   private func unique(_ items: [BrowseThread]) -> [BrowseThread] {

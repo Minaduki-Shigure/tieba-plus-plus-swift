@@ -19,7 +19,9 @@ final class UserProfileViewModelTests: XCTestCase {
     let viewModel = UserProfileViewModel(userID: 7, service: service)
 
     viewModel.loadIfNeeded()
-    try await waitForProfile { viewModel.state == .loaded }
+    try await waitForProfile {
+      viewModel.state == .loaded && viewModel.threadState == .loaded
+    }
 
     XCTAssertEqual(viewModel.profile?.id, 7)
     XCTAssertEqual(viewModel.profile?.preferredName, "测试用户")
@@ -34,6 +36,239 @@ final class UserProfileViewModelTests: XCTestCase {
     let threadRequests = await service.threadRequestSnapshot()
     XCTAssertEqual(profileRequests, [7])
     XCTAssertEqual(threadRequests, [UserThreadRequest(userID: 7, page: 1)])
+  }
+
+  func testThreadFailureLeavesLoadedProfileAvailable() async throws {
+    let service = UserProfileServiceStub(
+      profile: .fixture,
+      threadStubs: [.failure]
+    )
+    let viewModel = UserProfileViewModel(userID: 7, service: service)
+
+    viewModel.loadIfNeeded()
+    try await waitForProfile {
+      guard case .failed = viewModel.threadState else { return false }
+      return viewModel.state == .loaded
+    }
+
+    XCTAssertEqual(viewModel.profile, .fixture)
+    XCTAssertEqual(viewModel.state, .loaded)
+    guard case .failed = viewModel.threadState else {
+      return XCTFail("The public-thread section should expose its own failure")
+    }
+    XCTAssertTrue(viewModel.threads.isEmpty)
+  }
+
+  func testRetryingInitialThreadsDoesNotReloadProfile() async throws {
+    let replacement = BrowseThread.fixture(id: 11)
+    let service = UserProfileServiceStub(
+      profile: .fixture,
+      threadStubs: [
+        .failure,
+        .value(
+          UserThreadPageData(
+            threads: [replacement],
+            currentPage: 1,
+            hasMore: false,
+            isHidden: false
+          )
+        ),
+      ]
+    )
+    let viewModel = UserProfileViewModel(userID: 7, service: service)
+
+    viewModel.loadIfNeeded()
+    try await waitForProfile {
+      guard case .failed = viewModel.threadState else { return false }
+      return viewModel.state == .loaded
+    }
+
+    viewModel.retryInitialThreads()
+    try await waitForProfile {
+      viewModel.threadState == .loaded && viewModel.threads == [replacement]
+    }
+
+    XCTAssertEqual(viewModel.profile, .fixture)
+    let profileRequests = await service.profileRequestSnapshot()
+    let threadRequests = await service.threadRequestSnapshot()
+    XCTAssertEqual(profileRequests, [7])
+    XCTAssertEqual(
+      threadRequests,
+      [
+        UserThreadRequest(userID: 7, page: 1),
+        UserThreadRequest(userID: 7, page: 1),
+      ]
+    )
+  }
+
+  func testProfileFailureRemainsFullPageFailureWhenThreadsLoad() async throws {
+    let thread = BrowseThread.fixture(id: 12)
+    let service = UserProfileServiceStub(
+      profileStubs: [.failure],
+      threadStubs: [
+        .value(
+          UserThreadPageData(
+            threads: [thread],
+            currentPage: 1,
+            hasMore: false,
+            isHidden: false
+          )
+        )
+      ]
+    )
+    let viewModel = UserProfileViewModel(userID: 7, service: service)
+
+    viewModel.loadIfNeeded()
+    try await waitForProfile {
+      guard case .failed = viewModel.state else { return false }
+      return viewModel.threadState == .loaded
+    }
+
+    XCTAssertNil(viewModel.profile)
+    guard case .failed = viewModel.state else {
+      return XCTFail("Profile failure should remain the full-page state")
+    }
+    XCTAssertEqual(viewModel.threadState, .loaded)
+    XCTAssertEqual(viewModel.threads, [thread])
+  }
+
+  func testRefreshWaitsForProfileAndThreads() async throws {
+    let thread = BrowseThread.fixture(id: 13)
+    let service = UserProfileServiceStub(
+      profileStubs: [.suspended(1301)],
+      threadStubs: [.suspended(1302)]
+    )
+    let viewModel = UserProfileViewModel(userID: 7, service: service)
+    let completion = UserProfileRefreshCompletionProbe()
+
+    let refreshTask = Task { @MainActor in
+      await viewModel.refresh()
+      await completion.markCompleted()
+    }
+    try await waitForProfile {
+      let profileRequestCount = await service.profileRequestCount()
+      let threadRequestCount = await service.threadRequestCount()
+      return profileRequestCount == 1 && threadRequestCount == 1
+    }
+
+    let resumedProfile = await service.resumeProfile(id: 1301, returning: .fixture)
+    XCTAssertTrue(resumedProfile)
+    await service.waitUntilSuspendedRequestReturned(id: 1301)
+    try await waitForProfile { viewModel.state == .loaded }
+
+    XCTAssertEqual(viewModel.threadState, .loading)
+    let completedBeforeThreads = await completion.isCompleted()
+    XCTAssertFalse(completedBeforeThreads)
+
+    let resumedThreads = await service.resumeThreads(
+      id: 1302,
+      returning: UserThreadPageData(
+        threads: [thread],
+        currentPage: 1,
+        hasMore: false,
+        isHidden: false
+      )
+    )
+    XCTAssertTrue(resumedThreads)
+    await refreshTask.value
+
+    let completedAfterThreads = await completion.isCompleted()
+    XCTAssertTrue(completedAfterThreads)
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.threadState, .loaded)
+    XCTAssertEqual(viewModel.threads, [thread])
+  }
+
+  func testCancelAndReentryAfterLoadedPageDoNotReloadEitherResource() async throws {
+    let thread = BrowseThread.fixture(id: 14)
+    let service = UserProfileServiceStub(
+      profile: .fixture,
+      pages: [
+        1: UserThreadPageData(
+          threads: [thread],
+          currentPage: 1,
+          hasMore: false,
+          isHidden: false
+        )
+      ]
+    )
+    let viewModel = UserProfileViewModel(userID: 7, service: service)
+
+    viewModel.loadIfNeeded()
+    try await waitForProfile {
+      viewModel.state == .loaded && viewModel.threadState == .loaded
+    }
+
+    viewModel.cancel()
+    viewModel.loadIfNeeded()
+    await Task.yield()
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.threadState, .loaded)
+    XCTAssertEqual(viewModel.profile, .fixture)
+    XCTAssertEqual(viewModel.threads, [thread])
+    let profileRequests = await service.profileRequestSnapshot()
+    let threadRequests = await service.threadRequestSnapshot()
+    XCTAssertEqual(profileRequests, [7])
+    XCTAssertEqual(threadRequests, [UserThreadRequest(userID: 7, page: 1)])
+  }
+
+  func testCancelAfterProfileLoadsReentersByReloadingOnlyThreads() async throws {
+    let oldThread = BrowseThread.fixture(id: 15)
+    let replacementThread = BrowseThread.fixture(id: 16)
+    let service = UserProfileServiceStub(
+      profile: .fixture,
+      threadStubs: [
+        .suspended(1501),
+        .value(
+          UserThreadPageData(
+            threads: [replacementThread],
+            currentPage: 1,
+            hasMore: false,
+            isHidden: false
+          )
+        ),
+      ]
+    )
+    let viewModel = UserProfileViewModel(userID: 7, service: service)
+
+    viewModel.loadIfNeeded()
+    try await waitForProfile {
+      guard viewModel.state == .loaded else { return false }
+      return await service.threadRequestCount() == 1
+    }
+
+    viewModel.cancel()
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.threadState, .idle)
+
+    viewModel.loadIfNeeded()
+    try await waitForProfile {
+      viewModel.threadState == .loaded && viewModel.threads == [replacementThread]
+    }
+
+    let profileRequests = await service.profileRequestSnapshot()
+    let threadRequests = await service.threadRequestSnapshot()
+    XCTAssertEqual(profileRequests, [7])
+    XCTAssertEqual(threadRequests.map(\.page), [1, 1])
+
+    let resumed = await service.resumeThreads(
+      id: 1501,
+      returning: UserThreadPageData(
+        threads: [oldThread],
+        currentPage: 1,
+        hasMore: true,
+        isHidden: false
+      )
+    )
+    XCTAssertTrue(resumed)
+    await service.waitUntilSuspendedRequestReturned(id: 1501)
+    await Task.yield()
+
+    XCTAssertEqual(viewModel.profile, .fixture)
+    XCTAssertEqual(viewModel.threads, [replacementThread])
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.threadState, .loaded)
   }
 
   func testDisplayableThreadsKeepVisibleAndPlaceholderWithoutRemovingRawThreads() async throws {
@@ -54,7 +289,9 @@ final class UserProfileViewModelTests: XCTestCase {
     let viewModel = UserProfileViewModel(userID: 7, service: service)
 
     viewModel.loadIfNeeded()
-    try await waitForProfile { viewModel.state == .loaded }
+    try await waitForProfile {
+      viewModel.state == .loaded && viewModel.threadState == .loaded
+    }
 
     XCTAssertEqual(viewModel.threads, [visible, placeholder, hidden])
     XCTAssertEqual(viewModel.displayableThreads, [visible, placeholder])
@@ -85,7 +322,9 @@ final class UserProfileViewModelTests: XCTestCase {
     let viewModel = UserProfileViewModel(userID: 7, service: service)
 
     viewModel.loadIfNeeded()
-    try await waitForProfile { viewModel.state == .loaded }
+    try await waitForProfile {
+      viewModel.state == .loaded && viewModel.threadState == .loaded
+    }
     viewModel.loadMoreIfNeeded(current: hiddenTail)
 
     try await waitForProfile { viewModel.threads.map(\.id) == [30, 31, 32] }
@@ -110,7 +349,9 @@ final class UserProfileViewModelTests: XCTestCase {
     let viewModel = UserProfileViewModel(userID: 7, service: service)
 
     viewModel.loadIfNeeded()
-    try await waitForProfile { viewModel.state == .loaded }
+    try await waitForProfile {
+      viewModel.state == .loaded && viewModel.threadState == .loaded
+    }
     viewModel.loadMoreIfNeeded(current: rawTail)
 
     XCTAssertTrue(viewModel.isActivityHidden)
@@ -149,7 +390,9 @@ final class UserProfileViewModelTests: XCTestCase {
     let viewModel = UserProfileViewModel(userID: 7, service: service)
 
     viewModel.loadIfNeeded()
-    try await waitForProfile { viewModel.state == .loaded }
+    try await waitForProfile {
+      viewModel.state == .loaded && viewModel.threadState == .loaded
+    }
     viewModel.loadMoreIfNeeded(current: first)
     try await waitForProfile {
       viewModel.threads == [first, hiddenPageTail]
@@ -200,7 +443,9 @@ final class UserProfileViewModelTests: XCTestCase {
     let viewModel = UserProfileViewModel(userID: 7, service: service)
 
     viewModel.loadIfNeeded()
-    try await waitForProfile { viewModel.state == .loaded }
+    try await waitForProfile {
+      viewModel.state == .loaded && viewModel.threadState == .loaded
+    }
     XCTAssertFalse(viewModel.hasDisplayableThreads)
 
     viewModel.loadMoreIfNeeded(current: try XCTUnwrap(viewModel.threads.last))
@@ -225,7 +470,9 @@ final class UserProfileViewModelTests: XCTestCase {
     let viewModel = UserProfileViewModel(userID: 7, service: service)
 
     viewModel.loadIfNeeded()
-    try await waitForProfile { viewModel.state == .loaded }
+    try await waitForProfile {
+      viewModel.state == .loaded && viewModel.threadState == .loaded
+    }
     let initialEpoch = viewModel.threadPaginationEpoch
     XCTAssertGreaterThan(initialEpoch, 0)
 
@@ -264,7 +511,9 @@ final class UserProfileViewModelTests: XCTestCase {
     let viewModel = UserProfileViewModel(userID: 7, service: service)
 
     viewModel.loadIfNeeded()
-    try await waitForProfile { viewModel.state == .loaded }
+    try await waitForProfile {
+      viewModel.state == .loaded && viewModel.threadState == .loaded
+    }
     viewModel.loadMoreIfNeeded(current: try XCTUnwrap(viewModel.threads.last))
     try await waitForProfile { viewModel.threads.map(\.id) == [10, 11] }
 
@@ -318,7 +567,10 @@ final class UserProfileViewModelTests: XCTestCase {
 
     XCTAssertEqual(viewModel.threads, [replacement])
     XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.threadState, .loaded)
     XCTAssertEqual(viewModel.profile, .fixture)
+    let profileRequests = await service.profileRequestSnapshot()
+    XCTAssertEqual(profileRequests, [7])
     let requests = await service.threadRequestSnapshot()
     XCTAssertEqual(requests.map(\.page), [1, 1])
   }
@@ -419,7 +671,13 @@ final class UserProfileViewModelTests: XCTestCase {
     viewModel.cancel()
 
     XCTAssertFalse(viewModel.isLoadingMore)
+    XCTAssertEqual(viewModel.threadState, .loaded)
     XCTAssertGreaterThan(viewModel.threadPaginationEpoch, epochBeforeLoadMore)
+    viewModel.loadIfNeeded()
+    await Task.yield()
+    let requestsAfterReentry = await service.threadRequestSnapshot()
+    XCTAssertEqual(requestsAfterReentry.map(\.page), [1, 2])
+
     viewModel.loadMoreIfNeeded(current: first)
     try await waitForProfile { viewModel.threads == [first, second] }
 
@@ -440,6 +698,73 @@ final class UserProfileViewModelTests: XCTestCase {
     let requests = await service.threadRequestSnapshot()
     XCTAssertEqual(requests.map(\.page), [1, 2, 2])
   }
+
+  func testCancelThenReentryRejectsLateProfileAndThreadResults() async throws {
+    let oldThread = BrowseThread.fixture(id: 90)
+    let replacementThread = BrowseThread.fixture(id: 91)
+    let service = UserProfileServiceStub(
+      profileStubs: [
+        .suspended(901),
+        .value(.replacementFixture),
+      ],
+      threadStubs: [
+        .suspended(902),
+        .value(
+          UserThreadPageData(
+            threads: [replacementThread],
+            currentPage: 1,
+            hasMore: false,
+            isHidden: false
+          )
+        ),
+      ]
+    )
+    let viewModel = UserProfileViewModel(userID: 7, service: service)
+
+    viewModel.loadIfNeeded()
+    try await waitForProfile {
+      let profileRequestCount = await service.profileRequestCount()
+      let threadRequestCount = await service.threadRequestCount()
+      return profileRequestCount == 1 && threadRequestCount == 1
+    }
+
+    viewModel.cancel()
+    XCTAssertEqual(viewModel.state, .idle)
+    XCTAssertEqual(viewModel.threadState, .idle)
+
+    viewModel.loadIfNeeded()
+    try await waitForProfile {
+      viewModel.state == .loaded
+        && viewModel.threadState == .loaded
+        && viewModel.profile == .replacementFixture
+        && viewModel.threads == [replacementThread]
+    }
+
+    let resumedProfile = await service.resumeProfile(id: 901, returning: .fixture)
+    let resumedThreads = await service.resumeThreads(
+      id: 902,
+      returning: UserThreadPageData(
+        threads: [oldThread],
+        currentPage: 1,
+        hasMore: true,
+        isHidden: false
+      )
+    )
+    XCTAssertTrue(resumedProfile)
+    XCTAssertTrue(resumedThreads)
+    await service.waitUntilSuspendedRequestReturned(id: 901)
+    await service.waitUntilSuspendedRequestReturned(id: 902)
+    await Task.yield()
+
+    XCTAssertEqual(viewModel.profile, .replacementFixture)
+    XCTAssertEqual(viewModel.threads, [replacementThread])
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.threadState, .loaded)
+    let profileRequests = await service.profileRequestSnapshot()
+    let threadRequests = await service.threadRequestSnapshot()
+    XCTAssertEqual(profileRequests, [7, 7])
+    XCTAssertEqual(threadRequests.map(\.page), [1, 1])
+  }
 }
 
 private struct UserThreadRequest: Equatable, Sendable {
@@ -448,20 +773,30 @@ private struct UserThreadRequest: Equatable, Sendable {
 }
 
 private enum UserProfileStubError: Error {
+  case failure
   case missingPage
+}
+
+private enum UserProfileStub: Sendable {
+  case value(BrowseUserProfile)
+  case failure
+  case suspended(Int)
 }
 
 private enum UserThreadStub: Sendable {
   case value(UserThreadPageData)
+  case failure
   case suspended(Int)
 }
 
 private actor UserProfileServiceStub: UserProfileService {
   let profile: BrowseUserProfile
   let pages: [Int: UserThreadPageData]
+  private var profileStubs: [UserProfileStub]
   private var threadStubs: [UserThreadStub]
   private var profileRequests: [Int64] = []
   private var threadRequests: [UserThreadRequest] = []
+  private var pendingProfiles: [Int: CheckedContinuation<BrowseUserProfile, any Error>] = [:]
   private var pendingThreads: [Int: CheckedContinuation<UserThreadPageData, any Error>] = [:]
   private var returnedSuspendedRequests: Set<Int> = []
   private var suspendedReturnWaiters: [Int: [CheckedContinuation<Void, Never>]] = [:]
@@ -469,17 +804,40 @@ private actor UserProfileServiceStub: UserProfileService {
   init(profile: BrowseUserProfile, pages: [Int: UserThreadPageData]) {
     self.profile = profile
     self.pages = pages
+    profileStubs = []
     threadStubs = []
   }
 
   init(profile: BrowseUserProfile, threadStubs: [UserThreadStub]) {
     self.profile = profile
     pages = [:]
+    profileStubs = []
+    self.threadStubs = threadStubs
+  }
+
+  init(profileStubs: [UserProfileStub], threadStubs: [UserThreadStub]) {
+    profile = .fixture
+    pages = [:]
+    self.profileStubs = profileStubs
     self.threadStubs = threadStubs
   }
 
   func userProfile(userID: Int64) async throws -> BrowseUserProfile {
     profileRequests.append(userID)
+    if !profileStubs.isEmpty {
+      switch profileStubs.removeFirst() {
+      case .value(let response):
+        return response
+      case .failure:
+        throw UserProfileStubError.failure
+      case .suspended(let identifier):
+        let response: BrowseUserProfile = try await withCheckedThrowingContinuation {
+          pendingProfiles[identifier] = $0
+        }
+        markSuspendedRequestReturned(identifier)
+        return response
+      }
+    }
     return profile
   }
 
@@ -491,6 +849,8 @@ private actor UserProfileServiceStub: UserProfileService {
       switch threadStubs.removeFirst() {
       case .value(let response):
         return response
+      case .failure:
+        throw UserProfileStubError.failure
       case .suspended(let identifier):
         let response: UserThreadPageData = try await withCheckedThrowingContinuation {
           pendingThreads[identifier] = $0
@@ -533,6 +893,12 @@ private actor UserProfileServiceStub: UserProfileService {
     return true
   }
 
+  func resumeProfile(id: Int, returning value: BrowseUserProfile) -> Bool {
+    guard let continuation = pendingProfiles.removeValue(forKey: id) else { return false }
+    continuation.resume(returning: value)
+    return true
+  }
+
   func waitUntilSuspendedRequestReturned(id: Int) async {
     guard !returnedSuspendedRequests.contains(id) else { return }
     await withCheckedContinuation { continuation in
@@ -541,6 +907,7 @@ private actor UserProfileServiceStub: UserProfileService {
   }
 
   func profileRequestSnapshot() -> [Int64] { profileRequests }
+  func profileRequestCount() -> Int { profileRequests.count }
   func threadRequestSnapshot() -> [UserThreadRequest] { threadRequests }
   func threadRequestCount() -> Int { threadRequests.count }
 
@@ -551,35 +918,47 @@ private actor UserProfileServiceStub: UserProfileService {
   }
 }
 
+private actor UserProfileRefreshCompletionProbe {
+  private var completed = false
+
+  func markCompleted() { completed = true }
+  func isCompleted() -> Bool { completed }
+}
+
 extension BrowseUserProfile {
-  fileprivate static let fixture = BrowseUserProfile(
-    id: 7,
-    tiebaUID: 70,
-    username: "fixture-user",
-    displayName: "测试用户",
-    portraitURL: nil,
-    largePortraitURL: nil,
-    growthLevel: 8,
-    gender: .female,
-    ipLocation: "上海",
-    badges: ["测试印记"],
-    biography: "公开简介",
-    tiebaAge: "10.0",
-    threadCount: 3,
-    postCount: 20,
-    followerCount: 100,
-    followingCount: 10,
-    followedForumCount: 5,
-    likedForums: [
-      BrowseProfileForum(id: 42, name: "swift"),
-      BrowseProfileForum(id: 77, name: "ios"),
-    ],
-    totalAgreeCount: 500,
-    isModerator: false,
-    isVIP: true,
-    isVerifiedCreator: false,
-    isBlocked: false
-  )
+  fileprivate static let fixture = makeFixture(displayName: "测试用户")
+  fileprivate static let replacementFixture = makeFixture(displayName: "新资料")
+
+  private static func makeFixture(displayName: String) -> BrowseUserProfile {
+    BrowseUserProfile(
+      id: 7,
+      tiebaUID: 70,
+      username: "fixture-user",
+      displayName: displayName,
+      portraitURL: nil,
+      largePortraitURL: nil,
+      growthLevel: 8,
+      gender: .female,
+      ipLocation: "上海",
+      badges: ["测试印记"],
+      biography: "公开简介",
+      tiebaAge: "10.0",
+      threadCount: 3,
+      postCount: 20,
+      followerCount: 100,
+      followingCount: 10,
+      followedForumCount: 5,
+      likedForums: [
+        BrowseProfileForum(id: 42, name: "swift"),
+        BrowseProfileForum(id: 77, name: "ios"),
+      ],
+      totalAgreeCount: 500,
+      isModerator: false,
+      isVIP: true,
+      isVerifiedCreator: false,
+      isBlocked: false
+    )
+  }
 }
 
 extension BrowseThread {
