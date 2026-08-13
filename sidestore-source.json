@@ -21,8 +21,18 @@
       "iconURL": "https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/App/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png",
       "tintColor": "#125DBE",
       "category": "social",
-      "beta": true,
       "versions": [
+        {
+          "version": "0.60.0",
+          "buildVersion": "63",
+          "buildNumber": "63",
+          "date": "2026-08-13",
+          "localizedDescription": "Tieba++ v0.60.0-alpha.1 已通过核心测试、iOS 模拟器测试、匿名集成门禁和 IPA 完整性检查。此版本为无签名 IPA，供 SideStore 或 LiveContainer 自签名安装；详细功能与安全边界请参阅仓库文档。",
+          "downloadURL": "https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/releases/download/v0.60.0-alpha.1/TiebaPlusPlus-SideStore.ipa",
+          "size": 4927558,
+          "sha256": "cc39b0599d77b09fb7b02a53c7e32eb8d18519e56d3354fe969b85950707d0ea",
+          "minOSVersion": "16.0"
+        },
         {
           "version": "0.59.0",
           "buildVersion": "62",
@@ -91,12 +101,17 @@
         }
       ],
       "appPermissions": {
-        "entitlements": [],
+        "entitlements": [
+
+        ],
         "privacy": {
           "NSPhotoLibraryAddUsageDescription": "用于将您选择的贴吧图片保存到系统照片。"
         }
-      }
+      },
+      "beta": true
     }
   ],
-  "news": []
+  "news": [
+
+  ]
 }
