@@ -72,6 +72,29 @@ final class ComposerTextEditorTests: XCTestCase {
     )
   }
 
+  func testInsertionAcceptsWholeSurrogatePairAndCaretAfterIt() throws {
+    let token = try XCTUnwrap(TiebaClassicEmoticonCatalog.token(for: "哈哈"))
+    let replacement = try XCTUnwrap(
+      ComposerTextInsertionPolicy.replacingSelection(
+        in: "😀",
+        selection: ComposerTextSelection(location: 0, length: 2),
+        with: token
+      )
+    )
+    XCTAssertEqual(replacement.text, token)
+    XCTAssertEqual(replacement.selection.location, token.utf16.count)
+
+    let insertion = try XCTUnwrap(
+      ComposerTextInsertionPolicy.replacingSelection(
+        in: "😀",
+        selection: ComposerTextSelection(location: 2, length: 0),
+        with: token
+      )
+    )
+    XCTAssertEqual(insertion.text, "😀\(token)")
+    XCTAssertEqual(insertion.selection.location, 2 + token.utf16.count)
+  }
+
   func testCatalogRejectsUnknownOrNonCanonicalNamesBeforeInsertion() {
     XCTAssertNil(TiebaClassicEmoticonCatalog.token(for: "reply, portrait, name"))
     XCTAssertNil(TiebaClassicEmoticonCatalog.token(for: "不存在"))

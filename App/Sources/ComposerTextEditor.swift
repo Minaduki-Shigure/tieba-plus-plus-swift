@@ -22,11 +22,38 @@ struct ComposerTextSelection: Equatable, Sendable {
   }
 
   func isValid(for text: String) -> Bool {
+    range(in: text) != nil
+  }
+
+  func range(in text: String) -> Range<String.Index>? {
     let utf16Count = text.utf16.count
-    return location >= 0
+    guard
+      location >= 0
       && length >= 0
       && location <= utf16Count
       && length <= utf16Count - location
+    else { return nil }
+
+    let lowerOffset = location
+    let upperOffset = location + length
+    var lowerBound: String.Index?
+    var upperBound: String.Index?
+    var index = text.startIndex
+    var offset = 0
+
+    // Foundation may clamp malformed NSRanges, so enumerate exact Character boundaries.
+    while true {
+      if offset == lowerOffset { lowerBound = index }
+      if offset == upperOffset { upperBound = index }
+      if let lowerBound, let upperBound {
+        return lowerBound..<upperBound
+      }
+      guard index != text.endIndex else { return nil }
+
+      let nextIndex = text.index(after: index)
+      offset += text[index..<nextIndex].utf16.count
+      index = nextIndex
+    }
   }
 }
 
@@ -43,9 +70,7 @@ enum ComposerTextInsertionPolicy {
   ) -> ComposerTextInsertionResult? {
     guard
       !insertion.isEmpty,
-      selection.isValid(for: text),
-      let range = Range(selection.nsRange, in: text),
-      NSRange(range, in: text) == selection.nsRange
+      let range = selection.range(in: text)
     else { return nil }
 
     let updated = text.replacingCharacters(in: range, with: insertion)
