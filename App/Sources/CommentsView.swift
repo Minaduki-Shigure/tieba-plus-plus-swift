@@ -1036,7 +1036,7 @@ private enum CommentsListItemID: Hashable {
   case comment(Int64)
 }
 
-private struct CommentsRowRenderKey: Equatable {
+private struct CommentsRowRenderKey: Equatable, Sendable {
   let comment: BrowseComment
   let thread: BrowseThread?
   let parentPostID: Int64?

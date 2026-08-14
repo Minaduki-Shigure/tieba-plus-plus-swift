@@ -1,7 +1,7 @@
 import SwiftUI
 
-struct StableRenderBoundary<Key: Equatable, Content: View>: View, Equatable {
-  let key: Key
+struct StableRenderBoundary<Key: Equatable & Sendable, Content: View>: View, Equatable {
+  nonisolated let key: Key
   private let content: () -> Content
 
   init(key: Key, @ViewBuilder content: @escaping () -> Content) {
