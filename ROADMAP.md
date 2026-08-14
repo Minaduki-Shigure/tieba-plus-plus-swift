@@ -14,7 +14,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-currently serves `v0.60.2-alpha.1` (build 65), whose app-code snapshot contains
+currently serves `v0.60.3-alpha.1` (build 66), whose app-code snapshot contains
 the workflows measured by this audit. Later `main` work must still pass a tagged
 release before it becomes installable from that source.
 
@@ -30,7 +30,7 @@ release before it becomes installable from that source.
 | **Total** | **100** | **78–81** | Current full-product estimate; roughly 19–22% remains |
 
 This is a source-workflow coverage estimate, not a release-readiness or
-physical-device-validation percentage. The public `v0.60.2-alpha.1` app-code
+physical-device-validation percentage. The public `v0.60.3-alpha.1` app-code
 snapshot and current `main` therefore share the 78–81% scope estimate, while
 their experimental account paths retain the validation gates documented below.
 

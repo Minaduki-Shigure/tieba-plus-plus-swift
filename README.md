@@ -20,24 +20,39 @@ and its verified metadata enters the public app source.
 | Local features | Available for history, favorites, filtering, appearance, media preferences, account-isolated followed-forum pinning and layout, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
 | Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, and equivalent new-topic creation are in device validation. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
-| TiebaLite parity | Current `main` source and the public `v0.60.2-alpha.1` app-code snapshot: about 80% of full product scope (estimated range 78–81%, with 19–22% remaining); anonymous reading and media: about 91–95% |
-| Distribution | The public SideStore/LiveContainer source currently serves `v0.60.2-alpha.1` (build 65) |
+| TiebaLite parity | Current `main` source and the public `v0.60.3-alpha.1` app-code snapshot: about 80% of full product scope (estimated range 78–81%, with 19–22% remaining); anonymous reading and media: about 91–95% |
+| Distribution | The public SideStore/LiveContainer source currently serves `v0.60.3-alpha.1` (build 66) |
 
 ### Release and validation
 
-- **Current alpha:** `v0.60.2-alpha.1` publishes all end-user app-code changes
+- **Current alpha:** `v0.60.3-alpha.1` publishes all end-user app-code changes
   described below, including
   personalized and concern feeds, expanded public and
   account-bound reads, bounded animated-media and image-cache support, local
   followed-forum management, and guarded creation and social actions. Account
   reads and writes that are marked experimental still require disposable-account
   or physical-device validation.
-- **`v0.60.2-alpha.1` release scope:** The complete Discovery section now appears
-  first on Home. Thread reading collapses per-floor geometry into stable visible
-  floor IDs and updates page state only when the leading or trailing visible floor
-  changes, rather than for every scroll pixel. Ordinary thumbnails no longer
-  subscribe to download-progress events that they do not render; the full-screen
-  image viewer retains its progress reporting. Explore opens on a credential-free
+- **`v0.60.3-alpha.1` release scope:** The complete Discovery section appears
+  first on Home. On iOS 18, thread reading uses native scroll-target visibility
+  instead of evaluating per-floor geometry for every scroll frame; iOS 16 and 17
+  retain the prior compatibility path. Stable layout and post indexes preserve
+  reading progress and earlier-page anchors without scanning the full retained
+  floor set on every scroll update. Thread rows avoid persistent direct text
+  selection while retaining the existing context-menu selection panel. On iOS
+  18, only confirmed animated thumbnails subscribe to viewport changes and show
+  a poster while offscreen. Across supported OS versions, their display link
+  pauses during direct touch tracking. Thread preview decoding is bounded to
+  1,320 pixels. Ordinary thumbnails no longer subscribe to download-progress
+  events that they do not render; the full-screen image viewer retains its
+  progress reporting.
+  The personalized feed prefetches near its final three rows and treats every
+  nonempty raw page as eligible for continuation because the endpoint has no
+  authoritative `has_more`; an empty raw page ends pagination. Each load attempt,
+  including automatic prefetch, may cross at most five consecutive nonempty pages
+  whose entries all fail mapping before requiring an explicit retry. The optional
+  followed-forum filter independently scans at most five mapped-but-filtered
+  pages per load attempt, while duplicate-page and retained-item bounds remain in
+  force. Explore opens on a credential-free
   personalized thread feed beside the existing hot ranking. A logged-in account
   additionally receives an on-demand concern channel; it makes no request until selected,
   keeps the server snapshot timestamp in memory per exact account session, and
@@ -175,9 +190,9 @@ and its verified metadata enters the public app source.
   cannot observe submission, and cannot prove that the browser's Baidu account
   matches the active App account. The user must verify or complete browser login.
   All capabilities in this release-scope block are included in the public
-  `v0.60.2-alpha.1` IPA after the tagged commit and artifact passed the release
+  `v0.60.3-alpha.1` IPA after the tagged commit and artifact passed the release
   checks.
-- **Non-user-facing image-creation foundation:** The public `v0.60.2-alpha.1`
+- **Non-user-facing image-creation foundation:** The public `v0.60.3-alpha.1`
   app-code snapshot contains a strict HTTPS static-image chunk-upload contract and
   private, metadata-stripping attachment processing/storage. It is not connected
   to either composer, cannot initiate an upload from the UI, and receives no
@@ -210,7 +225,7 @@ and its verified metadata enters the public app source.
   pass. After the release asset is published and reverified, the release workflow
   derives its date, download URL, byte size, and SHA-256 and updates the source
   atomically; version or concurrent-source mismatches fail closed. The source
-  currently distributes the verified `v0.60.2-alpha.1` IPA (build 65).
+  currently distributes the verified `v0.60.3-alpha.1` IPA (build 66).
 - **Login hotfix:** `v0.54.0-alpha.1` can reach Tieba's account page without
   completing because its callback and Cookie matching are too strict.
   `v0.54.1-alpha.1` made that failure explicit and confirmed that iOS 18.7.2
@@ -227,7 +242,7 @@ and its verified metadata enters the public app source.
   topic pagination are available. The personalized feed has a default-off
   setting that locally retains only threads whose stable forum ID occurs in the
   active account's complete followed-forum index. Both feeds are included in the
-  public `v0.60.2-alpha.1` IPA. Recommendation dislike feedback remains disabled.
+  public `v0.60.3-alpha.1` IPA. Recommendation dislike feedback remains disabled.
 - **Search:** Forum, thread, and user search are separated by category. Global
   and per-forum post search provide the supported sort and content filters,
   local history, and optional credential-free suggestions.
@@ -568,7 +583,7 @@ and its verified metadata enters the public app source.
   about 19–22%; its anonymous reading and media subtotal remains about 91–95%.
   This measures implemented end-to-end workflows with partial credit for
   device-validation gates; it is not a claim that every path is release-ready.
-  The public `v0.60.2-alpha.1` app-code snapshot has the same estimated scope.
+  The public `v0.60.3-alpha.1` app-code snapshot has the same estimated scope.
   The largest remaining gaps are
   rich-media creation, background unread handling, broader settings, remaining
   account/social actions, unresolvable cloud-favorite rows, and moderation.
