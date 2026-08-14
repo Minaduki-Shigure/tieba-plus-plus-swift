@@ -138,6 +138,18 @@ struct PersonalizedFeedView: View {
         EmptyStateView(title: emptyTitle, systemImage: "sparkles")
           .frame(maxWidth: .infinity, minHeight: 240)
           .listRowSeparator(.hidden)
+        if viewModel.hasMore, viewModel.loadMoreError == nil {
+          Button {
+            guard isActive else { return }
+            viewModel.loadMore()
+          } label: {
+            Label("继续加载", systemImage: "arrow.down.circle")
+              .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(.borderless)
+          .disabled(viewModel.isLoadingMore || viewModel.loadMoreError != nil)
+          .listRowSeparator(.hidden)
+        }
       } else {
         ForEach(viewModel.items) { item in
           LocallyFilteredContent(
@@ -155,6 +167,10 @@ struct PersonalizedFeedView: View {
             } label: {
               ThreadSummaryRow(thread: item.thread, showsForum: true)
             }
+          }
+          .onAppear {
+            guard isActive else { return }
+            viewModel.loadMoreIfNeeded(currentItemID: item.id)
           }
         }
       }
@@ -174,7 +190,10 @@ struct PersonalizedFeedView: View {
           .frame(height: 1)
           .listRowSeparator(.hidden)
           .accessibilityHidden(true)
-          .onAppear(perform: viewModel.loadMore)
+          .onAppear {
+            guard isActive else { return }
+            viewModel.loadMore()
+          }
       }
     }
     .listStyle(.plain)

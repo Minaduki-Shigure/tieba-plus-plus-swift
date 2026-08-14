@@ -2468,6 +2468,22 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.firstPost, firstPost)
     XCTAssertEqual(viewModel.posts, [reply])
     XCTAssertEqual(viewModel.post(withID: firstPost.id), firstPost)
+    XCTAssertEqual(viewModel.post(withID: reply.id), reply)
+    XCTAssertEqual(
+      viewModel.scrollTargetsByPostID,
+      [
+        firstPost.id: ThreadScrollTargetDescriptor(
+          order: 0,
+          localVisibility: .visible,
+          tracksPrependAnchor: false
+        ),
+        reply.id: ThreadScrollTargetDescriptor(
+          order: 1,
+          localVisibility: .visible,
+          tracksPrependAnchor: true
+        ),
+      ]
+    )
     XCTAssertEqual(viewModel.scrollTargetPostID, firstPost.id)
   }
 

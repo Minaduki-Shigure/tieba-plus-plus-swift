@@ -288,9 +288,10 @@ and its verified metadata enters the public app source.
   WebP, or HEIC/HEIF sequence before it animates. Metadata is capped at 500 frames;
   frames downscale to a 16 MiB decoded bound and enter one shared cache capped
   at 64 MiB and 1,000 entries.
-  Unsupported or over-limit data falls back to a poster. Animated thumbnails pause
-  after their SwiftUI surface leaves presentation or the scene becomes inactive;
-  gallery neighbors and Reduce Motion always show the poster.
+  Unsupported or over-limit data falls back to a poster. Animated thread
+  thumbnails pause during direct scroll tracking, after leaving their viewport,
+  or when the scene becomes inactive; gallery neighbors and Reduce Motion always
+  show the poster.
 - **Playback:** Voice and native AVKit video share one application-wide playback
   coordinator. Starting new media pauses the prior item, inactive scenes pause
   playback, and playback never resumes implicitly. Voice files can be explicitly

@@ -1,6 +1,12 @@
 import Combine
 import Foundation
 
+struct ThreadScrollTargetDescriptor: Equatable, Sendable {
+  let order: Int
+  let localVisibility: LocalContentVisibility
+  let tracksPrependAnchor: Bool
+}
+
 @MainActor
 final class ThreadViewModel: ObservableObject {
   @Published private(set) var thread: BrowseThread {
@@ -9,10 +15,16 @@ final class ThreadViewModel: ObservableObject {
   @Published private(set) var originThread: BrowseThread?
   @Published private(set) var poll: BrowsePoll?
   @Published private(set) var firstPost: BrowsePost? {
-    didSet { rebuildAgreementTargetIndex() }
+    didSet {
+      guard oldValue != firstPost else { return }
+      rebuildPostIndexes()
+    }
   }
   @Published private(set) var posts: [BrowsePost] = [] {
-    didSet { rebuildAgreementTargetIndex() }
+    didSet {
+      guard oldValue != posts else { return }
+      rebuildPostIndexes()
+    }
   }
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
@@ -46,6 +58,8 @@ final class ThreadViewModel: ObservableObject {
   private var nextPagePostID: Int64?
   private var descendingFallbackPage: Int?
   private var agreementTargetsByPostID: [Int64: ContentAgreementTarget] = [:]
+  private var postsByID: [Int64: BrowsePost] = [:]
+  private(set) var scrollTargetsByPostID: [Int64: ThreadScrollTargetDescriptor] = [:]
 
   init(
     thread: BrowseThread,
@@ -782,7 +796,7 @@ final class ThreadViewModel: ObservableObject {
   }
 
   func post(withID postID: Int64) -> BrowsePost? {
-    post(withID: postID, firstPost: firstPost, replies: posts)
+    postsByID[postID]
   }
 
   func agreementTarget(forPostID postID: Int64) -> ContentAgreementTarget? {
@@ -837,6 +851,45 @@ final class ThreadViewModel: ObservableObject {
       }
     }
     agreementTargetsByPostID = targets
+  }
+
+  private func rebuildPostIndexes() {
+    var agreementTargets: [Int64: ContentAgreementTarget] = [:]
+    var lookup: [Int64: BrowsePost] = [:]
+    var scrollTargets: [Int64: ThreadScrollTargetDescriptor] = [:]
+    let capacity = posts.count + (firstPost == nil ? 0 : 1)
+    agreementTargets.reserveCapacity(capacity)
+    lookup.reserveCapacity(capacity)
+    scrollTargets.reserveCapacity(capacity)
+
+    var order = 0
+    if let firstPost, firstPost.id > 0 {
+      if let target = ContentAgreementTarget(thread: thread, post: firstPost) {
+        agreementTargets[firstPost.id] = target
+      }
+      lookup[firstPost.id] = firstPost
+      scrollTargets[firstPost.id] = ThreadScrollTargetDescriptor(
+        order: order,
+        localVisibility: firstPost.localVisibility,
+        tracksPrependAnchor: false
+      )
+      order += 1
+    }
+    for post in posts where post.id > 0 && lookup[post.id] == nil {
+      if let target = ContentAgreementTarget(thread: thread, post: post) {
+        agreementTargets[post.id] = target
+      }
+      lookup[post.id] = post
+      scrollTargets[post.id] = ThreadScrollTargetDescriptor(
+        order: order,
+        localVisibility: post.localVisibility,
+        tracksPrependAnchor: true
+      )
+      order += 1
+    }
+    agreementTargetsByPostID = agreementTargets
+    postsByID = lookup
+    scrollTargetsByPostID = scrollTargets
   }
 
   private struct NormalizedPostPage {
@@ -928,15 +981,6 @@ final class ThreadViewModel: ObservableObject {
     else {
       throw BrowseError.unavailable("贴吧返回的主题首楼标识或归属异常，未显示该响应。")
     }
-  }
-
-  private func post(
-    withID postID: Int64,
-    firstPost: BrowsePost?,
-    replies: [BrowsePost]
-  ) -> BrowsePost? {
-    if firstPost?.id == postID { return firstPost }
-    return replies.first(where: { $0.id == postID })
   }
 
   private func firstVisiblePost(

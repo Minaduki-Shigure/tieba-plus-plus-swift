@@ -68,6 +68,59 @@ final class ThreadScrollPositionTests: XCTestCase {
     )
   }
 
+  func testNativeResolverUsesLastVisibleProgressPostAndFirstReplyAnchor() {
+    XCTAssertEqual(
+      ThreadScrollPositionResolver.position(
+        visiblePostIDs: [3, 2, 2, 99, 1],
+        targetsByPostID: [
+          1: target(order: 0, tracksPrependAnchor: false),
+          2: target(order: 1),
+          3: target(order: 2),
+        ],
+        hidesLocallyFilteredContent: false
+      ),
+      ThreadScrollPosition(readingProgressPostID: 3, prependAnchorPostID: 2)
+    )
+  }
+
+  func testNativeResolverIgnoresUnknownHiddenAndInvalidTargets() {
+    XCTAssertEqual(
+      ThreadScrollPositionResolver.position(
+        visiblePostIDs: [0, -1, 10, 11, 12, 404],
+        targetsByPostID: [
+          10: target(order: 0, visibility: .hidden, tracksPrependAnchor: false),
+          11: target(order: 1, visibility: .placeholder),
+          12: target(order: 2),
+        ],
+        hidesLocallyFilteredContent: false
+      ),
+      ThreadScrollPosition(readingProgressPostID: 12, prependAnchorPostID: 11)
+    )
+    XCTAssertEqual(
+      ThreadScrollPositionResolver.position(
+        visiblePostIDs: [20, 21],
+        targetsByPostID: [:],
+        hidesLocallyFilteredContent: false
+      ),
+      .empty
+    )
+  }
+
+  func testNativeResolverHidesFilteredTargetsInPureReadingMode() {
+    XCTAssertEqual(
+      ThreadScrollPositionResolver.position(
+        visiblePostIDs: [1, 2, 3],
+        targetsByPostID: [
+          1: target(order: 0, tracksPrependAnchor: false),
+          2: target(order: 1, visibility: .placeholder),
+          3: target(order: 2),
+        ],
+        hidesLocallyFilteredContent: true
+      ),
+      ThreadScrollPosition(readingProgressPostID: 3, prependAnchorPostID: 3)
+    )
+  }
+
   func testVisibilityRejectsInvalidIdentityAndViewport() {
     XCTAssertEqual(position(postID: 0), .empty)
     XCTAssertEqual(position(viewportHeight: 0), .empty)
@@ -86,6 +139,18 @@ final class ThreadScrollPositionTests: XCTestCase {
       frame: frame,
       viewportHeight: viewportHeight,
       tracksReadingProgress: tracksReadingProgress,
+      tracksPrependAnchor: tracksPrependAnchor
+    )
+  }
+
+  private func target(
+    order: Int,
+    visibility: LocalContentVisibility = .visible,
+    tracksPrependAnchor: Bool = true
+  ) -> ThreadScrollTargetDescriptor {
+    ThreadScrollTargetDescriptor(
+      order: order,
+      localVisibility: visibility,
       tracksPrependAnchor: tracksPrependAnchor
     )
   }

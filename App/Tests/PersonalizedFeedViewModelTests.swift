@@ -41,6 +41,31 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testRowPrefetchStartsWithinLastThreeItemsOnly() async throws {
+    let service = ScriptedPersonalizedFeedService()
+    await service.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [1, 2, 3, 4, 5], page: 1, hasMore: true))
+    )
+    await service.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [6], page: 2, hasMore: false))
+    )
+    let viewModel = PersonalizedFeedViewModel(service: service)
+    viewModel.loadIfNeeded()
+    try await personalizedFeedWaitUntil { viewModel.state == .loaded }
+
+    viewModel.loadMoreIfNeeded(currentItemID: 2)
+    await personalizedFeedDrainMainActor()
+    var requests = await service.requestSnapshot()
+    XCTAssertEqual(requests, [1])
+
+    viewModel.loadMoreIfNeeded(currentItemID: 3)
+    try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [1, 2, 3, 4, 5, 6] }
+    requests = await service.requestSnapshot()
+    XCTAssertEqual(requests, [1, 2])
+    XCTAssertFalse(viewModel.hasMore)
+  }
+
+  @MainActor
   func testInitialPageMismatchFailsAndRetryRequestsFirstPageAgain() async throws {
     let service = ScriptedPersonalizedFeedService()
     await service.enqueue(
@@ -143,6 +168,142 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
     await personalizedFeedDrainMainActor()
     let requests = await service.requestSnapshot()
     XCTAssertEqual(requests, [1, 2, 3, 4])
+  }
+
+  @MainActor
+  func testPaginationCrossesMappedEmptyRawNonemptyPage() async throws {
+    let service = ScriptedPersonalizedFeedService()
+    await service.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [1], page: 1, hasMore: true))
+    )
+    await service.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [], page: 2, hasMore: true))
+    )
+    await service.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [2], page: 3, hasMore: true))
+    )
+    let viewModel = PersonalizedFeedViewModel(service: service)
+    viewModel.loadIfNeeded()
+    try await personalizedFeedWaitUntil { viewModel.state == .loaded }
+
+    viewModel.loadMore()
+    try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [1, 2] }
+
+    XCTAssertTrue(viewModel.hasMore)
+    let requests = await service.requestSnapshot()
+    XCTAssertEqual(requests, [1, 2, 3])
+  }
+
+  @MainActor
+  func testInitialMappedEmptyScanCanContinueAfterBoundedPause() async throws {
+    let service = ScriptedPersonalizedFeedService()
+    for page in 1...PersonalizedFeedViewModel.maximumAutomaticMappedEmptyPages {
+      await service.enqueue(
+        .value(PersonalizedFeedFixtures.page(ids: [], page: page, hasMore: true))
+      )
+    }
+    await service.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [6], page: 6, hasMore: true))
+    )
+    let viewModel = PersonalizedFeedViewModel(service: service)
+
+    viewModel.loadIfNeeded()
+    try await personalizedFeedWaitUntil { viewModel.state == .loaded }
+
+    XCTAssertTrue(viewModel.items.isEmpty)
+    XCTAssertTrue(viewModel.hasMore)
+    XCTAssertEqual(
+      viewModel.loadMoreError,
+      PersonalizedFeedViewModel.mappedEmptyScanPausedMessage
+    )
+    var requests = await service.requestSnapshot()
+    XCTAssertEqual(requests, [1, 2, 3, 4, 5])
+
+    viewModel.loadMore()
+    await personalizedFeedDrainMainActor()
+    requests = await service.requestSnapshot()
+    XCTAssertEqual(requests, [1, 2, 3, 4, 5])
+
+    viewModel.retryLoadMore()
+    try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [6] }
+    requests = await service.requestSnapshot()
+    XCTAssertEqual(requests, [1, 2, 3, 4, 5, 6])
+    XCTAssertTrue(viewModel.hasMore)
+    XCTAssertNil(viewModel.loadMoreError)
+  }
+
+  @MainActor
+  func testRefreshMappedEmptyPauseKeepsCursorForContinuation() async throws {
+    let service = ScriptedPersonalizedFeedService()
+    await service.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [1], page: 1, hasMore: true))
+    )
+    for page in 1...PersonalizedFeedViewModel.maximumAutomaticMappedEmptyPages {
+      await service.enqueue(
+        .value(PersonalizedFeedFixtures.page(ids: [], page: page, hasMore: true))
+      )
+    }
+    await service.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [2], page: 6, hasMore: true))
+    )
+    let viewModel = PersonalizedFeedViewModel(service: service)
+    viewModel.loadIfNeeded()
+    try await personalizedFeedWaitUntil { viewModel.state == .loaded }
+
+    await viewModel.refresh()
+
+    XCTAssertEqual(viewModel.items.map(\.id), [1])
+    XCTAssertEqual(
+      viewModel.loadMoreError,
+      PersonalizedFeedViewModel.mappedEmptyScanPausedMessage
+    )
+    var requests = await service.requestSnapshot()
+    XCTAssertEqual(requests, [1, 1, 2, 3, 4, 5])
+
+    viewModel.retryLoadMore()
+    try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [1, 2] }
+    requests = await service.requestSnapshot()
+    XCTAssertEqual(requests, [1, 1, 2, 3, 4, 5, 6])
+    XCTAssertNil(viewModel.loadMoreError)
+  }
+
+  @MainActor
+  func testLoadMoreMappedEmptyPauseBlocksAutomaticContinuation() async throws {
+    let service = ScriptedPersonalizedFeedService()
+    await service.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [1], page: 1, hasMore: true))
+    )
+    for page in 2...6 {
+      await service.enqueue(
+        .value(PersonalizedFeedFixtures.page(ids: [], page: page, hasMore: true))
+      )
+    }
+    await service.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [7], page: 7, hasMore: true))
+    )
+    let viewModel = PersonalizedFeedViewModel(service: service)
+    viewModel.loadIfNeeded()
+    try await personalizedFeedWaitUntil { viewModel.state == .loaded }
+
+    viewModel.loadMore()
+    try await personalizedFeedWaitUntil {
+      viewModel.loadMoreError == PersonalizedFeedViewModel.mappedEmptyScanPausedMessage
+        && !viewModel.isLoadingMore
+    }
+
+    XCTAssertEqual(viewModel.items.map(\.id), [1])
+    var requests = await service.requestSnapshot()
+    XCTAssertEqual(requests, [1, 2, 3, 4, 5, 6])
+    viewModel.loadMore()
+    await personalizedFeedDrainMainActor()
+    requests = await service.requestSnapshot()
+    XCTAssertEqual(requests, [1, 2, 3, 4, 5, 6])
+
+    viewModel.retryLoadMore()
+    try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [1, 7] }
+    requests = await service.requestSnapshot()
+    XCTAssertEqual(requests, [1, 2, 3, 4, 5, 6, 7])
+    XCTAssertNil(viewModel.loadMoreError)
   }
 
   @MainActor

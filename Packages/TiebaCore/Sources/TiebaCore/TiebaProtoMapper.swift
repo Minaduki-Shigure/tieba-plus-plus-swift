@@ -185,7 +185,7 @@ enum TiebaProtoMapper {
     return TiebaPersonalizedPage(
       items: items,
       currentPage: requestedPage,
-      hasMore: data.threadList.count >= pageSize
+      hasMore: !data.threadList.isEmpty
     )
   }
 

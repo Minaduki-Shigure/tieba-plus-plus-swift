@@ -150,11 +150,14 @@ cookie, IMEI, OAID, Android ID, network address, model, screen dimensions, or
 location. The request must not add Cookie, Authorization, BDUSS, STOKEN,
 `client_user_token`, an outer signature, or a CUID header. The UUID remains
 stable so refresh and later pages share one recommendation session; malformed
-stored values are replaced locally. Responses are limited to 4 MiB. Raw full
-pages may continue, but an empty page stops immediately. A refresh may traverse
-duplicate-only pages up to the page frontier already reached by that client;
-beyond it, at most one additional duplicate-only page may advance before a
-second stops the request chain. The default-off followed-forum filter never adds
+stored values are replaced locally. Responses are limited to 4 MiB. Because a
+short raw page can be followed by later nonempty pages, every nonempty page may
+continue, but an empty page stops immediately. Each explicit action may cross at
+most five consecutive pages whose raw entries all fail mapping before another
+explicit continuation is required. A refresh may traverse duplicate-only pages
+up to the page frontier already reached by that client; beyond it, at most one
+additional duplicate-only page may advance before a second stops the request
+chain. The default-off followed-forum filter never adds
 its account lease, credentials, or forum-ID set to this anonymous request. It
 waits for a verified-complete index and filters returned threads locally by
 stable forum ID. A waiting, signed-out, empty, partial, invalid, or failed index

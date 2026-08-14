@@ -7,6 +7,9 @@ struct BrowseContentView: View {
   let onImageOpen: ((Int) -> Void)?
   let onUserMention: ((Int64) -> Void)?
   let onTiebaLink: ((TiebaLinkTarget) -> Void)?
+  let allowsDirectTextSelection: Bool
+  let tracksAnimationVisibility: Bool
+  let maximumPreviewPixelSize: Int
 
   @Environment(\.externalWebOpenMode) private var externalWebOpenMode
   @Environment(\.openExternalWeb) private var openExternalWeb
@@ -21,13 +24,19 @@ struct BrowseContentView: View {
     imageLayout: BrowseContentImageLayout = .responsive,
     onImageOpen: ((Int) -> Void)? = nil,
     onUserMention: ((Int64) -> Void)? = nil,
-    onTiebaLink: ((TiebaLinkTarget) -> Void)? = nil
+    onTiebaLink: ((TiebaLinkTarget) -> Void)? = nil,
+    allowsDirectTextSelection: Bool = true,
+    tracksAnimationVisibility: Bool = false,
+    maximumPreviewPixelSize: Int = 1_600
   ) {
     self.contents = contents
     self.imageLayout = imageLayout
     self.onImageOpen = onImageOpen
     self.onUserMention = onUserMention
     self.onTiebaLink = onTiebaLink
+    self.allowsDirectTextSelection = allowsDirectTextSelection
+    self.tracksAnimationVisibility = tracksAnimationVisibility
+    self.maximumPreviewPixelSize = max(maximumPreviewPixelSize, 1)
   }
 
   private var blocks: [BrowseContentBlock] {
@@ -46,7 +55,7 @@ struct BrowseContentView: View {
               accentColor: appAccentColor.color
             )
           )
-            .textSelection(.enabled)
+            .modifier(DirectTextSelectionModifier(isEnabled: allowsDirectTextSelection))
             .fixedSize(horizontal: false, vertical: true)
             .environment(\.openURL, contentOpenURLAction)
         case .imageRun(let images):
@@ -113,7 +122,11 @@ struct BrowseContentView: View {
         )
       )
     case .video(let video):
-      BrowseVideoView(video: video) { pageURL in
+      BrowseVideoView(
+        video: video,
+        tracksAnimationVisibility: tracksAnimationVisibility,
+        maximumPreviewPixelSize: maximumPreviewPixelSize
+      ) { pageURL in
         openVideoPage(pageURL)
       }
     case .voice(let url, let duration):
@@ -133,6 +146,8 @@ struct BrowseContentView: View {
       ),
       width: image.width,
       height: image.height,
+      tracksAnimationVisibility: tracksAnimationVisibility,
+      maximumPreviewPixelSize: maximumPreviewPixelSize,
       onOpen: {
         if let onImageOpen {
           onImageOpen(image.contentOffset)
@@ -211,6 +226,19 @@ struct BrowseContentView: View {
   static func mentionUserID(from url: URL) -> Int64? {
     guard case .user(let userID) = TiebaLink.target(from: url) else { return nil }
     return userID
+  }
+}
+
+private struct DirectTextSelectionModifier: ViewModifier {
+  let isEnabled: Bool
+
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if isEnabled {
+      content.textSelection(.enabled)
+    } else {
+      content.textSelection(.disabled)
+    }
   }
 }
 
@@ -552,6 +580,8 @@ private struct BrowseImageView: View {
   let thumbnailURL: URL
   let width: Int
   let height: Int
+  let tracksAnimationVisibility: Bool
+  let maximumPreviewPixelSize: Int
   let onOpen: () -> Void
 
   @Environment(\.contentMediaLoadBehavior) private var contentMediaLoadBehavior
@@ -563,7 +593,7 @@ private struct BrowseImageView: View {
   var body: some View {
     ContentRemoteImage(
       url: thumbnailURL,
-      maxPixelSize: 1_600,
+      maxPixelSize: maximumPreviewPixelSize,
       loadAccessibilityLabel: "加载正文图片"
     ) { phase in
       switch phase {
@@ -571,7 +601,11 @@ private struct BrowseImageView: View {
         Button {
           onOpen()
         } label: {
-          RemoteImageAssetView(asset: asset, contentMode: .fill)
+          RemoteImageAssetView(
+            asset: asset,
+            contentMode: .fill,
+            tracksScrollVisibility: tracksAnimationVisibility
+          )
             .contentThumbnailDimming()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -678,6 +712,8 @@ enum BrowseVideoPresentationPolicy {
 
 private struct BrowseVideoView: View {
   let video: BrowseVideoContent
+  let tracksAnimationVisibility: Bool
+  let maximumPreviewPixelSize: Int
   let openPage: (URL) -> Void
 
   @State private var ownerID = UUID()
@@ -707,12 +743,16 @@ private struct BrowseVideoView: View {
           if let coverURL = video.cover {
             ContentRemoteImage(
               url: coverURL,
-              maxPixelSize: 1_600,
+              maxPixelSize: maximumPreviewPixelSize,
               loadAccessibilityLabel: "加载视频封面"
             ) { phase in
               switch phase {
               case .success(let asset, _):
-                RemoteImageAssetView(asset: asset, contentMode: .fill)
+                RemoteImageAssetView(
+                  asset: asset,
+                  contentMode: .fill,
+                  tracksScrollVisibility: tracksAnimationVisibility
+                )
                   .accessibilityHidden(true)
               case .empty:
                 ZStack {

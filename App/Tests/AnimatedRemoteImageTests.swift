@@ -5,6 +5,52 @@ import XCTest
 
 @MainActor
 final class AnimatedRemoteImageTests: XCTestCase {
+  func testAnimationVisibilityUsesViewportTrackingWhenAvailable() {
+    XCTAssertTrue(
+      RemoteImageAnimationVisibilityPolicy.isVisible(
+        tracksScrollVisibility: false,
+        supportsScrollVisibility: true,
+        isPresented: false,
+        isScrollVisible: false
+      )
+    )
+    XCTAssertFalse(
+      RemoteImageAnimationVisibilityPolicy.isVisible(
+        tracksScrollVisibility: true,
+        supportsScrollVisibility: true,
+        isPresented: true,
+        isScrollVisible: false
+      )
+    )
+    XCTAssertTrue(
+      RemoteImageAnimationVisibilityPolicy.isVisible(
+        tracksScrollVisibility: true,
+        supportsScrollVisibility: true,
+        isPresented: true,
+        isScrollVisible: true
+      )
+    )
+  }
+
+  func testAnimationVisibilityFallsBackToPresentationBeforeIOS18() {
+    XCTAssertFalse(
+      RemoteImageAnimationVisibilityPolicy.isVisible(
+        tracksScrollVisibility: true,
+        supportsScrollVisibility: false,
+        isPresented: false,
+        isScrollVisible: true
+      )
+    )
+    XCTAssertTrue(
+      RemoteImageAnimationVisibilityPolicy.isVisible(
+        tracksScrollVisibility: true,
+        supportsScrollVisibility: false,
+        isPresented: true,
+        isScrollVisible: false
+      )
+    )
+  }
+
   func testPlaybackStateAdvancesOneDecodedFrameAtATime() throws {
     var state = RemoteImageAnimationPlaybackState(generation: 7)
 

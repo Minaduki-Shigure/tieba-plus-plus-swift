@@ -526,32 +526,38 @@ struct RemoteImageAssetView: View {
   let asset: DownsampledImageAsset
   let contentMode: SwiftUI.ContentMode
   let animationPlaybackEnabled: Bool
+  let tracksScrollVisibility: Bool
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.scenePhase) private var scenePhase
   @State private var isPresented = false
+  @State private var isScrollVisible = false
 
   init(
     asset: DownsampledImageAsset,
     contentMode: SwiftUI.ContentMode,
-    animationPlaybackEnabled: Bool = true
+    animationPlaybackEnabled: Bool = true,
+    tracksScrollVisibility: Bool = false
   ) {
     self.asset = asset
     self.contentMode = contentMode
     self.animationPlaybackEnabled = animationPlaybackEnabled
+    self.tracksScrollVisibility = tracksScrollVisibility
   }
 
   var body: some View {
     Group {
-      if let animation = asset.animation {
+      if
+        let animation = asset.animation,
+        animationPlaybackEnabled,
+        animationIsVisible,
+        !reduceMotion
+      {
         AnimatedRemoteImageRepresentable(
           animation: animation,
           contentMode: contentMode,
-          playbackEnabled: animationPlaybackEnabled
-            && isPresented
-            && scenePhase == .active
-            && !reduceMotion,
-          showsPosterWhenStopped: reduceMotion || !animationPlaybackEnabled
+          playbackEnabled: isPresented && scenePhase == .active,
+          showsPosterWhenStopped: false
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
@@ -560,8 +566,62 @@ struct RemoteImageAssetView: View {
           .aspectRatio(contentMode: contentMode)
       }
     }
+    .modifier(
+      RemoteImageScrollVisibilityModifier(isEnabled: shouldTrackScrollVisibility) {
+        isScrollVisible = $0
+      }
+    )
     .onAppear { isPresented = true }
-    .onDisappear { isPresented = false }
+    .onDisappear {
+      isPresented = false
+    }
+  }
+
+  private var animationIsVisible: Bool {
+    let supportsScrollVisibility: Bool
+    if #available(iOS 18.0, *) {
+      supportsScrollVisibility = true
+    } else {
+      supportsScrollVisibility = false
+    }
+    return RemoteImageAnimationVisibilityPolicy.isVisible(
+      tracksScrollVisibility: tracksScrollVisibility,
+      supportsScrollVisibility: supportsScrollVisibility,
+      isPresented: isPresented,
+      isScrollVisible: isScrollVisible
+    )
+  }
+
+  private var shouldTrackScrollVisibility: Bool {
+    tracksScrollVisibility && asset.animation != nil
+  }
+}
+
+enum RemoteImageAnimationVisibilityPolicy {
+  static func isVisible(
+    tracksScrollVisibility: Bool,
+    supportsScrollVisibility: Bool,
+    isPresented: Bool,
+    isScrollVisible: Bool
+  ) -> Bool {
+    guard tracksScrollVisibility else { return true }
+    return supportsScrollVisibility ? isScrollVisible : isPresented
+  }
+}
+
+private struct RemoteImageScrollVisibilityModifier: ViewModifier {
+  let isEnabled: Bool
+  let onChange: (Bool) -> Void
+
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if #available(iOS 18.0, *), isEnabled {
+      content.onScrollVisibilityChange(threshold: 0.2) {
+        onChange($0)
+      }
+    } else {
+      content
+    }
   }
 }
 
@@ -736,7 +796,7 @@ final class RemoteImageAnimationImageView: UIImageView {
     guard displayLink == nil else { return }
     playbackClock.pause()
     let displayLink = CADisplayLink(target: self, selector: #selector(displayLinkDidFire(_:)))
-    displayLink.add(to: .main, forMode: .common)
+    displayLink.add(to: .main, forMode: .default)
     self.displayLink = displayLink
   }
 

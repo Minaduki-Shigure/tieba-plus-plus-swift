@@ -146,14 +146,30 @@ final class TiebaClientTests: XCTestCase {
     XCTAssertEqual(decoded.data.loadType, 2)
   }
 
-  func testPersonalizedClientStopsAfterShortPageAndMapsServerError() async throws {
+  func testPersonalizedClientContinuesAfterShortNonemptyPageAndMapsServerError() async throws {
     var short = PersonalizedResIdl()
     short.data.threadList = [personalizedThread(id: 1, forumID: 2, forumName: "swift")]
     let page = try await TiebaClient(
       transport: StubTransport(body: try short.serializedData())
     ).getPersonalizedThreads()
-    XCTAssertFalse(page.hasMore)
+    XCTAssertTrue(page.hasMore)
     XCTAssertEqual(page.items.map(\.id), [1])
+
+    let emptyPage = try await TiebaClient(
+      transport: StubTransport(body: try PersonalizedResIdl().serializedData())
+    ).getPersonalizedThreads(page: 2)
+    XCTAssertFalse(emptyPage.hasMore)
+    XCTAssertTrue(emptyPage.items.isEmpty)
+
+    var filtered = PersonalizedResIdl()
+    filtered.data.threadList = [
+      personalizedThread(id: 2, forumID: 2, forumName: "swift", isAd: true)
+    ]
+    let filteredPage = try await TiebaClient(
+      transport: StubTransport(body: try filtered.serializedData())
+    ).getPersonalizedThreads(page: 2)
+    XCTAssertTrue(filteredPage.hasMore)
+    XCTAssertTrue(filteredPage.items.isEmpty)
 
     var failure = PersonalizedResIdl()
     failure.error.errorno = 4

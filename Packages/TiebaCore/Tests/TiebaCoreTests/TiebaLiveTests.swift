@@ -23,13 +23,30 @@ final class TiebaLiveTests: XCTestCase {
     XCTAssertTrue(firstPage.items.allSatisfy {
       $0.id > 0 && $0.thread.forumID > 0 && !$0.thread.forumName.isEmpty
     })
+    let firstIDs = Set(firstPage.items.map(\.id))
 
-    guard firstPage.hasMore else { return }
+    XCTAssertTrue(firstPage.hasMore)
     let secondPage = try await client.getPersonalizedThreads(page: 2)
     XCTAssertEqual(secondPage.currentPage, 2)
-    XCTAssertFalse(secondPage.items.isEmpty)
-    let firstIDs = Set(firstPage.items.map(\.id))
-    XCTAssertTrue(secondPage.items.contains { !firstIDs.contains($0.id) })
+    if !secondPage.hasMore {
+      XCTAssertTrue(secondPage.items.isEmpty)
+      throw XCTSkip("The live recommendation session ended before page 3.")
+    }
+    XCTAssertTrue(secondPage.items.allSatisfy {
+      $0.id > 0 && $0.thread.forumID > 0 && !$0.thread.forumName.isEmpty
+    })
+    let thirdPage = try await client.getPersonalizedThreads(page: 3)
+    XCTAssertEqual(thirdPage.currentPage, 3)
+    if !thirdPage.hasMore {
+      XCTAssertTrue(thirdPage.items.isEmpty)
+    }
+    XCTAssertTrue(thirdPage.items.allSatisfy {
+      $0.id > 0 && $0.thread.forumID > 0 && !$0.thread.forumName.isEmpty
+    })
+    let laterItems = secondPage.items + thirdPage.items
+    if !laterItems.isEmpty {
+      XCTAssertTrue(laterItems.contains { !firstIDs.contains($0.id) })
+    }
   }
 
   func testAnonymousPicturePageMatchesPBImageCursor() async throws {

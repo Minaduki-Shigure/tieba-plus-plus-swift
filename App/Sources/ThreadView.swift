@@ -940,12 +940,16 @@ struct ThreadView: View {
                 }
               }
               .background {
-                ThreadPostVisibilityReader(
-                  postID: firstPost.id,
-                  viewportHeight: viewport.size.height,
-                  tracksReadingProgress: effectiveVisibility(for: firstPost) == .visible,
-                  tracksPrependAnchor: false
-                )
+                if #available(iOS 18.0, *) {
+                  EmptyView()
+                } else {
+                  ThreadPostVisibilityReader(
+                    postID: firstPost.id,
+                    viewportHeight: viewport.size.height,
+                    tracksReadingProgress: effectiveVisibility(for: firstPost) == .visible,
+                    tracksPrependAnchor: false
+                  )
+                }
               }
               .id(firstPost.id)
             }
@@ -1037,12 +1041,16 @@ struct ThreadView: View {
                 }
               }
               .background {
-                ThreadPostVisibilityReader(
-                  postID: post.id,
-                  viewportHeight: viewport.size.height,
-                  tracksReadingProgress: effectiveVisibility(for: post) == .visible,
-                  tracksPrependAnchor: true
-                )
+                if #available(iOS 18.0, *) {
+                  EmptyView()
+                } else {
+                  ThreadPostVisibilityReader(
+                    postID: post.id,
+                    viewportHeight: viewport.size.height,
+                    tracksReadingProgress: effectiveVisibility(for: post) == .visible,
+                    tracksPrependAnchor: true
+                  )
+                }
               }
               .id(post.id)
               .onAppear {
@@ -1080,12 +1088,20 @@ struct ThreadView: View {
               .accessibilityIdentifier("thread-check-latest-replies")
             }
           }
+          .modifier(ThreadScrollTargetLayoutModifier())
         }
         .coordinateSpace(name: "thread-scroll")
         .onPreferenceChange(ThreadScrollPositionPreferenceKey.self) { position in
-          guard position != scrollPosition else { return }
-          scrollPosition = position
+          if #available(iOS 18.0, *) { return }
+          updateScrollPosition(position)
         }
+        .modifier(
+          ThreadNativeScrollVisibilityModifier(
+            onChange: { visiblePostIDs in
+              updateScrollPosition(visiblePostIDs: visiblePostIDs)
+            }
+          )
+        )
         .task(id: viewModel.scrollTargetPostID) {
           guard let postID = viewModel.scrollTargetPostID else { return }
           await Task.yield()
@@ -1202,6 +1218,21 @@ struct ThreadView: View {
       return post.localVisibility
     }
     return .hidden
+  }
+
+  private func updateScrollPosition(visiblePostIDs: [Int64]) {
+    updateScrollPosition(
+      ThreadScrollPositionResolver.position(
+        visiblePostIDs: visiblePostIDs,
+        targetsByPostID: viewModel.scrollTargetsByPostID,
+        hidesLocallyFilteredContent: isPureReadingMode
+      )
+    )
+  }
+
+  private func updateScrollPosition(_ position: ThreadScrollPosition) {
+    guard position != scrollPosition else { return }
+    scrollPosition = position
   }
 
   private func selectableThreadTitle(for post: BrowsePost) -> String? {
@@ -1589,6 +1620,43 @@ struct ThreadScrollPosition: Equatable, Sendable {
   let prependAnchorPostID: Int64?
 }
 
+enum ThreadScrollPositionResolver {
+  static func position(
+    visiblePostIDs: [Int64],
+    targetsByPostID: [Int64: ThreadScrollTargetDescriptor],
+    hidesLocallyFilteredContent: Bool
+  ) -> ThreadScrollPosition {
+    var readingProgressPostID: Int64?
+    var prependAnchorPostID: Int64?
+    let visiblePostIDs = Set(visiblePostIDs.filter { $0 > 0 })
+    let orderedTargets = visiblePostIDs.compactMap { postID in
+      targetsByPostID[postID].map { (postID, $0) }
+    }.sorted { lhs, rhs in
+      lhs.1.order < rhs.1.order
+    }
+
+    for (postID, target) in orderedTargets {
+      let visibility = hidesLocallyFilteredContent && target.localVisibility != .visible
+        ? LocalContentVisibility.hidden
+        : target.localVisibility
+      if visibility == .visible {
+        readingProgressPostID = postID
+      }
+      if
+        prependAnchorPostID == nil,
+        target.tracksPrependAnchor,
+        visibility != .hidden
+      {
+        prependAnchorPostID = postID
+      }
+    }
+    return ThreadScrollPosition(
+      readingProgressPostID: readingProgressPostID,
+      prependAnchorPostID: prependAnchorPostID
+    )
+  }
+}
+
 enum ThreadPostVisibilityPolicy {
   static func position(
     postID: Int64,
@@ -1649,6 +1717,33 @@ private struct ThreadPostVisibilityReader: View {
           tracksPrependAnchor: tracksPrependAnchor
         )
       )
+    }
+  }
+}
+
+private struct ThreadScrollTargetLayoutModifier: ViewModifier {
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if #available(iOS 18.0, *) {
+      content.scrollTargetLayout()
+    } else {
+      content
+    }
+  }
+}
+
+private struct ThreadNativeScrollVisibilityModifier: ViewModifier {
+  let onChange: ([Int64]) -> Void
+
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if #available(iOS 18.0, *) {
+      content
+        .onScrollTargetVisibilityChange(idType: Int64.self, threshold: 0) {
+          onChange($0)
+        }
+    } else {
+      content
     }
   }
 }
@@ -1767,7 +1862,10 @@ private struct PostView: View {
         contents: post.contents,
         onImageOpen: openImage,
         onUserMention: openMentionedUser,
-        onTiebaLink: openTiebaLink
+        onTiebaLink: openTiebaLink,
+        allowsDirectTextSelection: false,
+        tracksAnimationVisibility: true,
+        maximumPreviewPixelSize: 1_320
       )
 
       if let originThread {
@@ -2775,7 +2873,10 @@ private struct OriginThreadCard: View {
         BrowseContentView(
           contents: thread.contents,
           onUserMention: openMentionedUser,
-          onTiebaLink: openTiebaLink
+          onTiebaLink: openTiebaLink,
+          allowsDirectTextSelection: false,
+          tracksAnimationVisibility: true,
+          maximumPreviewPixelSize: 1_320
         )
       }
     }

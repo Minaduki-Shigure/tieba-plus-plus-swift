@@ -241,10 +241,12 @@ not advertise a usable sign state; it is not permission to attempt a write.
   only to keep refresh and page requests in one recommendation session. No
   Cookie, credential, client ID, signature, IMEI, OAID, Android ID, IDFV,
   location, screen, model, or brand field is sent. Responses are limited to
-  4 MiB. Because the endpoint has no authoritative `has_more`, a raw page count
-  of at least 11 allows continuation. The App stops an empty page immediately,
-  traverses the server pages reached before a refresh, and then permits only one
-  additional duplicate-only overlap page.
+  4 MiB. Because the endpoint has no authoritative `has_more` and can return a
+  short page before later nonempty pages, any nonempty raw page allows
+  continuation. The App stops an empty page immediately, probes across at most
+  five consecutive mapped-empty pages per explicit action before requiring an
+  explicit continuation, traverses the server pages reached before a refresh,
+  and then permits only one additional duplicate-only overlap page.
 - The authenticated concern feed uses protobuf command `309474`, fixed client
   version `11.10.8.6`, and a random process-local UUID distinct from anonymous
   personalization. Its protobuf common data carries the full session; the outer

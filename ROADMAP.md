@@ -188,7 +188,7 @@ the source metadata is updated to that tested IPA.
   multi-frame GIF, WebP, and HEIC/HEIF-sequence playback in previews and the
   gallery, with single-frame fallback, a 500-frame metadata limit, a 16 MiB
   per-frame bound and a shared frame cache capped at 64 MiB and 1,000 entries,
-  view-disappearance/background/Reduce Motion pausing, and one active gallery page
+  viewport/scroll-tracking/background/Reduce Motion pausing, and one active gallery page
 - Explicit eviction of the process-local decoded-image memory cache
 - Optional compact media summaries for thread lists and per-forum search, with no collapsed preview request
 - Default-on dark-appearance dimming for successfully rendered static content thumbnails

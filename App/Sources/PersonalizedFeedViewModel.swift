@@ -38,9 +38,11 @@ enum PersonalizedFeedScope: Equatable, Sendable {
 final class PersonalizedFeedViewModel: ObservableObject {
   static let maximumRetainedItems = 300
   static let maximumConsecutiveDuplicatePages = 2
+  static let maximumAutomaticMappedEmptyPages = 5
   static let maximumAutomaticFilteredPages = 5
   static let maximumFilteredPagesPerScanEpoch = 50
   static let maximumRawItemIDsPerScanEpoch = 1_000
+  static let mappedEmptyScanPausedMessage = "连续多页没有可显示的推荐，可以继续加载。"
   static let filteredScanPausedMessage = "连续多页没有来自已关注贴吧的内容，可以继续查找。"
 
   @Published private(set) var items: [PersonalizedFeedItem] = []
@@ -136,6 +138,14 @@ final class PersonalizedFeedViewModel: ObservableObject {
     startRequest(.loadMore(page: currentPage + 1))
   }
 
+  func loadMoreIfNeeded(currentItemID: Int64) {
+    guard
+      let index = items.firstIndex(where: { $0.id == currentItemID }),
+      index >= max(items.count - 3, 0)
+    else { return }
+    loadMore()
+  }
+
   func retryLoadMore() {
     guard loadMoreError != nil else { return }
     if filteredScanIsPaused {
@@ -220,11 +230,20 @@ final class PersonalizedFeedViewModel: ObservableObject {
           let termination: PersonalizedFeedBatchTermination
 
           if !response.hasMore {
-            termination = .serverEnd
-          } else if rawItems.isEmpty {
-            termination = .rawEmpty
+            termination = rawItems.isEmpty ? .rawEmpty : .serverEnd
           } else if !madeRawProgress {
-            termination = .duplicateOnly
+            if rawItems.isEmpty,
+               pagesScannedForAction < Self.maximumAutomaticMappedEmptyPages,
+               page < Int(Int32.max)
+            {
+              page += 1
+              continue
+            }
+            if rawItems.isEmpty {
+              termination = page < Int(Int32.max) ? .mappedEmptyScanPaused : .serverEnd
+            } else {
+              termination = .duplicateOnly
+            }
           } else if !requestScope.isFollowedForumsOnly || !eligibleItems.isEmpty {
             termination = .pageReady
           } else if pagesScannedForAction >= Self.maximumAutomaticFilteredPages
@@ -270,6 +289,8 @@ final class PersonalizedFeedViewModel: ObservableObject {
       state = .loaded
       if batch.termination == .filteredScanPaused {
         pauseFilteredScan()
+      } else if batch.termination == .mappedEmptyScanPaused {
+        pauseMappedEmptyScan()
       }
     case .refresh:
       if !responseItems.isEmpty {
@@ -283,6 +304,15 @@ final class PersonalizedFeedViewModel: ObservableObject {
         currentPage = batch.currentPage
         hasMore = true
         pauseFilteredScan()
+      } else if batch.termination == .mappedEmptyScanPaused {
+        refreshOverlapFrontier = max(refreshOverlapFrontier, currentPage)
+        currentPage = batch.currentPage
+        hasMore = true
+        pauseMappedEmptyScan()
+      } else if batch.termination == .duplicateOnly, batch.serverHasMore {
+        refreshOverlapFrontier = max(refreshOverlapFrontier, currentPage)
+        currentPage = batch.currentPage
+        hasMore = true
       }
     case .loadMore:
       let knownIDs = Set(items.map(\.id))
@@ -300,6 +330,9 @@ final class PersonalizedFeedViewModel: ObservableObject {
       case .filteredScanPaused:
         hasMore = items.count < Self.maximumRetainedItems
         pauseFilteredScan()
+      case .mappedEmptyScanPaused:
+        hasMore = items.count < Self.maximumRetainedItems
+        pauseMappedEmptyScan()
       case .duplicateOnly:
         if additions.isEmpty {
           applyDuplicatePage(batch: batch)
@@ -340,10 +373,10 @@ final class PersonalizedFeedViewModel: ObservableObject {
     switch batch.termination {
     case .serverEnd, .rawEmpty:
       return false
-    case .filteredScanPaused:
+    case .filteredScanPaused, .mappedEmptyScanPaused:
       return true
     case .duplicateOnly:
-      return batch.serverHasMore && hasVisibleItems
+      return batch.serverHasMore
     case .pageReady:
       return batch.serverHasMore && (scope.isFollowedForumsOnly || hasVisibleItems)
     }
@@ -368,6 +401,10 @@ final class PersonalizedFeedViewModel: ObservableObject {
   private func pauseFilteredScan() {
     filteredScanIsPaused = true
     loadMoreError = Self.filteredScanPausedMessage
+  }
+
+  private func pauseMappedEmptyScan() {
+    loadMoreError = Self.mappedEmptyScanPausedMessage
   }
 
   private func resetSnapshot() {
@@ -458,6 +495,7 @@ private enum PersonalizedFeedBatchTermination: Equatable, Sendable {
   case rawEmpty
   case duplicateOnly
   case filteredScanPaused
+  case mappedEmptyScanPaused
 }
 
 private struct PersonalizedFeedBatch: Sendable {
