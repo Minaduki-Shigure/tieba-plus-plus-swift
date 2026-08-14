@@ -25,15 +25,10 @@ private enum CommentPagePlacement: Equatable {
 
 @MainActor
 final class CommentsViewModel: ObservableObject {
-  @Published private(set) var parentPost: CommentParentPostContext? {
-    didSet { rebuildAgreementTargetIndex() }
-  }
-  @Published private(set) var thread: BrowseThread? {
-    didSet { rebuildAgreementTargetIndex() }
-  }
-  @Published private(set) var comments: [BrowseComment] = [] {
-    didSet { rebuildAgreementTargetIndex() }
-  }
+  @Published private(set) var parentPost: CommentParentPostContext?
+  @Published private(set) var thread: BrowseThread?
+  @Published private(set) var comments: [BrowseComment] = []
+  private(set) var hasDisplayableComments = false
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
   @Published private(set) var isLoadingPrevious = false
@@ -61,8 +56,12 @@ final class CommentsViewModel: ObservableObject {
   private var loadGeneration = 0
   private var lockedParentPostID: Int64?
   private var activeAnchor: CommentsAnchor
+  private var commentIDs = Set<Int64>()
   private var indexedParentAgreementTarget: ContentAgreementTarget?
   private var agreementTargetsByCommentID: [Int64: ContentAgreementTarget] = [:]
+  private var indexedAgreementContext: CommentAgreementIndexContext?
+  private(set) var commentIndexFullRebuildCount = 0
+  private(set) var commentIndexIncrementalUpdateCount = 0
 
   init(threadID: Int64, postID: Int64, service: any BrowseService) {
     self.threadID = threadID
@@ -150,9 +149,7 @@ final class CommentsViewModel: ObservableObject {
     prependRestoreCommentID = nil
     positionNotice = nil
     totalCount = 0
-    parentPost = nil
-    thread = nil
-    comments = []
+    resetCommentSnapshot()
     replaceAgreementDescriptors(with: [])
     state = .loading
     load(page: 1, placement: .replacing, anchorOverride: anchorOverride)
@@ -340,14 +337,17 @@ final class CommentsViewModel: ObservableObject {
         }
         try validateThreadContext(response.thread, placement: placement)
         let pageComments = normalized(response.comments)
+        var agreementContextChanged = false
         switch placement {
         case .replacing, .refreshing:
           if self.lockedParentPostID == nil {
             self.lockedParentPostID = response.parentPost.id
           }
-          thread = response.thread
-          parentPost = response.parentPost
-          comments = pageComments
+          replaceCommentSnapshot(
+            thread: response.thread,
+            parentPost: response.parentPost,
+            comments: pageComments
+          )
           totalCount = max(response.totalCount, comments.count)
           let resolvedPage = max(response.currentPage, 1)
           lowestLoadedPage = resolvedPage
@@ -365,11 +365,35 @@ final class CommentsViewModel: ObservableObject {
           let firstVisibleID = comments.first(where: {
             $0.localVisibility != .hidden
           })?.id
-          let newItems = unique(pageComments, excluding: comments)
+          let newItems = unique(pageComments)
+          let changedContext = resolvedPaginatedAgreementContextIfChanged(
+            responseThread: response.thread,
+            responseParentPost: response.parentPost
+          )
           if newItems.isEmpty {
+            if let changedContext {
+              agreementContextChanged = true
+              replacePaginatedSnapshotForContextChange(
+                thread: changedContext.thread,
+                parentPost: changedContext.parentPost,
+                mergedComments: comments,
+                commentsChanged: false
+              )
+            }
             canLoadPrevious = false
           } else {
-            comments = newItems + comments
+            if let changedContext {
+              agreementContextChanged = true
+              replacePaginatedSnapshotForContextChange(
+                thread: changedContext.thread,
+                parentPost: changedContext.parentPost,
+                mergedComments: newItems + comments,
+                commentsChanged: true
+              )
+            } else {
+              indexCommentsIncrementally(newItems)
+              comments = newItems + comments
+            }
             lowestLoadedPage = response.currentPage
             canLoadPrevious = response.hasPrevious && lowestLoadedPage > 1
             prependRestoreCommentID = firstVisibleID
@@ -383,11 +407,35 @@ final class CommentsViewModel: ObservableObject {
             hasMore = false
             return
           }
-          let newItems = unique(pageComments, excluding: comments)
+          let newItems = unique(pageComments)
+          let changedContext = resolvedPaginatedAgreementContextIfChanged(
+            responseThread: response.thread,
+            responseParentPost: response.parentPost
+          )
           if newItems.isEmpty {
+            if let changedContext {
+              agreementContextChanged = true
+              replacePaginatedSnapshotForContextChange(
+                thread: changedContext.thread,
+                parentPost: changedContext.parentPost,
+                mergedComments: comments,
+                commentsChanged: false
+              )
+            }
             hasMore = false
           } else {
-            comments.append(contentsOf: newItems)
+            if let changedContext {
+              agreementContextChanged = true
+              replacePaginatedSnapshotForContextChange(
+                thread: changedContext.thread,
+                parentPost: changedContext.parentPost,
+                mergedComments: comments + newItems,
+                commentsChanged: true
+              )
+            } else {
+              indexCommentsIncrementally(newItems)
+              comments.append(contentsOf: newItems)
+            }
             highestLoadedPage = response.currentPage
             hasMore = response.hasMore
           }
@@ -403,7 +451,10 @@ final class CommentsViewModel: ObservableObject {
             forceReadIfUnchanged: true
           )
         } else {
-          upsertAgreementDescriptor(response.agreementReadDescriptor)
+          upsertAgreementDescriptor(
+            response.agreementReadDescriptor,
+            pruningAll: agreementContextChanged
+          )
         }
         if (placement == .replacing || placement == .refreshing),
           let commentID = anchor.targetCommentID
@@ -448,12 +499,12 @@ final class CommentsViewModel: ObservableObject {
     return items.filter { $0.id > 0 && seen.insert($0.id).inserted }
   }
 
-  private func unique(
-    _ newItems: [BrowseComment],
-    excluding existing: [BrowseComment]
-  ) -> [BrowseComment] {
-    var seen = Set(existing.map(\.id))
-    return newItems.filter { seen.insert($0.id).inserted }
+  private func unique(_ newItems: [BrowseComment]) -> [BrowseComment] {
+    var newIDs = Set<Int64>()
+    newIDs.reserveCapacity(newItems.count)
+    return newItems.filter {
+      !commentIDs.contains($0.id) && newIDs.insert($0.id).inserted
+    }
   }
 
   private func validateThreadContext(
@@ -480,15 +531,33 @@ final class CommentsViewModel: ObservableObject {
 
   private func replaceAgreementDescriptors(
     with descriptors: [ContentAgreementReadDescriptor],
-    forceReadIfUnchanged: Bool = false
+    forceReadIfUnchanged: Bool = false,
+    retainingOnlyIndexedTargets: Bool = false
   ) {
+    let indexedTargets: Set<ContentAgreementTarget>? = retainingOnlyIndexedTargets
+      ? Set(agreementTargetsByCommentID.values).union(
+        indexedParentAgreementTarget.map { [$0] } ?? []
+      )
+      : nil
     var normalized: [ContentAgreementReadDescriptor] = []
     normalized.reserveCapacity(descriptors.count)
     for descriptor in descriptors {
-      if let index = normalized.firstIndex(where: { $0.request == descriptor.request }) {
-        normalized[index] = descriptor
+      let retainedDescriptor: ContentAgreementReadDescriptor
+      if let indexedTargets {
+        guard
+          let candidate = ContentAgreementReadDescriptor(
+            request: descriptor.request,
+            expectedTargets: descriptor.expectedTargets.intersection(indexedTargets)
+          )
+        else { continue }
+        retainedDescriptor = candidate
       } else {
-        normalized.append(descriptor)
+        retainedDescriptor = descriptor
+      }
+      if let index = normalized.firstIndex(where: { $0.request == retainedDescriptor.request }) {
+        normalized[index] = retainedDescriptor
+      } else {
+        normalized.append(retainedDescriptor)
       }
     }
     guard normalized != agreementReadDescriptors else {
@@ -501,35 +570,235 @@ final class CommentsViewModel: ObservableObject {
     agreementDescriptorEpoch &+= 1
   }
 
-  private func upsertAgreementDescriptor(_ descriptor: ContentAgreementReadDescriptor?) {
-    guard let descriptor else { return }
+  private func upsertAgreementDescriptor(
+    _ descriptor: ContentAgreementReadDescriptor?,
+    pruningAll: Bool = false
+  ) {
+    guard descriptor != nil || pruningAll else { return }
     var descriptors = agreementReadDescriptors
-    if let index = descriptors.firstIndex(where: { $0.request == descriptor.request }) {
-      descriptors[index] = descriptor
-    } else {
-      descriptors.append(descriptor)
+    if let descriptor {
+      if let index = descriptors.firstIndex(where: { $0.request == descriptor.request }) {
+        descriptors[index] = descriptor
+      } else {
+        descriptors.append(descriptor)
+      }
     }
-    replaceAgreementDescriptors(with: descriptors)
+    replaceAgreementDescriptors(
+      with: descriptors,
+      retainingOnlyIndexedTargets: pruningAll
+    )
   }
 
-  private func rebuildAgreementTargetIndex() {
-    guard let thread, let parentPost else {
-      indexedParentAgreementTarget = nil
-      agreementTargetsByCommentID = [:]
-      return
+  private func resetCommentSnapshot() {
+    if hasDisplayableComments {
+      hasDisplayableComments = false
     }
-    indexedParentAgreementTarget = ContentAgreementTarget(thread: thread, parentPost: parentPost)
+    commentIDs.removeAll(keepingCapacity: true)
+    indexedParentAgreementTarget = nil
+    agreementTargetsByCommentID.removeAll(keepingCapacity: true)
+    indexedAgreementContext = nil
+    parentPost = nil
+    thread = nil
+    comments = []
+  }
+
+  private func replaceCommentSnapshot(
+    thread: BrowseThread?,
+    parentPost: CommentParentPostContext,
+    comments: [BrowseComment]
+  ) {
+    rebuildCommentIndexes(thread: thread, parentPost: parentPost, comments: comments)
+    self.thread = thread
+    self.parentPost = parentPost
+    self.comments = comments
+  }
+
+  private func resolvedPaginatedAgreementContextIfChanged(
+    responseThread: BrowseThread?,
+    responseParentPost: CommentParentPostContext
+  ) -> (thread: BrowseThread?, parentPost: CommentParentPostContext)? {
+    let resolvedThread = resolvedPaginationThread(responseThread)
+    let resolvedParentPost = resolvedPaginationParentPost(responseParentPost)
+    guard
+      agreementContext(thread: resolvedThread, parentPost: resolvedParentPost)
+        != indexedAgreementContext
+    else { return nil }
+    return (thread: resolvedThread, parentPost: resolvedParentPost)
+  }
+
+  private func replacePaginatedSnapshotForContextChange(
+    thread: BrowseThread?,
+    parentPost: CommentParentPostContext,
+    mergedComments: [BrowseComment],
+    commentsChanged: Bool
+  ) {
+    rebuildCommentIndexes(
+      thread: thread,
+      parentPost: parentPost,
+      comments: mergedComments
+    )
+    self.thread = thread
+    self.parentPost = parentPost
+    if commentsChanged {
+      comments = mergedComments
+    }
+  }
+
+  private func resolvedPaginationThread(_ responseThread: BrowseThread?) -> BrowseThread? {
+    guard let responseThread else { return thread }
+    guard let thread else { return responseThread }
+    let resolvedForumID = responseThread.forumID > 0
+      ? responseThread.forumID
+      : thread.forumID
+    let resolvedForumName = normalizedForumName(responseThread.forumName).isEmpty
+      ? thread.forumName
+      : responseThread.forumName
+    let resolvedFirstPostID = responseThread.firstPostID > 0
+      ? responseThread.firstPostID
+      : thread.firstPostID
+    guard
+      resolvedForumID != responseThread.forumID
+        || resolvedForumName != responseThread.forumName
+        || resolvedFirstPostID != responseThread.firstPostID
+    else { return responseThread }
+    return BrowseThread(
+      id: responseThread.id,
+      forumID: resolvedForumID,
+      forumName: resolvedForumName,
+      title: responseThread.title,
+      excerpt: responseThread.excerpt,
+      authorName: responseThread.authorName,
+      replyCount: responseThread.replyCount,
+      viewCount: responseThread.viewCount,
+      createdAt: responseThread.createdAt,
+      lastReplyAt: responseThread.lastReplyAt,
+      contents: responseThread.contents,
+      authorID: responseThread.authorID,
+      authorUsername: responseThread.authorUsername,
+      authorAvatarURL: responseThread.authorAvatarURL,
+      firstPostID: resolvedFirstPostID,
+      shareCount: responseThread.shareCount,
+      agreeCount: responseThread.agreeCount,
+      disagreeCount: responseThread.disagreeCount,
+      kind: responseThread.kind,
+      tabID: responseThread.tabID,
+      isPinned: responseThread.isPinned,
+      isFeatured: responseThread.isFeatured,
+      isShared: responseThread.isShared,
+      isServerHidden: responseThread.isServerHidden,
+      isLive: responseThread.isLive,
+      localVisibility: responseThread.localVisibility
+    )
+  }
+
+  private func resolvedPaginationParentPost(
+    _ responseParentPost: CommentParentPostContext
+  ) -> CommentParentPostContext {
+    guard
+      let parentPost,
+      parentPost.id == responseParentPost.id,
+      parentPost.threadID == responseParentPost.threadID,
+      parentPost.floor > 0,
+      responseParentPost.floor <= 0
+    else { return responseParentPost }
+    return parentPost
+  }
+
+  private func normalizedForumName(_ forumName: String) -> String {
+    forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+  }
+
+  private func rebuildCommentIndexes(
+    thread: BrowseThread?,
+    parentPost: CommentParentPostContext,
+    comments: [BrowseComment]
+  ) {
+    commentIndexFullRebuildCount += 1
+    indexedAgreementContext = agreementContext(thread: thread, parentPost: parentPost)
+    indexedParentAgreementTarget = thread.flatMap { thread in
+      ContentAgreementTarget(thread: thread, parentPost: parentPost)
+    }
+    var ids = Set<Int64>()
     var targets: [Int64: ContentAgreementTarget] = [:]
+    ids.reserveCapacity(comments.count)
     targets.reserveCapacity(comments.count)
+    var containsDisplayableComment = false
     for comment in comments {
-      if let target = ContentAgreementTarget(
-        thread: thread,
-        parentPostID: parentPost.id,
-        comment: comment
-      ) {
+      ids.insert(comment.id)
+      containsDisplayableComment = containsDisplayableComment
+        || comment.localVisibility != .hidden
+      if
+        let thread,
+        let target = ContentAgreementTarget(
+          thread: thread,
+          parentPostID: parentPost.id,
+          comment: comment
+        )
+      {
         targets[comment.id] = target
       }
     }
+    commentIDs = ids
+    if hasDisplayableComments != containsDisplayableComment {
+      hasDisplayableComments = containsDisplayableComment
+    }
     agreementTargetsByCommentID = targets
+  }
+
+  private func indexCommentsIncrementally(_ newComments: [BrowseComment]) {
+    guard !newComments.isEmpty else { return }
+    commentIndexIncrementalUpdateCount += 1
+    let indexedThread = thread
+    let indexedParentPostID = parentPost?.id
+    var discoveredDisplayableComment = false
+    for comment in newComments {
+      commentIDs.insert(comment.id)
+      discoveredDisplayableComment = discoveredDisplayableComment
+        || comment.localVisibility != .hidden
+      if
+        let indexedThread,
+        let indexedParentPostID,
+        let target = ContentAgreementTarget(
+          thread: indexedThread,
+          parentPostID: indexedParentPostID,
+          comment: comment
+        )
+      {
+        agreementTargetsByCommentID[comment.id] = target
+      }
+    }
+    if !hasDisplayableComments, discoveredDisplayableComment {
+      hasDisplayableComments = true
+    }
+  }
+
+  private func agreementContext(
+    thread: BrowseThread?,
+    parentPost: CommentParentPostContext?
+  ) -> CommentAgreementIndexContext? {
+    guard let thread, let parentPost else { return nil }
+    return CommentAgreementIndexContext(thread: thread, parentPost: parentPost)
+  }
+}
+
+private struct CommentAgreementIndexContext: Equatable {
+  let threadID: Int64
+  let forumID: Int64
+  let forumName: String
+  let firstPostID: Int64
+  let parentPostID: Int64
+  let parentThreadID: Int64
+  let parentFloor: Int
+
+  init(thread: BrowseThread, parentPost: CommentParentPostContext) {
+    threadID = thread.id
+    forumID = thread.forumID
+    forumName = thread.forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    firstPostID = thread.firstPostID
+    parentPostID = parentPost.id
+    parentThreadID = parentPost.threadID
+    parentFloor = parentPost.floor
   }
 }

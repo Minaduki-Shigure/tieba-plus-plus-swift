@@ -1,19 +1,38 @@
 import SwiftUI
 
+struct InlineCommentPreviewItem: Identifiable, Hashable, Sendable {
+  let comment: BrowseComment
+  let bodyText: String
+
+  var id: Int64 { comment.id }
+
+  init(comment: BrowseComment) {
+    self.comment = comment
+    self.bodyText = PostCopyText.text(comment: comment) ?? "（无可显示内容）"
+  }
+}
+
 struct InlineCommentPreviewPresentation: Hashable, Sendable {
-  let comments: [BrowseComment]
+  static let maximumVisibleItemCount = 3
+
+  let items: [InlineCommentPreviewItem]
   let totalCount: Int
   let showsAllCommentsAction: Bool
 
   init?(post: BrowsePost, isPureReadingMode: Bool) {
     guard !isPureReadingMode else { return nil }
-    let comments = post.inlineComments.filter { $0.localVisibility != .hidden }
+    let visibleItems = Array(
+      post.inlineComments.lazy
+        .filter { $0.localVisibility != .hidden }
+        .prefix(Self.maximumVisibleItemCount)
+        .map(InlineCommentPreviewItem.init)
+    )
     let totalCount = max(max(post.nestedReplyCount, 0), post.inlineComments.count)
-    guard totalCount > 0 || !comments.isEmpty else { return nil }
-    self.comments = comments
+    guard totalCount > 0 || !visibleItems.isEmpty else { return nil }
+    self.items = visibleItems
     self.totalCount = totalCount
-    self.showsAllCommentsAction = comments.count != totalCount
-      || !comments.allSatisfy { $0.localVisibility == .visible }
+    self.showsAllCommentsAction = totalCount > visibleItems.count
+      || !visibleItems.allSatisfy { $0.comment.localVisibility == .visible }
   }
 }
 
@@ -52,15 +71,16 @@ struct InlineCommentPreviewCard: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
-      ForEach(Array(presentation.comments.enumerated()), id: \.element.id) { index, comment in
+      ForEach(Array(presentation.items.enumerated()), id: \.element.id) { index, item in
         if index > 0 {
           Divider()
         }
+        let comment = item.comment
         switch comment.localVisibility {
         case .visible:
           let commentReplyPresentation = replyPresentation(comment)
           InlineCommentPreviewRow(
-            comment: comment,
+            item: item,
             action: { openComments(comment.id) },
             replyPresentation: commentReplyPresentation,
             requestReply: commentReplyPresentation == nil
@@ -80,7 +100,7 @@ struct InlineCommentPreviewCard: View {
         }
       }
 
-      if presentation.showsAllCommentsAction, !presentation.comments.isEmpty {
+      if presentation.showsAllCommentsAction, !presentation.items.isEmpty {
         Divider()
       }
       if presentation.showsAllCommentsAction {
@@ -111,7 +131,7 @@ struct InlineCommentPreviewCard: View {
 }
 
 private struct InlineCommentPreviewRow: View {
-  let comment: BrowseComment
+  let item: InlineCommentPreviewItem
   let action: () -> Void
   let replyPresentation: InlineCommentReplyPresentation?
   let requestReply: (() -> Void)?
@@ -121,9 +141,7 @@ private struct InlineCommentPreviewRow: View {
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
   @Environment(\.appAccentColor) private var appAccentColor
 
-  private var bodyText: String {
-    PostCopyText.text(comment: comment) ?? "（无可显示内容）"
-  }
+  private var comment: BrowseComment { item.comment }
 
   var body: some View {
     HStack(alignment: .center, spacing: 8) {
@@ -185,7 +203,7 @@ private struct InlineCommentPreviewRow: View {
         .foregroundColor(appAccentColor.color)
         .fontWeight(.semibold)
     }
-    return result + Text("：\(bodyText)")
+    return result + Text("：\(item.bodyText)")
   }
 
   private var displayedAuthorName: String {
@@ -200,6 +218,6 @@ private struct InlineCommentPreviewRow: View {
     let authorContext = comment.isThreadAuthor
       ? "\(displayedAuthorName)，楼主"
       : displayedAuthorName
-    return "\(authorContext)：\(bodyText)"
+    return "\(authorContext)：\(item.bodyText)"
   }
 }

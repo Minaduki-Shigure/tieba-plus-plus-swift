@@ -4,6 +4,40 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class ThreadScrollPositionTests: XCTestCase {
+  @MainActor
+  func testCoalescerPublishesOnlyLatestPositionAfterBurst() async throws {
+    let coalescer = ThreadScrollPositionCoalescer(delayNanoseconds: 1_000_000)
+    let first = ThreadScrollPosition(readingProgressPostID: 1, prependAnchorPostID: 1)
+    let latest = ThreadScrollPosition(readingProgressPostID: 3, prependAnchorPostID: 2)
+    var published: [ThreadScrollPosition] = []
+
+    coalescer.submit(first) { published.append($0) }
+    coalescer.submit(
+      ThreadScrollPosition(readingProgressPostID: 2, prependAnchorPostID: 2)
+    ) { published.append($0) }
+    coalescer.submit(latest) { published.append($0) }
+    try await Task.sleep(nanoseconds: 30_000_000)
+
+    XCTAssertEqual(coalescer.latestPosition, latest)
+    XCTAssertEqual(coalescer.publicationCount, 1)
+    XCTAssertEqual(published, [latest])
+  }
+
+  @MainActor
+  func testCoalescerCanRescheduleSamePositionAfterCancellation() async throws {
+    let coalescer = ThreadScrollPositionCoalescer(delayNanoseconds: 1_000_000)
+    let position = ThreadScrollPosition(readingProgressPostID: 7, prependAnchorPostID: 7)
+    var published: [ThreadScrollPosition] = []
+
+    coalescer.submit(position) { published.append($0) }
+    coalescer.cancelPendingPublication()
+    coalescer.submit(position) { published.append($0) }
+    try await Task.sleep(nanoseconds: 30_000_000)
+
+    XCTAssertEqual(coalescer.publicationCount, 1)
+    XCTAssertEqual(published, [position])
+  }
+
   func testVisibilityRequiresPositiveIntersectionWithViewport() {
     XCTAssertEqual(
       position(frame: CGRect(x: 0, y: -20, width: 100, height: 40)),

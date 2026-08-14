@@ -68,7 +68,10 @@ struct CommentParentPostView: View {
       BrowseContentView(
         contents: post.contents,
         onUserMention: openMentionedUser,
-        onTiebaLink: openTiebaLink
+        onTiebaLink: openTiebaLink,
+        allowsDirectTextSelection: false,
+        tracksAnimationVisibility: true,
+        maximumPreviewPixelSize: 1_320
       )
     }
     .padding(.vertical, 4)

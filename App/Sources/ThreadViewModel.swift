@@ -9,23 +9,11 @@ struct ThreadScrollTargetDescriptor: Equatable, Sendable {
 
 @MainActor
 final class ThreadViewModel: ObservableObject {
-  @Published private(set) var thread: BrowseThread {
-    didSet { rebuildAgreementTargetIndex() }
-  }
+  @Published private(set) var thread: BrowseThread
   @Published private(set) var originThread: BrowseThread?
   @Published private(set) var poll: BrowsePoll?
-  @Published private(set) var firstPost: BrowsePost? {
-    didSet {
-      guard oldValue != firstPost else { return }
-      rebuildPostIndexes()
-    }
-  }
-  @Published private(set) var posts: [BrowsePost] = [] {
-    didSet {
-      guard oldValue != posts else { return }
-      rebuildPostIndexes()
-    }
-  }
+  @Published private(set) var firstPost: BrowsePost?
+  @Published private(set) var posts: [BrowsePost] = []
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
   @Published private(set) var loadMoreError: String?
@@ -60,6 +48,12 @@ final class ThreadViewModel: ObservableObject {
   private var agreementTargetsByPostID: [Int64: ContentAgreementTarget] = [:]
   private var postsByID: [Int64: BrowsePost] = [:]
   private(set) var scrollTargetsByPostID: [Int64: ThreadScrollTargetDescriptor] = [:]
+  private(set) var resolvedThreadAuthorAvatarURL: URL?
+  private(set) var firstDisplayableReplyPostID: Int64?
+  private(set) var firstVisibleReplyPostID: Int64?
+  private var nextScrollTargetOrder = 0
+  private(set) var fullPostIndexRebuildCount = 0
+  private(set) var incrementallyIndexedPostCount = 0
 
   init(
     thread: BrowseThread,
@@ -74,6 +68,13 @@ final class ThreadViewModel: ObservableObject {
     self.service = service
     self.options = options
     self.initialLocation = options.sort == .hot ? nil : initialLocation
+    self.resolvedThreadAuthorAvatarURL = ThreadAuthorAvatarResolver.resolve(
+      thread: thread,
+      firstPost: nil,
+      posts: []
+    )
+    self.firstDisplayableReplyPostID = nil
+    self.firstVisibleReplyPostID = nil
   }
 
   func loadIfNeeded() {
@@ -170,8 +171,7 @@ final class ThreadViewModel: ObservableObject {
     descendingFallbackPage = nil
     scrollTargetPostID = nil
     replaceAgreementDescriptors(with: [])
-    firstPost = nil
-    posts = []
+    replacePostSnapshot(firstPost: nil, posts: [])
     state = .loading
     load(page: 1, replacing: true, location: location, jumping: false)
   }
@@ -373,16 +373,15 @@ final class ThreadViewModel: ObservableObject {
           responseThread: response.thread,
           replacing: false
         )
-        let newReplies = uniqueValidPosts(
-          normalized.replies,
-          excluding: posts,
-          threadID: threadID
-        )
+        let newReplies = uniqueValidPosts(normalized.replies, threadID: threadID)
         guard !newReplies.isEmpty else { return }
 
-        thread = response.thread
-        posts.append(contentsOf: newReplies)
-        upsertAgreementDescriptor(response.agreementReadDescriptor)
+        let requiresFullRebuild = replaceThreadIfNeeded(response.thread)
+        appendPostsToEnd(newReplies, requiresFullRebuild: requiresFullRebuild)
+        upsertAgreementDescriptor(
+          response.agreementReadDescriptor,
+          pruningAll: requiresFullRebuild
+        )
         currentPage = response.currentPage
         totalPages = response.totalPages
         hasMore = response.hasMore
@@ -410,7 +409,9 @@ final class ThreadViewModel: ObservableObject {
       options.sort == .ascending
     else { return }
     previousLoadAnchorPostID = anchorPostID.flatMap { candidate in
-      posts.first(where: { $0.id == candidate && $0.localVisibility != .hidden })?.id
+      post(withID: candidate).flatMap { post in
+        post.localVisibility == .hidden ? nil : post.id
+      }
     }
     load(
       page: lowestLoadedPage - 1,
@@ -552,11 +553,7 @@ final class ThreadViewModel: ObservableObject {
           else {
             throw BrowseError.unavailable("贴吧返回的上一页页码异常，未合并该响应。")
           }
-          let newItems = uniqueValidPosts(
-            normalized.replies,
-            excluding: posts,
-            threadID: threadID
-          )
+          let newItems = uniqueValidPosts(normalized.replies, threadID: threadID)
           guard !newItems.isEmpty else {
             canLoadPrevious = false
             previousLoadAnchorPostID = nil
@@ -565,18 +562,21 @@ final class ThreadViewModel: ObservableObject {
           }
           let restorePostID = previousLoadAnchorPostID
           isRestoringPrependPosition = true
-          thread = response.thread
-          if let responseFirstPost = normalized.firstPost {
-            firstPost = responseFirstPost
-          }
+          let threadRequiresFullRebuild = replaceThreadIfNeeded(response.thread)
           if let responseOriginThread = response.originThread {
-            originThread = responseOriginThread
+            replaceOriginThreadIfNeeded(responseOriginThread)
           }
           if let responsePoll = response.poll {
-            poll = responsePoll
+            replacePollIfNeeded(responsePoll)
           }
-          posts = newItems + posts
-          upsertAgreementDescriptor(response.agreementReadDescriptor)
+          replacePostSnapshot(
+            firstPost: normalized.firstPost ?? firstPost,
+            posts: newItems + posts
+          )
+          upsertAgreementDescriptor(
+            response.agreementReadDescriptor,
+            pruningAll: threadRequiresFullRebuild
+          )
           lowestLoadedPage = response.currentPage
           totalPages = max(totalPages, response.totalPages)
           canLoadPrevious = response.hasPrevious && lowestLoadedPage > 1
@@ -586,7 +586,6 @@ final class ThreadViewModel: ObservableObject {
           return
         }
 
-        let previousPosts = posts
         let previousPage = currentPage
         let requestedCursor: Int64?
         if case .pageCursor(let cursor) = effectiveLocation {
@@ -594,9 +593,9 @@ final class ThreadViewModel: ObservableObject {
         } else {
           requestedCursor = nil
         }
-        let mergedPosts = replacing
-          ? normalized.replies
-          : merge(previousPosts, normalized.replies)
+        let appendedPosts = replacing
+          ? []
+          : uniqueValidPosts(normalized.replies, threadID: threadID)
         if replacing, jumping, effectiveLocation == .pageNumber, response.currentPage != page {
           throw BrowseError.unavailable("贴吧返回的跳转页码异常，未显示该响应。")
         }
@@ -622,21 +621,22 @@ final class ThreadViewModel: ObservableObject {
             break
           }
         }
-        thread = response.thread
+        let threadRequiresFullRebuild = replaceThreadIfNeeded(response.thread)
+        var firstPostChanged = false
         if replacing {
-          firstPost = normalized.firstPost
+          firstPostChanged = firstPost != normalized.firstPost
         } else if let responseFirstPost = normalized.firstPost {
-          firstPost = responseFirstPost
+          firstPostChanged = replaceFirstPostIfNeeded(responseFirstPost)
         }
         if replacing {
-          originThread = response.originThread
+          replaceOriginThreadIfNeeded(response.originThread)
         } else if let responseOriginThread = response.originThread {
-          originThread = responseOriginThread
+          replaceOriginThreadIfNeeded(responseOriginThread)
         }
         if replacing {
-          poll = response.poll
+          replacePollIfNeeded(response.poll)
         } else if let responsePoll = response.poll {
-          poll = responsePoll
+          replacePollIfNeeded(responsePoll)
         }
         currentPage = response.currentPage
         totalPages = response.totalPages
@@ -648,7 +648,7 @@ final class ThreadViewModel: ObservableObject {
           currentPage: response.currentPage,
           totalPages: response.totalPages
         )
-        let addedPosts = mergedPosts.count > previousPosts.count
+        let addedPosts = !appendedPosts.isEmpty
         let exhaustedFallbackPage =
           !replacing && options.sort == .descending
           && effectiveLocation == .pageNumber && page == 1
@@ -672,13 +672,31 @@ final class ThreadViewModel: ObservableObject {
           && !stalledDescendingPage
           && !stalledAscendingPage
           && !stalledHotPage
-        posts = mergedPosts
+        if replacing {
+          let rebuilt = replacePostSnapshot(
+            firstPost: normalized.firstPost,
+            posts: normalized.replies
+          )
+          if threadRequiresFullRebuild, !rebuilt {
+            rebuildPostIndexes()
+          }
+        } else if !appendedPosts.isEmpty {
+          appendPostsToEnd(
+            appendedPosts,
+            requiresFullRebuild: threadRequiresFullRebuild || firstPostChanged
+          )
+        } else if threadRequiresFullRebuild || firstPostChanged {
+          rebuildPostIndexes()
+        }
         if replacing {
           replaceAgreementDescriptors(
             with: response.agreementReadDescriptor.map { [$0] } ?? []
           )
         } else {
-          upsertAgreementDescriptor(response.agreementReadDescriptor)
+          upsertAgreementDescriptor(
+            response.agreementReadDescriptor,
+            pruningAll: threadRequiresFullRebuild
+          )
         }
         if replacing {
           lowestLoadedPage = max(response.currentPage, 1)
@@ -790,9 +808,139 @@ final class ThreadViewModel: ObservableObject {
     }
   }
 
-  private func merge(_ existing: [BrowsePost], _ newItems: [BrowsePost]) -> [BrowsePost] {
-    var seen = Set(existing.map(\.id))
-    return existing + newItems.filter { seen.insert($0.id).inserted }
+  private struct AgreementThreadIdentity: Equatable {
+    let threadID: Int64
+    let firstPostID: Int64
+    let forumID: Int64
+    let forumName: String
+
+    init(_ thread: BrowseThread) {
+      threadID = thread.id
+      firstPostID = thread.firstPostID
+      forumID = thread.forumID
+      forumName = thread.forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+        .precomposedStringWithCanonicalMapping
+    }
+  }
+
+  private struct ThreadAvatarIdentity: Equatable {
+    let threadID: Int64
+    let authorID: Int64
+    let authorAvatarURL: URL?
+    let localVisibility: LocalContentVisibility
+
+    init(_ thread: BrowseThread) {
+      threadID = thread.id
+      authorID = thread.authorID
+      authorAvatarURL = thread.authorAvatarURL
+      localVisibility = thread.localVisibility
+    }
+  }
+
+  @discardableResult
+  private func replaceThreadIfNeeded(_ replacement: BrowseThread) -> Bool {
+    let agreementIdentityChanged = AgreementThreadIdentity(thread)
+      != AgreementThreadIdentity(replacement)
+    let avatarIdentityChanged = ThreadAvatarIdentity(thread)
+      != ThreadAvatarIdentity(replacement)
+    if thread != replacement {
+      thread = replacement
+      if avatarIdentityChanged {
+        refreshResolvedThreadAuthorAvatarURL()
+      }
+    }
+    return agreementIdentityChanged
+  }
+
+  @discardableResult
+  private func replaceFirstPostIfNeeded(_ replacement: BrowsePost?) -> Bool {
+    guard firstPost != replacement else { return false }
+    firstPost = replacement
+    refreshResolvedThreadAuthorAvatarURL()
+    return true
+  }
+
+  private func replaceOriginThreadIfNeeded(_ replacement: BrowseThread?) {
+    guard originThread != replacement else { return }
+    originThread = replacement
+  }
+
+  private func replacePollIfNeeded(_ replacement: BrowsePoll?) {
+    guard poll != replacement else { return }
+    poll = replacement
+  }
+
+  @discardableResult
+  private func replacePostSnapshot(
+    firstPost replacementFirstPost: BrowsePost?,
+    posts replacementPosts: [BrowsePost]
+  ) -> Bool {
+    let firstPostChanged = firstPost != replacementFirstPost
+    let postsChanged = posts != replacementPosts
+    guard firstPostChanged || postsChanged else { return false }
+    if firstPostChanged {
+      firstPost = replacementFirstPost
+    }
+    if postsChanged {
+      posts = replacementPosts
+    }
+    rebuildPostIndexes()
+    return true
+  }
+
+  private func appendPostsToEnd(
+    _ candidates: [BrowsePost],
+    requiresFullRebuild: Bool
+  ) {
+    var accepted: [BrowsePost] = []
+    accepted.reserveCapacity(candidates.count)
+    for post in candidates where post.id > 0 && postsByID[post.id] == nil {
+      accepted.append(post)
+    }
+    guard !accepted.isEmpty else {
+      if requiresFullRebuild {
+        rebuildPostIndexes()
+      }
+      return
+    }
+
+    if requiresFullRebuild {
+      posts.append(contentsOf: accepted)
+      rebuildPostIndexes()
+      return
+    }
+
+    for post in accepted {
+      if let target = ContentAgreementTarget(thread: thread, post: post) {
+        agreementTargetsByPostID[post.id] = target
+      }
+      postsByID[post.id] = post
+      scrollTargetsByPostID[post.id] = ThreadScrollTargetDescriptor(
+        order: nextScrollTargetOrder,
+        localVisibility: post.localVisibility,
+        tracksPrependAnchor: true
+      )
+      nextScrollTargetOrder += 1
+    }
+    if firstDisplayableReplyPostID == nil {
+      firstDisplayableReplyPostID = accepted.first(where: {
+        $0.localVisibility != .hidden
+      })?.id
+    }
+    if firstVisibleReplyPostID == nil {
+      firstVisibleReplyPostID = accepted.first(where: {
+        $0.localVisibility == .visible
+      })?.id
+    }
+    if resolvedThreadAuthorAvatarURL == nil {
+      resolvedThreadAuthorAvatarURL = ThreadAuthorAvatarResolver.resolve(
+        thread: thread,
+        firstPost: firstPost,
+        posts: accepted
+      )
+    }
+    incrementallyIndexedPostCount += accepted.count
+    posts.append(contentsOf: accepted)
   }
 
   func post(withID postID: Int64) -> BrowsePost? {
@@ -827,33 +975,58 @@ final class ThreadViewModel: ObservableObject {
     agreementDescriptorEpoch &+= 1
   }
 
-  private func upsertAgreementDescriptor(_ descriptor: ContentAgreementReadDescriptor?) {
-    var descriptors = agreementReadDescriptors
-    if let descriptor {
-      if let index = descriptors.firstIndex(where: { $0.request == descriptor.request }) {
-        descriptors[index] = descriptor
-      } else {
-        descriptors.append(descriptor)
+  private func upsertAgreementDescriptor(
+    _ descriptor: ContentAgreementReadDescriptor?,
+    pruningAll: Bool = false
+  ) {
+    if pruningAll {
+      var descriptors = agreementReadDescriptors
+      if let descriptor {
+        if let index = descriptors.firstIndex(where: { $0.request == descriptor.request }) {
+          descriptors[index] = descriptor
+        } else {
+          descriptors.append(descriptor)
+        }
       }
+      replaceAgreementDescriptors(with: descriptors)
+      return
     }
-    replaceAgreementDescriptors(with: descriptors)
+
+    guard let descriptor else { return }
+    var descriptors = agreementReadDescriptors
+    guard let retainedDescriptor = retainedAgreementDescriptor(descriptor) else {
+      guard let index = descriptors.firstIndex(where: { $0.request == descriptor.request }) else {
+        return
+      }
+      descriptors.remove(at: index)
+      agreementReadDescriptors = descriptors
+      agreementDescriptorEpoch &+= 1
+      return
+    }
+    if let index = descriptors.firstIndex(where: { $0.request == retainedDescriptor.request }) {
+      descriptors[index] = retainedDescriptor
+    } else {
+      descriptors.append(retainedDescriptor)
+    }
+    guard descriptors != agreementReadDescriptors else { return }
+    agreementReadDescriptors = descriptors
+    agreementDescriptorEpoch &+= 1
   }
 
-  private func rebuildAgreementTargetIndex() {
-    var targets: [Int64: ContentAgreementTarget] = [:]
-    targets.reserveCapacity(posts.count + (firstPost == nil ? 0 : 1))
-    if let firstPost, let target = ContentAgreementTarget(thread: thread, post: firstPost) {
-      targets[firstPost.id] = target
-    }
-    for post in posts {
-      if let target = ContentAgreementTarget(thread: thread, post: post) {
-        targets[post.id] = target
-      }
-    }
-    agreementTargetsByPostID = targets
+  private func retainedAgreementDescriptor(
+    _ descriptor: ContentAgreementReadDescriptor
+  ) -> ContentAgreementReadDescriptor? {
+    let retainedTargets = Set(descriptor.expectedTargets.filter { target in
+      agreementTargetsByPostID[target.objectID] == target
+    })
+    return ContentAgreementReadDescriptor(
+      request: descriptor.request,
+      expectedTargets: retainedTargets
+    )
   }
 
   private func rebuildPostIndexes() {
+    fullPostIndexRebuildCount += 1
     var agreementTargets: [Int64: ContentAgreementTarget] = [:]
     var lookup: [Int64: BrowsePost] = [:]
     var scrollTargets: [Int64: ThreadScrollTargetDescriptor] = [:]
@@ -863,6 +1036,8 @@ final class ThreadViewModel: ObservableObject {
     scrollTargets.reserveCapacity(capacity)
 
     var order = 0
+    var firstDisplayableReplyPostID: Int64?
+    var firstVisibleReplyPostID: Int64?
     if let firstPost, firstPost.id > 0 {
       if let target = ContentAgreementTarget(thread: thread, post: firstPost) {
         agreementTargets[firstPost.id] = target
@@ -885,11 +1060,29 @@ final class ThreadViewModel: ObservableObject {
         localVisibility: post.localVisibility,
         tracksPrependAnchor: true
       )
+      if firstDisplayableReplyPostID == nil, post.localVisibility != .hidden {
+        firstDisplayableReplyPostID = post.id
+      }
+      if firstVisibleReplyPostID == nil, post.localVisibility == .visible {
+        firstVisibleReplyPostID = post.id
+      }
       order += 1
     }
     agreementTargetsByPostID = agreementTargets
     postsByID = lookup
     scrollTargetsByPostID = scrollTargets
+    self.firstDisplayableReplyPostID = firstDisplayableReplyPostID
+    self.firstVisibleReplyPostID = firstVisibleReplyPostID
+    nextScrollTargetOrder = order
+    refreshResolvedThreadAuthorAvatarURL()
+  }
+
+  private func refreshResolvedThreadAuthorAvatarURL() {
+    resolvedThreadAuthorAvatarURL = ThreadAuthorAvatarResolver.resolve(
+      thread: thread,
+      firstPost: firstPost,
+      posts: posts
+    )
   }
 
   private struct NormalizedPostPage {
@@ -1017,14 +1210,13 @@ final class ThreadViewModel: ObservableObject {
     }
   }
 
-  private func uniqueValidPosts(
-    _ newItems: [BrowsePost],
-    excluding existing: [BrowsePost],
-    threadID: Int64
-  ) -> [BrowsePost] {
-    var seen = Set(existing.map(\.id))
+  private func uniqueValidPosts(_ newItems: [BrowsePost], threadID: Int64) -> [BrowsePost] {
+    var seen = Set<Int64>()
     return newItems.filter {
-      $0.id > 0 && $0.threadID == threadID && seen.insert($0.id).inserted
+      $0.id > 0
+        && $0.threadID == threadID
+        && postsByID[$0.id] == nil
+        && seen.insert($0.id).inserted
     }
   }
 }

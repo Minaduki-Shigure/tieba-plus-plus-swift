@@ -2259,6 +2259,66 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testThreadAppendMaintainsIndexesAndVisibilityCachesIncrementally() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 42)
+    let hidden = Fixtures.post(
+      id: 4_201,
+      threadID: thread.id,
+      floor: 2,
+      localVisibility: .hidden
+    )
+    let placeholder = Fixtures.post(
+      id: 4_202,
+      threadID: thread.id,
+      floor: 3,
+      localVisibility: .placeholder
+    )
+    let visible = Fixtures.post(id: 4_203, threadID: thread.id, floor: 4)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [hidden, placeholder],
+          currentPage: 1,
+          hasMore: true,
+          totalPages: 2
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [visible],
+          currentPage: 2,
+          hasMore: false,
+          totalPages: 2
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    XCTAssertEqual(viewModel.firstDisplayableReplyPostID, placeholder.id)
+    XCTAssertNil(viewModel.firstVisibleReplyPostID)
+    XCTAssertEqual(viewModel.fullPostIndexRebuildCount, 1)
+    XCTAssertEqual(viewModel.incrementallyIndexedPostCount, 0)
+
+    viewModel.loadMoreIfNeeded(current: placeholder)
+    try await waitUntil { viewModel.posts.last?.id == visible.id }
+
+    XCTAssertEqual(viewModel.firstDisplayableReplyPostID, placeholder.id)
+    XCTAssertEqual(viewModel.firstVisibleReplyPostID, visible.id)
+    XCTAssertEqual(viewModel.post(withID: visible.id), visible)
+    XCTAssertEqual(viewModel.scrollTargetsByPostID[visible.id]?.order, 2)
+    XCTAssertEqual(viewModel.fullPostIndexRebuildCount, 1)
+    XCTAssertEqual(viewModel.incrementallyIndexedPostCount, 1)
+  }
+
+  @MainActor
   func testThreadAgreementDescriptorsAccumulateAcrossPrependAndAppendThenReplaceOnRefresh()
     async throws
   {
@@ -5001,6 +5061,9 @@ final class BrowseViewModelTests: XCTestCase {
     try await waitUntil { viewModel.state == .loaded }
     XCTAssertEqual(viewModel.comments, comments)
     XCTAssertEqual(viewModel.parentPost?.id, 80)
+    XCTAssertTrue(viewModel.hasDisplayableComments)
+    XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 1)
+    XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 0)
     let requests = await service.commentRequestSnapshot()
     XCTAssertEqual(requests, [CommentRequest(threadID: 8, postID: 80, page: 1)])
   }
@@ -5156,6 +5219,8 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.agreementExplicitRefreshEpoch, 0)
     XCTAssertEqual(viewModel.parentAgreementTarget, parentTarget)
     XCTAssertEqual(viewModel.agreementTarget(forCommentID: current.id), currentTarget)
+    XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 1)
+    XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 0)
 
     viewModel.loadPrevious()
     try await waitUntil { viewModel.comments.map(\.id) == [earlier.id, current.id] }
@@ -5165,6 +5230,8 @@ final class BrowseViewModelTests: XCTestCase {
     )
     XCTAssertEqual(viewModel.agreementTarget(forCommentID: earlier.id), earlierTarget)
     XCTAssertEqual(viewModel.agreementExplicitRefreshEpoch, 0)
+    XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 1)
+    XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 1)
     viewModel.consumePrependRestoreTarget()
 
     viewModel.loadMoreIfNeeded(current: current)
@@ -5175,6 +5242,8 @@ final class BrowseViewModelTests: XCTestCase {
     )
     XCTAssertEqual(viewModel.agreementTarget(forCommentID: later.id), laterTarget)
     XCTAssertEqual(viewModel.agreementExplicitRefreshEpoch, 0)
+    XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 1)
+    XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 2)
 
     await viewModel.refresh()
 
@@ -5184,6 +5253,423 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.agreementTarget(forCommentID: current.id), currentTarget)
     XCTAssertNil(viewModel.agreementTarget(forCommentID: earlier.id))
     XCTAssertNil(viewModel.agreementTarget(forCommentID: later.id))
+    XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 2)
+    XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 2)
+  }
+
+  @MainActor
+  func testCommentsDisplayabilityUpdatesIncrementallyAndResetsOnRefresh() async throws {
+    let service = ScriptedBrowseService()
+    let hidden = Fixtures.comment(id: 8_401, localVisibility: .hidden)
+    let visible = Fixtures.comment(id: 8_402)
+    let refreshedHidden = Fixtures.comment(id: 8_403, localVisibility: .hidden)
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 84,
+          postID: 8_400,
+          comments: [hidden],
+          currentPage: 1,
+          hasMore: true
+        )
+      )
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 84,
+          postID: 8_400,
+          comments: [visible],
+          currentPage: 2,
+          hasMore: false
+        )
+      )
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: 84,
+          postID: 8_400,
+          comments: [refreshedHidden],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = CommentsViewModel(threadID: 84, postID: 8_400, service: service)
+
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    XCTAssertFalse(viewModel.hasDisplayableComments)
+    XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 1)
+    XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 0)
+
+    viewModel.loadMoreIfNeeded(current: hidden)
+    try await waitUntil { viewModel.comments.map(\.id) == [hidden.id, visible.id] }
+
+    XCTAssertTrue(viewModel.hasDisplayableComments)
+    XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 1)
+    XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 1)
+
+    await viewModel.refresh()
+
+    XCTAssertEqual(viewModel.comments, [refreshedHidden])
+    XCTAssertFalse(viewModel.hasDisplayableComments)
+    XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 2)
+    XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 1)
+  }
+
+  @MainActor
+  func testCommentsPaginationRebuildsIndexesWhenAgreementContextChanges() async throws {
+    let service = ScriptedBrowseService()
+    let originalThread = Fixtures.thread(id: 85, forumName: "Original")
+    let updatedThread = Fixtures.thread(id: 85, forumName: "Updated")
+    let finalThread = Fixtures.thread(id: 85, forumName: "Final")
+    let parent = Fixtures.commentParentPost(id: 8_500, threadID: originalThread.id)
+    let original = Fixtures.comment(
+      id: 8_501,
+      threadID: originalThread.id,
+      parentPostID: parent.id
+    )
+    let appended = Fixtures.comment(
+      id: 8_502,
+      threadID: originalThread.id,
+      parentPostID: parent.id
+    )
+    let originalTarget = ContentAgreementTarget(
+      thread: originalThread,
+      parentPostID: parent.id,
+      comment: original
+    )!
+    let updatedAppendedTarget = ContentAgreementTarget(
+      thread: updatedThread,
+      parentPostID: parent.id,
+      comment: appended
+    )!
+    let finalAppendedTarget = ContentAgreementTarget(
+      thread: finalThread,
+      parentPostID: parent.id,
+      comment: appended
+    )!
+    let initialDescriptor = Fixtures.commentAgreementDescriptor(
+      thread: originalThread,
+      parentPostID: parent.id,
+      aroundCommentID: nil,
+      page: 1,
+      targets: [originalTarget]
+    )
+    let updatedDescriptor = Fixtures.commentAgreementDescriptor(
+      thread: updatedThread,
+      parentPostID: parent.id,
+      aroundCommentID: nil,
+      page: 2,
+      targets: [updatedAppendedTarget]
+    )
+    let finalDescriptor = Fixtures.commentAgreementDescriptor(
+      thread: finalThread,
+      parentPostID: parent.id,
+      aroundCommentID: nil,
+      page: 3,
+      targets: [finalAppendedTarget]
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: originalThread.id,
+          postID: parent.id,
+          comments: [original],
+          currentPage: 1,
+          hasMore: true,
+          parentPost: parent,
+          thread: originalThread,
+          agreementReadDescriptor: initialDescriptor
+        )
+      )
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: updatedThread.id,
+          postID: parent.id,
+          comments: [appended],
+          currentPage: 2,
+          hasMore: true,
+          parentPost: parent,
+          thread: updatedThread,
+          agreementReadDescriptor: updatedDescriptor
+        )
+      )
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: finalThread.id,
+          postID: parent.id,
+          comments: [appended],
+          currentPage: 3,
+          hasMore: false,
+          parentPost: parent,
+          thread: finalThread,
+          agreementReadDescriptor: finalDescriptor
+        )
+      )
+    )
+    let viewModel = CommentsViewModel(
+      threadID: originalThread.id,
+      postID: parent.id,
+      service: service
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    XCTAssertEqual(
+      viewModel.agreementTarget(forCommentID: original.id),
+      ContentAgreementTarget(
+        thread: originalThread,
+        parentPostID: parent.id,
+        comment: original
+      )
+    )
+    XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 1)
+    XCTAssertEqual(viewModel.agreementReadDescriptors, [initialDescriptor])
+
+    viewModel.loadMoreIfNeeded(current: original)
+    try await waitUntil { viewModel.comments.map(\.id) == [original.id, appended.id] }
+
+    XCTAssertEqual(viewModel.thread, updatedThread)
+    XCTAssertEqual(
+      viewModel.agreementTarget(forCommentID: original.id),
+      ContentAgreementTarget(
+        thread: updatedThread,
+        parentPostID: parent.id,
+        comment: original
+      )
+    )
+    XCTAssertEqual(
+      viewModel.agreementTarget(forCommentID: appended.id),
+      ContentAgreementTarget(
+        thread: updatedThread,
+        parentPostID: parent.id,
+        comment: appended
+      )
+    )
+    XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 2)
+    XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 0)
+    XCTAssertEqual(viewModel.agreementReadDescriptors, [updatedDescriptor])
+
+    viewModel.loadMoreIfNeeded(current: appended)
+    try await waitUntil {
+      viewModel.commentIndexFullRebuildCount == 3 && !viewModel.isLoadingMore
+    }
+
+    XCTAssertEqual(viewModel.comments.map(\.id), [original.id, appended.id])
+    XCTAssertEqual(viewModel.thread, finalThread)
+    XCTAssertEqual(
+      viewModel.agreementTarget(forCommentID: original.id),
+      ContentAgreementTarget(
+        thread: finalThread,
+        parentPostID: parent.id,
+        comment: original
+      )
+    )
+    XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 0)
+    XCTAssertEqual(viewModel.agreementReadDescriptors, [finalDescriptor])
+  }
+
+  @MainActor
+  func testCommentsPaginationDoesNotDowngradeKnownAgreementContext() async throws {
+    let service = ScriptedBrowseService()
+    let parentID: Int64 = 8_600
+    let originalThread = Fixtures.thread(
+      id: 86,
+      forumName: "Known Forum",
+      firstPostID: parentID
+    )
+    let sparseThread = Fixtures.thread(
+      id: originalThread.id,
+      forumID: 0,
+      forumName: "",
+      firstPostID: 0
+    )
+    let parent = Fixtures.commentParentPost(
+      id: parentID,
+      threadID: originalThread.id,
+      floor: 1
+    )
+    let sparseParent = Fixtures.commentParentPost(
+      id: parentID,
+      threadID: originalThread.id,
+      floor: 0
+    )
+    let original = Fixtures.comment(
+      id: 8_601,
+      threadID: originalThread.id,
+      parentPostID: parent.id
+    )
+    let appended = Fixtures.comment(
+      id: 8_602,
+      threadID: originalThread.id,
+      parentPostID: parent.id
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: originalThread.id,
+          postID: parent.id,
+          comments: [original],
+          currentPage: 1,
+          hasMore: true,
+          parentPost: parent,
+          thread: originalThread
+        )
+      )
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: sparseThread.id,
+          postID: sparseParent.id,
+          comments: [appended],
+          currentPage: 2,
+          hasMore: false,
+          parentPost: sparseParent,
+          thread: sparseThread
+        )
+      )
+    )
+    let viewModel = CommentsViewModel(
+      threadID: originalThread.id,
+      postID: parent.id,
+      service: service
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+    let originalParentTarget = ContentAgreementTarget(
+      thread: originalThread,
+      parentPost: parent
+    )
+
+    viewModel.loadMoreIfNeeded(current: original)
+    try await waitUntil { viewModel.comments.map(\.id) == [original.id, appended.id] }
+
+    XCTAssertEqual(viewModel.thread, originalThread)
+    XCTAssertEqual(viewModel.parentPost, parent)
+    XCTAssertEqual(viewModel.parentAgreementTarget, originalParentTarget)
+    XCTAssertEqual(
+      viewModel.agreementTarget(forCommentID: appended.id),
+      ContentAgreementTarget(
+        thread: originalThread,
+        parentPostID: parent.id,
+        comment: appended
+      )
+    )
+    XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 1)
+    XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 1)
+  }
+
+  @MainActor
+  func testCommentsPaginationCombinesComplementaryAgreementContext() async throws {
+    let service = ScriptedBrowseService()
+    let parentID: Int64 = 8_700
+    let partialInitialThread = Fixtures.thread(
+      id: 87,
+      forumID: 100,
+      forumName: "",
+      firstPostID: 0
+    )
+    let partialNextThread = Fixtures.thread(
+      id: partialInitialThread.id,
+      forumID: 0,
+      forumName: "Recovered Forum",
+      firstPostID: parentID
+    )
+    let resolvedThread = Fixtures.thread(
+      id: partialInitialThread.id,
+      forumID: 100,
+      forumName: "Recovered Forum",
+      firstPostID: parentID
+    )
+    let parent = Fixtures.commentParentPost(
+      id: parentID,
+      threadID: partialInitialThread.id,
+      floor: 1
+    )
+    let original = Fixtures.comment(
+      id: 8_701,
+      threadID: partialInitialThread.id,
+      parentPostID: parent.id
+    )
+    let appended = Fixtures.comment(
+      id: 8_702,
+      threadID: partialInitialThread.id,
+      parentPostID: parent.id
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: partialInitialThread.id,
+          postID: parent.id,
+          comments: [original],
+          currentPage: 1,
+          hasMore: true,
+          parentPost: parent,
+          thread: partialInitialThread
+        )
+      )
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: partialNextThread.id,
+          postID: parent.id,
+          comments: [appended],
+          currentPage: 2,
+          hasMore: false,
+          parentPost: parent,
+          thread: partialNextThread
+        )
+      )
+    )
+    let viewModel = CommentsViewModel(
+      threadID: partialInitialThread.id,
+      postID: parent.id,
+      service: service
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+    XCTAssertNil(viewModel.parentAgreementTarget)
+    XCTAssertNil(viewModel.agreementTarget(forCommentID: original.id))
+
+    viewModel.loadMoreIfNeeded(current: original)
+    try await waitUntil { viewModel.comments.map(\.id) == [original.id, appended.id] }
+
+    XCTAssertEqual(viewModel.thread, resolvedThread)
+    XCTAssertEqual(
+      viewModel.parentAgreementTarget,
+      ContentAgreementTarget(thread: resolvedThread, parentPost: parent)
+    )
+    XCTAssertEqual(
+      viewModel.agreementTarget(forCommentID: original.id),
+      ContentAgreementTarget(
+        thread: resolvedThread,
+        parentPostID: parent.id,
+        comment: original
+      )
+    )
+    XCTAssertEqual(
+      viewModel.agreementTarget(forCommentID: appended.id),
+      ContentAgreementTarget(
+        thread: resolvedThread,
+        parentPostID: parent.id,
+        comment: appended
+      )
+    )
+    XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 2)
+    XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 0)
   }
 
   @MainActor
@@ -6540,6 +7026,7 @@ private enum Fixtures {
   static func thread(
     id: Int64,
     title: String? = nil,
+    forumID: Int64 = 100,
     forumName: String = "Swift",
     firstPostID: Int64 = 0,
     isPinned: Bool = false,
@@ -6547,7 +7034,7 @@ private enum Fixtures {
   ) -> BrowseThread {
     BrowseThread(
       id: id,
-      forumID: 100,
+      forumID: forumID,
       forumName: forumName,
       title: title ?? "thread-\(id)",
       excerpt: "excerpt-\(id)",
@@ -6567,7 +7054,8 @@ private enum Fixtures {
     id: Int64,
     threadID: Int64,
     authorName: String? = nil,
-    floor: Int? = nil
+    floor: Int? = nil,
+    localVisibility: LocalContentVisibility = .visible
   ) -> BrowsePost {
     BrowsePost(
       id: id,
@@ -6579,7 +7067,8 @@ private enum Fixtures {
       createdAt: Date(timeIntervalSince1970: 1_700_000_200),
       nestedReplyCount: 2,
       isThreadAuthor: false,
-      contents: [.text("post content")]
+      contents: [.text("post content")],
+      localVisibility: localVisibility
     )
   }
 

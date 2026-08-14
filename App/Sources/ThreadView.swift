@@ -13,6 +13,7 @@ struct ThreadView: View {
   @State private var showsPageJump = false
   @State private var pageInput = ""
   @State private var scrollPosition = ThreadScrollPosition.empty
+  @State private var scrollPositionCoalescer = ThreadScrollPositionCoalescer()
   @State private var linkedTarget: TiebaLinkTarget?
   @State private var restoredHistorySnapshot: ThreadHistorySnapshot?
   @State private var hasRecordedHistoryVisit = false
@@ -323,13 +324,15 @@ struct ThreadView: View {
     }
     .onChange(of: viewModel.options) { options in
       cancelPictureGallery()
+      scrollPositionCoalescer.reset()
       scrollPosition = .empty
       persistBrowseOptions(options)
     }
     .onDisappear {
-      if let visiblePost, !viewModel.isRestoringPrependPosition {
+      scrollPositionCoalescer.cancelPendingPublication()
+      if let latestVisiblePost, !viewModel.isRestoringPrependPosition {
         let options = viewModel.options
-        Task { await persistProgress(visiblePost, options: options) }
+        Task { await persistProgress(latestVisiblePost, options: options) }
       } else {
         persistBrowseOptions(viewModel.options)
       }
@@ -364,6 +367,7 @@ struct ThreadView: View {
       contentReportCoordinator?.invalidate(scopeID: reportScopeID)
       pendingCloudFavoriteAction = nil
       clearSelectableTextRoute()
+      scrollPositionCoalescer.reset()
       Task { @MainActor in
         scrollPosition = .empty
         viewModel.reload()
@@ -935,6 +939,7 @@ struct ThreadView: View {
                     },
                     selectText: presentSelectableText
                   )
+                  .equatable()
                   Divider()
                     .padding(.leading, isPureReadingMode ? 0 : 52)
                 }
@@ -1036,6 +1041,7 @@ struct ThreadView: View {
                     },
                     selectText: presentSelectableText
                   )
+                  .equatable()
                   Divider()
                     .padding(.leading, isPureReadingMode ? 0 : 52)
                 }
@@ -1231,8 +1237,10 @@ struct ThreadView: View {
   }
 
   private func updateScrollPosition(_ position: ThreadScrollPosition) {
-    guard position != scrollPosition else { return }
-    scrollPosition = position
+    scrollPositionCoalescer.submit(position) { position in
+      guard position != scrollPosition else { return }
+      scrollPosition = position
+    }
   }
 
   private func selectableThreadTitle(for post: BrowsePost) -> String? {
@@ -1318,13 +1326,15 @@ struct ThreadView: View {
 
   private var prependAnchorPostID: Int64? {
     if
-      let leadingVisiblePostID = scrollPosition.prependAnchorPostID,
-      let leadingPost = viewModel.posts.first(where: { $0.id == leadingVisiblePostID }),
+      let leadingVisiblePostID = scrollPositionCoalescer.latestPosition.prependAnchorPostID,
+      let leadingPost = viewModel.post(withID: leadingVisiblePostID),
       effectiveVisibility(for: leadingPost) != .hidden
     {
       return leadingVisiblePostID
     }
-    return viewModel.posts.first(where: { effectiveVisibility(for: $0) != .hidden })?.id
+    return isPureReadingMode
+      ? viewModel.firstVisibleReplyPostID
+      : viewModel.firstDisplayableReplyPostID
   }
 
   private var favoriteTarget: LocalFavoriteTarget {
@@ -1342,6 +1352,13 @@ struct ThreadView: View {
 
   private var visiblePost: BrowsePost? {
     guard let postID = scrollPosition.readingProgressPostID else { return nil }
+    return viewModel.post(withID: postID)
+  }
+
+  private var latestVisiblePost: BrowsePost? {
+    guard let postID = scrollPositionCoalescer.latestPosition.readingProgressPostID else {
+      return visiblePost
+    }
     return viewModel.post(withID: postID)
   }
 
@@ -1367,19 +1384,16 @@ struct ThreadView: View {
     {
       return position
     }
-    return viewModel.posts.lazy.compactMap {
-      effectiveVisibility(for: $0) == .visible
-        ? ThreadCloudFavoritePosition(post: $0, threadID: threadID)
-        : nil
-    }.first
+    guard
+      let firstVisibleReplyPostID = viewModel.firstVisibleReplyPostID,
+      let firstVisibleReply = viewModel.post(withID: firstVisibleReplyPostID),
+      effectiveVisibility(for: firstVisibleReply) == .visible
+    else { return nil }
+    return ThreadCloudFavoritePosition(post: firstVisibleReply, threadID: threadID)
   }
 
   private var threadAuthorAvatarURL: URL? {
-    ThreadAuthorAvatarResolver.resolve(
-      thread: viewModel.thread,
-      firstPost: viewModel.firstPost,
-      posts: viewModel.posts
-    )
+    viewModel.resolvedThreadAuthorAvatarURL
   }
 
   private var agreementConfirmationIsPresented: Binding<Bool> {
@@ -1425,6 +1439,8 @@ struct ThreadView: View {
       agreementErrorMessage = nil
       contentAgreementStore?.removeScope(agreementScopeID)
     }
+    scrollPositionCoalescer.reset()
+    scrollPosition = .empty
     withAnimation { isPureReadingMode.toggle() }
   }
 
@@ -1618,6 +1634,57 @@ struct ThreadScrollPosition: Equatable, Sendable {
 
   let readingProgressPostID: Int64?
   let prependAnchorPostID: Int64?
+}
+
+@MainActor
+final class ThreadScrollPositionCoalescer {
+  static let defaultDelayNanoseconds: UInt64 = 180_000_000
+
+  private(set) var latestPosition = ThreadScrollPosition.empty
+  private(set) var publicationCount = 0
+  private let delayNanoseconds: UInt64
+  private var pendingPublication: Task<Void, Never>?
+  private var publishedPosition = ThreadScrollPosition.empty
+
+  init(delayNanoseconds: UInt64 = defaultDelayNanoseconds) {
+    self.delayNanoseconds = delayNanoseconds
+  }
+
+  func submit(
+    _ position: ThreadScrollPosition,
+    publish: @escaping @MainActor (ThreadScrollPosition) -> Void
+  ) {
+    let positionChanged = position != latestPosition
+    latestPosition = position
+    guard positionChanged || (pendingPublication == nil && position != publishedPosition) else {
+      return
+    }
+    pendingPublication?.cancel()
+    pendingPublication = Task { @MainActor [weak self] in
+      guard let self else { return }
+      do {
+        try await Task.sleep(nanoseconds: delayNanoseconds)
+      } catch {
+        return
+      }
+      guard !Task.isCancelled else { return }
+      pendingPublication = nil
+      publicationCount += 1
+      publishedPosition = latestPosition
+      publish(publishedPosition)
+    }
+  }
+
+  func cancelPendingPublication() {
+    pendingPublication?.cancel()
+    pendingPublication = nil
+  }
+
+  func reset() {
+    cancelPendingPublication()
+    latestPosition = .empty
+    publishedPosition = .empty
+  }
 }
 
 enum ThreadScrollPositionResolver {
@@ -1814,7 +1881,7 @@ enum ContentAgreementControlPresentation: Equatable {
   }
 }
 
-private struct PostView: View {
+private struct PostView: View, Equatable {
   let post: BrowsePost
   let forumID: Int64
   let agreementTarget: ContentAgreementTarget?
@@ -1846,6 +1913,26 @@ private struct PostView: View {
   @Environment(\.accountAccess) private var accountAccess
   @Environment(\.contentAgreementStore) private var contentAgreementStore
   @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
+
+  static func == (lhs: PostView, rhs: PostView) -> Bool {
+    lhs.post == rhs.post
+      && lhs.forumID == rhs.forumID
+      && lhs.agreementTarget == rhs.agreementTarget
+      && lhs.agreementFallbackScore == rhs.agreementFallbackScore
+      && lhs.originThread == rhs.originThread
+      && lhs.poll == rhs.poll
+      && lhs.selectableThreadTitle == rhs.selectableThreadTitle
+      && lhs.isPureReadingMode == rhs.isPureReadingMode
+      && lhs.cloudFavoriteTarget == rhs.cloudFavoriteTarget
+      && lhs.reportThread.id == rhs.reportThread.id
+      && lhs.reportThread.forumID == rhs.reportThread.forumID
+      && lhs.reportThread.forumName == rhs.reportThread.forumName
+      && lhs.reportThread.firstPostID == rhs.reportThread.firstPostID
+      && lhs.reportThread.localVisibility == rhs.reportThread.localVisibility
+      && lhs.reportTarget == rhs.reportTarget
+      && (lhs.requestReply != nil) == (rhs.requestReply != nil)
+      && (lhs.requestInlineCommentReply != nil) == (rhs.requestInlineCommentReply != nil)
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {

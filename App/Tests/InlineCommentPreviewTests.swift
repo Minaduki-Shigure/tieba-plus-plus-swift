@@ -14,7 +14,7 @@ final class InlineCommentPreviewTests: XCTestCase {
       InlineCommentPreviewPresentation(post: post, isPureReadingMode: false)
     )
 
-    XCTAssertEqual(presentation.comments.map(\.id), [1, 3])
+    XCTAssertEqual(presentation.items.map(\.comment.id), [1, 3])
     XCTAssertEqual(presentation.totalCount, 8)
     XCTAssertTrue(presentation.showsAllCommentsAction)
   }
@@ -29,7 +29,7 @@ final class InlineCommentPreviewTests: XCTestCase {
       InlineCommentPreviewPresentation(post: post, isPureReadingMode: false)
     )
 
-    XCTAssertTrue(presentation.comments.isEmpty)
+    XCTAssertTrue(presentation.items.isEmpty)
     XCTAssertEqual(presentation.totalCount, 1)
     XCTAssertTrue(presentation.showsAllCommentsAction)
   }
@@ -53,17 +53,46 @@ final class InlineCommentPreviewTests: XCTestCase {
     )
   }
 
-  func testFullCommentsActionIsOmittedOnlyWhenEveryReplyHasAVisiblePreview() throws {
-    let fourComments = (1...4).map { comment(id: Int64($0)) }
-    let complete = try XCTUnwrap(
+  func testPresentationKeepsOnlyFirstThreeNonHiddenRowsInSourceOrder() throws {
+    let presentation = try XCTUnwrap(
       InlineCommentPreviewPresentation(
-        post: post(totalCount: 4, comments: fourComments),
+        post: post(
+          totalCount: 5,
+          comments: [
+            comment(id: 1, visibility: .hidden),
+            comment(id: 2),
+            comment(id: 3, visibility: .placeholder),
+            comment(id: 4),
+            comment(id: 5),
+          ]
+        ),
         isPureReadingMode: false
       )
     )
-    let partial = try XCTUnwrap(
+
+    XCTAssertEqual(InlineCommentPreviewPresentation.maximumVisibleItemCount, 3)
+    XCTAssertEqual(presentation.items.map(\.comment.id), [2, 3, 4])
+    XCTAssertTrue(presentation.showsAllCommentsAction)
+  }
+
+  func testFullCommentsActionIsOmittedOnlyWhenAllRepliesFitVisiblePreview() throws {
+    let threeComments = (1...3).map { comment(id: Int64($0)) }
+    let fourComments = (1...4).map { comment(id: Int64($0)) }
+    let complete = try XCTUnwrap(
       InlineCommentPreviewPresentation(
-        post: post(totalCount: 6, comments: fourComments),
+        post: post(totalCount: 3, comments: threeComments),
+        isPureReadingMode: false
+      )
+    )
+    let mappedOverflow = try XCTUnwrap(
+      InlineCommentPreviewPresentation(
+        post: post(totalCount: 0, comments: fourComments),
+        isPureReadingMode: false
+      )
+    )
+    let serverOverflow = try XCTUnwrap(
+      InlineCommentPreviewPresentation(
+        post: post(totalCount: 6, comments: threeComments),
         isPureReadingMode: false
       )
     )
@@ -83,8 +112,40 @@ final class InlineCommentPreviewTests: XCTestCase {
     )
 
     XCTAssertFalse(complete.showsAllCommentsAction)
-    XCTAssertTrue(partial.showsAllCommentsAction)
+    XCTAssertTrue(mappedOverflow.showsAllCommentsAction)
+    XCTAssertTrue(serverOverflow.showsAllCommentsAction)
     XCTAssertTrue(mixed.showsAllCommentsAction)
+  }
+
+  func testPresentationPrecomputesPreviewBodyProjection() throws {
+    let linkURL = try XCTUnwrap(URL(string: "https://secret.example/path"))
+    let imageURL = try XCTUnwrap(URL(string: "https://secret.example/image.jpg"))
+    let target = comment(
+      id: 1,
+      contents: [
+        .text("hello "),
+        .mention(name: "reader", userID: 7),
+        .link(label: "文档", url: linkURL),
+        .image(
+          thumbnail: imageURL,
+          fullSize: nil,
+          original: nil,
+          width: 1,
+          height: 1
+        ),
+      ]
+    )
+
+    let presentation = try XCTUnwrap(
+      InlineCommentPreviewPresentation(
+        post: post(totalCount: 1, comments: [target]),
+        isPureReadingMode: false
+      )
+    )
+    let item = try XCTUnwrap(presentation.items.first)
+
+    XCTAssertEqual(item.comment, target)
+    XCTAssertEqual(item.bodyText, "hello @reader文档\n[图片]")
   }
 
   func testReplyPresentationBindsExactVisibleCommentAndStableAccessibilityID() throws {
@@ -307,7 +368,8 @@ final class InlineCommentPreviewTests: XCTestCase {
     id: Int64,
     visibility: LocalContentVisibility = .visible,
     threadID: Int64 = 0,
-    parentPostID: Int64 = 0
+    parentPostID: Int64 = 0,
+    contents: [BrowseContent]? = nil
   ) -> BrowseComment {
     BrowseComment(
       id: id,
@@ -315,7 +377,7 @@ final class InlineCommentPreviewTests: XCTestCase {
       authorName: "Commenter \(id)",
       authorPortraitURL: nil,
       createdAt: nil,
-      contents: [.text("comment \(id)")],
+      contents: contents ?? [.text("comment \(id)")],
       localVisibility: visibility,
       threadID: threadID,
       parentPostID: parentPostID

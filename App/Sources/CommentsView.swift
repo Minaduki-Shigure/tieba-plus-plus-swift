@@ -206,7 +206,7 @@ struct CommentsView: View {
                 .accessibilityIdentifier("comments-load-previous")
               }
 
-              if !viewModel.comments.contains(where: { $0.localVisibility != .hidden }) {
+              if !viewModel.hasDisplayableComments {
                 EmptyStateView(title: "暂无可显示的楼中楼回复", systemImage: "bubble.left")
                   .frame(maxWidth: .infinity)
                   .listRowSeparator(.hidden)
@@ -217,73 +217,87 @@ struct CommentsView: View {
                   visibility: comment.localVisibility,
                   placeholder: "已屏蔽此条回复"
                 ) {
-                  VStack(alignment: .leading, spacing: 7) {
-                    HStack(alignment: .top, spacing: 10) {
-                      if comment.authorID > 0 {
-                        NavigationLink {
-                          UserProfileView(
-                            userID: comment.authorID,
-                            service: service,
-                            historyRepository: historyRepository,
-                            favoritesRepository: favoritesRepository,
-                            searchHistoryRepository: searchHistoryRepository
-                          )
-                        } label: {
+                  StableRenderBoundary(
+                    key: CommentsRowRenderKey(
+                      comment: comment,
+                      thread: viewModel.thread,
+                      parentPostID: viewModel.parentPost?.id,
+                      agreementTarget: viewModel.agreementTarget(forCommentID: comment.id),
+                      replyEntriesVisible: replyEntriesVisible
+                    )
+                  ) {
+                    VStack(alignment: .leading, spacing: 7) {
+                      HStack(alignment: .top, spacing: 10) {
+                        if comment.authorID > 0 {
+                          NavigationLink {
+                            UserProfileView(
+                              userID: comment.authorID,
+                              service: service,
+                              historyRepository: historyRepository,
+                              favoritesRepository: favoritesRepository,
+                              searchHistoryRepository: searchHistoryRepository
+                            )
+                          } label: {
+                            commentAuthorIdentity(comment)
+                          }
+                          .buttonStyle(.plain)
+                        } else {
                           commentAuthorIdentity(comment)
                         }
-                        .buttonStyle(.plain)
-                      } else {
-                        commentAuthorIdentity(comment)
+
+                        ContentAgreementControlSlot(
+                          store: contentAgreementStore,
+                          target: viewModel.agreementTarget(forCommentID: comment.id),
+                          fallbackAgreeScore: comment.agreeScore,
+                          requestChange: requestAgreementChange,
+                          retry: retryAgreement
+                        )
+
+                        if replyEntriesVisible, let context = replyContext(for: comment) {
+                          Button {
+                            guard replyEntriesVisible else { return }
+                            presentReplyComposer(context)
+                          } label: {
+                            Image(systemName: "arrowshape.turn.up.left")
+                          }
+                          .buttonStyle(.plain)
+                          .accessibilityLabel("回复 \(context.replyingToName ?? "此用户")")
+                          .help("回复此条")
+                        }
                       }
-
-                      ContentAgreementControlSlot(
-                        store: contentAgreementStore,
-                        target: viewModel.agreementTarget(forCommentID: comment.id),
-                        fallbackAgreeScore: comment.agreeScore,
-                        requestChange: requestAgreementChange,
-                        retry: retryAgreement
+                      BrowseContentView(
+                        contents: comment.contents,
+                        onUserMention: openMentionedUser,
+                        onTiebaLink: openTiebaLink,
+                        allowsDirectTextSelection: false,
+                        tracksAnimationVisibility: true,
+                        maximumPreviewPixelSize: 1_320
                       )
-
+                    }
+                    .padding(.vertical, 4)
+                    .contextMenu {
+                      if let copyText = PostCopyText.text(comment: comment) {
+                        Button {
+                          presentSelectableText(copyText)
+                        } label: {
+                          Label("选择文字", systemImage: "text.cursor")
+                        }
+                      }
                       if replyEntriesVisible, let context = replyContext(for: comment) {
                         Button {
                           guard replyEntriesVisible else { return }
                           presentReplyComposer(context)
                         } label: {
-                          Image(systemName: "arrowshape.turn.up.left")
+                          Label("回复此条", systemImage: "arrowshape.turn.up.left")
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("回复 \(context.replyingToName ?? "此用户")")
-                        .help("回复此条")
                       }
+                      ContentReportMenuItem(
+                        target: reportTarget(for: comment),
+                        accessibilityIdentifier: "comments-report-subpost-\(comment.id)"
+                      )
                     }
-                    BrowseContentView(
-                      contents: comment.contents,
-                      onUserMention: openMentionedUser,
-                      onTiebaLink: openTiebaLink
-                    )
                   }
-                  .padding(.vertical, 4)
-                  .contextMenu {
-                    if let copyText = PostCopyText.text(comment: comment) {
-                      Button {
-                        presentSelectableText(copyText)
-                      } label: {
-                        Label("选择文字", systemImage: "text.cursor")
-                      }
-                    }
-                    if replyEntriesVisible, let context = replyContext(for: comment) {
-                      Button {
-                        guard replyEntriesVisible else { return }
-                        presentReplyComposer(context)
-                      } label: {
-                        Label("回复此条", systemImage: "arrowshape.turn.up.left")
-                      }
-                    }
-                    ContentReportMenuItem(
-                      target: reportTarget(for: comment),
-                      accessibilityIdentifier: "comments-report-subpost-\(comment.id)"
-                    )
-                  }
+                  .equatable()
                 }
                 .id(CommentsListItemID.comment(comment.id))
                 .listRowBackground(
@@ -1020,6 +1034,14 @@ struct CommentsView: View {
 private enum CommentsListItemID: Hashable {
   case parentPost(Int64)
   case comment(Int64)
+}
+
+private struct CommentsRowRenderKey: Equatable {
+  let comment: BrowseComment
+  let thread: BrowseThread?
+  let parentPostID: Int64?
+  let agreementTarget: ContentAgreementTarget?
+  let replyEntriesVisible: Bool
 }
 
 private struct CommentHighlightToken: Equatable {

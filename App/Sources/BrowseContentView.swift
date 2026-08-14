@@ -43,21 +43,27 @@ struct BrowseContentView: View {
     BrowseContentBlock.makeBlocks(contents)
   }
 
+  @ViewBuilder
   var body: some View {
+    if onImageOpen == nil {
+      content
+        .fullScreenCover(item: $imageGalleryPresentation) { presentation in
+          ImageViewer(
+            items: presentation.items,
+            initialIndex: presentation.initialIndex
+          )
+        }
+    } else {
+      content
+    }
+  }
+
+  private var content: some View {
     VStack(alignment: .leading, spacing: 9) {
       ForEach(blocks) { block in
         switch block {
         case .inline(_, let contents):
-          Text(
-            Self.inlineText(
-              contents,
-              linksUserMentions: onUserMention != nil || onTiebaLink != nil,
-              accentColor: appAccentColor.color
-            )
-          )
-            .modifier(DirectTextSelectionModifier(isEnabled: allowsDirectTextSelection))
-            .fixedSize(horizontal: false, vertical: true)
-            .environment(\.openURL, contentOpenURLAction)
+          inlineContent(contents)
         case .imageRun(let images):
           BrowseImageMasonryLayout(
             imageLayout: imageLayout,
@@ -77,11 +83,25 @@ struct BrowseContentView: View {
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-    .fullScreenCover(item: $imageGalleryPresentation) { presentation in
-      ImageViewer(
-        items: presentation.items,
-        initialIndex: presentation.initialIndex
+  }
+
+  @ViewBuilder
+  private func inlineContent(_ contents: [BrowseContent]) -> some View {
+    if let plainText = Self.plainInlineText(contents) {
+      Text(plainText)
+        .modifier(DirectTextSelectionModifier(isEnabled: allowsDirectTextSelection))
+        .fixedSize(horizontal: false, vertical: true)
+    } else {
+      Text(
+        Self.inlineText(
+          contents,
+          linksUserMentions: onUserMention != nil || onTiebaLink != nil,
+          accentColor: appAccentColor.color
+        )
       )
+        .modifier(DirectTextSelectionModifier(isEnabled: allowsDirectTextSelection))
+        .fixedSize(horizontal: false, vertical: true)
+        .environment(\.openURL, contentOpenURLAction)
     }
   }
 
@@ -215,6 +235,27 @@ struct BrowseContentView: View {
         continue
       }
       result.append(fragment)
+    }
+    return result
+  }
+
+  static func plainInlineText(_ contents: [BrowseContent]) -> String? {
+    if contents.count == 1, case .text(let text) = contents[0] {
+      return text
+    }
+
+    var result = ""
+    for content in contents {
+      switch content {
+      case .text(let text):
+        result.append(contentsOf: text)
+      case .emoticon(let name, _):
+        result.append(contentsOf: TiebaClassicEmoticonCatalog.token(for: name) ?? name)
+      case .unsupported(let label):
+        result.append(contentsOf: "[\(label)]")
+      case .mention, .link, .image, .video, .voice:
+        return nil
+      }
     }
     return result
   }
