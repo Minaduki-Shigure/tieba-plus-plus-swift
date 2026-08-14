@@ -983,6 +983,15 @@ final class ThreadViewModel: ObservableObject {
     }
   }
 
+  private func post(
+    withID postID: Int64,
+    firstPost: BrowsePost?,
+    replies: [BrowsePost]
+  ) -> BrowsePost? {
+    if firstPost?.id == postID { return firstPost }
+    return replies.first(where: { $0.id == postID })
+  }
+
   private func firstVisiblePost(
     firstPost: BrowsePost?,
     replies: [BrowsePost]
