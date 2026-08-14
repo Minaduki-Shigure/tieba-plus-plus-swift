@@ -27,6 +27,8 @@ public enum TiebaClientError: Error, Sendable, Equatable {
   case newThreadChallengeRequired(message: String)
   case newThreadOutcomeUnknown
   case newThreadSubmissionIDConflict
+  case staticImageUploadOutcomeUnknown(uploadID: UUID, dispatchedChunk: Int)
+  case staticImageUploadIDConflict
   case server(code: Int32, message: String)
 }
 
@@ -85,6 +87,10 @@ extension TiebaClientError: LocalizedError {
       "The thread may have been submitted, but Tieba did not return a verifiable receipt."
     case .newThreadSubmissionIDConflict:
       "The new-thread submission identifier was already used for a different request."
+    case .staticImageUploadOutcomeUnknown(_, let dispatchedChunk):
+      "Image upload chunk \(dispatchedChunk) was sent, but Tieba did not return a verifiable result."
+    case .staticImageUploadIDConflict:
+      "The image-upload identifier was already used for a different request."
     case .server(let code, let message):
       message.isEmpty ? "Tieba returned error \(code)." : message
     }

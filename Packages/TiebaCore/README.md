@@ -149,6 +149,35 @@ let newThread = try await authenticatedClient.submitNewThread(
 )
 ```
 
+Core also exposes the lower-level static-image upload transaction needed by a
+future composer. The current App does not call it. A caller must retain the exact
+validated bytes and upload identity, treat a dispatched unknown outcome as
+non-resendable in its own durable state, and rebind a decoded receipt before use:
+
+```swift
+let upload = TiebaStaticImageUpload(
+    uploadID: UUID(),
+    forumName: "swift",
+    encodedBytes: metadataStrippedJPEG,
+    pixelWidth: width,
+    pixelHeight: height,
+    preservesOriginal: true
+)
+let receipt = try await authenticatedClient.uploadStaticImage(
+    credential: sessionCredential,
+    expectedUserID: sessionAccount.userID,
+    upload: upload
+)
+guard receipt.isBound(to: upload, expectedUserID: sessionAccount.userID) else {
+    throw TiebaClientError.invalidAuthenticatedResponse
+}
+```
+
+The client coalesces an identical upload ID within one bounded in-memory flight
+window and never automatically retries a dispatched chunk. That is not a
+cross-restart ledger: persistence and final post-transaction recovery belong to
+the App layer before image creation becomes user-visible.
+
 `getForumMembership` remains available for callers that need only
 `TiebaForumMembership`. `getForumAccountState` returns that membership plus an
 optional `TiebaForumCheckIn` containing the server-authoritative sign state,
@@ -237,6 +266,16 @@ not advertise a usable sign state; it is not permission to attempt a write.
   prove rejection of a wrong STOKEN; negative cases remain a physical-device
   validation requirement. The web response is limited to 256 KiB, cookie and
   credential storage are disabled, and every redirect is rejected.
+- Static-image upload uses only the exact HTTPS
+  `tiebac.baidu.com/c/s/uploadPicture` endpoint after full-session same-UID
+  validation. It sends sequential 512,000-byte chunks with a per-request
+  collision-checked multipart boundary, limits responses to 64 KiB, and omits
+  device, installation, advertising, model, screen, and location identifiers.
+  A schema-versioned receipt separately retains the uploaded dimensions and the
+  server's origin-picture dimensions; decoding proves structure only, while
+  `isBound(to:expectedUserID:)` recomputes the request-side SHA-256, protocol MD5
+  resource ID, byte/chunk counts, canonical forum, options, dimensions, UUID, and
+  account binding.
 - Read-only cloud favorites use fixed client version `11.10.8.6` and an HTTPS
   POST to `/c/f/post/threadstore`. The form contains only `BDUSS`,
   `_client_version`, `offset`, `rn`, `stoken`, `user_id`, and `sign`, with the

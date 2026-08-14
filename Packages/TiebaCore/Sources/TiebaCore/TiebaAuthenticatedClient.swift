@@ -518,6 +518,126 @@ private enum TiebaNewThreadWaitOutcome: Sendable, Equatable {
   case cancelled
 }
 
+private struct TiebaStaticImageUploadCredentialFingerprint:
+  Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  private let digest: [UInt8]
+
+  init(credential: TiebaSessionCredential) {
+    var input = Data("TiebaStaticImageUploadCredentialFingerprint/v1".utf8)
+    for value in [
+      credential.bdussCookieName.rawValue,
+      credential.bduss,
+      credential.stoken,
+    ] {
+      var byteCount = UInt64(value.utf8.count).bigEndian
+      withUnsafeBytes(of: &byteCount) { input.append(contentsOf: $0) }
+      input.append(contentsOf: value.utf8)
+    }
+    self.digest = Array(SHA256.hash(data: input))
+  }
+
+  var description: String { "TiebaStaticImageUploadCredentialFingerprint(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror { Mirror(self, children: [:], displayStyle: .struct) }
+}
+
+private struct TiebaStaticImageUploadFlightIdentity:
+  Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let expectedUserID: Int64
+  let uploadID: UUID
+  let normalizedForumName: String
+  let contentDigest: [UInt8]
+  let byteCount: Int
+  let pixelWidth: Int
+  let pixelHeight: Int
+  let preservesOriginal: Bool
+  let watermark: TiebaStaticImageWatermark
+  private let credentialFingerprint: TiebaStaticImageUploadCredentialFingerprint
+
+  init(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    plan: TiebaStaticImageUploadPlan
+  ) {
+    self.expectedUserID = expectedUserID
+    self.uploadID = plan.upload.uploadID
+    self.normalizedForumName = plan.normalizedForumName
+    self.contentDigest = plan.contentDigest
+    self.byteCount = plan.byteCount
+    self.pixelWidth = plan.upload.pixelWidth
+    self.pixelHeight = plan.upload.pixelHeight
+    self.preservesOriginal = plan.upload.preservesOriginal
+    self.watermark = plan.upload.watermark
+    self.credentialFingerprint = TiebaStaticImageUploadCredentialFingerprint(
+      credential: credential
+    )
+  }
+
+  var description: String { "TiebaStaticImageUploadFlightIdentity(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(
+      self,
+      children: [
+        "expectedUserID": expectedUserID,
+        "uploadID": uploadID,
+        "byteCount": byteCount,
+        "pixelWidth": pixelWidth,
+        "pixelHeight": pixelHeight,
+        "preservesOriginal": preservesOriginal,
+        "watermark": watermark,
+      ],
+      displayStyle: .struct
+    )
+  }
+}
+
+private struct TiebaStaticImageUploadFlight:
+  Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let id: UUID
+  let identity: TiebaStaticImageUploadFlightIdentity
+  let task: Task<TiebaStaticImageUploadReceipt, Swift.Error>
+  var stage: TiebaStaticImageUploadFlightStage
+
+  var isCompleted: Bool { stage == .completed }
+
+  var description: String { "TiebaStaticImageUploadFlight(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(
+      self,
+      children: ["identity": identity, "stage": stage],
+      displayStyle: .struct
+    )
+  }
+}
+
+private enum TiebaStaticImageUploadFlightStage: Sendable, Equatable {
+  case queued
+  case preflight
+  case chunkDispatched(Int)
+  case completed
+}
+
+private struct TiebaStaticImageUploadLeaseWaiter {
+  let uploadID: UUID
+  let flightID: UUID
+  let continuation: CheckedContinuation<TiebaStaticImageUploadLeaseOutcome, Never>
+}
+
+private enum TiebaStaticImageUploadLeaseOutcome: Sendable, Equatable {
+  case acquired
+  case cancelled
+}
+
+private enum TiebaStaticImageUploadWaitOutcome: Sendable, Equatable {
+  case completed
+  case cancelled
+}
+
 private struct TiebaOfficialBatchCheckInIdentity:
   Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
 {
@@ -608,9 +728,13 @@ public actor TiebaAuthenticatedClient {
   static let retainedTextReplySubmissionLimit = 64
   static let newThreadWriteResponseMaximumBytes = 128 * 1_024
   static let retainedNewThreadSubmissionLimit = 64
+  static let staticImageUploadResponseMaximumBytes =
+    TiebaStaticImageUploadPolicy.maximumResponseBodyBytes
+  static let retainedStaticImageUploadLimit = 64
 
   private let requestFactory: TiebaAuthenticatedRequestFactory
   private let transport: any TiebaTransport
+  private let staticImageUploadLeaseAcquired: (@Sendable (UUID) async -> Void)?
   private var userFollowFlights = [TiebaUserFollowResourceKey: TiebaUserFollowFlight]()
   private var userFollowWaiters = [
     TiebaUserFollowResourceKey: [UUID: CheckedContinuation<TiebaUserFollowWaitOutcome, Never>]
@@ -670,18 +794,30 @@ public actor TiebaAuthenticatedClient {
   private var newThreadWaiters = [
     UUID: [UUID: CheckedContinuation<TiebaNewThreadWaitOutcome, Never>]
   ]()
+  private var staticImageUploadFlights = [UUID: TiebaStaticImageUploadFlight]()
+  private var staticImageUploadFlightOrder = [UUID]()
+  private var staticImageUploadLeaseOwners = [Int64: UUID]()
+  private var staticImageUploadLeaseWaiters = [
+    Int64: [TiebaStaticImageUploadLeaseWaiter]
+  ]()
+  private var staticImageUploadWaiters = [
+    UUID: [UUID: CheckedContinuation<TiebaStaticImageUploadWaitOutcome, Never>]
+  ]()
 
   public init(configuration: TiebaClientConfiguration = .init()) {
     self.requestFactory = TiebaAuthenticatedRequestFactory(configuration: configuration)
     self.transport = URLSessionTiebaTransport(redirectPolicy: .rejectAll)
+    self.staticImageUploadLeaseAcquired = nil
   }
 
   init(
     configuration: TiebaClientConfiguration = .init(),
-    transport: any TiebaTransport
+    transport: any TiebaTransport,
+    staticImageUploadLeaseAcquired: (@Sendable (UUID) async -> Void)? = nil
   ) {
     self.requestFactory = TiebaAuthenticatedRequestFactory(configuration: configuration)
     self.transport = transport
+    self.staticImageUploadLeaseAcquired = staticImageUploadLeaseAcquired
   }
 
   public func validateAccount(
@@ -1253,6 +1389,62 @@ public actor TiebaAuthenticatedClient {
     )
     return try await waitForNewThreadFlight(
       submissionID: submission.submissionID,
+      task: task
+    )
+  }
+
+  public func uploadStaticImage(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    upload: TiebaStaticImageUpload
+  ) async throws -> TiebaStaticImageUploadReceipt {
+    try Task.checkCancellation()
+    let plan = try requestFactory.validateStaticImageUploadArguments(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      upload: upload
+    )
+    let identity = TiebaStaticImageUploadFlightIdentity(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      plan: plan
+    )
+    if let flight = staticImageUploadFlights[upload.uploadID] {
+      guard flight.identity == identity else {
+        throw TiebaClientError.staticImageUploadIDConflict
+      }
+      return try await waitForStaticImageUploadFlight(
+        uploadID: upload.uploadID,
+        task: flight.task
+      )
+    }
+
+    let flightID = UUID()
+    let task: Task<TiebaStaticImageUploadReceipt, Swift.Error> = Task.detached { [self] in
+      try await runStaticImageUploadWithAccountLease(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        plan: plan,
+        flightID: flightID
+      )
+    }
+    staticImageUploadFlights[upload.uploadID] = TiebaStaticImageUploadFlight(
+      id: flightID,
+      identity: identity,
+      task: task,
+      stage: .queued
+    )
+    staticImageUploadFlightOrder.append(upload.uploadID)
+
+    _ = Task.detached { [self] in
+      await finishStaticImageUploadFlight(
+        uploadID: upload.uploadID,
+        flightID: flightID,
+        task: task
+      )
+    }
+    return try await waitForStaticImageUploadFlight(
+      uploadID: upload.uploadID,
       task: task
     )
   }
@@ -2385,6 +2577,243 @@ public actor TiebaAuthenticatedClient {
     )
   }
 
+  private func runStaticImageUploadWithAccountLease(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    plan: TiebaStaticImageUploadPlan,
+    flightID: UUID
+  ) async throws -> TiebaStaticImageUploadReceipt {
+    try await acquireStaticImageUploadLease(
+      expectedUserID: expectedUserID,
+      uploadID: plan.upload.uploadID,
+      flightID: flightID
+    )
+    defer {
+      releaseStaticImageUploadLease(
+        expectedUserID: expectedUserID,
+        flightID: flightID
+      )
+    }
+    try Task.checkCancellation()
+    return try await performStaticImageUpload(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      plan: plan
+    )
+  }
+
+  private func acquireStaticImageUploadLease(
+    expectedUserID: Int64,
+    uploadID: UUID,
+    flightID: UUID
+  ) async throws {
+    try Task.checkCancellation()
+    guard
+      let flight = staticImageUploadFlights[uploadID],
+      flight.id == flightID,
+      flight.stage == .queued
+    else { throw CancellationError() }
+    if staticImageUploadLeaseOwners[expectedUserID] == nil {
+      staticImageUploadLeaseOwners[expectedUserID] = flightID
+      try await confirmStaticImageUploadLeaseAcquisition(
+        expectedUserID: expectedUserID,
+        uploadID: uploadID,
+        flightID: flightID
+      )
+      return
+    }
+
+    let outcome = await withTaskCancellationHandler {
+      await withCheckedContinuation {
+        (continuation: CheckedContinuation<TiebaStaticImageUploadLeaseOutcome, Never>) in
+        guard
+          !Task.isCancelled,
+          let currentFlight = staticImageUploadFlights[uploadID],
+          currentFlight.id == flightID,
+          currentFlight.stage == .queued
+        else {
+          continuation.resume(returning: .cancelled)
+          return
+        }
+        if staticImageUploadLeaseOwners[expectedUserID] == nil {
+          staticImageUploadLeaseOwners[expectedUserID] = flightID
+          continuation.resume(returning: .acquired)
+          return
+        }
+        staticImageUploadLeaseWaiters[expectedUserID, default: []].append(
+          TiebaStaticImageUploadLeaseWaiter(
+            uploadID: uploadID,
+            flightID: flightID,
+            continuation: continuation
+          )
+        )
+      }
+    } onCancel: {
+      Task {
+        await self.cancelStaticImageUploadLeaseWaiter(
+          expectedUserID: expectedUserID,
+          uploadID: uploadID,
+          flightID: flightID
+        )
+      }
+    }
+    guard outcome == .acquired else { throw CancellationError() }
+    try await confirmStaticImageUploadLeaseAcquisition(
+      expectedUserID: expectedUserID,
+      uploadID: uploadID,
+      flightID: flightID
+    )
+  }
+
+  private func confirmStaticImageUploadLeaseAcquisition(
+    expectedUserID: Int64,
+    uploadID: UUID,
+    flightID: UUID
+  ) async throws {
+    do {
+      if let staticImageUploadLeaseAcquired {
+        await staticImageUploadLeaseAcquired(uploadID)
+      }
+      try Task.checkCancellation()
+    } catch {
+      releaseStaticImageUploadLease(
+        expectedUserID: expectedUserID,
+        flightID: flightID
+      )
+      throw error
+    }
+  }
+
+  private func releaseStaticImageUploadLease(
+    expectedUserID: Int64,
+    flightID: UUID
+  ) {
+    guard staticImageUploadLeaseOwners[expectedUserID] == flightID else { return }
+    staticImageUploadLeaseOwners.removeValue(forKey: expectedUserID)
+
+    var waiters = staticImageUploadLeaseWaiters.removeValue(forKey: expectedUserID) ?? []
+    while !waiters.isEmpty {
+      let waiter = waiters.removeFirst()
+      guard
+        let flight = staticImageUploadFlights[waiter.uploadID],
+        flight.id == waiter.flightID,
+        flight.stage == .queued
+      else {
+        waiter.continuation.resume(returning: .cancelled)
+        continue
+      }
+      staticImageUploadLeaseOwners[expectedUserID] = waiter.flightID
+      if !waiters.isEmpty {
+        staticImageUploadLeaseWaiters[expectedUserID] = waiters
+      }
+      waiter.continuation.resume(returning: .acquired)
+      return
+    }
+  }
+
+  private func cancelStaticImageUploadLeaseWaiter(
+    expectedUserID: Int64,
+    uploadID: UUID,
+    flightID: UUID
+  ) {
+    guard var waiters = staticImageUploadLeaseWaiters[expectedUserID] else { return }
+    guard
+      let index = waiters.firstIndex(where: {
+        $0.uploadID == uploadID && $0.flightID == flightID
+      })
+    else { return }
+    let waiter = waiters.remove(at: index)
+    if waiters.isEmpty {
+      staticImageUploadLeaseWaiters.removeValue(forKey: expectedUserID)
+    } else {
+      staticImageUploadLeaseWaiters[expectedUserID] = waiters
+    }
+    waiter.continuation.resume(returning: .cancelled)
+  }
+
+  private func performStaticImageUpload(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    plan: TiebaStaticImageUploadPlan
+  ) async throws -> TiebaStaticImageUploadReceipt {
+    try Task.checkCancellation()
+    setStaticImageUploadFlightStage(
+      uploadID: plan.upload.uploadID,
+      stage: .preflight
+    )
+    let account = try await validateSession(credential: credential)
+    guard account.userID == expectedUserID else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    try Task.checkCancellation()
+
+    var receipt: TiebaStaticImageUploadReceipt?
+    for chunkNumber in 1...plan.chunkCount {
+      let request = try requestFactory.staticImageUploadChunk(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        plan: plan,
+        chunkNumber: chunkNumber
+      )
+      try Task.checkCancellation()
+      setStaticImageUploadFlightStage(
+        uploadID: plan.upload.uploadID,
+        stage: .chunkDispatched(chunkNumber)
+      )
+
+      let result: TiebaStaticImageChunkDecodeResult
+      do {
+        let body = try await send(
+          request,
+          maximumBodyBytes: Self.staticImageUploadResponseMaximumBytes
+        )
+        result = try TiebaStaticImageUploadDecoder.decodeChunkResponse(
+          from: body,
+          plan: plan,
+          chunkNumber: chunkNumber
+        )
+      } catch let error as TiebaClientError {
+        if case .server = error {
+          throw error
+        }
+        throw TiebaClientError.staticImageUploadOutcomeUnknown(
+          uploadID: plan.upload.uploadID,
+          dispatchedChunk: chunkNumber
+        )
+      } catch {
+        throw TiebaClientError.staticImageUploadOutcomeUnknown(
+          uploadID: plan.upload.uploadID,
+          dispatchedChunk: chunkNumber
+        )
+      }
+
+      switch result {
+      case .accepted:
+        guard chunkNumber < plan.chunkCount else {
+          throw TiebaClientError.staticImageUploadOutcomeUnknown(
+            uploadID: plan.upload.uploadID,
+            dispatchedChunk: chunkNumber
+          )
+        }
+      case .completed(let completedReceipt):
+        guard chunkNumber == plan.chunkCount else {
+          throw TiebaClientError.staticImageUploadOutcomeUnknown(
+            uploadID: plan.upload.uploadID,
+            dispatchedChunk: chunkNumber
+          )
+        }
+        receipt = completedReceipt
+      }
+    }
+    guard let receipt else {
+      throw TiebaClientError.staticImageUploadOutcomeUnknown(
+        uploadID: plan.upload.uploadID,
+        dispatchedChunk: plan.chunkCount
+      )
+    }
+    return receipt
+  }
+
   private func performForumCheckIn(
     credential: TiebaBDUSSCredential,
     expectedUserID: Int64,
@@ -2873,6 +3302,160 @@ public actor TiebaAuthenticatedClient {
 
   func newThreadRetainedFlightCountForTests() -> Int {
     newThreadFlights.values.lazy.filter(\.isCompleted).count
+  }
+
+  private func waitForStaticImageUploadFlight(
+    uploadID: UUID,
+    task: Task<TiebaStaticImageUploadReceipt, Swift.Error>
+  ) async throws -> TiebaStaticImageUploadReceipt {
+    guard !Task.isCancelled else {
+      cancelStaticImageUploadOwnerIfPreDispatchAndUnobserved(uploadID: uploadID)
+      throw CancellationError()
+    }
+    if staticImageUploadFlights[uploadID]?.isCompleted != false {
+      return try await task.value
+    }
+
+    let waiterID = UUID()
+    let outcome = await withTaskCancellationHandler {
+      await withCheckedContinuation {
+        (continuation: CheckedContinuation<TiebaStaticImageUploadWaitOutcome, Never>) in
+        if Task.isCancelled {
+          cancelStaticImageUploadOwnerIfPreDispatchAndUnobserved(uploadID: uploadID)
+          continuation.resume(returning: .cancelled)
+          return
+        }
+        guard staticImageUploadFlights[uploadID]?.isCompleted == false else {
+          continuation.resume(
+            returning: .completed
+          )
+          return
+        }
+        staticImageUploadWaiters[uploadID, default: [:]][waiterID] = continuation
+      }
+    } onCancel: {
+      Task {
+        await self.cancelStaticImageUploadWaiter(uploadID: uploadID, waiterID: waiterID)
+      }
+    }
+    guard outcome == .completed else { throw CancellationError() }
+    return try await task.value
+  }
+
+  private func cancelStaticImageUploadOwnerIfPreDispatchAndUnobserved(uploadID: UUID) {
+    guard
+      staticImageUploadWaiters[uploadID]?.isEmpty ?? true,
+      let flight = staticImageUploadFlights[uploadID],
+      flight.stage == .queued || flight.stage == .preflight
+    else { return }
+    flight.task.cancel()
+    if flight.stage == .queued {
+      cancelStaticImageUploadLeaseWaiter(
+        expectedUserID: flight.identity.expectedUserID,
+        uploadID: uploadID,
+        flightID: flight.id
+      )
+    }
+    staticImageUploadFlights.removeValue(forKey: uploadID)
+    staticImageUploadFlightOrder.removeAll { $0 == uploadID }
+  }
+
+  private func cancelStaticImageUploadWaiter(uploadID: UUID, waiterID: UUID) {
+    guard var waiters = staticImageUploadWaiters[uploadID] else { return }
+    let continuation = waiters.removeValue(forKey: waiterID)
+    if waiters.isEmpty {
+      staticImageUploadWaiters.removeValue(forKey: uploadID)
+      cancelStaticImageUploadOwnerIfPreDispatchAndUnobserved(uploadID: uploadID)
+    } else {
+      staticImageUploadWaiters[uploadID] = waiters
+    }
+    continuation?.resume(returning: .cancelled)
+  }
+
+  private func finishStaticImageUploadFlight(
+    uploadID: UUID,
+    flightID: UUID,
+    task: Task<TiebaStaticImageUploadReceipt, Swift.Error>
+  ) async {
+    let result = await task.result
+    guard
+      var flight = staticImageUploadFlights[uploadID],
+      flight.id == flightID
+    else { return }
+    flight.stage = .completed
+
+    let retainsUpload: Bool
+    switch result {
+    case .success:
+      retainsUpload = true
+    case .failure(let error):
+      if let error = error as? TiebaClientError,
+        case .staticImageUploadOutcomeUnknown = error
+      {
+        retainsUpload = true
+      } else {
+        retainsUpload = false
+      }
+    }
+    if retainsUpload {
+      staticImageUploadFlights[uploadID] = flight
+    } else {
+      staticImageUploadFlights.removeValue(forKey: uploadID)
+      staticImageUploadFlightOrder.removeAll { $0 == uploadID }
+    }
+    let waiters = staticImageUploadWaiters.removeValue(forKey: uploadID) ?? [:]
+    for continuation in waiters.values {
+      continuation.resume(returning: .completed)
+    }
+    pruneRetainedStaticImageUploadFlights()
+  }
+
+  private func pruneRetainedStaticImageUploadFlights() {
+    var completedCount = staticImageUploadFlights.values.lazy.filter(\.isCompleted).count
+    guard completedCount > Self.retainedStaticImageUploadLimit else { return }
+    var retainedOrder = [UUID]()
+    retainedOrder.reserveCapacity(staticImageUploadFlightOrder.count)
+    for uploadID in staticImageUploadFlightOrder {
+      if completedCount > Self.retainedStaticImageUploadLimit,
+        staticImageUploadFlights[uploadID]?.isCompleted == true
+      {
+        staticImageUploadFlights.removeValue(forKey: uploadID)
+        completedCount -= 1
+      } else if staticImageUploadFlights[uploadID] != nil {
+        retainedOrder.append(uploadID)
+      }
+    }
+    staticImageUploadFlightOrder = retainedOrder
+  }
+
+  private func setStaticImageUploadFlightStage(
+    uploadID: UUID,
+    stage: TiebaStaticImageUploadFlightStage
+  ) {
+    guard var flight = staticImageUploadFlights[uploadID], !flight.isCompleted else { return }
+    flight.stage = stage
+    staticImageUploadFlights[uploadID] = flight
+  }
+
+  func staticImageUploadWaiterCount(uploadID: UUID) -> Int {
+    staticImageUploadWaiters[uploadID]?.count ?? 0
+  }
+
+  func staticImageUploadRetainedFlightCountForTests() -> Int {
+    staticImageUploadFlights.values.lazy.filter(\.isCompleted).count
+  }
+
+  func staticImageUploadQueuedLeaseCountForTests() -> Int {
+    staticImageUploadLeaseWaiters.values.reduce(0) { $0 + $1.count }
+  }
+
+  func staticImageUploadActiveFlightCountForTests() -> Int {
+    staticImageUploadFlights.values.lazy.filter { !$0.isCompleted }.count
+  }
+
+  func staticImageUploadActiveFlightByteCountForTests() -> Int {
+    staticImageUploadFlights.values.lazy.filter { !$0.isCompleted }
+      .reduce(0) { $0 + $1.identity.byteCount }
   }
 
   private func adjustedAgreementScore(_ score: Int, isAgreed: Bool) -> Int {

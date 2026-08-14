@@ -515,6 +515,50 @@ explicitly starts another topic in that forum. The App must not clear it merely
 because the write task returned: a crash before the success navigation became
 visible would otherwise restore an apparently sendable old body.
 
+Current `main` also contains a non-user-facing static-image creation foundation.
+The App accepts only bounded, single-frame JPEG, PNG, HEIC, or HEIF input and
+always redraws it onto an 8-bit controlled sRGB surface before producing a new
+JPEG. Standard output is bounded to a 1,080-pixel longest side and 5 MiB; high-
+quality output has a 4,096-pixel longest-side ceiling and 10 MiB byte ceiling,
+while a separate total-pixel budget may reduce either dimension to keep decoding
+and redraw memory bounded. Alpha is flattened onto white. The encoded JPEG is
+accepted only after a marker-level dimension check, metadata-segment stripping,
+ImageIO property inspection, and a bounded full decode.
+
+Attachment metadata stores only a random UUID filename, SHA-256, byte count,
+dimensions, encoding, and local quality choice. Source paths, filenames, Photos
+asset identifiers, URLs, and image metadata are not retained. Files live below a
+trusted Application Support root, are excluded from backup, use complete file
+protection, and are read through a no-follow regular-file descriptor with size,
+inode, digest, JPEG, and dimension validation. Directory-chain checks reject
+symbolic-link redirection. Publication and deletion still use Foundation path
+operations, so a hostile writer already executing inside the same App sandbox
+could race those checks; eliminating that residual threat requires a future
+directory-descriptor `openat`/`renameat`/`unlinkat` store.
+
+Core's draft upload contract sends sequential 512,000-byte multipart chunks only
+to the exact `https://tiebac.baidu.com/c/s/uploadPicture` origin. It validates the
+complete BDUSS/STOKEN session with independent same-UID App and Web probes,
+single-flights only an identical full credential and upload identity, uses a
+per-request boundary that cannot occur in scalar values or binary content, and
+limits every response to 64 KiB. The signed scalar set contains no CUID, IMEI,
+Android ID, OAID, IDFV, model, hardware, location, or advertising identifier.
+Once a chunk is dispatched, cancellation cannot cause an automatic resend; an
+ambiguous transport or response failure becomes an outcome-unknown result. A
+decoded receipt is only syntactically valid until it is rebound to the original
+bytes, upload UUID, expected UID, canonical forum, options, digest, resource ID,
+uploaded dimensions, byte count, and chunk count. That rebinding cannot by itself
+authenticate a format-valid replacement of server-originated `picID`, width, or
+height after persistence; the current App neither persists nor consumes these
+receipts, and the future durable transaction must address that server-result
+integrity boundary before compiling an image marker.
+
+None of this code is reachable from a composer yet. There is no picker, durable
+upload ledger, protocol-owned image-marker compiler, final post snapshot, or
+restart recovery path, so `main` must continue to reject user-supplied image
+markers and rich-media creation remains unsupported until the complete workflow
+and its disposable-account validation are present.
+
 STOKEN is available only through a validated complete session and only to an
 endpoint whose contract explicitly requires it. The current unfollow, check-in,
 and content-approval requests deliberately omit STOKEN and must fail visibly

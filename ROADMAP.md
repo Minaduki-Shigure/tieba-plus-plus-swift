@@ -14,7 +14,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-currently serves `v0.60.0-alpha.1` (build 63), whose app-code snapshot contains
+currently serves `v0.60.1-alpha.1` (build 64), whose app-code snapshot contains
 the workflows measured by this audit. Later `main` work must still pass a tagged
 release before it becomes installable from that source.
 
@@ -30,7 +30,7 @@ release before it becomes installable from that source.
 | **Total** | **100** | **78–81** | Current full-product estimate; roughly 19–22% remains |
 
 This is a source-workflow coverage estimate, not a release-readiness or
-physical-device-validation percentage. The public `v0.60.0-alpha.1` app-code
+physical-device-validation percentage. The public `v0.60.1-alpha.1` app-code
 snapshot and current `main` therefore share the 78–81% scope estimate, while
 their experimental account paths retain the validation gates documented below.
 
@@ -302,6 +302,25 @@ the source metadata is updated to that tested IPA.
   canonical HTTPS route rebuilding, SafariServices handoff, and no App
   credential injection, browser-account identity claim, or submission-state inference
 
+## In progress
+
+Current `main` contains the security-sensitive foundation for TiebaLite-style
+static-image creation, but no end-user image composer workflow. The App can
+normalize a single-frame JPEG, PNG, HEIC, or HEIF input into a bounded,
+metadata-stripped JPEG and store it under a private random filename with file
+protection, backup exclusion, and digest validation. Core can validate a complete
+session, serialize same-account uploads, and send sequential 512,000-byte chunks
+to the exact HTTPS upload endpoint with bounded responses and no automatic retry
+after an uncertain dispatched chunk.
+
+This foundation is deliberately worth zero parity points until the picker and
+nine-image limit, new-topic and direct-topic-reply composer integration,
+account-scoped drafts, a durable pending/unknown ledger, receipt-to-upload
+rebinding, protocol-owned image-marker compilation, immutable final confirmation,
+cleanup, failure recovery, simulator coverage, and disposable-account device
+validation work together end to end. Ordinary-floor and nested-reply image entry
+remain outside the current TiebaLite-aligned scope.
+
 ## Next milestones
 
 1. Real-device validation of multi-frame GIF, WebP, and HEIC/HEIF sequences in
@@ -362,8 +381,12 @@ the source metadata is updated to that tested IPA.
    exact-PID visibility, all 50 fixed catalog tokens, type-2/type-11 readback,
    inline-preview entry, account rotation, and duplicate-send prevention
 12. Disposable-account validation of text/classic-emoticon new-topic creation,
-   followed by image and other rich-media topic/reply creation, broader settings parity, remaining account
-   activity, and moderation tools
+   followed by end-to-end static-image creation for new topics and direct topic
+   replies: finish the picker, nine-image drafts, upload ledger, typed marker
+   compilation, immutable submission binding, cleanup, and no-resend recovery,
+   then validate the minimum HTTPS upload contract and final creation readback.
+   Other rich media, broader settings parity, remaining account activity, and
+   moderation tools follow that bounded workflow
 13. Real-device validation of the official report-form handoff, including
    browser login state, report reasons, captcha/SMS challenges, cancellation,
    account rotation during preflight, and unsupported image/private-message

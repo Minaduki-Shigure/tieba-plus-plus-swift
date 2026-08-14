@@ -21,6 +21,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let pollReadClientVersion = "12.52.1.0"
   static let pollWriteClientVersion = "11.10.8.6"
   static let newThreadClientVersion = "7.2.0.0"
+  static let staticImageUploadClientVersion = "12.41.7.1"
   static let concernClientVersion = "11.10.8.6"
   static let selfProfileClientVersion = "12.52.1.0"
   static let userFollowClientVersion = "11.10.8.6"
@@ -743,6 +744,147 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     return try normalizedForumName(submission.forumName)
   }
 
+  func validateStaticImageUploadArguments(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    upload: TiebaStaticImageUpload
+  ) throws -> TiebaStaticImageUploadPlan {
+    try validate(credential)
+    guard expectedUserID > 0 else {
+      throw TiebaClientError.invalidArgument("Expected user ID must be positive.")
+    }
+    let forumName = try normalizedForumName(upload.forumName)
+    guard forumName.utf8.count <= TiebaStaticImageUploadPolicy.maximumForumNameUTF8Bytes else {
+      throw TiebaClientError.invalidArgument("Forum name is too large to upload an image.")
+    }
+    guard !upload.encodedBytes.isEmpty else {
+      throw TiebaClientError.invalidArgument("Image data must not be empty.")
+    }
+    let maximumBytes =
+      upload.preservesOriginal
+      ? TiebaStaticImageUploadPolicy.maximumOriginalImageBytes
+      : TiebaStaticImageUploadPolicy.maximumStandardImageBytes
+    guard upload.encodedBytes.count <= maximumBytes else {
+      throw TiebaClientError.invalidArgument(
+        "Image data exceeds the \(maximumBytes)-byte upload limit."
+      )
+    }
+    let dimensions = [upload.pixelWidth, upload.pixelHeight]
+    let dimensionsAreValid = dimensions.allSatisfy {
+      (1...TiebaStaticImageUploadPolicy.maximumPixelDimension).contains($0)
+    }
+    guard dimensionsAreValid else {
+      throw TiebaClientError.invalidArgument(
+        "Image dimensions must be between 1 and \(TiebaStaticImageUploadPolicy.maximumPixelDimension) pixels."
+      )
+    }
+
+    let contentDigest = TiebaStaticImageUploadPolicy.contentDigest(of: upload.encodedBytes)
+    guard
+      let chunkCount = TiebaStaticImageUploadPolicy.chunkCount(
+        forByteCount: upload.encodedBytes.count
+      )
+    else {
+      throw TiebaClientError.invalidArgument("Image data must not be empty.")
+    }
+    return TiebaStaticImageUploadPlan(
+      upload: upload,
+      expectedUserID: expectedUserID,
+      normalizedForumName: forumName,
+      resourceID: TiebaStaticImageUploadPolicy.resourceID(for: upload.encodedBytes),
+      contentDigest: contentDigest,
+      chunkCount: chunkCount
+    )
+  }
+
+  func staticImageUploadChunk(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    plan: TiebaStaticImageUploadPlan,
+    chunkNumber: Int
+  ) throws -> URLRequest {
+    try validate(credential)
+    guard expectedUserID > 0 else {
+      throw TiebaClientError.invalidArgument("Expected user ID must be positive.")
+    }
+    guard expectedUserID == plan.expectedUserID else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    guard (1...plan.chunkCount).contains(chunkNumber) else {
+      throw TiebaClientError.invalidArgument(
+        "Image chunk number must be between 1 and \(plan.chunkCount)."
+      )
+    }
+    try validateConfiguration()
+
+    let chunkStart = (chunkNumber - 1) * TiebaStaticImageUploadPolicy.chunkSize
+    let chunkEnd = min(
+      chunkStart + TiebaStaticImageUploadPolicy.chunkSize,
+      plan.upload.encodedBytes.count
+    )
+    let chunk = plan.upload.encodedBytes.subdata(in: chunkStart..<chunkEnd)
+    let isFinal = chunkNumber == plan.chunkCount
+    let fields = [
+      ("BDUSS", credential.bduss),
+      ("_client_type", "2"),
+      ("_client_version", Self.staticImageUploadClientVersion),
+      ("alt", "json"),
+      ("chunkNo", String(chunkNumber)),
+      ("forum_name", plan.normalizedForumName),
+      ("groupId", "1"),
+      ("height", String(plan.upload.pixelHeight)),
+      ("isFinish", isFinal ? "1" : "0"),
+      ("is_bjh", "0"),
+      ("pic_water_type", plan.upload.watermark.rawValue),
+      ("resourceId", plan.resourceID),
+      ("saveOrigin", plan.upload.preservesOriginal ? "1" : "0"),
+      ("size", String(plan.upload.encodedBytes.count)),
+      ("small_flow_fname", plan.normalizedForumName),
+      ("width", String(plan.upload.pixelWidth)),
+    ]
+    let signedFields =
+      fields.sorted {
+        $0.0 == $1.0 ? $0.1 < $1.1 : $0.0 < $1.0
+      } + [("sign", Self.signature(for: fields))]
+    let multipartBoundary = Self.staticImageUploadMultipartBoundary(
+      fields: signedFields,
+      chunk: chunk
+    )
+
+    var components = URLComponents()
+    components.scheme = "https"
+    components.host = TiebaStaticImageUploadEndpointPolicy.host
+    components.path = TiebaStaticImageUploadEndpointPolicy.path
+    guard let url = components.url, TiebaStaticImageUploadEndpointPolicy.allows(url) else {
+      throw TiebaClientError.invalidEndpoint
+    }
+
+    var request = URLRequest(
+      url: url,
+      cachePolicy: .reloadIgnoringLocalCacheData,
+      timeoutInterval: configuration.requestTimeout
+    )
+    request.httpMethod = "POST"
+    request.httpShouldHandleCookies = false
+    request.httpBody = Self.staticImageUploadMultipartBody(
+      fields: signedFields,
+      chunk: chunk,
+      boundary: multipartBoundary
+    )
+    request.setValue(
+      "bdtb for Android \(Self.staticImageUploadClientVersion)",
+      forHTTPHeaderField: "User-Agent"
+    )
+    request.setValue("ka=open", forHTTPHeaderField: "Cookie")
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    request.setValue("gzip", forHTTPHeaderField: "Accept-Encoding")
+    request.setValue(
+      "multipart/form-data; boundary=\(multipartBoundary)",
+      forHTTPHeaderField: "Content-Type"
+    )
+    return request
+  }
+
   func newThread(
     credential: TiebaSessionCredential,
     expectedUserID: Int64,
@@ -1457,6 +1599,44 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       request.setValue(cookie, forHTTPHeaderField: "Cookie")
     }
     return request
+  }
+
+  private static func staticImageUploadMultipartBody(
+    fields: [(String, String)],
+    chunk: Data,
+    boundary: String
+  ) -> Data {
+    var body = Data()
+    for (name, value) in fields {
+      body.append(Data("--\(boundary)\r\n".utf8))
+      body.append(
+        Data("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".utf8)
+      )
+      body.append(Data(value.utf8))
+      body.append(Data("\r\n".utf8))
+    }
+    body.append(Data("--\(boundary)\r\n".utf8))
+    body.append(
+      Data("Content-Disposition: form-data; name=\"chunk\"; filename=\"file\"\r\n\r\n".utf8)
+    )
+    body.append(chunk)
+    body.append(Data("\r\n--\(boundary)--\r\n".utf8))
+    return body
+  }
+
+  private static func staticImageUploadMultipartBoundary(
+    fields: [(String, String)],
+    chunk: Data
+  ) -> String {
+    while true {
+      let candidate = "TiebaPlusPlusBoundary-\(UUID().uuidString.lowercased())"
+      let candidateBytes = Data(candidate.utf8)
+      guard
+        !fields.contains(where: { $0.1.contains(candidate) }),
+        chunk.range(of: candidateBytes) == nil
+      else { continue }
+      return candidate
+    }
   }
 
   private func protobufRequest<Message: SwiftProtobuf.Message>(
