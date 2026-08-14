@@ -9,7 +9,7 @@ struct StableRenderBoundary<Key: Equatable, Content: View>: View, Equatable {
     self.content = content
   }
 
-  static func == (
+  nonisolated static func == (
     lhs: StableRenderBoundary<Key, Content>,
     rhs: StableRenderBoundary<Key, Content>
   ) -> Bool {

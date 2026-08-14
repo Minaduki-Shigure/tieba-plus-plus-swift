@@ -1914,7 +1914,7 @@ private struct PostView: View, Equatable {
   @Environment(\.contentAgreementStore) private var contentAgreementStore
   @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
 
-  static func == (lhs: PostView, rhs: PostView) -> Bool {
+  nonisolated static func == (lhs: PostView, rhs: PostView) -> Bool {
     lhs.post == rhs.post
       && lhs.forumID == rhs.forumID
       && lhs.agreementTarget == rhs.agreementTarget
