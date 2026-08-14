@@ -1311,20 +1311,23 @@ IMEI, OAID, Android ID, IDFV, location, screen, model, or brand data. The app
 generates the UUID independently, stores it only in local preferences, and reuses
 it across launches so refresh and pagination remain one recommendation session.
 It is not hardware- or account-derived. The response has no authoritative
-`has_more`; a raw page of at least 11 items permits one continuation, while an
-empty page stops. After refresh preserves older rows and resets the server page
-number, duplicate-only pages may traverse the highest page reached before that
-refresh. Beyond that frontier, one additional duplicate-only page is allowed to
-advance past overlap; a second consecutive duplicate-only page stops. When the
+`has_more`; any nonempty raw page permits one continuation, while an empty page
+stops. After refresh preserves older rows and resets the server page number,
+duplicate-only pages may traverse the highest page reached before that refresh.
+Beyond that frontier, one additional duplicate-only page is allowed to advance
+past overlap; a second consecutive duplicate-only page stops. When the
 default-off followed-forum option is selected, the app first waits for the exact
 active-session index to become complete, then matches returned threads locally
 by stable forum ID. Waiting, signed-out, empty, or failed indexes issue no
-recommendation request and never fall open. One user action automatically scans
-at most five filtered pages before presenting an explicit continue action; raw
-page and item progress remain independent from visible local filtering. Ads,
-live cards, invalid identities, and duplicate threads are discarded before UI
-mapping. Refresh prepends new unique items, the retained window is bounded, and
-local filtering never replaces the raw server count used for continuation.
+recommendation request and never fall open. One explicit load action may scan at
+most five pages whose mapped threads are all removed by that local followed-forum
+filter before presenting an explicit continue action. Independently, it may cross
+at most five consecutive nonempty raw pages whose entries all fail UI mapping
+before requiring another explicit continuation. Raw page and item progress remain
+independent from visible local filtering. Ads, live cards, invalid identities,
+and duplicate threads are discarded before UI mapping. Refresh prepends new
+unique items, the retained window is bounded, and local filtering never replaces
+the raw-page nonempty decision used for continuation.
 Recommendation reasons are retained for future protocol work, but the legacy
 dislike endpoint is a separate write and is not exposed by this read-only
 milestone.
