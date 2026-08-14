@@ -926,6 +926,8 @@ struct ThreadView: View {
                         )
                       }
                       : nil,
+                    requestReplyIsAvailable: replyEntriesVisible,
+                    requestInlineCommentReplyIsAvailable: replyEntriesVisible,
                     reportThread: viewModel.thread,
                     reportTarget: isPureReadingMode
                       ? nil
@@ -1028,6 +1030,8 @@ struct ThreadView: View {
                         )
                       }
                       : nil,
+                    requestReplyIsAvailable: replyEntriesVisible,
+                    requestInlineCommentReplyIsAvailable: replyEntriesVisible,
                     reportThread: viewModel.thread,
                     reportTarget: isPureReadingMode
                       ? nil
@@ -1904,6 +1908,8 @@ private struct PostView: View, Equatable {
   let requestCloudFavoriteAction: (ThreadCloudFavoritePendingAction) -> Void
   let requestReply: (() -> Void)?
   let requestInlineCommentReply: ((BrowseComment) -> Void)?
+  let requestReplyIsAvailable: Bool
+  let requestInlineCommentReplyIsAvailable: Bool
   let reportThread: BrowseThread
   let reportTarget: ContentReportTarget?
   let openComments: (Int64?) -> Void
@@ -1930,8 +1936,9 @@ private struct PostView: View, Equatable {
       && lhs.reportThread.firstPostID == rhs.reportThread.firstPostID
       && lhs.reportThread.localVisibility == rhs.reportThread.localVisibility
       && lhs.reportTarget == rhs.reportTarget
-      && (lhs.requestReply != nil) == (rhs.requestReply != nil)
-      && (lhs.requestInlineCommentReply != nil) == (rhs.requestInlineCommentReply != nil)
+      && lhs.requestReplyIsAvailable == rhs.requestReplyIsAvailable
+      && lhs.requestInlineCommentReplyIsAvailable
+        == rhs.requestInlineCommentReplyIsAvailable
   }
 
   var body: some View {
