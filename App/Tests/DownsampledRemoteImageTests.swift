@@ -1,4 +1,5 @@
 import ImageIO
+import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 import XCTest
@@ -7,6 +8,27 @@ import XCTest
 
 @MainActor
 final class DownsampledRemoteImageTests: XCTestCase {
+  func testOnlyProgressContentInitializerObservesLoadProgress() throws {
+    let url = try XCTUnwrap(URL(string: "https://img.example/progress-mode.jpg"))
+    let plain = DownsampledRemoteImage(
+      url: url,
+      maxPixelSize: 320,
+      fetchPolicy: .allowNetwork(.preview)
+    ) { _ in
+      EmptyView()
+    }
+    let detailed = DownsampledRemoteImage(
+      url: url,
+      maxPixelSize: 320,
+      fetchPolicy: .allowNetwork(.preview)
+    ) { _, _ in
+      EmptyView()
+    }
+
+    XCTAssertFalse(plain.observesLoadProgress)
+    XCTAssertTrue(detailed.observesLoadProgress)
+  }
+
   func testAutomaticPreviewUsesLowerTransferLimit() {
     XCTAssertEqual(
       RemoteImageDownloadPolicy.maximumResponseBytes(for: 720),
@@ -1065,6 +1087,68 @@ final class DownsampledRemoteImageTests: XCTestCase {
     if secondOutcome == nil { secondTask.cancel() }
     XCTAssertEqual(firstOutcome, .some(.success))
     XCTAssertEqual(secondOutcome, .some(.success))
+  }
+
+  func testProgressWaiterJoiningUnobservedTransferReceivesLatestProgress() async throws {
+    let downloader = ControlledProgressRemoteImageDownloader(imageData: try makeJPEGData())
+    addTeardownBlock { await downloader.releaseAll() }
+    let waiterCountProbe = InFlightWaiterCountProbe()
+    let progressEventProbe = InFlightProgressEventProbe()
+    let repository = DownsampledImageRepository(
+      downloader: downloader,
+      inFlightWaiterCountDidChange: { count in waiterCountProbe.record(count) },
+      inFlightProgressEventDidProcess: { progress, didAccept in
+        progressEventProbe.record(progress, didAccept: didAccept)
+      }
+    )
+    let url = try XCTUnwrap(URL(string: "https://img.example/unobserved-progress.jpg"))
+    let tenPercent = RemoteImageDownloadProgress(
+      receivedByteCount: 10,
+      expectedByteCount: 100
+    )
+
+    let unobservedTask = Task {
+      try await repository.image(
+        at: url,
+        maxPixelSize: 320,
+        fetchPolicy: .allowNetwork(.preview)
+      )
+    }
+    let didRegisterUnobservedWaiter = await waiterCountProbe.waitUntilCounts([1])
+    let didStartTransfer = await downloader.waitUntilRequestCount(1)
+    let didEmitTenPercent = await downloader.emit(tenPercent, forRequestAt: 0)
+    let didStoreLatestProgress = await progressEventProbe.waitUntilEvents([
+      .init(progress: .downloading(tenPercent), didAccept: true)
+    ])
+    XCTAssertTrue(didRegisterUnobservedWaiter)
+    XCTAssertTrue(didStartTransfer)
+    XCTAssertTrue(didEmitTenPercent)
+    XCTAssertTrue(didStoreLatestProgress)
+
+    let progressProbe = RemoteImageLoadProgressProbe()
+    let completionProbe = RemoteImageRequestCompletionProbe()
+    let observedTask = startRemoteImageRequest(
+      repository: repository,
+      url: url,
+      maxPixelSize: 320,
+      fetchPolicy: .allowNetwork(.preview),
+      progressProbe: progressProbe,
+      completionProbe: completionProbe
+    )
+    let didRegisterObservedWaiter = await waiterCountProbe.waitUntilCounts([1, 2])
+    let didReplayLatestProgress = await progressProbe.waitUntilEvents([
+      .downloading(tenPercent)
+    ])
+    let joinedRequestCount = await downloader.requestCount()
+    XCTAssertTrue(didRegisterObservedWaiter)
+    XCTAssertTrue(didReplayLatestProgress)
+    XCTAssertEqual(joinedRequestCount, 1)
+
+    await downloader.releaseAll()
+    _ = try await unobservedTask.value
+    let observedOutcome = await completionProbe.waitUntilOutcome(timeout: .seconds(10))
+    if observedOutcome == nil { observedTask.cancel() }
+    XCTAssertEqual(observedOutcome, .some(.success))
   }
 
   func testCancellingProgressWaiterStopsItsUpdatesAndOnlyFinalWaiterCancelsTransfer()

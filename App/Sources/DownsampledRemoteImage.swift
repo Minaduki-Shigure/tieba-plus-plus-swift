@@ -101,6 +101,7 @@ struct DownsampledRemoteImage<Content: View>: View {
   let fetchPolicy: DownsampledImageFetchPolicy
   let urlPolicy: DownsampledImageURLPolicy
   let reloadID: Int
+  let observesLoadProgress: Bool
   let onAttemptCompletion: @MainActor (DownsampledRemoteImageAttemptOutcome) -> Void
   @ViewBuilder let content: (
     DownsampledRemoteImagePhase,
@@ -119,6 +120,7 @@ struct DownsampledRemoteImage<Content: View>: View {
     let fetchPolicy: DownsampledImageFetchPolicy
     let urlPolicyID: String
     let reloadID: Int
+    let observesLoadProgress: Bool
   }
 
   init(
@@ -154,6 +156,7 @@ struct DownsampledRemoteImage<Content: View>: View {
     self.fetchPolicy = fetchPolicy
     self.urlPolicy = urlPolicy
     self.reloadID = reloadID
+    self.observesLoadProgress = false
     self.onAttemptCompletion = onAttemptCompletion
     self.content = { phase, _ in content(phase) }
   }
@@ -177,6 +180,7 @@ struct DownsampledRemoteImage<Content: View>: View {
     self.fetchPolicy = fetchPolicy
     self.urlPolicy = urlPolicy
     self.reloadID = reloadID
+    self.observesLoadProgress = true
     self.onAttemptCompletion = onAttemptCompletion
     self.content = progressContent
   }
@@ -187,7 +191,8 @@ struct DownsampledRemoteImage<Content: View>: View {
       maxPixelSize: maxPixelSize,
       fetchPolicy: fetchPolicy,
       urlPolicyID: urlPolicy.id,
-      reloadID: reloadID
+      reloadID: reloadID,
+      observesLoadProgress: observesLoadProgress
     )
   }
 
@@ -211,14 +216,16 @@ struct DownsampledRemoteImage<Content: View>: View {
     )
     content(
       canRenderStoredState ? phase : .empty,
-      canRenderStoredState && progressRequestID == requestID ? loadProgress : nil
+      observesLoadProgress && canRenderStoredState && progressRequestID == requestID
+        ? loadProgress
+        : nil
     )
       .task(id: requestID) {
         let activeAttemptID = UUID()
         let activeResourceID = resourceID
         let activeRequestID = requestID
         attemptID = activeAttemptID
-        progressRequestID = activeRequestID
+        progressRequestID = observesLoadProgress ? activeRequestID : nil
         loadProgress = nil
         if phaseResourceID != activeResourceID || !hasSuccessfulPhase {
           phase = .empty
@@ -235,12 +242,9 @@ struct DownsampledRemoteImage<Content: View>: View {
           return
         }
         do {
-          let asset = try await DownsampledImageRepository.shared.image(
-            at: url,
-            maxPixelSize: maxPixelSize,
-            fetchPolicy: fetchPolicy,
-            urlPolicy: urlPolicy,
-            onProgress: { progress in
+          let progressHandler: (@Sendable (DownsampledRemoteImageLoadProgress) -> Void)?
+          if observesLoadProgress {
+            progressHandler = { progress in
               Task { @MainActor in
                 guard DownsampledRemoteImageStateDecision.canAcceptEvent(
                   activeAttemptID: attemptID,
@@ -252,6 +256,15 @@ struct DownsampledRemoteImage<Content: View>: View {
                 loadProgress = progress
               }
             }
+          } else {
+            progressHandler = nil
+          }
+          let asset = try await DownsampledImageRepository.shared.image(
+            at: url,
+            maxPixelSize: maxPixelSize,
+            fetchPolicy: fetchPolicy,
+            urlPolicy: urlPolicy,
+            onProgress: progressHandler
           )
           try Task.checkCancellation()
           guard DownsampledRemoteImageStateDecision.canAcceptEvent(
@@ -361,7 +374,7 @@ actor DownsampledImageRepository {
 
   private struct InFlightRequest {
     struct Waiter {
-      let onProgress: @Sendable (DownsampledRemoteImageLoadProgress) -> Void
+      let onProgress: (@Sendable (DownsampledRemoteImageLoadProgress) -> Void)?
     }
 
     enum Stage: Equatable {
@@ -462,7 +475,7 @@ actor DownsampledImageRepository {
       maxPixelSize: requestedSize,
       fetchPolicy: fetchPolicy,
       urlPolicy: .remoteImage,
-      onProgress: { _ in }
+      onProgress: nil
     )
   }
 
@@ -471,7 +484,7 @@ actor DownsampledImageRepository {
     maxPixelSize requestedSize: Int,
     fetchPolicy: DownsampledImageFetchPolicy,
     urlPolicy: DownsampledImageURLPolicy = .remoteImage,
-    onProgress: @escaping @Sendable (DownsampledRemoteImageLoadProgress) -> Void
+    onProgress: (@Sendable (DownsampledRemoteImageLoadProgress) -> Void)?
   ) async throws -> DownsampledImageAsset {
     try Task.checkCancellation()
     guard RemoteImageURLPolicy.allows(url), urlPolicy.allows(url) else {
@@ -526,7 +539,7 @@ actor DownsampledImageRepository {
       inFlight[inFlightKey] = request
       inFlightWaiterCountDidChange(request.waiters.count)
       if let latestProgress = request.latestProgress {
-        onProgress(latestProgress)
+        onProgress?(latestProgress)
       }
       transferID = request.transferID
       task = request.task
@@ -714,7 +727,7 @@ actor DownsampledImageRepository {
     guard request.latestProgress != progress else { return }
     request.latestProgress = progress
     inFlight[key] = request
-    request.waiters.values.forEach { $0.onProgress(progress) }
+    request.waiters.values.forEach { $0.onProgress?(progress) }
     didAccept = true
   }
 
@@ -727,7 +740,7 @@ actor DownsampledImageRepository {
     request.stage = .decoding
     request.latestProgress = .decoding
     inFlight[key] = request
-    request.waiters.values.forEach { $0.onProgress(.decoding) }
+    request.waiters.values.forEach { $0.onProgress?(.decoding) }
   }
 
   private func removeWaiter(

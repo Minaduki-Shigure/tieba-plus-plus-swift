@@ -12,8 +12,7 @@ struct ThreadView: View {
   @State private var sheetRoute: ThreadSheetRoute?
   @State private var showsPageJump = false
   @State private var pageInput = ""
-  @State private var visiblePost: BrowsePost?
-  @State private var leadingVisiblePostID: Int64?
+  @State private var scrollPosition = ThreadScrollPosition.empty
   @State private var linkedTarget: TiebaLinkTarget?
   @State private var restoredHistorySnapshot: ThreadHistorySnapshot?
   @State private var hasRecordedHistoryVisit = false
@@ -324,8 +323,7 @@ struct ThreadView: View {
     }
     .onChange(of: viewModel.options) { options in
       cancelPictureGallery()
-      visiblePost = nil
-      leadingVisiblePostID = nil
+      scrollPosition = .empty
       persistBrowseOptions(options)
     }
     .onDisappear {
@@ -367,7 +365,7 @@ struct ThreadView: View {
       pendingCloudFavoriteAction = nil
       clearSelectableTextRoute()
       Task { @MainActor in
-        visiblePost = nil
+        scrollPosition = .empty
         viewModel.reload()
       }
     }
@@ -940,14 +938,14 @@ struct ThreadView: View {
                   Divider()
                     .padding(.leading, isPureReadingMode ? 0 : 52)
                 }
-                .background {
-                  GeometryReader { geometry in
-                    Color.clear.preference(
-                      key: PostFramePreferenceKey.self,
-                      value: [firstPost.id: geometry.frame(in: .named("thread-scroll"))]
-                    )
-                  }
-                }
+              }
+              .background {
+                ThreadPostVisibilityReader(
+                  postID: firstPost.id,
+                  viewportHeight: viewport.size.height,
+                  tracksReadingProgress: effectiveVisibility(for: firstPost) == .visible,
+                  tracksPrependAnchor: false
+                )
               }
               .id(firstPost.id)
             }
@@ -1037,22 +1035,14 @@ struct ThreadView: View {
                   Divider()
                     .padding(.leading, isPureReadingMode ? 0 : 52)
                 }
-                .background {
-                  GeometryReader { geometry in
-                    Color.clear.preference(
-                      key: PostFramePreferenceKey.self,
-                      value: [post.id: geometry.frame(in: .named("thread-scroll"))]
-                    )
-                  }
-                }
               }
               .background {
-                GeometryReader { geometry in
-                  Color.clear.preference(
-                    key: PrependAnchorFramePreferenceKey.self,
-                    value: [post.id: geometry.frame(in: .named("thread-scroll"))]
-                  )
-                }
+                ThreadPostVisibilityReader(
+                  postID: post.id,
+                  viewportHeight: viewport.size.height,
+                  tracksReadingProgress: effectiveVisibility(for: post) == .visible,
+                  tracksPrependAnchor: true
+                )
               }
               .id(post.id)
               .onAppear {
@@ -1092,26 +1082,9 @@ struct ThreadView: View {
           }
         }
         .coordinateSpace(name: "thread-scroll")
-        .onPreferenceChange(PostFramePreferenceKey.self) { frames in
-          let lastVisibleID =
-            frames
-            .filter { _, frame in
-              frame.maxY > 0 && frame.minY < viewport.size.height
-            }
-            .max { lhs, rhs in lhs.value.minY < rhs.value.minY }?
-            .key
-          visiblePost = lastVisibleID.flatMap { postID in
-            viewModel.post(withID: postID)
-          }
-        }
-        .onPreferenceChange(PrependAnchorFramePreferenceKey.self) { frames in
-          leadingVisiblePostID =
-            frames
-            .filter { _, frame in
-              frame.height > 0 && frame.maxY > 0 && frame.minY < viewport.size.height
-            }
-            .min { lhs, rhs in lhs.value.minY < rhs.value.minY }?
-            .key
+        .onPreferenceChange(ThreadScrollPositionPreferenceKey.self) { position in
+          guard position != scrollPosition else { return }
+          scrollPosition = position
         }
         .task(id: viewModel.scrollTargetPostID) {
           guard let postID = viewModel.scrollTargetPostID else { return }
@@ -1314,7 +1287,7 @@ struct ThreadView: View {
 
   private var prependAnchorPostID: Int64? {
     if
-      let leadingVisiblePostID,
+      let leadingVisiblePostID = scrollPosition.prependAnchorPostID,
       let leadingPost = viewModel.posts.first(where: { $0.id == leadingVisiblePostID }),
       effectiveVisibility(for: leadingPost) != .hidden
     {
@@ -1334,6 +1307,11 @@ struct ThreadView: View {
         lastFloor: progress?.floor
       )
     )
+  }
+
+  private var visiblePost: BrowsePost? {
+    guard let postID = scrollPosition.readingProgressPostID else { return nil }
+    return viewModel.post(withID: postID)
   }
 
   private var threadCloudFavoriteTarget: ThreadCloudFavoriteTarget? {
@@ -1601,19 +1579,77 @@ enum ThreadAuthorAvatarResolver {
   }
 }
 
-private struct PostFramePreferenceKey: PreferenceKey {
-  static let defaultValue: [Int64: CGRect] = [:]
+struct ThreadScrollPosition: Equatable, Sendable {
+  static let empty = ThreadScrollPosition(
+    readingProgressPostID: nil,
+    prependAnchorPostID: nil
+  )
 
-  static func reduce(value: inout [Int64: CGRect], nextValue: () -> [Int64: CGRect]) {
-    value.merge(nextValue(), uniquingKeysWith: { _, newValue in newValue })
+  let readingProgressPostID: Int64?
+  let prependAnchorPostID: Int64?
+}
+
+enum ThreadPostVisibilityPolicy {
+  static func position(
+    postID: Int64,
+    frame: CGRect,
+    viewportHeight: CGFloat,
+    tracksReadingProgress: Bool,
+    tracksPrependAnchor: Bool
+  ) -> ThreadScrollPosition {
+    guard
+      postID > 0,
+      viewportHeight.isFinite,
+      viewportHeight > 0,
+      frame.minY.isFinite,
+      frame.maxY.isFinite,
+      frame.height.isFinite,
+      frame.height > 0,
+      frame.maxY > 0,
+      frame.minY < viewportHeight
+    else { return .empty }
+
+    return ThreadScrollPosition(
+      readingProgressPostID: tracksReadingProgress ? postID : nil,
+      prependAnchorPostID: tracksPrependAnchor ? postID : nil
+    )
   }
 }
 
-private struct PrependAnchorFramePreferenceKey: PreferenceKey {
-  static let defaultValue: [Int64: CGRect] = [:]
+struct ThreadScrollPositionPreferenceKey: PreferenceKey {
+  static let defaultValue = ThreadScrollPosition.empty
 
-  static func reduce(value: inout [Int64: CGRect], nextValue: () -> [Int64: CGRect]) {
-    value.merge(nextValue(), uniquingKeysWith: { _, newValue in newValue })
+  static func reduce(
+    value: inout ThreadScrollPosition,
+    nextValue: () -> ThreadScrollPosition
+  ) {
+    let next = nextValue()
+    value = ThreadScrollPosition(
+      readingProgressPostID: next.readingProgressPostID ?? value.readingProgressPostID,
+      prependAnchorPostID: value.prependAnchorPostID ?? next.prependAnchorPostID
+    )
+  }
+}
+
+private struct ThreadPostVisibilityReader: View {
+  let postID: Int64
+  let viewportHeight: CGFloat
+  let tracksReadingProgress: Bool
+  let tracksPrependAnchor: Bool
+
+  var body: some View {
+    GeometryReader { geometry in
+      Color.clear.preference(
+        key: ThreadScrollPositionPreferenceKey.self,
+        value: ThreadPostVisibilityPolicy.position(
+          postID: postID,
+          frame: geometry.frame(in: .named("thread-scroll")),
+          viewportHeight: viewportHeight,
+          tracksReadingProgress: tracksReadingProgress,
+          tracksPrependAnchor: tracksPrependAnchor
+        )
+      )
+    }
   }
 }
 

@@ -81,6 +81,26 @@ struct RootView: View {
   var body: some View {
     NavigationStack(path: $path) {
       List {
+        if homeShowsDiscovery {
+          Section("\u{53d1}\u{73b0}") {
+            NavigationLink(value: RootDestination.explore(.personalized)) {
+              Label("发现", systemImage: "sparkles")
+            }
+
+            NavigationLink(value: RootDestination.hotTopics) {
+              Label("\u{70ed}\u{95e8}\u{8bdd}\u{9898}", systemImage: "flame.fill")
+            }
+
+            HStack(spacing: 12) {
+              Label("打开贴吧链接", systemImage: "link")
+              Spacer(minLength: 8)
+              PasteButton(payloadType: String.self, onPaste: openPastedLinks)
+                .accessibilityLabel("粘贴并打开贴吧链接")
+                .help("粘贴并打开贴吧链接")
+            }
+          }
+        }
+
         Section {
           HStack(spacing: 10) {
             TextField("输入吧名或关键词", text: $query)
@@ -129,26 +149,6 @@ struct RootView: View {
         }
 
         followedForumsSection
-
-        if homeShowsDiscovery {
-          Section("\u{53d1}\u{73b0}") {
-            NavigationLink(value: RootDestination.explore(.personalized)) {
-              Label("发现", systemImage: "sparkles")
-            }
-
-            NavigationLink(value: RootDestination.hotTopics) {
-              Label("\u{70ed}\u{95e8}\u{8bdd}\u{9898}", systemImage: "flame.fill")
-            }
-
-            HStack(spacing: 12) {
-              Label("打开贴吧链接", systemImage: "link")
-              Spacer(minLength: 8)
-              PasteButton(payloadType: String.self, onPaste: openPastedLinks)
-                .accessibilityLabel("粘贴并打开贴吧链接")
-                .help("粘贴并打开贴吧链接")
-            }
-          }
-        }
 
         recentForumsSection
 
