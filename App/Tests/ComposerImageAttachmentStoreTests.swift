@@ -54,7 +54,14 @@ final class ComposerImageAttachmentStoreTests: XCTestCase {
     )
     #if os(iOS)
       let attributes = try FileManager.default.attributesOfItem(atPath: storedURL.path)
-      XCTAssertEqual(attributes[.protectionKey] as? FileProtectionType, .complete)
+      let protection = attributes[.protectionKey] as? FileProtectionType
+      #if targetEnvironment(simulator)
+        if let protection {
+          XCTAssertEqual(protection, .complete)
+        }
+      #else
+        XCTAssertEqual(protection, .complete)
+      #endif
     #endif
   }
 
