@@ -350,7 +350,7 @@ struct ComposerImageAttachmentProcessor: Sendable {
         [kCGImageSourceShouldCache: false] as CFDictionary
       )
     else { throw ComposerImageProcessingError.encodeFailed }
-    let inspection = try inspectSource(source, requiresStrippedMetadata: true)
+    let inspection = try Self.inspectSource(source, requiresStrippedMetadata: true)
     guard
       let typeIdentifier = CGImageSourceGetType(source) as String?,
       let contentType = UTType(typeIdentifier),
