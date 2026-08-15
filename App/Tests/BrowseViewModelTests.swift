@@ -2259,6 +2259,58 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testThreadRefreshRebuildsRenderPlanWhenSamePostIDChanges() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 415)
+    let original = Fixtures.post(
+      id: 41_501,
+      threadID: thread.id,
+      contents: [.text("original content")]
+    )
+    let refreshed = Fixtures.post(
+      id: original.id,
+      threadID: thread.id,
+      contents: [.text("refreshed content")]
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [original],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [refreshed],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+    let originalPlan = viewModel.contentRenderPlan(for: original)
+    let originalRevision = viewModel.renderRevision(for: original)
+
+    await viewModel.refresh()
+
+    XCTAssertEqual(viewModel.posts, [refreshed])
+    XCTAssertNotEqual(viewModel.renderRevision(for: refreshed), originalRevision)
+    XCTAssertNotEqual(viewModel.contentRenderPlan(for: refreshed), originalPlan)
+    XCTAssertEqual(
+      viewModel.contentRenderPlan(for: refreshed),
+      BrowseContentRenderPlan(contents: refreshed.contents)
+    )
+  }
+
+  @MainActor
   func testThreadAppendMaintainsIndexesAndVisibilityCachesIncrementally() async throws {
     let service = ScriptedBrowseService()
     let thread = Fixtures.thread(id: 42)
@@ -2306,6 +2358,8 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertNil(viewModel.firstVisibleReplyPostID)
     XCTAssertEqual(viewModel.fullPostIndexRebuildCount, 1)
     XCTAssertEqual(viewModel.incrementallyIndexedPostCount, 0)
+    let placeholderRenderRevision = viewModel.renderRevision(for: placeholder)
+    XCTAssertGreaterThan(placeholderRenderRevision, 0)
 
     viewModel.loadMoreIfNeeded(current: placeholder)
     try await waitUntil { viewModel.posts.last?.id == visible.id }
@@ -2316,6 +2370,8 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.scrollTargetsByPostID[visible.id]?.order, 2)
     XCTAssertEqual(viewModel.fullPostIndexRebuildCount, 1)
     XCTAssertEqual(viewModel.incrementallyIndexedPostCount, 1)
+    XCTAssertEqual(viewModel.renderRevision(for: placeholder), placeholderRenderRevision)
+    XCTAssertGreaterThan(viewModel.renderRevision(for: visible), 0)
   }
 
   @MainActor
@@ -2422,6 +2478,8 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.agreementReadDescriptors, [initialDescriptor])
     XCTAssertEqual(viewModel.agreementTarget(forPostID: firstPost.id), topicTarget)
     XCTAssertEqual(viewModel.agreementTarget(forPostID: current.id), currentTarget)
+    let currentRenderPlan = viewModel.contentRenderPlan(for: current)
+    let currentRenderRevision = viewModel.renderRevision(for: current)
 
     viewModel.loadPrevious(anchorPostID: current.id)
     try await waitUntil { viewModel.posts.map(\.id) == [earlier.id, current.id] }
@@ -2429,6 +2487,10 @@ final class BrowseViewModelTests: XCTestCase {
       Set(viewModel.agreementReadDescriptors),
       Set([initialDescriptor, previousDescriptor])
     )
+    XCTAssertEqual(viewModel.contentRenderPlan(for: current), currentRenderPlan)
+    XCTAssertEqual(viewModel.renderRevision(for: current), currentRenderRevision)
+    let earlierRenderPlan = viewModel.contentRenderPlan(for: earlier)
+    let earlierRenderRevision = viewModel.renderRevision(for: earlier)
     viewModel.consumePrependRestoreTarget()
 
     viewModel.loadMoreIfNeeded(current: current)
@@ -2437,6 +2499,11 @@ final class BrowseViewModelTests: XCTestCase {
       Set(viewModel.agreementReadDescriptors),
       Set([initialDescriptor, previousDescriptor, nextDescriptor])
     )
+    XCTAssertEqual(viewModel.contentRenderPlan(for: current), currentRenderPlan)
+    XCTAssertEqual(viewModel.renderRevision(for: current), currentRenderRevision)
+    XCTAssertEqual(viewModel.contentRenderPlan(for: earlier), earlierRenderPlan)
+    XCTAssertEqual(viewModel.renderRevision(for: earlier), earlierRenderRevision)
+    XCTAssertGreaterThan(viewModel.renderRevision(for: later), 0)
 
     await viewModel.refresh()
 
@@ -5064,6 +5131,11 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertTrue(viewModel.hasDisplayableComments)
     XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 1)
     XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 0)
+    XCTAssertTrue(comments.allSatisfy { viewModel.renderRevision(for: $0) > 0 })
+    XCTAssertEqual(
+      comments.map { viewModel.contentRenderPlan(for: $0).contents },
+      comments.map(\.contents)
+    )
     let requests = await service.commentRequestSnapshot()
     XCTAssertEqual(requests, [CommentRequest(threadID: 8, postID: 80, page: 1)])
   }
@@ -5434,6 +5506,8 @@ final class BrowseViewModelTests: XCTestCase {
     )
     XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 1)
     XCTAssertEqual(viewModel.agreementReadDescriptors, [initialDescriptor])
+    let originalRenderPlan = viewModel.contentRenderPlan(for: original)
+    let originalRenderRevision = viewModel.renderRevision(for: original)
 
     viewModel.loadMoreIfNeeded(current: original)
     try await waitUntil { viewModel.comments.map(\.id) == [original.id, appended.id] }
@@ -5458,6 +5532,10 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 2)
     XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 0)
     XCTAssertEqual(viewModel.agreementReadDescriptors, [updatedDescriptor])
+    XCTAssertEqual(viewModel.contentRenderPlan(for: original), originalRenderPlan)
+    XCTAssertEqual(viewModel.renderRevision(for: original), originalRenderRevision)
+    let appendedRenderPlan = viewModel.contentRenderPlan(for: appended)
+    let appendedRenderRevision = viewModel.renderRevision(for: appended)
 
     viewModel.loadMoreIfNeeded(current: appended)
     try await waitUntil {
@@ -5476,6 +5554,10 @@ final class BrowseViewModelTests: XCTestCase {
     )
     XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 0)
     XCTAssertEqual(viewModel.agreementReadDescriptors, [finalDescriptor])
+    XCTAssertEqual(viewModel.contentRenderPlan(for: original), originalRenderPlan)
+    XCTAssertEqual(viewModel.renderRevision(for: original), originalRenderRevision)
+    XCTAssertEqual(viewModel.contentRenderPlan(for: appended), appendedRenderPlan)
+    XCTAssertEqual(viewModel.renderRevision(for: appended), appendedRenderRevision)
   }
 
   @MainActor
@@ -5688,6 +5770,7 @@ final class BrowseViewModelTests: XCTestCase {
     let refreshed = Fixtures.comment(
       id: original.id,
       authorName: "refreshed",
+      contents: [.text("refreshed comment content")],
       threadID: thread.id,
       parentPostID: parent.id
     )
@@ -5741,6 +5824,8 @@ final class BrowseViewModelTests: XCTestCase {
     viewModel.loadIfNeeded()
     try await waitUntil { viewModel.state == .loaded }
     let descriptorEpoch = viewModel.agreementDescriptorEpoch
+    let originalRenderPlan = viewModel.contentRenderPlan(for: original)
+    let originalRenderRevision = viewModel.renderRevision(for: original)
 
     await viewModel.refresh()
 
@@ -5748,6 +5833,12 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.agreementReadDescriptors, [descriptor])
     XCTAssertEqual(viewModel.agreementDescriptorEpoch, descriptorEpoch)
     XCTAssertEqual(viewModel.agreementExplicitRefreshEpoch, 1)
+    XCTAssertNotEqual(viewModel.contentRenderPlan(for: refreshed), originalRenderPlan)
+    XCTAssertNotEqual(viewModel.renderRevision(for: refreshed), originalRenderRevision)
+    XCTAssertEqual(
+      viewModel.contentRenderPlan(for: refreshed),
+      BrowseContentRenderPlan(contents: refreshed.contents)
+    )
 
     await service.enqueueComments(.failure(StubFailure(message: "refresh failed")))
     await viewModel.refresh()
@@ -7055,6 +7146,7 @@ private enum Fixtures {
     threadID: Int64,
     authorName: String? = nil,
     floor: Int? = nil,
+    contents: [BrowseContent] = [.text("post content")],
     localVisibility: LocalContentVisibility = .visible
   ) -> BrowsePost {
     BrowsePost(
@@ -7067,7 +7159,7 @@ private enum Fixtures {
       createdAt: Date(timeIntervalSince1970: 1_700_000_200),
       nestedReplyCount: 2,
       isThreadAuthor: false,
-      contents: [.text("post content")],
+      contents: contents,
       localVisibility: localVisibility
     )
   }
@@ -7075,6 +7167,7 @@ private enum Fixtures {
   static func comment(
     id: Int64,
     authorName: String? = nil,
+    contents: [BrowseContent] = [.text("comment content")],
     localVisibility: LocalContentVisibility = .visible,
     threadID: Int64 = 0,
     parentPostID: Int64 = 0
@@ -7085,7 +7178,7 @@ private enum Fixtures {
       authorName: authorName ?? "comment-author-\(id)",
       authorPortraitURL: URL(string: "https://example.com/avatar/\(id).png"),
       createdAt: Date(timeIntervalSince1970: 1_700_000_300),
-      contents: [.text("comment content")],
+      contents: contents,
       localVisibility: localVisibility,
       threadID: threadID,
       parentPostID: parentPostID

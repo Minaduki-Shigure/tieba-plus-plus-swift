@@ -76,4 +76,47 @@ final class BrowseContentTextProjectionTests: XCTestCase {
       XCTAssertEqual(plainText, String(attributedText.characters))
     }
   }
+
+  func testRenderPlanCachesPlainAndLinkedTextProjections() throws {
+    let url = try XCTUnwrap(URL(string: "https://example.com/thread"))
+    let contents: [BrowseContent] = [
+      .text("plain"),
+      .image(
+        thumbnail: url,
+        fullSize: nil,
+        original: nil,
+        width: 100,
+        height: 100
+      ),
+      .mention(name: "reader", userID: 77),
+      .text(" and "),
+      .link(label: "thread", url: url),
+    ]
+
+    let plan = BrowseContentRenderPlan(contents: contents)
+
+    XCTAssertEqual(plan.contents, contents)
+    XCTAssertTrue(plan.containsImage)
+    XCTAssertEqual(plan.blocks.count, 3)
+    XCTAssertEqual(plan.plainInlineTextByBlockID[.inline(0)], "plain")
+    let linked = try XCTUnwrap(plan.linkedInlineTextByBlockID[.inline(2)])
+    XCTAssertEqual(String(linked.characters), "@reader and thread")
+  }
+
+  func testRenderPlanKeepsTextOnlyContentOutOfImagePresentationPath() {
+    let plan = BrowseContentRenderPlan(contents: [.text("long body")])
+
+    XCTAssertFalse(plan.containsImage)
+    XCTAssertEqual(plan.plainInlineTextByBlockID[.inline(0)], "long body")
+    XCTAssertTrue(plan.linkedInlineTextByBlockID.isEmpty)
+  }
+
+  func testRenderPlanFallsBackForMentionWithoutRoutableUserID() {
+    let plan = BrowseContentRenderPlan(
+      contents: [.mention(name: "unknown", userID: 0)]
+    )
+
+    XCTAssertNil(plan.plainInlineTextByBlockID[.inline(0)])
+    XCTAssertNil(plan.linkedInlineTextByBlockID[.inline(0)])
+  }
 }

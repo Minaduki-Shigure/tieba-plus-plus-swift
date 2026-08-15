@@ -156,6 +156,8 @@ struct CommentsView: View {
               ) {
                 CommentParentPostView(
                   post: parentPost,
+                  contentRenderPlan: viewModel.parentContentRenderPlan
+                    ?? BrowseContentRenderPlan(contents: parentPost.contents),
                   thread: viewModel.thread,
                   agreementTarget: viewModel.parentAgreementTarget,
                   service: service,
@@ -180,7 +182,6 @@ struct CommentsView: View {
                   selectText: presentSelectableText
                 )
               }
-              .id(CommentsListItemID.parentPost(parentPost.id))
             }
 
             Section {
@@ -219,8 +220,9 @@ struct CommentsView: View {
                 ) {
                   StableRenderBoundary(
                     key: CommentsRowRenderKey(
-                      comment: comment,
-                      thread: viewModel.thread,
+                      commentID: comment.id,
+                      renderRevision: viewModel.renderRevision(for: comment),
+                      threadContext: CommentsThreadRenderContext(viewModel.thread),
                       parentPostID: viewModel.parentPost?.id,
                       agreementTarget: viewModel.agreementTarget(forCommentID: comment.id),
                       replyEntriesVisible: replyEntriesVisible
@@ -266,7 +268,7 @@ struct CommentsView: View {
                         }
                       }
                       BrowseContentView(
-                        contents: comment.contents,
+                        renderPlan: viewModel.contentRenderPlan(for: comment),
                         onUserMention: openMentionedUser,
                         onTiebaLink: openTiebaLink,
                         allowsDirectTextSelection: false,
@@ -299,7 +301,6 @@ struct CommentsView: View {
                   }
                   .equatable()
                 }
-                .id(CommentsListItemID.comment(comment.id))
                 .listRowBackground(
                   highlightedComment?.commentID == comment.id
                     ? appAccentColor.color.opacity(0.12)
@@ -348,11 +349,12 @@ struct CommentsView: View {
             }
           }
           .listStyle(.plain)
+          .environment(\.defaultMinListRowHeight, 0)
           .task(id: viewModel.scrollTargetCommentID) {
             guard let commentID = viewModel.scrollTargetCommentID else { return }
             await Task.yield()
             guard !Task.isCancelled else { return }
-            proxy.scrollTo(CommentsListItemID.comment(commentID), anchor: .center)
+            proxy.scrollTo(commentID, anchor: .center)
             highlightedComment = CommentHighlightToken(commentID: commentID)
             viewModel.consumeScrollTarget()
           }
@@ -360,7 +362,7 @@ struct CommentsView: View {
             guard let commentID = viewModel.prependRestoreCommentID else { return }
             await Task.yield()
             guard !Task.isCancelled else { return }
-            proxy.scrollTo(CommentsListItemID.comment(commentID), anchor: .top)
+            proxy.scrollTo(commentID, anchor: .top)
             viewModel.consumePrependRestoreTarget()
           }
           .task(id: highlightedComment) {
@@ -1031,17 +1033,30 @@ struct CommentsView: View {
   }
 }
 
-private enum CommentsListItemID: Hashable {
-  case parentPost(Int64)
-  case comment(Int64)
-}
-
 private struct CommentsRowRenderKey: Equatable, Sendable {
-  let comment: BrowseComment
-  let thread: BrowseThread?
+  let commentID: Int64
+  let renderRevision: UInt64
+  let threadContext: CommentsThreadRenderContext?
   let parentPostID: Int64?
   let agreementTarget: ContentAgreementTarget?
   let replyEntriesVisible: Bool
+}
+
+private struct CommentsThreadRenderContext: Equatable, Sendable {
+  let threadID: Int64
+  let forumID: Int64
+  let forumName: String
+  let firstPostID: Int64
+  let localVisibility: LocalContentVisibility
+
+  init?(_ thread: BrowseThread?) {
+    guard let thread else { return nil }
+    threadID = thread.id
+    forumID = thread.forumID
+    forumName = thread.forumName
+    firstPostID = thread.firstPostID
+    localVisibility = thread.localVisibility
+  }
 }
 
 private struct CommentHighlightToken: Equatable {
