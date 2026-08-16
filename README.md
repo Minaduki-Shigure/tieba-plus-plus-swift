@@ -45,7 +45,7 @@ and its verified metadata enters the public app source.
   while a same-ID content change receives a new revision and plan. Compact row
   equality keys and a cached active-agreement target set further limit work
   caused by root scroll-state changes. Reading progress, earlier-page anchors,
-  the empty-page pagination sentinel, complete long-text layout, gallery offsets,
+  the transparent bottom pagination sentinel, complete long-text layout, gallery offsets,
   links, and text-selection actions retain their previous behavior. Native
   visibility changes are coalesced before publishing root view state, while the
   latest raw position remains available for history and prepend restoration.
