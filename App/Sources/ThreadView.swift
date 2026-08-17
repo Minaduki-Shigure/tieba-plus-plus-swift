@@ -1113,6 +1113,11 @@ struct ThreadView: View {
             }
           )
         )
+        #if PERFORMANCE_HARNESS
+          .task {
+            await runPerformanceAutoscroll(proxy: proxy)
+          }
+        #endif
         .task(id: viewModel.scrollTargetPostID) {
           guard let postID = viewModel.scrollTargetPostID else { return }
           await Task.yield()
@@ -1247,6 +1252,58 @@ struct ThreadView: View {
       scrollPosition = position
     }
   }
+
+  #if PERFORMANCE_HARNESS
+    @MainActor
+    private func runPerformanceAutoscroll(proxy: ScrollViewProxy) async {
+      guard ThreadScrollPerformanceScenario.isSelfDrivenProfileRequested else { return }
+
+      do {
+        var targetIDs: [Int64] = []
+        for _ in 0..<50 {
+          targetIDs = ([viewModel.firstPost].compactMap { $0 } + viewModel.posts).map(\.id)
+          if targetIDs.count > 1 { break }
+          try await Task.sleep(for: .milliseconds(100))
+        }
+        let targetStride = max((targetIDs.count - 1) / 20, 1)
+        let forwardTargets = Array(
+          targetIDs.dropFirst().enumerated()
+            .filter { $0.offset.isMultiple(of: targetStride) }
+            .prefix(20)
+            .map(\.element)
+        )
+        guard !forwardTargets.isEmpty else { return }
+
+        guard ThreadScrollPerformanceScenario.writeSelfDrivenProfileMarker(phase: "ready") else {
+          assertionFailure("Could not mark the performance fixture as ready")
+          return
+        }
+        guard try await ThreadScrollPerformanceScenario.waitForSelfDrivenProfileStart() else {
+          return
+        }
+        guard ThreadScrollPerformanceScenario.writeSelfDrivenProfileMarker(phase: "started") else {
+          assertionFailure("Could not mark the performance autoscroll as started")
+          return
+        }
+        let backwardTargets = Array(forwardTargets.dropLast().reversed())
+        for targetID in forwardTargets + backwardTargets + forwardTargets {
+          try Task.checkCancellation()
+          withAnimation(.linear(duration: 0.22)) {
+            proxy.scrollTo(targetID, anchor: .top)
+          }
+          try await Task.sleep(for: .milliseconds(260))
+        }
+        guard ThreadScrollPerformanceScenario.writeSelfDrivenProfileMarker(phase: "completed") else {
+          assertionFailure("Could not mark the performance autoscroll as completed")
+          return
+        }
+      } catch is CancellationError {
+        return
+      } catch {
+        assertionFailure("Unexpected performance autoscroll failure: \(error)")
+      }
+    }
+  #endif
 
   private func selectableThreadTitle(for post: BrowsePost) -> String? {
     let thread = viewModel.thread

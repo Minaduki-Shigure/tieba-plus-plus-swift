@@ -4,7 +4,7 @@
 require "json"
 require "optparse"
 
-options = {}
+options = { analyses: [] }
 OptionParser.new do |parser|
   parser.on("--metrics PATH") { |value| options[:metrics] = value }
   parser.on("--build-log PATH") { |value| options[:build_log] = value }
@@ -13,6 +13,12 @@ OptionParser.new do |parser|
   parser.on("--xctrace-log PATH") { |value| options[:xctrace_log] = value }
   parser.on("--xctrace-toc PATH") { |value| options[:xctrace_toc] = value }
   parser.on("--xctrace-profile PATH") { |value| options[:xctrace_profile] = value }
+  parser.on("--analysis LABEL=PATH") do |value|
+    label, path = value.split("=", 2)
+    abort "--analysis expects LABEL=PATH" unless label && path
+
+    options[:analyses] << [label, path]
+  end
   parser.on("--environment PATH") { |value| options[:environment] = value }
   parser.on("--output PATH") { |value| options[:output] = value }
 end.parse!
@@ -74,6 +80,60 @@ if environment
   report << ""
   report << fenced(environment, limit: 8_000)
   report << ""
+end
+
+unless options[:analyses].empty?
+  report << "## Self-driven Time Profiler analysis"
+  report << ""
+  report << "The app drives adjacent scroll targets itself, so these traces do not contain " \
+            "XCUITest gesture or accessibility-snapshot work. Category weights are inclusive " \
+            "and may overlap."
+  report << ""
+  options[:analyses].each do |label, path|
+    analysis_contents = read_file(path)
+    unless analysis_contents
+      report << "### `#{label}`"
+      report << ""
+      report << "Analysis output was unavailable."
+      report << ""
+      next
+    end
+    analysis = JSON.parse(analysis_contents)
+    main_weight = analysis.dig("totals", "main weight ms") || 0
+    report << "### `#{label}`"
+    report << ""
+    report << "Main-thread running samples: **#{format('%.0f ms', main_weight)}**"
+    report << ""
+    report << "| Inclusive category | Weight | Main-thread share |"
+    report << "| --- | ---: | ---: |"
+    analysis.fetch("categories", {}).each do |category, values|
+      report << "| #{category} | #{format('%.0f ms', values['weight_ms'])} | " \
+                "#{format('%.1f%%', values['percent_of_main'])} |"
+    end
+    report << ""
+
+    inclusive_symbols = analysis.fetch("inclusive_symbols", {})
+    hotspot_groups = {
+      "Layout/View Graph" => /(?:AG::Graph|ViewGraph|Layout|sizeThatFits|LazyStack)/,
+      "Text" => /(?:ResolvedText|Text\.resolve|AttributedString|Typesetter|CTLine)/,
+      "App" => /(?:ThreadView|PostView|BrowseContent|InlineComment|Reply)/,
+    }
+    hotspots = hotspot_groups.flat_map do |group, pattern|
+      inclusive_symbols.select { |symbol, _| symbol.match?(pattern) }.first(7).map do |entry|
+        [group, *entry]
+      end
+    end
+    report << "| Group | Inclusive stack | Weight |"
+    report << "| --- | --- | ---: |"
+    hotspots.each do |group, symbol, weight|
+      escaped_symbol = symbol.gsub("|", "\\|").gsub("`", "'")
+      report << "| #{group} | `#{escaped_symbol}` | #{format('%.0f ms', weight)} |"
+    end
+    report << ""
+  rescue JSON::ParserError => error
+    report << "Analysis JSON for `#{label}` was invalid: `#{error.message}`"
+    report << ""
+  end
 end
 
 build_log = read_file(options[:build_log])
@@ -205,12 +265,13 @@ end
 report << "## Interpretation boundary"
 report << ""
 report << "These measurements come from an ephemeral GitHub-hosted iOS Simulator. " \
-          "Use them for call-stack attribution and same-run scenario comparisons, not as " \
+          "Use the fixed-window Time Profiler samples for call-stack attribution and same-run " \
+          "scenario comparisons, not as " \
           "absolute iPhone frame-rate or LiveContainer results."
 report << ""
-report << "Apple does not expose animation hitch count, hitch ratio, frame rate, or frame " \
-          "count from XCTest signpost metrics on Simulator. The scrolling metric therefore " \
-          "provides interval duration here; hitch and frame conclusions require a physical device."
+report << "Programmatic scrolling exercises SwiftUI layout and rendering without a UI-test " \
+          "driver, but it does not reproduce finger tracking or inertial deceleration. Absolute " \
+          "hitch and frame-rate conclusions still require a physical device."
 report << ""
 
 File.write(options[:output], report.join("\n"))

@@ -7,8 +7,14 @@ on:
     paths:
       - .github/workflows/thread-scroll-profile.yml
       - App/PerformanceTests/**
+      - App/Sources/BrowseContentView.swift
+      - App/Sources/InlineCommentPreview.swift
+      - App/Sources/ReplyModels.swift
       - App/Sources/ThreadScrollPerformanceScenario.swift
+      - App/Sources/ThreadView.swift
       - App/Sources/TiebaPlusPlusApp.swift
+      - Scripts/analyze_time_profile.rb
+      - Scripts/record_thread_scroll_profiles.sh
       - Scripts/summarize_thread_scroll_profile.rb
       - project.yml
 
@@ -29,7 +35,6 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
       ARTIFACT_DIR: build/thread-scroll-profile
       DERIVED_DATA: build/thread-scroll-derived-data
-      RESULT_BUNDLE: build/thread-scroll-profile/metrics.xcresult
       BUNDLE_ID: io.github.minaduki.tieba-plus-plus
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -90,7 +95,7 @@ jobs:
             xcrun xctrace list templates
           } > "$ARTIFACT_DIR/environment.txt" 2>&1
 
-      - name: Build optimized performance tests
+      - name: Build optimized performance harness
         id: build_profile
         continue-on-error: true
         run: |
@@ -103,7 +108,7 @@ jobs:
             -derivedDataPath "$DERIVED_DATA" \
             -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO \
-            build-for-testing 2>&1 | tee "$ARTIFACT_DIR/build.log"
+            build 2>&1 | tee "$ARTIFACT_DIR/build.log"
 
       - name: Report profile build diagnostics
         if: ${{ always() && steps.build_profile.outcome == 'failure' }}
@@ -121,126 +126,46 @@ jobs:
           ditto "$symbol_path" "$ARTIFACT_DIR/TiebaPlusPlus.app.dSYM"
           test -f "$ARTIFACT_DIR/TiebaPlusPlus.app.dSYM/Contents/Info.plist"
 
-      - name: Measure four deterministic scroll scenarios
-        id: metrics
-        if: ${{ steps.build_profile.outcome == 'success' }}
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          rm -rf "$RESULT_BUNDLE"
-          xcodebuild \
-            -project TiebaPlusPlus.xcodeproj \
-            -scheme TiebaPlusPlusPerformance \
-            -configuration Profile \
-            -destination "$IOS_SIMULATOR_DESTINATION" \
-            -derivedDataPath "$DERIVED_DATA" \
-            -skipPackagePluginValidation \
-            -parallel-testing-enabled NO \
-            -only-testing:TiebaPlusPlusPerformanceTests/ThreadScrollPerformanceTests/testBaselineScrolling \
-            -only-testing:TiebaPlusPlusPerformanceTests/ThreadScrollPerformanceTests/testLongPlainTextScrolling \
-            -only-testing:TiebaPlusPlusPerformanceTests/ThreadScrollPerformanceTests/testInlineRepliesScrolling \
-            -only-testing:TiebaPlusPlusPerformanceTests/ThreadScrollPerformanceTests/testManyFloorsScrolling \
-            -resultBundlePath "$RESULT_BUNDLE" \
-            CODE_SIGNING_ALLOWED=NO \
-            test-without-building 2>&1 | tee "$ARTIFACT_DIR/metrics-xcodebuild.log"
-
-      - name: Export XCTest metrics
-        id: metrics_export
-        if: ${{ always() && steps.metrics.outcome != 'skipped' }}
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          xcrun xcresulttool get test-results metrics \
-            --path "$RESULT_BUNDLE" \
-            --compact \
-            > "$ARTIFACT_DIR/metrics.json" \
-            2> "$ARTIFACT_DIR/metrics-export.log"
-          test -s "$ARTIFACT_DIR/metrics.json"
-          jq empty "$ARTIFACT_DIR/metrics.json"
-
-      - name: Report measurement diagnostics
-        if: ${{ always() && steps.metrics.outcome == 'failure' }}
-        run: ruby Scripts/report_xcode_errors.rb "$ARTIFACT_DIR/metrics-xcodebuild.log"
-
-      - name: Record Time Profiler trace
+      - name: Record self-driven Time Profiler traces
         id: time_profiler
         if: ${{ steps.build_profile.outcome == 'success' }}
         continue-on-error: true
-        env:
-          TEST_RUNNER_TIEBA_PROFILE_ATTACH_DELAY: "6"
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          app_path="$(find "$DERIVED_DATA/Build/Products/Profile-iphonesimulator" \
+            -maxdepth 1 -type d -name 'TiebaPlusPlus.app' -print -quit)"
+          test -n "$app_path"
+          bash Scripts/record_thread_scroll_profiles.sh \
+            "$IOS_SIMULATOR_ID" \
+            "$BUNDLE_ID" \
+            "$app_path" \
+            "$ARTIFACT_DIR"
+
+      - name: Analyze exported Time Profiler samples
+        id: trace_analysis
+        if: ${{ always() && steps.time_profiler.outcome != 'skipped' }}
+        continue-on-error: true
         run: |
           set -uo pipefail
-          xcrun simctl terminate "$IOS_SIMULATOR_ID" "$BUNDLE_ID" 2>/dev/null || true
-          rm -rf "$ARTIFACT_DIR/time-profiler.trace"
-          xcodebuild \
-            -project TiebaPlusPlus.xcodeproj \
-            -scheme TiebaPlusPlusPerformance \
-            -configuration Profile \
-            -destination "$IOS_SIMULATOR_DESTINATION" \
-            -derivedDataPath "$DERIVED_DATA" \
-            -skipPackagePluginValidation \
-            -parallel-testing-enabled NO \
-            -only-testing:TiebaPlusPlusPerformanceTests/ThreadScrollPerformanceTests/testLongPlainTextTraceDriver \
-            CODE_SIGNING_ALLOWED=NO \
-            test-without-building > "$ARTIFACT_DIR/time-profiler-driver.log" 2>&1 &
-          driver_pid=$!
-
-          app_pid=""
-          for _ in $(seq 1 120); do
-            app_pid="$(pgrep -x TiebaPlusPlus | tail -1 || true)"
-            if [ -n "$app_pid" ]; then break; fi
-            sleep 0.25
-          done
-          if [ -z "$app_pid" ]; then
-            echo "TiebaPlusPlus did not launch for Time Profiler." | tee "$ARTIFACT_DIR/xctrace.log"
-            wait "$driver_pid" || true
-            exit 1
-          fi
-
-          set +e
-          xcrun xctrace record \
-            --template "Time Profiler" \
-            --device "$IOS_SIMULATOR_ID" \
-            --attach TiebaPlusPlus \
-            --time-limit 25s \
-            --no-prompt \
-            --output "$ARTIFACT_DIR/time-profiler.trace" \
-            > "$ARTIFACT_DIR/xctrace.log" 2>&1
-          trace_status=$?
-          wait "$driver_pid"
-          driver_status=$?
-          toc_status=1
-          profile_export_status=1
-          if [ -d "$ARTIFACT_DIR/time-profiler.trace" ]; then
-            xcrun xctrace export \
-              --input "$ARTIFACT_DIR/time-profiler.trace" \
-              --toc \
-              --output "$ARTIFACT_DIR/time-profiler-toc.xml" \
-              >> "$ARTIFACT_DIR/xctrace.log" 2>&1
-            toc_status=$?
-            if [ "$toc_status" -eq 0 ]; then
-              xcrun xctrace export \
-                --input "$ARTIFACT_DIR/time-profiler.trace" \
-                --xpath '/trace-toc/run[@number="1"]/data/table[@schema="time-profile"]' \
-                --output "$ARTIFACT_DIR/time-profiler-samples.xml" \
-                >> "$ARTIFACT_DIR/xctrace.log" 2>&1
-              profile_export_status=$?
+          failed=0
+          for scenario in baseline long-plain-text inline-replies many-floors; do
+            samples="$ARTIFACT_DIR/time-profiler-$scenario-samples.xml"
+            analysis="$ARTIFACT_DIR/time-profiler-$scenario-analysis.json"
+            if [ ! -s "$samples" ]; then
+              echo "$scenario: samples unavailable" >&2
+              failed=1
+              continue
             fi
-          fi
-          set -e
-          {
-            echo "trace_status=$trace_status"
-            echo "toc_status=$toc_status"
-            echo "profile_export_status=$profile_export_status"
-            echo "driver_status=$driver_status"
-          } >> "$ARTIFACT_DIR/xctrace.log"
-          if [ "$trace_status" -ne 0 ]; then exit "$trace_status"; fi
-          if [ ! -d "$ARTIFACT_DIR/time-profiler.trace" ]; then exit 1; fi
-          if [ "$toc_status" -ne 0 ]; then exit "$toc_status"; fi
-          if [ ! -s "$ARTIFACT_DIR/time-profiler-toc.xml" ]; then exit 1; fi
-          if [ "$profile_export_status" -ne 0 ]; then exit "$profile_export_status"; fi
-          if [ ! -s "$ARTIFACT_DIR/time-profiler-samples.xml" ]; then exit 1; fi
-          if [ "$driver_status" -ne 0 ]; then exit "$driver_status"; fi
+            if ! ruby Scripts/analyze_time_profile.rb "$samples" > "$analysis"; then
+              failed=1
+              continue
+            fi
+            if ! jq empty "$analysis"; then
+              failed=1
+            fi
+          done
+          exit "$failed"
 
       - name: Build readable profile report
         id: report
@@ -248,26 +173,29 @@ jobs:
         env:
           PROFILE_BUILD_OUTCOME: ${{ steps.build_profile.outcome }}
           PROFILE_SYMBOLS_OUTCOME: ${{ steps.symbols.outcome }}
-          PROFILE_METRICS_OUTCOME: ${{ steps.metrics.outcome }}
-          PROFILE_METRICS_EXPORT_OUTCOME: ${{ steps.metrics_export.outcome }}
           PROFILE_XCTRACE_OUTCOME: ${{ steps.time_profiler.outcome }}
+          PROFILE_TRACE_ANALYSIS_OUTCOME: ${{ steps.trace_analysis.outcome }}
         run: |
           set -euo pipefail
           mkdir -p "$ARTIFACT_DIR"
           {
             echo "Build outcome: ${PROFILE_BUILD_OUTCOME:-unknown}"
             echo "Symbols outcome: ${PROFILE_SYMBOLS_OUTCOME:-unknown}"
-            echo "Metrics outcome: ${PROFILE_METRICS_OUTCOME:-unknown}"
-            echo "Metrics export outcome: ${PROFILE_METRICS_EXPORT_OUTCOME:-unknown}"
             echo "Time Profiler outcome: ${PROFILE_XCTRACE_OUTCOME:-unknown}"
+            echo "Trace analysis outcome: ${PROFILE_TRACE_ANALYSIS_OUTCOME:-unknown}"
+            if [ -s "$ARTIFACT_DIR/time-profiler-scenarios.txt" ]; then
+              cat "$ARTIFACT_DIR/time-profiler-scenarios.txt"
+            fi
           } >> "$ARTIFACT_DIR/environment.txt"
           ruby Scripts/summarize_thread_scroll_profile.rb \
-            --metrics "$ARTIFACT_DIR/metrics.json" \
             --build-log "$ARTIFACT_DIR/build.log" \
-            --xcode-log "$ARTIFACT_DIR/metrics-xcodebuild.log" \
             --xctrace-log "$ARTIFACT_DIR/xctrace.log" \
-            --xctrace-toc "$ARTIFACT_DIR/time-profiler-toc.xml" \
-            --xctrace-profile "$ARTIFACT_DIR/time-profiler-samples.xml" \
+            --xctrace-toc "$ARTIFACT_DIR/time-profiler-long-plain-text-toc.xml" \
+            --xctrace-profile "$ARTIFACT_DIR/time-profiler-long-plain-text-samples.xml" \
+            --analysis "baseline=$ARTIFACT_DIR/time-profiler-baseline-analysis.json" \
+            --analysis "long-plain-text=$ARTIFACT_DIR/time-profiler-long-plain-text-analysis.json" \
+            --analysis "inline-replies=$ARTIFACT_DIR/time-profiler-inline-replies-analysis.json" \
+            --analysis "many-floors=$ARTIFACT_DIR/time-profiler-many-floors-analysis.json" \
             --environment "$ARTIFACT_DIR/environment.txt" \
             --output "$ARTIFACT_DIR/report.md"
           cat "$ARTIFACT_DIR/report.md" >> "$GITHUB_STEP_SUMMARY"
@@ -278,17 +206,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PROFILE_BUILD_OUTCOME: ${{ steps.build_profile.outcome }}
           PROFILE_SYMBOLS_OUTCOME: ${{ steps.symbols.outcome }}
-          PROFILE_METRICS_OUTCOME: ${{ steps.metrics.outcome }}
-          PROFILE_METRICS_EXPORT_OUTCOME: ${{ steps.metrics_export.outcome }}
           PROFILE_XCTRACE_OUTCOME: ${{ steps.time_profiler.outcome }}
+          PROFILE_TRACE_ANALYSIS_OUTCOME: ${{ steps.trace_analysis.outcome }}
         run: |
           set -euo pipefail
           conclusion=neutral
           if [ "$PROFILE_BUILD_OUTCOME" = success ] \
             && [ "$PROFILE_SYMBOLS_OUTCOME" = success ] \
-            && [ "$PROFILE_METRICS_OUTCOME" = success ] \
-            && [ "$PROFILE_METRICS_EXPORT_OUTCOME" = success ] \
-            && [ "$PROFILE_XCTRACE_OUTCOME" = success ]; then
+            && [ "$PROFILE_XCTRACE_OUTCOME" = success ] \
+            && [ "$PROFILE_TRACE_ANALYSIS_OUTCOME" = success ]; then
             conclusion=success
           fi
           export PROFILE_CHECK_CONCLUSION="$conclusion"
@@ -330,9 +256,8 @@ jobs:
       - name: Fail when required profiling stages fail
         if: >-
           ${{ always() &&
-          (steps.build_profile.outcome == 'failure' ||
-          steps.symbols.outcome == 'failure' ||
-          steps.metrics.outcome == 'failure' ||
-          steps.metrics_export.outcome == 'failure' ||
-          steps.time_profiler.outcome == 'failure') }}
+          (steps.build_profile.outcome != 'success' ||
+          steps.symbols.outcome != 'success' ||
+          steps.time_profiler.outcome != 'success' ||
+          steps.trace_analysis.outcome != 'success') }}
         run: exit 1

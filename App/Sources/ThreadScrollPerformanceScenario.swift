@@ -15,6 +15,41 @@
       return Self(rawValue: value)
     }
 
+    static var isSelfDrivenProfileRequested: Bool {
+      ProcessInfo.processInfo.environment["TIEBA_PERFORMANCE_AUTOSCROLL"] == "1"
+    }
+
+    @MainActor
+    static func waitForSelfDrivenProfileStart() async throws -> Bool {
+      guard isSelfDrivenProfileRequested, let markerURL = profileMarkerURL(phase: "go") else {
+        return false
+      }
+      for _ in 0..<100 {
+        if FileManager.default.fileExists(atPath: markerURL.path) { return true }
+        try await Task.sleep(for: .milliseconds(100))
+      }
+      return false
+    }
+
+    @discardableResult
+    @MainActor
+    static func writeSelfDrivenProfileMarker(phase: String) -> Bool {
+      guard let markerURL = profileMarkerURL(phase: phase) else { return false }
+      do {
+        try phase.write(to: markerURL, atomically: true, encoding: .utf8)
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    @MainActor
+    private static func profileMarkerURL(phase: String) -> URL? {
+      guard let scenario = requested else { return nil }
+      return FileManager.default.temporaryDirectory
+        .appendingPathComponent("tieba-scroll-profile-\(scenario.rawValue)-\(phase)")
+    }
+
     fileprivate var thread: BrowseThread {
       BrowseThread(
         id: ThreadScrollPerformanceFixture.threadID,

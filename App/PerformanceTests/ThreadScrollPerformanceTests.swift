@@ -23,18 +23,6 @@ final class ThreadScrollPerformanceTests: XCTestCase {
     try measureScrolling(scenario: "many-floors")
   }
 
-  func testLongPlainTextTraceDriver() throws {
-    let (app, scrollView, _, _) = try launch(scenario: "long-plain-text")
-    let delay = ProcessInfo.processInfo.environment["TIEBA_PROFILE_ATTACH_DELAY"]
-      .flatMap(TimeInterval.init) ?? 5
-    Thread.sleep(forTimeInterval: delay)
-    for _ in 0..<20 {
-      scrollView.swipeUp(velocity: .fast)
-    }
-    Thread.sleep(forTimeInterval: 2)
-    app.terminate()
-  }
-
   private func measureScrolling(scenario: String) throws {
     let (app, scrollView, ready, initialMarkerFrame) = try launch(scenario: scenario)
 
