@@ -59,14 +59,9 @@ final class CommentsViewModel: ObservableObject {
   private var commentIDs = Set<Int64>()
   private var indexedParentAgreementTarget: ContentAgreementTarget?
   private var agreementTargetsByCommentID: [Int64: ContentAgreementTarget] = [:]
-  private var commentsByID: [Int64: BrowseComment] = [:]
-  private var contentRenderPlansByCommentID: [Int64: BrowseContentRenderPlan] = [:]
-  private var commentRenderRevisionsByID: [Int64: UInt64] = [:]
-  private var indexedParentContentRenderPlan: BrowseContentRenderPlan?
   private var indexedAgreementContext: CommentAgreementIndexContext?
   private(set) var commentIndexFullRebuildCount = 0
   private(set) var commentIndexIncrementalUpdateCount = 0
-  private var nextCommentRenderRevision: UInt64 = 0
 
   init(threadID: Int64, postID: Int64, service: any BrowseService) {
     self.threadID = threadID
@@ -258,20 +253,6 @@ final class CommentsViewModel: ObservableObject {
 
   func agreementTarget(forCommentID commentID: Int64) -> ContentAgreementTarget? {
     agreementTargetsByCommentID[commentID]
-  }
-
-  var parentContentRenderPlan: BrowseContentRenderPlan? {
-    indexedParentContentRenderPlan
-      ?? parentPost.map { BrowseContentRenderPlan(contents: $0.contents) }
-  }
-
-  func contentRenderPlan(for comment: BrowseComment) -> BrowseContentRenderPlan {
-    contentRenderPlansByCommentID[comment.id]
-      ?? BrowseContentRenderPlan(contents: comment.contents)
-  }
-
-  func renderRevision(for comment: BrowseComment) -> UInt64 {
-    commentRenderRevisionsByID[comment.id] ?? 0
   }
 
   private func load(
@@ -615,10 +596,6 @@ final class CommentsViewModel: ObservableObject {
     commentIDs.removeAll(keepingCapacity: true)
     indexedParentAgreementTarget = nil
     agreementTargetsByCommentID.removeAll(keepingCapacity: true)
-    commentsByID.removeAll(keepingCapacity: true)
-    contentRenderPlansByCommentID.removeAll(keepingCapacity: true)
-    commentRenderRevisionsByID.removeAll(keepingCapacity: true)
-    indexedParentContentRenderPlan = nil
     indexedAgreementContext = nil
     parentPost = nil
     thread = nil
@@ -738,39 +715,17 @@ final class CommentsViewModel: ObservableObject {
     comments: [BrowseComment]
   ) {
     commentIndexFullRebuildCount += 1
-    let previousCommentsByID = commentsByID
-    let previousRenderPlansByID = contentRenderPlansByCommentID
-    let previousRenderRevisionsByID = commentRenderRevisionsByID
     indexedAgreementContext = agreementContext(thread: thread, parentPost: parentPost)
     indexedParentAgreementTarget = thread.flatMap { thread in
       ContentAgreementTarget(thread: thread, parentPost: parentPost)
     }
-    indexedParentContentRenderPlan = BrowseContentRenderPlan(contents: parentPost.contents)
     var ids = Set<Int64>()
     var targets: [Int64: ContentAgreementTarget] = [:]
-    var lookup: [Int64: BrowseComment] = [:]
-    var renderPlans: [Int64: BrowseContentRenderPlan] = [:]
-    var renderRevisions: [Int64: UInt64] = [:]
     ids.reserveCapacity(comments.count)
     targets.reserveCapacity(comments.count)
-    lookup.reserveCapacity(comments.count)
-    renderPlans.reserveCapacity(comments.count)
-    renderRevisions.reserveCapacity(comments.count)
     var containsDisplayableComment = false
     for comment in comments {
       ids.insert(comment.id)
-      lookup[comment.id] = comment
-      if
-        previousCommentsByID[comment.id] == comment,
-        let previousPlan = previousRenderPlansByID[comment.id],
-        let previousRevision = previousRenderRevisionsByID[comment.id]
-      {
-        renderPlans[comment.id] = previousPlan
-        renderRevisions[comment.id] = previousRevision
-      } else {
-        renderPlans[comment.id] = BrowseContentRenderPlan(contents: comment.contents)
-        renderRevisions[comment.id] = allocateCommentRenderRevision()
-      }
       containsDisplayableComment = containsDisplayableComment
         || comment.localVisibility != .hidden
       if
@@ -789,9 +744,6 @@ final class CommentsViewModel: ObservableObject {
       hasDisplayableComments = containsDisplayableComment
     }
     agreementTargetsByCommentID = targets
-    commentsByID = lookup
-    contentRenderPlansByCommentID = renderPlans
-    commentRenderRevisionsByID = renderRevisions
   }
 
   private func indexCommentsIncrementally(_ newComments: [BrowseComment]) {
@@ -802,11 +754,6 @@ final class CommentsViewModel: ObservableObject {
     var discoveredDisplayableComment = false
     for comment in newComments {
       commentIDs.insert(comment.id)
-      commentsByID[comment.id] = comment
-      contentRenderPlansByCommentID[comment.id] = BrowseContentRenderPlan(
-        contents: comment.contents
-      )
-      commentRenderRevisionsByID[comment.id] = allocateCommentRenderRevision()
       discoveredDisplayableComment = discoveredDisplayableComment
         || comment.localVisibility != .hidden
       if
@@ -824,14 +771,6 @@ final class CommentsViewModel: ObservableObject {
     if !hasDisplayableComments, discoveredDisplayableComment {
       hasDisplayableComments = true
     }
-  }
-
-  private func allocateCommentRenderRevision() -> UInt64 {
-    nextCommentRenderRevision &+= 1
-    if nextCommentRenderRevision == 0 {
-      nextCommentRenderRevision = 1
-    }
-    return nextCommentRenderRevision
   }
 
   private func agreementContext(

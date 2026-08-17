@@ -155,21 +155,6 @@ final class ThreadScrollPositionTests: XCTestCase {
     )
   }
 
-  @MainActor
-  func testVisiblePostTrackerPublishesOnlyMembershipChanges() {
-    let tracker = ThreadVisiblePostTracker()
-
-    XCTAssertEqual(Set(tracker.update(postID: 2, isVisible: true) ?? []), [2])
-    XCTAssertNil(tracker.update(postID: 2, isVisible: true))
-    XCTAssertEqual(Set(tracker.update(postID: 3, isVisible: true) ?? []), [2, 3])
-    XCTAssertEqual(Set(tracker.update(postID: 2, isVisible: false) ?? []), [3])
-    XCTAssertNil(tracker.update(postID: 2, isVisible: false))
-    XCTAssertNil(tracker.update(postID: 0, isVisible: true))
-
-    tracker.reset()
-    XCTAssertTrue(tracker.visiblePostIDs.isEmpty)
-  }
-
   func testVisibilityRejectsInvalidIdentityAndViewport() {
     XCTAssertEqual(position(postID: 0), .empty)
     XCTAssertEqual(position(viewportHeight: 0), .empty)

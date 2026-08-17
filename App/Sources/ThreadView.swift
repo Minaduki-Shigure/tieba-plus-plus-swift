@@ -14,7 +14,6 @@ struct ThreadView: View {
   @State private var pageInput = ""
   @State private var scrollPosition = ThreadScrollPosition.empty
   @State private var scrollPositionCoalescer = ThreadScrollPositionCoalescer()
-  @State private var visiblePostTracker = ThreadVisiblePostTracker()
   @State private var linkedTarget: TiebaLinkTarget?
   @State private var restoredHistorySnapshot: ThreadHistorySnapshot?
   @State private var hasRecordedHistoryVisit = false
@@ -325,13 +324,11 @@ struct ThreadView: View {
     }
     .onChange(of: viewModel.options) { options in
       cancelPictureGallery()
-      visiblePostTracker.reset()
       scrollPositionCoalescer.reset()
       scrollPosition = .empty
       persistBrowseOptions(options)
     }
     .onDisappear {
-      visiblePostTracker.reset()
       scrollPositionCoalescer.cancelPendingPublication()
       if let latestVisiblePost, !viewModel.isRestoringPrependPosition {
         let options = viewModel.options
@@ -370,7 +367,6 @@ struct ThreadView: View {
       contentReportCoordinator?.invalidate(scopeID: reportScopeID)
       pendingCloudFavoriteAction = nil
       clearSelectableTextRoute()
-      visiblePostTracker.reset()
       scrollPositionCoalescer.reset()
       Task { @MainActor in
         scrollPosition = .empty
@@ -887,267 +883,253 @@ struct ThreadView: View {
   }
 
   private var postList: some View {
-    Group {
-      if #available(iOS 18.0, *) {
-        postList(viewportHeight: nil)
-      } else {
-        GeometryReader { viewport in
-          postList(viewportHeight: viewport.size.height)
-        }
-      }
-    }
-  }
-
-  private func postList(viewportHeight: CGFloat?) -> some View {
-    ScrollViewReader { proxy in
-      List {
-        if let firstPost = viewModel.firstPost {
-          LocallyFilteredContent(
-            visibility: effectiveVisibility(for: firstPost),
-            placeholder: "已屏蔽主题首楼"
-          ) {
-            VStack(spacing: 0) {
-              PostView(
-                post: firstPost,
-                renderRevision: viewModel.renderRevision(for: firstPost),
-                contentRenderPlan: viewModel.contentRenderPlan(for: firstPost),
-                forumID: viewModel.thread.forumID,
-                agreementTarget: viewModel.agreementTarget(forPostID: firstPost.id),
-                agreementFallbackScore: viewModel.thread.agreeScore,
-                originThread: viewModel.originThread,
-                poll: viewModel.poll,
-                service: service,
-                historyRepository: historyRepository,
-                favoritesRepository: favoritesRepository,
-                searchHistoryRepository: searchHistoryRepository,
-                selectableThreadTitle: selectableThreadTitle(for: firstPost),
-                isPureReadingMode: isPureReadingMode,
-                openImage: { contentOffset in
-                  openPictureGallery(post: firstPost, contentOffset: contentOffset)
-                },
-                openMentionedUser: openMentionedUser,
-                openTiebaLink: openTiebaLink,
-                requestAgreementChange: requestAgreementChange,
-                retryAgreement: retryAgreement,
-                cloudFavoriteTarget: threadCloudFavoriteTarget,
-                requestCloudFavoriteAction: requestFloorCloudFavoriteAction,
-                requestReply: replyEntriesVisible ? {
-                  requestReply(to: firstPost)
-                } : nil,
-                requestInlineCommentReply: replyEntriesVisible
-                  ? { comment in
-                    requestReply(
-                      toCommentID: comment.id,
-                      inParentPostID: firstPost.id
-                    )
-                  }
-                  : nil,
-                requestReplyIsAvailable: replyEntriesVisible,
-                requestInlineCommentReplyIsAvailable: replyEntriesVisible,
-                reportThread: viewModel.thread,
-                reportTarget: isPureReadingMode
-                  ? nil
-                  : ContentReportTarget(thread: viewModel.thread, post: firstPost),
-                openComments: { commentID in
-                  presentComments(
-                    threadID: firstPost.threadID,
+    GeometryReader { viewport in
+      ScrollViewReader { proxy in
+        ScrollView {
+          LazyVStack(spacing: 0) {
+            if let firstPost = viewModel.firstPost {
+              LocallyFilteredContent(
+                visibility: effectiveVisibility(for: firstPost),
+                placeholder: "已屏蔽主题首楼"
+              ) {
+                VStack(spacing: 0) {
+                  PostView(
+                    post: firstPost,
+                    forumID: viewModel.thread.forumID,
+                    agreementTarget: viewModel.agreementTarget(forPostID: firstPost.id),
+                    agreementFallbackScore: viewModel.thread.agreeScore,
+                    originThread: viewModel.originThread,
+                    poll: viewModel.poll,
+                    service: service,
+                    historyRepository: historyRepository,
+                    favoritesRepository: favoritesRepository,
+                    searchHistoryRepository: searchHistoryRepository,
+                    selectableThreadTitle: selectableThreadTitle(for: firstPost),
+                    isPureReadingMode: isPureReadingMode,
+                    openImage: { contentOffset in
+                      openPictureGallery(post: firstPost, contentOffset: contentOffset)
+                    },
+                    openMentionedUser: openMentionedUser,
+                    openTiebaLink: openTiebaLink,
+                    requestAgreementChange: requestAgreementChange,
+                    retryAgreement: retryAgreement,
+                    cloudFavoriteTarget: threadCloudFavoriteTarget,
+                    requestCloudFavoriteAction: requestFloorCloudFavoriteAction,
+                    requestReply: replyEntriesVisible ? {
+                      requestReply(to: firstPost)
+                    } : nil,
+                    requestInlineCommentReply: replyEntriesVisible
+                      ? { comment in
+                        requestReply(
+                          toCommentID: comment.id,
+                          inParentPostID: firstPost.id
+                        )
+                      }
+                      : nil,
+                    requestReplyIsAvailable: replyEntriesVisible,
+                    requestInlineCommentReplyIsAvailable: replyEntriesVisible,
+                    reportThread: viewModel.thread,
+                    reportTarget: isPureReadingMode
+                      ? nil
+                      : ContentReportTarget(thread: viewModel.thread, post: firstPost),
+                    openComments: { commentID in
+                      presentComments(
+                        threadID: firstPost.threadID,
+                        postID: firstPost.id,
+                        commentID: commentID
+                      )
+                    },
+                    selectText: presentSelectableText
+                  )
+                  .equatable()
+                  Divider()
+                    .padding(.leading, isPureReadingMode ? 0 : 52)
+                }
+              }
+              .background {
+                if #available(iOS 18.0, *) {
+                  EmptyView()
+                } else {
+                  ThreadPostVisibilityReader(
                     postID: firstPost.id,
-                    commentID: commentID
+                    viewportHeight: viewport.size.height,
+                    tracksReadingProgress: effectiveVisibility(for: firstPost) == .visible,
+                    tracksPrependAnchor: false
                   )
-                },
-                selectText: presentSelectableText
-              )
-              .equatable()
-              Divider()
-                .padding(.leading, isPureReadingMode ? 0 : 52)
+                }
+              }
+              .id(firstPost.id)
             }
-          }
-          .modifier(ThreadListRowModifier())
-          .modifier(
-            ThreadPostScrollVisibilityModifier(
-              postID: firstPost.id,
-              viewportHeight: viewportHeight,
-              tracksReadingProgress: effectiveVisibility(for: firstPost) == .visible,
-              tracksPrependAnchor: false,
-              onVisibilityChange: updatePostVisibility
-            )
-          )
-          .id(firstPost.id)
-        }
 
-        if viewModel.isLoadingPrevious {
-          ProgressView()
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .modifier(ThreadListRowModifier())
-        } else if let message = viewModel.loadPreviousError {
-          LoadMoreErrorView(message: message, retry: viewModel.retryLoadPrevious)
-            .disabled(
-              viewModel.isLoadingMore
-                || viewModel.isJumping
-                || viewModel.isCheckingLatestReplies
-            )
-            .modifier(ThreadListRowModifier())
-        } else if viewModel.canLoadPrevious, !viewModel.isJumping {
-          Button {
-            viewModel.loadPrevious(anchorPostID: prependAnchorPostID)
-          } label: {
-            Label("加载更早楼层", systemImage: "arrow.up")
-              .font(.subheadline)
-              .frame(maxWidth: .infinity)
-              .padding(.vertical, 12)
-          }
-          .buttonStyle(.plain)
-          .foregroundStyle(.tint)
-          .disabled(
-            viewModel.isLoadingMore
-              || viewModel.isAdjustingPrependPosition
-              || viewModel.isCheckingLatestReplies
-          )
-          .accessibilityIdentifier("thread-load-previous")
-          .modifier(ThreadListRowModifier())
-        }
+            if viewModel.isLoadingPrevious {
+              ProgressView()
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+            } else if let message = viewModel.loadPreviousError {
+              LoadMoreErrorView(message: message, retry: viewModel.retryLoadPrevious)
+                .disabled(
+                  viewModel.isLoadingMore
+                    || viewModel.isJumping
+                    || viewModel.isCheckingLatestReplies
+                )
+            } else if viewModel.canLoadPrevious, !viewModel.isJumping {
+              Button {
+                viewModel.loadPrevious(anchorPostID: prependAnchorPostID)
+              } label: {
+                Label("加载更早楼层", systemImage: "arrow.up")
+                  .font(.subheadline)
+                  .frame(maxWidth: .infinity)
+                  .padding(.vertical, 12)
+              }
+              .buttonStyle(.plain)
+              .foregroundStyle(.tint)
+              .disabled(
+                viewModel.isLoadingMore
+                  || viewModel.isAdjustingPrependPosition
+                  || viewModel.isCheckingLatestReplies
+              )
+              .accessibilityIdentifier("thread-load-previous")
+            }
 
-        ForEach(viewModel.posts) { post in
-          LocallyFilteredContent(
-            visibility: effectiveVisibility(for: post),
-            placeholder: post.floor > 0 ? "已屏蔽第 \(post.floor) 楼" : "已屏蔽此楼层"
-          ) {
-            VStack(spacing: 0) {
-              PostView(
-                post: post,
-                renderRevision: viewModel.renderRevision(for: post),
-                contentRenderPlan: viewModel.contentRenderPlan(for: post),
-                forumID: viewModel.thread.forumID,
-                agreementTarget: viewModel.agreementTarget(forPostID: post.id),
-                agreementFallbackScore: post.agreeScore,
-                originThread: nil,
-                poll: nil,
-                service: service,
-                historyRepository: historyRepository,
-                favoritesRepository: favoritesRepository,
-                searchHistoryRepository: searchHistoryRepository,
-                selectableThreadTitle: selectableThreadTitle(for: post),
-                isPureReadingMode: isPureReadingMode,
-                openImage: { contentOffset in
-                  openPictureGallery(post: post, contentOffset: contentOffset)
-                },
-                openMentionedUser: openMentionedUser,
-                openTiebaLink: openTiebaLink,
-                requestAgreementChange: requestAgreementChange,
-                retryAgreement: retryAgreement,
-                cloudFavoriteTarget: threadCloudFavoriteTarget,
-                requestCloudFavoriteAction: requestFloorCloudFavoriteAction,
-                requestReply: replyEntriesVisible ? {
-                  requestReply(to: post)
-                } : nil,
-                requestInlineCommentReply: replyEntriesVisible
-                  ? { comment in
-                    requestReply(
-                      toCommentID: comment.id,
-                      inParentPostID: post.id
-                    )
-                  }
-                  : nil,
-                requestReplyIsAvailable: replyEntriesVisible,
-                requestInlineCommentReplyIsAvailable: replyEntriesVisible,
-                reportThread: viewModel.thread,
-                reportTarget: isPureReadingMode
-                  ? nil
-                  : ContentReportTarget(thread: viewModel.thread, post: post),
-                openComments: { commentID in
-                  presentComments(
-                    threadID: post.threadID,
+            ForEach(viewModel.posts) { post in
+              LocallyFilteredContent(
+                visibility: effectiveVisibility(for: post),
+                placeholder: post.floor > 0 ? "已屏蔽第 \(post.floor) 楼" : "已屏蔽此楼层"
+              ) {
+                VStack(spacing: 0) {
+                  PostView(
+                    post: post,
+                    forumID: viewModel.thread.forumID,
+                    agreementTarget: viewModel.agreementTarget(forPostID: post.id),
+                    agreementFallbackScore: post.agreeScore,
+                    originThread: nil,
+                    poll: nil,
+                    service: service,
+                    historyRepository: historyRepository,
+                    favoritesRepository: favoritesRepository,
+                    searchHistoryRepository: searchHistoryRepository,
+                    selectableThreadTitle: selectableThreadTitle(for: post),
+                    isPureReadingMode: isPureReadingMode,
+                    openImage: { contentOffset in
+                      openPictureGallery(post: post, contentOffset: contentOffset)
+                    },
+                    openMentionedUser: openMentionedUser,
+                    openTiebaLink: openTiebaLink,
+                    requestAgreementChange: requestAgreementChange,
+                    retryAgreement: retryAgreement,
+                    cloudFavoriteTarget: threadCloudFavoriteTarget,
+                    requestCloudFavoriteAction: requestFloorCloudFavoriteAction,
+                    requestReply: replyEntriesVisible ? {
+                      requestReply(to: post)
+                    } : nil,
+                    requestInlineCommentReply: replyEntriesVisible
+                      ? { comment in
+                        requestReply(
+                          toCommentID: comment.id,
+                          inParentPostID: post.id
+                        )
+                      }
+                      : nil,
+                    requestReplyIsAvailable: replyEntriesVisible,
+                    requestInlineCommentReplyIsAvailable: replyEntriesVisible,
+                    reportThread: viewModel.thread,
+                    reportTarget: isPureReadingMode
+                      ? nil
+                      : ContentReportTarget(thread: viewModel.thread, post: post),
+                    openComments: { commentID in
+                      presentComments(
+                        threadID: post.threadID,
+                        postID: post.id,
+                        commentID: commentID
+                      )
+                    },
+                    selectText: presentSelectableText
+                  )
+                  .equatable()
+                  Divider()
+                    .padding(.leading, isPureReadingMode ? 0 : 52)
+                }
+              }
+              .background {
+                if #available(iOS 18.0, *) {
+                  EmptyView()
+                } else {
+                  ThreadPostVisibilityReader(
                     postID: post.id,
-                    commentID: commentID
+                    viewportHeight: viewport.size.height,
+                    tracksReadingProgress: effectiveVisibility(for: post) == .visible,
+                    tracksPrependAnchor: true
                   )
-                },
-                selectText: presentSelectableText
-              )
-              .equatable()
-              Divider()
-                .padding(.leading, isPureReadingMode ? 0 : 52)
+                }
+              }
+              .id(post.id)
+              .onAppear {
+                viewModel.loadMoreIfNeeded(current: post)
+              }
+            }
+            if viewModel.firstPost == nil && viewModel.posts.isEmpty && viewModel.state == .loaded {
+              EmptyStateView(title: "暂无楼层", systemImage: "bubble.left.and.bubble.right")
+                .padding(.vertical, 24)
+            }
+            Color.clear
+              .frame(height: 1)
+              .accessibilityHidden(true)
+              .onAppear { viewModel.loadMoreIfNeeded() }
+            if viewModel.isLoadingMore || viewModel.isJumping {
+              ProgressView()
+                .padding(20)
+            } else if let message = viewModel.loadMoreError {
+              LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
+            } else if viewModel.isCheckingLatestReplies {
+              ProgressView()
+                .padding(20)
+                .accessibilityLabel("正在检查新回复")
+            } else if let message = viewModel.latestRepliesError {
+              LoadMoreErrorView(message: message, retry: viewModel.retryLatestReplies)
+            } else if viewModel.canCheckLatestReplies {
+              Button(action: viewModel.checkLatestReplies) {
+                Label("检查新回复", systemImage: "arrow.clockwise")
+                  .font(.subheadline)
+                  .frame(maxWidth: .infinity)
+                  .padding(.vertical, 12)
+              }
+              .buttonStyle(.plain)
+              .foregroundStyle(.tint)
+              .accessibilityIdentifier("thread-check-latest-replies")
             }
           }
-          .modifier(ThreadListRowModifier())
-          .modifier(
-            ThreadPostScrollVisibilityModifier(
-              postID: post.id,
-              viewportHeight: viewportHeight,
-              tracksReadingProgress: effectiveVisibility(for: post) == .visible,
-              tracksPrependAnchor: true,
-              onVisibilityChange: updatePostVisibility
-            )
+          .modifier(ThreadScrollTargetLayoutModifier())
+        }
+        .coordinateSpace(name: "thread-scroll")
+        .onPreferenceChange(ThreadScrollPositionPreferenceKey.self) { position in
+          if #available(iOS 18.0, *) { return }
+          updateScrollPosition(position)
+        }
+        .modifier(
+          ThreadNativeScrollVisibilityModifier(
+            onChange: { visiblePostIDs in
+              updateScrollPosition(visiblePostIDs: visiblePostIDs)
+            }
           )
-          .onAppear {
-            viewModel.loadMoreIfNeeded(current: post)
-          }
-        }
-        if viewModel.firstPost == nil && viewModel.posts.isEmpty && viewModel.state == .loaded {
-          EmptyStateView(title: "暂无楼层", systemImage: "bubble.left.and.bubble.right")
-            .padding(.vertical, 24)
-            .modifier(ThreadListRowModifier())
-        }
-        Color.clear
-          .frame(height: 1)
-          .modifier(ThreadListRowModifier())
-          .accessibilityHidden(true)
-          .allowsHitTesting(false)
-          .onAppear { viewModel.loadMoreIfNeeded() }
-        if viewModel.isLoadingMore || viewModel.isJumping {
-          ProgressView()
-            .padding(20)
-            .frame(maxWidth: .infinity)
-            .modifier(ThreadListRowModifier())
-        } else if let message = viewModel.loadMoreError {
-          LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
-            .modifier(ThreadListRowModifier())
-        } else if viewModel.isCheckingLatestReplies {
-          ProgressView()
-            .padding(20)
-            .frame(maxWidth: .infinity)
-            .accessibilityLabel("正在检查新回复")
-            .modifier(ThreadListRowModifier())
-        } else if let message = viewModel.latestRepliesError {
-          LoadMoreErrorView(message: message, retry: viewModel.retryLatestReplies)
-            .modifier(ThreadListRowModifier())
-        } else if viewModel.canCheckLatestReplies {
-          Button(action: viewModel.checkLatestReplies) {
-            Label("检查新回复", systemImage: "arrow.clockwise")
-              .font(.subheadline)
-              .frame(maxWidth: .infinity)
-              .padding(.vertical, 12)
-          }
-          .buttonStyle(.plain)
-          .foregroundStyle(.tint)
-          .accessibilityIdentifier("thread-check-latest-replies")
-          .modifier(ThreadListRowModifier())
-        }
-      }
-      .listStyle(.plain)
-      .environment(\.defaultMinListRowHeight, 0)
-      .coordinateSpace(name: "thread-scroll")
-      .onPreferenceChange(ThreadScrollPositionPreferenceKey.self) { position in
-        if #available(iOS 18.0, *) { return }
-        updateScrollPosition(position)
-      }
-      .task(id: viewModel.scrollTargetPostID) {
-        guard let postID = viewModel.scrollTargetPostID else { return }
-        await Task.yield()
-        guard !Task.isCancelled else { return }
-        proxy.scrollTo(postID, anchor: .top)
-        viewModel.consumeScrollTarget()
-      }
-      .task(id: viewModel.prependRestoreSequence) {
-        guard viewModel.isRestoringPrependPosition else { return }
-        await Task.yield()
-        guard !Task.isCancelled else { return }
-        if let postID = viewModel.prependRestorePostID {
+        )
+        .task(id: viewModel.scrollTargetPostID) {
+          guard let postID = viewModel.scrollTargetPostID else { return }
+          await Task.yield()
+          guard !Task.isCancelled else { return }
           proxy.scrollTo(postID, anchor: .top)
+          viewModel.consumeScrollTarget()
         }
-        viewModel.consumePrependRestoreTarget()
+        .task(id: viewModel.prependRestoreSequence) {
+          guard viewModel.isRestoringPrependPosition else { return }
+          await Task.yield()
+          guard !Task.isCancelled else { return }
+          if let postID = viewModel.prependRestorePostID {
+            proxy.scrollTo(postID, anchor: .top)
+          }
+          viewModel.consumePrependRestoreTarget()
+        }
+        .refreshable { await viewModel.refresh() }
       }
-      .refreshable { await viewModel.refresh() }
     }
   }
 
@@ -1256,13 +1238,6 @@ struct ThreadView: View {
         hidesLocallyFilteredContent: isPureReadingMode
       )
     )
-  }
-
-  private func updatePostVisibility(postID: Int64, isVisible: Bool) {
-    guard
-      let visiblePostIDs = visiblePostTracker.update(postID: postID, isVisible: isVisible)
-    else { return }
-    updateScrollPosition(visiblePostIDs: visiblePostIDs)
   }
 
   private func updateScrollPosition(_ position: ThreadScrollPosition) {
@@ -1471,7 +1446,6 @@ struct ThreadView: View {
     scrollPositionCoalescer.reset()
     scrollPosition = .empty
     withAnimation { isPureReadingMode.toggle() }
-    updateScrollPosition(visiblePostIDs: Array(visiblePostTracker.visiblePostIDs))
   }
 
   private func requestAgreementChange(
@@ -1725,25 +1699,26 @@ enum ThreadScrollPositionResolver {
   ) -> ThreadScrollPosition {
     var readingProgressPostID: Int64?
     var prependAnchorPostID: Int64?
-    var readingProgressOrder = Int.min
-    var prependAnchorOrder = Int.max
+    let visiblePostIDs = Set(visiblePostIDs.filter { $0 > 0 })
+    let orderedTargets = visiblePostIDs.compactMap { postID in
+      targetsByPostID[postID].map { (postID, $0) }
+    }.sorted { lhs, rhs in
+      lhs.1.order < rhs.1.order
+    }
 
-    for postID in visiblePostIDs where postID > 0 {
-      guard let target = targetsByPostID[postID] else { continue }
+    for (postID, target) in orderedTargets {
       let visibility = hidesLocallyFilteredContent && target.localVisibility != .visible
         ? LocalContentVisibility.hidden
         : target.localVisibility
-      if visibility == .visible, target.order >= readingProgressOrder {
+      if visibility == .visible {
         readingProgressPostID = postID
-        readingProgressOrder = target.order
       }
       if
+        prependAnchorPostID == nil,
         target.tracksPrependAnchor,
-        visibility != .hidden,
-        target.order < prependAnchorOrder
+        visibility != .hidden
       {
         prependAnchorPostID = postID
-        prependAnchorOrder = target.order
       }
     }
     return ThreadScrollPosition(
@@ -1817,63 +1792,30 @@ private struct ThreadPostVisibilityReader: View {
   }
 }
 
-private struct ThreadListRowModifier: ViewModifier {
+private struct ThreadScrollTargetLayoutModifier: ViewModifier {
+  @ViewBuilder
   func body(content: Content) -> some View {
-    content
-      .listRowInsets(EdgeInsets())
-      .listRowSeparator(.hidden)
+    if #available(iOS 18.0, *) {
+      content.scrollTargetLayout()
+    } else {
+      content
+    }
   }
 }
 
-private struct ThreadPostScrollVisibilityModifier: ViewModifier {
-  let postID: Int64
-  let viewportHeight: CGFloat?
-  let tracksReadingProgress: Bool
-  let tracksPrependAnchor: Bool
-  let onVisibilityChange: (Int64, Bool) -> Void
+private struct ThreadNativeScrollVisibilityModifier: ViewModifier {
+  let onChange: ([Int64]) -> Void
 
   @ViewBuilder
   func body(content: Content) -> some View {
     if #available(iOS 18.0, *) {
       content
-        .onScrollVisibilityChange(threshold: 0) { isVisible in
-          onVisibilityChange(postID, isVisible)
+        .onScrollTargetVisibilityChange(idType: Int64.self, threshold: 0) {
+          onChange($0)
         }
-        .onDisappear {
-          onVisibilityChange(postID, false)
-        }
-    } else if let viewportHeight {
-      content.background {
-        ThreadPostVisibilityReader(
-          postID: postID,
-          viewportHeight: viewportHeight,
-          tracksReadingProgress: tracksReadingProgress,
-          tracksPrependAnchor: tracksPrependAnchor
-        )
-      }
     } else {
       content
     }
-  }
-}
-
-@MainActor
-final class ThreadVisiblePostTracker {
-  private(set) var visiblePostIDs: Set<Int64> = []
-
-  func update(postID: Int64, isVisible: Bool) -> [Int64]? {
-    guard postID > 0 else { return nil }
-    let changed: Bool
-    if isVisible {
-      changed = visiblePostIDs.insert(postID).inserted
-    } else {
-      changed = visiblePostIDs.remove(postID) != nil
-    }
-    return changed ? Array(visiblePostIDs) : nil
-  }
-
-  func reset() {
-    visiblePostIDs.removeAll(keepingCapacity: true)
   }
 }
 
@@ -1945,8 +1887,6 @@ enum ContentAgreementControlPresentation: Equatable {
 
 private struct PostView: View, Equatable {
   let post: BrowsePost
-  let renderRevision: UInt64
-  let contentRenderPlan: BrowseContentRenderPlan
   let forumID: Int64
   let agreementTarget: ContentAgreementTarget?
   let agreementFallbackScore: Int
@@ -1981,8 +1921,7 @@ private struct PostView: View, Equatable {
   @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
 
   nonisolated static func == (lhs: PostView, rhs: PostView) -> Bool {
-    lhs.post.id == rhs.post.id
-      && lhs.renderRevision == rhs.renderRevision
+    lhs.post == rhs.post
       && lhs.forumID == rhs.forumID
       && lhs.agreementTarget == rhs.agreementTarget
       && lhs.agreementFallbackScore == rhs.agreementFallbackScore
@@ -2014,7 +1953,7 @@ private struct PostView: View, Equatable {
       }
 
       BrowseContentView(
-        renderPlan: contentRenderPlan,
+        contents: post.contents,
         onImageOpen: openImage,
         onUserMention: openMentionedUser,
         onTiebaLink: openTiebaLink,

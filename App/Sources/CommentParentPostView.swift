@@ -2,7 +2,6 @@ import SwiftUI
 
 struct CommentParentPostView: View {
   let post: CommentParentPostContext
-  let contentRenderPlan: BrowseContentRenderPlan
   let thread: BrowseThread?
   let agreementTarget: ContentAgreementTarget?
   let service:
@@ -67,7 +66,7 @@ struct CommentParentPostView: View {
       }
 
       BrowseContentView(
-        renderPlan: contentRenderPlan,
+        contents: post.contents,
         onUserMention: openMentionedUser,
         onTiebaLink: openTiebaLink,
         allowsDirectTextSelection: false,

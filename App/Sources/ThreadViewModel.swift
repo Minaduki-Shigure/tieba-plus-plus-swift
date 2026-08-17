@@ -47,8 +47,6 @@ final class ThreadViewModel: ObservableObject {
   private var descendingFallbackPage: Int?
   private var agreementTargetsByPostID: [Int64: ContentAgreementTarget] = [:]
   private var postsByID: [Int64: BrowsePost] = [:]
-  private var contentRenderPlansByPostID: [Int64: BrowseContentRenderPlan] = [:]
-  private var postRenderRevisionsByID: [Int64: UInt64] = [:]
   private(set) var scrollTargetsByPostID: [Int64: ThreadScrollTargetDescriptor] = [:]
   private(set) var resolvedThreadAuthorAvatarURL: URL?
   private(set) var firstDisplayableReplyPostID: Int64?
@@ -56,7 +54,6 @@ final class ThreadViewModel: ObservableObject {
   private var nextScrollTargetOrder = 0
   private(set) var fullPostIndexRebuildCount = 0
   private(set) var incrementallyIndexedPostCount = 0
-  private var nextPostRenderRevision: UInt64 = 0
 
   init(
     thread: BrowseThread,
@@ -918,8 +915,6 @@ final class ThreadViewModel: ObservableObject {
         agreementTargetsByPostID[post.id] = target
       }
       postsByID[post.id] = post
-      contentRenderPlansByPostID[post.id] = BrowseContentRenderPlan(contents: post.contents)
-      postRenderRevisionsByID[post.id] = allocatePostRenderRevision()
       scrollTargetsByPostID[post.id] = ThreadScrollTargetDescriptor(
         order: nextScrollTargetOrder,
         localVisibility: post.localVisibility,
@@ -950,14 +945,6 @@ final class ThreadViewModel: ObservableObject {
 
   func post(withID postID: Int64) -> BrowsePost? {
     postsByID[postID]
-  }
-
-  func contentRenderPlan(for post: BrowsePost) -> BrowseContentRenderPlan {
-    contentRenderPlansByPostID[post.id] ?? BrowseContentRenderPlan(contents: post.contents)
-  }
-
-  func renderRevision(for post: BrowsePost) -> UInt64 {
-    postRenderRevisionsByID[post.id] ?? 0
   }
 
   func agreementTarget(forPostID postID: Int64) -> ContentAgreementTarget? {
@@ -1040,19 +1027,12 @@ final class ThreadViewModel: ObservableObject {
 
   private func rebuildPostIndexes() {
     fullPostIndexRebuildCount += 1
-    let previousPostsByID = postsByID
-    let previousRenderPlansByID = contentRenderPlansByPostID
-    let previousRenderRevisionsByID = postRenderRevisionsByID
     var agreementTargets: [Int64: ContentAgreementTarget] = [:]
     var lookup: [Int64: BrowsePost] = [:]
-    var renderPlans: [Int64: BrowseContentRenderPlan] = [:]
-    var renderRevisions: [Int64: UInt64] = [:]
     var scrollTargets: [Int64: ThreadScrollTargetDescriptor] = [:]
     let capacity = posts.count + (firstPost == nil ? 0 : 1)
     agreementTargets.reserveCapacity(capacity)
     lookup.reserveCapacity(capacity)
-    renderPlans.reserveCapacity(capacity)
-    renderRevisions.reserveCapacity(capacity)
     scrollTargets.reserveCapacity(capacity)
 
     var order = 0
@@ -1063,14 +1043,6 @@ final class ThreadViewModel: ObservableObject {
         agreementTargets[firstPost.id] = target
       }
       lookup[firstPost.id] = firstPost
-      let renderState = retainedOrNewRenderState(
-        for: firstPost,
-        previousPostsByID: previousPostsByID,
-        previousPlansByID: previousRenderPlansByID,
-        previousRevisionsByID: previousRenderRevisionsByID
-      )
-      renderPlans[firstPost.id] = renderState.plan
-      renderRevisions[firstPost.id] = renderState.revision
       scrollTargets[firstPost.id] = ThreadScrollTargetDescriptor(
         order: order,
         localVisibility: firstPost.localVisibility,
@@ -1083,14 +1055,6 @@ final class ThreadViewModel: ObservableObject {
         agreementTargets[post.id] = target
       }
       lookup[post.id] = post
-      let renderState = retainedOrNewRenderState(
-        for: post,
-        previousPostsByID: previousPostsByID,
-        previousPlansByID: previousRenderPlansByID,
-        previousRevisionsByID: previousRenderRevisionsByID
-      )
-      renderPlans[post.id] = renderState.plan
-      renderRevisions[post.id] = renderState.revision
       scrollTargets[post.id] = ThreadScrollTargetDescriptor(
         order: order,
         localVisibility: post.localVisibility,
@@ -1106,40 +1070,11 @@ final class ThreadViewModel: ObservableObject {
     }
     agreementTargetsByPostID = agreementTargets
     postsByID = lookup
-    contentRenderPlansByPostID = renderPlans
-    postRenderRevisionsByID = renderRevisions
     scrollTargetsByPostID = scrollTargets
     self.firstDisplayableReplyPostID = firstDisplayableReplyPostID
     self.firstVisibleReplyPostID = firstVisibleReplyPostID
     nextScrollTargetOrder = order
     refreshResolvedThreadAuthorAvatarURL()
-  }
-
-  private func retainedOrNewRenderState(
-    for post: BrowsePost,
-    previousPostsByID: [Int64: BrowsePost],
-    previousPlansByID: [Int64: BrowseContentRenderPlan],
-    previousRevisionsByID: [Int64: UInt64]
-  ) -> (plan: BrowseContentRenderPlan, revision: UInt64) {
-    if
-      previousPostsByID[post.id] == post,
-      let previousPlan = previousPlansByID[post.id],
-      let previousRevision = previousRevisionsByID[post.id]
-    {
-      return (previousPlan, previousRevision)
-    }
-    return (
-      BrowseContentRenderPlan(contents: post.contents),
-      allocatePostRenderRevision()
-    )
-  }
-
-  private func allocatePostRenderRevision() -> UInt64 {
-    nextPostRenderRevision &+= 1
-    if nextPostRenderRevision == 0 {
-      nextPostRenderRevision = 1
-    }
-    return nextPostRenderRevision
   }
 
   private func refreshResolvedThreadAuthorAvatarURL() {

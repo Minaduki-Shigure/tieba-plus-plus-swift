@@ -2,7 +2,7 @@ import SwiftUI
 import TiebaCore
 
 struct BrowseContentView: View {
-  let renderPlan: BrowseContentRenderPlan
+  let contents: [BrowseContent]
   let imageLayout: BrowseContentImageLayout
   let onImageOpen: ((Int) -> Void)?
   let onUserMention: ((Int64) -> Void)?
@@ -29,7 +29,7 @@ struct BrowseContentView: View {
     tracksAnimationVisibility: Bool = false,
     maximumPreviewPixelSize: Int = 1_600
   ) {
-    self.renderPlan = BrowseContentRenderPlan(contents: contents)
+    self.contents = contents
     self.imageLayout = imageLayout
     self.onImageOpen = onImageOpen
     self.onUserMention = onUserMention
@@ -39,29 +39,13 @@ struct BrowseContentView: View {
     self.maximumPreviewPixelSize = max(maximumPreviewPixelSize, 1)
   }
 
-  init(
-    renderPlan: BrowseContentRenderPlan,
-    imageLayout: BrowseContentImageLayout = .responsive,
-    onImageOpen: ((Int) -> Void)? = nil,
-    onUserMention: ((Int64) -> Void)? = nil,
-    onTiebaLink: ((TiebaLinkTarget) -> Void)? = nil,
-    allowsDirectTextSelection: Bool = true,
-    tracksAnimationVisibility: Bool = false,
-    maximumPreviewPixelSize: Int = 1_600
-  ) {
-    self.renderPlan = renderPlan
-    self.imageLayout = imageLayout
-    self.onImageOpen = onImageOpen
-    self.onUserMention = onUserMention
-    self.onTiebaLink = onTiebaLink
-    self.allowsDirectTextSelection = allowsDirectTextSelection
-    self.tracksAnimationVisibility = tracksAnimationVisibility
-    self.maximumPreviewPixelSize = max(maximumPreviewPixelSize, 1)
+  private var blocks: [BrowseContentBlock] {
+    BrowseContentBlock.makeBlocks(contents)
   }
 
   @ViewBuilder
   var body: some View {
-    if onImageOpen == nil, renderPlan.containsImage {
+    if onImageOpen == nil {
       content
         .fullScreenCover(item: $imageGalleryPresentation) { presentation in
           ImageViewer(
@@ -76,14 +60,10 @@ struct BrowseContentView: View {
 
   private var content: some View {
     VStack(alignment: .leading, spacing: 9) {
-      ForEach(renderPlan.blocks) { block in
+      ForEach(blocks) { block in
         switch block {
-        case .inline(let contentOffset, let contents):
-          inlineContent(
-            contents,
-            plainText: renderPlan.plainInlineTextByBlockID[.inline(contentOffset)],
-            linkedText: renderPlan.linkedInlineTextByBlockID[.inline(contentOffset)]
-          )
+        case .inline(_, let contents):
+          inlineContent(contents)
         case .imageRun(let images):
           BrowseImageMasonryLayout(
             imageLayout: imageLayout,
@@ -106,21 +86,11 @@ struct BrowseContentView: View {
   }
 
   @ViewBuilder
-  private func inlineContent(
-    _ contents: [BrowseContent],
-    plainText: String?,
-    linkedText: AttributedString?
-  ) -> some View {
-    if let plainText {
+  private func inlineContent(_ contents: [BrowseContent]) -> some View {
+    if let plainText = Self.plainInlineText(contents) {
       Text(plainText)
         .modifier(DirectTextSelectionModifier(isEnabled: allowsDirectTextSelection))
         .fixedSize(horizontal: false, vertical: true)
-    } else if let linkedText, onUserMention != nil || onTiebaLink != nil {
-      Text(linkedText)
-        .tint(appAccentColor.color)
-        .modifier(DirectTextSelectionModifier(isEnabled: allowsDirectTextSelection))
-        .fixedSize(horizontal: false, vertical: true)
-        .environment(\.openURL, contentOpenURLAction)
     } else {
       Text(
         Self.inlineText(
@@ -203,7 +173,7 @@ struct BrowseContentView: View {
           onImageOpen(image.contentOffset)
         } else {
           imageGalleryPresentation = ImageGalleryPresentation(
-            contents: renderPlan.contents,
+            contents: contents,
             selectedContentOffset: image.contentOffset
           )
         }
@@ -269,13 +239,7 @@ struct BrowseContentView: View {
     return result
   }
 
-  nonisolated static func plainInlineText(_ contents: [BrowseContent]) -> String? {
-    BrowseContentPlainTextProjection.project(contents)
-  }
-}
-
-enum BrowseContentPlainTextProjection {
-  nonisolated static func project(_ contents: [BrowseContent]) -> String? {
+  static func plainInlineText(_ contents: [BrowseContent]) -> String? {
     if contents.count == 1, case .text(let text) = contents[0] {
       return text
     }
@@ -295,43 +259,7 @@ enum BrowseContentPlainTextProjection {
     }
     return result
   }
-}
 
-enum BrowseContentLinkedTextProjection {
-  nonisolated static func canCache(_ contents: [BrowseContent]) -> Bool {
-    !contents.contains { content in
-      guard case .mention(_, let userID) = content else { return false }
-      return TiebaLink.appURL(for: .user(userID)) == nil
-    }
-  }
-
-  nonisolated static func project(_ contents: [BrowseContent]) -> AttributedString {
-    var result = AttributedString()
-    for content in contents {
-      var fragment: AttributedString
-      switch content {
-      case .text(let text):
-        fragment = AttributedString(text)
-      case .mention(let name, let userID):
-        fragment = AttributedString("@\(name)")
-        fragment.link = TiebaLink.appURL(for: .user(userID))
-      case .link(let label, let url):
-        fragment = AttributedString(label.isEmpty ? url.host ?? url.absoluteString : label)
-        fragment.link = url
-      case .emoticon(let name, _):
-        fragment = AttributedString(TiebaClassicEmoticonCatalog.token(for: name) ?? name)
-      case .unsupported(let label):
-        fragment = AttributedString("[\(label)]")
-      case .image, .video, .voice:
-        continue
-      }
-      result.append(fragment)
-    }
-    return result
-  }
-}
-
-extension BrowseContentView {
   static func mentionURL(for userID: Int64) -> URL? {
     TiebaLink.appURL(for: .user(userID))
   }
@@ -462,40 +390,6 @@ enum BrowseContentBlock: Identifiable, Equatable, Sendable {
     flushInline()
     flushImages()
     return result
-  }
-}
-
-struct BrowseContentRenderPlan: Equatable, Sendable {
-  let contents: [BrowseContent]
-  let blocks: [BrowseContentBlock]
-  let plainInlineTextByBlockID: [BrowseContentBlockID: String]
-  let linkedInlineTextByBlockID: [BrowseContentBlockID: AttributedString]
-  let containsImage: Bool
-
-  nonisolated init(contents: [BrowseContent]) {
-    self.contents = contents
-    let blocks = BrowseContentBlock.makeBlocks(contents)
-    self.blocks = blocks
-    var plainInlineTextByBlockID: [BrowseContentBlockID: String] = [:]
-    var linkedInlineTextByBlockID: [BrowseContentBlockID: AttributedString] = [:]
-    plainInlineTextByBlockID.reserveCapacity(blocks.count)
-    linkedInlineTextByBlockID.reserveCapacity(blocks.count)
-    for block in blocks {
-      guard case .inline(_, let inlineContents) = block else { continue }
-      if let plainText = BrowseContentPlainTextProjection.project(inlineContents) {
-        plainInlineTextByBlockID[block.id] = plainText
-      } else if BrowseContentLinkedTextProjection.canCache(inlineContents) {
-        linkedInlineTextByBlockID[block.id] = BrowseContentLinkedTextProjection.project(
-          inlineContents
-        )
-      }
-    }
-    self.plainInlineTextByBlockID = plainInlineTextByBlockID
-    self.linkedInlineTextByBlockID = linkedInlineTextByBlockID
-    self.containsImage = contents.contains { content in
-      if case .image = content { return true }
-      return false
-    }
   }
 }
 
