@@ -20,26 +20,27 @@ and its verified metadata enters the public app source.
 | Local features | Available for history, favorites, filtering, appearance, media preferences, account-isolated followed-forum pinning and layout, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
 | Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, and equivalent new-topic creation are in device validation. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
-| TiebaLite parity | Current `main` after the thread-performance rollback and the public `v0.60.5-alpha.1` snapshot retain the same product scope: about 80% overall (estimated range 78–81%, with 19–22% remaining); anonymous reading and media: about 91–95% |
-| Distribution | The public SideStore/LiveContainer source currently serves `v0.60.5-alpha.1` (build 68) |
+| TiebaLite parity | Current `main` and the public `v0.60.6-alpha.1` rollback snapshot have the same product scope: about 80% overall (estimated range 78–81%, with 19–22% remaining); anonymous reading and media: about 91–95% |
+| Distribution | The public SideStore/LiveContainer source currently serves `v0.60.6-alpha.1` (build 69) |
 
 ### Release and validation
 
-- **Current alpha:** `v0.60.5-alpha.1` publishes all end-user app-code changes
+- **Current alpha:** `v0.60.6-alpha.1` publishes all end-user app-code changes
   described below, including
   personalized and concern feeds, expanded public and
   account-bound reads, bounded animated-media and image-cache support, local
   followed-forum management, and guarded creation and social actions. Account
   reads and writes that are marked experimental still require disposable-account
   or physical-device validation.
-- **Current `main` rollback:** Physical-device testing on iOS 18.7.2 found that
+- **`v0.60.6-alpha.1` rollback scope:** Physical-device testing on iOS 18.7.2
+  found that
   the `v0.60.5-alpha.1` thread `List`, per-row visibility, and render-plan cache
-  experiment made long floor and reply scrolling slower. Current `main` reverts
-  that complete experiment while retaining the release's feature scope. The
-  public source continues to serve the immutable `v0.60.5-alpha.1` artifact
-  until a separately tested corrective release is tagged; `v0.60.4-alpha.1`
-  remains available in source history for the previous scrolling behavior.
-- **`v0.60.5-alpha.1` release scope:** The complete Discovery section appears
+  experiment made long floor and reply scrolling slower. This release reverts
+  that complete experiment and restores the `v0.60.4-alpha.1` application and
+  test implementation while retaining every end-user feature added through
+  `v0.60.5-alpha.1`. No replacement performance experiment is included.
+- **Historical `v0.60.5-alpha.1` release scope:** The complete Discovery section
+  appears
   first on Home. Thread reading now uses a plain `List` so SwiftUI can manage
   offscreen, variable-height floors through row virtualization instead of
   relying on `LazyVStack` height estimation.
@@ -213,10 +214,10 @@ and its verified metadata enters the public app source.
   `SFSafariViewController`: the App never injects its Keychain BDUSS/STOKEN,
   cannot observe submission, and cannot prove that the browser's Baidu account
   matches the active App account. The user must verify or complete browser login.
-  All capabilities in this release-scope block are included in the public
-  `v0.60.5-alpha.1` IPA after the tagged commit and artifact passed the release
-  checks.
-- **Non-user-facing image-creation foundation:** The public `v0.60.5-alpha.1`
+  All non-performance capabilities in this release-scope block remain included
+  in the public `v0.60.6-alpha.1` IPA after the rollback tag and artifact passed
+  the release checks.
+- **Non-user-facing image-creation foundation:** The public `v0.60.6-alpha.1`
   app-code snapshot contains a strict HTTPS static-image chunk-upload contract and
   private, metadata-stripping attachment processing/storage. It is not connected
   to either composer, cannot initiate an upload from the UI, and receives no
@@ -249,7 +250,7 @@ and its verified metadata enters the public app source.
   pass. After the release asset is published and reverified, the release workflow
   derives its date, download URL, byte size, and SHA-256 and updates the source
   atomically; version or concurrent-source mismatches fail closed. The source
-  currently distributes the verified `v0.60.5-alpha.1` IPA (build 68).
+  currently distributes the verified `v0.60.6-alpha.1` IPA (build 69).
 - **Login hotfix:** `v0.54.0-alpha.1` can reach Tieba's account page without
   completing because its callback and Cookie matching are too strict.
   `v0.54.1-alpha.1` made that failure explicit and confirmed that iOS 18.7.2
@@ -266,7 +267,7 @@ and its verified metadata enters the public app source.
   topic pagination are available. The personalized feed has a default-off
   setting that locally retains only threads whose stable forum ID occurs in the
   active account's complete followed-forum index. Both feeds are included in the
-  public `v0.60.5-alpha.1` IPA. Recommendation dislike feedback remains disabled.
+  public `v0.60.6-alpha.1` IPA. Recommendation dislike feedback remains disabled.
 - **Search:** Forum, thread, and user search are separated by category. Global
   and per-forum post search provide the supported sort and content filters,
   local history, and optional credential-free suggestions.
@@ -607,7 +608,7 @@ and its verified metadata enters the public app source.
   about 19–22%; its anonymous reading and media subtotal remains about 91–95%.
   This measures implemented end-to-end workflows with partial credit for
   device-validation gates; it is not a claim that every path is release-ready.
-  The public `v0.60.5-alpha.1` app-code snapshot has the same estimated scope.
+  The public `v0.60.6-alpha.1` app-code snapshot has the same estimated scope.
   The largest remaining gaps are
   rich-media creation, background unread handling, broader settings, remaining
   account/social actions, unresolvable cloud-favorite rows, and moderation.
