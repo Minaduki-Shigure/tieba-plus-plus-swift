@@ -158,6 +158,10 @@ jobs:
           test -s "$ARTIFACT_DIR/metrics.json"
           jq empty "$ARTIFACT_DIR/metrics.json"
 
+      - name: Report measurement diagnostics
+        if: ${{ always() && steps.metrics.outcome == 'failure' }}
+        run: ruby Scripts/report_xcode_errors.rb "$ARTIFACT_DIR/metrics-xcodebuild.log"
+
       - name: Record Time Profiler trace
         id: time_profiler
         if: ${{ steps.build_profile.outcome == 'success' }}
@@ -206,6 +210,7 @@ jobs:
           wait "$driver_pid"
           driver_status=$?
           toc_status=1
+          profile_export_status=1
           if [ -d "$ARTIFACT_DIR/time-profiler.trace" ]; then
             xcrun xctrace export \
               --input "$ARTIFACT_DIR/time-profiler.trace" \
@@ -213,14 +218,28 @@ jobs:
               --output "$ARTIFACT_DIR/time-profiler-toc.xml" \
               >> "$ARTIFACT_DIR/xctrace.log" 2>&1
             toc_status=$?
+            if [ "$toc_status" -eq 0 ]; then
+              xcrun xctrace export \
+                --input "$ARTIFACT_DIR/time-profiler.trace" \
+                --xpath '/trace-toc/run[@number="1"]/data/table[@schema="time-profile"]' \
+                --output "$ARTIFACT_DIR/time-profiler-samples.xml" \
+                >> "$ARTIFACT_DIR/xctrace.log" 2>&1
+              profile_export_status=$?
+            fi
           fi
           set -e
-          echo "trace_status=$trace_status toc_status=$toc_status driver_status=$driver_status" \
-            >> "$ARTIFACT_DIR/xctrace.log"
+          {
+            echo "trace_status=$trace_status"
+            echo "toc_status=$toc_status"
+            echo "profile_export_status=$profile_export_status"
+            echo "driver_status=$driver_status"
+          } >> "$ARTIFACT_DIR/xctrace.log"
           if [ "$trace_status" -ne 0 ]; then exit "$trace_status"; fi
           if [ ! -d "$ARTIFACT_DIR/time-profiler.trace" ]; then exit 1; fi
           if [ "$toc_status" -ne 0 ]; then exit "$toc_status"; fi
           if [ ! -s "$ARTIFACT_DIR/time-profiler-toc.xml" ]; then exit 1; fi
+          if [ "$profile_export_status" -ne 0 ]; then exit "$profile_export_status"; fi
+          if [ ! -s "$ARTIFACT_DIR/time-profiler-samples.xml" ]; then exit 1; fi
           if [ "$driver_status" -ne 0 ]; then exit "$driver_status"; fi
 
       - name: Sample long-text call stacks
@@ -299,6 +318,7 @@ jobs:
             --sample "$ARTIFACT_DIR/long-plain-text.sample.txt" \
             --xctrace-log "$ARTIFACT_DIR/xctrace.log" \
             --xctrace-toc "$ARTIFACT_DIR/time-profiler-toc.xml" \
+            --xctrace-profile "$ARTIFACT_DIR/time-profiler-samples.xml" \
             --environment "$ARTIFACT_DIR/environment.txt" \
             --output "$ARTIFACT_DIR/report.md"
           cat "$ARTIFACT_DIR/report.md" >> "$GITHUB_STEP_SUMMARY"
@@ -312,7 +332,6 @@ jobs:
           PROFILE_METRICS_OUTCOME: ${{ steps.metrics.outcome }}
           PROFILE_METRICS_EXPORT_OUTCOME: ${{ steps.metrics_export.outcome }}
           PROFILE_XCTRACE_OUTCOME: ${{ steps.time_profiler.outcome }}
-          PROFILE_SAMPLE_OUTCOME: ${{ steps.sample_stacks.outcome }}
         run: |
           set -euo pipefail
           conclusion=neutral
@@ -320,8 +339,7 @@ jobs:
             && [ "$PROFILE_SYMBOLS_OUTCOME" = success ] \
             && [ "$PROFILE_METRICS_OUTCOME" = success ] \
             && [ "$PROFILE_METRICS_EXPORT_OUTCOME" = success ] \
-            && [ "$PROFILE_XCTRACE_OUTCOME" = success ] \
-            && [ "$PROFILE_SAMPLE_OUTCOME" = success ]; then
+            && [ "$PROFILE_XCTRACE_OUTCOME" = success ]; then
             conclusion=success
           fi
           export PROFILE_CHECK_CONCLUSION="$conclusion"
@@ -367,6 +385,5 @@ jobs:
           steps.symbols.outcome == 'failure' ||
           steps.metrics.outcome == 'failure' ||
           steps.metrics_export.outcome == 'failure' ||
-          steps.time_profiler.outcome == 'failure' ||
-          steps.sample_stacks.outcome == 'failure') }}
+          steps.time_profiler.outcome == 'failure') }}
         run: exit 1

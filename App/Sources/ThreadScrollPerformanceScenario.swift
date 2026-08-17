@@ -215,8 +215,8 @@
 
     private static func comment(postID: Int64, floor: Int, reply: Int) -> BrowseComment {
       BrowseComment(
-        id: postID * 10 + Int64(reply),
-        authorID: 20_000 + Int64(floor * 10 + reply),
+        id: postID * 100 + Int64(reply),
+        authorID: 20_000 + Int64(floor * 100 + reply),
         authorName: "回复用户 \(reply)",
         authorPortraitURL: nil,
         createdAt: nil,
