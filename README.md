@@ -20,7 +20,7 @@ and its verified metadata enters the public app source.
 | Local features | Available for history, favorites, filtering, appearance, media preferences, account-isolated followed-forum pinning and layout, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
 | Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, and equivalent new-topic creation are in device validation. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
-| TiebaLite parity | Current `main` source and the public `v0.60.5-alpha.1` app-code snapshot: about 80% of full product scope (estimated range 78–81%, with 19–22% remaining); anonymous reading and media: about 91–95% |
+| TiebaLite parity | Current `main` after the thread-performance rollback and the public `v0.60.5-alpha.1` snapshot retain the same product scope: about 80% overall (estimated range 78–81%, with 19–22% remaining); anonymous reading and media: about 91–95% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.60.5-alpha.1` (build 68) |
 
 ### Release and validation
@@ -32,6 +32,13 @@ and its verified metadata enters the public app source.
   followed-forum management, and guarded creation and social actions. Account
   reads and writes that are marked experimental still require disposable-account
   or physical-device validation.
+- **Current `main` rollback:** Physical-device testing on iOS 18.7.2 found that
+  the `v0.60.5-alpha.1` thread `List`, per-row visibility, and render-plan cache
+  experiment made long floor and reply scrolling slower. Current `main` reverts
+  that complete experiment while retaining the release's feature scope. The
+  public source continues to serve the immutable `v0.60.5-alpha.1` artifact
+  until a separately tested corrective release is tagged; `v0.60.4-alpha.1`
+  remains available in source history for the previous scrolling behavior.
 - **`v0.60.5-alpha.1` release scope:** The complete Discovery section appears
   first on Home. Thread reading now uses a plain `List` so SwiftUI can manage
   offscreen, variable-height floors through row virtualization instead of
