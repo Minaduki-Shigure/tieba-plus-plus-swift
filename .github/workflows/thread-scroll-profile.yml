@@ -105,6 +105,10 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build-for-testing 2>&1 | tee "$ARTIFACT_DIR/build.log"
 
+      - name: Report profile build diagnostics
+        if: ${{ always() && steps.build_profile.outcome == 'failure' }}
+        run: ruby Scripts/report_xcode_errors.rb "$ARTIFACT_DIR/build.log"
+
       - name: Collect application symbols
         id: symbols
         if: ${{ steps.build_profile.outcome == 'success' }}
@@ -117,7 +121,7 @@ jobs:
           ditto "$symbol_path" "$ARTIFACT_DIR/TiebaPlusPlus.app.dSYM"
           test -f "$ARTIFACT_DIR/TiebaPlusPlus.app.dSYM/Contents/Info.plist"
 
-      - name: Measure three deterministic scroll scenarios
+      - name: Measure four deterministic scroll scenarios
         id: metrics
         if: ${{ steps.build_profile.outcome == 'success' }}
         continue-on-error: true
@@ -290,6 +294,7 @@ jobs:
           } >> "$ARTIFACT_DIR/environment.txt"
           ruby Scripts/summarize_thread_scroll_profile.rb \
             --metrics "$ARTIFACT_DIR/metrics.json" \
+            --build-log "$ARTIFACT_DIR/build.log" \
             --xcode-log "$ARTIFACT_DIR/metrics-xcodebuild.log" \
             --sample "$ARTIFACT_DIR/long-plain-text.sample.txt" \
             --xctrace-log "$ARTIFACT_DIR/xctrace.log" \

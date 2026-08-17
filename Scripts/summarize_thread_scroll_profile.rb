@@ -7,6 +7,7 @@ require "optparse"
 options = {}
 OptionParser.new do |parser|
   parser.on("--metrics PATH") { |value| options[:metrics] = value }
+  parser.on("--build-log PATH") { |value| options[:build_log] = value }
   parser.on("--xcode-log PATH") { |value| options[:xcode_log] = value }
   parser.on("--sample PATH") { |value| options[:sample] = value }
   parser.on("--xctrace-log PATH") { |value| options[:xctrace_log] = value }
@@ -61,6 +62,23 @@ if environment
   report << "## Environment"
   report << ""
   report << fenced(environment, limit: 8_000)
+  report << ""
+end
+
+build_log = read_file(options[:build_log])
+if build_log
+  error_lines = build_log.lines.filter_map do |line|
+    stripped = line.strip
+    next if stripped.empty?
+    next unless stripped.match?(
+      /(?:error:|fatal error|BUILD FAILED|Undefined symbols|CodeSign|Testing failed)/i
+    )
+
+    stripped
+  end.uniq.last(200)
+  report << "## Profile build diagnostics"
+  report << ""
+  report << (error_lines.empty? ? "No compiler diagnostic lines were matched." : fenced(error_lines.join("\n"), limit: 16_000))
   report << ""
 end
 
