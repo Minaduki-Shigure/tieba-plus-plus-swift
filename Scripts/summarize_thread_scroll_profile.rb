@@ -66,7 +66,7 @@ report << "## Scenarios"
 report << ""
 report << "- `baseline`: 30 floors, about 120 CJK characters per floor."
 report << "- `long-plain-text`: 30 floors, one plain 900-character text block per floor."
-report << "- `inline-replies`: 30 floors, 120 characters and 50 retained inline replies per " \
+report << "- `inline-replies`: 30 floors, 120 characters and 4 retained inline replies per " \
           "floor; the production UI previews the first three."
 report << "- `many-floors`: 120 retained short-text floors, modeling four loaded pages; the " \
           "self-driven trace settles at floor 61 before measuring adjacent-floor scrolling."
