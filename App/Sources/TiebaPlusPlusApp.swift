@@ -113,16 +113,17 @@ struct TiebaPlusPlusApp: App {
     )
 
     WindowGroup {
-      RootView(
-        service: service,
-        historyRepository: historyRepository,
-        favoritesRepository: favoritesRepository,
-        searchHistoryRepository: searchHistoryRepository,
-        globalSearchHistoryRepository: globalSearchHistoryRepository,
-        accountVault: accountVault,
-        accountService: accountService,
-        startDestination: startDestination
-      )
+      Group {
+        #if PERFORMANCE_HARNESS
+          if let scenario = ThreadScrollPerformanceScenario.requested {
+            ThreadScrollPerformanceRootView(scenario: scenario)
+          } else {
+            standardRootView
+          }
+        #else
+          standardRootView
+        #endif
+      }
       .environment(
         \.accountAccess,
         AccountAccess(vault: accountVault, service: accountService)
@@ -180,5 +181,18 @@ struct TiebaPlusPlusApp: App {
       .tint(resolvedAccentColor.color)
       .preferredColorScheme(AppAppearance.resolved(appearance).colorScheme)
     }
+  }
+
+  private var standardRootView: some View {
+    RootView(
+      service: service,
+      historyRepository: historyRepository,
+      favoritesRepository: favoritesRepository,
+      searchHistoryRepository: searchHistoryRepository,
+      globalSearchHistoryRepository: globalSearchHistoryRepository,
+      accountVault: accountVault,
+      accountService: accountService,
+      startDestination: startDestination
+    )
   }
 }

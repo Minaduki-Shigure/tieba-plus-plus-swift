@@ -1,0 +1,367 @@
+name: Thread scroll profile
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/thread-scroll-profile.yml
+      - App/PerformanceTests/**
+      - App/Sources/ThreadScrollPerformanceScenario.swift
+      - App/Sources/TiebaPlusPlusApp.swift
+      - Scripts/summarize_thread_scroll_profile.rb
+      - project.yml
+
+permissions:
+  contents: read
+  checks: write
+
+concurrency:
+  group: thread-scroll-profile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios-18-simulator:
+    name: iOS 18.5 simulator profile
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      ARTIFACT_DIR: build/thread-scroll-profile
+      DERIVED_DATA: build/thread-scroll-derived-data
+      RESULT_BUNDLE: build/thread-scroll-profile/metrics.xcresult
+      BUNDLE_ID: io.github.minaduki.tieba-plus-plus
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install XcodeGen
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          xcodegen_version="$(xcodegen --version | awk '{print $NF}')"
+          ruby -rrubygems -e '
+            abort "XcodeGen #{ARGV[0]} is older than 2.45.4" if
+              Gem::Version.new(ARGV[0]) < Gem::Version.new("2.45.4")
+          ' "$xcodegen_version"
+
+      - name: Generate profile project
+        run: xcodegen generate
+
+      - name: Select fixed iOS 18.5 simulator
+        id: simulator
+        run: |
+          set -euo pipefail
+          mkdir -p "$ARTIFACT_DIR"
+          device_json="$(xcrun simctl list devices available -j)"
+          device_id="$(jq -r '
+            [
+              .devices
+              | to_entries[]
+              | select(.key | endswith("iOS-18-5"))
+              | .value[]
+              | select(.isAvailable == true and .name == "iPhone 16 Pro")
+            ][0].udid // empty
+          ' <<< "$device_json")"
+          if [ -z "$device_id" ]; then
+            echo "The fixed iOS 18.5 iPhone 16 Pro simulator is unavailable." >&2
+            xcrun simctl list runtimes
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "IOS_SIMULATOR_ID=$device_id" >> "$GITHUB_ENV"
+          echo "IOS_SIMULATOR_DESTINATION=platform=iOS Simulator,id=$device_id" >> "$GITHUB_ENV"
+          xcrun simctl boot "$device_id" 2>/dev/null || true
+          xcrun simctl bootstatus "$device_id" -b
+
+      - name: Record environment
+        run: |
+          set -euo pipefail
+          {
+            echo "Commit: $GITHUB_SHA"
+            echo "Runner: ${ImageOS:-unknown} ${ImageVersion:-unknown}"
+            xcodebuild -version
+            echo "Simulator: $IOS_SIMULATOR_ID"
+            xcrun simctl list devices -j | jq -r --arg id "$IOS_SIMULATOR_ID" '
+              .devices[][] | select(.udid == $id) | "Device: \(.name) (\(.udid)) state=\(.state)"
+            '
+            sysctl -n machdep.cpu.brand_string 2>/dev/null || true
+            sysctl -n hw.logicalcpu 2>/dev/null || true
+            echo "Available xctrace templates:"
+            xcrun xctrace list templates
+          } > "$ARTIFACT_DIR/environment.txt" 2>&1
+
+      - name: Build optimized performance tests
+        id: build_profile
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project TiebaPlusPlus.xcodeproj \
+            -scheme TiebaPlusPlusPerformance \
+            -configuration Profile \
+            -destination "$IOS_SIMULATOR_DESTINATION" \
+            -derivedDataPath "$DERIVED_DATA" \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            build-for-testing 2>&1 | tee "$ARTIFACT_DIR/build.log"
+
+      - name: Collect application symbols
+        id: symbols
+        if: ${{ steps.build_profile.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          symbol_path="$(find "$DERIVED_DATA/Build/Products" \
+            -type d -name 'TiebaPlusPlus.app.dSYM' -print -quit)"
+          test -n "$symbol_path"
+          ditto "$symbol_path" "$ARTIFACT_DIR/TiebaPlusPlus.app.dSYM"
+          test -f "$ARTIFACT_DIR/TiebaPlusPlus.app.dSYM/Contents/Info.plist"
+
+      - name: Measure three deterministic scroll scenarios
+        id: metrics
+        if: ${{ steps.build_profile.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          rm -rf "$RESULT_BUNDLE"
+          xcodebuild \
+            -project TiebaPlusPlus.xcodeproj \
+            -scheme TiebaPlusPlusPerformance \
+            -configuration Profile \
+            -destination "$IOS_SIMULATOR_DESTINATION" \
+            -derivedDataPath "$DERIVED_DATA" \
+            -skipPackagePluginValidation \
+            -parallel-testing-enabled NO \
+            -only-testing:TiebaPlusPlusPerformanceTests/ThreadScrollPerformanceTests/testBaselineScrolling \
+            -only-testing:TiebaPlusPlusPerformanceTests/ThreadScrollPerformanceTests/testLongPlainTextScrolling \
+            -only-testing:TiebaPlusPlusPerformanceTests/ThreadScrollPerformanceTests/testInlineRepliesScrolling \
+            -only-testing:TiebaPlusPlusPerformanceTests/ThreadScrollPerformanceTests/testManyFloorsScrolling \
+            -resultBundlePath "$RESULT_BUNDLE" \
+            CODE_SIGNING_ALLOWED=NO \
+            test-without-building 2>&1 | tee "$ARTIFACT_DIR/metrics-xcodebuild.log"
+
+      - name: Export XCTest metrics
+        id: metrics_export
+        if: ${{ always() && steps.metrics.outcome != 'skipped' }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          xcrun xcresulttool get test-results metrics \
+            --path "$RESULT_BUNDLE" \
+            --compact \
+            > "$ARTIFACT_DIR/metrics.json" \
+            2> "$ARTIFACT_DIR/metrics-export.log"
+          test -s "$ARTIFACT_DIR/metrics.json"
+          jq empty "$ARTIFACT_DIR/metrics.json"
+
+      - name: Record Time Profiler trace
+        id: time_profiler
+        if: ${{ steps.build_profile.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          TEST_RUNNER_TIEBA_PROFILE_ATTACH_DELAY: "6"
+        run: |
+          set -uo pipefail
+          xcrun simctl terminate "$IOS_SIMULATOR_ID" "$BUNDLE_ID" 2>/dev/null || true
+          rm -rf "$ARTIFACT_DIR/time-profiler.trace"
+          xcodebuild \
+            -project TiebaPlusPlus.xcodeproj \
+            -scheme TiebaPlusPlusPerformance \
+            -configuration Profile \
+            -destination "$IOS_SIMULATOR_DESTINATION" \
+            -derivedDataPath "$DERIVED_DATA" \
+            -skipPackagePluginValidation \
+            -parallel-testing-enabled NO \
+            -only-testing:TiebaPlusPlusPerformanceTests/ThreadScrollPerformanceTests/testLongPlainTextTraceDriver \
+            CODE_SIGNING_ALLOWED=NO \
+            test-without-building > "$ARTIFACT_DIR/time-profiler-driver.log" 2>&1 &
+          driver_pid=$!
+
+          app_pid=""
+          for _ in $(seq 1 120); do
+            app_pid="$(pgrep -x TiebaPlusPlus | tail -1 || true)"
+            if [ -n "$app_pid" ]; then break; fi
+            sleep 0.25
+          done
+          if [ -z "$app_pid" ]; then
+            echo "TiebaPlusPlus did not launch for Time Profiler." | tee "$ARTIFACT_DIR/xctrace.log"
+            wait "$driver_pid" || true
+            exit 1
+          fi
+
+          set +e
+          xcrun xctrace record \
+            --template "Time Profiler" \
+            --device "$IOS_SIMULATOR_ID" \
+            --attach TiebaPlusPlus \
+            --time-limit 25s \
+            --no-prompt \
+            --output "$ARTIFACT_DIR/time-profiler.trace" \
+            > "$ARTIFACT_DIR/xctrace.log" 2>&1
+          trace_status=$?
+          wait "$driver_pid"
+          driver_status=$?
+          toc_status=1
+          if [ -d "$ARTIFACT_DIR/time-profiler.trace" ]; then
+            xcrun xctrace export \
+              --input "$ARTIFACT_DIR/time-profiler.trace" \
+              --toc \
+              --output "$ARTIFACT_DIR/time-profiler-toc.xml" \
+              >> "$ARTIFACT_DIR/xctrace.log" 2>&1
+            toc_status=$?
+          fi
+          set -e
+          echo "trace_status=$trace_status toc_status=$toc_status driver_status=$driver_status" \
+            >> "$ARTIFACT_DIR/xctrace.log"
+          if [ "$trace_status" -ne 0 ]; then exit "$trace_status"; fi
+          if [ ! -d "$ARTIFACT_DIR/time-profiler.trace" ]; then exit 1; fi
+          if [ "$toc_status" -ne 0 ]; then exit "$toc_status"; fi
+          if [ ! -s "$ARTIFACT_DIR/time-profiler-toc.xml" ]; then exit 1; fi
+          if [ "$driver_status" -ne 0 ]; then exit "$driver_status"; fi
+
+      - name: Sample long-text call stacks
+        id: sample_stacks
+        if: ${{ steps.build_profile.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          TEST_RUNNER_TIEBA_PROFILE_ATTACH_DELAY: "5"
+        run: |
+          set -uo pipefail
+          xcrun simctl terminate "$IOS_SIMULATOR_ID" "$BUNDLE_ID" 2>/dev/null || true
+          xcodebuild \
+            -project TiebaPlusPlus.xcodeproj \
+            -scheme TiebaPlusPlusPerformance \
+            -configuration Profile \
+            -destination "$IOS_SIMULATOR_DESTINATION" \
+            -derivedDataPath "$DERIVED_DATA" \
+            -skipPackagePluginValidation \
+            -parallel-testing-enabled NO \
+            -only-testing:TiebaPlusPlusPerformanceTests/ThreadScrollPerformanceTests/testLongPlainTextTraceDriver \
+            CODE_SIGNING_ALLOWED=NO \
+            test-without-building > "$ARTIFACT_DIR/sample-driver.log" 2>&1 &
+          driver_pid=$!
+
+          app_pid=""
+          for _ in $(seq 1 120); do
+            app_pid="$(pgrep -x TiebaPlusPlus | tail -1 || true)"
+            if [ -n "$app_pid" ]; then break; fi
+            sleep 0.25
+          done
+          if [ -z "$app_pid" ]; then
+            echo "TiebaPlusPlus did not launch for sample." > "$ARTIFACT_DIR/sample-error.log"
+            wait "$driver_pid" || true
+            exit 1
+          fi
+
+          set +e
+          sample "$app_pid" 20 -mayDie -file "$ARTIFACT_DIR/long-plain-text.sample.txt" \
+            > "$ARTIFACT_DIR/sample-command.log" 2>&1
+          sample_status=$?
+          wait "$driver_pid"
+          driver_status=$?
+          set -e
+          echo "sample_status=$sample_status driver_status=$driver_status" \
+            >> "$ARTIFACT_DIR/sample-command.log"
+          if [ "$sample_status" -ne 0 ]; then exit "$sample_status"; fi
+          if [ ! -s "$ARTIFACT_DIR/long-plain-text.sample.txt" ]; then exit 1; fi
+          if ! grep -q "Call graph:" "$ARTIFACT_DIR/long-plain-text.sample.txt"; then exit 1; fi
+          if [ "$driver_status" -ne 0 ]; then exit "$driver_status"; fi
+
+      - name: Build readable profile report
+        id: report
+        if: ${{ always() }}
+        env:
+          PROFILE_BUILD_OUTCOME: ${{ steps.build_profile.outcome }}
+          PROFILE_SYMBOLS_OUTCOME: ${{ steps.symbols.outcome }}
+          PROFILE_METRICS_OUTCOME: ${{ steps.metrics.outcome }}
+          PROFILE_METRICS_EXPORT_OUTCOME: ${{ steps.metrics_export.outcome }}
+          PROFILE_XCTRACE_OUTCOME: ${{ steps.time_profiler.outcome }}
+          PROFILE_SAMPLE_OUTCOME: ${{ steps.sample_stacks.outcome }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$ARTIFACT_DIR"
+          {
+            echo "Build outcome: ${PROFILE_BUILD_OUTCOME:-unknown}"
+            echo "Symbols outcome: ${PROFILE_SYMBOLS_OUTCOME:-unknown}"
+            echo "Metrics outcome: ${PROFILE_METRICS_OUTCOME:-unknown}"
+            echo "Metrics export outcome: ${PROFILE_METRICS_EXPORT_OUTCOME:-unknown}"
+            echo "Time Profiler outcome: ${PROFILE_XCTRACE_OUTCOME:-unknown}"
+            echo "Sample outcome: ${PROFILE_SAMPLE_OUTCOME:-unknown}"
+          } >> "$ARTIFACT_DIR/environment.txt"
+          ruby Scripts/summarize_thread_scroll_profile.rb \
+            --metrics "$ARTIFACT_DIR/metrics.json" \
+            --xcode-log "$ARTIFACT_DIR/metrics-xcodebuild.log" \
+            --sample "$ARTIFACT_DIR/long-plain-text.sample.txt" \
+            --xctrace-log "$ARTIFACT_DIR/xctrace.log" \
+            --xctrace-toc "$ARTIFACT_DIR/time-profiler-toc.xml" \
+            --environment "$ARTIFACT_DIR/environment.txt" \
+            --output "$ARTIFACT_DIR/report.md"
+          cat "$ARTIFACT_DIR/report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish public profile check
+        if: ${{ always() && steps.report.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROFILE_BUILD_OUTCOME: ${{ steps.build_profile.outcome }}
+          PROFILE_SYMBOLS_OUTCOME: ${{ steps.symbols.outcome }}
+          PROFILE_METRICS_OUTCOME: ${{ steps.metrics.outcome }}
+          PROFILE_METRICS_EXPORT_OUTCOME: ${{ steps.metrics_export.outcome }}
+          PROFILE_XCTRACE_OUTCOME: ${{ steps.time_profiler.outcome }}
+          PROFILE_SAMPLE_OUTCOME: ${{ steps.sample_stacks.outcome }}
+        run: |
+          set -euo pipefail
+          conclusion=neutral
+          if [ "$PROFILE_BUILD_OUTCOME" = success ] \
+            && [ "$PROFILE_SYMBOLS_OUTCOME" = success ] \
+            && [ "$PROFILE_METRICS_OUTCOME" = success ] \
+            && [ "$PROFILE_METRICS_EXPORT_OUTCOME" = success ] \
+            && [ "$PROFILE_XCTRACE_OUTCOME" = success ] \
+            && [ "$PROFILE_SAMPLE_OUTCOME" = success ]; then
+            conclusion=success
+          fi
+          export PROFILE_CHECK_CONCLUSION="$conclusion"
+          ruby -rjson -e '
+            summary = File.read(ARGV.fetch(0), encoding: "UTF-8")
+              .byteslice(0, 60_000).to_s.scrub
+            payload = {
+              name: "Thread scroll profile report (iOS 18.5 Simulator)",
+              head_sha: ENV.fetch("GITHUB_SHA"),
+              status: "completed",
+              conclusion: ENV.fetch("PROFILE_CHECK_CONCLUSION"),
+              details_url: "https://github.com/#{ENV.fetch("GITHUB_REPOSITORY")}/actions/runs/#{ENV.fetch("GITHUB_RUN_ID")}",
+              external_id: "#{ENV.fetch("GITHUB_RUN_ID")}-#{ENV.fetch("GITHUB_RUN_ATTEMPT")}",
+              output: {
+                title: "Deterministic thread scrolling profile",
+                summary: summary,
+              },
+            }
+            File.write(ARGV.fetch(1), JSON.generate(payload))
+          ' "$ARTIFACT_DIR/report.md" "$ARTIFACT_DIR/check-payload.json"
+          curl \
+            --fail-with-body \
+            --request POST \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/check-runs" \
+            --data-binary "@$ARTIFACT_DIR/check-payload.json"
+
+      - name: Upload profile artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: thread-scroll-profile-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.ARTIFACT_DIR }}
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Fail when required profiling stages fail
+        if: >-
+          ${{ always() &&
+          (steps.build_profile.outcome == 'failure' ||
+          steps.symbols.outcome == 'failure' ||
+          steps.metrics.outcome == 'failure' ||
+          steps.metrics_export.outcome == 'failure' ||
+          steps.time_profiler.outcome == 'failure' ||
+          steps.sample_stacks.outcome == 'failure') }}
+        run: exit 1
