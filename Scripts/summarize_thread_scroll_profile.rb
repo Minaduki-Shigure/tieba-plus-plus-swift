@@ -68,7 +68,8 @@ report << "- `baseline`: 30 floors, about 120 CJK characters per floor."
 report << "- `long-plain-text`: 30 floors, one plain 900-character text block per floor."
 report << "- `inline-replies`: 30 floors, 120 characters and 50 retained inline replies per " \
           "floor; the production UI previews the first three."
-report << "- `many-floors`: 120 retained short-text floors, modeling four loaded pages at steady state."
+report << "- `many-floors`: 120 retained short-text floors, modeling four loaded pages; the " \
+          "self-driven trace settles at floor 61 before measuring adjacent-floor scrolling."
 report << ""
 report << "All fixtures are deterministic and disable network media, pagination during measurement, " \
           "authenticated requests, history writes, and favorites writes."

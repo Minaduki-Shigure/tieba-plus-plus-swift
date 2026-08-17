@@ -1265,12 +1265,15 @@ struct ThreadView: View {
           if targetIDs.count > 1 { break }
           try await Task.sleep(for: .milliseconds(100))
         }
-        let targetStride = max((targetIDs.count - 1) / 20, 1)
+        let initialTargetIndex = ThreadScrollPerformanceScenario.requested == .manyFloors
+          ? min(60, max(targetIDs.count - 21, 0))
+          : 0
+        if initialTargetIndex > 0 {
+          proxy.scrollTo(targetIDs[initialTargetIndex], anchor: .top)
+          try await Task.sleep(for: .seconds(1))
+        }
         let forwardTargets = Array(
-          targetIDs.dropFirst().enumerated()
-            .filter { $0.offset.isMultiple(of: targetStride) }
-            .prefix(20)
-            .map(\.element)
+          targetIDs.dropFirst(initialTargetIndex + 1).prefix(20)
         )
         guard !forwardTargets.isEmpty else { return }
 

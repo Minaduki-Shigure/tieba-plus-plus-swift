@@ -130,7 +130,7 @@ jobs:
         id: time_profiler
         if: ${{ steps.build_profile.outcome == 'success' }}
         continue-on-error: true
-        timeout-minutes: 10
+        timeout-minutes: 15
         run: |
           set -euo pipefail
           app_path="$(find "$DERIVED_DATA/Build/Products/Profile-iphonesimulator" \
@@ -161,7 +161,12 @@ jobs:
               failed=1
               continue
             fi
-            if ! jq empty "$analysis"; then
+            if ! jq -e '
+              (.totals["main weight ms"] // 0) > 100
+              and (.categories["SwiftUI layout and view graph"].weight_ms // 0) > 0
+              and (.categories["XCTest UI automation"].weight_ms // 0) == 0
+            ' "$analysis" > /dev/null; then
+              echo "$scenario: analysis did not contain a clean scrolling sample" >&2
               failed=1
             fi
           done

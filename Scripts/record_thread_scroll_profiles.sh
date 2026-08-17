@@ -40,12 +40,21 @@ record_scenario() {
   local trace_path="$artifact_dir/time-profiler-$scenario.trace"
   local toc_path="$artifact_dir/time-profiler-$scenario-toc.xml"
   local samples_path="$artifact_dir/time-profiler-$scenario-samples.xml"
+  local potential_hangs_path="$artifact_dir/time-profiler-$scenario-potential-hangs.xml"
+  local hang_risks_path="$artifact_dir/time-profiler-$scenario-hang-risks.xml"
+  local recorder_log="$artifact_dir/xctrace-$scenario.log"
   local launch_output
   local app_pid
+  local recorder_ready=0
   local marker_prefix="$data_container/tmp/tieba-scroll-profile-$scenario"
 
   rm -rf "$trace_path"
-  rm -f "$toc_path" "$samples_path"
+  rm -f \
+    "$toc_path" \
+    "$samples_path" \
+    "$potential_hangs_path" \
+    "$hang_risks_path" \
+    "$recorder_log"
   rm -f \
     "$marker_prefix-ready" \
     "$marker_prefix-go" \
@@ -91,24 +100,35 @@ record_scenario() {
     --time-limit 24s \
     --no-prompt \
     --output "$trace_path" \
-    >> "$log_path" 2>&1 &
+    > "$recorder_log" 2>&1 &
   active_recorder_pid=$!
-  sleep 2
-  if ! kill -0 "$active_recorder_pid" 2>/dev/null; then
+  for _ in $(seq 1 80); do
+    if grep -q "Ctrl-C to stop the recording" "$recorder_log" 2>/dev/null; then
+      recorder_ready=1
+      break
+    fi
+    if ! kill -0 "$active_recorder_pid" 2>/dev/null; then break; fi
+    sleep 0.125
+  done
+  if [[ "$recorder_ready" -ne 1 ]]; then
+    kill "$active_recorder_pid" 2>/dev/null || true
     wait "$active_recorder_pid" || true
     active_recorder_pid=""
-    echo "$scenario: Time Profiler exited before autoscroll" >> "$log_path"
+    cat "$recorder_log" >> "$log_path"
+    echo "$scenario: Time Profiler did not enter the recording state" >> "$log_path"
     xcrun simctl terminate "$simulator_id" "$bundle_id" 2>/dev/null || true
     return 1
   fi
   touch "$marker_prefix-go"
   if ! wait "$active_recorder_pid"; then
     active_recorder_pid=""
+    cat "$recorder_log" >> "$log_path"
     echo "$scenario: Time Profiler recording failed" >> "$log_path"
     xcrun simctl terminate "$simulator_id" "$bundle_id" 2>/dev/null || true
     return 1
   fi
   active_recorder_pid=""
+  cat "$recorder_log" >> "$log_path"
   xcrun simctl terminate "$simulator_id" "$bundle_id" 2>/dev/null || true
 
   if [[ ! -f "$marker_prefix-started" || ! -f "$marker_prefix-completed" ]]; then
@@ -132,7 +152,24 @@ record_scenario() {
     echo "$scenario: time-profile table export failed" >> "$log_path"
     return 1
   fi
-  if [[ ! -s "$toc_path" || ! -s "$samples_path" ]]; then
+  if ! xcrun xctrace export \
+    --input "$trace_path" \
+    --xpath '/trace-toc/run[@number="1"]/data/table[@schema="potential-hangs"]' \
+    --output "$potential_hangs_path" \
+    >> "$log_path" 2>&1; then
+    echo "$scenario: potential-hangs table export failed" >> "$log_path"
+    return 1
+  fi
+  if ! xcrun xctrace export \
+    --input "$trace_path" \
+    --xpath '/trace-toc/run[@number="1"]/data/table[@schema="hang-risks"]' \
+    --output "$hang_risks_path" \
+    >> "$log_path" 2>&1; then
+    echo "$scenario: hang-risks table export failed" >> "$log_path"
+    return 1
+  fi
+  if [[ ! -s "$toc_path" || ! -s "$samples_path" || ! -s "$potential_hangs_path" \
+    || ! -s "$hang_risks_path" ]]; then
     echo "$scenario: exported profile is empty" >> "$log_path"
     return 1
   fi
