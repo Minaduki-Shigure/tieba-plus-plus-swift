@@ -24,7 +24,7 @@ jobs:
   ios-18-simulator:
     name: iOS 18.5 simulator profile
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
       ARTIFACT_DIR: build/thread-scroll-profile
@@ -242,54 +242,6 @@ jobs:
           if [ ! -s "$ARTIFACT_DIR/time-profiler-samples.xml" ]; then exit 1; fi
           if [ "$driver_status" -ne 0 ]; then exit "$driver_status"; fi
 
-      - name: Sample long-text call stacks
-        id: sample_stacks
-        if: ${{ steps.build_profile.outcome == 'success' }}
-        continue-on-error: true
-        env:
-          TEST_RUNNER_TIEBA_PROFILE_ATTACH_DELAY: "5"
-        run: |
-          set -uo pipefail
-          xcrun simctl terminate "$IOS_SIMULATOR_ID" "$BUNDLE_ID" 2>/dev/null || true
-          xcodebuild \
-            -project TiebaPlusPlus.xcodeproj \
-            -scheme TiebaPlusPlusPerformance \
-            -configuration Profile \
-            -destination "$IOS_SIMULATOR_DESTINATION" \
-            -derivedDataPath "$DERIVED_DATA" \
-            -skipPackagePluginValidation \
-            -parallel-testing-enabled NO \
-            -only-testing:TiebaPlusPlusPerformanceTests/ThreadScrollPerformanceTests/testLongPlainTextTraceDriver \
-            CODE_SIGNING_ALLOWED=NO \
-            test-without-building > "$ARTIFACT_DIR/sample-driver.log" 2>&1 &
-          driver_pid=$!
-
-          app_pid=""
-          for _ in $(seq 1 120); do
-            app_pid="$(pgrep -x TiebaPlusPlus | tail -1 || true)"
-            if [ -n "$app_pid" ]; then break; fi
-            sleep 0.25
-          done
-          if [ -z "$app_pid" ]; then
-            echo "TiebaPlusPlus did not launch for sample." > "$ARTIFACT_DIR/sample-error.log"
-            wait "$driver_pid" || true
-            exit 1
-          fi
-
-          set +e
-          sample "$app_pid" 20 -mayDie -file "$ARTIFACT_DIR/long-plain-text.sample.txt" \
-            > "$ARTIFACT_DIR/sample-command.log" 2>&1
-          sample_status=$?
-          wait "$driver_pid"
-          driver_status=$?
-          set -e
-          echo "sample_status=$sample_status driver_status=$driver_status" \
-            >> "$ARTIFACT_DIR/sample-command.log"
-          if [ "$sample_status" -ne 0 ]; then exit "$sample_status"; fi
-          if [ ! -s "$ARTIFACT_DIR/long-plain-text.sample.txt" ]; then exit 1; fi
-          if ! grep -q "Call graph:" "$ARTIFACT_DIR/long-plain-text.sample.txt"; then exit 1; fi
-          if [ "$driver_status" -ne 0 ]; then exit "$driver_status"; fi
-
       - name: Build readable profile report
         id: report
         if: ${{ always() }}
@@ -299,7 +251,6 @@ jobs:
           PROFILE_METRICS_OUTCOME: ${{ steps.metrics.outcome }}
           PROFILE_METRICS_EXPORT_OUTCOME: ${{ steps.metrics_export.outcome }}
           PROFILE_XCTRACE_OUTCOME: ${{ steps.time_profiler.outcome }}
-          PROFILE_SAMPLE_OUTCOME: ${{ steps.sample_stacks.outcome }}
         run: |
           set -euo pipefail
           mkdir -p "$ARTIFACT_DIR"
@@ -309,13 +260,11 @@ jobs:
             echo "Metrics outcome: ${PROFILE_METRICS_OUTCOME:-unknown}"
             echo "Metrics export outcome: ${PROFILE_METRICS_EXPORT_OUTCOME:-unknown}"
             echo "Time Profiler outcome: ${PROFILE_XCTRACE_OUTCOME:-unknown}"
-            echo "Sample outcome: ${PROFILE_SAMPLE_OUTCOME:-unknown}"
           } >> "$ARTIFACT_DIR/environment.txt"
           ruby Scripts/summarize_thread_scroll_profile.rb \
             --metrics "$ARTIFACT_DIR/metrics.json" \
             --build-log "$ARTIFACT_DIR/build.log" \
             --xcode-log "$ARTIFACT_DIR/metrics-xcodebuild.log" \
-            --sample "$ARTIFACT_DIR/long-plain-text.sample.txt" \
             --xctrace-log "$ARTIFACT_DIR/xctrace.log" \
             --xctrace-toc "$ARTIFACT_DIR/time-profiler-toc.xml" \
             --xctrace-profile "$ARTIFACT_DIR/time-profiler-samples.xml" \
