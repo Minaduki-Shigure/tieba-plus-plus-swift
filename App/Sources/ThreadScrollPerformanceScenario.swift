@@ -191,7 +191,7 @@
         inlineComments = []
       case .inlineReplies:
         contents = [.text(text(floor: floor, targetLength: 120, paragraphCount: 1))]
-        inlineComments = (1...3).map { reply in
+        inlineComments = (1...50).map { reply in
           comment(postID: postID, floor: floor, reply: reply)
         }
       }

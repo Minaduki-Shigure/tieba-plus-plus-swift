@@ -1,5 +1,6 @@
 import XCTest
 
+@MainActor
 final class ThreadScrollPerformanceTests: XCTestCase {
   override func setUp() {
     super.setUp()
