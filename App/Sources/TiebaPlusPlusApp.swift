@@ -121,6 +121,62 @@ struct TiebaPlusPlusApp: App {
             standardRootView
           }
         }
+        .environment(
+          \.accountAccess,
+          AccountAccess(vault: accountVault, service: accountService)
+        )
+        .environment(\.contentAgreementStore, contentAgreementStore)
+        .environment(\.threadCloudFavoriteStore, threadCloudFavoriteStore)
+        .environment(\.textReplySubmissionStore, textReplySubmissionStore)
+        .environment(\.newThreadSubmissionStore, newThreadSubmissionStore)
+        .environment(\.contentReportCoordinator, contentReportCoordinator)
+        .appTextSizeAdjustment(AppTextSizeAdjustment.resolved(textSizeAdjustment))
+        .environment(\.appAccentColor, resolvedAccentColor)
+        .environment(\.contentFilterRepository, contentFilterRepository)
+        .environment(
+          \.contentMediaLoadPolicy,
+          resolvedContentMediaLoadPolicy
+        )
+        .environment(\.contentMediaLoadBehavior, contentMediaLoadBehavior)
+        .environment(
+          \.contentImagePreviewQuality,
+          ContentImagePreviewQuality.resolved(contentImagePreviewQuality)
+        )
+        .environment(\.hidesThreadListMedia, hidesThreadListMedia)
+        .environment(\.hidesReplyEntryPoints, hidesReplyEntryPoints)
+        .environment(
+          \.darkensContentThumbnailsInDarkMode,
+          darkensContentThumbnailsInDarkMode
+        )
+        .environment(
+          \.showsBothUsernameAndNickname,
+          showsBothUsernameAndNickname
+        )
+        .environment(
+          \.externalWebOpenMode,
+          ExternalWebOpenMode.resolved(externalWebOpenMode)
+        )
+        .environment(
+          \.openExternalWeb,
+          ExternalWebOpenAction { url in
+            externalWebPresentation.requestPresentation(for: url)
+          }
+        )
+        .environmentObject(mediaPlaybackCoordinator)
+        .environmentObject(voicePlaybackController)
+        .environmentObject(videoPlaybackController)
+        .environmentObject(followedForumsViewModel)
+        .background {
+          ExternalWebBrowserPresenter(page: externalWebPresentation.page) { pageID in
+            externalWebPresentation.dismiss(id: pageID)
+          }
+          .frame(width: 0, height: 0)
+          .allowsHitTesting(false)
+          .accessibilityHidden(true)
+        }
+        .contentReportPresentation(contentReportCoordinator)
+        .tint(resolvedAccentColor.color)
+        .preferredColorScheme(AppAppearance.resolved(appearance).colorScheme)
       #else
         RootView(
           service: service,
@@ -132,63 +188,63 @@ struct TiebaPlusPlusApp: App {
           accountService: accountService,
           startDestination: startDestination
         )
+        .environment(
+          \.accountAccess,
+          AccountAccess(vault: accountVault, service: accountService)
+        )
+        .environment(\.contentAgreementStore, contentAgreementStore)
+        .environment(\.threadCloudFavoriteStore, threadCloudFavoriteStore)
+        .environment(\.textReplySubmissionStore, textReplySubmissionStore)
+        .environment(\.newThreadSubmissionStore, newThreadSubmissionStore)
+        .environment(\.contentReportCoordinator, contentReportCoordinator)
+        .appTextSizeAdjustment(AppTextSizeAdjustment.resolved(textSizeAdjustment))
+        .environment(\.appAccentColor, resolvedAccentColor)
+        .environment(\.contentFilterRepository, contentFilterRepository)
+        .environment(
+          \.contentMediaLoadPolicy,
+          resolvedContentMediaLoadPolicy
+        )
+        .environment(\.contentMediaLoadBehavior, contentMediaLoadBehavior)
+        .environment(
+          \.contentImagePreviewQuality,
+          ContentImagePreviewQuality.resolved(contentImagePreviewQuality)
+        )
+        .environment(\.hidesThreadListMedia, hidesThreadListMedia)
+        .environment(\.hidesReplyEntryPoints, hidesReplyEntryPoints)
+        .environment(
+          \.darkensContentThumbnailsInDarkMode,
+          darkensContentThumbnailsInDarkMode
+        )
+        .environment(
+          \.showsBothUsernameAndNickname,
+          showsBothUsernameAndNickname
+        )
+        .environment(
+          \.externalWebOpenMode,
+          ExternalWebOpenMode.resolved(externalWebOpenMode)
+        )
+        .environment(
+          \.openExternalWeb,
+          ExternalWebOpenAction { url in
+            externalWebPresentation.requestPresentation(for: url)
+          }
+        )
+        .environmentObject(mediaPlaybackCoordinator)
+        .environmentObject(voicePlaybackController)
+        .environmentObject(videoPlaybackController)
+        .environmentObject(followedForumsViewModel)
+        .background {
+          ExternalWebBrowserPresenter(page: externalWebPresentation.page) { pageID in
+            externalWebPresentation.dismiss(id: pageID)
+          }
+          .frame(width: 0, height: 0)
+          .allowsHitTesting(false)
+          .accessibilityHidden(true)
+        }
+        .contentReportPresentation(contentReportCoordinator)
+        .tint(resolvedAccentColor.color)
+        .preferredColorScheme(AppAppearance.resolved(appearance).colorScheme)
       #endif
-      .environment(
-        \.accountAccess,
-        AccountAccess(vault: accountVault, service: accountService)
-      )
-      .environment(\.contentAgreementStore, contentAgreementStore)
-      .environment(\.threadCloudFavoriteStore, threadCloudFavoriteStore)
-      .environment(\.textReplySubmissionStore, textReplySubmissionStore)
-      .environment(\.newThreadSubmissionStore, newThreadSubmissionStore)
-      .environment(\.contentReportCoordinator, contentReportCoordinator)
-      .appTextSizeAdjustment(AppTextSizeAdjustment.resolved(textSizeAdjustment))
-      .environment(\.appAccentColor, resolvedAccentColor)
-      .environment(\.contentFilterRepository, contentFilterRepository)
-      .environment(
-        \.contentMediaLoadPolicy,
-        resolvedContentMediaLoadPolicy
-      )
-      .environment(\.contentMediaLoadBehavior, contentMediaLoadBehavior)
-      .environment(
-        \.contentImagePreviewQuality,
-        ContentImagePreviewQuality.resolved(contentImagePreviewQuality)
-      )
-      .environment(\.hidesThreadListMedia, hidesThreadListMedia)
-      .environment(\.hidesReplyEntryPoints, hidesReplyEntryPoints)
-      .environment(
-        \.darkensContentThumbnailsInDarkMode,
-        darkensContentThumbnailsInDarkMode
-      )
-      .environment(
-        \.showsBothUsernameAndNickname,
-        showsBothUsernameAndNickname
-      )
-      .environment(
-        \.externalWebOpenMode,
-        ExternalWebOpenMode.resolved(externalWebOpenMode)
-      )
-      .environment(
-        \.openExternalWeb,
-        ExternalWebOpenAction { url in
-          externalWebPresentation.requestPresentation(for: url)
-        }
-      )
-      .environmentObject(mediaPlaybackCoordinator)
-      .environmentObject(voicePlaybackController)
-      .environmentObject(videoPlaybackController)
-      .environmentObject(followedForumsViewModel)
-      .background {
-        ExternalWebBrowserPresenter(page: externalWebPresentation.page) { pageID in
-          externalWebPresentation.dismiss(id: pageID)
-        }
-        .frame(width: 0, height: 0)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-      }
-      .contentReportPresentation(contentReportCoordinator)
-      .tint(resolvedAccentColor.color)
-      .preferredColorScheme(AppAppearance.resolved(appearance).colorScheme)
     }
   }
 
