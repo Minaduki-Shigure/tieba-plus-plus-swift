@@ -1100,7 +1100,6 @@ struct ThreadView: View {
           }
           .modifier(ThreadScrollTargetLayoutModifier())
         }
-        .accessibilityIdentifier("thread-post-list")
         .coordinateSpace(name: "thread-scroll")
         .onPreferenceChange(ThreadScrollPositionPreferenceKey.self) { position in
           if #available(iOS 18.0, *) { return }

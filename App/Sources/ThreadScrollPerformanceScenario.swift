@@ -2,18 +2,52 @@
   import Foundation
   import SwiftUI
 
+  enum ThreadScrollPerformanceExperiment: String, Sendable {
+    case control
+    case omitInlineMinimumScale = "omit-inline-minimum-scale"
+    case omitLongTextFixedSize = "omit-long-text-fixed-size"
+
+    static let requested: Self = {
+      guard
+        let value = ProcessInfo.processInfo.environment["TIEBA_PERFORMANCE_EXPERIMENT"]
+      else { return .control }
+      guard let experiment = Self(rawValue: value) else {
+        preconditionFailure("Unsupported thread scroll performance experiment: \(value)")
+      }
+      return experiment
+    }()
+  }
+
   enum ThreadScrollPerformanceScenario: String, CaseIterable, Sendable {
     case baseline
     case longPlainText = "long-plain-text"
     case inlineReplies = "inline-replies"
     case manyFloors = "many-floors"
 
-    static var requested: Self? {
+    static let requested: Self? = {
       guard
         let value = ProcessInfo.processInfo.environment["TIEBA_PERFORMANCE_SCENARIO"]
       else { return nil }
       return Self(rawValue: value)
-    }
+    }()
+
+    static let requestedProfileID: String? = {
+      guard
+        let value = ProcessInfo.processInfo.environment["TIEBA_PERFORMANCE_PROFILE_ID"],
+        !value.isEmpty
+      else { return nil }
+      let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789-")
+      guard value.unicodeScalars.allSatisfy(allowed.contains) else { return nil }
+      return value
+    }()
+
+    static let appliesInlinePreviewMinimumScaleFactor =
+      requested != .inlineReplies
+      || ThreadScrollPerformanceExperiment.requested != .omitInlineMinimumScale
+
+    static let appliesLongTextFixedSize =
+      requested != .longPlainText
+      || ThreadScrollPerformanceExperiment.requested != .omitLongTextFixedSize
 
     static var isSelfDrivenProfileRequested: Bool {
       ProcessInfo.processInfo.environment["TIEBA_PERFORMANCE_AUTOSCROLL"] == "1"
@@ -46,8 +80,9 @@
     @MainActor
     private static func profileMarkerURL(phase: String) -> URL? {
       guard let scenario = requested else { return nil }
+      let markerID = requestedProfileID ?? scenario.rawValue
       return FileManager.default.temporaryDirectory
-        .appendingPathComponent("tieba-scroll-profile-\(scenario.rawValue)-\(phase)")
+        .appendingPathComponent("tieba-scroll-profile-\(markerID)-\(phase)")
     }
 
     fileprivate var thread: BrowseThread {
@@ -65,6 +100,30 @@
         contents: [],
         firstPostID: ThreadScrollPerformanceFixture.firstPostID
       )
+    }
+  }
+
+  extension View {
+    @ViewBuilder
+    func threadScrollProfileMinimumScaleFactor(_ factor: CGFloat, isEnabled: Bool) -> some View {
+      if isEnabled {
+        minimumScaleFactor(factor)
+      } else {
+        self
+      }
+    }
+
+    @ViewBuilder
+    func threadScrollProfileFixedSize(
+      horizontal: Bool,
+      vertical: Bool,
+      isEnabled: Bool
+    ) -> some View {
+      if isEnabled {
+        fixedSize(horizontal: horizontal, vertical: vertical)
+      } else {
+        self
+      }
     }
   }
 

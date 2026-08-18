@@ -90,7 +90,15 @@ struct BrowseContentView: View {
     if let plainText = Self.plainInlineText(contents) {
       Text(plainText)
         .modifier(DirectTextSelectionModifier(isEnabled: allowsDirectTextSelection))
-        .fixedSize(horizontal: false, vertical: true)
+        #if PERFORMANCE_HARNESS
+          .threadScrollProfileFixedSize(
+            horizontal: false,
+            vertical: true,
+            isEnabled: ThreadScrollPerformanceScenario.appliesLongTextFixedSize
+          )
+        #else
+          .fixedSize(horizontal: false, vertical: true)
+        #endif
     } else {
       Text(
         Self.inlineText(
@@ -100,7 +108,15 @@ struct BrowseContentView: View {
         )
       )
         .modifier(DirectTextSelectionModifier(isEnabled: allowsDirectTextSelection))
-        .fixedSize(horizontal: false, vertical: true)
+        #if PERFORMANCE_HARNESS
+          .threadScrollProfileFixedSize(
+            horizontal: false,
+            vertical: true,
+            isEnabled: ThreadScrollPerformanceScenario.appliesLongTextFixedSize
+          )
+        #else
+          .fixedSize(horizontal: false, vertical: true)
+        #endif
         .environment(\.openURL, contentOpenURLAction)
     }
   }

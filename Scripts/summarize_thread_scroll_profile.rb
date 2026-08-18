@@ -3,6 +3,7 @@
 
 require "json"
 require "optparse"
+require "csv"
 
 options = { analyses: [] }
 OptionParser.new do |parser|
@@ -19,6 +20,8 @@ OptionParser.new do |parser|
 
     options[:analyses] << [label, path]
   end
+  parser.on("--profile-plan PATH") { |value| options[:profile_plan] = value }
+  parser.on("--profile-results PATH") { |value| options[:profile_results] = value }
   parser.on("--environment PATH") { |value| options[:environment] = value }
   parser.on("--output PATH") { |value| options[:output] = value }
 end.parse!
@@ -60,16 +63,55 @@ def section(lines, start_pattern, end_pattern, limit: 100)
   selected
 end
 
+def mean(values)
+  return nil if values.empty?
+
+  values.sum(0.0) / values.length
+end
+
+def category_weight(analysis, name)
+  analysis.dig("categories", name, "weight_ms").to_f
+end
+
+def percent_delta(control, candidate)
+  return nil if control.zero?
+
+  ((candidate - control) / control) * 100
+end
+
+profile_plan = if options[:profile_plan] && File.file?(options[:profile_plan])
+                 CSV.read(options[:profile_plan], headers: true, col_sep: "\t")
+               end
+profile_results = if options[:profile_results] && File.file?(options[:profile_results])
+                    CSV.read(options[:profile_results], headers: true, col_sep: "\t")
+                  end
+
 report = ["# Thread scroll performance profile", ""]
 
 report << "## Scenarios"
 report << ""
-report << "- `baseline`: 30 floors, about 120 CJK characters per floor."
-report << "- `long-plain-text`: 30 floors, one plain 900-character text block per floor."
-report << "- `inline-replies`: 30 floors, 120 characters and 4 retained inline replies per " \
-          "floor; the production UI previews the first three."
-report << "- `many-floors`: 120 retained short-text floors, modeling four loaded pages; the " \
-          "self-driven trace settles at floor 61 before measuring adjacent-floor scrolling."
+if profile_plan
+  report << "This run performs two isolated Profile-only A/B comparisons. Each side is recorded " \
+            "twice, and the order is reversed for the second replicate."
+  report << ""
+  report << "- `inline`: the candidate omits only `minimumScaleFactor(0.75)` from inline reply previews."
+  report << "- `long`: the candidate omits only vertical `fixedSize` from 900-character plain text."
+  report << ""
+  report << "| Order | Profile | Comparison | Variant | Replicate | Scenario | Experiment |"
+  report << "| ---: | --- | --- | --- | ---: | --- | --- |"
+  profile_plan.each do |row|
+    report << "| #{row['ordinal']} | `#{row['profile_id']}` | #{row['comparison']} | " \
+              "#{row['variant']} | #{row['replicate']} | `#{row['scenario']}` | " \
+              "`#{row['experiment']}` |"
+  end
+else
+  report << "- `baseline`: 30 floors, about 120 CJK characters per floor."
+  report << "- `long-plain-text`: 30 floors, one plain 900-character text block per floor."
+  report << "- `inline-replies`: 30 floors, 120 characters and 4 retained inline replies per " \
+            "floor; the production UI previews the first three."
+  report << "- `many-floors`: 120 retained short-text floors, modeling four loaded pages; the " \
+            "self-driven trace settles at floor 61 before measuring adjacent-floor scrolling."
+end
 report << ""
 report << "All fixtures are deterministic and disable network media, pagination during measurement, " \
           "authenticated requests, history writes, and favorites writes."
@@ -83,6 +125,7 @@ if environment
   report << ""
 end
 
+parsed_analyses = {}
 unless options[:analyses].empty?
   report << "## Self-driven Time Profiler analysis"
   report << ""
@@ -100,6 +143,7 @@ unless options[:analyses].empty?
       next
     end
     analysis = JSON.parse(analysis_contents)
+    parsed_analyses[label] = analysis
     main_weight = analysis.dig("totals", "main weight ms") || 0
     report << "### `#{label}`"
     report << ""
@@ -134,6 +178,90 @@ unless options[:analyses].empty?
   rescue JSON::ParserError => error
     report << "Analysis JSON for `#{label}` was invalid: `#{error.message}`"
     report << ""
+  end
+end
+
+if profile_plan
+  report << "## Paired A/B comparison"
+  report << ""
+  report << "Weights are inclusive sampled main-thread milliseconds and may overlap. Negative " \
+            "deltas mean the candidate sampled less work. With two replicates, consistency is " \
+            "descriptive only and is not a statistical significance claim."
+  report << ""
+
+  comparison_metrics = {
+    "inline" => [
+      ["Main-thread running", ->(analysis) { analysis.dig("totals", "main weight ms").to_f }],
+      ["SwiftUI layout/view graph", ->(analysis) { category_weight(analysis, "SwiftUI layout and view graph") }],
+      ["Text shaping/measurement", ->(analysis) { category_weight(analysis, "Text shaping and measurement") }],
+      ["Core Animation/drawing", ->(analysis) { category_weight(analysis, "Core Animation and drawing") }],
+      ["App implementation frames", ->(analysis) { category_weight(analysis, "App implementation frames") }],
+      ["Scaled-text layout", ->(analysis) { category_weight(analysis, "Scaled-text layout") }],
+    ],
+    "long" => [
+      ["Main-thread running", ->(analysis) { analysis.dig("totals", "main weight ms").to_f }],
+      ["SwiftUI layout/view graph", ->(analysis) { category_weight(analysis, "SwiftUI layout and view graph") }],
+      ["Text shaping/measurement", ->(analysis) { category_weight(analysis, "Text shaping and measurement") }],
+      ["Core Animation/drawing", ->(analysis) { category_weight(analysis, "Core Animation and drawing") }],
+      ["App implementation frames", ->(analysis) { category_weight(analysis, "App implementation frames") }],
+      ["Fixed-size layout", ->(analysis) { category_weight(analysis, "Fixed-size layout") }],
+    ],
+  }
+
+  comparison_metrics.each do |comparison, metrics|
+    report << "### `#{comparison}`"
+    report << ""
+    report << "| Metric (ms) | Control r1 | Candidate r1 | Delta r1 | Control r2 | Candidate r2 | Delta r2 | Mean paired delta | Direction |"
+    report << "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |"
+    metrics.each do |metric_name, value_for|
+      replicate_values = %w[1 2].map do |replicate|
+        rows = profile_plan.select do |row|
+          row.fetch("comparison") == comparison && row.fetch("replicate") == replicate
+        end
+        control_row = rows.find { |row| row.fetch("variant") == "control" }
+        candidate_row = rows.find { |row| row.fetch("variant") == "candidate" }
+        control = control_row && parsed_analyses[control_row.fetch("profile_id")]
+        candidate = candidate_row && parsed_analyses[candidate_row.fetch("profile_id")]
+        next unless control && candidate
+
+        control_value = value_for.call(control)
+        candidate_value = value_for.call(candidate)
+        [control_value, candidate_value, percent_delta(control_value, candidate_value)]
+      end
+
+      if replicate_values.any?(&:nil?)
+        report << "| #{metric_name} | unavailable | unavailable | unavailable | unavailable | " \
+                  "unavailable | unavailable | unavailable | incomplete |"
+        next
+      end
+
+      deltas = replicate_values.map { |values| values.fetch(2) }
+      direction = if deltas.all? { |delta| delta && delta.negative? }
+                    "both lower"
+                  elsif deltas.all? { |delta| delta && delta.positive? }
+                    "both higher"
+                  elsif deltas.all? { |delta| delta&.zero? }
+                    "both unchanged"
+                  else
+                    "mixed"
+                  end
+      formatted = replicate_values.flat_map do |control, candidate, delta|
+        [format("%.0f", control), format("%.0f", candidate), delta ? format("%+.1f%%", delta) : "n/a"]
+      end
+      paired_mean = mean(deltas.compact)
+      report << "| #{metric_name} | #{formatted[0]} | #{formatted[1]} | #{formatted[2]} | " \
+                "#{formatted[3]} | #{formatted[4]} | #{formatted[5]} | " \
+                "#{paired_mean ? format('%+.1f%%', paired_mean) : 'n/a'} | #{direction} |"
+    end
+    report << ""
+  end
+
+  if profile_results
+    failures = profile_results.reject { |row| row.fetch("status") == "success" }
+    unless failures.empty?
+      report << "Incomplete recordings: #{failures.map { |row| row.fetch('profile_id') }.join(', ')}."
+      report << ""
+    end
   end
 end
 

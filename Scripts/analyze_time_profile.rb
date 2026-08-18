@@ -55,6 +55,8 @@ def classify_stack(entries)
       binary_names.any? { |name| ["CoreText", "UIFoundation", "libicucore.A.dylib"].include?(name) } ||
         joined.match?(/Typesetter|CTLine|AttributedString\.measured|StyledTextLayout|ResolvedText|Text\.resolve/)
     ),
+    "Scaled-text layout" => joined.include?("__NSScaledTextOversized"),
+    "Fixed-size layout" => joined.include?("_FixedSizeLayout"),
     "Core Animation and drawing" => (
       binary_names.any? { |name| ["QuartzCore", "CoreGraphics"].include?(name) } ||
         joined.match?(/CA::Transaction|CA::Layer|CGContext/)

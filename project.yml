@@ -90,37 +90,11 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.minaduki.tieba-plus-plus.tests
         GENERATE_INFOPLIST_FILE: true
 
-  TiebaPlusPlusPerformanceTests:
-    type: bundle.ui-testing
-    platform: iOS
-    sources:
-      - path: App/PerformanceTests
-    dependencies:
-      - target: TiebaPlusPlus
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.minaduki.tieba-plus-plus.performance-tests
-        GENERATE_INFOPLIST_FILE: true
-        TEST_TARGET_NAME: TiebaPlusPlus
-
 schemes:
   TiebaPlusPlusPerformance:
     build:
       targets:
         TiebaPlusPlus: all
-        TiebaPlusPlusPerformanceTests: [test]
     run:
       config: Profile
       debugEnabled: false
-    test:
-      config: Profile
-      debugEnabled: false
-      gatherCoverageData: false
-      captureScreenshotsAutomatically: false
-      disableMainThreadChecker: true
-      enableGPUFrameCaptureMode: disabled
-      enableGPUValidationMode: false
-      targets:
-        - name: TiebaPlusPlusPerformanceTests
-          parallelizable: false
-          randomExecutionOrder: false

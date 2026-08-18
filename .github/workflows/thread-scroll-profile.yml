@@ -6,7 +6,6 @@ on:
     branches: [main]
     paths:
       - .github/workflows/thread-scroll-profile.yml
-      - App/PerformanceTests/**
       - App/Sources/BrowseContentView.swift
       - App/Sources/InlineCommentPreview.swift
       - App/Sources/ReplyModels.swift
@@ -16,6 +15,8 @@ on:
       - Scripts/analyze_time_profile.rb
       - Scripts/record_thread_scroll_profiles.sh
       - Scripts/summarize_thread_scroll_profile.rb
+      - Scripts/thread_scroll_profile_plan.tsv
+      - Scripts/validate_thread_scroll_profile_plan.rb
       - project.yml
 
 permissions:
@@ -130,7 +131,7 @@ jobs:
         id: time_profiler
         if: ${{ steps.build_profile.outcome == 'success' }}
         continue-on-error: true
-        timeout-minutes: 15
+        timeout-minutes: 20
         run: |
           set -euo pipefail
           app_path="$(find "$DERIVED_DATA/Build/Products/Profile-iphonesimulator" \
@@ -148,12 +149,19 @@ jobs:
         continue-on-error: true
         run: |
           set -uo pipefail
+          plan="$ARTIFACT_DIR/time-profiler-plan.tsv"
+          results="$ARTIFACT_DIR/time-profiler-results.tsv"
+          if ! profile_ids="$(
+            ruby Scripts/validate_thread_scroll_profile_plan.rb "$plan"
+          )"; then
+            exit 1
+          fi
           failed=0
-          for scenario in baseline long-plain-text inline-replies many-floors; do
-            samples="$ARTIFACT_DIR/time-profiler-$scenario-samples.xml"
-            analysis="$ARTIFACT_DIR/time-profiler-$scenario-analysis.json"
+          while IFS= read -r profile_id; do
+            samples="$ARTIFACT_DIR/time-profiler-$profile_id-samples.xml"
+            analysis="$ARTIFACT_DIR/time-profiler-$profile_id-analysis.json"
             if [ ! -s "$samples" ]; then
-              echo "$scenario: samples unavailable" >&2
+              echo "$profile_id: samples unavailable" >&2
               failed=1
               continue
             fi
@@ -166,10 +174,15 @@ jobs:
               and (.categories["SwiftUI layout and view graph"].weight_ms // 0) > 0
               and (.categories["XCTest UI automation"].weight_ms // 0) == 0
             ' "$analysis" > /dev/null; then
-              echo "$scenario: analysis did not contain a clean scrolling sample" >&2
+              echo "$profile_id: analysis did not contain a clean scrolling sample" >&2
               failed=1
             fi
-          done
+          done <<< "$profile_ids"
+          if [ ! -s "$results" ] \
+            || ! ruby Scripts/validate_thread_scroll_profile_plan.rb \
+              "$plan" "$results" > /dev/null; then
+            failed=1
+          fi
           exit "$failed"
 
       - name: Build readable profile report
@@ -183,24 +196,41 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$ARTIFACT_DIR"
+          profile_args=()
+          analysis_args=()
+          plan="$ARTIFACT_DIR/time-profiler-plan.tsv"
+          results="$ARTIFACT_DIR/time-profiler-results.tsv"
+          if [ -s "$plan" ]; then
+            profile_args+=(--profile-plan "$plan")
+            while IFS=$'\t' read -r ordinal profile_id comparison variant replicate scenario experiment; do
+              if [ "$ordinal" = ordinal ]; then continue; fi
+              analysis_args+=(
+                --analysis "$profile_id=$ARTIFACT_DIR/time-profiler-$profile_id-analysis.json"
+              )
+            done < "$plan"
+          fi
+          if [ -s "$results" ]; then
+            profile_args+=(--profile-results "$results")
+          fi
           {
             echo "Build outcome: ${PROFILE_BUILD_OUTCOME:-unknown}"
             echo "Symbols outcome: ${PROFILE_SYMBOLS_OUTCOME:-unknown}"
             echo "Time Profiler outcome: ${PROFILE_XCTRACE_OUTCOME:-unknown}"
             echo "Trace analysis outcome: ${PROFILE_TRACE_ANALYSIS_OUTCOME:-unknown}"
-            if [ -s "$ARTIFACT_DIR/time-profiler-scenarios.txt" ]; then
-              cat "$ARTIFACT_DIR/time-profiler-scenarios.txt"
+            if [ -s "$plan" ]; then
+              echo "Profile plan:"
+              cat "$plan"
+            fi
+            if [ -s "$results" ]; then
+              echo "Profile results:"
+              cat "$results"
             fi
           } >> "$ARTIFACT_DIR/environment.txt"
           ruby Scripts/summarize_thread_scroll_profile.rb \
             --build-log "$ARTIFACT_DIR/build.log" \
             --xctrace-log "$ARTIFACT_DIR/xctrace.log" \
-            --xctrace-toc "$ARTIFACT_DIR/time-profiler-long-plain-text-toc.xml" \
-            --xctrace-profile "$ARTIFACT_DIR/time-profiler-long-plain-text-samples.xml" \
-            --analysis "baseline=$ARTIFACT_DIR/time-profiler-baseline-analysis.json" \
-            --analysis "long-plain-text=$ARTIFACT_DIR/time-profiler-long-plain-text-analysis.json" \
-            --analysis "inline-replies=$ARTIFACT_DIR/time-profiler-inline-replies-analysis.json" \
-            --analysis "many-floors=$ARTIFACT_DIR/time-profiler-many-floors-analysis.json" \
+            "${profile_args[@]}" \
+            "${analysis_args[@]}" \
             --environment "$ARTIFACT_DIR/environment.txt" \
             --output "$ARTIFACT_DIR/report.md"
           cat "$ARTIFACT_DIR/report.md" >> "$GITHUB_STEP_SUMMARY"

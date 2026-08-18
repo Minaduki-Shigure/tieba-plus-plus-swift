@@ -150,7 +150,15 @@ private struct InlineCommentPreviewRow: View {
           .font(.subheadline)
           .foregroundStyle(.primary)
           .lineLimit(showsBothNames ? 5 : 4)
-          .minimumScaleFactor(0.75)
+          #if PERFORMANCE_HARNESS
+            .threadScrollProfileMinimumScaleFactor(
+              0.75,
+              isEnabled: ThreadScrollPerformanceScenario
+                .appliesInlinePreviewMinimumScaleFactor
+            )
+          #else
+            .minimumScaleFactor(0.75)
+          #endif
           .multilineTextAlignment(.leading)
           .frame(maxWidth: .infinity, alignment: .leading)
           .padding(.vertical, 9)

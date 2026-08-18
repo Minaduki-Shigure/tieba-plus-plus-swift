@@ -113,17 +113,26 @@ struct TiebaPlusPlusApp: App {
     )
 
     WindowGroup {
-      Group {
-        #if PERFORMANCE_HARNESS
+      #if PERFORMANCE_HARNESS
+        Group {
           if let scenario = ThreadScrollPerformanceScenario.requested {
             ThreadScrollPerformanceRootView(scenario: scenario)
           } else {
             standardRootView
           }
-        #else
-          standardRootView
-        #endif
-      }
+        }
+      #else
+        RootView(
+          service: service,
+          historyRepository: historyRepository,
+          favoritesRepository: favoritesRepository,
+          searchHistoryRepository: searchHistoryRepository,
+          globalSearchHistoryRepository: globalSearchHistoryRepository,
+          accountVault: accountVault,
+          accountService: accountService,
+          startDestination: startDestination
+        )
+      #endif
       .environment(
         \.accountAccess,
         AccountAccess(vault: accountVault, service: accountService)
@@ -183,16 +192,18 @@ struct TiebaPlusPlusApp: App {
     }
   }
 
-  private var standardRootView: some View {
-    RootView(
-      service: service,
-      historyRepository: historyRepository,
-      favoritesRepository: favoritesRepository,
-      searchHistoryRepository: searchHistoryRepository,
-      globalSearchHistoryRepository: globalSearchHistoryRepository,
-      accountVault: accountVault,
-      accountService: accountService,
-      startDestination: startDestination
-    )
-  }
+  #if PERFORMANCE_HARNESS
+    private var standardRootView: some View {
+      RootView(
+        service: service,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository,
+        globalSearchHistoryRepository: globalSearchHistoryRepository,
+        accountVault: accountVault,
+        accountService: accountService,
+        startDestination: startDestination
+      )
+    }
+  #endif
 }
