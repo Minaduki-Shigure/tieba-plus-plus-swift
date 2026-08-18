@@ -229,26 +229,25 @@ if profile_plan
         [control_value, candidate_value, percent_delta(control_value, candidate_value)]
       end
 
-      if replicate_values.any?(&:nil?)
-        report << "| #{metric_name} | unavailable | unavailable | unavailable | unavailable | " \
-                  "unavailable | unavailable | unavailable | incomplete |"
-        next
-      end
-
-      deltas = replicate_values.map { |values| values.fetch(2) }
-      direction = if deltas.all? { |delta| delta && delta.negative? }
+      deltas = replicate_values.filter_map { |values| values&.fetch(2) }
+      direction = if deltas.length < 2
+                    "incomplete"
+                  elsif deltas.all?(&:negative?)
                     "both lower"
-                  elsif deltas.all? { |delta| delta && delta.positive? }
+                  elsif deltas.all?(&:positive?)
                     "both higher"
-                  elsif deltas.all? { |delta| delta&.zero? }
+                  elsif deltas.all?(&:zero?)
                     "both unchanged"
                   else
                     "mixed"
                   end
-      formatted = replicate_values.flat_map do |control, candidate, delta|
+      formatted = replicate_values.flat_map do |values|
+        next ["unavailable", "unavailable", "unavailable"] unless values
+
+        control, candidate, delta = values
         [format("%.0f", control), format("%.0f", candidate), delta ? format("%+.1f%%", delta) : "n/a"]
       end
-      paired_mean = mean(deltas.compact)
+      paired_mean = mean(deltas)
       report << "| #{metric_name} | #{formatted[0]} | #{formatted[1]} | #{formatted[2]} | " \
                 "#{formatted[3]} | #{formatted[4]} | #{formatted[5]} | " \
                 "#{paired_mean ? format('%+.1f%%', paired_mean) : 'n/a'} | #{direction} |"

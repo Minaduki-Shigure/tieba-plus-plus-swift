@@ -41,6 +41,7 @@ record_profile() {
   local profile_id="$1"
   local scenario="$2"
   local experiment="$3"
+  local attempt="$4"
   local trace_path="$artifact_dir/time-profiler-$profile_id.trace"
   local samples_path="$artifact_dir/time-profiler-$profile_id-samples.xml"
   local recorder_log="$artifact_dir/xctrace-$profile_id.log"
@@ -76,7 +77,8 @@ record_profile() {
     echo "$profile_id: application launch failed" >> "$log_path"
     return 1
   fi
-  echo "$profile_id launch ($scenario, $experiment): $launch_output" >> "$log_path"
+  echo "$profile_id attempt $attempt launch ($scenario, $experiment): $launch_output" \
+    >> "$log_path"
   app_pid="${launch_output##*: }"
   if [[ ! "$app_pid" =~ ^[0-9]+$ ]]; then
     echo "$profile_id: could not parse application PID" >> "$log_path"
@@ -97,6 +99,8 @@ record_profile() {
     xcrun simctl terminate "$simulator_id" "$bundle_id" 2>/dev/null || true
     return 1
   fi
+  # The first xctrace attach on a freshly booted runner can lag process registration.
+  sleep 0.5
 
   xcrun xctrace record \
     --template "Time Profiler" \
@@ -166,10 +170,15 @@ printf 'profile_id\tstatus\n' > "$results_path"
 failed=0
 while IFS=$'\t' read -r ordinal profile_id comparison variant replicate scenario experiment; do
   if [[ "$ordinal" == "ordinal" ]]; then continue; fi
-  if record_profile "$profile_id" "$scenario" "$experiment"; then
-    status=success
-  else
-    status=failure
+  status=failure
+  for attempt in 1 2; do
+    if record_profile "$profile_id" "$scenario" "$experiment" "$attempt"; then
+      status=success
+      break
+    fi
+    echo "$profile_id attempt $attempt failed" >> "$log_path"
+  done
+  if [[ "$status" == failure ]]; then
     failed=1
   fi
   printf '%s\t%s\n' "$profile_id" "$status" >> "$results_path"
