@@ -43,10 +43,8 @@ final class ComposerDraftDurabilityTests: XCTestCase {
     }
 
     XCTAssertEqual(try Data(contentsOf: location.file), originalBytes)
-    XCTAssertEqual(
-      try await FileNewThreadDraftStore(fileURL: location.file).draft(for: key),
-      original
-    )
+    let retainedDraft = try await FileNewThreadDraftStore(fileURL: location.file).draft(for: key)
+    XCTAssertEqual(retainedDraft, original)
     try composerDraftAssertNoStagedFiles(in: location.parent)
   }
 
@@ -87,10 +85,8 @@ final class ComposerDraftDurabilityTests: XCTestCase {
     }
 
     XCTAssertEqual(try Data(contentsOf: location.file), originalBytes)
-    XCTAssertEqual(
-      try await FileTextReplyDraftStore(fileURL: location.file).draft(for: key),
-      original
-    )
+    let retainedDraft = try await FileTextReplyDraftStore(fileURL: location.file).draft(for: key)
+    XCTAssertEqual(retainedDraft, original)
     try composerDraftAssertNoStagedFiles(in: location.parent)
   }
 
@@ -130,10 +126,8 @@ final class ComposerDraftDurabilityTests: XCTestCase {
       XCTAssertEqual(error as? NewThreadDraftStoreError, .writeFailed)
     }
 
-    XCTAssertEqual(
-      try await FileNewThreadDraftStore(fileURL: location.file).draft(for: key),
-      replacement
-    )
+    let publishedDraft = try await FileNewThreadDraftStore(fileURL: location.file).draft(for: key)
+    XCTAssertEqual(publishedDraft, replacement)
     try composerDraftAssertNoStagedFiles(in: location.parent)
   }
 
@@ -171,10 +165,8 @@ final class ComposerDraftDurabilityTests: XCTestCase {
       XCTAssertEqual(error as? TextReplyDraftStoreError, .writeFailed)
     }
 
-    XCTAssertEqual(
-      try await FileTextReplyDraftStore(fileURL: location.file).draft(for: key),
-      replacement
-    )
+    let publishedDraft = try await FileTextReplyDraftStore(fileURL: location.file).draft(for: key)
+    XCTAssertEqual(publishedDraft, replacement)
     try composerDraftAssertNoStagedFiles(in: location.parent)
   }
 
