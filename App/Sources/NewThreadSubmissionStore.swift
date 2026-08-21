@@ -526,8 +526,8 @@ final class NewThreadSubmissionStore {
       switch persistedDraft.disposition {
       case .editing:
         break
-      case .confirmed, .imageConfirmed:
-        guard entry.state == .confirmed else {
+      case .confirmed(_, let receipt), .imageConfirmed(_, let receipt):
+        guard entry.state == .confirmed(receipt) else {
           throw NewThreadSubmissionError.outcomeUnknown
         }
       case .challengeRequired:

@@ -923,6 +923,55 @@ final class NewThreadSubmissionStoreTests: XCTestCase {
     XCTAssertEqual(requestCountAfterNewSubmission, 2)
   }
 
+  func testDiscardRejectsPersistedConfirmationWithDifferentReceipt() async throws {
+    let target = newThreadStoreTarget()
+    let session = newThreadStoreSession()
+    let receipt = newThreadStoreReceipt()
+    let service = NewThreadSubmissionServiceSpy(behavior: .confirmed(receipt))
+    let vault = NewThreadSubmissionVaultSpy(session: session)
+    let drafts = NewThreadSubmissionDraftRepository()
+    let store = newThreadSubmissionStore(vault: vault, service: service, drafts: drafts)
+    await store.activate(target, for: UUID())
+
+    _ = try await store.submit(
+      title: "已确认标题",
+      content: "已确认正文",
+      for: target,
+      submissionID: newThreadStoreUUID(72)
+    )
+    XCTAssertEqual(store.entry(for: target).state, .confirmed(receipt))
+
+    let key = try XCTUnwrap(NewThreadDraftKey(userID: session.id, target: target))
+    let storedValue = try await drafts.draft(for: key)
+    let stored = try XCTUnwrap(storedValue)
+    let differentReceipt = try XCTUnwrap(NewThreadReceipt(threadID: 71, firstPostID: 701))
+    let mismatchedDisposition = NewThreadDraftDisposition.confirmed(
+      submissionID: newThreadStoreUUID(72),
+      receipt: differentReceipt
+    )
+    let mismatchedDraft = try XCTUnwrap(
+      NewThreadDraft(
+        key: stored.key,
+        title: stored.title,
+        content: stored.content,
+        attachments: stored.attachments,
+        imageWatermark: stored.imageWatermark,
+        disposition: mismatchedDisposition,
+        updatedAt: stored.updatedAt
+      )
+    )
+    try await drafts.save(mismatchedDraft)
+
+    await assertNewThreadSubmissionError(.outcomeUnknown) {
+      try await store.discardDraft(for: target)
+    }
+    XCTAssertEqual(store.entry(for: target).state, .confirmed(receipt))
+    let retainedValue = try await drafts.draft(for: key)
+    XCTAssertEqual(retainedValue?.disposition, mismatchedDisposition)
+    let deleteCount = await drafts.deleteCount()
+    XCTAssertEqual(deleteCount, 0)
+  }
+
   func testConfirmedTombstoneSaveFailureRebuildsUnknownAndNeverResends() async throws {
     let target = newThreadStoreTarget()
     let service = NewThreadSubmissionServiceSpy(behavior: .confirmed(newThreadStoreReceipt()))

@@ -189,7 +189,7 @@ final class TiebaNewThreadClientTests: XCTestCase, @unchecked Sendable {
 
     await assertClientError(
       .invalidArgument(
-        "The new-thread title or content is invalid, too large, contains unsupported control characters, or contains an unsupported Tieba rich-content marker."
+        "Submission text is empty, too large, contains unsupported control characters, or contains an unsupported Tieba rich-content marker."
       )
     ) {
       _ = try await client.verifyNewThreadVisibility(
