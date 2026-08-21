@@ -122,7 +122,7 @@ class SideStoreSourceUpdaterTest < Minitest::Test
 
     error = assert_raises(SourceUpdateError) { make_updater.update! }
     assert_includes error.message, "unsupported source schema"
-    assert_equal original, File.read(@source_path)
+    assert_equal original.b, File.binread(@source_path)
   end
 
   def test_rejects_duplicate_json_keys
