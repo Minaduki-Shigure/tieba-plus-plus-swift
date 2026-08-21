@@ -78,11 +78,16 @@ class SideStoreSourceValidator
   end
 
   def load_source
-    source = JSON.parse(read_utf8(@source_path), object_class: StrictJSONObject)
+    source = JSON.parse(
+      read_utf8(@source_path),
+      object_class: StrictJSONObject,
+      allow_duplicate_key: false
+    )
     assert(source.is_a?(Hash), "source JSON must contain an object")
     source
   rescue JSON::ParserError => error
-    raise ValidationError, "invalid source JSON: #{error.message}"
+    message = error.message.match?(/duplicate (?:JSON )?key/i) ? "duplicate JSON key" : error.message
+    raise ValidationError, "invalid source JSON: #{message}"
   end
 
   def read_utf8(path)

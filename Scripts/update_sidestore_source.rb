@@ -70,14 +70,19 @@ class SideStoreSourceUpdater
   private
 
   def load_source
-    source = JSON.parse(read_utf8(@source_path), object_class: StrictSourceJSONObject)
+    source = JSON.parse(
+      read_utf8(@source_path),
+      object_class: StrictSourceJSONObject,
+      allow_duplicate_key: false
+    )
     assert(source.is_a?(Hash), "source JSON must contain an object")
     assert(source["version"] == 2, "refusing to update an unsupported source schema")
     apps = source["apps"]
     assert(apps.is_a?(Array) && apps.length == 1, "source must contain exactly one app")
     source
   rescue JSON::ParserError => error
-    raise SourceUpdateError, "invalid source JSON: #{error.message}"
+    message = error.message.match?(/duplicate (?:JSON )?key/i) ? "duplicate JSON key" : error.message
+    raise SourceUpdateError, "invalid source JSON: #{message}"
   end
 
   def load_project_metadata

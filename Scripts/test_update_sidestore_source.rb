@@ -130,6 +130,15 @@ class SideStoreSourceUpdaterTest < Minitest::Test
 
     error = assert_raises(SourceUpdateError) { make_updater.update! }
     assert_includes error.message, "duplicate JSON key"
+
+    stdout, stderr, status = Open3.capture3(
+      RbConfig.ruby,
+      File.join(REPOSITORY_ROOT, "Scripts", "validate_sidestore_source.rb"),
+      "--source", @source_path,
+      "--project", @project_path
+    )
+    refute status.success?
+    assert_includes "#{stdout}#{stderr}", "duplicate JSON key"
   end
 
   private
