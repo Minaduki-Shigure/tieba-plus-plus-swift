@@ -498,6 +498,11 @@ enum TiebaAuthenticatedDecoder {
     try checkServerError(object)
   }
 
+  static func checkPersonalizedFeedbackResponse(_ body: Data) throws {
+    let object = try responseObject(from: body)
+    try checkServerError(object)
+  }
+
   static func userInteractionPermissions(
     from body: Data,
     expectedUserID: Int64,

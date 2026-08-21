@@ -2549,6 +2549,10 @@ struct TiebaCoreAccountService: AccountService {
       message = "贴吧尚未确认投票结果；请重新读取状态，不会自动重发投票。"
     case .userInteractionPermissionsOutcomeUnknown:
       message = "贴吧尚未确认互动权限结果；请重新读取状态，不会自动重发请求。"
+    case .personalizedFeedbackWriteConflict:
+      message = "该帖已有另一项推荐反馈正在提交。"
+    case .personalizedFeedbackOutcomeUnknown:
+      message = "贴吧尚未确认推荐反馈结果，应用不会自动重发请求。"
     case .replyChallengeRequired, .replyOutcomeUnknown, .replySubmissionIDConflict:
       message = "账户请求失败，请稍后重试。"
     case .server(let code, _):

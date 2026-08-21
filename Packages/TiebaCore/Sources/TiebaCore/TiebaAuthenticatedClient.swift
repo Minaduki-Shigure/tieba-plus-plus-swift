@@ -121,6 +121,61 @@ private struct TiebaPollResourceKey: Hashable, Sendable {
   let threadID: Int64
 }
 
+private struct TiebaPersonalizedFeedbackResourceKey: Hashable, Sendable {
+  let userID: Int64
+  let threadID: Int64
+}
+
+private struct TiebaPersonalizedFeedbackIdentity:
+  Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  private let bduss: String
+  private let stoken: String
+  private let cookieName: TiebaBDUSSCookieName
+  let submission: TiebaPersonalizedFeedbackSubmission
+
+  init(
+    credential: TiebaSessionCredential,
+    submission: TiebaPersonalizedFeedbackSubmission
+  ) {
+    bduss = credential.bduss
+    stoken = credential.stoken
+    cookieName = credential.bdussCookieName
+    self.submission = submission
+  }
+
+  var description: String { "TiebaPersonalizedFeedbackIdentity(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror { Mirror(self, children: [:], displayStyle: .struct) }
+}
+
+private struct TiebaPersonalizedFeedbackFlight:
+  Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let id: UUID
+  let identity: TiebaPersonalizedFeedbackIdentity
+  let task: Task<Void, Swift.Error>
+  var stage: TiebaPersonalizedFeedbackFlightStage
+
+  var description: String { "TiebaPersonalizedFeedbackFlight(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(self, children: ["id": id, "stage": stage], displayStyle: .struct)
+  }
+}
+
+private enum TiebaPersonalizedFeedbackFlightStage: Sendable, Equatable {
+  case queued
+  case preflight
+  case writeDispatched
+  case completed
+}
+
+private enum TiebaPersonalizedFeedbackWaitOutcome: Sendable, Equatable {
+  case completed
+  case cancelled
+}
+
 private struct TiebaPollFlightIdentity:
   Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
 {
@@ -704,6 +759,7 @@ public actor TiebaAuthenticatedClient {
   static let userFollowWriteResponseMaximumBytes = 64 * 1_024
   static let userInteractionPermissionsResponseMaximumBytes = 64 * 1_024
   static let userInteractionPermissionsWriteResponseMaximumBytes = 64 * 1_024
+  static let personalizedFeedbackResponseMaximumBytes = 64 * 1_024
   static let pollStateResponseMaximumBytes = 8 * 1_024 * 1_024
   static let pollWriteResponseMaximumBytes = 64 * 1_024
   static let webSessionResponseMaximumBytes = 256 * 1_024
@@ -755,6 +811,17 @@ public actor TiebaAuthenticatedClient {
     TiebaPollResourceKey: [UUID: CheckedContinuation<TiebaPollWaitOutcome, Never>]
   ]()
   private var pollSharedWaiterIDs = [TiebaPollResourceKey: Set<UUID>]()
+  private var personalizedFeedbackFlights = [
+    TiebaPersonalizedFeedbackResourceKey: TiebaPersonalizedFeedbackFlight
+  ]()
+  private var personalizedFeedbackWaiters = [
+    TiebaPersonalizedFeedbackResourceKey: [
+      UUID: CheckedContinuation<TiebaPersonalizedFeedbackWaitOutcome, Never>
+    ]
+  ]()
+  private var personalizedFeedbackSharedWaiterIDs = [
+    TiebaPersonalizedFeedbackResourceKey: Set<UUID>
+  ]()
   private var forumCheckInFlights = [TiebaForumCheckInResourceKey: TiebaForumCheckInFlight]()
   private var forumCheckInSharedWaiterCounts = [UUID: Int]()
   private var forumCheckInConflictWaiters = [
@@ -853,6 +920,256 @@ public actor TiebaAuthenticatedClient {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
     return account
+  }
+
+  public func submitPersonalizedFeedback(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    submission: TiebaPersonalizedFeedbackSubmission
+  ) async throws {
+    try Task.checkCancellation()
+    let request = try requestFactory.personalizedFeedback(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      submission: submission
+    )
+
+    let resourceKey = TiebaPersonalizedFeedbackResourceKey(
+      userID: expectedUserID,
+      threadID: submission.threadID
+    )
+    let identity = TiebaPersonalizedFeedbackIdentity(
+      credential: credential,
+      submission: submission
+    )
+    if let flight = personalizedFeedbackFlights[resourceKey] {
+      guard flight.identity == identity else {
+        throw TiebaClientError.personalizedFeedbackWriteConflict
+      }
+      return try await waitForPersonalizedFeedbackFlight(
+        resourceKey: resourceKey,
+        flightID: flight.id,
+        task: flight.task
+      )
+    }
+
+    let flightID = UUID()
+    let task = Task.detached { [self] in
+      try await performPersonalizedFeedbackRequest(
+        resourceKey: resourceKey,
+        flightID: flightID,
+        request: request
+      )
+    }
+    personalizedFeedbackFlights[resourceKey] = TiebaPersonalizedFeedbackFlight(
+      id: flightID,
+      identity: identity,
+      task: task,
+      stage: .queued
+    )
+    Task {
+      await finishPersonalizedFeedbackFlight(
+        resourceKey: resourceKey,
+        flightID: flightID,
+        task: task
+      )
+    }
+    try await waitForPersonalizedFeedbackFlight(
+      resourceKey: resourceKey,
+      flightID: flightID,
+      task: task
+    )
+  }
+
+  private func performPersonalizedFeedbackRequest(
+    resourceKey: TiebaPersonalizedFeedbackResourceKey,
+    flightID: UUID,
+    request: URLRequest
+  ) async throws {
+    try beginPersonalizedFeedbackPreflight(
+      resourceKey: resourceKey,
+      flightID: flightID
+    )
+    try beginPersonalizedFeedbackWrite(
+      resourceKey: resourceKey,
+      flightID: flightID
+    )
+    let body: Data
+    do {
+      body = try await send(
+        request,
+        maximumBodyBytes: Self.personalizedFeedbackResponseMaximumBytes
+      )
+    } catch is CancellationError {
+      throw TiebaClientError.personalizedFeedbackOutcomeUnknown
+    } catch {
+      throw TiebaClientError.personalizedFeedbackOutcomeUnknown
+    }
+
+    do {
+      try TiebaAuthenticatedDecoder.checkPersonalizedFeedbackResponse(body)
+    } catch let error as TiebaClientError {
+      if case .server = error { throw error }
+      throw TiebaClientError.personalizedFeedbackOutcomeUnknown
+    } catch {
+      throw TiebaClientError.personalizedFeedbackOutcomeUnknown
+    }
+  }
+
+  private func waitForPersonalizedFeedbackFlight(
+    resourceKey: TiebaPersonalizedFeedbackResourceKey,
+    flightID: UUID,
+    task: Task<Void, Swift.Error>
+  ) async throws {
+    if Task.isCancelled {
+      cancelUnregisteredPersonalizedFeedbackWaiter(
+        resourceKey: resourceKey,
+        flightID: flightID
+      )
+      throw CancellationError()
+    }
+    guard personalizedFeedbackFlights[resourceKey]?.id == flightID else {
+      return try await task.value
+    }
+    let waiterID = UUID()
+    let outcome: TiebaPersonalizedFeedbackWaitOutcome = await withTaskCancellationHandler {
+      await withCheckedContinuation { continuation in
+        guard
+          !Task.isCancelled,
+          personalizedFeedbackFlights[resourceKey]?.id == flightID
+        else {
+          if Task.isCancelled {
+            cancelUnregisteredPersonalizedFeedbackWaiter(
+              resourceKey: resourceKey,
+              flightID: flightID
+            )
+          }
+          continuation.resume(
+            returning: Task.isCancelled ? .cancelled : .completed
+          )
+          return
+        }
+        personalizedFeedbackWaiters[resourceKey, default: [:]][waiterID] = continuation
+        personalizedFeedbackSharedWaiterIDs[resourceKey, default: []].insert(waiterID)
+      }
+    } onCancel: {
+      Task {
+        await self.cancelPersonalizedFeedbackWaiter(
+          resourceKey: resourceKey,
+          flightID: flightID,
+          waiterID: waiterID
+        )
+      }
+    }
+    guard outcome == .completed else { throw CancellationError() }
+    try Task.checkCancellation()
+    try await task.value
+  }
+
+  private func cancelPersonalizedFeedbackWaiter(
+    resourceKey: TiebaPersonalizedFeedbackResourceKey,
+    flightID: UUID,
+    waiterID: UUID
+  ) {
+    guard personalizedFeedbackFlights[resourceKey]?.id == flightID else { return }
+    guard var waiters = personalizedFeedbackWaiters[resourceKey] else {
+      cancelUnregisteredPersonalizedFeedbackWaiter(
+        resourceKey: resourceKey,
+        flightID: flightID
+      )
+      return
+    }
+    let continuation = waiters.removeValue(forKey: waiterID)
+    if var sharedWaiterIDs = personalizedFeedbackSharedWaiterIDs[resourceKey] {
+      sharedWaiterIDs.remove(waiterID)
+      if sharedWaiterIDs.isEmpty {
+        personalizedFeedbackSharedWaiterIDs.removeValue(forKey: resourceKey)
+      } else {
+        personalizedFeedbackSharedWaiterIDs[resourceKey] = sharedWaiterIDs
+      }
+    }
+    if waiters.isEmpty {
+      personalizedFeedbackWaiters.removeValue(forKey: resourceKey)
+    } else {
+      personalizedFeedbackWaiters[resourceKey] = waiters
+    }
+    if personalizedFeedbackSharedWaiterIDs[resourceKey]?.isEmpty != false,
+      let flight = personalizedFeedbackFlights[resourceKey],
+      flight.stage == .queued || flight.stage == .preflight
+    {
+      flight.task.cancel()
+    }
+    continuation?.resume(returning: .cancelled)
+  }
+
+  private func cancelUnregisteredPersonalizedFeedbackWaiter(
+    resourceKey: TiebaPersonalizedFeedbackResourceKey,
+    flightID: UUID
+  ) {
+    guard
+      personalizedFeedbackSharedWaiterIDs[resourceKey]?.isEmpty != false,
+      let flight = personalizedFeedbackFlights[resourceKey],
+      flight.id == flightID,
+      flight.stage == .queued || flight.stage == .preflight
+    else { return }
+    flight.task.cancel()
+  }
+
+  private func beginPersonalizedFeedbackPreflight(
+    resourceKey: TiebaPersonalizedFeedbackResourceKey,
+    flightID: UUID
+  ) throws {
+    try Task.checkCancellation()
+    guard var flight = personalizedFeedbackFlights[resourceKey],
+      flight.id == flightID,
+      flight.stage == .queued
+    else { throw CancellationError() }
+    flight.stage = .preflight
+    personalizedFeedbackFlights[resourceKey] = flight
+  }
+
+  private func beginPersonalizedFeedbackWrite(
+    resourceKey: TiebaPersonalizedFeedbackResourceKey,
+    flightID: UUID
+  ) throws {
+    try Task.checkCancellation()
+    guard var flight = personalizedFeedbackFlights[resourceKey],
+      flight.id == flightID,
+      flight.stage == .preflight
+    else { throw CancellationError() }
+    flight.stage = .writeDispatched
+    personalizedFeedbackFlights[resourceKey] = flight
+  }
+
+  private func finishPersonalizedFeedbackFlight(
+    resourceKey: TiebaPersonalizedFeedbackResourceKey,
+    flightID: UUID,
+    task: Task<Void, Swift.Error>
+  ) async {
+    _ = await task.result
+    guard var flight = personalizedFeedbackFlights[resourceKey], flight.id == flightID else {
+      return
+    }
+    flight.stage = .completed
+    personalizedFeedbackFlights[resourceKey] = flight
+    personalizedFeedbackFlights.removeValue(forKey: resourceKey)
+    let waiters = personalizedFeedbackWaiters.removeValue(forKey: resourceKey) ?? [:]
+    personalizedFeedbackSharedWaiterIDs.removeValue(forKey: resourceKey)
+    for continuation in waiters.values {
+      continuation.resume(returning: .completed)
+    }
+  }
+
+  func personalizedFeedbackWaiterCount(
+    expectedUserID: Int64,
+    threadID: Int64
+  ) -> Int {
+    personalizedFeedbackWaiters[
+      TiebaPersonalizedFeedbackResourceKey(
+        userID: expectedUserID,
+        threadID: threadID
+      )
+    ]?.count ?? 0
   }
 
   public func getSelfProfile(

@@ -31,6 +31,7 @@ struct ExploreView: View {
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
   let accountService: any AccountService
+  let feedbackService: any PersonalizedFeedbackService
   let accountVault: any AccountVault
 
   @State private var selectedSection: ExploreSection
@@ -44,6 +45,7 @@ struct ExploreView: View {
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository,
     accountService: any AccountService,
+    feedbackService: any PersonalizedFeedbackService,
     accountVault: any AccountVault
   ) {
     self.service = service
@@ -51,6 +53,7 @@ struct ExploreView: View {
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
     self.accountService = accountService
+    self.feedbackService = feedbackService
     self.accountVault = accountVault
     _selectedSection = State(initialValue: initialSection)
     _channelsViewModel = StateObject(
@@ -77,6 +80,7 @@ struct ExploreView: View {
         isActive: selectedSection == .personalized,
         service: service,
         accountService: accountService,
+        feedbackService: feedbackService,
         vault: accountVault,
         historyRepository: historyRepository,
         favoritesRepository: favoritesRepository,

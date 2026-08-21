@@ -15,26 +15,28 @@ implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
 currently serves `v0.60.6-alpha.1` (build 69), whose app-code snapshot predates
-the current-main image-composer workflow and remains at the previous 78–81%
-estimate. Later `main` work must still pass a tagged release before it becomes
-installable from that source.
+the current-main image-composer and recommendation-feedback workflows and remains
+at the previous 78–81% estimate. Later `main` work must still pass a tagged
+release before it becomes installable from that source.
 
 | Capability area | Weight | Credited points | Current basis |
 | --- | ---: | ---: | --- |
-| Anonymous discovery, search, and forums | 20 | 18–19 | Core browsing, ranking, recommendations, categories, and search are implemented; feedback and a few niche discovery paths remain |
+| Anonymous discovery, search, and forums | 20 | 18–19 | Core browsing, ranking, recommendations, categories, and search are implemented; a few niche discovery paths remain. Account-bound dislike feedback is credited under server writes, not anonymous reading |
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, shared text selection/copying, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
 | Local data, settings, and customization | 10 | 7 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, account-isolated followed-forum pinning and layout, a configurable forum primary action, reply-entry visibility, a default-on composer risk notice, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, switching, a self-profile summary, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
-| Server writes, creation, and social actions | 15 | 13–14 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, three text/classic-emoticon reply targets, equivalent new-topic creation, bounded static-image new-topic/direct-topic-reply creation, direct inline-preview reply entry, and credential-free official reporting entry points have guarded implementations; real batch-check-in behavior, creation, poll and interaction-restriction success, broader uploaded media, unresolvable cloud rows, native reporting, and most reactions remain unavailable or unvalidated |
+| Server writes, creation, and social actions | 15 | 14 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, server-reason-bound personalized recommendation dislike feedback, three text/classic-emoticon reply targets, equivalent new-topic creation, bounded static-image new-topic/direct-topic-reply creation, direct inline-preview reply entry, and credential-free official reporting entry points have guarded implementations; real batch-check-in behavior, creation, poll and interaction-restriction success, broader uploaded media, unresolvable cloud rows, native reporting, and other reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
-| **Total** | **100** | **79–82** | Current full-product estimate; roughly 18–21% remains |
+| **Total** | **100** | **80–82** | Current full-product estimate; roughly 18–20% remains |
 
 This is a source-workflow coverage estimate, not a release-readiness or
-physical-device-validation percentage. Current `main` receives one additional
-partial point for the end-to-end static-image composer workflow. The public
-`v0.60.6-alpha.1` app-code snapshot remains at 78–81%; all experimental account
-paths retain the validation gates documented below.
+physical-device-validation percentage. Current `main` receives partial credit
+for the end-to-end static-image composer workflow and one additional server-write
+point for the bounded recommendation-feedback workflow, bringing that row to 14.
+The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
+The public `v0.60.6-alpha.1` app-code snapshot remains at 78–81%; all experimental
+account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
 points, or roughly 91–95%. Concern and the foreground unread summary raise the
@@ -105,6 +107,14 @@ confirmation, explicit no-resend recovery, terminal metadata cleanup,
 enqueue-only attachment tombstones, and strict ordered readback, but remains
 below full credit until its minimum HTTPS contract and server-visible result pass
 disposable-account and physical-device validation.
+The current-main personalized recommendation-feedback flow closes one bounded
+reaction workflow and adds one server-write point. It includes explicit
+server-reason selection, exact reason/opaque-extra/target/time binding, a signed
+single write, session-lease isolation, concurrent equivalent-request sharing,
+conflict rejection, and no retry after an unknown outcome. It receives no
+anonymous-reading credit and remains below release readiness until the live
+minimum contract, acknowledgement behavior, and downstream recommendation effect
+pass disposable-account and physical-device validation.
 
 ## Available
 
@@ -118,6 +128,11 @@ the source metadata is updated to that tested IPA.
   refresh, integer pagination, duplicate and stalled-page termination, local
   filtering, one app-scoped random recommendation UUID, and a default-off option
   to retain only forums in the active account's verified-complete followed list
+- Login-gated personalized recommendation dislike feedback for rows carrying
+  valid server-provided reasons, with exact reason, opaque-extra, thread, forum,
+  click-time, account-session, and recommendation-CUID binding; one signed HTTPS
+  write; equivalent-request sharing; conflict rejection; and no retry after an
+  unknown outcome
 - Foreground account-bound concern feed shown only for a saved account, with
   explicit-selection activation, opaque cursor pagination, per-session in-memory
   timestamps, local filtering, and UID-plus-session-revision isolation
@@ -353,6 +368,18 @@ validation of the upload response, watermark values, marker acceptance, server
 readback, picker lifecycle, and cleanup on iOS 16 and iOS 18.7.2. Ordinary-floor
 and nested-reply image entry remain outside the current TiebaLite-aligned scope.
 
+Current `main` also exposes personalized recommendation dislike feedback when a
+row carries a bounded valid server reason. Automated coverage verifies reason
+and target binding, full-session admission, exact signed request fields,
+credential sanitization, equivalent-request sharing, conflict rejection,
+success/known-rejection/unknown classification, no automatic retry, pre-dispatch
+caller cancellation, and stale UI suppression after an account-session change.
+It does not use a real account in CI. A session change is not claimed to retract
+a write that may already have been dispatched. The remaining gate is
+disposable-account and physical-device
+validation of the endpoint's minimum fields, reason encoding, acknowledgement,
+and effect on later recommendations.
+
 ## Next milestones
 
 1. Real-device validation of multi-frame GIF, WebP, and HEIC/HEIF sequences in
@@ -427,6 +454,15 @@ and nested-reply image entry remain outside the current TiebaLite-aligned scope.
    for `/mo/q/tbs`, `/mg/o/complaint/wise/querytpl`, and
    `/mg/o/complaint/wise/submit`; Keychain credentials must not be injected into
    a remotely updated general-purpose WebView.
+14. Disposable-account and physical-device validation of personalized
+   recommendation dislike feedback, including the signed-field deletion matrix,
+   missing, random, expired, and cross-account STOKEN cases, single- and
+   multiple-reason opaque-extra encoding, explicit success, known rejection,
+   malformed acknowledgement, post-dispatch transport loss, equivalent and
+   conflicting concurrency, cancellation before and after dispatch, account
+   switching, same-UID credential rotation, and whether submission changes later
+   recommendation pages. Confirm that unknown outcomes never trigger a retry and
+   that a stale account lease cannot publish a completion.
 
 The foreground inbox deliberately does not copy TiebaLite's cleartext JSON
 transport or its Android hardware parameters. ReplyMe uses the current HTTPS
@@ -1362,9 +1398,26 @@ independent from visible local filtering. Ads, live cards, invalid identities,
 and duplicate threads are discarded before UI mapping. Refresh prepends new
 unique items, the retained window is bounded, and local filtering never replaces
 the raw-page nonempty decision used for continuation.
-Recommendation reasons are retained for future protocol work, but the legacy
-dislike endpoint is a separate write and is not exposed by this read-only
-milestone.
+Recommendation reasons are retained as bounded `(id, title, opaque extra)`
+records. Current `main` exposes an explicit, account-gated selection only when a
+row has at least one valid reason. The submission preserves server reason order,
+binds the exact thread and forum IDs plus the feedback-entry click timestamp, and
+sends one signed HTTPS form to `/c/c/excellent/submitDislike` with full BDUSS/STOKEN,
+`dislike_from=homepage`, and the same random recommendation CUID used by the
+anonymous feed. The feed read itself remains credential-free, but this explicit
+write lets Tieba associate that recommendation session with the active account;
+the CUID is independently generated, not hardware- or account-derived.
+
+For one account and thread, equivalent in-flight submissions share one request
+and a different payload is rejected instead of queued. Explicit success hides
+the row, while a known server rejection retains it. Transport loss or a malformed
+acknowledgement becomes outcome unknown, hides the row from the current in-memory
+feed, and is never retried. An account-session change cancels caller work before
+dispatch and suppresses stale result publication, but does not claim to retract
+a write that may already have been dispatched. Live minimum-field behavior,
+reason encoding, acknowledgement
+semantics, and future-feed effects remain disposable-account and physical-device
+validation gates.
 
 Anonymous poll cards remain read-only. Current post responses place an ordinary
 thread's poll in its mirrored `origin_thread_info`, while that same field belongs

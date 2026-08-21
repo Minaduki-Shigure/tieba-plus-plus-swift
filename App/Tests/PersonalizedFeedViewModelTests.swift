@@ -1167,6 +1167,267 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
     let requests = await service.requestSnapshot()
     XCTAssertEqual(requests, [1, 2])
   }
+
+  @MainActor
+  func testFeedbackSubmissionIsSingleFlightAndConfirmedSuccessSuppressesTheThread()
+    async throws
+  {
+    let feedService = ScriptedPersonalizedFeedService()
+    await feedService.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [1, 2], page: 1, hasMore: true))
+    )
+    let feedbackService = ScriptedPersonalizedFeedbackService(stubs: [.suspended(1)])
+    let vault = PersonalizedFeedbackVault(session: personalizedFeedbackSession())
+    let viewModel = PersonalizedFeedViewModel(
+      service: feedService,
+      feedbackService: feedbackService,
+      vault: vault
+    )
+    viewModel.loadIfNeeded()
+    try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [1, 2] }
+
+    viewModel.submitFeedback(
+      threadID: 1,
+      selectedReasonIDs: [1],
+      clickTimeMilliseconds: 1_723_456_789_012
+    )
+    try await personalizedFeedWaitUntil { await feedbackService.requestCount() == 1 }
+    XCTAssertEqual(viewModel.feedbackSubmittingThreadIDs, [1])
+
+    viewModel.submitFeedback(
+      threadID: 1,
+      selectedReasonIDs: [1],
+      clickTimeMilliseconds: 1_723_456_789_012
+    )
+    await personalizedFeedDrainMainActor()
+    let requestCountBeforeCompletion = await feedbackService.requestCount()
+    XCTAssertEqual(requestCountBeforeCompletion, 1)
+
+    let resumed = await feedbackService.resume(id: 1)
+    XCTAssertTrue(resumed)
+    try await personalizedFeedWaitUntil {
+      viewModel.items.map(\.id) == [2] && viewModel.feedbackSubmittingThreadIDs.isEmpty
+    }
+    XCTAssertNil(viewModel.feedbackFailure)
+    let requests = await feedbackService.requestSnapshot()
+    XCTAssertEqual(requests.map(\.sessionID), [7])
+    XCTAssertEqual(requests.first?.submission.threadID, 1)
+    XCTAssertEqual(requests.first?.submission.forumID, 7)
+    XCTAssertEqual(requests.first?.submission.reasons.map(\.id), [1])
+  }
+
+  @MainActor
+  func testConfirmedFeedbackCannotBeReinsertedByLaterPagination() async throws {
+    let feedService = ScriptedPersonalizedFeedService()
+    await feedService.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [1], page: 1, hasMore: true))
+    )
+    await feedService.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [1], page: 1, hasMore: true))
+    )
+    await feedService.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [1, 2], page: 2, hasMore: false))
+    )
+    let feedbackService = ScriptedPersonalizedFeedbackService(stubs: [.success])
+    let viewModel = PersonalizedFeedViewModel(
+      service: feedService,
+      feedbackService: feedbackService,
+      vault: PersonalizedFeedbackVault(session: personalizedFeedbackSession())
+    )
+    viewModel.loadIfNeeded()
+    try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [1] }
+    viewModel.submitFeedback(
+      threadID: 1,
+      selectedReasonIDs: [1],
+      clickTimeMilliseconds: 1
+    )
+    try await personalizedFeedWaitUntil { viewModel.items.isEmpty }
+
+    viewModel.reloadForContentFilterChange()
+    try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [2] }
+    XCTAssertFalse(viewModel.hasMore)
+    let pageRequests = await feedService.requestSnapshot()
+    XCTAssertEqual(pageRequests, [1, 1, 2])
+  }
+
+  @MainActor
+  func testKnownFeedbackFailureRetainsThreadWhileUnknownOutcomeSuppressesIt() async throws {
+    let knownFeed = ScriptedPersonalizedFeedService()
+    await knownFeed.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [1], page: 1, hasMore: false))
+    )
+    let knownFeedback = ScriptedPersonalizedFeedbackService(
+      stubs: [.failure(.unavailable("明确拒绝"))]
+    )
+    let session = personalizedFeedbackSession()
+    let knownViewModel = PersonalizedFeedViewModel(
+      service: knownFeed,
+      feedbackService: knownFeedback,
+      vault: PersonalizedFeedbackVault(session: session)
+    )
+    knownViewModel.loadIfNeeded()
+    try await personalizedFeedWaitUntil { knownViewModel.items.map(\.id) == [1] }
+    knownViewModel.submitFeedback(
+      threadID: 1,
+      selectedReasonIDs: [1],
+      clickTimeMilliseconds: 1
+    )
+    try await personalizedFeedWaitUntil { knownViewModel.feedbackFailure != nil }
+    XCTAssertEqual(knownViewModel.items.map(\.id), [1])
+    XCTAssertEqual(knownViewModel.feedbackFailure, .unavailable("明确拒绝"))
+
+    let unknownFeed = ScriptedPersonalizedFeedService()
+    await unknownFeed.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [1], page: 1, hasMore: false))
+    )
+    let unknownViewModel = PersonalizedFeedViewModel(
+      service: unknownFeed,
+      feedbackService: ScriptedPersonalizedFeedbackService(stubs: [.failure(.outcomeUnknown)]),
+      vault: PersonalizedFeedbackVault(session: session)
+    )
+    unknownViewModel.loadIfNeeded()
+    try await personalizedFeedWaitUntil { unknownViewModel.items.map(\.id) == [1] }
+    unknownViewModel.submitFeedback(
+      threadID: 1,
+      selectedReasonIDs: [1],
+      clickTimeMilliseconds: 1
+    )
+    try await personalizedFeedWaitUntil { unknownViewModel.feedbackFailure == .outcomeUnknown }
+    XCTAssertTrue(unknownViewModel.items.isEmpty)
+    XCTAssertTrue(unknownViewModel.feedbackSubmittingThreadIDs.isEmpty)
+  }
+
+  @MainActor
+  func testFeedbackRequiresCurrentFullSessionAndRejectsStaleReason() async throws {
+    let feedService = ScriptedPersonalizedFeedService()
+    await feedService.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [1], page: 1, hasMore: false))
+    )
+    let feedbackService = ScriptedPersonalizedFeedbackService(stubs: [.success])
+    let vault = PersonalizedFeedbackVault(session: nil)
+    let viewModel = PersonalizedFeedViewModel(
+      service: feedService,
+      feedbackService: feedbackService,
+      vault: vault
+    )
+    viewModel.loadIfNeeded()
+    try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [1] }
+
+    viewModel.submitFeedback(
+      threadID: 1,
+      selectedReasonIDs: [999],
+      clickTimeMilliseconds: 1
+    )
+    XCTAssertEqual(viewModel.feedbackFailure, .invalidSelection)
+    var feedbackRequestCount = await feedbackService.requestCount()
+    XCTAssertEqual(feedbackRequestCount, 0)
+
+    viewModel.clearFeedbackFailure()
+    viewModel.submitFeedback(
+      threadID: 1,
+      selectedReasonIDs: [1],
+      clickTimeMilliseconds: 1
+    )
+    try await personalizedFeedWaitUntil { viewModel.feedbackFailure == .loginRequired }
+    XCTAssertEqual(viewModel.items.map(\.id), [1])
+    feedbackRequestCount = await feedbackService.requestCount()
+    XCTAssertEqual(feedbackRequestCount, 0)
+
+    await vault.setSession(personalizedFeedbackSession(stoken: nil))
+    viewModel.clearFeedbackFailure()
+    viewModel.submitFeedback(
+      threadID: 1,
+      selectedReasonIDs: [1],
+      clickTimeMilliseconds: 1
+    )
+    try await personalizedFeedWaitUntil {
+      viewModel.feedbackFailure == .fullCredentialsRequired
+    }
+    feedbackRequestCount = await feedbackService.requestCount()
+    XCTAssertEqual(feedbackRequestCount, 0)
+  }
+
+  @MainActor
+  func testLateFeedbackCompletionAfterAccountSwitchCannotMutateTheFeed() async throws {
+    let feedService = ScriptedPersonalizedFeedService()
+    await feedService.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [1], page: 1, hasMore: false))
+    )
+    await feedService.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [2], page: 1, hasMore: false))
+    )
+    let feedbackService = ScriptedPersonalizedFeedbackService(stubs: [.suspended(9)])
+    let vault = PersonalizedFeedbackVault(session: personalizedFeedbackSession())
+    let viewModel = PersonalizedFeedViewModel(
+      service: feedService,
+      feedbackService: feedbackService,
+      vault: vault
+    )
+    viewModel.loadIfNeeded()
+    try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [1] }
+    viewModel.submitFeedback(
+      threadID: 1,
+      selectedReasonIDs: [1],
+      clickTimeMilliseconds: 1
+    )
+    try await personalizedFeedWaitUntil { await feedbackService.requestCount() == 1 }
+
+    await vault.setSession(
+      personalizedFeedbackSession(
+        userID: 8,
+        revision: UUID(uuidString: "00000000-0000-0000-0000-000000000008")!
+      )
+    )
+    viewModel.accountSessionDidChange(reloadIfActive: false)
+    XCTAssertTrue(viewModel.feedbackSubmittingThreadIDs.isEmpty)
+    XCTAssertTrue(viewModel.items.isEmpty)
+    XCTAssertEqual(viewModel.state, .idle)
+    let resumed = await feedbackService.resume(id: 9)
+    XCTAssertTrue(resumed)
+    await personalizedFeedDrainMainActor()
+
+    XCTAssertTrue(viewModel.items.isEmpty)
+    XCTAssertNil(viewModel.feedbackFailure)
+
+    viewModel.setScope(.all, loadIfNeeded: true)
+    try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [2] }
+    let pageRequests = await feedService.requestSnapshot()
+    XCTAssertEqual(pageRequests, [1, 1])
+  }
+
+  @MainActor
+  func testAccountSwitchCancelsFeedbackCallerBeforeDispatch() async throws {
+    let feedService = ScriptedPersonalizedFeedService()
+    await feedService.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [1], page: 1, hasMore: false))
+    )
+    let feedbackService = ScriptedPersonalizedFeedbackService(
+      stubs: [.cancellationAwareSuspended(10)]
+    )
+    let viewModel = PersonalizedFeedViewModel(
+      service: feedService,
+      feedbackService: feedbackService,
+      vault: PersonalizedFeedbackVault(session: personalizedFeedbackSession())
+    )
+    viewModel.loadIfNeeded()
+    try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [1] }
+    viewModel.submitFeedback(
+      threadID: 1,
+      selectedReasonIDs: [1],
+      clickTimeMilliseconds: 1
+    )
+    try await personalizedFeedWaitUntil { await feedbackService.requestCount() == 1 }
+
+    viewModel.accountSessionDidChange(reloadIfActive: false)
+    try await personalizedFeedWaitUntil {
+      await feedbackService.cancelledRequestCount() == 1
+    }
+
+    XCTAssertTrue(viewModel.items.isEmpty)
+    XCTAssertEqual(viewModel.state, .idle)
+    XCTAssertTrue(viewModel.feedbackSubmittingThreadIDs.isEmpty)
+    XCTAssertNil(viewModel.feedbackFailure)
+  }
 }
 
 private struct PersonalizedFeedStubFailure: LocalizedError, Sendable {
@@ -1214,6 +1475,109 @@ private actor ScriptedPersonalizedFeedService: PersonalizedFeedService {
     continuation.resume(returning: value)
     return true
   }
+}
+
+private struct PersonalizedFeedbackServiceRequest: Sendable {
+  let sessionID: Int64
+  let submission: PersonalizedFeedbackSubmission
+}
+
+private enum ScriptedPersonalizedFeedbackStub: Sendable {
+  case success
+  case failure(PersonalizedFeedbackSubmissionError)
+  case suspended(Int)
+  case cancellationAwareSuspended(Int)
+}
+
+private actor ScriptedPersonalizedFeedbackService: PersonalizedFeedbackService {
+  private var stubs: [ScriptedPersonalizedFeedbackStub]
+  private var requests: [PersonalizedFeedbackServiceRequest] = []
+  private var pending: [Int: CheckedContinuation<Void, any Error>] = [:]
+  private var cancelledRequestIDs = Set<Int>()
+
+  init(stubs: [ScriptedPersonalizedFeedbackStub]) {
+    self.stubs = stubs
+  }
+
+  func submitPersonalizedFeedback(
+    session: StoredAccountSession,
+    submission: PersonalizedFeedbackSubmission
+  ) async throws {
+    requests.append(
+      PersonalizedFeedbackServiceRequest(sessionID: session.id, submission: submission)
+    )
+    guard !stubs.isEmpty else {
+      throw PersonalizedFeedbackSubmissionError.unavailable("Unexpected feedback request")
+    }
+    switch stubs.removeFirst() {
+    case .success:
+      return
+    case .failure(let error):
+      throw error
+    case .suspended(let identifier):
+      try await withCheckedThrowingContinuation { pending[identifier] = $0 }
+    case .cancellationAwareSuspended(let identifier):
+      try await withTaskCancellationHandler {
+        try await withCheckedThrowingContinuation { pending[identifier] = $0 }
+      } onCancel: {
+        Task { await self.cancelPendingRequest(id: identifier) }
+      }
+    }
+  }
+
+  func requestCount() -> Int { requests.count }
+  func requestSnapshot() -> [PersonalizedFeedbackServiceRequest] { requests }
+  func cancelledRequestCount() -> Int { cancelledRequestIDs.count }
+
+  func resume(id: Int) -> Bool {
+    guard let continuation = pending.removeValue(forKey: id) else { return false }
+    continuation.resume()
+    return true
+  }
+
+  private func cancelPendingRequest(id: Int) {
+    cancelledRequestIDs.insert(id)
+    pending.removeValue(forKey: id)?.resume(throwing: CancellationError())
+  }
+}
+
+private actor PersonalizedFeedbackVault: AccountVault {
+  private var session: StoredAccountSession?
+
+  init(session: StoredAccountSession?) {
+    self.session = session
+  }
+
+  func accountSummaries() async throws -> [AccountSummary] { [] }
+  func activeSession() async throws -> StoredAccountSession? { session }
+  func upsert(_ session: StoredAccountSession) async throws { self.session = session }
+  func switchActive(to userID: Int64) async throws {}
+  func remove(userID: Int64) async throws {
+    if session?.id == userID { session = nil }
+  }
+  func removeAll() async throws { session = nil }
+
+  func setSession(_ session: StoredAccountSession?) {
+    self.session = session
+  }
+}
+
+private func personalizedFeedbackSession(
+  userID: Int64 = 7,
+  stoken: String? = String(repeating: "s", count: 64),
+  revision: UUID = UUID(uuidString: "00000000-0000-0000-0000-000000000007")!
+) -> StoredAccountSession {
+  StoredAccountSession(
+    id: userID,
+    username: "user-\(userID)",
+    displayName: "User \(userID)",
+    portrait: "portrait-\(userID)",
+    bduss: String(repeating: "b", count: 192),
+    stoken: stoken,
+    createdAt: Date(timeIntervalSince1970: 1),
+    updatedAt: Date(timeIntervalSince1970: 1),
+    sessionRevision: revision
+  )
 }
 
 private enum PersonalizedFeedFixtures {

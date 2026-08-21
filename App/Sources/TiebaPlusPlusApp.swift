@@ -45,6 +45,7 @@ struct TiebaPlusPlusApp: App {
     FileGlobalSearchHistoryStore.live()
   private let accountVault: any AccountVault
   private let accountService: any AccountService
+  private let personalizedFeedbackService: any PersonalizedFeedbackService
   private let contentAgreementStore: ContentAgreementStore
   private let threadCloudFavoriteStore: ThreadCloudFavoriteStore
   private let textReplySubmissionStore: TextReplySubmissionStore
@@ -58,12 +59,16 @@ struct TiebaPlusPlusApp: App {
       personalizedCUID: PersonalizedRecommendationIdentity.current()
     )
     let accountVault: any AccountVault = KeychainAccountVault()
+    let authenticatedClient = TiebaAuthenticatedClient(configuration: clientConfiguration)
     let accountService: any AccountService = TiebaCoreAccountService(
-      client: TiebaAuthenticatedClient(configuration: clientConfiguration),
+      client: authenticatedClient,
       contentFilterRepository: contentFilterRepository
     )
     self.accountVault = accountVault
     self.accountService = accountService
+    self.personalizedFeedbackService = TiebaCorePersonalizedFeedbackService(
+      client: authenticatedClient
+    )
     _followedForumsViewModel = StateObject(
       wrappedValue: FollowedForumsViewModel(
         service: accountService,
@@ -220,6 +225,7 @@ struct TiebaPlusPlusApp: App {
           globalSearchHistoryRepository: globalSearchHistoryRepository,
           accountVault: accountVault,
           accountService: accountService,
+          personalizedFeedbackService: personalizedFeedbackService,
           startDestination: startDestination
         )
         .environment(
@@ -293,6 +299,7 @@ struct TiebaPlusPlusApp: App {
         globalSearchHistoryRepository: globalSearchHistoryRepository,
         accountVault: accountVault,
         accountService: accountService,
+        personalizedFeedbackService: personalizedFeedbackService,
         startDestination: startDestination
       )
     }

@@ -19,8 +19,8 @@ and its verified metadata enters the public app source.
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, media preferences, account-isolated followed-forum pinning and layout, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
 | Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
-| Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, and equivalent new-topic creation are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies; it remains a disposable-account and physical-device validation gate. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
-| TiebaLite parity | Current `main`: about 80% overall (estimated range 79–82%, with 18–21% remaining). Public `v0.60.6-alpha.1`: 78–81%. Anonymous reading and media remain about 91–95% |
+| Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies; both newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
+| TiebaLite parity | Current `main`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Public `v0.60.6-alpha.1`: 78–81%. Anonymous reading and media remain about 91–95% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.60.6-alpha.1` (build 69) |
 
 ### Release and validation
@@ -239,6 +239,26 @@ and its verified metadata enters the public app source.
   owners share an exclusive reference reservation. Independently, abandoned
   picker transfer directories named `tieba-composer-image-<uuid>` expire after
   24 hours and are removed without following links in batches of at most 32.
+- **Current-main recommendation feedback:** Personalized rows that carry at
+  least one valid server-provided reason expose an explicit "reduce similar
+  recommendations" selection. The feed read remains credential-free; only an
+  explicit submission requires the active account's complete BDUSS/STOKEN
+  session. It binds the exact thread and forum IDs, the selected server reason
+  IDs and opaque extras in server order, plus the feedback-entry click timestamp.
+  The signed write intentionally reuses the feed's locally generated recommendation CUID,
+  so Tieba can associate that recommendation session with the active account
+  even though the CUID is not derived from an account or hardware identifier.
+  Equivalent concurrent submissions share one request, while a different
+  submission for the same account and thread is rejected rather than queued. A
+  definite success hides the row; a known server rejection retains it. Transport
+  loss or a malformed acknowledgement becomes an outcome-unknown state, hides
+  the row from the current in-memory feed, and is never retried automatically.
+  An account-session change cancels caller work before dispatch and suppresses
+  stale UI publication, but does not claim to retract a write that may already
+  have been dispatched. Automated contract
+  coverage is present, but live endpoint behavior still requires a disposable
+  account and physical-device validation. This workflow is not present in the
+  public `v0.60.6-alpha.1` IPA.
 - **Public-release image foundation:** The public `v0.60.6-alpha.1`
   app-code snapshot contains a strict HTTPS static-image chunk-upload contract and
   private, metadata-stripping attachment processing/storage. It is not connected
@@ -252,7 +272,10 @@ and its verified metadata enters the public app source.
   updater, and verifies its public IPA hash.
   Authenticated flows never use real credentials in CI. Login binding, cloud
   favorite reads and mutations, including floor-level marker/action admission,
-  stale-confirmation rejection and verified list deletion, followed-forum recommendation filtering,
+  stale-confirmation rejection and verified list deletion, followed-forum
+  recommendation filtering, personalized-feedback reason and session binding,
+  exact signed request fields, single-flight conflict handling,
+  success/rejection/unknown classification, and stale-result suppression,
   target-bound liked-forum pagination, the minimal self-profile request and its
   UID/session-lease race handling, target-bound interaction permissions,
   concern-feed, inbox summary, inbox
@@ -263,7 +286,8 @@ and its verified metadata enters the public app source.
   reads, forum
   follow/unfollow, check-in, cloud-favorite changes, topic/post/subpost content
   approval, poll voting, user follow/unfollow, user interaction restrictions,
-  real reply creation, and real new-topic creation remain
+  personalized recommendation feedback, real reply creation, and real new-topic
+  creation remain
   physical-device validation features in the current alpha.
 - **App source:** Add [`sidestore-source.json`](https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json)
   to LiveContainer 3.7.0 or newer, or to SideStore. Its latest IPA is published
@@ -287,8 +311,11 @@ and its verified metadata enters the public app source.
   previews, category snapshots, topic details, related forums, and cursor-aware
   topic pagination are available. The personalized feed has a default-off
   setting that locally retains only threads whose stable forum ID occurs in the
-  active account's complete followed-forum index. Both feeds are included in the
-  public `v0.60.6-alpha.1` IPA. Recommendation dislike feedback remains disabled.
+  active account's complete followed-forum index. Both feed reads are included
+  in the public `v0.60.6-alpha.1` IPA. Current `main` additionally offers
+  login-gated dislike feedback only when a row carries valid server-provided
+  reasons; that write is absent from the public IPA and still requires
+  disposable-account and physical-device validation.
 - **Search:** Forum, thread, and user search are separated by category. Global
   and per-forum post search provide the supported sort and content filters,
   local history, and optional credential-free suggestions.
@@ -577,9 +604,12 @@ and its verified metadata enters the public app source.
   client-lifetime Galaxy2 identifier (`32HEX|V` plus an 8-character Helios
   checksum); it is not hardware-derived or persisted. Personalized discovery
   separately uses one nonsecret random UUID stored in local preferences. The
-  authenticated concern feed uses a different random UUID that lasts only for
-  the current process. Neither value is derived from hardware, IDFV, an account,
-  or a credential, and the two feeds never share an identifier.
+  anonymous feed read sends no account credential, but an explicit recommendation
+  feedback write intentionally reuses that UUID with BDUSS/STOKEN; Tieba can
+  therefore associate the recommendation session with the active account after
+  that action. The UUID is still not derived from hardware, IDFV, an account, or
+  a credential. The authenticated concern feed uses a different random UUID that
+  lasts only for the current process, and the two feeds never share an identifier.
 - **Write safety:** Each write is bound to the expected account UID and forum.
   Follow and check-in operations for the same forum cannot overlap, identical
   concurrent forum operations are coalesced, and both Core and the account
@@ -607,6 +637,14 @@ and its verified metadata enters the public app source.
   permission write for that same account and target are mutually exclusive, so
   the later operation also settles through a read without dispatching a second
   kind of write.
+  Recommendation feedback permits one in-flight write per account and thread.
+  An equivalent payload shares that request; a conflicting payload is rejected,
+  and no uncertain outcome is retried. A definite success removes the current
+  row, a known rejection keeps it, and a missing or malformed acknowledgement
+  becomes outcome unknown and hides it for the current in-memory feed. Account
+  changes cancel pre-dispatch caller work and suppress a stale completion from
+  reaching the UI, but do not assert retraction after the write may have been
+  dispatched.
   Already-completed check-in and matching content state are idempotent. The
   foreground one-click flow binds the user's confirmation to an ordered forum
   snapshot, refreshes official eligibility immediately before dispatch, and
@@ -619,8 +657,8 @@ and its verified metadata enters the public app source.
   notice is not that confirmation. Background and automatic check-in are not
   implemented.
 - **Unsupported operations:** Guess-based removal of unresolvable cloud-favorite
-  rows, bulk cloud/local synchronization, disagreement and other reaction types,
-  recommendation feedback, image creation for ordinary-floor and nested replies,
+  rows, bulk cloud/local synchronization, disagreement and other remaining
+  reaction types, image creation for ordinary-floor and nested replies,
   voice and arbitrary rich-media topic/reply creation, profile editing, content
   deletion, native or credential-injected reporting, background or automatic check-in, notification mark-read/unread
   reconciliation, background notification polling, and moderation remain
@@ -628,12 +666,13 @@ and its verified metadata enters the public app source.
   validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, weighted estimate, protocol constraints, and next milestones.
-  The current `main` source audit totals 79–82 of 100 weighted points, leaving
-  about 18–21%; its anonymous reading and media subtotal remains about 91–95%.
+  The current `main` source audit totals 80–82 of 100 weighted points, leaving
+  about 18–20%; its anonymous reading and media subtotal remains about 91–95%.
   This measures implemented end-to-end workflows with partial credit for
   device-validation gates; it is not a claim that every path is release-ready.
-  The public `v0.60.6-alpha.1` app-code snapshot remains at 78–81% because it
-  contains only the non-user-facing image-upload foundation.
+  The public `v0.60.6-alpha.1` app-code snapshot remains at 78–81%: its image
+  support is only the non-user-facing upload foundation, and it does not contain
+  current-main recommendation feedback.
   The largest remaining gaps are
   rich-media creation, background unread handling, broader settings, remaining
   account/social actions, unresolvable cloud-favorite rows, and moderation.

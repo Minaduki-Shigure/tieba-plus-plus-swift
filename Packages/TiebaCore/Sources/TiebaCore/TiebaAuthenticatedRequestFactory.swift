@@ -26,6 +26,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let selfProfileClientVersion = "12.52.1.0"
   static let userFollowClientVersion = "11.10.8.6"
   static let userInteractionPermissionsClientVersion = "12.41.7.1"
+  static let personalizedFeedbackClientVersion = "12.41.7.1"
   static let officialCheckInClientVersion = "11.10.8.6"
   static let officialCheckInGuideClientVersion = "12.41.7.1"
   static let selfProfileUserAgent =
@@ -312,6 +313,75 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
         ("stoken", credential.stoken),
       ],
       userAgent: Self.userInteractionPermissionsUserAgent,
+      cookie: "ka=open"
+    )
+  }
+
+  func personalizedFeedback(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    submission: TiebaPersonalizedFeedbackSubmission
+  ) throws -> URLRequest {
+    try validate(credential)
+    guard expectedUserID > 0 else {
+      throw TiebaClientError.invalidArgument("Expected user ID must be positive.")
+    }
+    guard submission.threadID > 0, submission.forumID > 0 else {
+      throw TiebaClientError.invalidArgument("Feedback thread and forum IDs must be positive.")
+    }
+    guard
+      !submission.reasonIDs.isEmpty,
+      submission.reasonIDs.count <= 16,
+      submission.reasonIDs.allSatisfy({ $0 > 0 }),
+      Set(submission.reasonIDs).count == submission.reasonIDs.count,
+      submission.reasonExtras.count == submission.reasonIDs.count
+    else {
+      throw TiebaClientError.invalidArgument("Feedback reasons are invalid.")
+    }
+    guard
+      submission.clickTimeMilliseconds > 0,
+      submission.reasonExtras.allSatisfy({ $0.utf8.count <= 4_096 }),
+      submission.reasonExtras.reduce(0, { $0 + $1.utf8.count }) <= 16_384
+    else {
+      throw TiebaClientError.invalidArgument("Feedback metadata is invalid.")
+    }
+    let personalizedCUID = try validatedPersonalizedCUID()
+
+    let object: [[String: Any]] = [
+      [
+        "click_time": submission.clickTimeMilliseconds,
+        "dislike_ids": submission.reasonIDs.map(String.init).joined(separator: ","),
+        "extra": submission.reasonExtras.joined(separator: ","),
+        "fid": String(submission.forumID),
+        "tid": String(submission.threadID),
+      ]
+    ]
+    let jsonData: Data
+    do {
+      jsonData = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    } catch {
+      throw TiebaClientError.invalidArgument("Unable to encode recommendation feedback.")
+    }
+    guard
+      jsonData.count <= 24_576,
+      let dislike = String(data: jsonData, encoding: .utf8)
+    else {
+      throw TiebaClientError.invalidArgument("Recommendation feedback is too large.")
+    }
+
+    return try signedFormRequest(
+      host: Self.writeHost,
+      path: "/c/c/excellent/submitDislike",
+      fields: [
+        ("BDUSS", credential.bduss),
+        ("_client_type", "2"),
+        ("_client_version", Self.personalizedFeedbackClientVersion),
+        ("cuid", personalizedCUID),
+        ("dislike", dislike),
+        ("dislike_from", "homepage"),
+        ("stoken", credential.stoken),
+      ],
+      userAgent: "bdtb for Android \(Self.personalizedFeedbackClientVersion)",
       cookie: "ka=open"
     )
   }
@@ -1887,6 +1957,22 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     guard personalizedValue != value else {
       throw TiebaClientError.invalidArgument(
         "Concern-feed identifier must not reuse the personalized recommendation identifier."
+      )
+    }
+    return value.uuidString.lowercased()
+  }
+
+  private func validatedPersonalizedCUID() throws -> String {
+    let rawValue = configuration.personalizedCUID.trimmingCharacters(
+      in: .whitespacesAndNewlines
+    )
+    guard
+      rawValue.utf8.count == 36,
+      let value = UUID(uuidString: rawValue),
+      value.uuidString.caseInsensitiveCompare(rawValue) == .orderedSame
+    else {
+      throw TiebaClientError.invalidArgument(
+        "Personalized recommendation identifier must be a canonical UUID."
       )
     }
     return value.uuidString.lowercased()

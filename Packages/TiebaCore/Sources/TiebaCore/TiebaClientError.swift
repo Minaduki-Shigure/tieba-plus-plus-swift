@@ -21,6 +21,8 @@ public enum TiebaClientError: Error, Sendable, Equatable {
   case threadCloudFavoriteOutcomeUnknown
   case pollOutcomeUnknown
   case userInteractionPermissionsOutcomeUnknown
+  case personalizedFeedbackWriteConflict
+  case personalizedFeedbackOutcomeUnknown
   case replyChallengeRequired(message: String)
   case replyOutcomeUnknown
   case replySubmissionIDConflict
@@ -71,6 +73,10 @@ extension TiebaClientError: LocalizedError {
       "The poll vote was sent, but Tieba did not return a verifiable final selection."
     case .userInteractionPermissionsOutcomeUnknown:
       "The interaction-permission write was sent, but Tieba did not return a verifiable final state."
+    case .personalizedFeedbackWriteConflict:
+      "A different recommendation-feedback operation is already running for this thread."
+    case .personalizedFeedbackOutcomeUnknown:
+      "The recommendation feedback may have been sent, but Tieba did not return a verifiable acknowledgement."
     case .replyChallengeRequired(let message):
       message.isEmpty
         ? "Tieba requires additional verification before this reply can be submitted."

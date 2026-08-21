@@ -53,8 +53,12 @@ final class PersonalizedFeedViewModel: ObservableObject {
   @Published private(set) var refreshError: String?
   @Published private(set) var loadMoreError: String?
   @Published private(set) var scope: PersonalizedFeedScope = .all
+  @Published private(set) var feedbackSubmittingThreadIDs = Set<Int64>()
+  @Published private(set) var feedbackFailure: PersonalizedFeedbackFailure?
 
   private let service: any PersonalizedFeedService
+  private let feedbackService: (any PersonalizedFeedbackService)?
+  private let vault: (any AccountVault)?
   private var loadTask: Task<Void, Never>?
   private var generation = 0
   private var currentPage = 0
@@ -65,9 +69,19 @@ final class PersonalizedFeedViewModel: ObservableObject {
   private var scannedPageCount = 0
   private var filteredScanIsPaused = false
   private var failedLoadMorePage: Int?
+  private var feedbackGeneration = 0
+  private var feedbackOperations = [Int64: UUID]()
+  private var feedbackTasks = [Int64: Task<Void, Never>]()
+  private var feedbackHiddenThreadIDs = Set<Int64>()
 
-  init(service: any PersonalizedFeedService) {
+  init(
+    service: any PersonalizedFeedService,
+    feedbackService: (any PersonalizedFeedbackService)? = nil,
+    vault: (any AccountVault)? = nil
+  ) {
     self.service = service
+    self.feedbackService = feedbackService
+    self.vault = vault
   }
 
   func setScope(_ scope: PersonalizedFeedScope, loadIfNeeded: Bool) {
@@ -164,12 +178,234 @@ final class PersonalizedFeedViewModel: ObservableObject {
     refreshError = nil
   }
 
+  func clearFeedbackFailure() {
+    feedbackFailure = nil
+  }
+
+  func submitFeedback(
+    threadID: Int64,
+    selectedReasonIDs: Set<UInt32>,
+    clickTimeMilliseconds: Int64
+  ) {
+    guard feedbackOperations[threadID] == nil else { return }
+    guard
+      let item = items.first(where: { $0.id == threadID }),
+      let submission = PersonalizedFeedbackSubmission(
+        item: item,
+        selectedReasonIDs: selectedReasonIDs,
+        clickTimeMilliseconds: clickTimeMilliseconds
+      )
+    else {
+      feedbackFailure = .invalidSelection
+      return
+    }
+    guard let feedbackService, let vault else {
+      feedbackFailure = .unavailable("当前版本无法提交推荐反馈。")
+      return
+    }
+
+    feedbackFailure = nil
+    let operationID = UUID()
+    let requestGeneration = feedbackGeneration
+    feedbackOperations[threadID] = operationID
+    feedbackSubmittingThreadIDs.insert(threadID)
+    let task = Task { @MainActor [weak self] in
+      guard let self else { return }
+      await self.performFeedbackSubmission(
+        submission,
+        operationID: operationID,
+        requestGeneration: requestGeneration,
+        service: feedbackService,
+        vault: vault
+      )
+    }
+    feedbackTasks[threadID] = task
+  }
+
+  func accountSessionDidChange(reloadIfActive: Bool) {
+    feedbackGeneration &+= 1
+    feedbackOperations.removeAll()
+    // Core stops pre-dispatch work but lets a possibly dispatched one-shot write finish.
+    for task in feedbackTasks.values { task.cancel() }
+    feedbackTasks.removeAll()
+    feedbackSubmittingThreadIDs.removeAll()
+    feedbackHiddenThreadIDs.removeAll()
+    feedbackFailure = nil
+
+    invalidateCurrentRequest()
+    resetSnapshot()
+
+    guard reloadIfActive, scope.isReady, !scope.hasNoAllowedForums else { return }
+    loadIfNeeded()
+  }
+
   func cancel() {
     let kind = activeRequestKind
     invalidateCurrentRequest()
     if state == .loading {
       state = kind == .replacement && items.isEmpty ? .idle : .loaded
     }
+  }
+
+  private func performFeedbackSubmission(
+    _ submission: PersonalizedFeedbackSubmission,
+    operationID: UUID,
+    requestGeneration: Int,
+    service: any PersonalizedFeedbackService,
+    vault: any AccountVault
+  ) async {
+    defer {
+      finishFeedbackOperation(
+        threadID: submission.threadID,
+        operationID: operationID,
+        requestGeneration: requestGeneration
+      )
+    }
+
+    let session: StoredAccountSession
+    do {
+      guard let activeSession = try await vault.activeSession() else {
+        publishFeedbackFailure(
+          .loginRequired,
+          threadID: submission.threadID,
+          operationID: operationID,
+          requestGeneration: requestGeneration
+        )
+        return
+      }
+      guard
+        feedbackOperationIsCurrent(
+          threadID: submission.threadID,
+          operationID: operationID,
+          requestGeneration: requestGeneration
+        )
+      else { return }
+      guard activeSession.credentials != nil else {
+        publishFeedbackFailure(
+          .fullCredentialsRequired,
+          threadID: submission.threadID,
+          operationID: operationID,
+          requestGeneration: requestGeneration
+        )
+        return
+      }
+      session = activeSession
+    } catch is CancellationError {
+      return
+    } catch {
+      publishFeedbackFailure(
+        .unavailable("无法读取当前账户，请稍后重试。"),
+        threadID: submission.threadID,
+        operationID: operationID,
+        requestGeneration: requestGeneration
+      )
+      return
+    }
+
+    let lease = PersonalizedFeedbackSessionLease(session)
+    do {
+      try await service.submitPersonalizedFeedback(
+        session: session,
+        submission: submission
+      )
+      guard await feedbackLeaseIsCurrent(lease, vault: vault) else { return }
+      guard
+        feedbackOperationIsCurrent(
+          threadID: submission.threadID,
+          operationID: operationID,
+          requestGeneration: requestGeneration
+        )
+      else { return }
+      hideFeedbackThread(submission.threadID)
+    } catch is CancellationError {
+      return
+    } catch let error as PersonalizedFeedbackSubmissionError where error == .outcomeUnknown {
+      guard await feedbackLeaseIsCurrent(lease, vault: vault) else { return }
+      guard
+        feedbackOperationIsCurrent(
+          threadID: submission.threadID,
+          operationID: operationID,
+          requestGeneration: requestGeneration
+        )
+      else { return }
+      hideFeedbackThread(submission.threadID)
+      feedbackFailure = .outcomeUnknown
+    } catch let error as PersonalizedFeedbackSubmissionError
+      where error == .fullCredentialsRequired
+    {
+      guard await feedbackLeaseIsCurrent(lease, vault: vault) else { return }
+      publishFeedbackFailure(
+        .fullCredentialsRequired,
+        threadID: submission.threadID,
+        operationID: operationID,
+        requestGeneration: requestGeneration
+      )
+    } catch {
+      guard await feedbackLeaseIsCurrent(lease, vault: vault) else { return }
+      publishFeedbackFailure(
+        .unavailable(error.localizedDescription),
+        threadID: submission.threadID,
+        operationID: operationID,
+        requestGeneration: requestGeneration
+      )
+    }
+  }
+
+  private func feedbackLeaseIsCurrent(
+    _ lease: PersonalizedFeedbackSessionLease,
+    vault: any AccountVault
+  ) async -> Bool {
+    do {
+      return lease.matches(try await vault.activeSession())
+    } catch {
+      return false
+    }
+  }
+
+  private func hideFeedbackThread(_ threadID: Int64) {
+    feedbackHiddenThreadIDs.insert(threadID)
+    items.removeAll { $0.id == threadID }
+  }
+
+  private func publishFeedbackFailure(
+    _ failure: PersonalizedFeedbackFailure,
+    threadID: Int64,
+    operationID: UUID,
+    requestGeneration: Int
+  ) {
+    guard
+      feedbackOperationIsCurrent(
+        threadID: threadID,
+        operationID: operationID,
+        requestGeneration: requestGeneration
+      )
+    else { return }
+    feedbackFailure = failure
+  }
+
+  private func finishFeedbackOperation(
+    threadID: Int64,
+    operationID: UUID,
+    requestGeneration: Int
+  ) {
+    guard
+      feedbackOperationIsCurrent(
+        threadID: threadID,
+        operationID: operationID,
+        requestGeneration: requestGeneration
+      )
+    else { return }
+    feedbackOperations.removeValue(forKey: threadID)
+    feedbackTasks.removeValue(forKey: threadID)
+    feedbackSubmittingThreadIDs.remove(threadID)
+  }
+
+  private func feedbackOperationIsCurrent(
+    threadID: Int64,
+    operationID: UUID,
+    requestGeneration: Int
+  ) -> Bool {
+    feedbackGeneration == requestGeneration && feedbackOperations[threadID] == operationID
   }
 
   private var filteredScanEpochIsExhausted: Bool {
@@ -226,7 +462,7 @@ final class PersonalizedFeedViewModel: ObservableObject {
           let madeRawProgress = recordRawProgress(rawItems)
           scannedPageCount &+= 1
           pagesScannedForAction &+= 1
-          let eligibleItems = requestScope.filter(rawItems)
+          let eligibleItems = feedbackVisible(requestScope.filter(rawItems))
           let termination: PersonalizedFeedBatchTermination
 
           if !response.hasMore {
@@ -244,6 +480,14 @@ final class PersonalizedFeedViewModel: ObservableObject {
             } else {
               termination = .duplicateOnly
             }
+          } else if !requestScope.isFollowedForumsOnly, eligibleItems.isEmpty {
+            if pagesScannedForAction < Self.maximumAutomaticMappedEmptyPages,
+              page < Int(Int32.max)
+            {
+              page += 1
+              continue
+            }
+            termination = page < Int(Int32.max) ? .mappedEmptyScanPaused : .serverEnd
           } else if !requestScope.isFollowedForumsOnly || !eligibleItems.isEmpty {
             termination = .pageReady
           } else if pagesScannedForAction >= Self.maximumAutomaticFilteredPages
@@ -278,7 +522,7 @@ final class PersonalizedFeedViewModel: ObservableObject {
   }
 
   private func apply(_ batch: PersonalizedFeedBatch, kind: PersonalizedFeedRequestKind) {
-    let responseItems = unique(batch.items)
+    let responseItems = feedbackVisible(unique(batch.items))
     switch kind {
     case .replacement:
       items = Array(responseItems.prefix(Self.maximumRetainedItems))
@@ -444,6 +688,12 @@ final class PersonalizedFeedViewModel: ObservableObject {
     return source.filter { $0.id > 0 && seen.insert($0.id).inserted }
   }
 
+  private func feedbackVisible(
+    _ source: [PersonalizedFeedItem]
+  ) -> [PersonalizedFeedItem] {
+    source.filter { !feedbackHiddenThreadIDs.contains($0.id) }
+  }
+
   private func merged(
     _ first: [PersonalizedFeedItem],
     followedBy second: [PersonalizedFeedItem]
@@ -451,7 +701,11 @@ final class PersonalizedFeedViewModel: ObservableObject {
     var seen = Set<Int64>()
     return Array(
       (first + second)
-        .filter { $0.id > 0 && seen.insert($0.id).inserted }
+        .filter {
+          $0.id > 0
+            && !feedbackHiddenThreadIDs.contains($0.id)
+            && seen.insert($0.id).inserted
+        }
         .prefix(Self.maximumRetainedItems)
     )
   }

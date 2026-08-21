@@ -12,6 +12,7 @@ struct RootView: View {
   let searchHistoryRepository: any ForumSearchHistoryRepository
   let accountVault: any AccountVault
   let accountService: any AccountService
+  let personalizedFeedbackService: any PersonalizedFeedbackService
 
   @State private var query = ""
   @State private var path: [RootDestination]
@@ -53,6 +54,7 @@ struct RootView: View {
     globalSearchHistoryRepository: any GlobalSearchHistoryRepository,
     accountVault: any AccountVault,
     accountService: any AccountService,
+    personalizedFeedbackService: any PersonalizedFeedbackService,
     startDestination: AppStartDestination
   ) {
     self.service = service
@@ -61,6 +63,7 @@ struct RootView: View {
     self.searchHistoryRepository = searchHistoryRepository
     self.accountVault = accountVault
     self.accountService = accountService
+    self.personalizedFeedbackService = personalizedFeedbackService
     _path = State(
       initialValue: RootStartupNavigation.initialPath(startDestination: startDestination)
     )
@@ -265,6 +268,7 @@ struct RootView: View {
             favoritesRepository: favoritesRepository,
             searchHistoryRepository: searchHistoryRepository,
             accountService: accountService,
+            feedbackService: personalizedFeedbackService,
             accountVault: accountVault
           )
         case .history:
