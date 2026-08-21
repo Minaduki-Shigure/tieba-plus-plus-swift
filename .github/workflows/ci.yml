@@ -31,7 +31,30 @@ jobs:
       - name: Validate source metadata
         run: ruby Scripts/validate_sidestore_source.rb
       - name: Test source publication tooling
-        run: ruby Scripts/test_update_sidestore_source.rb
+        id: source_tests
+        continue-on-error: true
+        run: >-
+          set -o pipefail;
+          ruby Scripts/test_update_sidestore_source.rb
+          2>&1 | tee source-test.log
+      - name: Report source-test diagnostics
+        if: ${{ always() && steps.source_tests.outcome == 'failure' }}
+        run: >-
+          ruby Scripts/report_xcode_errors.rb
+          --mode full
+          --title "Source publication tooling tests failed"
+          --file Scripts/test_update_sidestore_source.rb
+          source-test.log
+      - name: Upload source-test failure log
+        if: ${{ always() && steps.source_tests.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-test-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: source-test.log
+          retention-days: 7
+      - name: Fail when source publication tests fail
+        if: ${{ always() && steps.source_tests.outcome == 'failure' }}
+        run: exit 1
       - name: Verify published IPA
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: |
