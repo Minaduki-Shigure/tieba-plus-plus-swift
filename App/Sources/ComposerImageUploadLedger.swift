@@ -207,6 +207,11 @@ struct ComposerImageUploadLedgerKey:
   }
 }
 
+private struct ComposerImageUploadLedgerContextOwner: Hashable {
+  let context: ComposerImageUploadContext
+  let userID: Int64
+}
+
 struct ComposerImageUploadAttachmentSnapshot:
   Hashable, Codable, Sendable, CustomStringConvertible, CustomDebugStringConvertible,
   CustomReflectable
@@ -426,7 +431,8 @@ struct ComposerImageUploadIntentDigest:
     guard
       key.submissionID == submission.id,
       key.context == ComposerImageUploadContext(newThread: submission.target),
-      attachmentSnapshots.map(\.attachment) == submission.attachments
+      attachmentSnapshots.map(\.attachment) == submission.attachments,
+      attachmentSnapshots.allSatisfy({ $0.watermark == submission.imageWatermark })
     else { return nil }
     return newThread(
       key: key,
@@ -444,7 +450,8 @@ struct ComposerImageUploadIntentDigest:
     guard
       key.submissionID == submission.id,
       key.context == ComposerImageUploadContext(directTopicReply: submission.target),
-      attachmentSnapshots.map(\.attachment) == submission.attachments
+      attachmentSnapshots.map(\.attachment) == submission.attachments,
+      attachmentSnapshots.allSatisfy({ $0.watermark == submission.imageWatermark })
     else { return nil }
     return directTopicReply(
       key: key,
@@ -798,6 +805,7 @@ enum ComposerImageUploadLedgerError: LocalizedError, Sendable, Equatable {
   case invalidAttachments
   case intentMismatch
   case recordAlreadyExists
+  case activeContextConflict
   case recordNotFound
   case identityMismatch
   case invalidTransition
@@ -823,6 +831,8 @@ enum ComposerImageUploadLedgerError: LocalizedError, Sendable, Equatable {
       "图片上传恢复记录与当前最终提交内容不匹配。"
     case .recordAlreadyExists:
       "图片上传恢复记录已存在，未进行覆盖。"
+    case .activeContextConflict:
+      "此账户和发布位置已有未清理的图片提交，未创建第二条记录。"
     case .recordNotFound:
       "没有找到图片上传恢复记录。"
     case .identityMismatch:
@@ -985,6 +995,22 @@ actor ComposerImageUploadLedger {
     return try record(for: key)
   }
 
+  func record(
+    for context: ComposerImageUploadContext,
+    userID: Int64
+  ) throws -> ComposerImageUploadLedgerRecord? {
+    guard context.isValid, userID > 0 else {
+      throw ComposerImageUploadLedgerError.invalidIdentity
+    }
+    let matches = try loadArchive().records.filter {
+      $0.key.context == context && $0.key.userID == userID
+    }
+    guard matches.count <= 1 else {
+      throw ComposerImageUploadLedgerError.corruptedArchive
+    }
+    return matches.first
+  }
+
   @discardableResult
   func prepare(
     newThreadSubmission submission: NewThreadSubmission,
@@ -1053,6 +1079,11 @@ actor ComposerImageUploadLedger {
       else { throw ComposerImageUploadLedgerError.intentMismatch }
       throw ComposerImageUploadLedgerError.recordAlreadyExists
     }
+    guard
+      !archive.records.contains(where: {
+        $0.key.context == key.context && $0.key.userID == key.userID
+      })
+    else { throw ComposerImageUploadLedgerError.activeContextConflict }
     guard archive.records.count < maximumRecords else {
       throw ComposerImageUploadLedgerError.tooManyRecords
     }
@@ -1380,8 +1411,17 @@ actor ComposerImageUploadLedger {
       throw ComposerImageUploadLedgerError.corruptedArchive
     }
     var submissionIDs = Set<UUID>()
+    var activeContexts = Set<ComposerImageUploadLedgerContextOwner>()
     for record in archive.records {
-      guard submissionIDs.insert(record.key.submissionID).inserted else {
+      guard
+        submissionIDs.insert(record.key.submissionID).inserted,
+        activeContexts.insert(
+          ComposerImageUploadLedgerContextOwner(
+            context: record.key.context,
+            userID: record.key.userID
+          )
+        ).inserted
+      else {
         throw ComposerImageUploadLedgerError.corruptedArchive
       }
       try Self.validate(record)

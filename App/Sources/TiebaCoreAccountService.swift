@@ -701,7 +701,8 @@ struct TiebaCoreAccountService: AccountService {
         session: session,
         submissionID: submission.id,
         forumID: submission.target.forumID,
-        forumName: submission.target.forumName
+        forumName: submission.target.forumName,
+        watermark: submission.imageWatermark
       ),
       submission.attachments.isEmpty || Self.isDirectThreadReply(submission.target.destination)
     else { throw TextReplySubmissionError.invalidSubmission }
@@ -767,7 +768,8 @@ struct TiebaCoreAccountService: AccountService {
         session: session,
         submissionID: submission.id,
         forumID: submission.target.forumID,
-        forumName: submission.target.forumName
+        forumName: submission.target.forumName,
+        watermark: submission.imageWatermark
       )
     else { throw NewThreadSubmissionError.invalidSubmission }
     let coreSubmission = TiebaNewThreadSubmission(
@@ -827,7 +829,8 @@ struct TiebaCoreAccountService: AccountService {
         session: session,
         submissionID: submission.id,
         forumID: submission.target.forumID,
-        forumName: submission.target.forumName
+        forumName: submission.target.forumName,
+        watermark: submission.imageWatermark
       )
     else { throw NewThreadSubmissionError.invalidSubmission }
     let coreSubmission = TiebaNewThreadSubmission(
@@ -870,7 +873,8 @@ struct TiebaCoreAccountService: AccountService {
         authorUserID: session.id,
         title: submission.title,
         content: submission.content,
-        attachments: submission.attachments
+        attachments: submission.attachments,
+        imageWatermark: submission.imageWatermark
       )
     else {
       throw NewThreadSubmissionError.unavailable
@@ -2029,7 +2033,8 @@ struct TiebaCoreAccountService: AccountService {
     session: StoredAccountSession,
     submissionID: UUID,
     forumID: Int64,
-    forumName: String
+    forumName: String,
+    watermark: TiebaStaticImageWatermark
   ) -> [TiebaStaticImageContentProof]? {
     guard
       session.id > 0,
@@ -2050,6 +2055,7 @@ struct TiebaCoreAccountService: AccountService {
       guard
         result.sessionRevision == session.sessionRevision,
         result.attachment == attachment,
+        result.watermark == watermark,
         receipt.schemaVersion == TiebaStaticImageUploadReceipt.currentSchemaVersion,
         receipt.uploadID == attachment.id,
         receipt.contentSHA256 == attachment.sha256,

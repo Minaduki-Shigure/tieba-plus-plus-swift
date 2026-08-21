@@ -575,6 +575,70 @@ final class TiebaStaticImageAccountServiceTests: XCTestCase {
     XCTAssertEqual(verifications.last?.imageProofs, [])
   }
 
+  func testUsernameWatermarkRemainsBoundThroughFinalSubmissionAndVisibility() async throws {
+    let bytes = Data([0x81, 0x82, 0x83])
+    let attachment = try staticImageAttachment(id: staticImageUUID(9), bytes: bytes)
+    let receipt = try staticImageReceipt(
+      attachment: attachment,
+      bytes: bytes,
+      userID: 9,
+      forumName: "swift",
+      watermark: .username
+    )
+    let spy = StaticImageAccountClientSpy(uploadBehavior: .receipt(receipt))
+    let service = TiebaCoreAccountService(client: spy)
+
+    let reply = try directImageReplySubmission(
+      id: staticImageUUID(53),
+      attachments: [attachment],
+      imageWatermark: .username
+    )
+    let replyUpload = try await staticImageUploadResult(
+      service: service,
+      submissionID: reply.id,
+      attachment: attachment,
+      bytes: bytes,
+      watermark: .username
+    )
+    _ = try await service.submitTextReply(
+      session: staticImageSession(),
+      submission: reply,
+      imageUploads: [replyUpload]
+    )
+
+    let thread = try imageNewThreadSubmission(
+      id: staticImageUUID(54),
+      attachments: [attachment],
+      imageWatermark: .username
+    )
+    let threadUpload = try await staticImageUploadResult(
+      service: service,
+      submissionID: thread.id,
+      attachment: attachment,
+      bytes: bytes,
+      watermark: .username
+    )
+    _ = try await service.submitNewThread(
+      session: staticImageSession(),
+      submission: thread,
+      imageUploads: [threadUpload]
+    )
+    let confirmation = try await service.verifyNewThreadVisibility(
+      session: staticImageSession(),
+      submission: thread,
+      receipt: try XCTUnwrap(NewThreadReceipt(threadID: 70, firstPostID: 700)),
+      imageUploads: [threadUpload]
+    )
+
+    let replies = await spy.replySubmissions()
+    let threads = await spy.newThreadSubmissions()
+    let verifications = await spy.visibilitySubmissions()
+    XCTAssertEqual(confirmation?.imageWatermark, .username)
+    XCTAssertEqual(replies.last?.imageProofs.count, 1)
+    XCTAssertEqual(threads.last?.imageProofs.count, 1)
+    XCTAssertEqual(verifications.last?.imageProofs.count, 1)
+  }
+
   func testImageUploadsCannotCrossSessionRevisionForSameUser() async throws {
     let bytes = Data([0x71, 0x72, 0x73])
     let attachment = try staticImageAttachment(id: staticImageUUID(10), bytes: bytes)
@@ -892,7 +956,8 @@ private func staticImageReceipt(
 
 private func directImageReplySubmission(
   id: UUID,
-  attachments: [ComposerImageAttachment]
+  attachments: [ComposerImageAttachment],
+  imageWatermark: TiebaStaticImageWatermark = .forumName
 ) throws -> TextReplySubmission {
   let target = try XCTUnwrap(
     TextReplyTarget(
@@ -908,14 +973,16 @@ private func directImageReplySubmission(
       id: id,
       target: target,
       content: "正文",
-      attachments: attachments
+      attachments: attachments,
+      imageWatermark: imageWatermark
     )
   )
 }
 
 private func imageNewThreadSubmission(
   id: UUID,
-  attachments: [ComposerImageAttachment]
+  attachments: [ComposerImageAttachment],
+  imageWatermark: TiebaStaticImageWatermark = .forumName
 ) throws -> NewThreadSubmission {
   try XCTUnwrap(
     NewThreadSubmission(
@@ -923,7 +990,8 @@ private func imageNewThreadSubmission(
       target: try XCTUnwrap(NewThreadTarget(forumID: 7, forumName: "swift")),
       title: "标题",
       content: "正文",
-      attachments: attachments
+      attachments: attachments,
+      imageWatermark: imageWatermark
     )
   )
 }
@@ -934,7 +1002,8 @@ private func staticImageUploadResult(
   forumID: Int64 = 7,
   forumName: String = "swift",
   attachment: ComposerImageAttachment,
-  bytes: Data
+  bytes: Data,
+  watermark: TiebaStaticImageWatermark = .forumName
 ) async throws -> ComposerImageUploadResult {
   let prepared = try await service.prepareStaticImageUpload(
     session: staticImageSession(),
@@ -943,7 +1012,7 @@ private func staticImageUploadResult(
     forumName: forumName,
     attachment: attachment,
     validatedBytes: bytes,
-    watermark: .forumName
+    watermark: watermark
   )
   return try await service.dispatchStaticImageUpload(prepared)
 }

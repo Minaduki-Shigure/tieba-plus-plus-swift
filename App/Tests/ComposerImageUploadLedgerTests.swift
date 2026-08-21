@@ -67,11 +67,46 @@ final class ComposerImageUploadLedgerTests: XCTestCase {
     )
   }
 
+  func testContextOwnerScanRejectsSecondUnclearedSubmission() async throws {
+    let location = makeLocation()
+    defer { try? FileManager.default.removeItem(at: location.directory) }
+    let ledger = makeLedger(fileURL: location.file)
+    let firstKey = makeKey(submissionIndex: 101)
+    let secondKey = makeKey(submissionIndex: 102)
+    let image = try fixture(index: 1)
+    let first = try await prepareNewThread(
+      in: ledger,
+      key: firstKey,
+      attachments: [image.snapshot]
+    )
+
+    let scanned = try await ledger.record(
+      for: firstKey.context,
+      userID: firstKey.userID
+    )
+    XCTAssertEqual(scanned, first)
+    await assertLedgerError(.activeContextConflict) {
+      try await ledger.prepare(
+        newThreadSubmission: try self.makeNewThreadSubmission(
+          key: secondKey,
+          attachments: [image.snapshot]
+        ),
+        key: secondKey,
+        attachmentSnapshots: [image.snapshot]
+      )
+    }
+    let otherUser = try await ledger.record(
+      for: firstKey.context,
+      userID: firstKey.userID + 1
+    )
+    XCTAssertNil(otherUser)
+  }
+
   func testNewThreadIntentFreezesEverySubmissionAndAttachmentFieldAcrossRestart() async throws {
     let location = makeLocation()
     defer { try? FileManager.default.removeItem(at: location.directory) }
     let key = makeKey()
-    let first = try fixture(index: 1)
+    let first = try fixture(index: 1, watermark: .username)
     let second = try fixture(index: 2, preservesOriginal: true, watermark: .username)
     let snapshots = [first.snapshot, second.snapshot]
     let submission = try makeNewThreadSubmission(
@@ -455,7 +490,7 @@ final class ComposerImageUploadLedgerTests: XCTestCase {
     let location = makeLocation()
     defer { try? FileManager.default.removeItem(at: location.directory) }
     let ledger = makeLedger(fileURL: location.file)
-    let first = try fixture(index: 1)
+    let first = try fixture(index: 1, watermark: .username)
     let second = try fixture(index: 2, preservesOriginal: true, watermark: .username)
     let newThreadKey = try XCTUnwrap(
       ComposerImageUploadLedgerKey(
@@ -1537,7 +1572,8 @@ final class ComposerImageUploadLedgerTests: XCTestCase {
         target: try XCTUnwrap(NewThreadTarget(forumID: forumID, forumName: forumName)),
         title: title,
         content: content,
-        attachments: attachments.map(\.attachment)
+        attachments: attachments.map(\.attachment),
+        imageWatermark: attachments.first?.watermark ?? .forumName
       )
     )
   }
@@ -1569,7 +1605,8 @@ final class ComposerImageUploadLedgerTests: XCTestCase {
         id: key.submissionID,
         target: target,
         content: content,
-        attachments: attachments.map(\.attachment)
+        attachments: attachments.map(\.attachment),
+        imageWatermark: attachments.first?.watermark ?? .forumName
       )
     )
   }

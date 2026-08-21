@@ -541,6 +541,157 @@ final class ReplyModelsTests: XCTestCase {
     )
   }
 
+  func testPureTextDraftDispositionsRejectImageAttachments() throws {
+    let key = try XCTUnwrap(TextReplyDraftKey(userID: 9, target: replyTarget()))
+    let attachment = replyModelAttachment(1)
+    let submissionID = replyModelUUID(20)
+    let sessionRevision = replyModelUUID(21)
+    let dispositions: [TextReplyDraftDisposition] = [
+      .submissionPending(submissionID: submissionID),
+      .challengeRequired(submissionID: submissionID, sessionRevision: sessionRevision),
+      .acceptedAwaitingVisibility(
+        submissionID: submissionID,
+        receipt: .post(postID: 701)
+      ),
+      .outcomeUnknown(submissionID: submissionID),
+    ]
+
+    for disposition in dispositions {
+      XCTAssertNil(
+        TextReplyDraft(
+          key: key,
+          content: "正文",
+          attachments: [attachment],
+          disposition: disposition
+        )
+      )
+    }
+  }
+
+  func testImageDraftStatesRequireNonemptyValidAttachments() throws {
+    let key = try XCTUnwrap(TextReplyDraftKey(userID: 9, target: replyTarget()))
+    let reference = try XCTUnwrap(
+      ComposerImageSubmissionReference(
+        submissionID: replyModelUUID(20),
+        sessionRevision: replyModelUUID(21)
+      )
+    )
+    let attachment = replyModelAttachment(1)
+    let dispositions: [TextReplyDraftDisposition] = [
+      .imagePreparationPending(reference: reference),
+      .imagePipeline(reference: reference),
+      .imageAcceptedAwaitingVisibility(
+        reference: reference,
+        receipt: .post(postID: 701)
+      ),
+      .imageConfirmed(
+        reference: reference,
+        created: .post(postID: 701, floor: 2)
+      ),
+    ]
+
+    for disposition in dispositions {
+      XCTAssertNil(
+        TextReplyDraft(key: key, content: "正文", disposition: disposition)
+      )
+      XCTAssertNil(
+        TextReplyDraft(
+          key: key,
+          content: "正文",
+          attachments: [attachment, attachment],
+          disposition: disposition
+        )
+      )
+      let draft = try XCTUnwrap(
+        TextReplyDraft(
+          key: key,
+          content: "正文",
+          attachments: [attachment],
+          disposition: disposition
+        )
+      )
+      XCTAssertEqual(draft.disposition.imageSubmissionReference, reference)
+    }
+  }
+
+  func testImageAcceptedDraftRequiresReceiptForExactDirectThreadTarget() throws {
+    let threadKey = try XCTUnwrap(TextReplyDraftKey(userID: 9, target: replyTarget()))
+    let reference = try XCTUnwrap(
+      ComposerImageSubmissionReference(
+        submissionID: replyModelUUID(20),
+        sessionRevision: replyModelUUID(21)
+      )
+    )
+    let attachment = replyModelAttachment(1)
+
+    XCTAssertNotNil(
+      TextReplyDraft(
+        key: threadKey,
+        content: "",
+        attachments: [attachment],
+        disposition: .imageAcceptedAwaitingVisibility(
+          reference: reference,
+          receipt: .post(postID: 701)
+        )
+      )
+    )
+    for receipt in [
+      TextReplyReceipt.post(postID: 0),
+      .post(postID: 700),
+      .subpost(parentPostID: 701, subpostID: 702),
+    ] {
+      XCTAssertNil(
+        TextReplyDraft(
+          key: threadKey,
+          content: "",
+          attachments: [attachment],
+          disposition: .imageAcceptedAwaitingVisibility(
+            reference: reference,
+            receipt: receipt
+          )
+        )
+      )
+    }
+  }
+
+  func testImageConfirmedDraftRequiresCreatedReplyForExactDirectThreadTarget() throws {
+    let threadKey = try XCTUnwrap(TextReplyDraftKey(userID: 9, target: replyTarget()))
+    let reference = try XCTUnwrap(
+      ComposerImageSubmissionReference(
+        submissionID: replyModelUUID(20),
+        sessionRevision: replyModelUUID(21)
+      )
+    )
+    let attachment = replyModelAttachment(1)
+
+    let confirmed = try XCTUnwrap(
+      TextReplyDraft(
+        key: threadKey,
+        content: "正文",
+        attachments: [attachment],
+        disposition: .imageConfirmed(
+          reference: reference,
+          created: .post(postID: 701, floor: 2)
+        )
+      )
+    )
+    XCTAssertEqual(confirmed.disposition.imageSubmissionReference, reference)
+    for created in [
+      CreatedTextReply.post(postID: 0, floor: 2),
+      .post(postID: 700, floor: 2),
+      .subpost(parentPostID: 701, subpostID: 702),
+    ] {
+      XCTAssertNil(
+        TextReplyDraft(
+          key: threadKey,
+          content: "正文",
+          attachments: [attachment],
+          disposition: .imageConfirmed(reference: reference, created: created)
+        )
+      )
+    }
+  }
+
   func testVisibilityConfirmationRequiresValidAuthorContentAndCreatedReply() {
     let attachment = replyModelAttachment(20)
     XCTAssertNotNil(

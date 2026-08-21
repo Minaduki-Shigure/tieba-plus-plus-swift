@@ -750,11 +750,17 @@ struct ThreadView: View {
   }
 
   private func verifyReplyVisibility(
-    _ receipt: TextReplyReceipt,
-    expectedContent: String
+    _ submission: TextReplySubmission,
+    receipt: TextReplyReceipt,
+    imageUploads: [ComposerImageUploadResult]
   ) async throws
     -> TextReplyVisibilityConfirmation?
   {
+    guard
+      let context = replyComposerContext,
+      context.target == submission.target,
+      receipt.belongs(to: submission.target)
+    else { throw TextReplySubmissionError.invalidSubmission }
     switch receipt {
     case .post(let postID):
       guard
@@ -762,19 +768,40 @@ struct ThreadView: View {
         post.id == postID,
         post.threadID == viewModel.thread.id,
         post.id != viewModel.thread.firstPostID,
-        post.floor > 1,
-        let content = TextReplyVisibilityProof.exactPlainText(
-          from: post.contents,
-          matching: expectedContent
-        )
+        post.floor > 1
       else { return nil }
+      let content: String
+      if submission.attachments.isEmpty {
+        guard
+          imageUploads.isEmpty,
+          let exactContent = TextReplyVisibilityProof.exactPlainText(
+            from: post.contents,
+            matching: submission.content
+          )
+        else { return nil }
+        content = exactContent
+      } else {
+        guard
+          ReplyComposerImagePolicy.allowsAttachments(for: submission.target),
+          TextReplyImageVisibilityProof.exactDirectTopicReply(
+            from: post.contents,
+            matching: submission.content,
+            uploads: imageUploads
+          )
+        else { return nil }
+        content = submission.content
+      }
       return TextReplyVisibilityConfirmation(
         created: .post(postID: post.id, floor: post.floor),
         authorUserID: post.authorID,
-        content: content
+        content: content,
+        attachments: submission.attachments,
+        imageWatermark: submission.imageWatermark
       )
     case .subpost(let parentPostID, let subpostID):
       guard
+        submission.attachments.isEmpty,
+        imageUploads.isEmpty,
         let comment = try await viewModel.verifyAcceptedSubpost(
           parentPostID: parentPostID,
           subpostID: subpostID
@@ -784,7 +811,6 @@ struct ThreadView: View {
         comment.parentPostID == parentPostID
       else { return nil }
       let content: String?
-      guard let context = replyComposerContext else { return nil }
       switch context.target.destination {
       case .subpost(let expectedParentPostID, _):
         guard expectedParentPostID == parentPostID else { return nil }
@@ -792,13 +818,13 @@ struct ThreadView: View {
         content = TextReplyVisibilityProof.exactNestedReplyBody(
           from: comment,
           expectedReplyToUserID: expectedReplyToUserID,
-          matching: expectedContent
+          matching: submission.content
         )
       case .post(let expectedParentPostID):
         guard expectedParentPostID == parentPostID else { return nil }
         content = TextReplyVisibilityProof.exactPlainText(
           from: comment.contents,
-          matching: expectedContent
+          matching: submission.content
         )
       case .thread:
         return nil

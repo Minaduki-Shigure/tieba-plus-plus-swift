@@ -1,4 +1,5 @@
 import Foundation
+import TiebaCore
 
 struct SubmissionConfirmationCopy: Equatable, Sendable {
   let title: String
@@ -113,20 +114,36 @@ enum SubmissionConfirmationPolicy {
     id: UUID = UUID(),
     target: TextReplyTarget,
     content: String,
+    attachments: [ComposerImageAttachment] = [],
+    imageWatermark: TiebaStaticImageWatermark = .forumName,
     submissionAllowed: Bool
   ) -> TextReplySubmission? {
     guard submissionAllowed else { return nil }
-    return TextReplySubmission(id: id, target: target, content: content)
+    return TextReplySubmission(
+      id: id,
+      target: target,
+      content: content,
+      attachments: attachments,
+      imageWatermark: imageWatermark
+    )
   }
 
   static func textReplySnapshotIsCurrent(
     _ snapshot: TextReplySubmission,
     target: TextReplyTarget,
     content: String,
+    attachments: [ComposerImageAttachment] = [],
+    imageWatermark: TiebaStaticImageWatermark = .forumName,
     submissionAllowed: Bool
   ) -> Bool {
     guard submissionAllowed else { return false }
-    return TextReplySubmission(id: snapshot.id, target: target, content: content) == snapshot
+    return TextReplySubmission(
+      id: snapshot.id,
+      target: target,
+      content: content,
+      attachments: attachments,
+      imageWatermark: imageWatermark
+    ) == snapshot
   }
 
   static func newThreadSnapshot(
@@ -134,10 +151,19 @@ enum SubmissionConfirmationPolicy {
     target: NewThreadTarget,
     title: String?,
     content: String,
+    attachments: [ComposerImageAttachment] = [],
+    imageWatermark: TiebaStaticImageWatermark = .forumName,
     submissionAllowed: Bool
   ) -> NewThreadSubmission? {
     guard submissionAllowed else { return nil }
-    return NewThreadSubmission(id: id, target: target, title: title, content: content)
+    return NewThreadSubmission(
+      id: id,
+      target: target,
+      title: title,
+      content: content,
+      attachments: attachments,
+      imageWatermark: imageWatermark
+    )
   }
 
   static func newThreadSnapshotIsCurrent(
@@ -145,6 +171,8 @@ enum SubmissionConfirmationPolicy {
     target: NewThreadTarget,
     title: String?,
     content: String,
+    attachments: [ComposerImageAttachment] = [],
+    imageWatermark: TiebaStaticImageWatermark = .forumName,
     submissionAllowed: Bool
   ) -> Bool {
     guard submissionAllowed else { return false }
@@ -152,7 +180,9 @@ enum SubmissionConfirmationPolicy {
       id: snapshot.id,
       target: target,
       title: title,
-      content: content
+      content: content,
+      attachments: attachments,
+      imageWatermark: imageWatermark
     ) == snapshot
   }
 }

@@ -138,9 +138,6 @@ struct ForumView: View {
         case .newThread(let target):
           NewThreadComposerView(
             target: target,
-            verifyVisibility: { submission, receipt in
-              try await verifyNewThreadVisibility(submission, receipt: receipt)
-            },
             onConfirmed: handleConfirmedNewThread
           )
           .id("new-thread:\(target.id)")
@@ -196,23 +193,6 @@ struct ForumView: View {
       set: { isPresented in
         if !isPresented { navigationDestination = nil }
       }
-    )
-  }
-
-  private func verifyNewThreadVisibility(
-    _ submission: NewThreadSubmission,
-    receipt: NewThreadReceipt
-  ) async throws -> NewThreadVisibilityConfirmation? {
-    guard let currentTarget = newThreadTarget, submission.target == currentTarget else {
-      throw NewThreadSubmissionError.invalidSubmission
-    }
-    guard let accountAccess, let session = try await accountAccess.vault.activeSession() else {
-      throw NewThreadSubmissionError.signedOut
-    }
-    return try await accountAccess.service.verifyNewThreadVisibility(
-      session: session,
-      submission: submission,
-      receipt: receipt
     )
   }
 

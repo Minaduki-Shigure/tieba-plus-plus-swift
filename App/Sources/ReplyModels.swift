@@ -300,12 +300,14 @@ struct TextReplySubmission:
   let target: TextReplyTarget
   let content: String
   let attachments: [ComposerImageAttachment]
+  let imageWatermark: TiebaStaticImageWatermark
 
   init?(
     id: UUID = UUID(),
     target: TextReplyTarget,
     content: String,
-    attachments: [ComposerImageAttachment] = []
+    attachments: [ComposerImageAttachment] = [],
+    imageWatermark: TiebaStaticImageWatermark = .forumName
   ) {
     guard
       ComposerImageDraftPolicy.isValid(attachments),
@@ -321,6 +323,10 @@ struct TextReplySubmission:
     self.target = target
     self.content = content
     self.attachments = attachments
+    self.imageWatermark = ComposerImageDraftPolicy.normalizedWatermark(
+      imageWatermark,
+      for: attachments
+    )
   }
 
   var description: String { "TextReplySubmission(redacted)" }
@@ -332,6 +338,7 @@ struct TextReplySubmission:
       && lhs.target == rhs.target
       && lhs.content.utf8.elementsEqual(rhs.content.utf8)
       && lhs.attachments == rhs.attachments
+      && lhs.imageWatermark == rhs.imageWatermark
   }
 
   func hash(into hasher: inout Hasher) {
@@ -342,6 +349,7 @@ struct TextReplySubmission:
       hasher.combine(byte)
     }
     hasher.combine(attachments)
+    hasher.combine(imageWatermark)
   }
 
   private static func target(
@@ -424,12 +432,14 @@ struct TextReplyVisibilityConfirmation:
   let authorUserID: Int64
   let content: String
   let attachments: [ComposerImageAttachment]
+  let imageWatermark: TiebaStaticImageWatermark
 
   init?(
     created: CreatedTextReply,
     authorUserID: Int64,
     content: String,
-    attachments: [ComposerImageAttachment] = []
+    attachments: [ComposerImageAttachment] = [],
+    imageWatermark: TiebaStaticImageWatermark = .forumName
   ) {
     guard
       created.isValid,
@@ -447,6 +457,10 @@ struct TextReplyVisibilityConfirmation:
     self.authorUserID = authorUserID
     self.content = content
     self.attachments = attachments
+    self.imageWatermark = ComposerImageDraftPolicy.normalizedWatermark(
+      imageWatermark,
+      for: attachments
+    )
   }
 
   var description: String { "TextReplyVisibilityConfirmation(redacted)" }
@@ -551,9 +565,30 @@ struct TextReplyDraftKey: Hashable, Codable, Sendable {
 enum TextReplyDraftDisposition: Hashable, Codable, Sendable {
   case editing
   case submissionPending(submissionID: UUID)
+  case imagePreparationPending(reference: ComposerImageSubmissionReference)
+  case imagePipeline(reference: ComposerImageSubmissionReference)
   case challengeRequired(submissionID: UUID, sessionRevision: UUID)
   case acceptedAwaitingVisibility(submissionID: UUID, receipt: TextReplyReceipt)
+  case imageAcceptedAwaitingVisibility(
+    reference: ComposerImageSubmissionReference,
+    receipt: TextReplyReceipt
+  )
+  case imageConfirmed(
+    reference: ComposerImageSubmissionReference,
+    created: CreatedTextReply
+  )
   case outcomeUnknown(submissionID: UUID)
+
+  var imageSubmissionReference: ComposerImageSubmissionReference? {
+    switch self {
+    case .imagePreparationPending(let reference), .imagePipeline(let reference),
+      .imageAcceptedAwaitingVisibility(let reference, _), .imageConfirmed(let reference, _):
+      reference
+    case .editing, .submissionPending, .challengeRequired, .acceptedAwaitingVisibility,
+      .outcomeUnknown:
+      nil
+    }
+  }
 }
 
 struct TextReplyDraft:
@@ -566,6 +601,7 @@ struct TextReplyDraft:
   let key: TextReplyDraftKey
   let content: String
   let attachments: [ComposerImageAttachment]
+  let imageWatermark: TiebaStaticImageWatermark
   let disposition: TextReplyDraftDisposition
   let updatedAt: Date
 
@@ -573,6 +609,7 @@ struct TextReplyDraft:
     key: TextReplyDraftKey,
     content: String,
     attachments: [ComposerImageAttachment] = [],
+    imageWatermark: TiebaStaticImageWatermark = .forumName,
     disposition: TextReplyDraftDisposition = .editing,
     updatedAt: Date = Date()
   ) {
@@ -590,6 +627,10 @@ struct TextReplyDraft:
     self.key = key
     self.content = content
     self.attachments = attachments
+    self.imageWatermark = ComposerImageDraftPolicy.normalizedWatermark(
+      imageWatermark,
+      for: attachments
+    )
     self.disposition = disposition
     self.updatedAt = updatedAt
   }
@@ -603,25 +644,36 @@ struct TextReplyDraft:
     for destination: TextReplyTarget.Destination
   ) -> Bool {
     switch disposition {
-    case .editing, .submissionPending, .challengeRequired, .outcomeUnknown:
+    case .editing, .submissionPending, .imagePreparationPending, .imagePipeline,
+      .challengeRequired, .outcomeUnknown:
       true
-    case .acceptedAwaitingVisibility(_, let receipt):
-      switch (destination, receipt) {
-      case (.thread(let firstPostID), .post(let postID)):
-        postID > 0 && postID != firstPostID
-      case (.post(let expectedParent), .subpost(let parentPostID, let subpostID)):
-        expectedParent == parentPostID && subpostID > 0 && subpostID != parentPostID
-      case (
-        .subpost(let expectedParent, let repliedSubpostID),
-        .subpost(let parentPostID, let createdSubpostID)
-      ):
-        expectedParent == parentPostID
-          && createdSubpostID > 0
-          && createdSubpostID != parentPostID
-          && createdSubpostID != repliedSubpostID
-      default:
-        false
-      }
+    case .acceptedAwaitingVisibility(_, let receipt),
+      .imageAcceptedAwaitingVisibility(_, let receipt):
+      Self.receipt(receipt, belongsTo: destination)
+    case .imageConfirmed(_, let created):
+      created.isValid && Self.receipt(created.receipt, belongsTo: destination)
+    }
+  }
+
+  private static func receipt(
+    _ receipt: TextReplyReceipt,
+    belongsTo destination: TextReplyTarget.Destination
+  ) -> Bool {
+    switch (destination, receipt) {
+    case (.thread(let firstPostID), .post(let postID)):
+      postID > 0 && postID != firstPostID
+    case (.post(let expectedParent), .subpost(let parentPostID, let subpostID)):
+      expectedParent == parentPostID && subpostID > 0 && subpostID != parentPostID
+    case (
+      .subpost(let expectedParent, let repliedSubpostID),
+      .subpost(let parentPostID, let createdSubpostID)
+    ):
+      expectedParent == parentPostID
+        && createdSubpostID > 0
+        && createdSubpostID != parentPostID
+        && createdSubpostID != repliedSubpostID
+    default:
+      false
     }
   }
 
@@ -648,9 +700,12 @@ struct TextReplyDraft:
     case .editing:
       true
     case .challengeRequired:
-      content.isEmpty || isValidSubmissionContent(content, attachments: attachments)
+      attachments.isEmpty && (content.isEmpty || TextReplyContentPolicy.isValid(content))
     case .submissionPending, .acceptedAwaitingVisibility, .outcomeUnknown:
-      isValidSubmissionContent(content, attachments: attachments)
+      attachments.isEmpty && TextReplyContentPolicy.isValid(content)
+    case .imagePreparationPending, .imagePipeline, .imageAcceptedAwaitingVisibility,
+      .imageConfirmed:
+      !attachments.isEmpty && isValidSubmissionContent(content, attachments: attachments)
     }
   }
 

@@ -26,6 +26,10 @@ private struct NewThreadSubmissionStoreEnvironmentKey: EnvironmentKey {
   static let defaultValue: NewThreadSubmissionStore? = nil
 }
 
+private struct ComposerImageAttachmentStoreEnvironmentKey: EnvironmentKey {
+  static let defaultValue: ComposerImageAttachmentStore? = nil
+}
+
 extension EnvironmentValues {
   var accountAccess: AccountAccess? {
     get { self[AccountAccessEnvironmentKey.self] }
@@ -50,6 +54,11 @@ extension EnvironmentValues {
   var newThreadSubmissionStore: NewThreadSubmissionStore? {
     get { self[NewThreadSubmissionStoreEnvironmentKey.self] }
     set { self[NewThreadSubmissionStoreEnvironmentKey.self] = newValue }
+  }
+
+  var composerImageAttachmentStore: ComposerImageAttachmentStore? {
+    get { self[ComposerImageAttachmentStoreEnvironmentKey.self] }
+    set { self[ComposerImageAttachmentStoreEnvironmentKey.self] = newValue }
   }
 }
 

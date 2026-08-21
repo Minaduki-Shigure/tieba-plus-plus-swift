@@ -19,14 +19,14 @@ and its verified metadata enters the public app source.
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, media preferences, account-isolated followed-forum pinning and layout, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
 | Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
-| Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, and equivalent new-topic creation are in device validation. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
-| TiebaLite parity | Current `main` and the public `v0.60.6-alpha.1` rollback snapshot have the same product scope: about 80% overall (estimated range 78–81%, with 19–22% remaining); anonymous reading and media: about 91–95% |
+| Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, and equivalent new-topic creation are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies; it remains a disposable-account and physical-device validation gate. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
+| TiebaLite parity | Current `main`: about 80% overall (estimated range 79–82%, with 18–21% remaining). Public `v0.60.6-alpha.1`: 78–81%. Anonymous reading and media remain about 91–95% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.60.6-alpha.1` (build 69) |
 
 ### Release and validation
 
-- **Current alpha:** `v0.60.6-alpha.1` publishes all end-user app-code changes
-  described below, including
+- **Current alpha:** `v0.60.6-alpha.1` publishes the end-user app-code scope
+  through the rollback snapshot described below, including
   personalized and concern feeds, expanded public and
   account-bound reads, bounded animated-media and image-cache support, local
   followed-forum management, and guarded creation and social actions. Account
@@ -217,13 +217,34 @@ and its verified metadata enters the public app source.
   All non-performance capabilities in this release-scope block remain included
   in the public `v0.60.6-alpha.1` IPA after the rollback tag and artifact passed
   the release checks.
-- **Non-user-facing image-creation foundation:** The public `v0.60.6-alpha.1`
+- **Current-main static-image creation:** New-topic and direct-topic-reply
+  composers on `main` can select, reorder, preview, and remove up to nine static
+  images, choose standard or high-definition processing, and select forum-name,
+  username, or no watermark. Account-scoped drafts, attachment files, upload
+  progress, and unknown outcomes are durable across restart. Uploads are
+  sequential, final marker compilation is owned by the protocol layer, and the
+  immutable confirmation binds the exact text, image order, processing choice,
+  watermark, target, account session, and submission ID. Recovery never resumes
+  network work implicitly; a resumable operation requires an explicit action,
+  while a dispatched unknown outcome remains locked. Accepted submissions retain
+  their authenticated upload proof until strict ordered image readback confirms
+  visibility. This source workflow has automated contract coverage but has not
+  yet passed disposable-account or physical-device validation.
+  Removing an attachment or completing a submission durably records a bounded
+  deletion tombstone but deliberately retains the private composer JPEG: the
+  current cross-draft, cross-store, and upload-ledger reference audit is not an
+  atomic deletion authorization. The 128-record journal rotates its oldest audit
+  entry without deleting a file, so cleanup bookkeeping cannot block a terminal
+  submission. Physical attachment reclamation remains deferred until those
+  owners share an exclusive reference reservation. Independently, abandoned
+  picker transfer directories named `tieba-composer-image-<uuid>` expire after
+  24 hours and are removed without following links in batches of at most 32.
+- **Public-release image foundation:** The public `v0.60.6-alpha.1`
   app-code snapshot contains a strict HTTPS static-image chunk-upload contract and
   private, metadata-stripping attachment processing/storage. It is not connected
   to either composer, cannot initiate an upload from the UI, and receives no
   TiebaLite parity credit yet.
-  Picker limits, draft integration, durable unknown-outcome recovery, typed marker
-  compilation, final submission binding, and device validation remain required.
+  The current-main composer integration described above is not present in that IPA.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
   XcodeGen 2.45.4 or newer.
 - **Automated checks:** GitHub Actions runs package tests and the complete iOS
@@ -518,9 +539,11 @@ and its verified metadata enters the public app source.
 - **Text and classic-emoticon replies:** Current `main` can reply to a topic, an ordinary floor,
   or a specific nested reply, including one under the canonical first floor,
   from native, draft-backed composers. A visible inline nested-reply preview has
-  a direct exact-target reply action. Bodies may include only ordinary text and
-  the fixed 50-name classic-emoticon catalog; all other rich markers remain
-  invalid. Replying to the first-floor parent itself
+  a direct exact-target reply action. The pure-text path accepts only ordinary
+  text and the fixed 50-name classic-emoticon catalog. Direct topic replies on
+  current `main` may additionally use the bounded static-image workflow described
+  above; ordinary-floor, nested-reply, and all other rich markers remain invalid.
+  Replying to the first-floor parent itself
   remains a topic reply rather than an ordinary-floor reply. Targets are rebuilt
   only from validated page models and rebound by an authenticated PB
   Page/Floor read before the single write. Drafts are isolated by account and
@@ -597,18 +620,20 @@ and its verified metadata enters the public app source.
   implemented.
 - **Unsupported operations:** Guess-based removal of unresolvable cloud-favorite
   rows, bulk cloud/local synchronization, disagreement and other reaction types,
-  recommendation feedback, image/voice and arbitrary rich-media topic/reply creation, profile editing, content
+  recommendation feedback, image creation for ordinary-floor and nested replies,
+  voice and arbitrary rich-media topic/reply creation, profile editing, content
   deletion, native or credential-injected reporting, background or automatic check-in, notification mark-read/unread
   reconciliation, background notification polling, and moderation remain
   unavailable until their request contracts and recovery paths have been
   validated on a disposable account.
 - **Detailed parity:** See [`ROADMAP.md`](ROADMAP.md) for the complete TiebaLite
   comparison, weighted estimate, protocol constraints, and next milestones.
-  The current `main` source audit totals 78–81 of 100 weighted points, leaving
-  about 19–22%; its anonymous reading and media subtotal remains about 91–95%.
+  The current `main` source audit totals 79–82 of 100 weighted points, leaving
+  about 18–21%; its anonymous reading and media subtotal remains about 91–95%.
   This measures implemented end-to-end workflows with partial credit for
   device-validation gates; it is not a claim that every path is release-ready.
-  The public `v0.60.6-alpha.1` app-code snapshot has the same estimated scope.
+  The public `v0.60.6-alpha.1` app-code snapshot remains at 78–81% because it
+  contains only the non-user-facing image-upload foundation.
   The largest remaining gaps are
   rich-media creation, background unread handling, broader settings, remaining
   account/social actions, unresolvable cloud-favorite rows, and moderation.

@@ -231,6 +231,85 @@ final class SubmissionConfirmationTests: XCTestCase {
     )
   }
 
+  func testImageSnapshotsFreezeAttachmentOrderAndWatermark() throws {
+    let first = confirmationAttachment(31)
+    let second = confirmationAttachment(32)
+    let replyTarget = try replyConfirmationTarget()
+    let reply = try XCTUnwrap(
+      SubmissionConfirmationPolicy.textReplySnapshot(
+        target: replyTarget,
+        content: "图片回复",
+        attachments: [first, second],
+        imageWatermark: .username,
+        submissionAllowed: true
+      )
+    )
+    XCTAssertTrue(
+      SubmissionConfirmationPolicy.textReplySnapshotIsCurrent(
+        reply,
+        target: replyTarget,
+        content: "图片回复",
+        attachments: [first, second],
+        imageWatermark: .username,
+        submissionAllowed: true
+      )
+    )
+    XCTAssertFalse(
+      SubmissionConfirmationPolicy.textReplySnapshotIsCurrent(
+        reply,
+        target: replyTarget,
+        content: "图片回复",
+        attachments: [second, first],
+        imageWatermark: .username,
+        submissionAllowed: true
+      )
+    )
+    XCTAssertFalse(
+      SubmissionConfirmationPolicy.textReplySnapshotIsCurrent(
+        reply,
+        target: replyTarget,
+        content: "图片回复",
+        attachments: [first, second],
+        imageWatermark: .none,
+        submissionAllowed: true
+      )
+    )
+
+    let threadTarget = try XCTUnwrap(NewThreadTarget(forumID: 7, forumName: "swift"))
+    let thread = try XCTUnwrap(
+      SubmissionConfirmationPolicy.newThreadSnapshot(
+        target: threadTarget,
+        title: "标题",
+        content: "图片主题",
+        attachments: [first, second],
+        imageWatermark: .username,
+        submissionAllowed: true
+      )
+    )
+    XCTAssertFalse(
+      SubmissionConfirmationPolicy.newThreadSnapshotIsCurrent(
+        thread,
+        target: threadTarget,
+        title: "标题",
+        content: "图片主题",
+        attachments: [first],
+        imageWatermark: .username,
+        submissionAllowed: true
+      )
+    )
+    XCTAssertFalse(
+      SubmissionConfirmationPolicy.newThreadSnapshotIsCurrent(
+        thread,
+        target: threadTarget,
+        title: "标题",
+        content: "图片主题",
+        attachments: [first, second],
+        imageWatermark: .forumName,
+        submissionAllowed: true
+      )
+    )
+  }
+
   func testPendingSnapshotCannotBeReplacedAndIsConsumedOnceByExactIdentifier() throws {
     let target = try replyConfirmationTarget()
     let current = try XCTUnwrap(
@@ -277,4 +356,15 @@ private func replyConfirmationTarget() throws -> TextReplyTarget {
 
 private func confirmationUUID(_ value: UInt8) -> UUID {
   UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, value))
+}
+
+private func confirmationAttachment(_ value: UInt8) -> ComposerImageAttachment {
+  ComposerImageAttachment(
+    id: confirmationUUID(value),
+    sha256: String(repeating: String(value % 10), count: 64),
+    byteCount: 1,
+    pixelWidth: 1,
+    pixelHeight: 1,
+    quality: .standard
+  )!
 }

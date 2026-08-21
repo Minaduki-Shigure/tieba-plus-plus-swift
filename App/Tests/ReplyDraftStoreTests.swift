@@ -63,7 +63,7 @@ final class ReplyDraftStoreTests: XCTestCase {
     XCTAssertEqual(restored?.attachments, attachments)
   }
 
-  func testSchemaV1DraftMigratesToEmptyAttachmentsAndRewritesAsV2OnSave() async throws {
+  func testSchemaV1DraftMigratesToEmptyAttachmentsAndRewritesAsV3OnSave() async throws {
     let location = try makeReplyDraftTestLocation()
     defer { try? FileManager.default.removeItem(at: location.directory) }
     let store = FileTextReplyDraftStore(fileURL: location.file)
@@ -81,6 +81,7 @@ final class ReplyDraftStoreTests: XCTestCase {
     legacyArchive["schemaVersion"] = 1
     var legacyDrafts = try XCTUnwrap(legacyArchive["drafts"] as? [[String: Any]])
     legacyDrafts[0].removeValue(forKey: "attachments")
+    legacyDrafts[0].removeValue(forKey: "imageWatermark")
     legacyArchive["drafts"] = legacyDrafts
     try writeReplyDraftArchive(legacyArchive, to: location.file)
 
@@ -96,7 +97,107 @@ final class ReplyDraftStoreTests: XCTestCase {
     XCTAssertEqual((rewrittenDrafts[0]["attachments"] as? [Any])?.count, 0)
   }
 
-  func testSchemaV2RejectsDuplicateOverlimitAndInvalidAttachmentMetadata() async throws {
+  func testSchemaV2AttachmentDraftMigratesAndRewritesAsV3OnSave() async throws {
+    let location = try makeReplyDraftTestLocation()
+    defer { try? FileManager.default.removeItem(at: location.directory) }
+    let store = FileTextReplyDraftStore(fileURL: location.file)
+    let key = try XCTUnwrap(TextReplyDraftKey(userID: 9, target: draftTarget()))
+    let attachments = [replyDraftAttachment(2), replyDraftAttachment(1)]
+    let draft = try XCTUnwrap(
+      TextReplyDraft(
+        key: key,
+        content: "正文",
+        attachments: attachments,
+        updatedAt: Date(timeIntervalSince1970: 100)
+      )
+    )
+    try await store.save(draft)
+    var legacyArchive = try replyDraftArchiveObject(at: location.file)
+    legacyArchive["schemaVersion"] = 2
+    var legacyDrafts = try XCTUnwrap(legacyArchive["drafts"] as? [[String: Any]])
+    legacyDrafts[0].removeValue(forKey: "imageWatermark")
+    legacyArchive["drafts"] = legacyDrafts
+    try writeReplyDraftArchive(legacyArchive, to: location.file)
+
+    let restored = try await store.draft(for: key)
+    XCTAssertEqual(restored, draft)
+    XCTAssertEqual(restored?.attachments, attachments)
+    try await store.save(try XCTUnwrap(restored))
+    let rewritten = try replyDraftArchiveObject(at: location.file)
+    XCTAssertEqual(rewritten["schemaVersion"] as? Int, 3)
+    let rewrittenDrafts = try XCTUnwrap(rewritten["drafts"] as? [[String: Any]])
+    XCTAssertEqual((rewrittenDrafts[0]["attachments"] as? [Any])?.count, 2)
+  }
+
+  func testSchemaV3RejectsNoncanonicalWatermarkWithoutAttachments() async throws {
+    let location = try makeReplyDraftTestLocation()
+    defer { try? FileManager.default.removeItem(at: location.directory) }
+    let store = FileTextReplyDraftStore(fileURL: location.file)
+    let key = try XCTUnwrap(TextReplyDraftKey(userID: 9, target: draftTarget()))
+    try await store.save(
+      try XCTUnwrap(TextReplyDraft(key: key, content: "正文"))
+    )
+    var archive = try replyDraftArchiveObject(at: location.file)
+    var drafts = try XCTUnwrap(archive["drafts"] as? [[String: Any]])
+    drafts[0]["imageWatermark"] = "1"
+    archive["drafts"] = drafts
+    try writeReplyDraftArchive(archive, to: location.file)
+    let original = try Data(contentsOf: location.file)
+
+    await XCTAssertThrowsErrorAsync(try await store.draft(for: key)) { error in
+      XCTAssertEqual(error as? TextReplyDraftStoreError, .corruptedArchive)
+    }
+    XCTAssertEqual(try Data(contentsOf: location.file), original)
+  }
+
+  func testSchemaV2CannotSmuggleImageDispositions() async throws {
+    let reference = try XCTUnwrap(
+      ComposerImageSubmissionReference(
+        submissionID: replyDraftUUID(20),
+        sessionRevision: replyDraftUUID(21)
+      )
+    )
+    let dispositions: [TextReplyDraftDisposition] = [
+      .imagePreparationPending(reference: reference),
+      .imagePipeline(reference: reference),
+      .imageAcceptedAwaitingVisibility(reference: reference, receipt: .post(postID: 701)),
+      .imageConfirmed(
+        reference: reference,
+        created: .post(postID: 701, floor: 2)
+      ),
+    ]
+
+    for disposition in dispositions {
+      let location = try makeReplyDraftTestLocation()
+      defer { try? FileManager.default.removeItem(at: location.directory) }
+      let store = FileTextReplyDraftStore(fileURL: location.file)
+      let key = try XCTUnwrap(TextReplyDraftKey(userID: 9, target: draftTarget()))
+      try await store.save(
+        try XCTUnwrap(
+          TextReplyDraft(
+            key: key,
+            content: "",
+            attachments: [replyDraftAttachment(1)],
+            disposition: disposition
+          )
+        )
+      )
+      var downgraded = try replyDraftArchiveObject(at: location.file)
+      downgraded["schemaVersion"] = 2
+      var downgradedDrafts = try XCTUnwrap(downgraded["drafts"] as? [[String: Any]])
+      downgradedDrafts[0].removeValue(forKey: "imageWatermark")
+      downgraded["drafts"] = downgradedDrafts
+      try writeReplyDraftArchive(downgraded, to: location.file)
+      let original = try Data(contentsOf: location.file)
+
+      await XCTAssertThrowsErrorAsync(try await store.draft(for: key)) { error in
+        XCTAssertEqual(error as? TextReplyDraftStoreError, .corruptedArchive)
+      }
+      XCTAssertEqual(try Data(contentsOf: location.file), original)
+    }
+  }
+
+  func testSchemaV3RejectsDuplicateOverlimitAndInvalidAttachmentMetadata() async throws {
     let location = try makeReplyDraftTestLocation()
     defer { try? FileManager.default.removeItem(at: location.directory) }
     let store = FileTextReplyDraftStore(fileURL: location.file)
@@ -136,7 +237,7 @@ final class ReplyDraftStoreTests: XCTestCase {
     }
   }
 
-  func testSchemaV2RejectsAttachmentsBoundToPostTarget() async throws {
+  func testSchemaV3RejectsAttachmentsBoundToPostTarget() async throws {
     let location = try makeReplyDraftTestLocation()
     defer { try? FileManager.default.removeItem(at: location.directory) }
     let store = FileTextReplyDraftStore(fileURL: location.file)
@@ -302,18 +403,18 @@ final class ReplyDraftStoreTests: XCTestCase {
       at: location.directory,
       withIntermediateDirectories: true
     )
-    let original = Data("{\"schemaVersion\":3,\"drafts\":[]}".utf8)
+    let original = Data("{\"schemaVersion\":4,\"drafts\":[]}".utf8)
     try original.write(to: location.file)
     let store = FileTextReplyDraftStore(fileURL: location.file)
     let key = TextReplyDraftKey(userID: 9, target: draftTarget())!
 
     await XCTAssertThrowsErrorAsync(try await store.draft(for: key)) { error in
-      XCTAssertEqual(error as? TextReplyDraftStoreError, .unsupportedSchemaVersion(3))
+      XCTAssertEqual(error as? TextReplyDraftStoreError, .unsupportedSchemaVersion(4))
     }
     await XCTAssertThrowsErrorAsync(
       try await store.save(TextReplyDraft(key: key, content: "new")!)
     ) { error in
-      XCTAssertEqual(error as? TextReplyDraftStoreError, .unsupportedSchemaVersion(3))
+      XCTAssertEqual(error as? TextReplyDraftStoreError, .unsupportedSchemaVersion(4))
     }
     XCTAssertEqual(try Data(contentsOf: location.file), original)
   }
@@ -365,6 +466,10 @@ private func replyDraftAttachment(_ value: UInt8) -> ComposerImageAttachment {
     pixelHeight: 10,
     quality: .standard
   )!
+}
+
+private func replyDraftUUID(_ value: UInt8) -> UUID {
+  UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, value))
 }
 
 private func replyDraftArchiveObject(at url: URL) throws -> [String: Any] {

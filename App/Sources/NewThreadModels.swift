@@ -76,6 +76,13 @@ enum NewThreadContentPolicy {
 enum ComposerImageDraftPolicy {
   static let maximumAttachmentCount = TiebaStaticImageContentPolicy.maximumImageCount
 
+  static func normalizedWatermark(
+    _ watermark: TiebaStaticImageWatermark,
+    for attachments: [ComposerImageAttachment]
+  ) -> TiebaStaticImageWatermark {
+    attachments.isEmpty ? .forumName : watermark
+  }
+
   static func isValid(_ attachments: [ComposerImageAttachment]) -> Bool {
     guard attachments.count <= maximumAttachmentCount else { return false }
 
@@ -112,13 +119,15 @@ struct NewThreadSubmission:
   let title: String?
   let content: String
   let attachments: [ComposerImageAttachment]
+  let imageWatermark: TiebaStaticImageWatermark
 
   init?(
     id: UUID = UUID(),
     target: NewThreadTarget,
     title: String?,
     content: String,
-    attachments: [ComposerImageAttachment] = []
+    attachments: [ComposerImageAttachment] = [],
+    imageWatermark: TiebaStaticImageWatermark = .forumName
   ) {
     let title = NewThreadTitlePolicy.normalized(title)
     guard
@@ -137,6 +146,10 @@ struct NewThreadSubmission:
     self.title = title
     self.content = content
     self.attachments = attachments
+    self.imageWatermark = ComposerImageDraftPolicy.normalizedWatermark(
+      imageWatermark,
+      for: attachments
+    )
   }
 
   var description: String { "NewThreadSubmission(redacted)" }
@@ -155,6 +168,7 @@ struct NewThreadSubmission:
       && lhs.title == rhs.title
       && lhs.content.utf8.elementsEqual(rhs.content.utf8)
       && lhs.attachments == rhs.attachments
+      && lhs.imageWatermark == rhs.imageWatermark
   }
 
   func hash(into hasher: inout Hasher) {
@@ -166,6 +180,7 @@ struct NewThreadSubmission:
       hasher.combine(byte)
     }
     hasher.combine(attachments)
+    hasher.combine(imageWatermark)
   }
 
 }
@@ -221,6 +236,7 @@ struct NewThreadVisibilityConfirmation:
   let title: String?
   let content: String
   let attachments: [ComposerImageAttachment]
+  let imageWatermark: TiebaStaticImageWatermark
 
   init?(
     receipt: NewThreadReceipt,
@@ -228,7 +244,8 @@ struct NewThreadVisibilityConfirmation:
     authorUserID: Int64,
     title: String?,
     content: String,
-    attachments: [ComposerImageAttachment] = []
+    attachments: [ComposerImageAttachment] = [],
+    imageWatermark: TiebaStaticImageWatermark = .forumName
   ) {
     let title = Self.normalizedVisibleTitle(title)
     guard
@@ -250,6 +267,10 @@ struct NewThreadVisibilityConfirmation:
     self.title = title
     self.content = content
     self.attachments = attachments
+    self.imageWatermark = ComposerImageDraftPolicy.normalizedWatermark(
+      imageWatermark,
+      for: attachments
+    )
   }
 
   var description: String { "NewThreadVisibilityConfirmation(redacted)" }
@@ -338,10 +359,28 @@ struct NewThreadDraftKey: Hashable, Codable, Sendable {
 enum NewThreadDraftDisposition: Hashable, Codable, Sendable {
   case editing
   case submissionPending(submissionID: UUID)
+  case imagePreparationPending(reference: ComposerImageSubmissionReference)
+  case imagePipeline(reference: ComposerImageSubmissionReference)
   case challengeRequired(submissionID: UUID, sessionRevision: UUID)
   case acceptedAwaitingVisibility(submissionID: UUID, receipt: NewThreadReceipt)
+  case imageAcceptedAwaitingVisibility(
+    reference: ComposerImageSubmissionReference,
+    receipt: NewThreadReceipt
+  )
   case confirmed(submissionID: UUID, receipt: NewThreadReceipt)
+  case imageConfirmed(reference: ComposerImageSubmissionReference, receipt: NewThreadReceipt)
   case outcomeUnknown(submissionID: UUID)
+
+  var imageSubmissionReference: ComposerImageSubmissionReference? {
+    switch self {
+    case .imagePreparationPending(let reference), .imagePipeline(let reference),
+      .imageAcceptedAwaitingVisibility(let reference, _), .imageConfirmed(let reference, _):
+      reference
+    case .editing, .submissionPending, .challengeRequired, .acceptedAwaitingVisibility,
+      .confirmed, .outcomeUnknown:
+      nil
+    }
+  }
 }
 
 struct NewThreadDraft:
@@ -355,6 +394,7 @@ struct NewThreadDraft:
   let title: String?
   let content: String
   let attachments: [ComposerImageAttachment]
+  let imageWatermark: TiebaStaticImageWatermark
   let disposition: NewThreadDraftDisposition
   let updatedAt: Date
 
@@ -363,6 +403,7 @@ struct NewThreadDraft:
     title: String?,
     content: String,
     attachments: [ComposerImageAttachment] = [],
+    imageWatermark: TiebaStaticImageWatermark = .forumName,
     disposition: NewThreadDraftDisposition = .editing,
     updatedAt: Date = Date()
   ) {
@@ -382,6 +423,10 @@ struct NewThreadDraft:
     self.title = title
     self.content = content
     self.attachments = attachments
+    self.imageWatermark = ComposerImageDraftPolicy.normalizedWatermark(
+      imageWatermark,
+      for: attachments
+    )
     self.disposition = disposition
     self.updatedAt = updatedAt
   }
@@ -405,11 +450,17 @@ struct NewThreadDraft:
     case .editing:
       true
     case .challengeRequired:
-      content.isEmpty || isValidSubmissionContent(content, attachments: attachments)
+      attachments.isEmpty && (content.isEmpty || NewThreadContentPolicy.isValid(content))
     case .submissionPending, .outcomeUnknown:
-      isValidSubmissionContent(content, attachments: attachments)
+      attachments.isEmpty && NewThreadContentPolicy.isValid(content)
+    case .imagePreparationPending, .imagePipeline:
+      !attachments.isEmpty && isValidSubmissionContent(content, attachments: attachments)
     case .acceptedAwaitingVisibility(_, let receipt), .confirmed(_, let receipt):
-      receipt.isValid && isValidSubmissionContent(content, attachments: attachments)
+      attachments.isEmpty && receipt.isValid && NewThreadContentPolicy.isValid(content)
+    case .imageAcceptedAwaitingVisibility(_, let receipt), .imageConfirmed(_, let receipt):
+      !attachments.isEmpty
+        && receipt.isValid
+        && isValidSubmissionContent(content, attachments: attachments)
     }
   }
 

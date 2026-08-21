@@ -68,7 +68,7 @@ final class NewThreadDraftStoreTests: XCTestCase {
     XCTAssertEqual(restored?.attachments, attachments)
   }
 
-  func testSchemaV1DraftMigratesToEmptyAttachmentsAndRewritesAsV2OnSave() async throws {
+  func testSchemaV1DraftMigratesToEmptyAttachmentsAndRewritesAsV3OnSave() async throws {
     let location = try makeNewThreadDraftTestLocation()
     defer { try? FileManager.default.removeItem(at: location.directory) }
     let store = FileNewThreadDraftStore(fileURL: location.file)
@@ -89,6 +89,7 @@ final class NewThreadDraftStoreTests: XCTestCase {
     legacyArchive["schemaVersion"] = 1
     var legacyDrafts = try XCTUnwrap(legacyArchive["drafts"] as? [[String: Any]])
     legacyDrafts[0].removeValue(forKey: "attachments")
+    legacyDrafts[0].removeValue(forKey: "imageWatermark")
     legacyArchive["drafts"] = legacyDrafts
     try writeNewThreadDraftArchive(legacyArchive, to: location.file)
 
@@ -104,7 +105,111 @@ final class NewThreadDraftStoreTests: XCTestCase {
     XCTAssertEqual((rewrittenDrafts[0]["attachments"] as? [Any])?.count, 0)
   }
 
-  func testSchemaV2RejectsDuplicateOverlimitAndInvalidAttachmentMetadata() async throws {
+  func testSchemaV2AttachmentDraftMigratesAndRewritesAsV3OnSave() async throws {
+    let location = try makeNewThreadDraftTestLocation()
+    defer { try? FileManager.default.removeItem(at: location.directory) }
+    let store = FileNewThreadDraftStore(fileURL: location.file)
+    let key = try XCTUnwrap(NewThreadDraftKey(userID: 9, target: newThreadDraftTarget()))
+    let attachments = [newThreadDraftAttachment(2), newThreadDraftAttachment(1)]
+    let draft = try XCTUnwrap(
+      NewThreadDraft(
+        key: key,
+        title: nil,
+        content: "正文",
+        attachments: attachments,
+        updatedAt: Date(timeIntervalSince1970: 100)
+      )
+    )
+    try await store.save(draft)
+    var legacyArchive = try newThreadDraftArchiveObject(at: location.file)
+    legacyArchive["schemaVersion"] = 2
+    var legacyDrafts = try XCTUnwrap(legacyArchive["drafts"] as? [[String: Any]])
+    legacyDrafts[0].removeValue(forKey: "imageWatermark")
+    legacyArchive["drafts"] = legacyDrafts
+    try writeNewThreadDraftArchive(legacyArchive, to: location.file)
+
+    let restored = try await store.draft(for: key)
+    XCTAssertEqual(restored, draft)
+    XCTAssertEqual(restored?.attachments, attachments)
+    try await store.save(try XCTUnwrap(restored))
+    let rewritten = try newThreadDraftArchiveObject(at: location.file)
+    XCTAssertEqual(rewritten["schemaVersion"] as? Int, 3)
+    let rewrittenDrafts = try XCTUnwrap(rewritten["drafts"] as? [[String: Any]])
+    XCTAssertEqual((rewrittenDrafts[0]["attachments"] as? [Any])?.count, 2)
+  }
+
+  func testSchemaV3RejectsNoncanonicalWatermarkWithoutAttachments() async throws {
+    let location = try makeNewThreadDraftTestLocation()
+    defer { try? FileManager.default.removeItem(at: location.directory) }
+    let store = FileNewThreadDraftStore(fileURL: location.file)
+    let key = try XCTUnwrap(NewThreadDraftKey(userID: 9, target: newThreadDraftTarget()))
+    try await store.save(
+      try XCTUnwrap(
+        NewThreadDraft(key: key, title: nil, content: "正文")
+      )
+    )
+    var archive = try newThreadDraftArchiveObject(at: location.file)
+    var drafts = try XCTUnwrap(archive["drafts"] as? [[String: Any]])
+    drafts[0]["imageWatermark"] = "1"
+    archive["drafts"] = drafts
+    try writeNewThreadDraftArchive(archive, to: location.file)
+    let original = try Data(contentsOf: location.file)
+
+    await XCTAssertThrowsNewThreadDraftError(try await store.draft(for: key)) { error in
+      XCTAssertEqual(error as? NewThreadDraftStoreError, .corruptedArchive)
+    }
+    XCTAssertEqual(try Data(contentsOf: location.file), original)
+  }
+
+  func testSchemaV2CannotSmuggleImageDispositions() async throws {
+    let reference = try XCTUnwrap(
+      ComposerImageSubmissionReference(
+        submissionID: newThreadDraftUUID(20),
+        sessionRevision: newThreadDraftUUID(21)
+      )
+    )
+    let receipt = try XCTUnwrap(NewThreadReceipt(threadID: 70, firstPostID: 700))
+    let dispositions: [NewThreadDraftDisposition] = [
+      .imagePreparationPending(reference: reference),
+      .imagePipeline(reference: reference),
+      .imageAcceptedAwaitingVisibility(reference: reference, receipt: receipt),
+      .imageConfirmed(reference: reference, receipt: receipt),
+    ]
+
+    for disposition in dispositions {
+      let location = try makeNewThreadDraftTestLocation()
+      defer { try? FileManager.default.removeItem(at: location.directory) }
+      let store = FileNewThreadDraftStore(fileURL: location.file)
+      let key = try XCTUnwrap(
+        NewThreadDraftKey(userID: 9, target: newThreadDraftTarget())
+      )
+      try await store.save(
+        try XCTUnwrap(
+          NewThreadDraft(
+            key: key,
+            title: nil,
+            content: "",
+            attachments: [newThreadDraftAttachment(1)],
+            disposition: disposition
+          )
+        )
+      )
+      var downgraded = try newThreadDraftArchiveObject(at: location.file)
+      downgraded["schemaVersion"] = 2
+      var downgradedDrafts = try XCTUnwrap(downgraded["drafts"] as? [[String: Any]])
+      downgradedDrafts[0].removeValue(forKey: "imageWatermark")
+      downgraded["drafts"] = downgradedDrafts
+      try writeNewThreadDraftArchive(downgraded, to: location.file)
+      let original = try Data(contentsOf: location.file)
+
+      await XCTAssertThrowsNewThreadDraftError(try await store.draft(for: key)) { error in
+        XCTAssertEqual(error as? NewThreadDraftStoreError, .corruptedArchive)
+      }
+      XCTAssertEqual(try Data(contentsOf: location.file), original)
+    }
+  }
+
+  func testSchemaV3RejectsDuplicateOverlimitAndInvalidAttachmentMetadata() async throws {
     let location = try makeNewThreadDraftTestLocation()
     defer { try? FileManager.default.removeItem(at: location.directory) }
     let store = FileNewThreadDraftStore(fileURL: location.file)
@@ -263,18 +368,18 @@ final class NewThreadDraftStoreTests: XCTestCase {
       at: location.directory,
       withIntermediateDirectories: true
     )
-    let original = Data("{\"schemaVersion\":3,\"drafts\":[]}".utf8)
+    let original = Data("{\"schemaVersion\":4,\"drafts\":[]}".utf8)
     try original.write(to: location.file)
     let store = FileNewThreadDraftStore(fileURL: location.file)
     let key = NewThreadDraftKey(userID: 9, target: newThreadDraftTarget())!
 
     await XCTAssertThrowsNewThreadDraftError(try await store.draft(for: key)) { error in
-      XCTAssertEqual(error as? NewThreadDraftStoreError, .unsupportedSchemaVersion(3))
+      XCTAssertEqual(error as? NewThreadDraftStoreError, .unsupportedSchemaVersion(4))
     }
     await XCTAssertThrowsNewThreadDraftError(
       try await store.save(NewThreadDraft(key: key, title: nil, content: "new")!)
     ) { error in
-      XCTAssertEqual(error as? NewThreadDraftStoreError, .unsupportedSchemaVersion(3))
+      XCTAssertEqual(error as? NewThreadDraftStoreError, .unsupportedSchemaVersion(4))
     }
     XCTAssertEqual(try Data(contentsOf: location.file), original)
   }
@@ -381,6 +486,10 @@ private func newThreadDraftAttachment(_ value: UInt8) -> ComposerImageAttachment
     pixelHeight: 10,
     quality: .standard
   )!
+}
+
+private func newThreadDraftUUID(_ value: UInt8) -> UUID {
+  UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, value))
 }
 
 private func newThreadDraftArchiveObject(at url: URL) throws -> [String: Any] {

@@ -438,6 +438,114 @@ final class NewThreadModelsTests: XCTestCase {
     )
   }
 
+  func testPureTextDraftDispositionsRejectImageAttachments() throws {
+    let key = try XCTUnwrap(NewThreadDraftKey(userID: 9, target: newThreadModelTarget()))
+    let attachment = newThreadModelAttachment(1)
+    let submissionID = newThreadModelUUID(20)
+    let sessionRevision = newThreadModelUUID(21)
+    let receipt = try XCTUnwrap(NewThreadReceipt(threadID: 70, firstPostID: 700))
+    let dispositions: [NewThreadDraftDisposition] = [
+      .submissionPending(submissionID: submissionID),
+      .challengeRequired(submissionID: submissionID, sessionRevision: sessionRevision),
+      .acceptedAwaitingVisibility(submissionID: submissionID, receipt: receipt),
+      .confirmed(submissionID: submissionID, receipt: receipt),
+      .outcomeUnknown(submissionID: submissionID),
+    ]
+
+    for disposition in dispositions {
+      XCTAssertNil(
+        NewThreadDraft(
+          key: key,
+          title: "标题",
+          content: "正文",
+          attachments: [attachment],
+          disposition: disposition
+        )
+      )
+    }
+  }
+
+  func testImageDraftStatesRequireNonemptyValidAttachments() throws {
+    let key = try XCTUnwrap(NewThreadDraftKey(userID: 9, target: newThreadModelTarget()))
+    let reference = try XCTUnwrap(
+      ComposerImageSubmissionReference(
+        submissionID: newThreadModelUUID(20),
+        sessionRevision: newThreadModelUUID(21)
+      )
+    )
+    let attachment = newThreadModelAttachment(1)
+    let receipt = try XCTUnwrap(NewThreadReceipt(threadID: 70, firstPostID: 700))
+    let dispositions: [NewThreadDraftDisposition] = [
+      .imagePreparationPending(reference: reference),
+      .imagePipeline(reference: reference),
+      .imageAcceptedAwaitingVisibility(reference: reference, receipt: receipt),
+      .imageConfirmed(reference: reference, receipt: receipt),
+    ]
+
+    for disposition in dispositions {
+      XCTAssertNil(
+        NewThreadDraft(
+          key: key,
+          title: nil,
+          content: "正文",
+          disposition: disposition
+        )
+      )
+      XCTAssertNil(
+        NewThreadDraft(
+          key: key,
+          title: nil,
+          content: "正文",
+          attachments: [attachment, attachment],
+          disposition: disposition
+        )
+      )
+      let draft = try XCTUnwrap(
+        NewThreadDraft(
+          key: key,
+          title: nil,
+          content: "正文",
+          attachments: [attachment],
+          disposition: disposition
+        )
+      )
+      XCTAssertEqual(draft.disposition.imageSubmissionReference, reference)
+    }
+  }
+
+  func testImageAcceptedAndConfirmedDraftsRejectInvalidReceipts() throws {
+    let key = try XCTUnwrap(NewThreadDraftKey(userID: 9, target: newThreadModelTarget()))
+    let reference = try XCTUnwrap(
+      ComposerImageSubmissionReference(
+        submissionID: newThreadModelUUID(20),
+        sessionRevision: newThreadModelUUID(21)
+      )
+    )
+    let invalidReceipt = try JSONDecoder().decode(
+      NewThreadReceipt.self,
+      from: Data(#"{"threadID":0,"firstPostID":700}"#.utf8)
+    )
+    XCTAssertFalse(invalidReceipt.isValid)
+
+    for disposition in [
+      NewThreadDraftDisposition.imageAcceptedAwaitingVisibility(
+        reference: reference,
+        receipt: invalidReceipt
+      ),
+      .imageConfirmed(reference: reference, receipt: invalidReceipt),
+    ] {
+      XCTAssertNil(
+        NewThreadDraft(
+          key: key,
+          title: nil,
+          content: "正文",
+          attachments: [newThreadModelAttachment(1)],
+          disposition: disposition
+        )
+      )
+    }
+  }
+
   func testSensitiveModelsUseRedactedDescriptions() throws {
     let target = newThreadModelTarget()
     let attachment = newThreadModelAttachment(30)

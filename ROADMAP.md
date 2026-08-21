@@ -14,9 +14,10 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-currently serves `v0.60.6-alpha.1` (build 69), whose app-code snapshot contains
-the workflows measured by this audit. Later `main` work must still pass a tagged
-release before it becomes installable from that source.
+currently serves `v0.60.6-alpha.1` (build 69), whose app-code snapshot predates
+the current-main image-composer workflow and remains at the previous 78–81%
+estimate. Later `main` work must still pass a tagged release before it becomes
+installable from that source.
 
 | Capability area | Weight | Credited points | Current basis |
 | --- | ---: | ---: | --- |
@@ -25,14 +26,15 @@ release before it becomes installable from that source.
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
 | Local data, settings, and customization | 10 | 7 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, account-isolated followed-forum pinning and layout, a configurable forum primary action, reply-entry visibility, a default-on composer risk notice, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, switching, a self-profile summary, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
-| Server writes, creation, and social actions | 15 | 12–13 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, three text/classic-emoticon reply targets, equivalent new-topic creation, direct inline-preview reply entry, and credential-free official reporting entry points have guarded implementations; real batch-check-in behavior, creation, poll and interaction-restriction success, uploaded media, unresolvable cloud rows, native reporting, and most reactions remain unavailable or unvalidated |
+| Server writes, creation, and social actions | 15 | 13–14 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, three text/classic-emoticon reply targets, equivalent new-topic creation, bounded static-image new-topic/direct-topic-reply creation, direct inline-preview reply entry, and credential-free official reporting entry points have guarded implementations; real batch-check-in behavior, creation, poll and interaction-restriction success, broader uploaded media, unresolvable cloud rows, native reporting, and most reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
-| **Total** | **100** | **78–81** | Current full-product estimate; roughly 19–22% remains |
+| **Total** | **100** | **79–82** | Current full-product estimate; roughly 18–21% remains |
 
 This is a source-workflow coverage estimate, not a release-readiness or
-physical-device-validation percentage. The public `v0.60.6-alpha.1` app-code
-snapshot and current `main` therefore share the 78–81% scope estimate, while
-their experimental account paths retain the validation gates documented below.
+physical-device-validation percentage. Current `main` receives one additional
+partial point for the end-to-end static-image composer workflow. The public
+`v0.60.6-alpha.1` app-code snapshot remains at 78–81%; all experimental account
+paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
 points, or roughly 91–95%. Concern and the foreground unread summary raise the
@@ -93,8 +95,16 @@ cannot infer whether the user submitted or cancelled the form.
 The fixed classic-emoticon catalog and inline-preview reply entry together close
 one bounded TiebaLite creation-workflow gap and therefore add one weighted point.
 They reuse the existing three write targets and add no endpoint: only exact,
-compiled `#(name)` tokens are accepted, while images, voice, arbitrary markers,
-and remotely supplied sending choices remain unsupported.
+compiled `#(name)` tokens are accepted. Voice, arbitrary markers, and remotely
+supplied sending choices remain unsupported; image support is limited to the
+current-main workflow described next.
+The current-main static-image composer closes another bounded part of that gap
+for new topics and direct topic replies and receives one partial weighted point.
+It includes the picker, nine-image drafts, ordered upload proof, immutable final
+confirmation, explicit no-resend recovery, terminal metadata cleanup,
+enqueue-only attachment tombstones, and strict ordered readback, but remains
+below full credit until its minimum HTTPS contract and server-visible result pass
+disposable-account and physical-device validation.
 
 ## Available
 
@@ -287,10 +297,18 @@ the source metadata is updated to that tested IPA.
   persistent per-target drafts, strict challenge/accepted/unknown states, and
   structured exact-PID readback without write retry; visible inline nested-reply
   previews expose the same exact-target composer without another network request
+- Current-main static-image selection for direct topic replies, with up to nine
+  ordered metadata-stripped attachments, quality and watermark choices,
+  account-scoped durable drafts and upload proof, explicit resume-only recovery,
+  immutable confirmation, and strict ordered image readback. Ordinary-floor and
+  nested-reply image entry remain unsupported
 - Experimental native text/classic-emoticon new-topic creation from a loaded forum, with an
   optional bounded title, fresh account/forum/TBS preflight, one signed HTTPS
   write, persistent per-account-and-forum drafts, strict
   challenge/accepted/unknown states, and exact TID/PID readback without retry
+- Current-main static-image selection for new topics with the same bounded picker,
+  durable upload, confirmation, recovery, terminal metadata cleanup, enqueue-only
+  attachment tombstones, and exact visibility rules
 - Page-shaped authenticated approval overlays that mirror the anonymous post
   and nested-reply requests, batch the currently retained targets, and refresh
   a full nested-reply page even when its target set is unchanged
@@ -304,22 +322,36 @@ the source metadata is updated to that tested IPA.
 
 ## In progress
 
-Current `main` contains the security-sensitive foundation for TiebaLite-style
-static-image creation, but no end-user image composer workflow. The App can
-normalize a single-frame JPEG, PNG, HEIC, or HEIF input into a bounded,
-metadata-stripped JPEG and store it under a private random filename with file
-protection, backup exclusion, and digest validation. Core can validate a complete
-session, serialize same-account uploads, and send sequential 512,000-byte chunks
-to the exact HTTPS upload endpoint with bounded responses and no automatic retry
-after an uncertain dispatched chunk.
+Current `main` now connects the security-sensitive static-image foundation to
+the new-topic and direct-topic-reply composers. The App normalizes a selected
+single-frame JPEG, PNG, HEIC, or HEIF into a bounded, metadata-stripped JPEG;
+stores up to nine ordered attachments under private random filenames with file
+protection, backup exclusion, and digest validation; and persists account-scoped
+draft and upload state. Core validates the complete session, serializes
+same-account uploads, sends sequential 512,000-byte chunks, owns typed image-marker
+compilation, and never retries an uncertain dispatched chunk. The final write is
+bound to an immutable target, content, attachment order, processing choice,
+watermark, session, and submission ID. Restart recovery performs no network work
+until an explicit resume, while locked outcomes remain read-only.
 
-This foundation is deliberately worth zero parity points until the picker and
-nine-image limit, new-topic and direct-topic-reply composer integration,
-account-scoped drafts, a durable pending/unknown ledger, receipt-to-upload
-rebinding, protocol-owned image-marker compilation, immutable final confirmation,
-cleanup, failure recovery, simulator coverage, and disposable-account device
-validation work together end to end. Ordinary-floor and nested-reply image entry
-remain outside the current TiebaLite-aligned scope.
+Attachment removal and terminal submission cleanup write a durable bounded
+tombstone but do not physically delete the private composer JPEG in current
+`main`. The reference audit spans all new-topic drafts, reply drafts, and upload
+ledger records, but its snapshot is not atomic with in-flight UI and store
+mutations; treating it as deletion authorization could therefore remove a live
+cross-key attachment. The fail-closed policy retains every file. At 128 records,
+the journal rotates the oldest audit entry without deleting its file, and a
+journal write failure never keeps a terminal draft or completed ledger record
+sendable. Physical reclamation requires a future shared exclusive reference
+reservation. Picker transfer copies are separate: strictly named
+`tieba-composer-image-<uuid>` directories expire after 24 hours and a no-follow,
+nonrecursive pass inspects at most 256 entries and removes at most 32 directories.
+
+Automated model, durability, pipeline, UI-policy, and strict visibility-proof
+coverage is present. The remaining gate is disposable-account and physical-device
+validation of the upload response, watermark values, marker acceptance, server
+readback, picker lifecycle, and cleanup on iOS 16 and iOS 18.7.2. Ordinary-floor
+and nested-reply image entry remain outside the current TiebaLite-aligned scope.
 
 ## Next milestones
 
@@ -380,11 +412,12 @@ remain outside the current TiebaLite-aligned scope.
    STOKEN and TBS, challenge and permission failures, post-dispatch loss,
    exact-PID visibility, all 50 fixed catalog tokens, type-2/type-11 readback,
    inline-preview entry, account rotation, and duplicate-send prevention
-12. Disposable-account validation of text/classic-emoticon new-topic creation,
-   followed by end-to-end static-image creation for new topics and direct topic
-   replies: finish the picker, nine-image drafts, upload ledger, typed marker
-   compilation, immutable submission binding, cleanup, and no-resend recovery,
-   then validate the minimum HTTPS upload contract and final creation readback.
+12. Disposable-account validation of text/classic-emoticon new-topic creation and
+   the current-main static-image workflow for new topics and direct topic replies:
+   validate the minimum HTTPS upload contract, standard/high-definition processing,
+   all watermark choices, ordered one-to-nine-image marker acceptance, final
+   creation readback, cancellation, restart recovery, cleanup, account switching,
+   and same-UID credential rotation on physical devices.
    Other rich media, broader settings parity, remaining account activity, and
    moderation tools follow that bounded workflow
 13. Real-device validation of the official report-form handoff, including
@@ -1244,7 +1277,8 @@ and allows an untitled topic's server-generated display title only after all
 other proof matches. Confirmed creation remains as a bounded local tombstone
 across restart until the user explicitly starts another topic in that forum, so
 a crash between persistence and navigation cannot reopen the old body as
-sendable. Rich-media topic creation remains unsupported.
+sendable. Apart from the current-main bounded static-image workflow, voice and
+other rich-media topic creation remain unsupported.
 
 Search categories load independently so one endpoint failure does not discard
 another category's results. User search uses the credential-free Web endpoint,

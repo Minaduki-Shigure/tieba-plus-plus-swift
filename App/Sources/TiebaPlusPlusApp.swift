@@ -49,6 +49,7 @@ struct TiebaPlusPlusApp: App {
   private let threadCloudFavoriteStore: ThreadCloudFavoriteStore
   private let textReplySubmissionStore: TextReplySubmissionStore
   private let newThreadSubmissionStore: NewThreadSubmissionStore
+  private let composerImageAttachmentStore: ComposerImageAttachmentStore
   private let startDestination: AppStartDestination
 
   init() {
@@ -71,10 +72,42 @@ struct TiebaPlusPlusApp: App {
       )
     )
     let accountAccess = AccountAccess(vault: accountVault, service: accountService)
+    let composerImageAttachmentStore = ComposerImageAttachmentStore.live()
+    let textReplyDraftStore = FileTextReplyDraftStore.live()
+    let newThreadDraftStore = FileNewThreadDraftStore.live()
+    let composerImageUploadLedger = ComposerImageUploadLedger.live()
+    let composerImageDeletionCoordinator = ComposerImageAttachmentDeletionCoordinator.live(
+      newThreadDrafts: newThreadDraftStore,
+      replyDrafts: textReplyDraftStore,
+      ledger: composerImageUploadLedger
+    )
+    let composerImageSubmissionPipeline = ComposerImageSubmissionPipeline(
+      access: accountAccess,
+      attachmentStore: composerImageAttachmentStore,
+      ledger: composerImageUploadLedger,
+      attachmentDeletionScheduler: composerImageDeletionCoordinator
+    )
+    Task.detached(priority: .utility) {
+      _ = try? await composerImageDeletionCoordinator.performMaintenance()
+      _ = ComposerImageTemporaryDirectoryCleaner().cleanup()
+    }
+    self.composerImageAttachmentStore = composerImageAttachmentStore
     self.contentAgreementStore = ContentAgreementStore(access: accountAccess)
     self.threadCloudFavoriteStore = ThreadCloudFavoriteStore(access: accountAccess)
-    self.textReplySubmissionStore = TextReplySubmissionStore(access: accountAccess)
-    self.newThreadSubmissionStore = NewThreadSubmissionStore(access: accountAccess)
+    self.textReplySubmissionStore = TextReplySubmissionStore(
+      access: accountAccess,
+      drafts: textReplyDraftStore,
+      imagePipeline: composerImageSubmissionPipeline,
+      attachmentStore: composerImageAttachmentStore,
+      attachmentDeletionScheduler: composerImageDeletionCoordinator
+    )
+    self.newThreadSubmissionStore = NewThreadSubmissionStore(
+      access: accountAccess,
+      drafts: newThreadDraftStore,
+      imagePipeline: composerImageSubmissionPipeline,
+      attachmentStore: composerImageAttachmentStore,
+      attachmentDeletionScheduler: composerImageDeletionCoordinator
+    )
     let mediaPlaybackCoordinator = MediaPlaybackCoordinator()
     _mediaPlaybackCoordinator = StateObject(wrappedValue: mediaPlaybackCoordinator)
     _voicePlaybackController = StateObject(
@@ -129,6 +162,7 @@ struct TiebaPlusPlusApp: App {
         .environment(\.threadCloudFavoriteStore, threadCloudFavoriteStore)
         .environment(\.textReplySubmissionStore, textReplySubmissionStore)
         .environment(\.newThreadSubmissionStore, newThreadSubmissionStore)
+        .environment(\.composerImageAttachmentStore, composerImageAttachmentStore)
         .environment(\.contentReportCoordinator, contentReportCoordinator)
         .appTextSizeAdjustment(AppTextSizeAdjustment.resolved(textSizeAdjustment))
         .environment(\.appAccentColor, resolvedAccentColor)
@@ -196,6 +230,7 @@ struct TiebaPlusPlusApp: App {
         .environment(\.threadCloudFavoriteStore, threadCloudFavoriteStore)
         .environment(\.textReplySubmissionStore, textReplySubmissionStore)
         .environment(\.newThreadSubmissionStore, newThreadSubmissionStore)
+        .environment(\.composerImageAttachmentStore, composerImageAttachmentStore)
         .environment(\.contentReportCoordinator, contentReportCoordinator)
         .appTextSizeAdjustment(AppTextSizeAdjustment.resolved(textSizeAdjustment))
         .environment(\.appAccentColor, resolvedAccentColor)
