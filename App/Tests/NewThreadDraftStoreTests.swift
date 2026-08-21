@@ -11,6 +11,12 @@ final class NewThreadDraftStoreTests: XCTestCase {
       NewThreadDraftKey(userID: 9, target: newThreadDraftTarget())
     )
     let receipt = try XCTUnwrap(NewThreadReceipt(threadID: 70, firstPostID: 700))
+    let reference = try XCTUnwrap(
+      ComposerImageSubmissionReference(
+        submissionID: newThreadDraftUUID(3),
+        sessionRevision: newThreadDraftUUID(4)
+      )
+    )
     let attachments = [newThreadDraftAttachment(2), newThreadDraftAttachment(1)]
     let draft = try XCTUnwrap(
       NewThreadDraft(
@@ -18,8 +24,8 @@ final class NewThreadDraftStoreTests: XCTestCase {
         title: "标题",
         content: "  第一行\nCafe\u{301}\t末尾  ",
         attachments: attachments,
-        disposition: .confirmed(
-          submissionID: UUID(),
+        disposition: .imageConfirmed(
+          reference: reference,
           receipt: receipt
         ),
         updatedAt: Date(timeIntervalSince1970: 100)

@@ -968,36 +968,47 @@ final class ComposerImageUploadLedgerTests: XCTestCase {
   func testConcurrentIndependentPrepareRespectsRecordLimitWithoutCorruption() async throws {
     let location = makeLocation()
     defer { try? FileManager.default.removeItem(at: location.directory) }
-    let image = try fixture(index: 1)
     let ledger = makeLedger(fileURL: location.file, maximumRecords: 8)
     let attempts = try (1...16).map { index in
-      let key = makeKey(submissionIndex: 1_000 + index)
+      let image = try fixture(index: index)
+      let key = makeKey(
+        submissionIndex: 1_000 + index,
+        userID: 1_000 + Int64(index)
+      )
       return (
         key,
-        try makeNewThreadSubmission(key: key, attachments: [image.snapshot])
+        try makeNewThreadSubmission(key: key, attachments: [image.snapshot]),
+        image.snapshot
       )
     }
 
-    let successes = await withTaskGroup(of: Bool.self, returning: Int.self) { group in
-      for (key, submission) in attempts {
+    let outcomes = await withTaskGroup(
+      of: ConcurrentLedgerPrepareOutcome.self,
+      returning: [ConcurrentLedgerPrepareOutcome].self
+    ) { group in
+      for (key, submission, snapshot) in attempts {
         group.addTask {
           do {
             _ = try await ledger.prepare(
               newThreadSubmission: submission,
               key: key,
-              attachmentSnapshots: [image.snapshot]
+              attachmentSnapshots: [snapshot]
             )
-            return true
+            return .success
+          } catch let error as ComposerImageUploadLedgerError {
+            return .ledgerFailure(error)
           } catch {
-            return false
+            return .unexpectedFailure
           }
         }
       }
-      var count = 0
-      for await succeeded in group where succeeded { count += 1 }
-      return count
+      var results: [ConcurrentLedgerPrepareOutcome] = []
+      for await outcome in group { results.append(outcome) }
+      return results
     }
-    XCTAssertEqual(successes, 8)
+    XCTAssertEqual(outcomes.filter { $0 == .success }.count, 8)
+    XCTAssertEqual(outcomes.filter { $0 == .ledgerFailure(.tooManyRecords) }.count, 8)
+    XCTAssertFalse(outcomes.contains(.unexpectedFailure))
     let reopened = makeLedger(fileURL: location.file, maximumRecords: 8)
     let records = try await reopened.load()
     XCTAssertEqual(records.count, 8)
@@ -1313,7 +1324,7 @@ final class ComposerImageUploadLedgerTests: XCTestCase {
     )
     let original = try Data(contentsOf: location.file)
     await assertLedgerError(.tooManyRecords) {
-      let key = self.makeKey(submissionIndex: 2)
+      let key = self.makeKey(submissionIndex: 2, userID: 1002)
       try await oneRecordLedger.prepare(
         newThreadSubmission: try self.makeNewThreadSubmission(
           key: key,
@@ -1354,10 +1365,14 @@ final class ComposerImageUploadLedgerTests: XCTestCase {
     XCTAssertEqual(directoryValues.isExcludedFromBackup, true)
     #if os(iOS)
       let attributes = try FileManager.default.attributesOfItem(atPath: location.file.path)
-      XCTAssertEqual(
-        attributes[.protectionKey] as? FileProtectionType,
-        .complete
-      )
+      let protection = attributes[.protectionKey] as? FileProtectionType
+      #if targetEnvironment(simulator)
+        if let protection {
+          XCTAssertEqual(protection, .complete)
+        }
+      #else
+        XCTAssertEqual(protection, .complete)
+      #endif
     #endif
     XCTAssertEqual(record.description, "ComposerImageUploadLedgerRecord(redacted)")
     XCTAssertFalse(record.description.contains(image.attachment.sha256))
@@ -1490,10 +1505,13 @@ final class ComposerImageUploadLedgerTests: XCTestCase {
     )
   }
 
-  private func makeKey(submissionIndex: Int = 101) -> ComposerImageUploadLedgerKey {
+  private func makeKey(
+    submissionIndex: Int = 101,
+    userID: Int64 = 1001
+  ) -> ComposerImageUploadLedgerKey {
     ComposerImageUploadLedgerKey(
       context: .newThread(forumID: 7, forumName: "swift"),
-      userID: 1001,
+      userID: userID,
       sessionRevision: fixedUUID(100),
       submissionID: fixedUUID(submissionIndex)
     )!
@@ -1794,6 +1812,12 @@ private struct TestSignedEnvelope: Codable {
   let schemaVersion: Int
   var canonicalPayload: Data
   let authenticationCode: Data
+}
+
+private enum ConcurrentLedgerPrepareOutcome: Equatable, Sendable {
+  case success
+  case ledgerFailure(ComposerImageUploadLedgerError)
+  case unexpectedFailure
 }
 
 private enum TestFailure: Error {
