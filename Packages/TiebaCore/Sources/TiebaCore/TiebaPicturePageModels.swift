@@ -95,6 +95,7 @@ public struct TiebaPicturePage: Sendable, Hashable {
 }
 
 enum TiebaPicturePagePolicy {
+  static let pictureIDByteCount = 40
   static let maximumPictureCount = 10_000
   static let requestedBatchSize = 10
   static let maximumResponsePictureCount = 50
@@ -103,9 +104,10 @@ enum TiebaPicturePagePolicy {
   static let maximumResponseBodyBytes = 1_048_576
 
   static func isValidPictureID(_ value: String) -> Bool {
-    value.utf8.count == 40 && value.utf8.allSatisfy {
-      (48...57).contains($0) || (97...102).contains($0)
-    }
+    value.utf8.count == pictureIDByteCount
+      && value.utf8.allSatisfy {
+        (48...57).contains($0) || (97...102).contains($0)
+      }
   }
 }
 

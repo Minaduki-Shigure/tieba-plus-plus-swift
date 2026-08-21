@@ -246,6 +246,60 @@ final class TiebaTextReplyTests: XCTestCase, @unchecked Sendable {
 
   }
 
+  func testThreadImageProofRequestUsesCompiledContentAndRejectsReplayOrNestedTargets() throws {
+    let submissionID = UUID()
+    let proof = try makeStaticImageContentProof(
+      submissionID: submissionID,
+      userID: userID,
+      forumID: forumID,
+      forumName: forumName,
+      picID: pictureID("a")
+    )
+    let submission = makeSubmission(
+      submissionID: submissionID,
+      target: .thread(firstPostID: firstPostID),
+      content: "正文",
+      imageProofs: [proof]
+    )
+    let message = try AddPostReqIdl(
+      serializedBytes: parseMultipart(makeRequest(submission: submission)).protobuf
+    )
+    XCTAssertEqual(
+      message.data.content,
+      "正文\n#(pic,\(proof.picID),\(proof.width),\(proof.height))"
+    )
+
+    let imageOnly = makeSubmission(
+      submissionID: submissionID,
+      target: .thread(firstPostID: firstPostID),
+      content: "",
+      imageProofs: [proof]
+    )
+    let imageOnlyMessage = try AddPostReqIdl(
+      serializedBytes: parseMultipart(makeRequest(submission: imageOnly)).protobuf
+    )
+    XCTAssertEqual(imageOnlyMessage.data.content, "#(pic,\(proof.picID),640,480)")
+
+    for rejected in [
+      makeSubmission(
+        target: .thread(firstPostID: firstPostID), content: "正文", imageProofs: [proof]),
+      makeSubmission(
+        submissionID: submissionID,
+        target: .post(postID: parentPostID),
+        content: "正文",
+        imageProofs: [proof]
+      ),
+      makeSubmission(
+        submissionID: submissionID,
+        target: .subpost(parentPostID: parentPostID, subpostID: targetSubpostID),
+        content: "正文",
+        imageProofs: [proof]
+      ),
+    ] {
+      XCTAssertThrowsError(try makeRequest(submission: rejected))
+    }
+  }
+
   func testSubpostReplyRejectsServerIdentityThatCanAlterReplyMarkerStructure() {
     let nested = makeSubmission(
       target: .subpost(parentPostID: parentPostID, subpostID: targetSubpostID)
@@ -575,6 +629,59 @@ final class TiebaTextReplyTests: XCTestCase, @unchecked Sendable {
     )
   }
 
+  func testDirectThreadImageReadbackRequiresExactTrustedImage() throws {
+    let submissionID = UUID()
+    let proof = try makeStaticImageContentProof(
+      submissionID: submissionID,
+      userID: userID,
+      forumID: forumID,
+      forumName: forumName,
+      picID: pictureID("a")
+    )
+    let submission = makeSubmission(
+      submissionID: submissionID,
+      target: .thread(firstPostID: firstPostID),
+      content: "正文",
+      imageProofs: [proof]
+    )
+    var image = contentFragment(type: 3)
+    image.originSrc = "https://tiebapic.baidu.com/forum/pic/item/\(proof.picID).jpg"
+    image.bsize = "640,480"
+    var response = pageResponse(
+      locatedPostID: createdPostID,
+      locatedFloor: 3,
+      locatedAuthorID: userID,
+      locatedContent: "unused"
+    )
+    response.data.postList[0].content = [contentFragment(type: 0, text: "正文"), image]
+    XCTAssertEqual(
+      try TiebaAuthenticatedDecoder.verifiedTextReplyPost(
+        from: response,
+        expectedUserID: userID,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        postID: createdPostID,
+        submission: submission
+      ),
+      .post(postID: createdPostID, floor: 3)
+    )
+
+    response.data.postList[0].content[1].originSrc =
+      "https://example.com/forum/pic/item/\(proof.picID).jpg"
+    XCTAssertThrowsError(
+      try TiebaAuthenticatedDecoder.verifiedTextReplyPost(
+        from: response,
+        expectedUserID: userID,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        postID: createdPostID,
+        submission: submission
+      )
+    ) { XCTAssertEqual($0 as? TiebaClientError, .invalidAuthenticatedResponse) }
+  }
+
   func testSubpostReadbackMatchesStructuredEmoticonWithoutNestedPrefix() throws {
     let parent = try TiebaAuthenticatedDecoder.textReplyPageContext(
       from: pageResponse(
@@ -854,16 +961,19 @@ final class TiebaTextReplyTests: XCTestCase, @unchecked Sendable {
   }
 
   private func makeSubmission(
+    submissionID: UUID? = nil,
     target: TiebaTextReplyTarget,
-    content: String = "body"
+    content: String = "body",
+    imageProofs: [TiebaStaticImageContentProof] = []
   ) -> TiebaTextReplySubmission {
     TiebaTextReplySubmission(
-      submissionID: UUID(),
+      submissionID: submissionID ?? UUID(),
       forumID: forumID,
       forumName: forumName,
       threadID: threadID,
       target: target,
-      content: content
+      content: content,
+      imageProofs: imageProofs
     )
   }
 

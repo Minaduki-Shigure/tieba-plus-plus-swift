@@ -299,12 +299,28 @@ struct TextReplySubmission:
   let id: UUID
   let target: TextReplyTarget
   let content: String
+  let attachments: [ComposerImageAttachment]
 
-  init?(id: UUID = UUID(), target: TextReplyTarget, content: String) {
-    guard TextReplyContentPolicy.isValid(content) else { return nil }
+  init?(
+    id: UUID = UUID(),
+    target: TextReplyTarget,
+    content: String,
+    attachments: [ComposerImageAttachment] = []
+  ) {
+    guard
+      ComposerImageDraftPolicy.isValid(attachments),
+      Self.target(target.destination, allows: attachments),
+      TiebaStaticImageContentPolicy.canCompileWithinLimits(
+        userContent: content,
+        imageCount: attachments.count,
+        maximumCharacterCount: TextReplyContentPolicy.maximumCharacterCount,
+        maximumUTF8ByteCount: TextReplyContentPolicy.maximumUTF8ByteCount
+      )
+    else { return nil }
     self.id = id
     self.target = target
     self.content = content
+    self.attachments = attachments
   }
 
   var description: String { "TextReplySubmission(redacted)" }
@@ -315,6 +331,7 @@ struct TextReplySubmission:
     lhs.id == rhs.id
       && lhs.target == rhs.target
       && lhs.content.utf8.elementsEqual(rhs.content.utf8)
+      && lhs.attachments == rhs.attachments
   }
 
   func hash(into hasher: inout Hasher) {
@@ -324,6 +341,16 @@ struct TextReplySubmission:
     for byte in content.utf8 {
       hasher.combine(byte)
     }
+    hasher.combine(attachments)
+  }
+
+  private static func target(
+    _ destination: TextReplyTarget.Destination,
+    allows attachments: [ComposerImageAttachment]
+  ) -> Bool {
+    guard !attachments.isEmpty else { return true }
+    if case .thread = destination { return true }
+    return false
   }
 }
 
@@ -396,21 +423,40 @@ struct TextReplyVisibilityConfirmation:
   let created: CreatedTextReply
   let authorUserID: Int64
   let content: String
+  let attachments: [ComposerImageAttachment]
 
-  init?(created: CreatedTextReply, authorUserID: Int64, content: String) {
+  init?(
+    created: CreatedTextReply,
+    authorUserID: Int64,
+    content: String,
+    attachments: [ComposerImageAttachment] = []
+  ) {
     guard
       created.isValid,
       authorUserID > 0,
-      TextReplyContentPolicy.isValid(content)
+      attachments.isEmpty || Self.isDirectTopicReply(created),
+      ComposerImageDraftPolicy.isValid(attachments),
+      TiebaStaticImageContentPolicy.canCompileWithinLimits(
+        userContent: content,
+        imageCount: attachments.count,
+        maximumCharacterCount: TextReplyContentPolicy.maximumCharacterCount,
+        maximumUTF8ByteCount: TextReplyContentPolicy.maximumUTF8ByteCount
+      )
     else { return nil }
     self.created = created
     self.authorUserID = authorUserID
     self.content = content
+    self.attachments = attachments
   }
 
   var description: String { "TextReplyVisibilityConfirmation(redacted)" }
   var debugDescription: String { description }
   var customMirror: Mirror { Mirror(self, children: [:], displayStyle: .struct) }
+
+  private static func isDirectTopicReply(_ created: CreatedTextReply) -> Bool {
+    if case .post = created { return true }
+    return false
+  }
 }
 
 struct TextReplyResult: Hashable, Sendable {
@@ -519,12 +565,14 @@ struct TextReplyDraft:
 
   let key: TextReplyDraftKey
   let content: String
+  let attachments: [ComposerImageAttachment]
   let disposition: TextReplyDraftDisposition
   let updatedAt: Date
 
   init?(
     key: TextReplyDraftKey,
     content: String,
+    attachments: [ComposerImageAttachment] = [],
     disposition: TextReplyDraftDisposition = .editing,
     updatedAt: Date = Date()
   ) {
@@ -532,12 +580,16 @@ struct TextReplyDraft:
       key.isValid,
       content.count <= Self.maximumStoredCharacterCount,
       content.utf8.count <= Self.maximumStoredUTF8ByteCount,
+      ComposerImageDraftPolicy.isValid(attachments),
       updatedAt.timeIntervalSinceReferenceDate.isFinite,
-      !content.isEmpty || Self.allowsEmptyContent(disposition),
-      Self.isValid(disposition, for: key.destination)
+      !content.isEmpty || !attachments.isEmpty || Self.allowsEmptyContent(disposition),
+      Self.target(key.destination, allows: attachments),
+      Self.isValid(disposition, for: key.destination),
+      Self.isValidContent(content, attachments: attachments, disposition: disposition)
     else { return nil }
     self.key = key
     self.content = content
+    self.attachments = attachments
     self.disposition = disposition
     self.updatedAt = updatedAt
   }
@@ -576,5 +628,41 @@ struct TextReplyDraft:
   private static func allowsEmptyContent(_ disposition: TextReplyDraftDisposition) -> Bool {
     if case .challengeRequired = disposition { return true }
     return false
+  }
+
+  private static func target(
+    _ destination: TextReplyTarget.Destination,
+    allows attachments: [ComposerImageAttachment]
+  ) -> Bool {
+    guard !attachments.isEmpty else { return true }
+    if case .thread = destination { return true }
+    return false
+  }
+
+  private static func isValidContent(
+    _ content: String,
+    attachments: [ComposerImageAttachment],
+    disposition: TextReplyDraftDisposition
+  ) -> Bool {
+    switch disposition {
+    case .editing:
+      true
+    case .challengeRequired:
+      content.isEmpty || isValidSubmissionContent(content, attachments: attachments)
+    case .submissionPending, .acceptedAwaitingVisibility, .outcomeUnknown:
+      isValidSubmissionContent(content, attachments: attachments)
+    }
+  }
+
+  private static func isValidSubmissionContent(
+    _ content: String,
+    attachments: [ComposerImageAttachment]
+  ) -> Bool {
+    TiebaStaticImageContentPolicy.canCompileWithinLimits(
+      userContent: content,
+      imageCount: attachments.count,
+      maximumCharacterCount: TextReplyContentPolicy.maximumCharacterCount,
+      maximumUTF8ByteCount: TextReplyContentPolicy.maximumUTF8ByteCount
+    )
   }
 }

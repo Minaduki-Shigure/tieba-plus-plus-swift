@@ -172,6 +172,41 @@ final class TiebaNewThreadTests: XCTestCase {
     ) { XCTAssertEqual($0 as? TiebaClientError, .invalidAuthenticatedResponse) }
   }
 
+  func testImageProofRequestUsesCompiledContentAndRejectsCrossSubmissionReplay() throws {
+    let submissionID = UUID()
+    let proof = try makeStaticImageContentProof(
+      submissionID: submissionID,
+      userID: userID,
+      forumID: forumID,
+      forumName: forumName,
+      picID: pictureID("a")
+    )
+    let submission = makeSubmission(
+      submissionID: submissionID,
+      content: "正文",
+      imageProofs: [proof]
+    )
+    XCTAssertEqual(
+      try newThreadForm(makeRequest(submission: submission)).fields["content"],
+      "正文\n#(pic,\(proof.picID),640,480)"
+    )
+    XCTAssertEqual(
+      try newThreadForm(
+        makeRequest(
+          submission: makeSubmission(
+            submissionID: submissionID,
+            content: "",
+            imageProofs: [proof]
+          )
+        )
+      ).fields["content"],
+      "#(pic,\(proof.picID),640,480)"
+    )
+    XCTAssertThrowsError(
+      try makeRequest(submission: makeSubmission(content: "正文", imageProofs: [proof]))
+    )
+  }
+
   func testFRSPreflightBindsIdentityTBSAndTrustedDisplayName() throws {
     let response = newThreadForumResponse()
     let context = try TiebaAuthenticatedDecoder.newThreadContext(
@@ -357,6 +392,55 @@ final class TiebaNewThreadTests: XCTestCase {
     )
   }
 
+  func testNewThreadImageReadbackSupportsType20AndRejectsWrongDimensions() throws {
+    let submissionID = UUID()
+    let proof = try makeStaticImageContentProof(
+      submissionID: submissionID,
+      userID: userID,
+      forumID: forumID,
+      forumName: forumName,
+      picID: pictureID("a")
+    )
+    let submission = makeSubmission(
+      submissionID: submissionID,
+      title: "A title",
+      content: "正文",
+      imageProofs: [proof]
+    )
+    let receipt = TiebaNewThreadReceipt(threadID: threadID, firstPostID: firstPostID)
+    var image = contentFragment(type: 20)
+    image.src = "https://tiebapic.baidu.com/forum/pic/item/\(proof.picID).jpg"
+    image.width = 640
+    image.height = 480
+    XCTAssertEqual(
+      try TiebaAuthenticatedDecoder.verifiedNewThread(
+        from: newThreadPageResponse(
+          title: submission.title,
+          content: "unused",
+          contentFragments: [contentFragment(type: 0, text: "正文"), image]
+        ),
+        context: newThreadContext(),
+        submission: submission,
+        receipt: receipt
+      ),
+      receipt
+    )
+
+    image.height = 481
+    XCTAssertThrowsError(
+      try TiebaAuthenticatedDecoder.verifiedNewThread(
+        from: newThreadPageResponse(
+          title: submission.title,
+          content: "unused",
+          contentFragments: [contentFragment(type: 0, text: "正文"), image]
+        ),
+        context: newThreadContext(),
+        submission: submission,
+        receipt: receipt
+      )
+    ) { XCTAssertEqual($0 as? TiebaClientError, .invalidAuthenticatedResponse) }
+  }
+
   func testReadbackRejectsUnknownWrongTypeAndType0FakeEmoticons() {
     let content = "前#(呵呵)后"
     let submission = makeSubmission(title: "A title", content: content)
@@ -478,17 +562,20 @@ final class TiebaNewThreadTests: XCTestCase {
   }
 
   private func makeSubmission(
+    submissionID: UUID? = nil,
     title: String = "title",
     content: String = "body",
     forumID: Int64? = nil,
-    forumName: String? = nil
+    forumName: String? = nil,
+    imageProofs: [TiebaStaticImageContentProof] = []
   ) -> TiebaNewThreadSubmission {
     TiebaNewThreadSubmission(
-      submissionID: UUID(),
+      submissionID: submissionID ?? UUID(),
       forumID: forumID ?? self.forumID,
       forumName: forumName ?? self.forumName,
       title: title,
-      content: content
+      content: content,
+      imageProofs: imageProofs
     )
   }
 

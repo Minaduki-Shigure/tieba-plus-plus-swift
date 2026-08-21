@@ -30,19 +30,22 @@ public struct TiebaNewThreadSubmission:
   public let forumName: String
   public let title: String
   public let content: String
+  public let imageProofs: [TiebaStaticImageContentProof]
 
   public init(
     submissionID: UUID,
     forumID: Int64,
     forumName: String,
     title: String,
-    content: String
+    content: String,
+    imageProofs: [TiebaStaticImageContentProof] = []
   ) {
     self.submissionID = submissionID
     self.forumID = forumID
     self.forumName = forumName
     self.title = title
     self.content = content
+    self.imageProofs = imageProofs
   }
 
   public var description: String { "TiebaNewThreadSubmission(redacted)" }
@@ -68,6 +71,7 @@ public struct TiebaNewThreadSubmission:
       && lhs.forumName == rhs.forumName
       && lhs.title == rhs.title
       && lhs.content.utf8.elementsEqual(rhs.content.utf8)
+      && lhs.imageProofs == rhs.imageProofs
   }
 
   public func hash(into hasher: inout Hasher) {
@@ -79,6 +83,7 @@ public struct TiebaNewThreadSubmission:
     for byte in content.utf8 {
       hasher.combine(byte)
     }
+    hasher.combine(imageProofs)
   }
 }
 

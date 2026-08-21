@@ -130,8 +130,145 @@ final class NewThreadModelsTests: XCTestCase {
     )
   }
 
+  func testSubmissionSupportsOrderedImageOnlyAndTextWithUpToNineAttachments() throws {
+    let target = newThreadModelTarget()
+    let attachments = (1...ComposerImageDraftPolicy.maximumAttachmentCount).map {
+      newThreadModelAttachment(UInt8($0))
+    }
+
+    let imageOnly = try XCTUnwrap(
+      NewThreadSubmission(
+        id: newThreadModelUUID(20),
+        target: target,
+        title: nil,
+        content: "",
+        attachments: attachments
+      )
+    )
+    let textAndImages = try XCTUnwrap(
+      NewThreadSubmission(
+        id: newThreadModelUUID(21),
+        target: target,
+        title: "标题",
+        content: "正文 #(滑稽)",
+        attachments: Array(attachments.reversed())
+      )
+    )
+    let reorderedIdentity = try XCTUnwrap(
+      NewThreadSubmission(
+        id: imageOnly.id,
+        target: target,
+        title: nil,
+        content: "",
+        attachments: Array(attachments.reversed())
+      )
+    )
+
+    XCTAssertEqual(imageOnly.attachments, attachments)
+    XCTAssertEqual(textAndImages.attachments, Array(attachments.reversed()))
+    XCTAssertNotEqual(imageOnly, reorderedIdentity)
+    XCTAssertEqual(Set([imageOnly, reorderedIdentity]).count, 2)
+    XCTAssertNil(
+      NewThreadSubmission(
+        target: target,
+        title: nil,
+        content: "",
+        attachments: attachments + [newThreadModelAttachment(10)]
+      )
+    )
+    XCTAssertNil(
+      NewThreadSubmission(
+        target: target,
+        title: nil,
+        content: "",
+        attachments: [attachments[0], attachments[0]]
+      )
+    )
+    let duplicateContent = try XCTUnwrap(
+      ComposerImageAttachment(
+        id: newThreadModelUUID(11),
+        sha256: attachments[0].sha256,
+        byteCount: attachments[0].byteCount,
+        pixelWidth: attachments[0].pixelWidth,
+        pixelHeight: attachments[0].pixelHeight,
+        quality: attachments[0].quality
+      )
+    )
+    XCTAssertNil(
+      NewThreadSubmission(
+        target: target,
+        title: nil,
+        content: "",
+        attachments: [attachments[0], duplicateContent]
+      )
+    )
+  }
+
+  func testAttachmentDoesNotBypassSubmissionPolicyButEditingDraftRemainsLossless() {
+    let attachment = newThreadModelAttachment(1)
+    let target = newThreadModelTarget()
+
+    XCTAssertNil(
+      NewThreadSubmission(
+        target: target,
+        title: nil,
+        content: "文本 #(pic,1,2,3)",
+        attachments: [attachment]
+      )
+    )
+    XCTAssertNil(
+      NewThreadSubmission(
+        target: target,
+        title: nil,
+        content: " \n\t ",
+        attachments: [attachment]
+      )
+    )
+    XCTAssertNil(
+      NewThreadSubmission(
+        target: target,
+        title: nil,
+        content: String(
+          repeating: "a",
+          count: NewThreadContentPolicy.maximumCharacterCount - 1
+        ),
+        attachments: [attachment]
+      )
+    )
+    let key = NewThreadDraftKey(userID: 9, target: target)!
+    XCTAssertNotNil(
+      NewThreadDraft(
+        key: key,
+        title: nil,
+        content: "文本 #(pic,1,2,3)",
+        attachments: [attachment]
+      )
+    )
+    XCTAssertNotNil(
+      NewThreadDraft(
+        key: key,
+        title: nil,
+        content: String(
+          repeating: "a",
+          count: NewThreadContentPolicy.maximumCharacterCount + 1
+        ),
+        attachments: [attachment]
+      )
+    )
+    XCTAssertNil(
+      NewThreadDraft(
+        key: key,
+        title: nil,
+        content: "文本 #(pic,1,2,3)",
+        attachments: [attachment],
+        disposition: .submissionPending(submissionID: UUID())
+      )
+    )
+  }
+
   func testReceiptResultAndVisibilityConfirmationValidateIdentity() throws {
     let target = newThreadModelTarget()
+    let attachment = newThreadModelAttachment(20)
     let receipt = try XCTUnwrap(NewThreadReceipt(threadID: 70, firstPostID: 700))
     let result = try XCTUnwrap(
       NewThreadResult(
@@ -153,6 +290,27 @@ final class NewThreadModelsTests: XCTestCase {
 
     XCTAssertEqual(result.outcome, .acceptedAwaitingVisibility(receipt))
     XCTAssertEqual(confirmation.title, "标题")
+    let imageOnlyConfirmation = try XCTUnwrap(
+      NewThreadVisibilityConfirmation(
+        receipt: receipt,
+        target: target,
+        authorUserID: 9,
+        title: nil,
+        content: "",
+        attachments: [attachment]
+      )
+    )
+    XCTAssertEqual(imageOnlyConfirmation.attachments, [attachment])
+    XCTAssertNil(
+      NewThreadVisibilityConfirmation(
+        receipt: receipt,
+        target: target,
+        authorUserID: 9,
+        title: nil,
+        content: " \n\t ",
+        attachments: [attachment]
+      )
+    )
     XCTAssertNotNil(
       NewThreadVisibilityConfirmation(
         receipt: receipt,
@@ -243,24 +401,88 @@ final class NewThreadModelsTests: XCTestCase {
     )
   }
 
+  func testDraftSupportsImageOnlyAndIncludesOrderedAttachmentsInIdentity() throws {
+    let key = try XCTUnwrap(NewThreadDraftKey(userID: 9, target: newThreadModelTarget()))
+    let first = newThreadModelAttachment(1)
+    let second = newThreadModelAttachment(2)
+    let date = Date(timeIntervalSince1970: 100)
+    let imageOnly = try XCTUnwrap(
+      NewThreadDraft(
+        key: key,
+        title: nil,
+        content: "",
+        attachments: [first, second],
+        updatedAt: date
+      )
+    )
+    let reordered = try XCTUnwrap(
+      NewThreadDraft(
+        key: key,
+        title: nil,
+        content: "",
+        attachments: [second, first],
+        updatedAt: date
+      )
+    )
+
+    XCTAssertEqual(imageOnly.attachments, [first, second])
+    XCTAssertNotEqual(imageOnly, reordered)
+    XCTAssertEqual(Set([imageOnly, reordered]).count, 2)
+    XCTAssertNil(
+      NewThreadDraft(
+        key: key,
+        title: nil,
+        content: "",
+        attachments: [first, first]
+      )
+    )
+  }
+
   func testSensitiveModelsUseRedactedDescriptions() throws {
     let target = newThreadModelTarget()
+    let attachment = newThreadModelAttachment(30)
     let submission = try XCTUnwrap(
-      NewThreadSubmission(target: target, title: "secret title", content: "secret content")
+      NewThreadSubmission(
+        target: target,
+        title: "secret title",
+        content: "secret content",
+        attachments: [attachment]
+      )
     )
     let key = try XCTUnwrap(NewThreadDraftKey(userID: 9, target: target))
     let draft = try XCTUnwrap(
-      NewThreadDraft(key: key, title: "secret title", content: "secret content")
+      NewThreadDraft(
+        key: key,
+        title: "secret title",
+        content: "secret content",
+        attachments: [attachment]
+      )
     )
 
     for value in [String(describing: submission), String(reflecting: submission)] {
       XCTAssertFalse(value.contains("secret title"))
       XCTAssertFalse(value.contains("secret content"))
+      XCTAssertFalse(value.contains(attachment.sha256))
+      XCTAssertFalse(value.contains(attachment.relativePrivateFilename))
     }
     for value in [String(describing: draft), String(reflecting: draft)] {
       XCTAssertFalse(value.contains("secret title"))
       XCTAssertFalse(value.contains("secret content"))
+      XCTAssertFalse(value.contains(attachment.sha256))
+      XCTAssertFalse(value.contains(attachment.relativePrivateFilename))
     }
+    XCTAssertFalse(
+      Mirror(reflecting: submission).children.contains { child in
+        String(reflecting: child.value).contains(attachment.sha256)
+          || String(reflecting: child.value).contains(attachment.relativePrivateFilename)
+      }
+    )
+    XCTAssertFalse(
+      Mirror(reflecting: draft).children.contains { child in
+        String(reflecting: child.value).contains(attachment.sha256)
+          || String(reflecting: child.value).contains(attachment.relativePrivateFilename)
+      }
+    )
   }
 }
 
@@ -270,4 +492,15 @@ private func newThreadModelTarget() -> NewThreadTarget {
 
 private func newThreadModelUUID(_ value: UInt8) -> UUID {
   UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, value))
+}
+
+private func newThreadModelAttachment(_ value: UInt8) -> ComposerImageAttachment {
+  ComposerImageAttachment(
+    id: newThreadModelUUID(value),
+    sha256: String(repeating: String(format: "%02x", value), count: 32),
+    byteCount: Int64(100 + Int(value)),
+    pixelWidth: 20,
+    pixelHeight: 10,
+    quality: .standard
+  )!
 }

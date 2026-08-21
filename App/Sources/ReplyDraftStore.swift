@@ -37,9 +37,10 @@ protocol TextReplyDraftRepository: Sendable {
 }
 
 actor FileTextReplyDraftStore: TextReplyDraftRepository {
-  static let schemaVersion = 1
+  static let schemaVersion = 2
   static let defaultMaximumDrafts = 64
   static let defaultMaximumArchiveBytes = 8 * 1_024 * 1_024
+  private static let legacySchemaVersion = 1
 
   private struct Archive: Codable, Sendable {
     let schemaVersion: Int
@@ -52,6 +53,54 @@ actor FileTextReplyDraftStore: TextReplyDraftRepository {
 
   private struct ArchiveHeader: Decodable, Sendable {
     let schemaVersion: Int
+  }
+
+  private struct LegacyArchiveV1: Decodable, Sendable {
+    let schemaVersion: Int
+    let drafts: [LegacyDraftV1]
+  }
+
+  private struct LegacyDraftV1: Decodable, Sendable {
+    let key: TextReplyDraftKey
+    let content: String
+    let disposition: TextReplyDraftDisposition
+    let updatedAt: Date
+
+    private enum CodingKeys: String, CodingKey {
+      case key
+      case content
+      case disposition
+      case updatedAt
+      case attachments
+    }
+
+    init(from decoder: Decoder) throws {
+      let container = try decoder.container(keyedBy: CodingKeys.self)
+      guard !container.contains(.attachments) else {
+        throw DecodingError.dataCorruptedError(
+          forKey: .attachments,
+          in: container,
+          debugDescription: "Schema v1 drafts cannot contain image attachments."
+        )
+      }
+      self.key = try container.decode(TextReplyDraftKey.self, forKey: .key)
+      self.content = try container.decode(String.self, forKey: .content)
+      self.disposition = try container.decode(
+        TextReplyDraftDisposition.self,
+        forKey: .disposition
+      )
+      self.updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+    }
+
+    func migrated() -> TextReplyDraft? {
+      TextReplyDraft(
+        key: key,
+        content: content,
+        attachments: [],
+        disposition: disposition,
+        updatedAt: updatedAt
+      )
+    }
   }
 
   private let fileURL: URL
@@ -136,15 +185,41 @@ actor FileTextReplyDraftStore: TextReplyDraftRepository {
     } catch {
       throw TextReplyDraftStoreError.corruptedArchive
     }
-    guard header.schemaVersion == Self.schemaVersion else {
-      throw TextReplyDraftStoreError.unsupportedSchemaVersion(header.schemaVersion)
-    }
-
     let archive: Archive
-    do {
-      archive = try decoder.decode(Archive.self, from: data)
-    } catch {
-      throw TextReplyDraftStoreError.corruptedArchive
+    switch header.schemaVersion {
+    case Self.schemaVersion:
+      do {
+        archive = try decoder.decode(Archive.self, from: data)
+        guard archive.schemaVersion == Self.schemaVersion else {
+          throw TextReplyDraftStoreError.corruptedArchive
+        }
+      } catch let error as TextReplyDraftStoreError {
+        throw error
+      } catch {
+        throw TextReplyDraftStoreError.corruptedArchive
+      }
+    case Self.legacySchemaVersion:
+      do {
+        let legacy = try decoder.decode(LegacyArchiveV1.self, from: data)
+        guard legacy.schemaVersion == Self.legacySchemaVersion else {
+          throw TextReplyDraftStoreError.corruptedArchive
+        }
+        var migratedDrafts: [TextReplyDraft] = []
+        migratedDrafts.reserveCapacity(legacy.drafts.count)
+        for legacyDraft in legacy.drafts {
+          guard let migrated = legacyDraft.migrated() else {
+            throw TextReplyDraftStoreError.corruptedArchive
+          }
+          migratedDrafts.append(migrated)
+        }
+        archive = Archive(schemaVersion: Self.schemaVersion, drafts: migratedDrafts)
+      } catch let error as TextReplyDraftStoreError {
+        throw error
+      } catch {
+        throw TextReplyDraftStoreError.corruptedArchive
+      }
+    default:
+      throw TextReplyDraftStoreError.unsupportedSchemaVersion(header.schemaVersion)
     }
     guard archive.drafts.count <= maximumDrafts else {
       throw TextReplyDraftStoreError.tooManyDrafts
@@ -202,10 +277,12 @@ actor FileTextReplyDraftStore: TextReplyDraftRepository {
       draft.key.isValid,
       draft.content.count <= TextReplyDraft.maximumStoredCharacterCount,
       draft.content.utf8.count <= TextReplyDraft.maximumStoredUTF8ByteCount,
+      ComposerImageDraftPolicy.isValid(draft.attachments),
       draft.updatedAt.timeIntervalSinceReferenceDate.isFinite,
       TextReplyDraft(
         key: draft.key,
         content: draft.content,
+        attachments: draft.attachments,
         disposition: draft.disposition,
         updatedAt: draft.updatedAt
       ) != nil

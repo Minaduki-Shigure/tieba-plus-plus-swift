@@ -695,6 +695,18 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     expectedUserID: Int64,
     submission: TiebaTextReplySubmission
   ) throws -> String {
+    try validatedTextReplySubmission(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      submission: submission
+    ).normalizedForumName
+  }
+
+  private func validatedTextReplySubmission(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    submission: TiebaTextReplySubmission
+  ) throws -> (normalizedForumName: String, content: TiebaCompiledSubmissionContent) {
     try validate(credential)
     try validateAgreementContext(
       expectedUserID: expectedUserID,
@@ -702,11 +714,14 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       threadID: submission.threadID,
       target: nil
     )
+    let allowsImages: Bool
     switch submission.target {
     case .thread(let firstPostID):
       try validatePositiveID(firstPostID, name: "First post ID")
+      allowsImages = true
     case .post(let postID):
       try validatePositiveID(postID, name: "Post ID")
+      allowsImages = false
     case .subpost(let parentPostID, let subpostID):
       try validatePositiveID(parentPostID, name: "Parent post ID")
       try validatePositiveID(subpostID, name: "Subpost ID")
@@ -715,13 +730,21 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
           "Parent post ID and subpost ID must be different."
         )
       }
+      allowsImages = false
     }
-    guard TiebaTextReplyContentPolicy.isValid(submission.content) else {
-      throw TiebaClientError.invalidArgument(
-        "Reply content is empty, too large, contains unsupported control characters, or contains an unsupported Tieba rich-content marker."
-      )
-    }
-    return try normalizedForumName(submission.forumName)
+    let forumName = try normalizedForumName(submission.forumName)
+    let content = try TiebaStaticImageContentCompiler.compile(
+      userContent: submission.content,
+      imageProofs: submission.imageProofs,
+      submissionID: submission.submissionID,
+      expectedUserID: expectedUserID,
+      forumID: submission.forumID,
+      normalizedForumName: forumName,
+      allowsImages: allowsImages,
+      maximumCharacterCount: TiebaTextReplyContentPolicy.maximumCharacterCount,
+      maximumUTF8ByteCount: TiebaTextReplyContentPolicy.maximumUTF8ByteCount
+    )
+    return (forumName, content)
   }
 
   func validateNewThreadArguments(
@@ -729,19 +752,38 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     expectedUserID: Int64,
     submission: TiebaNewThreadSubmission
   ) throws -> String {
+    try validatedNewThreadSubmission(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      submission: submission
+    ).normalizedForumName
+  }
+
+  private func validatedNewThreadSubmission(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    submission: TiebaNewThreadSubmission
+  ) throws -> (normalizedForumName: String, content: TiebaCompiledSubmissionContent) {
     try validate(credential)
     try validateIdentity(expectedUserID: expectedUserID, forumID: submission.forumID)
-    guard
-      TiebaNewThreadContentPolicy.isValid(
-        title: submission.title,
-        content: submission.content
-      )
-    else {
+    guard TiebaNewThreadContentPolicy.isValidTitle(submission.title) else {
       throw TiebaClientError.invalidArgument(
         "The new-thread title or content is invalid, too large, contains unsupported control characters, or contains an unsupported Tieba rich-content marker."
       )
     }
-    return try normalizedForumName(submission.forumName)
+    let forumName = try normalizedForumName(submission.forumName)
+    let content = try TiebaStaticImageContentCompiler.compile(
+      userContent: submission.content,
+      imageProofs: submission.imageProofs,
+      submissionID: submission.submissionID,
+      expectedUserID: expectedUserID,
+      forumID: submission.forumID,
+      normalizedForumName: forumName,
+      allowsImages: true,
+      maximumCharacterCount: TiebaNewThreadContentPolicy.maximumContentCharacterCount,
+      maximumUTF8ByteCount: TiebaNewThreadContentPolicy.maximumContentUTF8ByteCount
+    )
+    return (forumName, content)
   }
 
   func validateStaticImageUploadArguments(
@@ -893,12 +935,15 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     tbs: String,
     accountDisplayName: String
   ) throws -> URLRequest {
-    let validatedForumName = try validateNewThreadArguments(
+    let validatedSubmission = try validatedNewThreadSubmission(
       credential: credential,
       expectedUserID: expectedUserID,
       submission: submission
     )
-    guard validatedForumName == normalizedForumName, Self.isValidTBS(tbs) else {
+    guard
+      validatedSubmission.normalizedForumName == normalizedForumName,
+      Self.isValidTBS(tbs)
+    else {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
     let displayName = try validatedReplyMetadata(
@@ -920,7 +965,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
         ("anonymous", "1"),
         ("call_from", "2"),
         ("can_no_forum", "0"),
-        ("content", submission.content),
+        ("content", validatedSubmission.content.wireValue),
         ("cuid_gid", ""),
         ("entrance_type", "1"),
         ("fid", String(submission.forumID)),
@@ -957,12 +1002,12 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     replyUserDisplayName: String?,
     replyUserPortrait: String?
   ) throws -> URLRequest {
-    let validatedForumName = try validateTextReplyArguments(
+    let validatedSubmission = try validatedTextReplySubmission(
       credential: credential,
       expectedUserID: expectedUserID,
       submission: submission
     )
-    guard validatedForumName == normalizedForumName else {
+    guard validatedSubmission.normalizedForumName == normalizedForumName else {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
     guard Self.isValidTBS(tbs) else {
@@ -1010,7 +1055,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       guard replyUserID == nil, replyUserDisplayName == nil, replyUserPortrait == nil else {
         throw TiebaClientError.invalidAuthenticatedResponse
       }
-      data.content = submission.content
+      data.content = validatedSubmission.content.wireValue
       data.barrageTime = "0"
       data.postFrom = "13"
       data.vFid = ""
@@ -1024,7 +1069,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       else {
         throw TiebaClientError.invalidAuthenticatedResponse
       }
-      data.content = submission.content
+      data.content = validatedSubmission.content.wireValue
       data.replyUid = String(replyUserID)
       data.quoteID = String(postID)
       data.repostid = String(postID)
@@ -1045,7 +1090,8 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
         maximumBytes: 2_048,
         allowsEmpty: false
       )
-      data.content = "回复 #(reply, \(portrait), \(displayName)) :\(submission.content)"
+      data.content =
+        "回复 #(reply, \(portrait), \(displayName)) :\(validatedSubmission.content.wireValue)"
       data.replyUid = String(replyUserID)
       data.quoteID = String(parentPostID)
       data.repostid = String(parentPostID)

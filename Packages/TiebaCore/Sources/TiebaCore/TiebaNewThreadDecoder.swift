@@ -160,15 +160,17 @@ extension TiebaAuthenticatedDecoder {
         directID: firstPost.authorID,
         nested: firstPost.hasAuthor ? firstPost.author : nil
       ) == context.userID,
-      let submittedTokens = TiebaClassicEmoticonTokenizer.submissionTokens(
-        in: submission.content
-      ),
-      let readbackTokens = TiebaClassicEmoticonTokenizer.readbackTokens(
-        in: firstPost.content,
+      TiebaStaticImageContentCompiler.readbackMatches(
+        firstPost.content,
+        userContent: submission.content,
+        imageProofs: submission.imageProofs,
+        submissionID: submission.submissionID,
+        expectedUserID: context.userID,
+        forumID: context.forumID,
+        normalizedForumName: context.forumName,
         maximumUTF8ByteCount: TiebaNewThreadContentPolicy.maximumContentUTF8ByteCount,
         allowsMentions: true
-      ),
-      readbackTokens == submittedTokens
+      )
     else {
       throw TiebaClientError.invalidAuthenticatedResponse
     }

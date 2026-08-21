@@ -5,8 +5,16 @@ public enum TiebaTextReplyContentPolicy {
   public static let maximumUTF8ByteCount = 32 * 1_024
 
   public static func isValid(_ value: String) -> Bool {
+    isValidUserText(value, allowsVisuallyEmptyValue: false)
+  }
+
+  static func isValidUserText(
+    _ value: String,
+    allowsVisuallyEmptyValue: Bool
+  ) -> Bool {
     guard
-      !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+      allowsVisuallyEmptyValue
+        || !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
       value.count <= maximumCharacterCount,
       value.utf8.count <= maximumUTF8ByteCount,
       TiebaClassicEmoticonTokenizer.submissionTokens(in: value) != nil
@@ -36,6 +44,7 @@ public struct TiebaTextReplySubmission:
   public let threadID: Int64
   public let target: TiebaTextReplyTarget
   public let content: String
+  public let imageProofs: [TiebaStaticImageContentProof]
 
   public init(
     submissionID: UUID,
@@ -43,7 +52,8 @@ public struct TiebaTextReplySubmission:
     forumName: String,
     threadID: Int64,
     target: TiebaTextReplyTarget,
-    content: String
+    content: String,
+    imageProofs: [TiebaStaticImageContentProof] = []
   ) {
     self.submissionID = submissionID
     self.forumID = forumID
@@ -51,6 +61,7 @@ public struct TiebaTextReplySubmission:
     self.threadID = threadID
     self.target = target
     self.content = content
+    self.imageProofs = imageProofs
   }
 
   public var description: String { "TiebaTextReplySubmission(redacted)" }
@@ -76,6 +87,7 @@ public struct TiebaTextReplySubmission:
       && lhs.threadID == rhs.threadID
       && lhs.target == rhs.target
       && lhs.content.utf8.elementsEqual(rhs.content.utf8)
+      && lhs.imageProofs == rhs.imageProofs
   }
 
   public func hash(into hasher: inout Hasher) {
@@ -88,6 +100,7 @@ public struct TiebaTextReplySubmission:
     for byte in content.utf8 {
       hasher.combine(byte)
     }
+    hasher.combine(imageProofs)
   }
 }
 

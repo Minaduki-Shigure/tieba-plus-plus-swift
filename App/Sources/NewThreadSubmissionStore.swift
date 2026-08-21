@@ -414,7 +414,8 @@ final class NewThreadSubmissionStore {
     guard
       confirmation.authorUserID == lease.userID,
       draft.title == nil || confirmation.title == draft.title,
-      confirmation.content.utf8.elementsEqual(draft.content.utf8)
+      confirmation.content.utf8.elementsEqual(draft.content.utf8),
+      confirmation.attachments == draft.attachments
     else {
       throw NewThreadSubmissionError.invalidSubmission
     }

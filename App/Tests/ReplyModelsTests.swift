@@ -225,6 +225,127 @@ final class ReplyModelsTests: XCTestCase {
     )
   }
 
+  func testDirectThreadReplySupportsOrderedImageOnlyAndNineImageBoundary() throws {
+    let target = replyTarget()
+    let attachments = (1...ComposerImageDraftPolicy.maximumAttachmentCount).map {
+      replyModelAttachment(UInt8($0))
+    }
+    let imageOnly = try XCTUnwrap(
+      TextReplySubmission(
+        id: replyModelUUID(20),
+        target: target,
+        content: "",
+        attachments: attachments
+      )
+    )
+    let textAndImages = try XCTUnwrap(
+      TextReplySubmission(
+        id: replyModelUUID(21),
+        target: target,
+        content: "正文 #(滑稽)",
+        attachments: Array(attachments.reversed())
+      )
+    )
+    let reorderedIdentity = try XCTUnwrap(
+      TextReplySubmission(
+        id: imageOnly.id,
+        target: target,
+        content: "",
+        attachments: Array(attachments.reversed())
+      )
+    )
+
+    XCTAssertEqual(imageOnly.attachments, attachments)
+    XCTAssertEqual(textAndImages.attachments, Array(attachments.reversed()))
+    XCTAssertNotEqual(imageOnly, reorderedIdentity)
+    XCTAssertEqual(Set([imageOnly, reorderedIdentity]).count, 2)
+    XCTAssertNil(
+      TextReplySubmission(
+        target: target,
+        content: "",
+        attachments: attachments + [replyModelAttachment(10)]
+      )
+    )
+    XCTAssertNil(
+      TextReplySubmission(
+        target: target,
+        content: "",
+        attachments: [attachments[0], attachments[0]]
+      )
+    )
+  }
+
+  func testReplyImagesRejectNonThreadTargetsWithoutMakingEditingDraftLossy() {
+    let attachment = replyModelAttachment(1)
+
+    XCTAssertNil(
+      TextReplySubmission(
+        target: replyTarget(destination: .post(postID: 701)),
+        content: "正文",
+        attachments: [attachment]
+      )
+    )
+    XCTAssertNil(
+      TextReplySubmission(
+        target: replyTarget(
+          destination: .subpost(parentPostID: 701, subpostID: 702)
+        ),
+        content: "正文",
+        attachments: [attachment]
+      )
+    )
+    XCTAssertNil(
+      TextReplySubmission(
+        target: replyTarget(),
+        content: "文本 #(pic,1,2,3)",
+        attachments: [attachment]
+      )
+    )
+    XCTAssertNil(
+      TextReplySubmission(
+        target: replyTarget(),
+        content: " \n\t ",
+        attachments: [attachment]
+      )
+    )
+    XCTAssertNil(
+      TextReplySubmission(
+        target: replyTarget(),
+        content: String(
+          repeating: "a",
+          count: TextReplyContentPolicy.maximumCharacterCount - 1
+        ),
+        attachments: [attachment]
+      )
+    )
+    let key = TextReplyDraftKey(userID: 9, target: replyTarget())!
+    XCTAssertNotNil(
+      TextReplyDraft(
+        key: key,
+        content: "文本 #(pic,1,2,3)",
+        attachments: [attachment]
+      )
+    )
+    XCTAssertNotNil(
+      TextReplyDraft(
+        key: key,
+        content: String(
+          repeating: "a",
+          count: TextReplyContentPolicy.maximumCharacterCount + 1
+        ),
+        attachments: [attachment]
+      )
+    )
+    XCTAssertNil(
+      TextReplyDraft(
+        key: key,
+        content: "文本 #(pic,1,2,3)",
+        attachments: [attachment],
+        disposition: .submissionPending(submissionID: UUID())
+      )
+    )
+  }
+
   func testOutcomesRequireExactTargetShape() throws {
     let threadTarget = replyTarget(destination: .thread(firstPostID: 700))
     let postTarget = replyTarget(destination: .post(postID: 701))
@@ -368,12 +489,88 @@ final class ReplyModelsTests: XCTestCase {
     }
   }
 
+  func testDraftBindsImagesOnlyToDirectThreadTargetAndPreservesOrderInIdentity() throws {
+    let threadKey = try XCTUnwrap(TextReplyDraftKey(userID: 9, target: replyTarget()))
+    let postKey = try XCTUnwrap(
+      TextReplyDraftKey(
+        userID: 9,
+        target: replyTarget(destination: .post(postID: 701))
+      )
+    )
+    let subpostKey = try XCTUnwrap(
+      TextReplyDraftKey(
+        userID: 9,
+        target: replyTarget(
+          destination: .subpost(parentPostID: 701, subpostID: 702)
+        )
+      )
+    )
+    let first = replyModelAttachment(1)
+    let second = replyModelAttachment(2)
+    let date = Date(timeIntervalSince1970: 100)
+    let imageOnly = try XCTUnwrap(
+      TextReplyDraft(
+        key: threadKey,
+        content: "",
+        attachments: [first, second],
+        updatedAt: date
+      )
+    )
+    let reordered = try XCTUnwrap(
+      TextReplyDraft(
+        key: threadKey,
+        content: "",
+        attachments: [second, first],
+        updatedAt: date
+      )
+    )
+
+    XCTAssertEqual(imageOnly.attachments, [first, second])
+    XCTAssertNotEqual(imageOnly, reordered)
+    XCTAssertEqual(Set([imageOnly, reordered]).count, 2)
+    XCTAssertNil(TextReplyDraft(key: postKey, content: "正文", attachments: [first]))
+    XCTAssertNil(TextReplyDraft(key: subpostKey, content: "正文", attachments: [first]))
+    XCTAssertNil(TextReplyDraft(key: threadKey, content: "", attachments: [first, first]))
+    XCTAssertNil(
+      TextReplyDraft(
+        key: threadKey,
+        content: "#(pic,1,2,3)",
+        attachments: [first],
+        disposition: .submissionPending(submissionID: UUID())
+      )
+    )
+  }
+
   func testVisibilityConfirmationRequiresValidAuthorContentAndCreatedReply() {
+    let attachment = replyModelAttachment(20)
     XCTAssertNotNil(
       TextReplyVisibilityConfirmation(
         created: .post(postID: 703, floor: 3),
         authorUserID: 9,
         content: "正文"
+      )
+    )
+    let imageOnlyConfirmation = TextReplyVisibilityConfirmation(
+      created: .post(postID: 704, floor: 4),
+      authorUserID: 9,
+      content: "",
+      attachments: [attachment]
+    )
+    XCTAssertEqual(imageOnlyConfirmation?.attachments, [attachment])
+    XCTAssertNil(
+      TextReplyVisibilityConfirmation(
+        created: .post(postID: 704, floor: 4),
+        authorUserID: 9,
+        content: " \n\t ",
+        attachments: [attachment]
+      )
+    )
+    XCTAssertNil(
+      TextReplyVisibilityConfirmation(
+        created: .subpost(parentPostID: 703, subpostID: 704),
+        authorUserID: 9,
+        content: "正文",
+        attachments: [attachment]
       )
     )
     XCTAssertNil(
@@ -409,11 +606,22 @@ final class ReplyModelsTests: XCTestCase {
         destination: .thread(firstPostID: 700)
       )
     )
+    let attachment = replyModelAttachment(30)
     let submission = try XCTUnwrap(
-      TextReplySubmission(target: target, content: "secret-reply-content")
+      TextReplySubmission(
+        target: target,
+        content: "secret-reply-content",
+        attachments: [attachment]
+      )
     )
     let key = try XCTUnwrap(TextReplyDraftKey(userID: 9, target: target))
-    let draft = try XCTUnwrap(TextReplyDraft(key: key, content: "secret-draft-content"))
+    let draft = try XCTUnwrap(
+      TextReplyDraft(
+        key: key,
+        content: "secret-draft-content",
+        attachments: [attachment]
+      )
+    )
     let confirmation = try XCTUnwrap(
       TextReplyVisibilityConfirmation(
         created: .post(postID: 701, floor: 2),
@@ -428,6 +636,10 @@ final class ReplyModelsTests: XCTestCase {
       let debugDescription = String(reflecting: value)
       XCTAssertFalse(description.contains("secret"))
       XCTAssertFalse(debugDescription.contains("secret"))
+      XCTAssertFalse(description.contains(attachment.sha256))
+      XCTAssertFalse(debugDescription.contains(attachment.sha256))
+      XCTAssertFalse(description.contains(attachment.relativePrivateFilename))
+      XCTAssertFalse(debugDescription.contains(attachment.relativePrivateFilename))
       XCTAssertTrue(Mirror(reflecting: value).children.isEmpty)
     }
   }
@@ -514,5 +726,20 @@ private func replyTarget(
     threadID: 70,
     firstPostID: 700,
     destination: destination
+  )!
+}
+
+private func replyModelUUID(_ value: UInt8) -> UUID {
+  UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, value))
+}
+
+private func replyModelAttachment(_ value: UInt8) -> ComposerImageAttachment {
+  ComposerImageAttachment(
+    id: replyModelUUID(value),
+    sha256: String(repeating: String(format: "%02x", value), count: 32),
+    byteCount: Int64(100 + Int(value)),
+    pixelWidth: 20,
+    pixelHeight: 10,
+    quality: .standard
   )!
 }

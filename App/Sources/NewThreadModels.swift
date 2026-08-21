@@ -73,6 +73,37 @@ enum NewThreadContentPolicy {
   }
 }
 
+enum ComposerImageDraftPolicy {
+  static let maximumAttachmentCount = TiebaStaticImageContentPolicy.maximumImageCount
+
+  static func isValid(_ attachments: [ComposerImageAttachment]) -> Bool {
+    guard attachments.count <= maximumAttachmentCount else { return false }
+
+    var ids = Set<UUID>()
+    var relativePrivateFilenames = Set<String>()
+    var contentDigests = Set<String>()
+    for attachment in attachments {
+      guard
+        let validated = ComposerImageAttachment(
+          id: attachment.id,
+          relativePrivateFilename: attachment.relativePrivateFilename,
+          sha256: attachment.sha256,
+          byteCount: attachment.byteCount,
+          pixelWidth: attachment.pixelWidth,
+          pixelHeight: attachment.pixelHeight,
+          encoding: attachment.encoding,
+          quality: attachment.quality
+        ),
+        validated == attachment,
+        ids.insert(attachment.id).inserted,
+        relativePrivateFilenames.insert(attachment.relativePrivateFilename).inserted,
+        contentDigests.insert(attachment.sha256).inserted
+      else { return false }
+    }
+    return true
+  }
+}
+
 struct NewThreadSubmission:
   Hashable, Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
 {
@@ -80,23 +111,32 @@ struct NewThreadSubmission:
   let target: NewThreadTarget
   let title: String?
   let content: String
+  let attachments: [ComposerImageAttachment]
 
   init?(
     id: UUID = UUID(),
     target: NewThreadTarget,
     title: String?,
-    content: String
+    content: String,
+    attachments: [ComposerImageAttachment] = []
   ) {
     let title = NewThreadTitlePolicy.normalized(title)
     guard
       target.isValid,
       NewThreadTitlePolicy.isValid(title),
-      NewThreadContentPolicy.isValid(content)
+      ComposerImageDraftPolicy.isValid(attachments),
+      TiebaStaticImageContentPolicy.canCompileWithinLimits(
+        userContent: content,
+        imageCount: attachments.count,
+        maximumCharacterCount: NewThreadContentPolicy.maximumCharacterCount,
+        maximumUTF8ByteCount: NewThreadContentPolicy.maximumUTF8ByteCount
+      )
     else { return nil }
     self.id = id
     self.target = target
     self.title = title
     self.content = content
+    self.attachments = attachments
   }
 
   var description: String { "NewThreadSubmission(redacted)" }
@@ -114,6 +154,7 @@ struct NewThreadSubmission:
       && lhs.target == rhs.target
       && lhs.title == rhs.title
       && lhs.content.utf8.elementsEqual(rhs.content.utf8)
+      && lhs.attachments == rhs.attachments
   }
 
   func hash(into hasher: inout Hasher) {
@@ -124,6 +165,7 @@ struct NewThreadSubmission:
     for byte in content.utf8 {
       hasher.combine(byte)
     }
+    hasher.combine(attachments)
   }
 
 }
@@ -178,13 +220,15 @@ struct NewThreadVisibilityConfirmation:
   let authorUserID: Int64
   let title: String?
   let content: String
+  let attachments: [ComposerImageAttachment]
 
   init?(
     receipt: NewThreadReceipt,
     target: NewThreadTarget,
     authorUserID: Int64,
     title: String?,
-    content: String
+    content: String,
+    attachments: [ComposerImageAttachment] = []
   ) {
     let title = Self.normalizedVisibleTitle(title)
     guard
@@ -192,13 +236,20 @@ struct NewThreadVisibilityConfirmation:
       target.isValid,
       authorUserID > 0,
       Self.isValidVisibleTitle(title),
-      NewThreadContentPolicy.isValid(content)
+      ComposerImageDraftPolicy.isValid(attachments),
+      TiebaStaticImageContentPolicy.canCompileWithinLimits(
+        userContent: content,
+        imageCount: attachments.count,
+        maximumCharacterCount: NewThreadContentPolicy.maximumCharacterCount,
+        maximumUTF8ByteCount: NewThreadContentPolicy.maximumUTF8ByteCount
+      )
     else { return nil }
     self.receipt = receipt
     self.target = target
     self.authorUserID = authorUserID
     self.title = title
     self.content = content
+    self.attachments = attachments
   }
 
   var description: String { "NewThreadVisibilityConfirmation(redacted)" }
@@ -303,6 +354,7 @@ struct NewThreadDraft:
   let key: NewThreadDraftKey
   let title: String?
   let content: String
+  let attachments: [ComposerImageAttachment]
   let disposition: NewThreadDraftDisposition
   let updatedAt: Date
 
@@ -310,6 +362,7 @@ struct NewThreadDraft:
     key: NewThreadDraftKey,
     title: String?,
     content: String,
+    attachments: [ComposerImageAttachment] = [],
     disposition: NewThreadDraftDisposition = .editing,
     updatedAt: Date = Date()
   ) {
@@ -319,13 +372,16 @@ struct NewThreadDraft:
       NewThreadTitlePolicy.isValid(title),
       content.count <= Self.maximumStoredContentCharacterCount,
       content.utf8.count <= Self.maximumStoredContentUTF8ByteCount,
+      ComposerImageDraftPolicy.isValid(attachments),
       updatedAt.timeIntervalSinceReferenceDate.isFinite,
-      title != nil || !content.isEmpty || Self.allowsEmptyDraft(disposition),
-      Self.isValid(disposition, content: content)
+      title != nil || !content.isEmpty || !attachments.isEmpty
+        || Self.allowsEmptyDraft(disposition),
+      Self.isValid(disposition, content: content, attachments: attachments)
     else { return nil }
     self.key = key
     self.title = title
     self.content = content
+    self.attachments = attachments
     self.disposition = disposition
     self.updatedAt = updatedAt
   }
@@ -342,18 +398,31 @@ struct NewThreadDraft:
 
   private static func isValid(
     _ disposition: NewThreadDraftDisposition,
-    content: String
+    content: String,
+    attachments: [ComposerImageAttachment]
   ) -> Bool {
     switch disposition {
     case .editing:
       true
     case .challengeRequired:
-      content.isEmpty || NewThreadContentPolicy.isValid(content)
+      content.isEmpty || isValidSubmissionContent(content, attachments: attachments)
     case .submissionPending, .outcomeUnknown:
-      NewThreadContentPolicy.isValid(content)
+      isValidSubmissionContent(content, attachments: attachments)
     case .acceptedAwaitingVisibility(_, let receipt), .confirmed(_, let receipt):
-      receipt.isValid && NewThreadContentPolicy.isValid(content)
+      receipt.isValid && isValidSubmissionContent(content, attachments: attachments)
     }
+  }
+
+  private static func isValidSubmissionContent(
+    _ content: String,
+    attachments: [ComposerImageAttachment]
+  ) -> Bool {
+    TiebaStaticImageContentPolicy.canCompileWithinLimits(
+      userContent: content,
+      imageCount: attachments.count,
+      maximumCharacterCount: NewThreadContentPolicy.maximumCharacterCount,
+      maximumUTF8ByteCount: NewThreadContentPolicy.maximumUTF8ByteCount
+    )
   }
 
   private static func allowsEmptyDraft(_ disposition: NewThreadDraftDisposition) -> Bool {

@@ -3743,7 +3743,7 @@ public actor TiebaAuthenticatedClient {
         forumName: context.forumName,
         threadID: submission.threadID,
         postID: postID,
-        content: submission.content
+        submission: submission
       )
     case .subpost(let parentPostID, let subpostID):
       switch submission.target {

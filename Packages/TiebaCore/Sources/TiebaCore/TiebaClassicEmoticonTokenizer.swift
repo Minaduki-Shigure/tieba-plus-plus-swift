@@ -18,6 +18,10 @@ enum TiebaClassicEmoticonContentToken: Sendable, Equatable {
 public enum TiebaClassicEmoticonTokenizer {
   private static let readbackTextTypes: Set<UInt32> = [0, 9, 18, 27, 40]
 
+  static func isReadbackTextType(_ type: UInt32) -> Bool {
+    readbackTextTypes.contains(type)
+  }
+
   /// Returns byte-exact, type-tagged tokens suitable for cross-layer visibility proofs.
   public static func submissionProofTokens(in value: String) -> [[UInt8]]? {
     submissionTokens(in: value)?.map { token in

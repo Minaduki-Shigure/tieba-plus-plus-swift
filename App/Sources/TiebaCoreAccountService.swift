@@ -1,5 +1,6 @@
+import CryptoKit
 import Foundation
-import TiebaCore
+@_spi(TiebaPlusPlusApp) import TiebaCore
 
 protocol TiebaAuthenticatedAccountClient: Sendable {
   func validateAccount(
@@ -44,6 +45,11 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
     threadID: Int64,
     markedPostID: Int64?
   ) async throws -> TiebaThreadCloudFavoriteState
+  func uploadStaticImage(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    upload: TiebaStaticImageUpload
+  ) async throws -> TiebaStaticImageUploadReceipt
   func submitTextReply(
     credential: TiebaSessionCredential,
     expectedUserID: Int64,
@@ -209,6 +215,14 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
 }
 
 extension TiebaAuthenticatedAccountClient {
+  func uploadStaticImage(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    upload: TiebaStaticImageUpload
+  ) async throws -> TiebaStaticImageUploadReceipt {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
   func getOfficialCheckInCatalog(
     credential: TiebaSessionCredential,
     expectedUserID: Int64
@@ -615,13 +629,82 @@ struct TiebaCoreAccountService: AccountService {
     )
   }
 
+  nonisolated func prepareStaticImageUpload(
+    session: StoredAccountSession,
+    submissionID: UUID,
+    forumID: Int64,
+    forumName: String,
+    attachment: ComposerImageAttachment,
+    validatedBytes: Data,
+    watermark: TiebaStaticImageWatermark
+  ) async throws -> ComposerPreparedImageUpload {
+    try Self.preparedStaticImageUpload(
+      session: session,
+      submissionID: submissionID,
+      forumID: forumID,
+      forumName: forumName,
+      attachment: attachment,
+      validatedBytes: validatedBytes,
+      watermark: watermark
+    )
+  }
+
+  func dispatchStaticImageUpload(
+    _ prepared: ComposerPreparedImageUpload
+  ) async throws -> ComposerImageUploadResult {
+    let receipt: TiebaStaticImageUploadReceipt
+    do {
+      receipt = try await client.uploadStaticImage(
+        credential: Self.coreSessionCredential(prepared.credential),
+        expectedUserID: prepared.sessionUserID,
+        upload: prepared.coreUpload
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch let error as TiebaClientError {
+      throw Self.composerImageUploadError(
+        error,
+        attachment: prepared.attachment,
+        expectedChunkCount: prepared.expectedChunkCount
+      )
+    } catch {
+      throw ComposerImageUploadError.unavailable
+    }
+    return try Self.bindStaticImageProof(
+      receipt: receipt,
+      prepared: prepared
+    )
+  }
+
+  nonisolated func recoverStaticImageUpload(
+    _ prepared: ComposerPreparedImageUpload,
+    authenticatedReceipt: TiebaStaticImageUploadReceipt
+  ) async throws -> ComposerImageUploadResult {
+    try Self.bindStaticImageProof(
+      receipt: authenticatedReceipt,
+      prepared: prepared
+    )
+  }
+
   func submitTextReply(
     session: StoredAccountSession,
-    submission: TextReplySubmission
+    submission: TextReplySubmission,
+    imageUploads: [ComposerImageUploadResult]
   ) async throws -> TextReplyResult {
     guard session.id > 0, let credentials = session.credentials else {
       throw TextReplySubmissionError.fullCredentialsRequired
     }
+    guard
+      let imageProofs = Self.coreImageProofs(
+        from: imageUploads,
+        match: submission.attachments,
+        session: session,
+        submissionID: submission.id,
+        forumID: submission.target.forumID,
+        forumName: submission.target.forumName
+      ),
+      submission.attachments.isEmpty || Self.isDirectThreadReply(submission.target.destination)
+    else { throw TextReplySubmissionError.invalidSubmission }
     let coreTarget = Self.coreTextReplyTarget(submission.target.destination)
     let coreSubmission = TiebaTextReplySubmission(
       submissionID: submission.id,
@@ -629,7 +712,8 @@ struct TiebaCoreAccountService: AccountService {
       forumName: submission.target.forumName,
       threadID: submission.target.threadID,
       target: coreTarget,
-      content: submission.content
+      content: submission.content,
+      imageProofs: imageProofs
     )
     let response: TiebaTextReplyResult
     do {
@@ -670,17 +754,29 @@ struct TiebaCoreAccountService: AccountService {
 
   func submitNewThread(
     session: StoredAccountSession,
-    submission: NewThreadSubmission
+    submission: NewThreadSubmission,
+    imageUploads: [ComposerImageUploadResult]
   ) async throws -> NewThreadResult {
     guard session.id > 0, let credentials = session.credentials else {
       throw NewThreadSubmissionError.fullCredentialsRequired
     }
+    guard
+      let imageProofs = Self.coreImageProofs(
+        from: imageUploads,
+        match: submission.attachments,
+        session: session,
+        submissionID: submission.id,
+        forumID: submission.target.forumID,
+        forumName: submission.target.forumName
+      )
+    else { throw NewThreadSubmissionError.invalidSubmission }
     let coreSubmission = TiebaNewThreadSubmission(
       submissionID: submission.id,
       forumID: submission.target.forumID,
       forumName: submission.target.forumName,
       title: submission.title ?? "",
-      content: submission.content
+      content: submission.content,
+      imageProofs: imageProofs
     )
     let response: TiebaNewThreadResult
     do {
@@ -718,17 +814,29 @@ struct TiebaCoreAccountService: AccountService {
   func verifyNewThreadVisibility(
     session: StoredAccountSession,
     submission: NewThreadSubmission,
-    receipt: NewThreadReceipt
+    receipt: NewThreadReceipt,
+    imageUploads: [ComposerImageUploadResult]
   ) async throws -> NewThreadVisibilityConfirmation? {
     guard session.id > 0, let credentials = session.credentials else {
       throw NewThreadSubmissionError.fullCredentialsRequired
     }
+    guard
+      let imageProofs = Self.coreImageProofs(
+        from: imageUploads,
+        match: submission.attachments,
+        session: session,
+        submissionID: submission.id,
+        forumID: submission.target.forumID,
+        forumName: submission.target.forumName
+      )
+    else { throw NewThreadSubmissionError.invalidSubmission }
     let coreSubmission = TiebaNewThreadSubmission(
       submissionID: submission.id,
       forumID: submission.target.forumID,
       forumName: submission.target.forumName,
       title: submission.title ?? "",
-      content: submission.content
+      content: submission.content,
+      imageProofs: imageProofs
     )
     let coreReceipt = TiebaNewThreadReceipt(
       threadID: receipt.threadID,
@@ -761,7 +869,8 @@ struct TiebaCoreAccountService: AccountService {
         target: submission.target,
         authorUserID: session.id,
         title: submission.title,
-        content: submission.content
+        content: submission.content,
+        attachments: submission.attachments
       )
     else {
       throw NewThreadSubmissionError.unavailable
@@ -1772,6 +1881,206 @@ struct TiebaCoreAccountService: AccountService {
       stoken: credential.stoken,
       bdussCookieName: cookieName
     )
+  }
+
+  private static func preparedStaticImageUpload(
+    session: StoredAccountSession,
+    submissionID: UUID,
+    forumID: Int64,
+    forumName: String,
+    attachment: ComposerImageAttachment,
+    validatedBytes: Data,
+    watermark: TiebaStaticImageWatermark
+  ) throws -> ComposerPreparedImageUpload {
+    guard session.id > 0, let credentials = session.credentials else {
+      throw ComposerImageUploadPreparationError.fullCredentialsRequired
+    }
+
+    let normalizedForumName = forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    guard
+      forumID > 0,
+      !forumName.isEmpty,
+      forumName.count <= 100,
+      forumName.utf8.count <= TiebaStaticImageUploadPolicy.maximumForumNameUTF8Bytes,
+      forumName.utf8.elementsEqual(normalizedForumName.utf8),
+      !forumName.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+      let validatedAttachment = ComposerImageAttachment(
+        id: attachment.id,
+        relativePrivateFilename: attachment.relativePrivateFilename,
+        sha256: attachment.sha256,
+        byteCount: attachment.byteCount,
+        pixelWidth: attachment.pixelWidth,
+        pixelHeight: attachment.pixelHeight,
+        encoding: attachment.encoding,
+        quality: attachment.quality
+      ),
+      validatedAttachment == attachment,
+      let exactByteCount = Int(exactly: attachment.byteCount),
+      exactByteCount == validatedBytes.count,
+      attachment.pixelWidth <= TiebaStaticImageUploadPolicy.maximumPixelDimension,
+      attachment.pixelHeight <= TiebaStaticImageUploadPolicy.maximumPixelDimension,
+      sha256HexadecimalString(validatedBytes) == attachment.sha256
+    else { throw ComposerImageUploadPreparationError.invalidUpload }
+
+    let preservesOriginal: Bool
+    let maximumBytes: Int
+    switch attachment.quality {
+    case .standard:
+      preservesOriginal = false
+      maximumBytes = TiebaStaticImageUploadPolicy.maximumStandardImageBytes
+    case .highQuality:
+      preservesOriginal = true
+      maximumBytes = TiebaStaticImageUploadPolicy.maximumOriginalImageBytes
+    }
+    guard
+      exactByteCount <= maximumBytes,
+      attachment.pixelWidth <= attachment.quality.maximumPixelSize,
+      attachment.pixelHeight <= attachment.quality.maximumPixelSize,
+      exactByteCount > 0
+    else { throw ComposerImageUploadPreparationError.invalidUpload }
+
+    let coreUpload = TiebaStaticImageUpload(
+      uploadID: attachment.id,
+      forumName: forumName,
+      encodedBytes: validatedBytes,
+      pixelWidth: attachment.pixelWidth,
+      pixelHeight: attachment.pixelHeight,
+      preservesOriginal: preservesOriginal,
+      watermark: watermark
+    )
+    return ComposerPreparedImageUpload(
+      sessionUserID: session.id,
+      sessionRevision: session.sessionRevision,
+      credential: credentials,
+      submissionID: submissionID,
+      forumID: forumID,
+      forumName: forumName,
+      attachment: attachment,
+      validatedBytes: validatedBytes,
+      watermark: watermark,
+      coreUpload: coreUpload,
+      expectedChunkCount: (exactByteCount - 1) / TiebaStaticImageUploadPolicy.chunkSize + 1
+    )
+  }
+
+  private static func bindStaticImageProof(
+    receipt: TiebaStaticImageUploadReceipt,
+    prepared: ComposerPreparedImageUpload
+  ) throws -> ComposerImageUploadResult {
+    do {
+      let proof = try TiebaStaticImageContentProof.bind(
+        upload: prepared.coreUpload,
+        receipt: receipt,
+        expectedUserID: prepared.sessionUserID,
+        submissionID: prepared.submissionID,
+        forumID: prepared.forumID
+      )
+      guard
+        proof.submissionID == prepared.submissionID,
+        proof.userID == prepared.sessionUserID,
+        proof.forumID == prepared.forumID,
+        proof.forumName.utf8.elementsEqual(prepared.forumName.utf8),
+        proof.uploadID == prepared.coreUpload.uploadID,
+        prepared.attachment.id == prepared.coreUpload.uploadID
+      else { throw ComposerImageUploadError.invalidReceipt }
+      return ComposerImageUploadResult(
+        sessionRevision: prepared.sessionRevision,
+        attachment: prepared.attachment,
+        watermark: prepared.watermark,
+        receipt: receipt,
+        proof: proof
+      )
+    } catch let error as ComposerImageUploadError {
+      throw error
+    } catch {
+      throw ComposerImageUploadError.invalidReceipt
+    }
+  }
+
+  private static func sha256HexadecimalString(_ data: Data) -> String {
+    SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+  }
+
+  private static func composerImageUploadError(
+    _ error: TiebaClientError,
+    attachment: ComposerImageAttachment,
+    expectedChunkCount: Int
+  ) -> ComposerImageUploadError {
+    switch error {
+    case .invalidArgument:
+      .preparedUploadRejected
+    case .staticImageUploadIDConflict:
+      .uploadConflict
+    case .staticImageUploadOutcomeUnknown(let uploadID, let dispatchedChunk)
+    where uploadID == attachment.id
+      && (1...expectedChunkCount).contains(dispatchedChunk):
+      .outcomeUnknown(attachment: attachment, dispatchedChunk: dispatchedChunk)
+    case .server(let code, _):
+      .server(code: code)
+    default:
+      .unavailable
+    }
+  }
+
+  private static func coreImageProofs(
+    from uploads: [ComposerImageUploadResult],
+    match attachments: [ComposerImageAttachment],
+    session: StoredAccountSession,
+    submissionID: UUID,
+    forumID: Int64,
+    forumName: String
+  ) -> [TiebaStaticImageContentProof]? {
+    guard
+      session.id > 0,
+      forumID > 0,
+      uploads.count == attachments.count,
+      uploads.count <= TiebaStaticImageContentPolicy.maximumImageCount,
+      ComposerImageDraftPolicy.isValid(attachments),
+      attachments == uploads.map(\.attachment)
+    else { return nil }
+
+    var proofs = [TiebaStaticImageContentProof]()
+    proofs.reserveCapacity(uploads.count)
+    var picIDs = Set<String>()
+    for (attachment, result) in zip(attachments, uploads) {
+      let receipt = result.receipt
+      let proof = result.proof
+      let preservesOriginal = attachment.quality == .highQuality
+      guard
+        result.sessionRevision == session.sessionRevision,
+        result.attachment == attachment,
+        receipt.schemaVersion == TiebaStaticImageUploadReceipt.currentSchemaVersion,
+        receipt.uploadID == attachment.id,
+        receipt.contentSHA256 == attachment.sha256,
+        receipt.userID == session.id,
+        receipt.forumName.utf8.elementsEqual(forumName.utf8),
+        receipt.preservesOriginal == preservesOriginal,
+        receipt.watermark == result.watermark,
+        receipt.uploadedPixelWidth == attachment.pixelWidth,
+        receipt.uploadedPixelHeight == attachment.pixelHeight,
+        receipt.byteCount == Int(attachment.byteCount),
+        receipt.chunkCount
+          == (Int(attachment.byteCount) - 1) / TiebaStaticImageUploadPolicy.chunkSize + 1,
+        proof.submissionID == submissionID,
+        proof.userID == session.id,
+        proof.forumID == forumID,
+        proof.forumName.utf8.elementsEqual(forumName.utf8),
+        proof.uploadID == attachment.id,
+        proof.uploadID == receipt.uploadID,
+        proof.picID == receipt.picID,
+        proof.width == receipt.width,
+        proof.height == receipt.height,
+        picIDs.insert(receipt.picID).inserted
+      else { return nil }
+      proofs.append(proof)
+    }
+    return proofs
+  }
+
+  private static func isDirectThreadReply(_ destination: TextReplyTarget.Destination) -> Bool {
+    if case .thread = destination { return true }
+    return false
   }
 
   private static func cloudFavoriteDate(_ timestamp: Int64) -> Date? {

@@ -233,6 +233,60 @@ extension TiebaAuthenticatedDecoder {
     postID: Int64,
     content: String
   ) throws -> TiebaCreatedReply? {
+    try verifiedTextReplyPost(
+      from: response,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      forumName: forumName,
+      threadID: threadID,
+      postID: postID,
+      content: content,
+      imageProofs: [],
+      submissionID: UUID()
+    )
+  }
+
+  static func verifiedTextReplyPost(
+    from response: PbPageResIdl,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    postID: Int64,
+    submission: TiebaTextReplySubmission
+  ) throws -> TiebaCreatedReply? {
+    guard
+      submission.forumID == forumID,
+      submission.threadID == threadID,
+      textReplyCanonicalForumName(submission.forumName) == forumName,
+      case .thread = submission.target
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    return try verifiedTextReplyPost(
+      from: response,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      forumName: forumName,
+      threadID: threadID,
+      postID: postID,
+      content: submission.content,
+      imageProofs: submission.imageProofs,
+      submissionID: submission.submissionID
+    )
+  }
+
+  private static func verifiedTextReplyPost(
+    from response: PbPageResIdl,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    postID: Int64,
+    content: String,
+    imageProofs: [TiebaStaticImageContentProof],
+    submissionID: UUID
+  ) throws -> TiebaCreatedReply? {
     try checkTextReplyPageEnvelope(
       response,
       expectedUserID: expectedUserID,
@@ -258,13 +312,17 @@ extension TiebaAuthenticatedDecoder {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
     guard
-      let submittedTokens = TiebaClassicEmoticonTokenizer.submissionTokens(in: content),
-      let readbackTokens = TiebaClassicEmoticonTokenizer.readbackTokens(
-        in: post.content,
+      TiebaStaticImageContentCompiler.readbackMatches(
+        post.content,
+        userContent: content,
+        imageProofs: imageProofs,
+        submissionID: submissionID,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        normalizedForumName: forumName,
         maximumUTF8ByteCount: TiebaTextReplyContentPolicy.maximumUTF8ByteCount,
         allowsMentions: true
-      ),
-      readbackTokens == submittedTokens
+      )
     else {
       throw TiebaClientError.invalidAuthenticatedResponse
     }

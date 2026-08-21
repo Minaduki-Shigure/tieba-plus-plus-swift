@@ -37,9 +37,10 @@ protocol NewThreadDraftRepository: Sendable {
 }
 
 actor FileNewThreadDraftStore: NewThreadDraftRepository {
-  static let schemaVersion = 1
+  static let schemaVersion = 2
   static let defaultMaximumDrafts = 64
   static let defaultMaximumArchiveBytes = 8 * 1_024 * 1_024
+  private static let legacySchemaVersion = 1
 
   private struct Archive: Codable, Sendable {
     let schemaVersion: Int
@@ -52,6 +53,58 @@ actor FileNewThreadDraftStore: NewThreadDraftRepository {
 
   private struct ArchiveHeader: Decodable, Sendable {
     let schemaVersion: Int
+  }
+
+  private struct LegacyArchiveV1: Decodable, Sendable {
+    let schemaVersion: Int
+    let drafts: [LegacyDraftV1]
+  }
+
+  private struct LegacyDraftV1: Decodable, Sendable {
+    let key: NewThreadDraftKey
+    let title: String?
+    let content: String
+    let disposition: NewThreadDraftDisposition
+    let updatedAt: Date
+
+    private enum CodingKeys: String, CodingKey {
+      case key
+      case title
+      case content
+      case disposition
+      case updatedAt
+      case attachments
+    }
+
+    init(from decoder: Decoder) throws {
+      let container = try decoder.container(keyedBy: CodingKeys.self)
+      guard !container.contains(.attachments) else {
+        throw DecodingError.dataCorruptedError(
+          forKey: .attachments,
+          in: container,
+          debugDescription: "Schema v1 drafts cannot contain image attachments."
+        )
+      }
+      self.key = try container.decode(NewThreadDraftKey.self, forKey: .key)
+      self.title = try container.decodeIfPresent(String.self, forKey: .title)
+      self.content = try container.decode(String.self, forKey: .content)
+      self.disposition = try container.decode(
+        NewThreadDraftDisposition.self,
+        forKey: .disposition
+      )
+      self.updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+    }
+
+    func migrated() -> NewThreadDraft? {
+      NewThreadDraft(
+        key: key,
+        title: title,
+        content: content,
+        attachments: [],
+        disposition: disposition,
+        updatedAt: updatedAt
+      )
+    }
   }
 
   private let fileURL: URL
@@ -141,15 +194,41 @@ actor FileNewThreadDraftStore: NewThreadDraftRepository {
     } catch {
       throw NewThreadDraftStoreError.corruptedArchive
     }
-    guard header.schemaVersion == Self.schemaVersion else {
-      throw NewThreadDraftStoreError.unsupportedSchemaVersion(header.schemaVersion)
-    }
-
     let archive: Archive
-    do {
-      archive = try decoder.decode(Archive.self, from: data)
-    } catch {
-      throw NewThreadDraftStoreError.corruptedArchive
+    switch header.schemaVersion {
+    case Self.schemaVersion:
+      do {
+        archive = try decoder.decode(Archive.self, from: data)
+        guard archive.schemaVersion == Self.schemaVersion else {
+          throw NewThreadDraftStoreError.corruptedArchive
+        }
+      } catch let error as NewThreadDraftStoreError {
+        throw error
+      } catch {
+        throw NewThreadDraftStoreError.corruptedArchive
+      }
+    case Self.legacySchemaVersion:
+      do {
+        let legacy = try decoder.decode(LegacyArchiveV1.self, from: data)
+        guard legacy.schemaVersion == Self.legacySchemaVersion else {
+          throw NewThreadDraftStoreError.corruptedArchive
+        }
+        var migratedDrafts: [NewThreadDraft] = []
+        migratedDrafts.reserveCapacity(legacy.drafts.count)
+        for legacyDraft in legacy.drafts {
+          guard let migrated = legacyDraft.migrated() else {
+            throw NewThreadDraftStoreError.corruptedArchive
+          }
+          migratedDrafts.append(migrated)
+        }
+        archive = Archive(schemaVersion: Self.schemaVersion, drafts: migratedDrafts)
+      } catch let error as NewThreadDraftStoreError {
+        throw error
+      } catch {
+        throw NewThreadDraftStoreError.corruptedArchive
+      }
+    default:
+      throw NewThreadDraftStoreError.unsupportedSchemaVersion(header.schemaVersion)
     }
     guard archive.drafts.count <= maximumDrafts else {
       throw NewThreadDraftStoreError.tooManyDrafts
@@ -237,11 +316,13 @@ actor FileNewThreadDraftStore: NewThreadDraftRepository {
       draft.key.isValid,
       draft.content.count <= NewThreadDraft.maximumStoredContentCharacterCount,
       draft.content.utf8.count <= NewThreadDraft.maximumStoredContentUTF8ByteCount,
+      ComposerImageDraftPolicy.isValid(draft.attachments),
       draft.updatedAt.timeIntervalSinceReferenceDate.isFinite,
       NewThreadDraft(
         key: draft.key,
         title: draft.title,
         content: draft.content,
+        attachments: draft.attachments,
         disposition: draft.disposition,
         updatedAt: draft.updatedAt
       ) != nil

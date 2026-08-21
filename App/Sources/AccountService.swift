@@ -1,4 +1,5 @@
 import Foundation
+import TiebaCore
 
 struct ValidatedAccount:
   Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
@@ -473,6 +474,121 @@ struct ContentAgreementPageData: Hashable, Sendable {
   let agreements: [ContentAgreementData]
 }
 
+struct ComposerImageUploadResult:
+  Sendable, Hashable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let sessionRevision: UUID
+  let attachment: ComposerImageAttachment
+  let watermark: TiebaStaticImageWatermark
+  let receipt: TiebaStaticImageUploadReceipt
+  let proof: TiebaStaticImageContentProof
+
+  var description: String { "ComposerImageUploadResult(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror { Mirror(self, children: [:], displayStyle: .struct) }
+}
+
+struct ComposerPreparedImageUpload:
+  Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let sessionUserID: Int64
+  let sessionRevision: UUID
+  let credential: AccountCredentials
+  let submissionID: UUID
+  let forumID: Int64
+  let forumName: String
+  let attachment: ComposerImageAttachment
+  let validatedBytes: Data
+  let watermark: TiebaStaticImageWatermark
+  let coreUpload: TiebaStaticImageUpload
+  let expectedChunkCount: Int
+
+  var description: String { "ComposerPreparedImageUpload(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror { Mirror(self, children: [:], displayStyle: .struct) }
+}
+
+enum ComposerImageUploadPreparationError:
+  LocalizedError, Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible,
+  CustomReflectable
+{
+  case fullCredentialsRequired
+  case invalidUpload
+  case unavailable
+
+  var errorDescription: String? {
+    switch self {
+    case .fullCredentialsRequired:
+      "此账户需要重新登录，才能安全准备图片上传。"
+    case .invalidUpload:
+      "图片、贴吧或上传选项与当前提交不匹配，未开始上传。"
+    case .unavailable:
+      "当前账户服务无法准备图片上传。"
+    }
+  }
+
+  var description: String {
+    switch self {
+    case .fullCredentialsRequired:
+      "ComposerImageUploadPreparationError.fullCredentialsRequired"
+    case .invalidUpload:
+      "ComposerImageUploadPreparationError.invalidUpload(redacted)"
+    case .unavailable:
+      "ComposerImageUploadPreparationError.unavailable(redacted)"
+    }
+  }
+  var debugDescription: String { description }
+  var customMirror: Mirror { Mirror(self, children: [:], displayStyle: .enum) }
+}
+
+enum ComposerImageUploadError:
+  LocalizedError, Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible,
+  CustomReflectable
+{
+  case preparedUploadRejected
+  case invalidReceipt
+  case uploadConflict
+  case outcomeUnknown(attachment: ComposerImageAttachment, dispatchedChunk: Int)
+  case server(code: Int32)
+  case unavailable
+
+  var errorDescription: String? {
+    switch self {
+    case .preparedUploadRejected:
+      "已准备的图片上传请求未被上传客户端接受；附件已保留。"
+    case .invalidReceipt:
+      "贴吧返回的图片上传回执无法验证；附件已保留。"
+    case .uploadConflict:
+      "图片上传请求标识发生冲突，未再次上传。"
+    case .outcomeUnknown:
+      "图片分片已经发出，但贴吧未返回可验证的结果；请保留附件并从恢复记录继续。"
+    case .server(let code):
+      "贴吧拒绝了图片上传（错误码 \(code)）；附件已保留。"
+    case .unavailable:
+      "暂时无法上传图片，附件已保留。"
+    }
+  }
+
+  var description: String {
+    switch self {
+    case .preparedUploadRejected:
+      "ComposerImageUploadError.preparedUploadRejected(redacted)"
+    case .invalidReceipt:
+      "ComposerImageUploadError.invalidReceipt(redacted)"
+    case .uploadConflict:
+      "ComposerImageUploadError.uploadConflict(redacted)"
+    case .outcomeUnknown:
+      "ComposerImageUploadError.outcomeUnknown(redacted)"
+    case .server:
+      "ComposerImageUploadError.server(redacted)"
+    case .unavailable:
+      "ComposerImageUploadError.unavailable(redacted)"
+    }
+  }
+  var debugDescription: String { description }
+  var customMirror: Mirror { Mirror(self, children: [:], displayStyle: .enum) }
+}
+
 protocol AccountService: Sendable {
   func validate(credential: AccountCredentials) async throws -> ValidatedAccount
   func selfProfile(
@@ -511,18 +627,50 @@ protocol AccountService: Sendable {
     target: ThreadCloudFavoriteTarget,
     markedPostID: Int64?
   ) async throws -> ThreadCloudFavoriteData
+  nonisolated func prepareStaticImageUpload(
+    session: StoredAccountSession,
+    submissionID: UUID,
+    forumID: Int64,
+    forumName: String,
+    attachment: ComposerImageAttachment,
+    validatedBytes: Data,
+    watermark: TiebaStaticImageWatermark
+  ) async throws -> ComposerPreparedImageUpload
+  func dispatchStaticImageUpload(
+    _ prepared: ComposerPreparedImageUpload
+  ) async throws -> ComposerImageUploadResult
+  nonisolated func recoverStaticImageUpload(
+    _ prepared: ComposerPreparedImageUpload,
+    authenticatedReceipt: TiebaStaticImageUploadReceipt
+  ) async throws -> ComposerImageUploadResult
   func submitTextReply(
     session: StoredAccountSession,
     submission: TextReplySubmission
+  ) async throws -> TextReplyResult
+  func submitTextReply(
+    session: StoredAccountSession,
+    submission: TextReplySubmission,
+    imageUploads: [ComposerImageUploadResult]
   ) async throws -> TextReplyResult
   func submitNewThread(
     session: StoredAccountSession,
     submission: NewThreadSubmission
   ) async throws -> NewThreadResult
+  func submitNewThread(
+    session: StoredAccountSession,
+    submission: NewThreadSubmission,
+    imageUploads: [ComposerImageUploadResult]
+  ) async throws -> NewThreadResult
   func verifyNewThreadVisibility(
     session: StoredAccountSession,
     submission: NewThreadSubmission,
     receipt: NewThreadReceipt
+  ) async throws -> NewThreadVisibilityConfirmation?
+  func verifyNewThreadVisibility(
+    session: StoredAccountSession,
+    submission: NewThreadSubmission,
+    receipt: NewThreadReceipt,
+    imageUploads: [ComposerImageUploadResult]
   ) async throws -> NewThreadVisibilityConfirmation?
   func concernFeed(
     session: StoredAccountSession,
@@ -617,6 +765,31 @@ protocol AccountService: Sendable {
 }
 
 extension AccountService {
+  nonisolated func prepareStaticImageUpload(
+    session: StoredAccountSession,
+    submissionID: UUID,
+    forumID: Int64,
+    forumName: String,
+    attachment: ComposerImageAttachment,
+    validatedBytes: Data,
+    watermark: TiebaStaticImageWatermark
+  ) async throws -> ComposerPreparedImageUpload {
+    throw ComposerImageUploadPreparationError.unavailable
+  }
+
+  func dispatchStaticImageUpload(
+    _ prepared: ComposerPreparedImageUpload
+  ) async throws -> ComposerImageUploadResult {
+    throw ComposerImageUploadError.unavailable
+  }
+
+  nonisolated func recoverStaticImageUpload(
+    _ prepared: ComposerPreparedImageUpload,
+    authenticatedReceipt: TiebaStaticImageUploadReceipt
+  ) async throws -> ComposerImageUploadResult {
+    throw ComposerImageUploadError.unavailable
+  }
+
   func checkInCatalog(
     session: StoredAccountSession
   ) async throws -> ForumCheckInCatalogData {
@@ -727,12 +900,28 @@ extension AccountService {
     session: StoredAccountSession,
     submission: TextReplySubmission
   ) async throws -> TextReplyResult {
+    try await submitTextReply(session: session, submission: submission, imageUploads: [])
+  }
+
+  func submitTextReply(
+    session: StoredAccountSession,
+    submission: TextReplySubmission,
+    imageUploads: [ComposerImageUploadResult]
+  ) async throws -> TextReplyResult {
     throw TextReplySubmissionError.unavailable
   }
 
   func submitNewThread(
     session: StoredAccountSession,
     submission: NewThreadSubmission
+  ) async throws -> NewThreadResult {
+    try await submitNewThread(session: session, submission: submission, imageUploads: [])
+  }
+
+  func submitNewThread(
+    session: StoredAccountSession,
+    submission: NewThreadSubmission,
+    imageUploads: [ComposerImageUploadResult]
   ) async throws -> NewThreadResult {
     throw NewThreadSubmissionError.unavailable
   }
@@ -741,6 +930,20 @@ extension AccountService {
     session: StoredAccountSession,
     submission: NewThreadSubmission,
     receipt: NewThreadReceipt
+  ) async throws -> NewThreadVisibilityConfirmation? {
+    try await verifyNewThreadVisibility(
+      session: session,
+      submission: submission,
+      receipt: receipt,
+      imageUploads: []
+    )
+  }
+
+  func verifyNewThreadVisibility(
+    session: StoredAccountSession,
+    submission: NewThreadSubmission,
+    receipt: NewThreadReceipt,
+    imageUploads: [ComposerImageUploadResult]
   ) async throws -> NewThreadVisibilityConfirmation? {
     throw NewThreadSubmissionError.unavailable
   }
