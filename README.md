@@ -20,14 +20,16 @@ and its verified metadata enters the public app source.
 | Local features | Available for history, favorites, filtering, appearance, media preferences, account-isolated followed-forum pinning and layout, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
 | Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies; both newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
-| TiebaLite parity | Current `main` and public `v0.61.0-alpha.1`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
-| Distribution | The public SideStore/LiveContainer source currently serves `v0.61.0-alpha.1` (build 70) |
+| TiebaLite parity | Current `main` and public `v0.62.0-alpha.1`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
+| Distribution | The public SideStore/LiveContainer source currently serves `v0.62.0-alpha.1` (build 71) |
 
 ### Release and validation
 
-- **Current alpha:** `v0.61.0-alpha.1` publishes the current end-user app-code
-  scope, including bounded static-image new-topic/direct-topic-reply composers
-  and server-reason-bound personalized recommendation feedback. It retains the
+- **Current alpha:** `v0.62.0-alpha.1` publishes the current end-user app-code
+  scope, including independently selectable anonymous or saved-account
+  recommendation personas, bounded static-image new-topic/direct-topic-reply
+  composers, and server-reason-bound personalized recommendation feedback. It
+  retains the
   known-good thread-scrolling baseline restored by the rollback described below,
   along with
   personalized and concern feeds, expanded public and
@@ -220,7 +222,7 @@ and its verified metadata enters the public app source.
   cannot observe submission, and cannot prove that the browser's Baidu account
   matches the active App account. The user must verify or complete browser login.
   All non-performance capabilities in this release-scope block remain included
-  in the public `v0.61.0-alpha.1` IPA.
+  in the public `v0.62.0-alpha.1` IPA.
 - **`v0.61.0-alpha.1` static-image creation:** New-topic and direct-topic-reply
   composers can select, reorder, preview, and remove up to nine static
   images, choose standard or high-definition processing, and select forum-name,
@@ -243,7 +245,7 @@ and its verified metadata enters the public app source.
   owners share an exclusive reference reservation. Independently, abandoned
   picker transfer directories named `tieba-composer-image-<uuid>` expire after
   24 hours and are removed without following links in batches of at most 32.
-- **Current-main recommendation personas:** The recommendation page defaults to
+- **`v0.62.0-alpha.1` recommendation personas:** The recommendation page defaults to
   the existing anonymous, install-scoped random CUID and can independently select
   any saved account without switching the App-wide active account. Anonymous
   reads retain the credential-free wire contract. Account-persona reads add one
@@ -307,7 +309,7 @@ and its verified metadata enters the public app source.
   pass. After the release asset is published and reverified, the release workflow
   derives its date, download URL, byte size, and SHA-256 and updates the source
   atomically; version or concurrent-source mismatches fail closed. The source
-  currently distributes the verified `v0.61.0-alpha.1` IPA (build 70).
+  currently distributes the verified `v0.62.0-alpha.1` IPA (build 71).
 - **Login hotfix:** `v0.54.0-alpha.1` can reach Tieba's account page without
   completing because its callback and Cookie matching are too strict.
   `v0.54.1-alpha.1` made that failure explicit and confirmed that iOS 18.7.2
@@ -318,16 +320,17 @@ and its verified metadata enters the public app source.
 
 ### Discovery and forums
 
-- **Discovery:** On current `main`, a pageable anonymous personalized feed, an
+- **Discovery:** On current `main`, a pageable personalized feed with a persistent
+  choice between the default anonymous CUID and any saved account, an
   explicitly selected account-bound concern feed, post rankings, hot-topic
   previews, category snapshots, topic details, related forums, and cursor-aware
   topic pagination are available. The personalized feed has a default-off
   setting that locally retains only threads whose stable forum ID occurs in the
-  active account's complete followed-forum index. Both feed reads and the
-  login-gated dislike-feedback UI are included in the public
-  `v0.61.0-alpha.1` IPA; the write is offered only when a row carries valid
-  server-provided reasons and still requires disposable-account and
-  physical-device validation.
+  selected account persona's complete followed-forum index, or the active
+  account's index when the persona is anonymous. These reads and the account-
+  persona dislike-feedback UI are included in the public `v0.62.0-alpha.1` IPA;
+  the write is offered only when a row carries valid server-provided reasons and
+  still requires disposable-account and physical-device validation.
 - **Search:** Forum, thread, and user search are separated by category. Global
   and per-forum post search provide the supported sort and content filters,
   local history, and optional credential-free suggestions.
@@ -683,9 +686,10 @@ and its verified metadata enters the public app source.
   about 18–20%; its anonymous reading and media subtotal remains about 91–95%.
   This measures implemented end-to-end workflows with partial credit for
   device-validation gates; it is not a claim that every path is release-ready.
-  The public `v0.61.0-alpha.1` app-code snapshot matches the current 80–82%
-  estimate because it includes the static-image composer and recommendation-
-  feedback workflows; both retain their documented device-validation gates.
+  The public `v0.62.0-alpha.1` app-code snapshot matches the current 80–82%
+  estimate because it includes the static-image composer, recommendation-
+  feedback, and selectable recommendation-persona workflows; all retain their
+  documented device-validation gates.
   The largest remaining gaps are
   rich-media creation, background unread handling, broader settings, remaining
   account/social actions, unresolvable cloud-favorite rows, and moderation.
