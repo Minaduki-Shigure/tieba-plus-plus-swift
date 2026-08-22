@@ -14,10 +14,10 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-currently serves `v0.60.6-alpha.1` (build 69), whose app-code snapshot predates
-the current-main image-composer and recommendation-feedback workflows and remains
-at the previous 78–81% estimate. Later `main` work must still pass a tagged
-release before it becomes installable from that source.
+currently serves `v0.61.0-alpha.1` (build 70), whose app-code snapshot includes
+the image-composer and recommendation-feedback workflows and therefore matches
+the current 80–82% estimate. Later `main` work must still pass a tagged release
+before it becomes installable from that source.
 
 | Capability area | Weight | Credited points | Current basis |
 | --- | ---: | ---: | --- |
@@ -35,7 +35,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.60.6-alpha.1` app-code snapshot remains at 78–81%; all experimental
+The public `v0.61.0-alpha.1` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55

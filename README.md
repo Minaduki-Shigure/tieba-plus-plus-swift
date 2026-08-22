@@ -20,13 +20,16 @@ and its verified metadata enters the public app source.
 | Local features | Available for history, favorites, filtering, appearance, media preferences, account-isolated followed-forum pinning and layout, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
 | Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies; both newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
-| TiebaLite parity | Current `main`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Public `v0.60.6-alpha.1`: 78–81%. Anonymous reading and media remain about 91–95% |
-| Distribution | The public SideStore/LiveContainer source currently serves `v0.60.6-alpha.1` (build 69) |
+| TiebaLite parity | Current `main` and public `v0.61.0-alpha.1`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
+| Distribution | The public SideStore/LiveContainer source currently serves `v0.61.0-alpha.1` (build 70) |
 
 ### Release and validation
 
-- **Current alpha:** `v0.60.6-alpha.1` publishes the end-user app-code scope
-  through the rollback snapshot described below, including
+- **Current alpha:** `v0.61.0-alpha.1` publishes the current end-user app-code
+  scope, including bounded static-image new-topic/direct-topic-reply composers
+  and server-reason-bound personalized recommendation feedback. It retains the
+  known-good thread-scrolling baseline restored by the rollback described below,
+  along with
   personalized and concern feeds, expanded public and
   account-bound reads, bounded animated-media and image-cache support, local
   followed-forum management, and guarded creation and social actions. Account
@@ -215,10 +218,9 @@ and its verified metadata enters the public app source.
   cannot observe submission, and cannot prove that the browser's Baidu account
   matches the active App account. The user must verify or complete browser login.
   All non-performance capabilities in this release-scope block remain included
-  in the public `v0.60.6-alpha.1` IPA after the rollback tag and artifact passed
-  the release checks.
-- **Current-main static-image creation:** New-topic and direct-topic-reply
-  composers on `main` can select, reorder, preview, and remove up to nine static
+  in the public `v0.61.0-alpha.1` IPA.
+- **`v0.61.0-alpha.1` static-image creation:** New-topic and direct-topic-reply
+  composers can select, reorder, preview, and remove up to nine static
   images, choose standard or high-definition processing, and select forum-name,
   username, or no watermark. Account-scoped drafts, attachment files, upload
   progress, and unknown outcomes are durable across restart. Uploads are
@@ -239,7 +241,7 @@ and its verified metadata enters the public app source.
   owners share an exclusive reference reservation. Independently, abandoned
   picker transfer directories named `tieba-composer-image-<uuid>` expire after
   24 hours and are removed without following links in batches of at most 32.
-- **Current-main recommendation feedback:** Personalized rows that carry at
+- **`v0.61.0-alpha.1` recommendation feedback:** Personalized rows that carry at
   least one valid server-provided reason expose an explicit "reduce similar
   recommendations" selection. The feed read remains credential-free; only an
   explicit submission requires the active account's complete BDUSS/STOKEN
@@ -257,14 +259,9 @@ and its verified metadata enters the public app source.
   stale UI publication, but does not claim to retract a write that may already
   have been dispatched. Automated contract
   coverage is present, but live endpoint behavior still requires a disposable
-  account and physical-device validation. This workflow is not present in the
-  public `v0.60.6-alpha.1` IPA.
-- **Public-release image foundation:** The public `v0.60.6-alpha.1`
-  app-code snapshot contains a strict HTTPS static-image chunk-upload contract and
-  private, metadata-stripping attachment processing/storage. It is not connected
-  to either composer, cannot initiate an upload from the UI, and receives no
-  TiebaLite parity credit yet.
-  The current-main composer integration described above is not present in that IPA.
+  account and physical-device validation. The workflow is included in the public
+  IPA, but release inclusion is not evidence that Tieba accepted a real-account
+  write.
 - **Compatibility:** The deployment target is iOS 16. Builds use Xcode 16.4 and
   XcodeGen 2.45.4 or newer.
 - **Automated checks:** GitHub Actions runs package tests and the complete iOS
@@ -295,7 +292,7 @@ and its verified metadata enters the public app source.
   pass. After the release asset is published and reverified, the release workflow
   derives its date, download URL, byte size, and SHA-256 and updates the source
   atomically; version or concurrent-source mismatches fail closed. The source
-  currently distributes the verified `v0.60.6-alpha.1` IPA (build 69).
+  currently distributes the verified `v0.61.0-alpha.1` IPA (build 70).
 - **Login hotfix:** `v0.54.0-alpha.1` can reach Tieba's account page without
   completing because its callback and Cookie matching are too strict.
   `v0.54.1-alpha.1` made that failure explicit and confirmed that iOS 18.7.2
@@ -311,11 +308,11 @@ and its verified metadata enters the public app source.
   previews, category snapshots, topic details, related forums, and cursor-aware
   topic pagination are available. The personalized feed has a default-off
   setting that locally retains only threads whose stable forum ID occurs in the
-  active account's complete followed-forum index. Both feed reads are included
-  in the public `v0.60.6-alpha.1` IPA. Current `main` additionally offers
-  login-gated dislike feedback only when a row carries valid server-provided
-  reasons; that write is absent from the public IPA and still requires
-  disposable-account and physical-device validation.
+  active account's complete followed-forum index. Both feed reads and the
+  login-gated dislike-feedback UI are included in the public
+  `v0.61.0-alpha.1` IPA; the write is offered only when a row carries valid
+  server-provided reasons and still requires disposable-account and
+  physical-device validation.
 - **Search:** Forum, thread, and user search are separated by category. Global
   and per-forum post search provide the supported sort and content filters,
   local history, and optional credential-free suggestions.
@@ -670,9 +667,9 @@ and its verified metadata enters the public app source.
   about 18–20%; its anonymous reading and media subtotal remains about 91–95%.
   This measures implemented end-to-end workflows with partial credit for
   device-validation gates; it is not a claim that every path is release-ready.
-  The public `v0.60.6-alpha.1` app-code snapshot remains at 78–81%: its image
-  support is only the non-user-facing upload foundation, and it does not contain
-  current-main recommendation feedback.
+  The public `v0.61.0-alpha.1` app-code snapshot matches the current 80–82%
+  estimate because it includes the static-image composer and recommendation-
+  feedback workflows; both retain their documented device-validation gates.
   The largest remaining gaps are
   rich-media creation, background unread handling, broader settings, remaining
   account/social actions, unresolvable cloud-favorite rows, and moderation.
