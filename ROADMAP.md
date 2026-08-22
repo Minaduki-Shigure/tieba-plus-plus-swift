@@ -124,11 +124,12 @@ the source metadata is updated to that tested IPA.
 
 - Anonymous hot-thread ranking with an embedded hot-topic preview,
   server-defined categories, and snapshot refresh
-- Anonymous personalized thread feed as the default Explore channel, with pull
-  refresh, integer pagination, duplicate and stalled-page termination, local
-  filtering, one app-scoped random recommendation UUID, and a default-off option
-  to retain only forums in the active account's verified-complete followed list
-- Login-gated personalized recommendation dislike feedback for rows carrying
+- Personalized thread feed as the default Explore channel, with a persistent
+  choice between the default anonymous CUID and any saved account, pull refresh,
+  integer pagination, duplicate and stalled-page termination, local filtering,
+  one app-scoped random recommendation UUID, and a default-off persona-bound
+  followed-forum filter
+- Account-persona personalized recommendation dislike feedback for rows carrying
   valid server-provided reasons, with exact reason, opaque-extra, thread, forum,
   click-time, account-session, and recommendation-CUID binding; one signed HTTPS
   write; equivalent-request sharing; conflict rejection; and no retry after an
@@ -831,15 +832,15 @@ directions remain disposable-account validation gates.
 
 Tieba's followed-forum list rejects anonymous requests. The logged-in home page
 projects at most the first six entries from the same app-scoped, memory-only state
-used by the current account's complete paginated list. A selected, default-off
-recommendation filter may also request completion of that shared index. New
-requests may start only while the home page, complete list, or selected filtered
-recommendation page is active. Every page reads the active account before
-transport and again after transport, and the result is accepted only while the
-exact `userID + sessionRevision` lease and requested page remain current. Account
-switching, logout, same-UID credential rotation, or a matching forum-membership
-change starts a new state epoch and synchronously removes the prior snapshot; an
-inactive surface remains empty until an eligible surface becomes active again.
+used by the current account's complete paginated list. The selected, default-off
+recommendation filter builds a separate memory-only index while its page is
+active. An account persona resolves that exact saved UID without changing the
+App-wide active account; anonymous resolves the active account for local filtering
+only. Every page checks the chosen session before and after transport, and the
+result is accepted only while the exact `userID + sessionRevision`, persona, and
+requested page remain current. Persona changes, account switching, logout,
+same-UID credential rotation, or a forum-membership change synchronously removes
+the filter snapshot; an inactive filtered surface remains empty until active.
 Only an explicit server end publishes the complete forum-ID set. Empty or
 duplicate-only continuations, invalid data, service failures, more than 100
 pages, or more than 5,000 retained forums fail closed rather than publishing a
@@ -1380,15 +1381,28 @@ returns real recommendations without Cookie, account ID, signature, client ID,
 IMEI, OAID, Android ID, IDFV, location, screen, model, or brand data. The app
 generates the UUID independently, stores it only in local preferences, and reuses
 it across launches so refresh and pagination remain one recommendation session.
-It is not hardware- or account-derived. The response has no authoritative
+It is not hardware- or account-derived. Current `main` also offers an independent
+account persona for every saved full session. That path follows TiebaLite's v12
+shape by adding the selected session's BDUSS/STOKEN in `CommonReq`, a top-level
+`stoken`, and the selected UID in `client_user_token`; Cookie contains only
+`ka=open`, and account credentials never enter the URL. The App-wide active
+account is not changed. Anonymous remains the default and retains the proven
+credential-free contract. The same install UUID is intentionally reused across
+personas to match TiebaLite's device-level identity behavior, so this is not an
+anti-correlation boundary. Account-mode ranking behavior still needs a
+disposable-account physical-device comparison before parity credit increases.
+
+The response has no authoritative
 `has_more`; any nonempty raw page permits one continuation, while an empty page
 stops. After refresh preserves older rows and resets the server page number,
 duplicate-only pages may traverse the highest page reached before that refresh.
 Beyond that frontier, one additional duplicate-only page is allowed to advance
 past overlap; a second consecutive duplicate-only page stops. When the
-default-off followed-forum option is selected, the app first waits for the exact
-active-session index to become complete, then matches returned threads locally
-by stable forum ID. Waiting, signed-out, empty, or failed indexes issue no
+default-off followed-forum option is selected, the app first waits for an exact
+complete index: an account persona uses that selected session, while anonymous
+uses the current active account only for this local filter. It then matches
+returned threads locally by stable forum ID; no forum allowlist enters the
+recommendation request. Waiting, signed-out, empty, or failed indexes issue no
 recommendation request and never fall open. One explicit load action may scan at
 most five pages whose mapped threads are all removed by that local followed-forum
 filter before presenting an explicit continue action. Independently, it may cross
@@ -1399,22 +1413,24 @@ and duplicate threads are discarded before UI mapping. Refresh prepends new
 unique items, the retained window is bounded, and local filtering never replaces
 the raw-page nonempty decision used for continuation.
 Recommendation reasons are retained as bounded `(id, title, opaque extra)`
-records. Current `main` exposes an explicit, account-gated selection only when a
-row has at least one valid reason. The submission preserves server reason order,
+records. Current `main` exposes the explicit selection only for account-persona
+rows carrying at least one valid reason; anonymous rows never fall back to the
+active account for a server write. The submission preserves server reason order,
 binds the exact thread and forum IDs plus the feedback-entry click timestamp, and
 sends one signed HTTPS form to `/c/c/excellent/submitDislike` with full BDUSS/STOKEN,
 `dislike_from=homepage`, and the same random recommendation CUID used by the
-anonymous feed. The feed read itself remains credential-free, but this explicit
-write lets Tieba associate that recommendation session with the active account;
-the CUID is independently generated, not hardware- or account-derived.
+selected feed. Both read and feedback resolve the explicitly selected UID rather
+than the App-wide active account. The CUID is independently generated, not
+hardware- or account-derived, but its reuse allows Tieba to associate personas.
 
 For one account and thread, equivalent in-flight submissions share one request
 and a different payload is rejected instead of queued. Explicit success hides
 the row, while a known server rejection retains it. Transport loss or a malformed
 acknowledgement becomes outcome unknown, hides the row from the current in-memory
-feed, and is never retried. An account-session change cancels caller work before
-dispatch and suppresses stale result publication, but does not claim to retract
-a write that may already have been dispatched. Live minimum-field behavior,
+feed, and is never retried. Persona changes and account-session revision changes
+cancel caller work before dispatch and suppress stale result publication, but do
+not claim to retract a write that may already have been dispatched. Live
+minimum-field behavior,
 reason encoding, acknowledgement
 semantics, and future-feed effects remain disposable-account and physical-device
 validation gates.

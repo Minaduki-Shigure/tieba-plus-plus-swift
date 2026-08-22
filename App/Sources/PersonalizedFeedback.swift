@@ -55,6 +55,7 @@ enum PersonalizedFeedbackSubmissionError: LocalizedError, Equatable, Sendable {
 }
 
 enum PersonalizedFeedbackFailure: Equatable, Sendable {
+  case accountPersonaRequired
   case loginRequired
   case invalidSelection
   case fullCredentialsRequired
@@ -63,6 +64,8 @@ enum PersonalizedFeedbackFailure: Equatable, Sendable {
 
   var title: String {
     switch self {
+    case .accountPersonaRequired:
+      "需要选择账号"
     case .loginRequired, .fullCredentialsRequired:
       "需要登录"
     case .invalidSelection:
@@ -76,6 +79,8 @@ enum PersonalizedFeedbackFailure: Equatable, Sendable {
 
   var message: String {
     switch self {
+    case .accountPersonaRequired:
+      "匿名个性不会使用任何登录账号提交反馈；请选择一个账号个性后再试。"
     case .loginRequired:
       "请先登录账户，再重新选择不感兴趣的原因。"
     case .invalidSelection:
@@ -93,7 +98,7 @@ enum PersonalizedFeedbackFailure: Equatable, Sendable {
     switch self {
     case .loginRequired, .fullCredentialsRequired:
       true
-    case .invalidSelection, .outcomeUnknown, .unavailable:
+    case .accountPersonaRequired, .invalidSelection, .outcomeUnknown, .unavailable:
       false
     }
   }

@@ -27,6 +27,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let userFollowClientVersion = "11.10.8.6"
   static let userInteractionPermissionsClientVersion = "12.41.7.1"
   static let personalizedFeedbackClientVersion = "12.41.7.1"
+  static let personalizedReadClientVersion = TiebaRequestFactory.personalizedClientVersion
   static let officialCheckInClientVersion = "11.10.8.6"
   static let officialCheckInGuideClientVersion = "12.41.7.1"
   static let selfProfileUserAgent =
@@ -314,6 +315,52 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       ],
       userAgent: Self.userInteractionPermissionsUserAgent,
       cookie: "ka=open"
+    )
+  }
+
+  func personalizedThreads(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    page: Int
+  ) throws -> URLRequest {
+    try validate(credential)
+    guard expectedUserID > 0 else {
+      throw TiebaClientError.invalidArgument("Expected user ID must be positive.")
+    }
+    guard page > 0, page <= Int(Int32.max) else {
+      throw TiebaClientError.invalidArgument("Page must be between 1 and Int32.max.")
+    }
+    try validateConfiguration()
+    let personalizedCUID = try validatedPersonalizedCUID()
+
+    var common = CommonReq()
+    common.clientType = 2
+    common.clientVersion = Self.personalizedReadClientVersion
+    common.bduss = credential.bduss
+    common.stoken = credential.stoken
+    common.cuid = personalizedCUID
+    common.netType = 1
+    common.personalizedRecSwitch = 1
+
+    var data = PersonalizedReqIdl.DataReq()
+    data.common = common
+    data.loadType = page == 1 ? 1 : 2
+    data.pageThreadCount = UInt32(TiebaRequestFactory.personalizedPageSize)
+    data.pn = UInt32(page)
+    data.qType = 1
+    data.newNetType = 1
+
+    var message = PersonalizedReqIdl()
+    message.data = data
+    return try authenticatedProtobufReadRequest(
+      path: "/c/f/excellent/personalized",
+      command: 309_264,
+      message: message,
+      fields: [("stoken", credential.stoken)],
+      userAgent: Self.selfProfileUserAgent,
+      clientUserToken: String(expectedUserID),
+      cookie: "ka=open",
+      includesFormatQuery: false
     )
   }
 
@@ -1892,16 +1939,17 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     fields: [(String, String)],
     userAgent: String,
     clientUserToken: String,
-    cookie: String
+    cookie: String,
+    includesFormatQuery: Bool = true
   ) throws -> URLRequest {
     var components = URLComponents()
     components.scheme = "https"
     components.host = Self.writeHost
     components.path = path
-    components.queryItems = [
-      URLQueryItem(name: "cmd", value: String(command)),
-      URLQueryItem(name: "format", value: "protobuf"),
-    ]
+    components.queryItems = [URLQueryItem(name: "cmd", value: String(command))]
+    if includesFormatQuery {
+      components.queryItems?.append(URLQueryItem(name: "format", value: "protobuf"))
+    }
     guard let url = components.url, Self.allows(url, expectedHost: Self.writeHost) else {
       throw TiebaClientError.invalidEndpoint
     }

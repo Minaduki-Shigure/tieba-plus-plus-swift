@@ -136,3 +136,7 @@ protocol AccountVault: Sendable {
   func remove(userID: Int64) async throws
   func removeAll() async throws
 }
+
+protocol AccountSessionLookup: Sendable {
+  func session(userID: Int64) async throws -> StoredAccountSession?
+}

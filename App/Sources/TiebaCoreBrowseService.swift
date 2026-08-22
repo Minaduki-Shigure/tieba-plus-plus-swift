@@ -7,13 +7,16 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
   ContentReportService
 {
   private let client: TiebaClient
+  private let authenticatedClient: TiebaAuthenticatedClient?
   private let contentFilterRepository: any ContentFilterRepository
 
   init(
     client: TiebaClient = TiebaClient(),
+    authenticatedClient: TiebaAuthenticatedClient? = nil,
     contentFilterRepository: any ContentFilterRepository = EmptyContentFilterRepository()
   ) {
     self.client = client
+    self.authenticatedClient = authenticatedClient
     self.contentFilterRepository = contentFilterRepository
   }
 
@@ -499,6 +502,48 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     } catch {
       throw Self.browseError(error)
     }
+    return await personalizedPageData(response)
+  }
+
+  func personalizedThreads(
+    page: Int,
+    session: StoredAccountSession
+  ) async throws -> PersonalizedFeedPageData {
+    guard let authenticatedClient else {
+      throw BrowseError.unavailable("当前推荐服务不支持账号个性。")
+    }
+    guard session.id > 0, let credentials = session.credentials else {
+      throw BrowseError.unavailable("所选账号需要重新登录，才能用于个性推荐。")
+    }
+    let cookieName: TiebaBDUSSCookieName
+    switch credentials.bdussCookieName {
+    case .bduss:
+      cookieName = .bduss
+    case .bdussBFESS:
+      cookieName = .bdussBFESS
+    }
+    let response: TiebaPersonalizedPage
+    do {
+      response = try await authenticatedClient.getPersonalizedThreads(
+        credential: TiebaSessionCredential(
+          bduss: credentials.bduss,
+          stoken: credentials.stoken,
+          bdussCookieName: cookieName
+        ),
+        expectedUserID: session.id,
+        page: page
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+    return await personalizedPageData(response)
+  }
+
+  private func personalizedPageData(
+    _ response: TiebaPersonalizedPage
+  ) async -> PersonalizedFeedPageData {
     let filter = await contentFilterSnapshot()
     return PersonalizedFeedPageData(
       items: response.items.map { item in

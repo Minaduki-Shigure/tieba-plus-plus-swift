@@ -760,6 +760,7 @@ public actor TiebaAuthenticatedClient {
   static let userInteractionPermissionsResponseMaximumBytes = 64 * 1_024
   static let userInteractionPermissionsWriteResponseMaximumBytes = 64 * 1_024
   static let personalizedFeedbackResponseMaximumBytes = 64 * 1_024
+  static let personalizedResponseMaximumBytes = 4 * 1_024 * 1_024
   static let pollStateResponseMaximumBytes = 8 * 1_024 * 1_024
   static let pollWriteResponseMaximumBytes = 64 * 1_024
   static let webSessionResponseMaximumBytes = 256 * 1_024
@@ -978,6 +979,33 @@ public actor TiebaAuthenticatedClient {
       resourceKey: resourceKey,
       flightID: flightID,
       task: task
+    )
+  }
+
+  public func getPersonalizedThreads(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    page: Int = 1
+  ) async throws -> TiebaPersonalizedPage {
+    let request = try requestFactory.personalizedThreads(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      page: page
+    )
+    let response: PersonalizedResIdl = try await sendProtobuf(
+      request,
+      maximumBodyBytes: Self.personalizedResponseMaximumBytes
+    )
+    guard response.error.errorno == 0 else {
+      throw TiebaClientError.server(
+        code: response.error.errorno,
+        message: response.error.errmsg
+      )
+    }
+    return TiebaProtoMapper.personalizedPage(
+      response.data,
+      requestedPage: page,
+      pageSize: TiebaRequestFactory.personalizedPageSize
     )
   }
 

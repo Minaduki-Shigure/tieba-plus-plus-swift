@@ -1233,6 +1233,126 @@ final class AccountViewModelTests: XCTestCase {
     XCTAssertEqual(requests.map(\.page), [1])
   }
 
+  func testPersonalizedFollowedIndexUsesSelectedInactiveAccountWithoutSwitchingActiveAccount()
+    async throws
+  {
+    let selected = session(userID: 7, name: "selected")
+    let active = session(userID: 8, name: "active")
+    let vault = AccountVaultSpy(sessions: [selected, active], activeUserID: 8)
+    let service = AccountServiceSpy(
+      followedPages: [
+        1: .success(
+          FollowedForumPageData(
+            forums: [forum(id: 70, name: "selected-forum")],
+            currentPage: 1,
+            hasMore: false
+          )
+        )
+      ]
+    )
+    let viewModel = PersonalizedFollowedForumIndexViewModel(
+      service: service,
+      vault: vault,
+      lookup: vault
+    )
+
+    viewModel.setPersona(.account(userID: 7), loadIfNeeded: true)
+    try await waitForAccountState {
+      if case .ready = viewModel.state { return true }
+      return false
+    }
+
+    guard case .ready(let snapshot) = viewModel.state else {
+      return XCTFail("Expected a complete selected-account index")
+    }
+    XCTAssertEqual(snapshot.lease, FollowedForumsSessionLease(selected))
+    XCTAssertEqual(snapshot.forumIDs, Set<Int64>([70]))
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests, [FollowedRequest(userID: 7, page: 1, pageSize: 50)])
+    let activeAfterLoad = try await vault.activeSession()
+    XCTAssertEqual(activeAfterLoad?.id, 8)
+  }
+
+  func testPersonalizedFollowedIndexCancelsBeforeTransportWhenPersonaChangesDuringLookup()
+    async throws
+  {
+    let first = session(userID: 7, name: "first")
+    let second = session(userID: 8, name: "second")
+    let vault = AccountVaultSpy(sessions: [first, second], activeUserID: 8)
+    let lookup = SuspendedAccountSessionLookup(session: first)
+    let service = AccountServiceSpy()
+    let viewModel = PersonalizedFollowedForumIndexViewModel(
+      service: service,
+      vault: vault,
+      lookup: lookup
+    )
+
+    viewModel.setPersona(.account(userID: 7), loadIfNeeded: true)
+    await lookup.waitUntilRequested()
+    viewModel.setPersona(.account(userID: 8), loadIfNeeded: false)
+    let resumed = await lookup.resume()
+    XCTAssertTrue(resumed)
+    try await Task.sleep(nanoseconds: 20_000_000)
+
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertTrue(requests.isEmpty)
+    XCTAssertEqual(viewModel.state, .idle)
+  }
+
+  func testPersonalizedPersonaKeepsInactiveSelectionAndFallsBackOnlyAfterConfirmedRemoval()
+    async throws
+  {
+    let suiteName = "AccountViewModelTests.personalized-persona.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    PersonalizedRecommendationPersona.account(userID: 7).persist(defaults: defaults)
+    let selected = session(userID: 7, name: "selected")
+    let active = session(userID: 8, name: "active")
+    let vault = AccountVaultSpy(sessions: [selected, active], activeUserID: 8)
+    let viewModel = PersonalizedRecommendationPersonaViewModel(
+      vault: vault,
+      defaults: defaults
+    )
+
+    await viewModel.loadIfNeeded()
+    XCTAssertEqual(viewModel.selection, .account(userID: 7))
+    XCTAssertEqual(viewModel.selectedAccount?.id, 7)
+
+    try await vault.remove(userID: 7)
+    await viewModel.reload()
+
+    XCTAssertEqual(viewModel.selection, .anonymous)
+    XCTAssertEqual(
+      defaults.string(forKey: AppPreferenceKey.personalizedRecommendationPersona),
+      "anonymous"
+    )
+    let activeAfterReload = try await vault.activeSession()
+    XCTAssertEqual(activeAfterReload?.id, 8)
+  }
+
+  func testPersonalizedPersonaKeepsPreferenceWhenAccountSummaryReadFails() async throws {
+    let suiteName = "AccountViewModelTests.personalized-persona-failure.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let selected = PersonalizedRecommendationPersona.account(userID: 7)
+    selected.persist(defaults: defaults)
+    let viewModel = PersonalizedRecommendationPersonaViewModel(
+      vault: FailingSummaryAccountVault(),
+      defaults: defaults
+    )
+
+    await viewModel.reload()
+
+    XCTAssertEqual(viewModel.selection, selected)
+    XCTAssertEqual(
+      defaults.string(forKey: AppPreferenceKey.personalizedRecommendationPersona),
+      "account:7"
+    )
+    guard case .failed = viewModel.state else {
+      return XCTFail("Expected the transient vault error to remain visible")
+    }
+  }
+
   private func session(
     userID: Int64,
     name: String,
@@ -1458,7 +1578,7 @@ private actor AccountServiceSpy: AccountService {
   func followedRequestSnapshot() -> [FollowedRequest] { followedRequests }
 }
 
-private actor AccountVaultSpy: AccountVault {
+private actor AccountVaultSpy: AccountVault, AccountSessionLookup {
   private var sessions: [Int64: StoredAccountSession]
   private var activeUserID: Int64?
   private var activeSessionScript: [StoredAccountSession?]
@@ -1664,6 +1784,49 @@ private actor RecoverableAccountVault: AccountVault {
   }
 
   func resetCount() -> Int { resets }
+}
+
+private actor FailingSummaryAccountVault: AccountVault {
+  func accountSummaries() async throws -> [AccountSummary] {
+    throw AccountTestFailure(message: "vault unavailable")
+  }
+
+  func activeSession() async throws -> StoredAccountSession? { nil }
+  func upsert(_ session: StoredAccountSession) async throws {}
+  func switchActive(to userID: Int64) async throws {}
+  func remove(userID: Int64) async throws {}
+  func removeAll() async throws {}
+}
+
+private actor SuspendedAccountSessionLookup: AccountSessionLookup {
+  private let storedSession: StoredAccountSession
+  private var continuation: CheckedContinuation<StoredAccountSession?, Never>?
+  private var requested = false
+  private var waiters: [CheckedContinuation<Void, Never>] = []
+
+  init(session: StoredAccountSession) {
+    storedSession = session
+  }
+
+  func session(userID: Int64) async throws -> StoredAccountSession? {
+    requested = true
+    let pendingWaiters = waiters
+    waiters.removeAll()
+    pendingWaiters.forEach { $0.resume() }
+    return await withCheckedContinuation { continuation = $0 }
+  }
+
+  func waitUntilRequested() async {
+    if requested { return }
+    await withCheckedContinuation { waiters.append($0) }
+  }
+
+  func resume() -> Bool {
+    guard let continuation else { return false }
+    self.continuation = nil
+    continuation.resume(returning: storedSession)
+    return true
+  }
 }
 
 @MainActor

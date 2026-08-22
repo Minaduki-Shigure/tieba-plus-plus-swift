@@ -9,15 +9,18 @@ struct PersonalizedFeedView: View {
   let accountService: any AccountService
   let feedbackService: any PersonalizedFeedbackService
   let vault: any AccountVault
+  let accountSessionLookup: any AccountSessionLookup
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @StateObject private var viewModel: PersonalizedFeedViewModel
-  @State private var completeIndexSurfaceID = UUID()
+  @StateObject private var personaViewModel: PersonalizedRecommendationPersonaViewModel
+  @StateObject private var followedForumIndexViewModel: PersonalizedFollowedForumIndexViewModel
   @State private var showsLogin = false
   @State private var feedbackPrompt: PersonalizedFeedbackPrompt?
-  @EnvironmentObject private var followedForumsViewModel: FollowedForumsViewModel
+  @State private var isVisible = false
+  @State private var personaReloadTask: Task<Void, Never>?
   @AppStorage(AppPreferenceKey.personalizedFollowedForumsOnly)
   private var followedForumsOnly = AppPreferenceDefaults.personalizedFollowedForumsOnly
 
@@ -28,6 +31,7 @@ struct PersonalizedFeedView: View {
     accountService: any AccountService,
     feedbackService: any PersonalizedFeedbackService,
     vault: any AccountVault,
+    accountSessionLookup: any AccountSessionLookup,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository
@@ -37,6 +41,7 @@ struct PersonalizedFeedView: View {
     self.accountService = accountService
     self.feedbackService = feedbackService
     self.vault = vault
+    self.accountSessionLookup = accountSessionLookup
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
@@ -44,34 +49,71 @@ struct PersonalizedFeedView: View {
       wrappedValue: PersonalizedFeedViewModel(
         service: service,
         feedbackService: feedbackService,
-        vault: vault
+        accountSessionLookup: accountSessionLookup,
+        accountVault: vault
+      )
+    )
+    _personaViewModel = StateObject(
+      wrappedValue: PersonalizedRecommendationPersonaViewModel(vault: vault)
+    )
+    _followedForumIndexViewModel = StateObject(
+      wrappedValue: PersonalizedFollowedForumIndexViewModel(
+        service: accountService,
+        vault: vault,
+        lookup: accountSessionLookup
       )
     )
   }
 
   var body: some View {
-    Group {
-      if followedForumsOnly {
-        followedForumsOnlyContent
-      } else {
-        feedContent
+    VStack(spacing: 0) {
+      personaSelector
+      Divider()
+      Group {
+        if followedForumsOnly {
+          followedForumsOnlyContent
+        } else {
+          feedContent
+        }
       }
     }
-    .onAppear(perform: synchronizeActivation)
+    .onAppear {
+      isVisible = true
+      synchronizeActivation()
+    }
+    .task { await personaViewModel.loadIfNeeded() }
     .onChange(of: isActive) { _ in synchronizeActivation() }
     .onChange(of: followedForumsOnly) { _ in synchronizeActivation() }
-    .onChange(of: followedForumsViewModel.indexState) { _ in synchronizeScope() }
+    .onChange(of: personaViewModel.selection) { _ in
+      feedbackPrompt = nil
+      synchronizeActivation()
+    }
+    .onChange(of: followedForumIndexViewModel.state) { _ in synchronizeScope() }
     .onDisappear {
-      followedForumsViewModel.completeIndexSurfaceDidDisappear(id: completeIndexSurfaceID)
+      isVisible = false
+      personaReloadTask?.cancel()
+      personaReloadTask = nil
+      followedForumIndexViewModel.cancel()
       viewModel.cancel()
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
-      if isActive { viewModel.reloadForContentFilterChange() }
+      if isVisible, isActive { viewModel.reloadForContentFilterChange() }
     }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
       feedbackPrompt = nil
-      viewModel.accountSessionDidChange(
-        reloadIfActive: isActive && !followedForumsOnly
+      viewModel.accountSessionDidChange(reloadIfActive: false)
+      followedForumIndexViewModel.accountDataDidChange(loadIfNeeded: false)
+      personaReloadTask?.cancel()
+      personaReloadTask = Task { @MainActor in
+        await personaViewModel.reload()
+        guard !Task.isCancelled, isVisible else { return }
+        personaReloadTask = nil
+        synchronizeActivation()
+      }
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .forumMembershipDidChange)) { _ in
+      followedForumIndexViewModel.accountDataDidChange(
+        loadIfNeeded: isVisible && isActive && followedForumsOnly
       )
     }
     .sheet(isPresented: $showsLogin) {
@@ -103,20 +145,81 @@ struct PersonalizedFeedView: View {
 
   @ViewBuilder
   private var followedForumsOnlyContent: some View {
-    switch followedForumsViewModel.indexState {
+    switch followedForumIndexViewModel.state {
     case .idle, .loading, .partial:
       ProgressView()
     case .signedOut:
       accountState
     case .failed(let message):
-      ErrorStateView(message: message, retry: followedForumsViewModel.retryCompleteIndex)
+      ErrorStateView(message: message, retry: followedForumIndexViewModel.retry)
     case .ready(let snapshot):
       if snapshot.forumIDs.isEmpty {
-        EmptyStateView(title: "当前账户暂无关注贴吧", systemImage: "star")
+        EmptyStateView(
+          title: personaViewModel.selection.accountUserID == nil
+            ? "当前账号暂无关注贴吧" : "所选账号暂无关注贴吧",
+          systemImage: "star"
+        )
       } else {
         feedContent
       }
     }
+  }
+
+  private var personaSelector: some View {
+    Menu {
+      Button {
+        personaViewModel.select(.anonymous)
+      } label: {
+        Label(
+          "匿名推荐",
+          systemImage: personaViewModel.selection == .anonymous
+            ? "checkmark.circle.fill" : "person.crop.circle.badge.questionmark"
+        )
+      }
+
+      if !personaViewModel.accounts.isEmpty {
+        Divider()
+        ForEach(personaViewModel.accounts) { account in
+          let persona = PersonalizedRecommendationPersona.account(userID: account.id)
+          Button {
+            personaViewModel.select(persona)
+          } label: {
+            Label(
+              account.hasFullCredentials
+                ? account.preferredName : "\(account.preferredName)（需重新登录）",
+              systemImage: personaViewModel.selection == persona
+                ? "checkmark.circle.fill" : "person.crop.circle"
+            )
+          }
+        }
+      }
+
+      Divider()
+      Button {
+        showsLogin = true
+      } label: {
+        Label("登录其他账号", systemImage: "person.badge.key")
+      }
+    } label: {
+      HStack(spacing: 10) {
+        Label("个性：\(personaViewModel.title)", systemImage: "person.crop.circle")
+          .lineLimit(1)
+        Spacer(minLength: 8)
+        if personaViewModel.state == .loading {
+          ProgressView()
+            .controlSize(.small)
+        } else {
+          Image(systemName: "chevron.up.chevron.down")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      }
+      .contentShape(Rectangle())
+      .padding(.horizontal, 16)
+      .frame(minHeight: 44)
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel("推荐个性，当前为\(personaViewModel.title)")
   }
 
   @ViewBuilder
@@ -143,7 +246,8 @@ struct PersonalizedFeedView: View {
   private var accountState: some View {
     VStack(spacing: 12) {
       EmptyStateView(
-        title: "请先登录账户",
+        title: personaViewModel.selection.accountUserID == nil
+          ? "请先登录账号" : "所选账号不可用",
         systemImage: "person.crop.circle.badge.exclamationmark"
       )
       Button {
@@ -196,7 +300,7 @@ struct PersonalizedFeedView: View {
                 ThreadSummaryRow(thread: item.thread, showsForum: true)
               }
 
-              if !item.feedbackReasons.isEmpty {
+              if viewModel.usesAccountPersona, !item.feedbackReasons.isEmpty {
                 feedbackButton(for: item)
               }
             }
@@ -274,25 +378,27 @@ struct PersonalizedFeedView: View {
   }
 
   private func synchronizeActivation() {
-    if isActive, followedForumsOnly {
-      followedForumsViewModel.completeIndexSurfaceDidAppear(id: completeIndexSurfaceID)
-    } else {
-      followedForumsViewModel.completeIndexSurfaceDidDisappear(id: completeIndexSurfaceID)
-    }
+    let persona = personaViewModel.selection
+    let shouldLoad = isVisible && isActive
+    viewModel.setPersona(persona, loadIfNeeded: false)
+    followedForumIndexViewModel.setPersona(
+      persona,
+      loadIfNeeded: shouldLoad && followedForumsOnly
+    )
     synchronizeScope()
-    if !isActive { viewModel.cancel() }
+    if !shouldLoad { viewModel.cancel() }
   }
 
   private func synchronizeScope() {
     let scope: PersonalizedFeedScope
     if !followedForumsOnly {
       scope = .all
-    } else if case .ready(let snapshot) = followedForumsViewModel.indexState {
+    } else if case .ready(let snapshot) = followedForumIndexViewModel.state {
       scope = .followedForums(snapshot)
     } else {
       scope = .waitingForFollowedForumIndex
     }
-    viewModel.setScope(scope, loadIfNeeded: isActive)
+    viewModel.setScope(scope, loadIfNeeded: isVisible && isActive)
   }
 }
 

@@ -18,7 +18,7 @@ and its verified metadata enters the public app source.
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, media preferences, account-isolated followed-forum pinning and layout, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
-| Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, a default-off followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
+| Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies; both newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
 | TiebaLite parity | Current `main` and public `v0.61.0-alpha.1`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.61.0-alpha.1` (build 70) |
@@ -123,8 +123,10 @@ and its verified metadata enters the public app source.
   front without loading another page, and the same context menu can unpin or copy
   the public forum name. A default-off setting can reuse
   a verified-complete snapshot to show personalized recommendations only from
-  the active account's followed forums. This filtering is local: the anonymous
-  recommendation request receives no account, credential, lease, or forum ID.
+  followed forums. An account persona reads the selected account's index without
+  changing the App-wide active account; the anonymous persona uses the active
+  account only for this local filter. No forum ID or allowlist enters either
+  recommendation request.
   The account page now also offers a foreground-only one-click check-in after it
   loads the authoritative forum catalog and the user explicitly confirms the
   displayed target snapshot. Immediately before dispatch, the official batch
@@ -241,6 +243,19 @@ and its verified metadata enters the public app source.
   owners share an exclusive reference reservation. Independently, abandoned
   picker transfer directories named `tieba-composer-image-<uuid>` expire after
   24 hours and are removed without following links in batches of at most 32.
+- **Current-main recommendation personas:** The recommendation page defaults to
+  the existing anonymous, install-scoped random CUID and can independently select
+  any saved account without switching the App-wide active account. Anonymous
+  reads retain the credential-free wire contract. Account-persona reads add one
+  atomic BDUSS/STOKEN session snapshot and its expected UID to the same bounded
+  HTTPS protobuf endpoint, following TiebaLite's v12 request shape. Every page
+  and dislike-feedback completion rechecks the selected `userID + sessionRevision`;
+  a removed or reauthenticated account cannot publish a stale result. Anonymous
+  rows never submit account feedback implicitly. Account-persona rows submit only
+  through that same selected session. The install CUID remains random and stable
+  across personas, matching TiebaLite's device-level behavior, so Tieba may link
+  those personas at the service layer. Real-server ranking differences still
+  require disposable-account and physical-device validation.
 - **`v0.61.0-alpha.1` recommendation feedback:** Personalized rows that carry at
   least one valid server-provided reason expose an explicit "reduce similar
   recommendations" selection. The feed read remains credential-free; only an
@@ -407,8 +422,8 @@ and its verified metadata enters the public app source.
 - **Filtering:** Local literal-keyword, exact user block/allow, and video-topic
   filters cover list, profile, floor, nested-reply, shared-origin, and foreground
   inbox surfaces without discarding their raw server pagination. A separate
-  default-off recommendation filter matches the active account's followed forums
-  by stable forum ID.
+  default-off recommendation filter matches forums by stable ID using the selected
+  account persona, or the active account when the persona is anonymous.
 - **Appearance:** System, light, and dark themes, five tested accent presets,
   one locally stored opaque custom accent, Dynamic Type-relative text sizing,
   compact previews, and optional combined
@@ -459,12 +474,12 @@ and its verified metadata enters the public app source.
   complete paginated list. The home projection and complete list share a
   persistent adaptive-grid or single-column layout preference, with an explicit
   switch on the complete list. Layout changes are local and do not reload the
-  account snapshot. A selected, default-off recommendation filter is a
-  third consumer of the same app-scoped, memory-only state. It publishes an
-  allowlist only after the server explicitly ends pagination; partial, stalled,
-  invalid, over-limit, signed-out, and failed results remain unavailable. Each
-  page checks the exact `userID + sessionRevision` lease before and after its
-  request; account or forum-membership changes clear the snapshot. New list
+  account snapshot. The selected, default-off recommendation filter keeps its own
+  memory-only, persona-bound index and publishes an allowlist only after the
+  server explicitly ends pagination; partial, stalled, invalid, over-limit,
+  signed-out, and failed results remain unavailable. Each page checks the exact
+  `userID + sessionRevision` lease before and after its request; persona, account,
+  or forum-membership changes clear that index. New list
   requests begin only while the home page, complete list, or selected filtered
   recommendation page is active. The private server snapshot remains memory-only
   and performs no automatic account write. A separate versioned local archive
@@ -600,12 +615,13 @@ and its verified metadata enters the public app source.
   persisted. Content approval's mandatory `cuid` is a random
   client-lifetime Galaxy2 identifier (`32HEX|V` plus an 8-character Helios
   checksum); it is not hardware-derived or persisted. Personalized discovery
-  separately uses one nonsecret random UUID stored in local preferences. The
-  anonymous feed read sends no account credential, but an explicit recommendation
-  feedback write intentionally reuses that UUID with BDUSS/STOKEN; Tieba can
-  therefore associate the recommendation session with the active account after
-  that action. The UUID is still not derived from hardware, IDFV, an account, or
-  a credential. The authenticated concern feed uses a different random UUID that
+  separately uses one nonsecret random UUID stored in local preferences. An
+  anonymous persona sends no account credential and cannot issue account feedback.
+  An explicitly selected account persona reuses that UUID while sending only the
+  selected session's BDUSS/STOKEN and expected UID for its read and feedback paths;
+  Tieba can therefore associate the installation and selected accounts. The UUID
+  is still not derived from hardware, IDFV, an account, or a credential. The
+  authenticated concern feed uses a different random UUID that
   lasts only for the current process, and the two feeds never share an identifier.
 - **Write safety:** Each write is bound to the expected account UID and forum.
   Follow and check-in operations for the same forum cannot overlap, identical

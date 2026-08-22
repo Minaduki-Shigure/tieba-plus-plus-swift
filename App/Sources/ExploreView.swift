@@ -33,6 +33,7 @@ struct ExploreView: View {
   let accountService: any AccountService
   let feedbackService: any PersonalizedFeedbackService
   let accountVault: any AccountVault
+  let accountSessionLookup: any AccountSessionLookup
 
   @State private var selectedSection: ExploreSection
   @StateObject private var channelsViewModel: ExploreChannelsViewModel
@@ -46,7 +47,8 @@ struct ExploreView: View {
     searchHistoryRepository: any ForumSearchHistoryRepository,
     accountService: any AccountService,
     feedbackService: any PersonalizedFeedbackService,
-    accountVault: any AccountVault
+    accountVault: any AccountVault,
+    accountSessionLookup: any AccountSessionLookup
   ) {
     self.service = service
     self.historyRepository = historyRepository
@@ -55,6 +57,7 @@ struct ExploreView: View {
     self.accountService = accountService
     self.feedbackService = feedbackService
     self.accountVault = accountVault
+    self.accountSessionLookup = accountSessionLookup
     _selectedSection = State(initialValue: initialSection)
     _channelsViewModel = StateObject(
       wrappedValue: ExploreChannelsViewModel(vault: accountVault)
@@ -82,6 +85,7 @@ struct ExploreView: View {
         accountService: accountService,
         feedbackService: feedbackService,
         vault: accountVault,
+        accountSessionLookup: accountSessionLookup,
         historyRepository: historyRepository,
         favoritesRepository: favoritesRepository,
         searchHistoryRepository: searchHistoryRepository

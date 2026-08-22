@@ -41,6 +41,27 @@ final class KeychainAccountVaultTests: XCTestCase {
     XCTAssertNil(backend.snapshot())
   }
 
+  func testExactSessionLookupReadsAnInactiveAccountWithoutChangingTheActiveAccount() async throws {
+    let backend = InMemoryAccountVaultBackend()
+    let vault = KeychainAccountVault(backend: backend)
+    try await vault.upsert(session(userID: 1, name: "one"))
+    try await vault.upsert(session(userID: 2, name: "two"))
+    try await vault.switchActive(to: 1)
+    let writeCount = backend.writeCount
+
+    let inactive = try await vault.session(userID: 2)
+    let missing = try await vault.session(userID: 3)
+    let invalid = try await vault.session(userID: 0)
+    let active = try await vault.activeSession()
+
+    XCTAssertEqual(inactive?.id, 2)
+    XCTAssertEqual(inactive?.username, "two")
+    XCTAssertNil(missing)
+    XCTAssertNil(invalid)
+    XCTAssertEqual(active?.id, 1)
+    XCTAssertEqual(backend.writeCount, writeCount)
+  }
+
   func testUpsertPreservesOriginalCreationDate() async throws {
     let backend = InMemoryAccountVaultBackend()
     let vault = KeychainAccountVault(backend: backend)

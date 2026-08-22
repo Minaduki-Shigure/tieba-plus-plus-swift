@@ -185,6 +185,19 @@ protocol HotThreadService: Sendable {
 
 protocol PersonalizedFeedService: Sendable {
   func personalizedThreads(page: Int) async throws -> PersonalizedFeedPageData
+  func personalizedThreads(
+    page: Int,
+    session: StoredAccountSession
+  ) async throws -> PersonalizedFeedPageData
+}
+
+extension PersonalizedFeedService {
+  func personalizedThreads(
+    page: Int,
+    session: StoredAccountSession
+  ) async throws -> PersonalizedFeedPageData {
+    throw BrowseError.unavailable("当前推荐服务不支持账号个性。")
+  }
 }
 
 protocol UserProfileService: Sendable {

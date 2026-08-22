@@ -655,6 +655,25 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testFollowedForumScopeWithoutAccountVaultFailsBeforeTransport() async throws {
+    let service = ScriptedPersonalizedFeedService()
+    let viewModel = PersonalizedFeedViewModel(service: service)
+
+    viewModel.setScope(
+      PersonalizedFeedFixtures.followedScope(forumIDs: [7]),
+      loadIfNeeded: true
+    )
+    try await personalizedFeedWaitUntil {
+      if case .failed = viewModel.state { return true }
+      return false
+    }
+
+    let requests = await service.requestSnapshot()
+    XCTAssertTrue(requests.isEmpty)
+    XCTAssertTrue(viewModel.items.isEmpty)
+  }
+
+  @MainActor
   func testFollowedForumScopeMatchesStableForumIDInsteadOfName() async throws {
     let service = ScriptedPersonalizedFeedService()
     await service.enqueue(
@@ -677,7 +696,7 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
         )
       )
     )
-    let viewModel = PersonalizedFeedViewModel(service: service)
+    let viewModel = personalizedFilteredFeedViewModel(service: service)
 
     viewModel.setScope(
       PersonalizedFeedFixtures.followedScope(forumIDs: [7]),
@@ -689,6 +708,34 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.items.first?.thread.forumName, "renamed-forum")
     let requests = await service.requestSnapshot()
     XCTAssertEqual(requests, [1])
+  }
+
+  @MainActor
+  func testAccountPersonaRejectsAnotherAccountsFollowedForumIndexBeforeTransport()
+    async throws
+  {
+    let service = ScriptedPersonalizedFeedService()
+    let lookup = MultiAccountSessionLookup(
+      sessions: [personalizedFeedbackSession(userID: 7)]
+    )
+    let viewModel = PersonalizedFeedViewModel(
+      service: service,
+      accountSessionLookup: lookup
+    )
+    viewModel.setPersona(.account(userID: 7), loadIfNeeded: false)
+
+    viewModel.setScope(
+      PersonalizedFeedFixtures.followedScope(forumIDs: [8], userID: 8),
+      loadIfNeeded: true
+    )
+    try await personalizedFeedWaitUntil {
+      if case .failed = viewModel.state { return true }
+      return false
+    }
+
+    let requests = await service.requestSnapshot()
+    XCTAssertTrue(requests.isEmpty)
+    XCTAssertTrue(viewModel.items.isEmpty)
   }
 
   @MainActor
@@ -724,7 +771,7 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
         )
       )
     )
-    let viewModel = PersonalizedFeedViewModel(service: service)
+    let viewModel = personalizedFilteredFeedViewModel(service: service)
 
     viewModel.setScope(
       PersonalizedFeedFixtures.followedScope(forumIDs: [7]),
@@ -778,7 +825,7 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
         )
       )
     )
-    let viewModel = PersonalizedFeedViewModel(service: service)
+    let viewModel = personalizedFilteredFeedViewModel(service: service)
     viewModel.setScope(
       PersonalizedFeedFixtures.followedScope(forumIDs: [7]),
       loadIfNeeded: true
@@ -826,7 +873,7 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
         )
       )
     )
-    let viewModel = PersonalizedFeedViewModel(service: service)
+    let viewModel = personalizedFilteredFeedViewModel(service: service)
     viewModel.setScope(
       PersonalizedFeedFixtures.followedScope(forumIDs: [7]),
       loadIfNeeded: true
@@ -867,7 +914,7 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
         )
       )
     }
-    let viewModel = PersonalizedFeedViewModel(service: service)
+    let viewModel = personalizedFilteredFeedViewModel(service: service)
     viewModel.setScope(
       PersonalizedFeedFixtures.followedScope(forumIDs: [7]),
       loadIfNeeded: true
@@ -923,7 +970,7 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
         )
       )
     )
-    let viewModel = PersonalizedFeedViewModel(service: service)
+    let viewModel = personalizedFilteredFeedViewModel(service: service)
     viewModel.setScope(
       PersonalizedFeedFixtures.followedScope(forumIDs: [7]),
       loadIfNeeded: true
@@ -976,7 +1023,7 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
         )
       )
     )
-    let viewModel = PersonalizedFeedViewModel(service: service)
+    let viewModel = personalizedFilteredFeedViewModel(service: service)
     viewModel.setScope(
       PersonalizedFeedFixtures.followedScope(forumIDs: [7]),
       loadIfNeeded: true
@@ -1017,7 +1064,7 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
         )
       )
     )
-    let viewModel = PersonalizedFeedViewModel(service: service)
+    let viewModel = personalizedFilteredFeedViewModel(service: service)
     viewModel.loadIfNeeded()
     try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [1] }
 
@@ -1075,7 +1122,13 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
     )
     let firstRevision = UUID(uuidString: "00000000-0000-0000-0000-000000000101")!
     let secondRevision = UUID(uuidString: "00000000-0000-0000-0000-000000000102")!
-    let viewModel = PersonalizedFeedViewModel(service: service)
+    let firstSession = personalizedFeedbackSession(revision: firstRevision)
+    let vault = PersonalizedFilterVault(sessions: [firstSession], activeUserID: firstSession.id)
+    let viewModel = PersonalizedFeedViewModel(
+      service: service,
+      accountSessionLookup: vault,
+      accountVault: vault
+    )
 
     viewModel.setScope(
       PersonalizedFeedFixtures.followedScope(
@@ -1085,6 +1138,8 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
       loadIfNeeded: true
     )
     try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [1] }
+
+    try await vault.upsert(personalizedFeedbackSession(revision: secondRevision))
 
     viewModel.setScope(
       PersonalizedFeedFixtures.followedScope(
@@ -1148,7 +1203,7 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
         )
       )
     )
-    let viewModel = PersonalizedFeedViewModel(service: service)
+    let viewModel = personalizedFilteredFeedViewModel(service: service)
     viewModel.setScope(
       PersonalizedFeedFixtures.followedScope(forumIDs: [7]),
       loadIfNeeded: true
@@ -1181,8 +1236,9 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
     let viewModel = PersonalizedFeedViewModel(
       service: feedService,
       feedbackService: feedbackService,
-      vault: vault
+      accountSessionLookup: vault
     )
+    viewModel.setPersona(.account(userID: 7), loadIfNeeded: false)
     viewModel.loadIfNeeded()
     try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [1, 2] }
 
@@ -1217,6 +1273,193 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testPersonaSwitchUsesExactAccountAndDiscardsThePreviousAccountResponse() async throws {
+    let service = ScriptedPersonalizedFeedService()
+    await service.enqueue(.suspended(71))
+    await service.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [2], page: 1, hasMore: false))
+    )
+    let lookup = MultiAccountSessionLookup(
+      sessions: [
+        personalizedFeedbackSession(userID: 7),
+        personalizedFeedbackSession(
+          userID: 8,
+          revision: UUID(uuidString: "00000000-0000-0000-0000-000000000008")!
+        ),
+      ]
+    )
+    let viewModel = PersonalizedFeedViewModel(
+      service: service,
+      accountSessionLookup: lookup
+    )
+
+    viewModel.setPersona(.account(userID: 7), loadIfNeeded: true)
+    try await personalizedFeedWaitUntil { await service.accountSessionIDSnapshot() == [7] }
+    viewModel.setPersona(.account(userID: 8), loadIfNeeded: true)
+    try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [2] }
+
+    let resumed = await service.resume(
+      id: 71,
+      returning: PersonalizedFeedFixtures.page(ids: [1], page: 1, hasMore: false)
+    )
+    XCTAssertTrue(resumed)
+    await personalizedFeedDrainMainActor()
+
+    XCTAssertEqual(viewModel.persona, .account(userID: 8))
+    XCTAssertEqual(viewModel.items.map(\.id), [2])
+    let accountSessionIDs = await service.accountSessionIDSnapshot()
+    XCTAssertEqual(accountSessionIDs, [7, 8])
+  }
+
+  @MainActor
+  func testSameAccountSessionRotationDiscardsThePreviousRevisionResponse() async throws {
+    let service = ScriptedPersonalizedFeedService()
+    await service.enqueue(.suspended(72))
+    await service.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [2], page: 1, hasMore: false))
+    )
+    let lookup = MultiAccountSessionLookup(
+      sessions: [personalizedFeedbackSession(userID: 7)]
+    )
+    let viewModel = PersonalizedFeedViewModel(
+      service: service,
+      accountSessionLookup: lookup
+    )
+    viewModel.setPersona(.account(userID: 7), loadIfNeeded: true)
+    try await personalizedFeedWaitUntil { await service.requestCount() == 1 }
+
+    await lookup.setSession(
+      personalizedFeedbackSession(
+        userID: 7,
+        revision: UUID(uuidString: "00000000-0000-0000-0000-000000000009")!
+      )
+    )
+    viewModel.accountSessionDidChange(reloadIfActive: true)
+    try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [2] }
+
+    let resumed = await service.resume(
+      id: 72,
+      returning: PersonalizedFeedFixtures.page(ids: [1], page: 1, hasMore: false)
+    )
+    XCTAssertTrue(resumed)
+    await personalizedFeedDrainMainActor()
+
+    XCTAssertEqual(viewModel.items.map(\.id), [2])
+    let accountSessionIDs = await service.accountSessionIDSnapshot()
+    XCTAssertEqual(accountSessionIDs, [7, 7])
+  }
+
+  @MainActor
+  func testAnonymousFilteredResponseCannotPublishAfterActiveAccountChanges() async throws {
+    let service = ScriptedPersonalizedFeedService()
+    await service.enqueue(.suspended(73))
+    let first = personalizedFeedbackSession(userID: 7)
+    let second = personalizedFeedbackSession(
+      userID: 8,
+      revision: UUID(uuidString: "00000000-0000-0000-0000-000000000008")!
+    )
+    let vault = PersonalizedFilterVault(sessions: [first, second], activeUserID: 7)
+    let viewModel = PersonalizedFeedViewModel(
+      service: service,
+      accountSessionLookup: vault,
+      accountVault: vault
+    )
+    viewModel.setScope(
+      PersonalizedFeedFixtures.followedScope(
+        forumIDs: [7],
+        userID: 7,
+        sessionRevision: first.sessionRevision
+      ),
+      loadIfNeeded: true
+    )
+    try await personalizedFeedWaitUntil { await service.requestCount() == 1 }
+
+    try await vault.switchActive(to: 8)
+    let resumed = await service.resume(
+      id: 73,
+      returning: PersonalizedFeedFixtures.page(ids: [1], page: 1, hasMore: false)
+    )
+    XCTAssertTrue(resumed)
+    try await personalizedFeedWaitUntil {
+      if case .failed = viewModel.state { return true }
+      return false
+    }
+
+    XCTAssertTrue(viewModel.items.isEmpty)
+  }
+
+  @MainActor
+  func testAnonymousPersonaNeverFallsBackToAnAccountForFeedback() async throws {
+    let feedService = ScriptedPersonalizedFeedService()
+    await feedService.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [1], page: 1, hasMore: false))
+    )
+    let feedbackService = ScriptedPersonalizedFeedbackService(stubs: [.success])
+    let viewModel = PersonalizedFeedViewModel(
+      service: feedService,
+      feedbackService: feedbackService,
+      accountSessionLookup: PersonalizedFeedbackVault(
+        session: personalizedFeedbackSession()
+      )
+    )
+    viewModel.loadIfNeeded()
+    try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [1] }
+
+    viewModel.submitFeedback(
+      threadID: 1,
+      selectedReasonIDs: [1],
+      clickTimeMilliseconds: 1
+    )
+
+    XCTAssertEqual(viewModel.feedbackFailure, .accountPersonaRequired)
+    let feedbackRequestCount = await feedbackService.requestCount()
+    XCTAssertEqual(feedbackRequestCount, 0)
+    XCTAssertEqual(viewModel.items.map(\.id), [1])
+  }
+
+  @MainActor
+  func testFeedbackCannotUseNewCredentialsForRowsLoadedByAnOlderSessionRevision()
+    async throws
+  {
+    let feedService = ScriptedPersonalizedFeedService()
+    await feedService.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [1], page: 1, hasMore: false))
+    )
+    let feedbackService = ScriptedPersonalizedFeedbackService(stubs: [.success])
+    let lookup = MultiAccountSessionLookup(
+      sessions: [personalizedFeedbackSession(userID: 7)]
+    )
+    let viewModel = PersonalizedFeedViewModel(
+      service: feedService,
+      feedbackService: feedbackService,
+      accountSessionLookup: lookup
+    )
+    viewModel.setPersona(.account(userID: 7), loadIfNeeded: true)
+    try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [1] }
+
+    await lookup.setSession(
+      personalizedFeedbackSession(
+        userID: 7,
+        revision: UUID(uuidString: "00000000-0000-0000-0000-000000000009")!
+      )
+    )
+    viewModel.submitFeedback(
+      threadID: 1,
+      selectedReasonIDs: [1],
+      clickTimeMilliseconds: 1
+    )
+    try await personalizedFeedWaitUntil { viewModel.feedbackFailure != nil }
+
+    XCTAssertEqual(
+      viewModel.feedbackFailure,
+      .unavailable("推荐内容对应的账户会话已变化，请刷新后再提交反馈。")
+    )
+    let requestCount = await feedbackService.requestCount()
+    XCTAssertEqual(requestCount, 0)
+    XCTAssertEqual(viewModel.items.map(\.id), [1])
+  }
+
+  @MainActor
   func testConfirmedFeedbackCannotBeReinsertedByLaterPagination() async throws {
     let feedService = ScriptedPersonalizedFeedService()
     await feedService.enqueue(
@@ -1232,8 +1475,9 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
     let viewModel = PersonalizedFeedViewModel(
       service: feedService,
       feedbackService: feedbackService,
-      vault: PersonalizedFeedbackVault(session: personalizedFeedbackSession())
+      accountSessionLookup: PersonalizedFeedbackVault(session: personalizedFeedbackSession())
     )
+    viewModel.setPersona(.account(userID: 7), loadIfNeeded: false)
     viewModel.loadIfNeeded()
     try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [1] }
     viewModel.submitFeedback(
@@ -1263,8 +1507,9 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
     let knownViewModel = PersonalizedFeedViewModel(
       service: knownFeed,
       feedbackService: knownFeedback,
-      vault: PersonalizedFeedbackVault(session: session)
+      accountSessionLookup: PersonalizedFeedbackVault(session: session)
     )
+    knownViewModel.setPersona(.account(userID: 7), loadIfNeeded: false)
     knownViewModel.loadIfNeeded()
     try await personalizedFeedWaitUntil { knownViewModel.items.map(\.id) == [1] }
     knownViewModel.submitFeedback(
@@ -1283,8 +1528,9 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
     let unknownViewModel = PersonalizedFeedViewModel(
       service: unknownFeed,
       feedbackService: ScriptedPersonalizedFeedbackService(stubs: [.failure(.outcomeUnknown)]),
-      vault: PersonalizedFeedbackVault(session: session)
+      accountSessionLookup: PersonalizedFeedbackVault(session: session)
     )
+    unknownViewModel.setPersona(.account(userID: 7), loadIfNeeded: false)
     unknownViewModel.loadIfNeeded()
     try await personalizedFeedWaitUntil { unknownViewModel.items.map(\.id) == [1] }
     unknownViewModel.submitFeedback(
@@ -1304,12 +1550,13 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
       .value(PersonalizedFeedFixtures.page(ids: [1], page: 1, hasMore: false))
     )
     let feedbackService = ScriptedPersonalizedFeedbackService(stubs: [.success])
-    let vault = PersonalizedFeedbackVault(session: nil)
+    let vault = PersonalizedFeedbackVault(session: personalizedFeedbackSession())
     let viewModel = PersonalizedFeedViewModel(
       service: feedService,
       feedbackService: feedbackService,
-      vault: vault
+      accountSessionLookup: vault
     )
+    viewModel.setPersona(.account(userID: 7), loadIfNeeded: false)
     viewModel.loadIfNeeded()
     try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [1] }
 
@@ -1323,6 +1570,7 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
     XCTAssertEqual(feedbackRequestCount, 0)
 
     viewModel.clearFeedbackFailure()
+    await vault.setSession(nil)
     viewModel.submitFeedback(
       threadID: 1,
       selectedReasonIDs: [1],
@@ -1348,7 +1596,7 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
   }
 
   @MainActor
-  func testLateFeedbackCompletionAfterAccountSwitchCannotMutateTheFeed() async throws {
+  func testLateFeedbackCompletionAfterSessionRotationCannotMutateTheFeed() async throws {
     let feedService = ScriptedPersonalizedFeedService()
     await feedService.enqueue(
       .value(PersonalizedFeedFixtures.page(ids: [1], page: 1, hasMore: false))
@@ -1361,8 +1609,9 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
     let viewModel = PersonalizedFeedViewModel(
       service: feedService,
       feedbackService: feedbackService,
-      vault: vault
+      accountSessionLookup: vault
     )
+    viewModel.setPersona(.account(userID: 7), loadIfNeeded: false)
     viewModel.loadIfNeeded()
     try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [1] }
     viewModel.submitFeedback(
@@ -1374,7 +1623,7 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
 
     await vault.setSession(
       personalizedFeedbackSession(
-        userID: 8,
+        userID: 7,
         revision: UUID(uuidString: "00000000-0000-0000-0000-000000000008")!
       )
     )
@@ -1407,8 +1656,9 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
     let viewModel = PersonalizedFeedViewModel(
       service: feedService,
       feedbackService: feedbackService,
-      vault: PersonalizedFeedbackVault(session: personalizedFeedbackSession())
+      accountSessionLookup: PersonalizedFeedbackVault(session: personalizedFeedbackSession())
     )
+    viewModel.setPersona(.account(userID: 7), loadIfNeeded: false)
     viewModel.loadIfNeeded()
     try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [1] }
     viewModel.submitFeedback(
@@ -1444,6 +1694,7 @@ private enum PersonalizedFeedStub: Sendable {
 private actor ScriptedPersonalizedFeedService: PersonalizedFeedService {
   private var stubs: [PersonalizedFeedStub] = []
   private var requests: [Int] = []
+  private var accountSessionIDs: [Int64] = []
   private var pending: [Int: CheckedContinuation<PersonalizedFeedPageData, any Error>] = [:]
 
   func enqueue(_ stub: PersonalizedFeedStub) {
@@ -1467,13 +1718,71 @@ private actor ScriptedPersonalizedFeedService: PersonalizedFeedService {
     }
   }
 
+  func personalizedThreads(
+    page: Int,
+    session: StoredAccountSession
+  ) async throws -> PersonalizedFeedPageData {
+    accountSessionIDs.append(session.id)
+    try await personalizedThreads(page: page)
+  }
+
   func requestCount() -> Int { requests.count }
   func requestSnapshot() -> [Int] { requests }
+  func accountSessionIDSnapshot() -> [Int64] { accountSessionIDs }
 
   func resume(id: Int, returning value: PersonalizedFeedPageData) -> Bool {
     guard let continuation = pending.removeValue(forKey: id) else { return false }
     continuation.resume(returning: value)
     return true
+  }
+}
+
+private actor MultiAccountSessionLookup: AccountSessionLookup {
+  private var sessions: [Int64: StoredAccountSession]
+
+  init(sessions: [StoredAccountSession]) {
+    self.sessions = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+  }
+
+  func session(userID: Int64) async throws -> StoredAccountSession? {
+    sessions[userID]
+  }
+
+  func setSession(_ session: StoredAccountSession?) {
+    guard let session else { return }
+    sessions[session.id] = session
+  }
+}
+
+private actor PersonalizedFilterVault: AccountVault, AccountSessionLookup {
+  private var sessions: [Int64: StoredAccountSession]
+  private var activeUserID: Int64?
+
+  init(sessions: [StoredAccountSession], activeUserID: Int64?) {
+    self.sessions = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+    self.activeUserID = activeUserID
+  }
+
+  func accountSummaries() async throws -> [AccountSummary] { [] }
+  func activeSession() async throws -> StoredAccountSession? {
+    activeUserID.flatMap { sessions[$0] }
+  }
+  func session(userID: Int64) async throws -> StoredAccountSession? { sessions[userID] }
+  func upsert(_ session: StoredAccountSession) async throws {
+    sessions[session.id] = session
+    activeUserID = session.id
+  }
+  func switchActive(to userID: Int64) async throws {
+    guard sessions[userID] != nil else { throw AccountVaultError.accountNotFound }
+    activeUserID = userID
+  }
+  func remove(userID: Int64) async throws {
+    sessions.removeValue(forKey: userID)
+    if activeUserID == userID { activeUserID = nil }
+  }
+  func removeAll() async throws {
+    sessions.removeAll()
+    activeUserID = nil
   }
 }
 
@@ -1541,7 +1850,7 @@ private actor ScriptedPersonalizedFeedbackService: PersonalizedFeedbackService {
   }
 }
 
-private actor PersonalizedFeedbackVault: AccountVault {
+private actor PersonalizedFeedbackVault: AccountVault, AccountSessionLookup {
   private var session: StoredAccountSession?
 
   init(session: StoredAccountSession?) {
@@ -1550,6 +1859,9 @@ private actor PersonalizedFeedbackVault: AccountVault {
 
   func accountSummaries() async throws -> [AccountSummary] { [] }
   func activeSession() async throws -> StoredAccountSession? { session }
+  func session(userID: Int64) async throws -> StoredAccountSession? {
+    session?.id == userID ? session : nil
+  }
   func upsert(_ session: StoredAccountSession) async throws { self.session = session }
   func switchActive(to userID: Int64) async throws {}
   func remove(userID: Int64) async throws {
@@ -1560,6 +1872,22 @@ private actor PersonalizedFeedbackVault: AccountVault {
   func setSession(_ session: StoredAccountSession?) {
     self.session = session
   }
+}
+
+@MainActor
+private func personalizedFilteredFeedViewModel(
+  service: any PersonalizedFeedService,
+  sessionRevision: UUID = UUID(
+    uuidString: "00000000-0000-0000-0000-000000000100"
+  )!
+) -> PersonalizedFeedViewModel {
+  let session = personalizedFeedbackSession(revision: sessionRevision)
+  let vault = PersonalizedFilterVault(sessions: [session], activeUserID: session.id)
+  return PersonalizedFeedViewModel(
+    service: service,
+    accountSessionLookup: vault,
+    accountVault: vault
+  )
 }
 
 private func personalizedFeedbackSession(

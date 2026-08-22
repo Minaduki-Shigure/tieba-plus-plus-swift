@@ -107,7 +107,7 @@ struct SystemKeychainAccountVaultBackend: AccountVaultBackend, @unchecked Sendab
   }
 }
 
-actor KeychainAccountVault: AccountVault {
+actor KeychainAccountVault: AccountVault, AccountSessionLookup {
   static let maximumArchiveBytes = 64 * 1_024
   static let maximumAccounts = 8
 
@@ -147,6 +147,11 @@ actor KeychainAccountVault: AccountVault {
     let archive = try loadArchive()
     guard let activeUserID = archive.activeUserID else { return nil }
     return archive.accounts.first { $0.id == activeUserID }
+  }
+
+  func session(userID: Int64) throws -> StoredAccountSession? {
+    guard userID > 0 else { return nil }
+    return try loadArchive().accounts.first { $0.id == userID }
   }
 
   func upsert(_ session: StoredAccountSession) throws {

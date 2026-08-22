@@ -11,6 +11,7 @@ struct RootView: View {
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
   let accountVault: any AccountVault
+  let accountSessionLookup: any AccountSessionLookup
   let accountService: any AccountService
   let personalizedFeedbackService: any PersonalizedFeedbackService
 
@@ -53,6 +54,7 @@ struct RootView: View {
     searchHistoryRepository: any ForumSearchHistoryRepository,
     globalSearchHistoryRepository: any GlobalSearchHistoryRepository,
     accountVault: any AccountVault,
+    accountSessionLookup: any AccountSessionLookup,
     accountService: any AccountService,
     personalizedFeedbackService: any PersonalizedFeedbackService,
     startDestination: AppStartDestination
@@ -62,6 +64,7 @@ struct RootView: View {
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
     self.accountVault = accountVault
+    self.accountSessionLookup = accountSessionLookup
     self.accountService = accountService
     self.personalizedFeedbackService = personalizedFeedbackService
     _path = State(
@@ -269,7 +272,8 @@ struct RootView: View {
             searchHistoryRepository: searchHistoryRepository,
             accountService: accountService,
             feedbackService: personalizedFeedbackService,
-            accountVault: accountVault
+            accountVault: accountVault,
+            accountSessionLookup: accountSessionLookup
           )
         case .history:
           HistoryView(repository: historyRepository) { target in

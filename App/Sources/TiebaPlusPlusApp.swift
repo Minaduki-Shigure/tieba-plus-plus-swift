@@ -44,6 +44,7 @@ struct TiebaPlusPlusApp: App {
   private let globalSearchHistoryRepository: any GlobalSearchHistoryRepository =
     FileGlobalSearchHistoryStore.live()
   private let accountVault: any AccountVault
+  private let accountSessionLookup: any AccountSessionLookup
   private let accountService: any AccountService
   private let personalizedFeedbackService: any PersonalizedFeedbackService
   private let contentAgreementStore: ContentAgreementStore
@@ -58,13 +59,14 @@ struct TiebaPlusPlusApp: App {
     let clientConfiguration = TiebaClientConfiguration(
       personalizedCUID: PersonalizedRecommendationIdentity.current()
     )
-    let accountVault: any AccountVault = KeychainAccountVault()
+    let accountVault = KeychainAccountVault()
     let authenticatedClient = TiebaAuthenticatedClient(configuration: clientConfiguration)
     let accountService: any AccountService = TiebaCoreAccountService(
       client: authenticatedClient,
       contentFilterRepository: contentFilterRepository
     )
     self.accountVault = accountVault
+    self.accountSessionLookup = accountVault
     self.accountService = accountService
     self.personalizedFeedbackService = TiebaCorePersonalizedFeedbackService(
       client: authenticatedClient
@@ -128,6 +130,7 @@ struct TiebaPlusPlusApp: App {
     let browseClient = TiebaClient(configuration: clientConfiguration)
     let browseService = TiebaCoreBrowseService(
       client: browseClient,
+      authenticatedClient: authenticatedClient,
       contentFilterRepository: contentFilterRepository
     )
     self.service = browseService
@@ -224,6 +227,7 @@ struct TiebaPlusPlusApp: App {
           searchHistoryRepository: searchHistoryRepository,
           globalSearchHistoryRepository: globalSearchHistoryRepository,
           accountVault: accountVault,
+          accountSessionLookup: accountSessionLookup,
           accountService: accountService,
           personalizedFeedbackService: personalizedFeedbackService,
           startDestination: startDestination
@@ -298,6 +302,7 @@ struct TiebaPlusPlusApp: App {
         searchHistoryRepository: searchHistoryRepository,
         globalSearchHistoryRepository: globalSearchHistoryRepository,
         accountVault: accountVault,
+        accountSessionLookup: accountSessionLookup,
         accountService: accountService,
         personalizedFeedbackService: personalizedFeedbackService,
         startDestination: startDestination

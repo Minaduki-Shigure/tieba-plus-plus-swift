@@ -31,6 +31,8 @@ enum AppPreferenceKey {
     "TiebaPlusPlus.favoriteThreadsOpenDescending"
   static let personalizedRecommendationCUID =
     "TiebaPlusPlus.personalizedRecommendationCUID"
+  static let personalizedRecommendationPersona =
+    "TiebaPlusPlus.personalizedRecommendationPersona"
 }
 
 enum PersonalizedRecommendationIdentity {
@@ -51,6 +53,52 @@ enum PersonalizedRecommendationIdentity {
     let generated = UUID().uuidString.lowercased()
     defaults.set(generated, forKey: AppPreferenceKey.personalizedRecommendationCUID)
     return generated
+  }
+}
+
+enum PersonalizedRecommendationPersona: Hashable, Sendable {
+  case anonymous
+  case account(userID: Int64)
+
+  var storedValue: String {
+    switch self {
+    case .anonymous:
+      "anonymous"
+    case .account(let userID):
+      "account:\(userID)"
+    }
+  }
+
+  var accountUserID: Int64? {
+    guard case .account(let userID) = self else { return nil }
+    return userID
+  }
+
+  static func resolved(_ value: String?) -> Self {
+    guard let value, value.utf8.count <= 64 else { return .anonymous }
+    if value == "anonymous" { return .anonymous }
+    let prefix = "account:"
+    guard value.hasPrefix(prefix) else { return .anonymous }
+    let suffix = String(value.dropFirst(prefix.count))
+    guard
+      let userID = Int64(suffix),
+      userID > 0,
+      suffix == String(userID)
+    else { return .anonymous }
+    return .account(userID: userID)
+  }
+
+  static func current(defaults: UserDefaults = .standard) -> Self {
+    let stored = defaults.string(forKey: AppPreferenceKey.personalizedRecommendationPersona)
+    let persona = resolved(stored)
+    if stored != nil, stored != persona.storedValue {
+      defaults.set(persona.storedValue, forKey: AppPreferenceKey.personalizedRecommendationPersona)
+    }
+    return persona
+  }
+
+  func persist(defaults: UserDefaults = .standard) {
+    defaults.set(storedValue, forKey: AppPreferenceKey.personalizedRecommendationPersona)
   }
 }
 

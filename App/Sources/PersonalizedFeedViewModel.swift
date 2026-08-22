@@ -53,12 +53,14 @@ final class PersonalizedFeedViewModel: ObservableObject {
   @Published private(set) var refreshError: String?
   @Published private(set) var loadMoreError: String?
   @Published private(set) var scope: PersonalizedFeedScope = .all
+  @Published private(set) var persona: PersonalizedRecommendationPersona = .anonymous
   @Published private(set) var feedbackSubmittingThreadIDs = Set<Int64>()
   @Published private(set) var feedbackFailure: PersonalizedFeedbackFailure?
 
   private let service: any PersonalizedFeedService
   private let feedbackService: (any PersonalizedFeedbackService)?
-  private let vault: (any AccountVault)?
+  private let accountSessionLookup: (any AccountSessionLookup)?
+  private let accountVault: (any AccountVault)?
   private var loadTask: Task<Void, Never>?
   private var generation = 0
   private var currentPage = 0
@@ -73,15 +75,33 @@ final class PersonalizedFeedViewModel: ObservableObject {
   private var feedbackOperations = [Int64: UUID]()
   private var feedbackTasks = [Int64: Task<Void, Never>]()
   private var feedbackHiddenThreadIDs = Set<Int64>()
+  private var loadedAccountLease: PersonalizedFeedbackSessionLease?
 
   init(
     service: any PersonalizedFeedService,
     feedbackService: (any PersonalizedFeedbackService)? = nil,
-    vault: (any AccountVault)? = nil
+    accountSessionLookup: (any AccountSessionLookup)? = nil,
+    accountVault: (any AccountVault)? = nil
   ) {
     self.service = service
     self.feedbackService = feedbackService
-    self.vault = vault
+    self.accountSessionLookup = accountSessionLookup
+    self.accountVault = accountVault
+  }
+
+  var usesAccountPersona: Bool { persona.accountUserID != nil }
+
+  func setPersona(_ persona: PersonalizedRecommendationPersona, loadIfNeeded: Bool) {
+    guard self.persona != persona else {
+      if loadIfNeeded { self.loadIfNeeded() }
+      return
+    }
+    invalidateFeedbackOperations()
+    invalidateCurrentRequest()
+    self.persona = persona
+    resetSnapshot()
+    guard loadIfNeeded, scope.isReady, !scope.hasNoAllowedForums else { return }
+    self.loadIfNeeded()
   }
 
   func setScope(_ scope: PersonalizedFeedScope, loadIfNeeded: Bool) {
@@ -199,8 +219,16 @@ final class PersonalizedFeedViewModel: ObservableObject {
       feedbackFailure = .invalidSelection
       return
     }
-    guard let feedbackService, let vault else {
+    guard let feedbackService, let accountSessionLookup else {
       feedbackFailure = .unavailable("当前版本无法提交推荐反馈。")
+      return
+    }
+    guard let selectedUserID = persona.accountUserID else {
+      feedbackFailure = .accountPersonaRequired
+      return
+    }
+    guard let feedLease = loadedAccountLease, feedLease.userID == selectedUserID else {
+      feedbackFailure = .unavailable("推荐内容对应的账户会话已变化，请刷新后再提交反馈。")
       return
     }
 
@@ -216,21 +244,16 @@ final class PersonalizedFeedViewModel: ObservableObject {
         operationID: operationID,
         requestGeneration: requestGeneration,
         service: feedbackService,
-        vault: vault
+        lookup: accountSessionLookup,
+        selectedUserID: selectedUserID,
+        feedLease: feedLease
       )
     }
     feedbackTasks[threadID] = task
   }
 
   func accountSessionDidChange(reloadIfActive: Bool) {
-    feedbackGeneration &+= 1
-    feedbackOperations.removeAll()
-    // Core stops pre-dispatch work but lets a possibly dispatched one-shot write finish.
-    for task in feedbackTasks.values { task.cancel() }
-    feedbackTasks.removeAll()
-    feedbackSubmittingThreadIDs.removeAll()
-    feedbackHiddenThreadIDs.removeAll()
-    feedbackFailure = nil
+    invalidateFeedbackOperations()
 
     invalidateCurrentRequest()
     resetSnapshot()
@@ -252,7 +275,9 @@ final class PersonalizedFeedViewModel: ObservableObject {
     operationID: UUID,
     requestGeneration: Int,
     service: any PersonalizedFeedbackService,
-    vault: any AccountVault
+    lookup: any AccountSessionLookup,
+    selectedUserID: Int64,
+    feedLease: PersonalizedFeedbackSessionLease
   ) async {
     defer {
       finishFeedbackOperation(
@@ -264,7 +289,7 @@ final class PersonalizedFeedViewModel: ObservableObject {
 
     let session: StoredAccountSession
     do {
-      guard let activeSession = try await vault.activeSession() else {
+      guard let selectedSession = try await lookup.session(userID: selectedUserID) else {
         publishFeedbackFailure(
           .loginRequired,
           threadID: submission.threadID,
@@ -280,7 +305,16 @@ final class PersonalizedFeedViewModel: ObservableObject {
           requestGeneration: requestGeneration
         )
       else { return }
-      guard activeSession.credentials != nil else {
+      guard feedLease.matches(selectedSession) else {
+        publishFeedbackFailure(
+          .unavailable("推荐内容对应的账户会话已变化，请刷新后再提交反馈。"),
+          threadID: submission.threadID,
+          operationID: operationID,
+          requestGeneration: requestGeneration
+        )
+        return
+      }
+      guard selectedSession.credentials != nil else {
         publishFeedbackFailure(
           .fullCredentialsRequired,
           threadID: submission.threadID,
@@ -289,7 +323,7 @@ final class PersonalizedFeedViewModel: ObservableObject {
         )
         return
       }
-      session = activeSession
+      session = selectedSession
     } catch is CancellationError {
       return
     } catch {
@@ -308,7 +342,7 @@ final class PersonalizedFeedViewModel: ObservableObject {
         session: session,
         submission: submission
       )
-      guard await feedbackLeaseIsCurrent(lease, vault: vault) else { return }
+      guard await feedbackLeaseIsCurrent(lease, lookup: lookup) else { return }
       guard
         feedbackOperationIsCurrent(
           threadID: submission.threadID,
@@ -320,7 +354,7 @@ final class PersonalizedFeedViewModel: ObservableObject {
     } catch is CancellationError {
       return
     } catch let error as PersonalizedFeedbackSubmissionError where error == .outcomeUnknown {
-      guard await feedbackLeaseIsCurrent(lease, vault: vault) else { return }
+      guard await feedbackLeaseIsCurrent(lease, lookup: lookup) else { return }
       guard
         feedbackOperationIsCurrent(
           threadID: submission.threadID,
@@ -333,7 +367,7 @@ final class PersonalizedFeedViewModel: ObservableObject {
     } catch let error as PersonalizedFeedbackSubmissionError
       where error == .fullCredentialsRequired
     {
-      guard await feedbackLeaseIsCurrent(lease, vault: vault) else { return }
+      guard await feedbackLeaseIsCurrent(lease, lookup: lookup) else { return }
       publishFeedbackFailure(
         .fullCredentialsRequired,
         threadID: submission.threadID,
@@ -341,7 +375,7 @@ final class PersonalizedFeedViewModel: ObservableObject {
         requestGeneration: requestGeneration
       )
     } catch {
-      guard await feedbackLeaseIsCurrent(lease, vault: vault) else { return }
+      guard await feedbackLeaseIsCurrent(lease, lookup: lookup) else { return }
       publishFeedbackFailure(
         .unavailable(error.localizedDescription),
         threadID: submission.threadID,
@@ -353,13 +387,24 @@ final class PersonalizedFeedViewModel: ObservableObject {
 
   private func feedbackLeaseIsCurrent(
     _ lease: PersonalizedFeedbackSessionLease,
-    vault: any AccountVault
+    lookup: any AccountSessionLookup
   ) async -> Bool {
     do {
-      return lease.matches(try await vault.activeSession())
+      return lease.matches(try await lookup.session(userID: lease.userID))
     } catch {
       return false
     }
+  }
+
+  private func invalidateFeedbackOperations() {
+    feedbackGeneration &+= 1
+    feedbackOperations.removeAll()
+    // Core stops pre-dispatch work but lets a possibly dispatched one-shot write finish.
+    for task in feedbackTasks.values { task.cancel() }
+    feedbackTasks.removeAll()
+    feedbackSubmittingThreadIDs.removeAll()
+    feedbackHiddenThreadIDs.removeAll()
+    feedbackFailure = nil
   }
 
   private func hideFeedbackThread(_ threadID: Int64) {
@@ -428,6 +473,7 @@ final class PersonalizedFeedViewModel: ObservableObject {
       requestedPage = 1
       state = .loading
       items = []
+      loadedAccountLease = nil
       currentPage = 0
       refreshOverlapFrontier = 0
       consecutiveDuplicatePages = 0
@@ -444,16 +490,65 @@ final class PersonalizedFeedViewModel: ObservableObject {
 
     let requestGeneration = generation
     let requestScope = scope
+    let requestPersona = persona
     let service = service
+    let accountSessionLookup = accountSessionLookup
+    let accountVault = accountVault
     loadTask = Task {
       var page = requestedPage
       defer { finishRequest(generation: requestGeneration, kind: kind) }
       do {
+        let requestIdentity = try await Self.requestIdentity(
+          for: requestPersona,
+          lookup: accountSessionLookup
+        )
+        let scopeIsCurrent = await Self.requestScopeIsCurrent(
+          requestScope,
+          persona: requestPersona,
+          identity: requestIdentity,
+          vault: accountVault
+        )
+        try Task.checkCancellation()
+        guard generation == requestGeneration, persona == requestPersona else { return }
+        guard scopeIsCurrent else {
+          throw BrowseError.unavailable("关注贴吧筛选对应的账户已变化，请重新加载。")
+        }
+        guard Self.snapshotLeaseIsCompatible(
+          kind: kind,
+          loadedLease: loadedAccountLease,
+          identity: requestIdentity
+        ) else {
+          throw BrowseError.unavailable("推荐内容对应的账户会话已变化，请重新加载。")
+        }
         var pagesScannedForAction = 0
         while true {
-          let response = try await service.personalizedThreads(page: page)
+          let response: PersonalizedFeedPageData
+          switch requestIdentity {
+          case .anonymous:
+            response = try await service.personalizedThreads(page: page)
+          case .account(let session, _):
+            response = try await service.personalizedThreads(page: page, session: session)
+          }
           try Task.checkCancellation()
-          guard generation == requestGeneration else { return }
+          let identityIsCurrent = await Self.requestIdentityIsCurrent(
+            requestIdentity,
+            lookup: accountSessionLookup
+          )
+          let scopeIsCurrent = await Self.requestScopeIsCurrent(
+            requestScope,
+            persona: requestPersona,
+            identity: requestIdentity,
+            vault: accountVault
+          )
+          try Task.checkCancellation()
+          guard
+            generation == requestGeneration,
+            persona == requestPersona,
+            identityIsCurrent,
+            scopeIsCurrent
+          else {
+            throw BrowseError.unavailable("推荐个性对应的账户已变化，请重新加载。")
+          }
           guard response.currentPage == page else {
             throw BrowseError.unavailable("推荐流返回了错误的页码。")
           }
@@ -508,7 +603,8 @@ final class PersonalizedFeedViewModel: ObservableObject {
               serverHasMore: response.hasMore,
               termination: termination
             ),
-            kind: kind
+            kind: kind,
+            identity: requestIdentity
           )
           return
         }
@@ -521,10 +617,15 @@ final class PersonalizedFeedViewModel: ObservableObject {
     }
   }
 
-  private func apply(_ batch: PersonalizedFeedBatch, kind: PersonalizedFeedRequestKind) {
+  private func apply(
+    _ batch: PersonalizedFeedBatch,
+    kind: PersonalizedFeedRequestKind,
+    identity: PersonalizedFeedRequestIdentity
+  ) {
     let responseItems = feedbackVisible(unique(batch.items))
     switch kind {
     case .replacement:
+      loadedAccountLease = identity.accountLease
       items = Array(responseItems.prefix(Self.maximumRetainedItems))
       currentPage = batch.currentPage
       refreshOverlapFrontier = 0
@@ -664,6 +765,7 @@ final class PersonalizedFeedViewModel: ObservableObject {
     consecutiveDuplicatePages = 0
     filteredScanIsPaused = false
     failedLoadMorePage = nil
+    loadedAccountLease = nil
     resetFilteredScanEpoch()
   }
 
@@ -735,6 +837,78 @@ final class PersonalizedFeedViewModel: ObservableObject {
     isRefreshing = false
     isLoadingMore = false
   }
+
+  private nonisolated static func requestIdentity(
+    for persona: PersonalizedRecommendationPersona,
+    lookup: (any AccountSessionLookup)?
+  ) async throws -> PersonalizedFeedRequestIdentity {
+    switch persona {
+    case .anonymous:
+      return .anonymous
+    case .account(let userID):
+      guard let lookup else {
+        throw BrowseError.unavailable("当前版本无法读取所选推荐账号。")
+      }
+      guard let session = try await lookup.session(userID: userID) else {
+        throw BrowseError.unavailable("所选推荐账号已不存在，请重新选择。")
+      }
+      guard session.credentials != nil else {
+        throw BrowseError.unavailable("所选账号需要重新登录，才能用于个性推荐。")
+      }
+      return .account(session: session, lease: PersonalizedFeedbackSessionLease(session))
+    }
+  }
+
+  private nonisolated static func requestIdentityIsCurrent(
+    _ identity: PersonalizedFeedRequestIdentity,
+    lookup: (any AccountSessionLookup)?
+  ) async -> Bool {
+    switch identity {
+    case .anonymous:
+      return true
+    case .account(_, let lease):
+      guard let lookup else { return false }
+      do {
+        return lease.matches(try await lookup.session(userID: lease.userID))
+      } catch {
+        return false
+      }
+    }
+  }
+
+  private nonisolated static func requestScopeIsCurrent(
+    _ scope: PersonalizedFeedScope,
+    persona: PersonalizedRecommendationPersona,
+    identity: PersonalizedFeedRequestIdentity,
+    vault: (any AccountVault)?
+  ) async -> Bool {
+    guard case .followedForums(let snapshot) = scope else {
+      return scope != .waitingForFollowedForumIndex
+    }
+    switch persona {
+    case .anonymous:
+      guard let vault else { return false }
+      do {
+        guard let session = try await vault.activeSession() else { return false }
+        return snapshot.lease.matches(session)
+      } catch {
+        return false
+      }
+    case .account:
+      guard case .account(_, let lease) = identity else { return false }
+      return snapshot.lease.userID == lease.userID
+        && snapshot.lease.sessionRevision == lease.sessionRevision
+    }
+  }
+
+  private nonisolated static func snapshotLeaseIsCompatible(
+    kind: PersonalizedFeedRequestKind,
+    loadedLease: PersonalizedFeedbackSessionLease?,
+    identity: PersonalizedFeedRequestIdentity
+  ) -> Bool {
+    if kind == .replacement { return true }
+    return loadedLease == identity.accountLease
+  }
 }
 
 private enum PersonalizedFeedRequestKind: Equatable, Sendable {
@@ -757,4 +931,14 @@ private struct PersonalizedFeedBatch: Sendable {
   let currentPage: Int
   let serverHasMore: Bool
   let termination: PersonalizedFeedBatchTermination
+}
+
+private enum PersonalizedFeedRequestIdentity: Sendable {
+  case anonymous
+  case account(session: StoredAccountSession, lease: PersonalizedFeedbackSessionLease)
+
+  var accountLease: PersonalizedFeedbackSessionLease? {
+    guard case .account(_, let lease) = self else { return nil }
+    return lease
+  }
 }

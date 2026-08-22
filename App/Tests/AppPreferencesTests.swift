@@ -228,6 +228,42 @@ final class AppPreferencesTests: XCTestCase {
     XCTAssertEqual(UUID(uuidString: repaired)?.uuidString.lowercased(), repaired)
   }
 
+  func testPersonalizedRecommendationPersonaPersistsOnlyCanonicalIdentity() throws {
+    let suiteName = "AppPreferencesTests.personalized-persona.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    XCTAssertEqual(
+      PersonalizedRecommendationPersona.current(defaults: defaults),
+      .anonymous
+    )
+    let account = PersonalizedRecommendationPersona.account(userID: 42)
+    account.persist(defaults: defaults)
+    XCTAssertEqual(
+      PersonalizedRecommendationPersona.current(defaults: defaults),
+      account
+    )
+    XCTAssertEqual(
+      defaults.string(forKey: AppPreferenceKey.personalizedRecommendationPersona),
+      "account:42"
+    )
+
+    for invalid in [
+      "account:0", "account:-1", "account:+42", "account:042", "account: 42",
+      "account:9223372036854775808", "future:42", "", String(repeating: "9", count: 65),
+    ] {
+      defaults.set(invalid, forKey: AppPreferenceKey.personalizedRecommendationPersona)
+      XCTAssertEqual(
+        PersonalizedRecommendationPersona.current(defaults: defaults),
+        .anonymous
+      )
+      XCTAssertEqual(
+        defaults.string(forKey: AppPreferenceKey.personalizedRecommendationPersona),
+        "anonymous"
+      )
+    }
+  }
+
   func testPersonalizedFollowedForumsOnlyUsesStableKeyAndDefaultsOff() {
     XCTAssertEqual(
       AppPreferenceKey.personalizedFollowedForumsOnly,
