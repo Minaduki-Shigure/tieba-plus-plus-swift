@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 import XCTest
 
 @testable import TiebaPlusPlus
@@ -168,6 +169,39 @@ final class BrowseContentImageLayoutTests: XCTestCase {
     )
     XCTAssertEqual(BrowseImageMasonryGeometry.sanitizedAspectRatio(.nan), 4 / 3)
     XCTAssertEqual(BrowseImageMasonryGeometry.sanitizedAspectRatio(.infinity), 4 / 3)
+  }
+
+  func testVeryTallImagePlanReservesItsEntireClampedPreviewFrame() {
+    let aspectRatio = BrowseImageMasonryGeometry.sanitizedAspectRatio(
+      width: 412,
+      height: 2_343
+    )
+    let plan = BrowseImageMasonryGeometry.plan(
+      availableWidth: 358,
+      aspectRatios: [aspectRatio],
+      imageLayout: .responsive
+    )
+
+    XCTAssertEqual(aspectRatio, 0.5)
+    XCTAssertEqual(plan.frames, [CGRect(x: 0, y: 0, width: 358, height: 716)])
+    XCTAssertEqual(plan.size.height, plan.frames[0].maxY)
+  }
+
+  @MainActor
+  func testPreviewFrameSizeIsIndependentOfOversizedImageContent() {
+    let host = UIHostingController(
+      rootView: BrowseImagePreviewFrame(aspectRatio: 0.5) {
+        Color.red.frame(width: 358, height: 4_096)
+      }
+      .frame(width: 358)
+    )
+
+    let size = host.sizeThatFits(
+      in: CGSize(width: 358, height: 10_000)
+    )
+
+    XCTAssertEqual(size.width, 358, accuracy: 0.5)
+    XCTAssertEqual(size.height, 716, accuracy: 0.5)
   }
 
   func testResponsiveColumnThresholdsAndItemCap() {

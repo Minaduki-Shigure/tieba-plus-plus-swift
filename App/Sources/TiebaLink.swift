@@ -115,8 +115,7 @@ enum TiebaLink {
     guard
       let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
       components.user == nil,
-      components.password == nil,
-      components.fragment == nil
+      components.password == nil
     else { return nil }
 
     switch components.scheme?.lowercased() {
@@ -139,6 +138,7 @@ enum TiebaLink {
     else { return nil }
 
     if components.path.lowercased() == "/f" {
+      guard components.fragment == nil else { return nil }
       let forumItems = (components.queryItems ?? []).filter { $0.name == "kw" }
       guard
         forumItems.count == 1,
@@ -156,7 +156,8 @@ enum TiebaLink {
       path[0].isEmpty,
       path[1].lowercased() == "p",
       let threadID = Int64(path[2]),
-      threadID > 0
+      threadID > 0,
+      components.fragment == nil || components.fragment == "/"
     else { return nil }
     guard let route = threadRoute(
       threadID: threadID,
@@ -171,7 +172,8 @@ enum TiebaLink {
   ) -> TiebaLinkTarget? {
     guard
       components.host?.lowercased() == "unidispatch",
-      components.port == nil
+      components.port == nil,
+      components.fragment == nil
     else { return nil }
 
     let items = components.queryItems ?? []
@@ -209,6 +211,7 @@ enum TiebaLink {
   private static func appTarget(from components: URLComponents) -> TiebaLinkTarget? {
     guard
       components.port == nil,
+      components.fragment == nil,
       let host = components.host?.lowercased()
     else { return nil }
 

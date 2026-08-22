@@ -298,12 +298,15 @@ struct PersonalizedFeedView: View {
                 )
               } label: {
                 ThreadSummaryRow(thread: item.thread, showsForum: true)
+                  .frame(maxWidth: .infinity, alignment: .leading)
               }
+              .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
 
               if viewModel.usesAccountPersona, !item.feedbackReasons.isEmpty {
                 feedbackButton(for: item)
               }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
           }
           .onAppear {
             guard isActive else { return }

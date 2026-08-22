@@ -77,6 +77,7 @@ struct BrowseContentView: View {
                 )
             }
           }
+          .clipped()
         case .standalone(let contentOffset, let content):
           standalone(content, contentOffset: contentOffset)
         }
@@ -96,8 +97,6 @@ struct BrowseContentView: View {
             vertical: true,
             isEnabled: ThreadScrollPerformanceScenario.appliesLongTextFixedSize
           )
-        #else
-          .fixedSize(horizontal: false, vertical: true)
         #endif
     } else {
       Text(
@@ -114,8 +113,6 @@ struct BrowseContentView: View {
             vertical: true,
             isEnabled: ThreadScrollPerformanceScenario.appliesLongTextFixedSize
           )
-        #else
-          .fixedSize(horizontal: false, vertical: true)
         #endif
         .environment(\.openURL, contentOpenURLAction)
     }
@@ -648,65 +645,64 @@ private struct BrowseImageView: View {
   }
 
   var body: some View {
-    ContentRemoteImage(
-      url: thumbnailURL,
-      maxPixelSize: maximumPreviewPixelSize,
-      loadAccessibilityLabel: "加载正文图片"
-    ) { phase in
-      switch phase {
-      case .success(let asset, _):
-        Button {
-          onOpen()
-        } label: {
-          RemoteImageAssetView(
-            asset: asset,
-            contentMode: .fill,
-            tracksScrollVisibility: tracksAnimationVisibility
-          )
-            .contentThumbnailDimming()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("查看大图")
-      case .empty:
-        if contentMediaLoadBehavior != .userInitiated {
-          Button(action: onOpen) {
-            imageLoadingPlaceholder
+    BrowseImagePreviewFrame(aspectRatio: aspectRatio) {
+      ContentRemoteImage(
+        url: thumbnailURL,
+        maxPixelSize: maximumPreviewPixelSize,
+        loadAccessibilityLabel: "加载正文图片"
+      ) { phase in
+        switch phase {
+        case .success(let asset, _):
+          Button {
+            onOpen()
+          } label: {
+            RemoteImageAssetView(
+              asset: asset,
+              contentMode: .fill,
+              tracksScrollVisibility: tracksAnimationVisibility
+            )
+              .contentThumbnailDimming()
+              .frame(maxWidth: .infinity, maxHeight: .infinity)
           }
           .buttonStyle(.plain)
           .accessibilityLabel("查看大图")
-        } else {
-          imageLoadingPlaceholder
-        }
-      case .loadRequired:
-        imageActionPlaceholder(title: "加载图片", systemImage: "arrow.down.circle")
-      case .failure:
-        if contentMediaLoadBehavior != .userInitiated {
-          Button(action: onOpen) {
+        case .empty:
+          if contentMediaLoadBehavior != .userInitiated {
+            Button(action: onOpen) {
+              imageLoadingPlaceholder
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("查看大图")
+          } else {
+            imageLoadingPlaceholder
+          }
+        case .loadRequired:
+          imageActionPlaceholder(title: "加载图片", systemImage: "arrow.down.circle")
+        case .failure:
+          if contentMediaLoadBehavior != .userInitiated {
+            Button(action: onOpen) {
+              imageActionPlaceholder(
+                title: "图片加载失败",
+                systemImage: "photo.badge.exclamationmark"
+              )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("查看大图")
+          } else if canRetryImageLoad {
+            imageActionPlaceholder(
+              title: "重新加载",
+              systemImage: "arrow.clockwise.circle"
+            )
+          } else {
             imageActionPlaceholder(
               title: "图片加载失败",
               systemImage: "photo.badge.exclamationmark"
             )
           }
-          .buttonStyle(.plain)
-          .accessibilityLabel("查看大图")
-        } else if canRetryImageLoad {
-          imageActionPlaceholder(
-            title: "重新加载",
-            systemImage: "arrow.clockwise.circle"
-          )
-        } else {
-          imageActionPlaceholder(
-            title: "图片加载失败",
-            systemImage: "photo.badge.exclamationmark"
-          )
         }
       }
+      .buttonStyle(.plain)
     }
-    .buttonStyle(.plain)
-    .aspectRatio(aspectRatio, contentMode: .fit)
-    .frame(maxWidth: .infinity)
-    .clipped()
   }
 
   private var imageLoadingPlaceholder: some View {
@@ -729,6 +725,31 @@ private struct BrowseImageView: View {
   private var canRetryImageLoad: Bool {
     contentMediaLoadBehavior == .userInitiated
       && RemoteImageURLPolicy.allows(thumbnailURL)
+  }
+}
+
+struct BrowseImagePreviewFrame<Content: View>: View {
+  let aspectRatio: CGFloat
+  private let content: Content
+
+  init(aspectRatio: CGFloat, @ViewBuilder content: () -> Content) {
+    self.aspectRatio = BrowseImageMasonryGeometry.sanitizedAspectRatio(aspectRatio)
+    self.content = content()
+  }
+
+  var body: some View {
+    Color.clear
+      .aspectRatio(aspectRatio, contentMode: .fit)
+      .frame(maxWidth: .infinity)
+      .overlay {
+        GeometryReader { proxy in
+          content
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .clipped()
+        }
+      }
+      .contentShape(Rectangle())
+      .clipped()
   }
 }
 

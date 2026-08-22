@@ -156,8 +156,6 @@ private struct InlineCommentPreviewRow: View {
               isEnabled: ThreadScrollPerformanceScenario
                 .appliesInlinePreviewMinimumScaleFactor
             )
-          #else
-            .minimumScaleFactor(0.75)
           #endif
           .multilineTextAlignment(.leading)
           .frame(maxWidth: .infinity, alignment: .leading)

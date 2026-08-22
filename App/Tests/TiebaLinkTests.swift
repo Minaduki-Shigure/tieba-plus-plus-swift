@@ -75,6 +75,16 @@ final class TiebaLinkTests: XCTestCase {
     )
   }
 
+  func testOfficialThreadURLAcceptsInertHashSlashFragment() throws {
+    let rawURL = "https://tieba.baidu.com/p/10957526376?see_lz=0#/"
+    let expected = TiebaLinkTarget.thread(
+      TiebaThreadRoute(threadID: 10_957_526_376, onlyThreadAuthor: false)
+    )
+
+    XCTAssertEqual(TiebaLink.target(from: rawURL), expected)
+    XCTAssertEqual(TiebaLink.target(fromPastedText: rawURL), expected)
+  }
+
   func testOfficialClientSchemeCanBePastedButUsesTheSameStrictTargets() throws {
     let forumURL = try XCTUnwrap(
       URL(string: "com.baidu.tieba://unidispatch/frs?kw=swift&source=official")
@@ -132,6 +142,7 @@ final class TiebaLinkTests: XCTestCase {
       "https://tieba.baidu.com/f?kw=one&kw=two",
       "https://tieba.baidu.com/f?kw=swift&kw",
       "https://tieba.baidu.com/f/?kw=swift",
+      "https://tieba.baidu.com/f?kw=swift#/",
       "https://tieba.baidu.com/p/0",
       "https://tieba.baidu.com/p/-1",
       "https://tieba.baidu.com/p/9223372036854775808",
@@ -139,6 +150,8 @@ final class TiebaLinkTests: XCTestCase {
       "https://tieba.baidu.com/p/42/",
       "https://tieba.baidu.com/p/42/extra",
       "https://tieba.baidu.com/p/42#99",
+      "https://tieba.baidu.com/p/42#/thread",
+      "https://tieba.baidu.com/p/42#//evil",
       "https://tieba.baidu.com/p/42?see_lz=2",
       "https://tieba.baidu.com/p/42?see_lz",
       "https://tieba.baidu.com/p/42?see_lz=0&see_lz=1",
@@ -154,6 +167,7 @@ final class TiebaLinkTests: XCTestCase {
       "tieba-plus-plus://thread//42",
       "tieba-plus-plus://thread/42/",
       "tieba-plus-plus://thread/42/extra",
+      "tieba-plus-plus://thread/42#/",
       "tieba-plus-plus://forum/",
       "tieba-plus-plus://user/-1",
       "tieba-plus-plus://user/7/",
@@ -163,6 +177,7 @@ final class TiebaLinkTests: XCTestCase {
       "com.baidu.tieba://unidispatch/pb?tid=0",
       "com.baidu.tieba://unidispatch/pb?tid",
       "com.baidu.tieba://unidispatch/pb?tid=42&tid",
+      "com.baidu.tieba://unidispatch/pb?tid=42#/",
     ]
 
     for rawURL in invalidURLs {
