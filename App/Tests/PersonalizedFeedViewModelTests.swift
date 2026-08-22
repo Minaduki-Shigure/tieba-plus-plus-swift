@@ -1723,7 +1723,7 @@ private actor ScriptedPersonalizedFeedService: PersonalizedFeedService {
     session: StoredAccountSession
   ) async throws -> PersonalizedFeedPageData {
     accountSessionIDs.append(session.id)
-    try await personalizedThreads(page: page)
+    return try await personalizedThreads(page: page)
   }
 
   func requestCount() -> Int { requests.count }
