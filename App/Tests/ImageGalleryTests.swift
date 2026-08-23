@@ -104,9 +104,127 @@ final class ImageGalleryTests: XCTestCase {
     XCTAssertEqual(ImageZoomGeometry.clampedScale(0.5), 1)
     XCTAssertEqual(ImageZoomGeometry.clampedScale(3), 3)
     XCTAssertEqual(ImageZoomGeometry.clampedScale(8), 5)
+    XCTAssertEqual(
+      ImageZoomGeometry.clampedScale(
+        14,
+        maximumScale: ImageZoomGeometry.absoluteMaximumScale
+      ),
+      14
+    )
     XCTAssertEqual(ImageZoomGeometry.clampedScale(.nan), 1)
     XCTAssertFalse(ImageZoomGeometry.allowsPanning(at: 1))
     XCTAssertTrue(ImageZoomGeometry.allowsPanning(at: 1.01))
+  }
+
+  func testZoomGeometryStartsUltraTallImagesAtReadableWidthAndTopEdge() throws {
+    let viewport = CGSize(width: 390, height: 844)
+    let fitted = ImageZoomGeometry.fittedImageSize(
+      width: 412,
+      height: 12_800,
+      viewportSize: viewport
+    )
+    let position = ImageZoomGeometry.readingPosition(
+      viewportSize: viewport,
+      fittedImageSize: fitted
+    )
+    let limits = try XCTUnwrap(
+      ImageZoomGeometry.panLimits(
+        scale: position.scale,
+        viewportSize: viewport,
+        fittedImageSize: fitted
+      )
+    )
+
+    XCTAssertEqual(position.scale, 390 / fitted.width, accuracy: 0.001)
+    XCTAssertGreaterThan(position.scale, 14)
+    XCTAssertTrue(ImageZoomGeometry.shouldStartInReadingMode(readingScale: position.scale))
+    XCTAssertEqual(position.offset, CGSize(width: 0, height: limits.vertical))
+    XCTAssertEqual(fitted.width * position.scale, viewport.width, accuracy: 0.001)
+    XCTAssertEqual(
+      viewport.height / 2 + position.offset.height - fitted.height * position.scale / 2,
+      0,
+      accuracy: 0.001
+    )
+    XCTAssertGreaterThanOrEqual(
+      ImageZoomGeometry.maximumScale(forReadingScale: position.scale),
+      position.scale * 2 - 0.001
+    )
+  }
+
+  func testZoomGeometryKeepsOrdinaryImagesInWholeImageFitMode() {
+    let viewport = CGSize(width: 390, height: 844)
+    let fitted = ImageZoomGeometry.fittedImageSize(
+      width: 1_200,
+      height: 900,
+      viewportSize: viewport
+    )
+    let position = ImageZoomGeometry.readingPosition(
+      viewportSize: viewport,
+      fittedImageSize: fitted
+    )
+
+    XCTAssertEqual(position, ImageZoomReadingPosition(scale: 1, offset: .zero))
+    XCTAssertFalse(ImageZoomGeometry.shouldStartInReadingMode(readingScale: position.scale))
+    XCTAssertFalse(ImageZoomGeometry.isValidViewport(.zero))
+    XCTAssertTrue(ImageZoomGeometry.isValidViewport(viewport))
+  }
+
+  func testZoomGeometryPreservesLongImageReadingProgressAcrossViewportChanges() throws {
+    let portrait = CGSize(width: 390, height: 844)
+    let landscape = CGSize(width: 844, height: 390)
+    let portraitFitted = ImageZoomGeometry.fittedImageSize(
+      width: 412,
+      height: 12_800,
+      viewportSize: portrait
+    )
+    let portraitPosition = ImageZoomGeometry.readingPosition(
+      viewportSize: portrait,
+      fittedImageSize: portraitFitted
+    )
+    let portraitLimits = try XCTUnwrap(
+      ImageZoomGeometry.panLimits(
+        scale: portraitPosition.scale,
+        viewportSize: portrait,
+        fittedImageSize: portraitFitted
+      )
+    )
+    let sourceOffset = ImageZoomGeometry.readingOffset(
+      verticalProgress: 0.37,
+      limits: portraitLimits
+    )
+    let landscapeFitted = ImageZoomGeometry.fittedImageSize(
+      width: 412,
+      height: 12_800,
+      viewportSize: landscape
+    )
+    let landscapePosition = ImageZoomGeometry.readingPosition(
+      viewportSize: landscape,
+      fittedImageSize: landscapeFitted
+    )
+    let landscapeLimits = try XCTUnwrap(
+      ImageZoomGeometry.panLimits(
+        scale: landscapePosition.scale,
+        viewportSize: landscape,
+        fittedImageSize: landscapeFitted
+      )
+    )
+    let destinationOffset = ImageZoomGeometry.readingOffset(
+      verticalProgress: ImageZoomGeometry.verticalReadingProgress(
+        offset: sourceOffset,
+        limits: portraitLimits
+      ),
+      limits: landscapeLimits
+    )
+
+    XCTAssertEqual(landscapeFitted.width * landscapePosition.scale, landscape.width, accuracy: 0.001)
+    XCTAssertEqual(
+      ImageZoomGeometry.verticalReadingProgress(
+        offset: destinationOffset,
+        limits: landscapeLimits
+      ),
+      0.37,
+      accuracy: 0.001
+    )
   }
 
   func testLoadingPresentationUsesExactDeterminateProgressWhenLengthIsReliable() {
@@ -220,7 +338,14 @@ final class ImageGalleryTests: XCTestCase {
         fittedImageSize: CGSize(width: CGFloat.infinity, height: 100)
       )
     )
-    for invalidScale in [CGFloat.nan, .infinity, 0.5, 6] {
+    XCTAssertNotNil(
+      ImageZoomGeometry.panLimits(
+        scale: 6,
+        viewportSize: viewport,
+        fittedImageSize: fittedImage
+      )
+    )
+    for invalidScale in [CGFloat.nan, .infinity, 0.5, 65] {
       XCTAssertNil(
         ImageZoomGeometry.panLimits(
           scale: invalidScale,
@@ -594,7 +719,7 @@ final class ImageGalleryTests: XCTestCase {
       )
     )
 
-    for invalidScale in [CGFloat.nan, .infinity, 0.5, 6] {
+    for invalidScale in [CGFloat.nan, .infinity, 0.5, 65] {
       coordinator.update(
         from: panOverlay(
           scale: invalidScale,
@@ -1048,7 +1173,7 @@ final class ImageGalleryTests: XCTestCase {
       offset: CGSize(width: 10, height: -5)
     )
     let secondState = ImageGalleryZoomState(scale: 3, offset: .zero)
-    let thirdState = ImageGalleryZoomState(scale: 4, offset: .zero)
+    let thirdState = ImageGalleryZoomState(scale: 14, offset: .zero)
 
     store.update(firstState, for: first.id)
     store.update(secondState, for: second.id)
@@ -1063,6 +1188,31 @@ final class ImageGalleryTests: XCTestCase {
     store.retainOnly([third.id])
     XCTAssertEqual(store.state(for: first.id), .identity)
     XCTAssertEqual(store.retainedStateCount, 1)
+  }
+
+  @MainActor
+  func testZoomStateStoreDistinguishesExplicitFitFromUnconfiguredState() throws {
+    let first = try item(1)
+    let second = try item(2)
+    let store = ImageGalleryZoomStateStore(maximumRetainedStates: 1)
+
+    XCTAssertEqual(store.configuration(for: first.id), .unconfigured)
+
+    store.update(.identity, for: first.id)
+
+    XCTAssertEqual(store.configuration(for: first.id), .configured(.identity))
+    XCTAssertEqual(store.retainedStateCount, 1)
+
+    let readingState = ImageGalleryZoomState(
+      scale: 14,
+      offset: CGSize(width: 0, height: 200),
+      mode: .reading,
+      referenceViewportSize: CGSize(width: 390, height: 844)
+    )
+    store.update(readingState, for: second.id)
+
+    XCTAssertEqual(store.configuration(for: first.id), .unconfigured)
+    XCTAssertEqual(store.configuration(for: second.id), .configured(readingState))
   }
 
   @MainActor

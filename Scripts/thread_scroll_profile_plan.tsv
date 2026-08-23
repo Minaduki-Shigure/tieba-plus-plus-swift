@@ -1,9 +1,9 @@
 ordinal	profile_id	comparison	variant	replicate	scenario	experiment
-1	inline-control-r1	inline	control	1	inline-replies	control
-2	inline-candidate-r1	inline	candidate	1	inline-replies	omit-inline-minimum-scale
-3	long-candidate-r1	long	candidate	1	long-plain-text	omit-long-text-fixed-size
-4	long-control-r1	long	control	1	long-plain-text	control
-5	inline-candidate-r2	inline	candidate	2	inline-replies	omit-inline-minimum-scale
-6	inline-control-r2	inline	control	2	inline-replies	control
-7	long-control-r2	long	control	2	long-plain-text	control
-8	long-candidate-r2	long	candidate	2	long-plain-text	omit-long-text-fixed-size
+1	comments-control-r1	comments	control	1	nested-comments	control
+2	comments-candidate-r1	comments	candidate	1	nested-comments	stabilize-comments-rows
+3	comments-mixed-candidate-r1	comments-mixed	candidate	1	mixed-nested-comments	stabilize-comments-rows
+4	comments-mixed-control-r1	comments-mixed	control	1	mixed-nested-comments	control
+5	comments-candidate-r2	comments	candidate	2	nested-comments	stabilize-comments-rows
+6	comments-control-r2	comments	control	2	nested-comments	control
+7	comments-mixed-control-r2	comments-mixed	control	2	mixed-nested-comments	control
+8	comments-mixed-candidate-r2	comments-mixed	candidate	2	mixed-nested-comments	stabilize-comments-rows

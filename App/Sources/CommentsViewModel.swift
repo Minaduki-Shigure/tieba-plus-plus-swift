@@ -28,6 +28,7 @@ final class CommentsViewModel: ObservableObject {
   @Published private(set) var parentPost: CommentParentPostContext?
   @Published private(set) var thread: BrowseThread?
   @Published private(set) var comments: [BrowseComment] = []
+  private(set) var displayableComments: [BrowseComment] = []
   private(set) var hasDisplayableComments = false
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
@@ -392,6 +393,8 @@ final class CommentsViewModel: ObservableObject {
               )
             } else {
               indexCommentsIncrementally(newItems)
+              displayableComments = newItems.filter { $0.localVisibility != .hidden }
+                + displayableComments
               comments = newItems + comments
             }
             lowestLoadedPage = response.currentPage
@@ -434,6 +437,9 @@ final class CommentsViewModel: ObservableObject {
               )
             } else {
               indexCommentsIncrementally(newItems)
+              displayableComments.append(
+                contentsOf: newItems.filter { $0.localVisibility != .hidden }
+              )
               comments.append(contentsOf: newItems)
             }
             highestLoadedPage = response.currentPage
@@ -600,6 +606,7 @@ final class CommentsViewModel: ObservableObject {
     parentPost = nil
     thread = nil
     comments = []
+    displayableComments = []
   }
 
   private func replaceCommentSnapshot(
@@ -721,13 +728,17 @@ final class CommentsViewModel: ObservableObject {
     }
     var ids = Set<Int64>()
     var targets: [Int64: ContentAgreementTarget] = [:]
+    var displayable: [BrowseComment] = []
     ids.reserveCapacity(comments.count)
     targets.reserveCapacity(comments.count)
+    displayable.reserveCapacity(comments.count)
     var containsDisplayableComment = false
     for comment in comments {
       ids.insert(comment.id)
-      containsDisplayableComment = containsDisplayableComment
-        || comment.localVisibility != .hidden
+      if comment.localVisibility != .hidden {
+        displayable.append(comment)
+        containsDisplayableComment = true
+      }
       if
         let thread,
         let target = ContentAgreementTarget(
@@ -740,6 +751,7 @@ final class CommentsViewModel: ObservableObject {
       }
     }
     commentIDs = ids
+    displayableComments = displayable
     if hasDisplayableComments != containsDisplayableComment {
       hasDisplayableComments = containsDisplayableComment
     }

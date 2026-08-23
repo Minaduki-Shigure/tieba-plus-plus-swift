@@ -5219,6 +5219,7 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.agreementExplicitRefreshEpoch, 0)
     XCTAssertEqual(viewModel.parentAgreementTarget, parentTarget)
     XCTAssertEqual(viewModel.agreementTarget(forCommentID: current.id), currentTarget)
+    XCTAssertEqual(viewModel.displayableComments.map(\.id), [current.id])
     XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 1)
     XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 0)
 
@@ -5229,6 +5230,7 @@ final class BrowseViewModelTests: XCTestCase {
       Set([initialDescriptor, previousDescriptor])
     )
     XCTAssertEqual(viewModel.agreementTarget(forCommentID: earlier.id), earlierTarget)
+    XCTAssertEqual(viewModel.displayableComments.map(\.id), [earlier.id, current.id])
     XCTAssertEqual(viewModel.agreementExplicitRefreshEpoch, 0)
     XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 1)
     XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 1)
@@ -5241,6 +5243,10 @@ final class BrowseViewModelTests: XCTestCase {
       Set([initialDescriptor, previousDescriptor, nextDescriptor])
     )
     XCTAssertEqual(viewModel.agreementTarget(forCommentID: later.id), laterTarget)
+    XCTAssertEqual(
+      viewModel.displayableComments.map(\.id),
+      [earlier.id, current.id, later.id]
+    )
     XCTAssertEqual(viewModel.agreementExplicitRefreshEpoch, 0)
     XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 1)
     XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 2)
@@ -5253,6 +5259,7 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.agreementTarget(forCommentID: current.id), currentTarget)
     XCTAssertNil(viewModel.agreementTarget(forCommentID: earlier.id))
     XCTAssertNil(viewModel.agreementTarget(forCommentID: later.id))
+    XCTAssertEqual(viewModel.displayableComments.map(\.id), [current.id, refreshed.id])
     XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 2)
     XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 2)
   }
@@ -5302,6 +5309,7 @@ final class BrowseViewModelTests: XCTestCase {
     try await waitUntil { viewModel.state == .loaded }
 
     XCTAssertFalse(viewModel.hasDisplayableComments)
+    XCTAssertTrue(viewModel.displayableComments.isEmpty)
     XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 1)
     XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 0)
 
@@ -5309,6 +5317,7 @@ final class BrowseViewModelTests: XCTestCase {
     try await waitUntil { viewModel.comments.map(\.id) == [hidden.id, visible.id] }
 
     XCTAssertTrue(viewModel.hasDisplayableComments)
+    XCTAssertEqual(viewModel.displayableComments, [visible])
     XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 1)
     XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 1)
 
@@ -5316,6 +5325,7 @@ final class BrowseViewModelTests: XCTestCase {
 
     XCTAssertEqual(viewModel.comments, [refreshedHidden])
     XCTAssertFalse(viewModel.hasDisplayableComments)
+    XCTAssertTrue(viewModel.displayableComments.isEmpty)
     XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 2)
     XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 1)
   }

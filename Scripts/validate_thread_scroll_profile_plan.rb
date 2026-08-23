@@ -20,10 +20,10 @@ abort "Profile IDs must be unique" unless profile_ids.uniq.length == profile_ids
 abort "Profile IDs must be lowercase ASCII slugs" unless profile_ids.all? { |id| id.match?(/\A[a-z0-9-]+\z/) }
 
 expected_experiments = {
-  ["inline", "control"] => ["inline-replies", "control"],
-  ["inline", "candidate"] => ["inline-replies", "omit-inline-minimum-scale"],
-  ["long", "control"] => ["long-plain-text", "control"],
-  ["long", "candidate"] => ["long-plain-text", "omit-long-text-fixed-size"],
+  ["comments", "control"] => ["nested-comments", "control"],
+  ["comments", "candidate"] => ["nested-comments", "stabilize-comments-rows"],
+  ["comments-mixed", "control"] => ["mixed-nested-comments", "control"],
+  ["comments-mixed", "candidate"] => ["mixed-nested-comments", "stabilize-comments-rows"],
 }
 
 expected_experiments.each do |(comparison, variant), (scenario, experiment)|
@@ -39,7 +39,7 @@ expected_experiments.each do |(comparison, variant), (scenario, experiment)|
     end
 end
 
-%w[inline long].each do |comparison|
+%w[comments comments-mixed].each do |comparison|
   comparison_rows = plan.select { |row| row.fetch("comparison") == comparison }
   control_ordinals = comparison_rows.filter_map do |row|
     Integer(row.fetch("ordinal"), 10) if row.fetch("variant") == "control"

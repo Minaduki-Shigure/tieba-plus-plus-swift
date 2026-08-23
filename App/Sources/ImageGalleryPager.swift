@@ -479,16 +479,57 @@ enum ImageGalleryAccessibilityPolicy {
   }
 }
 
+enum ImageGalleryZoomMode: Equatable {
+  case fit
+  case reading
+  case custom
+}
+
 struct ImageGalleryZoomState: Equatable {
-  static let identity = Self(scale: 1, offset: .zero)
+  static let identity = Self(scale: 1, offset: .zero, mode: .fit)
 
   let scale: CGFloat
   let offset: CGSize
+  let mode: ImageGalleryZoomMode
+  let referenceViewportSize: CGSize?
 
-  init(scale: CGFloat, offset: CGSize) {
-    let scale = ImageZoomGeometry.clampedScale(scale)
+  init(
+    scale: CGFloat,
+    offset: CGSize,
+    mode: ImageGalleryZoomMode? = nil,
+    referenceViewportSize: CGSize? = nil
+  ) {
+    let scale = ImageZoomGeometry.clampedScale(
+      scale,
+      maximumScale: ImageZoomGeometry.absoluteMaximumScale
+    )
     self.scale = scale
     self.offset = ImageZoomGeometry.allowsPanning(at: scale) ? offset : .zero
+    let mode = mode ?? (ImageZoomGeometry.allowsPanning(at: scale) ? .custom : .fit)
+    self.mode = mode
+    if
+      mode == .reading,
+      let referenceViewportSize,
+      referenceViewportSize.width.isFinite,
+      referenceViewportSize.height.isFinite,
+      referenceViewportSize.width > 0,
+      referenceViewportSize.height > 0
+    {
+      self.referenceViewportSize = referenceViewportSize
+    } else {
+      self.referenceViewportSize = nil
+    }
+  }
+}
+
+struct ImageGalleryZoomConfiguration: Equatable {
+  static let unconfigured = Self(state: .identity, isConfigured: false)
+
+  let state: ImageGalleryZoomState
+  let isConfigured: Bool
+
+  static func configured(_ state: ImageGalleryZoomState) -> Self {
+    Self(state: state, isConfigured: true)
   }
 }
 
@@ -505,18 +546,17 @@ final class ImageGalleryZoomStateStore: ObservableObject {
   var retainedStateCount: Int { states.count }
 
   func state(for id: ImageGalleryItem.ID) -> ImageGalleryZoomState {
-    guard let state = states[id] else { return .identity }
+    configuration(for: id).state
+  }
+
+  func configuration(for id: ImageGalleryItem.ID) -> ImageGalleryZoomConfiguration {
+    guard let state = states[id] else { return .unconfigured }
     recency.removeAll(where: { $0 == id })
     recency.append(id)
-    return state
+    return .configured(state)
   }
 
   func update(_ state: ImageGalleryZoomState, for id: ImageGalleryItem.ID) {
-    if state == .identity {
-      states[id] = nil
-      recency.removeAll(where: { $0 == id })
-      return
-    }
     states[id] = state
     recency.removeAll(where: { $0 == id })
     recency.append(id)
@@ -1008,14 +1048,14 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       if let controller = controllers[id] {
         controller.update(
           item: item,
-          zoomState: zoomStateStore?.state(for: id) ?? .identity,
+          zoomConfiguration: zoomConfiguration(for: id),
           animationPlaybackEnabled: controller.animationPlaybackEnabled
         )
         return controller
       }
       let controller = ImageGalleryPageHostingController(
         item: item,
-        zoomState: zoomStateStore?.state(for: id) ?? .identity,
+        zoomConfiguration: zoomConfiguration(for: id),
         animationPlaybackEnabled: false,
         onZoomStateChange: { [weak self] itemID, state in
           self?.zoomStateDidChange(itemID: itemID, state: state)
@@ -1043,12 +1083,15 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
         }
         controller.update(
           item: item,
-          zoomState: zoomStateStore?.state(for: id) ?? .identity,
+          zoomConfiguration: zoomConfiguration(for: id),
           animationPlaybackEnabled: controller.animationPlaybackEnabled
         )
       }
       for id in invalidIDs {
-        controllers[id]?.setAnimationPlaybackEnabled(false, zoomState: .identity)
+        controllers[id]?.setAnimationPlaybackEnabled(
+          false,
+          zoomConfiguration: .configured(.identity)
+        )
         controllers[id] = nil
       }
       synchronizeAnimationPlaybackControllers()
@@ -1066,7 +1109,10 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       if let visibleID = currentVisibleID { retainedIDs.insert(visibleID) }
       let removedIDs = Set(controllers.keys).subtracting(retainedIDs)
       for id in removedIDs {
-        controllers[id]?.setAnimationPlaybackEnabled(false, zoomState: .identity)
+        controllers[id]?.setAnimationPlaybackEnabled(
+          false,
+          zoomConfiguration: .configured(.identity)
+        )
         controllers[id] = nil
       }
       animationPlaybackOwnership.retainOnly(Set(snapshot.itemIDs))
@@ -1087,13 +1133,13 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       for (id, controller) in controllers where id != ownerID {
         controller.setAnimationPlaybackEnabled(
           false,
-          zoomState: zoomStateStore?.state(for: id) ?? .identity
+          zoomConfiguration: zoomConfiguration(for: id)
         )
       }
       if let ownerID, let ownerController = controllers[ownerID] {
         ownerController.setAnimationPlaybackEnabled(
           true,
-          zoomState: zoomStateStore?.state(for: ownerID) ?? .identity
+          zoomConfiguration: zoomConfiguration(for: ownerID)
         )
       }
     }
@@ -1104,6 +1150,12 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
     ) {
       guard snapshot.contains(itemID) else { return }
       zoomStateStore?.update(state, for: itemID)
+    }
+
+    private func zoomConfiguration(
+      for itemID: ImageGalleryItem.ID
+    ) -> ImageGalleryZoomConfiguration {
+      zoomStateStore?.configuration(for: itemID) ?? .unconfigured
     }
 
     private func configurePagingGesture() {
@@ -1167,7 +1219,7 @@ private final class ImageGalleryPageHostingController: UIHostingController<AnyVi
 
   init(
     item: ImageGalleryItem,
-    zoomState: ImageGalleryZoomState,
+    zoomConfiguration: ImageGalleryZoomConfiguration,
     animationPlaybackEnabled: Bool,
     onZoomStateChange: @escaping (ImageGalleryItem.ID, ImageGalleryZoomState) -> Void
   ) {
@@ -1179,7 +1231,8 @@ private final class ImageGalleryPageHostingController: UIHostingController<AnyVi
       rootView: AnyView(
         ZoomableRemoteImage(
           item: item,
-          initialZoomState: zoomState,
+          initialZoomState: zoomConfiguration.state,
+          initialZoomWasConfigured: zoomConfiguration.isConfigured,
           animationPlaybackEnabled: animationPlaybackEnabled,
           onZoomStateChange: onZoomStateChange
         )
@@ -1195,7 +1248,7 @@ private final class ImageGalleryPageHostingController: UIHostingController<AnyVi
 
   func update(
     item: ImageGalleryItem,
-    zoomState: ImageGalleryZoomState,
+    zoomConfiguration: ImageGalleryZoomConfiguration,
     animationPlaybackEnabled: Bool
   ) {
     guard self.item != item || self.animationPlaybackEnabled != animationPlaybackEnabled else {
@@ -1206,7 +1259,8 @@ private final class ImageGalleryPageHostingController: UIHostingController<AnyVi
     rootView = AnyView(
       ZoomableRemoteImage(
         item: item,
-        initialZoomState: zoomState,
+        initialZoomState: zoomConfiguration.state,
+        initialZoomWasConfigured: zoomConfiguration.isConfigured,
         animationPlaybackEnabled: animationPlaybackEnabled,
         onZoomStateChange: onZoomStateChange
       )
@@ -1215,11 +1269,11 @@ private final class ImageGalleryPageHostingController: UIHostingController<AnyVi
 
   func setAnimationPlaybackEnabled(
     _ enabled: Bool,
-    zoomState: ImageGalleryZoomState
+    zoomConfiguration: ImageGalleryZoomConfiguration
   ) {
     update(
       item: item,
-      zoomState: zoomState,
+      zoomConfiguration: zoomConfiguration,
       animationPlaybackEnabled: enabled
     )
   }

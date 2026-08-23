@@ -7,7 +7,12 @@ on:
     paths:
       - .github/workflows/thread-scroll-profile.yml
       - App/Sources/BrowseContentView.swift
+      - App/Sources/BlockedContentView.swift
+      - App/Sources/CommentsView.swift
+      - App/Sources/CommentsViewModel.swift
+      - App/Sources/ContentAgreementStore.swift
       - App/Sources/InlineCommentPreview.swift
+      - App/Sources/PostMetadataView.swift
       - App/Sources/ReplyModels.swift
       - App/Sources/ThreadScrollPerformanceScenario.swift
       - App/Sources/ThreadView.swift

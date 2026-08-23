@@ -533,6 +533,36 @@ final class ContentAgreementStoreTests: XCTestCase {
 
     XCTAssertTrue(retained === store.entry(for: target))
   }
+
+  func testAllActiveEntriesRemainStableAboveCapacityUntilScopeIsRemoved() async {
+    let targets = (300...302).map { agreementTarget(objectID: Int64($0)) }
+    let service = ContentAgreementStoreServiceSpy()
+    let vault = ContentAgreementStoreVaultSpy()
+    let store = ContentAgreementStore(
+      access: AccountAccess(vault: vault, service: service),
+      capacity: 2,
+      observesAccountSessionChanges: false
+    )
+    let scope = UUID()
+    await store.replaceDescriptors(
+      targets.enumerated().map { index, target in
+        agreementDescriptor(target: target, page: index + 1)
+      },
+      for: scope
+    )
+
+    let entries = targets.map { store.entry(for: $0) }
+
+    XCTAssertTrue(entries[0] === store.entry(for: targets[0]))
+    XCTAssertTrue(entries[1] === store.entry(for: targets[1]))
+    XCTAssertTrue(entries[2] === store.entry(for: targets[2]))
+    XCTAssertEqual(store.evictionCandidateScanCount, 0)
+
+    store.removeScope(scope)
+
+    XCTAssertEqual(store.evictionCandidateScanCount, 1)
+    XCTAssertFalse(entries[0] === store.entry(for: targets[0]))
+  }
 }
 
 private struct ContentAgreementStoreTestFailure: LocalizedError, Sendable {

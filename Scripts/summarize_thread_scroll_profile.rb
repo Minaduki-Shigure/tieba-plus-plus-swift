@@ -94,8 +94,12 @@ if profile_plan
   report << "This run performs two isolated Profile-only A/B comparisons. Each side is recorded " \
             "twice, and the order is reversed for the second replicate."
   report << ""
-  report << "- `inline`: the candidate omits only `minimumScaleFactor(0.75)` from inline reply previews."
-  report << "- `long`: the candidate omits only vertical `fixedSize` from 900-character plain text."
+  report << "Recording begins before CommentsView is constructed. The A/B switch changes only " \
+            "the List row collection/identity path; model filtering and agreement-cache changes " \
+            "are common to both variants."
+  report << ""
+  report << "- `comments`: 240 visible nested replies; the candidate guarantees one List row per item and uses the ForEach identity."
+  report << "- `comments-mixed`: 600 nested replies with visible, placeholder, and hidden states; the candidate precomputes displayable items before List construction."
   report << ""
   report << "| Order | Profile | Comparison | Variant | Replicate | Scenario | Experiment |"
   report << "| ---: | --- | --- | --- | ---: | --- | --- |"
@@ -161,7 +165,7 @@ unless options[:analyses].empty?
     hotspot_groups = {
       "Layout/View Graph" => /(?:AG::Graph|ViewGraph|Layout|sizeThatFits|LazyStack)/,
       "Text" => /(?:ResolvedText|Text\.resolve|AttributedString|Typesetter|CTLine)/,
-      "App" => /(?:ThreadView|PostView|BrowseContent|InlineComment|Reply)/,
+      "App" => /(?:ThreadView|CommentsView|CommentsViewModel|ContentAgreement|PostView|BrowseContent|InlineComment|Reply)/,
     }
     hotspots = hotspot_groups.flat_map do |group, pattern|
       inclusive_symbols.select { |symbol, _| symbol.match?(pattern) }.first(7).map do |entry|
@@ -190,7 +194,7 @@ if profile_plan
   report << ""
 
   comparison_metrics = {
-    "inline" => [
+    "comments" => [
       ["Main-thread running", ->(analysis) { analysis.dig("totals", "main weight ms").to_f }],
       ["SwiftUI layout/view graph", ->(analysis) { category_weight(analysis, "SwiftUI layout and view graph") }],
       ["Text shaping/measurement", ->(analysis) { category_weight(analysis, "Text shaping and measurement") }],
@@ -198,13 +202,13 @@ if profile_plan
       ["App implementation frames", ->(analysis) { category_weight(analysis, "App implementation frames") }],
       ["Scaled-text layout", ->(analysis) { category_weight(analysis, "Scaled-text layout") }],
     ],
-    "long" => [
+    "comments-mixed" => [
       ["Main-thread running", ->(analysis) { analysis.dig("totals", "main weight ms").to_f }],
       ["SwiftUI layout/view graph", ->(analysis) { category_weight(analysis, "SwiftUI layout and view graph") }],
       ["Text shaping/measurement", ->(analysis) { category_weight(analysis, "Text shaping and measurement") }],
       ["Core Animation/drawing", ->(analysis) { category_weight(analysis, "Core Animation and drawing") }],
       ["App implementation frames", ->(analysis) { category_weight(analysis, "App implementation frames") }],
-      ["Fixed-size layout", ->(analysis) { category_weight(analysis, "Fixed-size layout") }],
+      ["Scaled-text layout", ->(analysis) { category_weight(analysis, "Scaled-text layout") }],
     ],
   }
 
@@ -367,7 +371,7 @@ if sample
   ).reject(&:empty?)
   framework_lines = call_graph_lines.filter do |line|
     line.match?(
-      /(?:CoreText|TextKit|SwiftUI|AttributeGraph|CoreGraphics|QuartzCore|UIKitCore|layout|glyph|Typesetter|BrowseContentView|ThreadView|InlineComment)/i
+      /(?:CoreText|TextKit|SwiftUI|AttributeGraph|CoreGraphics|QuartzCore|UIKitCore|layout|glyph|Typesetter|BrowseContentView|ThreadView|CommentsView|CommentsViewModel|ContentAgreement|InlineComment)/i
     )
   end.uniq.first(160)
   report << "## Sampled call stacks"

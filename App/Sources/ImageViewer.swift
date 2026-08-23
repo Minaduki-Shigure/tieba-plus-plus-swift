@@ -81,13 +81,24 @@ struct ImageGalleryPresentation: Identifiable, Equatable, Sendable {
 }
 
 enum ImageZoomGeometry {
-  static func clampedScale(_ scale: CGFloat) -> CGFloat {
+  static let defaultMaximumScale: CGFloat = 5
+  static let absoluteMaximumScale: CGFloat = 64
+  static let automaticReadingScaleThreshold: CGFloat = 2
+
+  static func clampedScale(
+    _ scale: CGFloat,
+    maximumScale: CGFloat = defaultMaximumScale
+  ) -> CGFloat {
     guard !scale.isNaN else { return 1 }
-    return min(max(scale, 1), 5)
+    let maximumScale = min(
+      max(maximumScale.isFinite ? maximumScale : defaultMaximumScale, 1),
+      absoluteMaximumScale
+    )
+    return min(max(scale, 1), maximumScale)
   }
 
   static func allowsPanning(at scale: CGFloat) -> Bool {
-    clampedScale(scale) > 1.001
+    clampedScale(scale, maximumScale: absoluteMaximumScale) > 1.001
   }
 
   static func clampedOffset(
@@ -96,7 +107,7 @@ enum ImageZoomGeometry {
     viewportSize: CGSize,
     fittedImageSize: CGSize? = nil
   ) -> CGSize {
-    let scale = clampedScale(scale)
+    let scale = clampedScale(scale, maximumScale: absoluteMaximumScale)
     guard scale > 1 else { return .zero }
     guard let limits = panLimits(
       scale: scale,
@@ -117,7 +128,7 @@ enum ImageZoomGeometry {
     guard
       scale.isFinite,
       scale >= 1,
-      scale <= 5,
+      scale <= absoluteMaximumScale,
       viewportSize.width.isFinite,
       viewportSize.height.isFinite,
       viewportSize.width > 0,
@@ -159,6 +170,81 @@ enum ImageZoomGeometry {
     }
     return CGSize(width: viewportHeight * imageAspectRatio, height: viewportHeight)
   }
+
+  static func readingScale(
+    viewportSize: CGSize,
+    fittedImageSize: CGSize
+  ) -> CGFloat {
+    guard
+      viewportSize.width.isFinite,
+      viewportSize.width > 0,
+      fittedImageSize.width.isFinite,
+      fittedImageSize.width > 0
+    else { return 1 }
+    return clampedScale(
+      viewportSize.width / fittedImageSize.width,
+      maximumScale: absoluteMaximumScale
+    )
+  }
+
+  static func isValidViewport(_ viewportSize: CGSize) -> Bool {
+    viewportSize.width.isFinite
+      && viewportSize.height.isFinite
+      && viewportSize.width > 0
+      && viewportSize.height > 0
+  }
+
+  static func maximumScale(forReadingScale readingScale: CGFloat) -> CGFloat {
+    clampedScale(
+      max(defaultMaximumScale, readingScale * 2),
+      maximumScale: absoluteMaximumScale
+    )
+  }
+
+  static func shouldStartInReadingMode(readingScale: CGFloat) -> Bool {
+    readingScale >= automaticReadingScaleThreshold
+  }
+
+  static func readingPosition(
+    viewportSize: CGSize,
+    fittedImageSize: CGSize
+  ) -> ImageZoomReadingPosition {
+    let scale = readingScale(
+      viewportSize: viewportSize,
+      fittedImageSize: fittedImageSize
+    )
+    let verticalOffset = panLimits(
+      scale: scale,
+      viewportSize: viewportSize,
+      fittedImageSize: fittedImageSize
+    )?.vertical ?? 0
+    return ImageZoomReadingPosition(
+      scale: scale,
+      offset: CGSize(width: 0, height: verticalOffset)
+    )
+  }
+
+  static func verticalReadingProgress(
+    offset: CGSize,
+    limits: ImageZoomPanLimits?
+  ) -> CGFloat {
+    guard let limits, limits.vertical.isFinite, limits.vertical > 0 else { return 0 }
+    return min(max((limits.vertical - offset.height) / (2 * limits.vertical), 0), 1)
+  }
+
+  static func readingOffset(
+    verticalProgress: CGFloat,
+    limits: ImageZoomPanLimits?
+  ) -> CGSize {
+    guard let limits, limits.vertical.isFinite, limits.vertical > 0 else { return .zero }
+    let progress = min(max(verticalProgress.isFinite ? verticalProgress : 0, 0), 1)
+    return CGSize(width: 0, height: limits.vertical * (1 - 2 * progress))
+  }
+}
+
+struct ImageZoomReadingPosition: Equatable, Sendable {
+  let scale: CGFloat
+  let offset: CGSize
 }
 
 struct ImageZoomPanLimits: Equatable, Sendable {
@@ -338,7 +424,7 @@ struct ImageZoomPanGestureOverlay: UIViewRepresentable {
       guard
         configuration.scale.isFinite,
         configuration.scale >= 1,
-        configuration.scale <= 5
+        configuration.scale <= ImageZoomGeometry.absoluteMaximumScale
       else { return true }
       guard ImageZoomGeometry.allowsPanning(at: configuration.scale) else { return false }
       return ImageZoomPanOwnershipPolicy.resolve(
@@ -804,10 +890,14 @@ struct ZoomableRemoteImage: View {
   @State private var offset: CGSize
   @State private var committedOffset: CGSize
   @State private var lastPublishedZoomState: ImageGalleryZoomState
+  @State private var hasConfiguredInitialZoom: Bool
+  @State private var zoomMode: ImageGalleryZoomMode
+  @State private var lastViewportSize: CGSize?
 
   init(
     item: ImageGalleryItem,
     initialZoomState: ImageGalleryZoomState = .identity,
+    initialZoomWasConfigured: Bool = false,
     animationPlaybackEnabled: Bool,
     onZoomStateChange: @escaping (
       ImageGalleryItem.ID,
@@ -822,13 +912,16 @@ struct ZoomableRemoteImage: View {
     _offset = State(initialValue: initialZoomState.offset)
     _committedOffset = State(initialValue: initialZoomState.offset)
     _lastPublishedZoomState = State(initialValue: initialZoomState)
+    _hasConfiguredInitialZoom = State(initialValue: initialZoomWasConfigured)
+    _zoomMode = State(initialValue: initialZoomState.mode)
+    _lastViewportSize = State(initialValue: initialZoomState.referenceViewportSize)
   }
 
   var body: some View {
     GeometryReader { proxy in
       DownsampledRemoteImage(
         url: item.url,
-        maxPixelSize: 4_096,
+        maxPixelSize: ImageDownsampler.maximumStaticPixelDimension,
         fetchPolicy: .allowNetwork(.original)
       ) { phase, progress in
         switch phase {
@@ -883,13 +976,13 @@ struct ZoomableRemoteImage: View {
               toggleZoom(viewportSize: proxy.size, imagePixelSize: pixelSize)
             }
             .onAppear {
-              clampZoomOffset(
+              configureInitialZoomIfNeeded(
                 viewportSize: proxy.size,
                 imagePixelSize: pixelSize
               )
             }
             .onChange(of: proxy.size) { viewportSize in
-              clampZoomOffset(
+              configureInitialZoomIfNeeded(
                 viewportSize: viewportSize,
                 imagePixelSize: pixelSize
               )
@@ -908,9 +1001,6 @@ struct ZoomableRemoteImage: View {
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-    .onAppear {
-      publishZoomState(force: true)
-    }
   }
 
   private func magnificationGesture(
@@ -919,7 +1009,14 @@ struct ZoomableRemoteImage: View {
   ) -> some Gesture {
     MagnificationGesture()
       .onChanged { value in
-        scale = ImageZoomGeometry.clampedScale(committedScale * value)
+        zoomMode = .custom
+        scale = ImageZoomGeometry.clampedScale(
+          committedScale * value,
+          maximumScale: maximumZoomScale(
+            viewportSize: viewportSize,
+            imagePixelSize: imagePixelSize
+          )
+        )
         offset = ImageZoomGeometry.clampedOffset(
           committedOffset,
           scale: scale,
@@ -986,23 +1083,136 @@ struct ZoomableRemoteImage: View {
 
   private func toggleZoom(viewportSize: CGSize, imagePixelSize: CGSize) {
     withAnimation(.easeInOut(duration: 0.2)) {
-      scale = ImageZoomGeometry.allowsPanning(at: scale) ? 1 : 2
-      offset = ImageZoomGeometry.clampedOffset(
-        .zero,
-        scale: scale,
-        viewportSize: viewportSize,
-        fittedImageSize: fittedImageSize(
-          in: viewportSize,
-          imagePixelSize: imagePixelSize
-        )
+      let fittedImageSize = fittedImageSize(
+        in: viewportSize,
+        imagePixelSize: imagePixelSize
       )
+      if ImageZoomGeometry.allowsPanning(at: scale) {
+        scale = 1
+        offset = .zero
+        zoomMode = .fit
+      } else {
+        let readingPosition = ImageZoomGeometry.readingPosition(
+          viewportSize: viewportSize,
+          fittedImageSize: fittedImageSize
+        )
+        scale = ImageZoomGeometry.clampedScale(
+          max(2, readingPosition.scale),
+          maximumScale: ImageZoomGeometry.maximumScale(
+            forReadingScale: readingPosition.scale
+          )
+        )
+        offset = ImageZoomGeometry.shouldStartInReadingMode(
+          readingScale: readingPosition.scale
+        )
+          ? ImageZoomGeometry.clampedOffset(
+            readingPosition.offset,
+            scale: scale,
+            viewportSize: viewportSize,
+            fittedImageSize: fittedImageSize
+          )
+          : .zero
+        zoomMode = ImageZoomGeometry.shouldStartInReadingMode(
+          readingScale: readingPosition.scale
+        ) ? .reading : .custom
+      }
       committedScale = scale
       committedOffset = offset
       publishZoomState()
     }
   }
 
-  private func clampZoomOffset(viewportSize: CGSize, imagePixelSize: CGSize) {
+  private func configureInitialZoomIfNeeded(
+    viewportSize: CGSize,
+    imagePixelSize: CGSize
+  ) {
+    guard ImageZoomGeometry.isValidViewport(viewportSize) else { return }
+    guard !hasConfiguredInitialZoom else {
+      if zoomMode == .reading, lastViewportSize != nil {
+        handleViewportChange(viewportSize: viewportSize, imagePixelSize: imagePixelSize)
+        return
+      }
+      lastViewportSize = viewportSize
+      clampZoomState(viewportSize: viewportSize, imagePixelSize: imagePixelSize)
+      return
+    }
+    lastViewportSize = viewportSize
+    hasConfiguredInitialZoom = true
+    let fittedImageSize = fittedImageSize(
+      in: viewportSize,
+      imagePixelSize: imagePixelSize
+    )
+    let readingPosition = ImageZoomGeometry.readingPosition(
+      viewportSize: viewportSize,
+      fittedImageSize: fittedImageSize
+    )
+    guard ImageZoomGeometry.shouldStartInReadingMode(readingScale: readingPosition.scale) else {
+      clampZoomState(viewportSize: viewportSize, imagePixelSize: imagePixelSize)
+      publishZoomState(force: true)
+      return
+    }
+    scale = readingPosition.scale
+    zoomMode = .reading
+    committedScale = readingPosition.scale
+    offset = readingPosition.offset
+    committedOffset = readingPosition.offset
+    publishZoomState(force: true)
+  }
+
+  private func handleViewportChange(
+    viewportSize: CGSize,
+    imagePixelSize: CGSize
+  ) {
+    let previousViewportSize = lastViewportSize
+    lastViewportSize = viewportSize
+    guard zoomMode == .reading, let previousViewportSize else {
+      clampZoomState(viewportSize: viewportSize, imagePixelSize: imagePixelSize)
+      return
+    }
+
+    let previousFittedSize = fittedImageSize(
+      in: previousViewportSize,
+      imagePixelSize: imagePixelSize
+    )
+    let progress = ImageZoomGeometry.verticalReadingProgress(
+      offset: offset,
+      limits: ImageZoomGeometry.panLimits(
+        scale: scale,
+        viewportSize: previousViewportSize,
+        fittedImageSize: previousFittedSize
+      )
+    )
+    let newFittedSize = fittedImageSize(
+      in: viewportSize,
+      imagePixelSize: imagePixelSize
+    )
+    let readingPosition = ImageZoomGeometry.readingPosition(
+      viewportSize: viewportSize,
+      fittedImageSize: newFittedSize
+    )
+    scale = readingPosition.scale
+    offset = ImageZoomGeometry.readingOffset(
+      verticalProgress: progress,
+      limits: ImageZoomGeometry.panLimits(
+        scale: scale,
+        viewportSize: viewportSize,
+        fittedImageSize: newFittedSize
+      )
+    )
+    committedScale = scale
+    committedOffset = offset
+    publishZoomState()
+  }
+
+  private func clampZoomState(viewportSize: CGSize, imagePixelSize: CGSize) {
+    scale = ImageZoomGeometry.clampedScale(
+      scale,
+      maximumScale: maximumZoomScale(
+        viewportSize: viewportSize,
+        imagePixelSize: imagePixelSize
+      )
+    )
+    committedScale = scale
     offset = ImageZoomGeometry.clampedOffset(
       offset,
       scale: scale,
@@ -1016,8 +1226,29 @@ struct ZoomableRemoteImage: View {
     publishZoomState()
   }
 
+  private func maximumZoomScale(
+    viewportSize: CGSize,
+    imagePixelSize: CGSize
+  ) -> CGFloat {
+    let fittedImageSize = fittedImageSize(
+      in: viewportSize,
+      imagePixelSize: imagePixelSize
+    )
+    return ImageZoomGeometry.maximumScale(
+      forReadingScale: ImageZoomGeometry.readingScale(
+        viewportSize: viewportSize,
+        fittedImageSize: fittedImageSize
+      )
+    )
+  }
+
   private func publishZoomState(force: Bool = false) {
-    let state = ImageGalleryZoomState(scale: scale, offset: offset)
+    let state = ImageGalleryZoomState(
+      scale: scale,
+      offset: offset,
+      mode: zoomMode,
+      referenceViewportSize: lastViewportSize
+    )
     guard force || state != lastPublishedZoomState else { return }
     lastPublishedZoomState = state
     onZoomStateChange(item.id, state)

@@ -6,6 +6,7 @@
     case control
     case omitInlineMinimumScale = "omit-inline-minimum-scale"
     case omitLongTextFixedSize = "omit-long-text-fixed-size"
+    case stabilizeCommentsRows = "stabilize-comments-rows"
 
     static let requested: Self = {
       guard
@@ -23,6 +24,8 @@
     case longPlainText = "long-plain-text"
     case inlineReplies = "inline-replies"
     case manyFloors = "many-floors"
+    case nestedComments = "nested-comments"
+    case mixedNestedComments = "mixed-nested-comments"
 
     static let requested: Self? = {
       guard
@@ -48,6 +51,15 @@
     static let appliesLongTextFixedSize =
       requested != .longPlainText
       || ThreadScrollPerformanceExperiment.requested != .omitLongTextFixedSize
+
+    static var usesLegacyCommentsRows: Bool {
+      guard requested?.isCommentsScenario == true else { return false }
+      return ThreadScrollPerformanceExperiment.requested != .stabilizeCommentsRows
+    }
+
+    var isCommentsScenario: Bool {
+      self == .nestedComments || self == .mixedNestedComments
+    }
 
     static var isSelfDrivenProfileRequested: Bool {
       ProcessInfo.processInfo.environment["TIEBA_PERFORMANCE_AUTOSCROLL"] == "1"
@@ -130,17 +142,66 @@
   @MainActor
   struct ThreadScrollPerformanceRootView: View {
     let scenario: ThreadScrollPerformanceScenario
+    @State private var presentsProfileContent: Bool
+
+    init(scenario: ThreadScrollPerformanceScenario) {
+      self.scenario = scenario
+      _presentsProfileContent = State(
+        initialValue: !scenario.isCommentsScenario
+          || !ThreadScrollPerformanceScenario.isSelfDrivenProfileRequested
+      )
+    }
 
     var body: some View {
       NavigationStack {
-        ThreadView(
-          thread: scenario.thread,
-          service: ThreadScrollPerformanceService(scenario: scenario),
-          historyRepository: ThreadScrollPerformanceHistoryRepository(),
-          favoritesRepository: ThreadScrollPerformanceFavoritesRepository(),
-          searchHistoryRepository: ThreadScrollPerformanceSearchHistoryRepository()
-        )
+        if !presentsProfileContent {
+          ProgressView()
+            .task {
+              await startCommentsProfile()
+            }
+        } else if scenario.isCommentsScenario {
+          CommentsView(
+            threadID: ThreadScrollPerformanceFixture.threadID,
+            postID: ThreadScrollPerformanceFixture.commentsParentPostID,
+            service: ThreadScrollPerformanceService(scenario: scenario),
+            historyRepository: ThreadScrollPerformanceHistoryRepository(),
+            favoritesRepository: ThreadScrollPerformanceFavoritesRepository(),
+            searchHistoryRepository: ThreadScrollPerformanceSearchHistoryRepository(),
+            showsDismissButton: false
+          )
+        } else {
+          ThreadView(
+            thread: scenario.thread,
+            service: ThreadScrollPerformanceService(scenario: scenario),
+            historyRepository: ThreadScrollPerformanceHistoryRepository(),
+            favoritesRepository: ThreadScrollPerformanceFavoritesRepository(),
+            searchHistoryRepository: ThreadScrollPerformanceSearchHistoryRepository()
+          )
+        }
       }
+    }
+
+    private func startCommentsProfile() async {
+      guard scenario.isCommentsScenario else { return }
+      guard ThreadScrollPerformanceScenario.writeSelfDrivenProfileMarker(phase: "ready") else {
+        assertionFailure("Could not mark the comments performance fixture as ready")
+        return
+      }
+      do {
+        guard try await ThreadScrollPerformanceScenario.waitForSelfDrivenProfileStart() else {
+          return
+        }
+      } catch is CancellationError {
+        return
+      } catch {
+        assertionFailure("Unexpected comments performance start failure: \(error)")
+        return
+      }
+      guard ThreadScrollPerformanceScenario.writeSelfDrivenProfileMarker(phase: "started") else {
+        assertionFailure("Could not mark the comments performance profile as started")
+        return
+      }
+      presentsProfileContent = true
     }
   }
 
@@ -180,7 +241,13 @@
     func comments(threadID: Int64, postID: Int64, page: Int) async throws
       -> CommentPageData
     {
-      throw ThreadScrollPerformanceError.unexpectedRequest("comments")
+      guard
+        scenario.isCommentsScenario,
+        threadID == ThreadScrollPerformanceFixture.threadID,
+        postID == ThreadScrollPerformanceFixture.commentsParentPostID,
+        page == 1
+      else { throw ThreadScrollPerformanceError.unexpectedRequest("comments") }
+      return ThreadScrollPerformanceFixture.commentsPage(for: scenario)
     }
 
     func comments(
@@ -249,6 +316,7 @@
     static let forumID: Int64 = 9_100
     static let threadID: Int64 = 9_100_001
     static let firstPostID: Int64 = 9_101_001
+    static let commentsParentPostID: Int64 = 9_101_002
 
     static func postCount(for scenario: ThreadScrollPerformanceScenario) -> Int {
       // This models the steady state after four normal pages without timing pagination itself.
@@ -288,6 +356,9 @@
         inlineComments = (1...4).map { reply in
           comment(postID: postID, floor: floor, reply: reply)
         }
+      case .nestedComments, .mixedNestedComments:
+        contents = [.text(text(floor: floor, targetLength: 120, paragraphCount: 1))]
+        inlineComments = []
       }
       return BrowsePost(
         id: postID,
@@ -319,6 +390,91 @@
         agreeScore: reply,
         threadID: threadID,
         parentPostID: postID
+      )
+    }
+
+    static func commentsPage(for scenario: ThreadScrollPerformanceScenario) -> CommentPageData {
+      let count = scenario == .mixedNestedComments ? 600 : 240
+      let comments = (1...count).map { index in
+        detailComment(index: index, scenario: scenario)
+      }
+      let thread = scenario.thread
+      let parentPost = CommentParentPostContext(
+        id: commentsParentPostID,
+        threadID: threadID,
+        floor: 2,
+        authorID: 9_200,
+        authorName: "楼中楼性能测试父楼",
+        authorPortraitURL: nil,
+        createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+        isThreadAuthor: false,
+        contents: [.text(text(floor: 2, targetLength: 180, paragraphCount: 1))],
+        authorLevel: 12,
+        authorIPLocation: "测试环境",
+        agreeScore: 42
+      )
+      var agreementTargets = Set(comments.compactMap { comment in
+        ContentAgreementTarget(
+          thread: thread,
+          parentPostID: parentPost.id,
+          comment: comment
+        )
+      })
+      if let parentAgreementTarget = ContentAgreementTarget(
+        thread: thread,
+        parentPost: parentPost
+      ) {
+        agreementTargets.insert(parentAgreementTarget)
+      }
+      let agreementRequest = ContentAgreementSubpostPageRequest(
+        forumID: thread.forumID,
+        forumName: thread.forumName,
+        threadID: thread.id,
+        parentPostID: parentPost.id,
+        aroundSubpostID: nil,
+        page: 1
+      )!
+      return CommentPageData(
+        parentPost: parentPost,
+        comments: comments,
+        currentPage: 1,
+        hasMore: false,
+        totalPages: 1,
+        totalCount: count,
+        thread: thread,
+        agreementReadDescriptor: ContentAgreementReadDescriptor(
+          request: .subpostPage(agreementRequest),
+          expectedTargets: agreementTargets
+        )
+      )
+    }
+
+    private static func detailComment(
+      index: Int,
+      scenario: ThreadScrollPerformanceScenario
+    ) -> BrowseComment {
+      let visibility: LocalContentVisibility
+      if scenario == .mixedNestedComments, index.isMultiple(of: 11) {
+        visibility = .hidden
+      } else if scenario == .mixedNestedComments, index.isMultiple(of: 5) {
+        visibility = .placeholder
+      } else {
+        visibility = .visible
+      }
+      return BrowseComment(
+        id: commentsParentPostID * 1_000 + Int64(index),
+        authorID: 30_000 + Int64(index),
+        authorName: "楼中楼测试用户 \(index) 的较长昵称",
+        authorPortraitURL: nil,
+        createdAt: Date(timeIntervalSince1970: 1_700_000_000 + TimeInterval(index)),
+        contents: [.text(text(floor: index, targetLength: 150, paragraphCount: 1))],
+        authorLevel: (index % 18) + 1,
+        authorIPLocation: "测试环境",
+        agreeScore: index % 97,
+        isThreadAuthor: index.isMultiple(of: 23),
+        localVisibility: visibility,
+        threadID: threadID,
+        parentPostID: commentsParentPostID
       )
     }
 

@@ -86,6 +86,8 @@ final class ContentAgreementStore {
   private let capacity: Int
   private var entries: [ContentAgreementTarget: ContentAgreementEntry] = [:]
   private var scopeDescriptors: [UUID: Set<ContentAgreementReadDescriptor>] = [:]
+  private var activeTargetsCache: Set<ContentAgreementTarget> = []
+  private var activeEntryCount = 0
   private var descriptorTasks: [DescriptorTaskKey: DescriptorTask] = [:]
   private var loadedDescriptors: [DescriptorTaskKey: ContentAgreementReadDescriptor] = [:]
   private var mutationFlights: [ContentAgreementTarget: MutationFlight] = [:]
@@ -94,6 +96,7 @@ final class ContentAgreementStore {
   private var generation: UInt64 = 0
   private var epoch: UInt64 = 0
   private var accessOrdinal: UInt64 = 0
+  private(set) var evictionCandidateScanCount = 0
   private var sessionChangeCancellable: AnyCancellable?
 
   init(access: AccountAccess, capacity: Int = 512) {
@@ -136,6 +139,9 @@ final class ContentAgreementStore {
       break
     }
     entries[target] = entry
+    if activeTargetsCache.contains(target) {
+      activeEntryCount += 1
+    }
     touch(entry)
     evictIfNeeded()
     return entry
@@ -151,6 +157,7 @@ final class ContentAgreementStore {
     } else {
       scopeDescriptors[scope] = normalized
     }
+    rebuildActiveTargetsCache()
     reconcileDescriptorTasks()
     guard !scopeDescriptors.isEmpty else {
       evictIfNeeded()
@@ -161,6 +168,7 @@ final class ContentAgreementStore {
 
   func removeScope(_ scope: UUID) {
     guard scopeDescriptors.removeValue(forKey: scope) != nil else { return }
+    rebuildActiveTargetsCache()
     reconcileDescriptorTasks()
     evictIfNeeded()
     if !scopeDescriptors.isEmpty {
@@ -571,9 +579,20 @@ final class ContentAgreementStore {
   }
 
   private func activeTargets() -> Set<ContentAgreementTarget> {
-    scopeDescriptors.values.reduce(into: Set<ContentAgreementTarget>()) { result, descriptors in
+    activeTargetsCache
+  }
+
+  private func rebuildActiveTargetsCache() {
+    activeTargetsCache = scopeDescriptors.values.reduce(
+      into: Set<ContentAgreementTarget>()
+    ) { result, descriptors in
       for descriptor in descriptors {
         result.formUnion(descriptor.expectedTargets)
+      }
+    }
+    activeEntryCount = entries.keys.reduce(into: 0) { count, target in
+      if activeTargetsCache.contains(target) {
+        count += 1
       }
     }
   }
@@ -675,6 +694,10 @@ final class ContentAgreementStore {
 
   private func evictIfNeeded() {
     guard entries.count > capacity else { return }
+    if mutationFlights.isEmpty, activeEntryCount == entries.count {
+      return
+    }
+    evictionCandidateScanCount += 1
     let protectedTargets = activeTargets().union(mutationFlights.keys)
     let candidates = entries.values
       .filter { $0.activeWriteCount == 0 && !protectedTargets.contains($0.target) }

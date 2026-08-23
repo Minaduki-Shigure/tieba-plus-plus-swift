@@ -24,6 +24,62 @@ final class DownsampledImageTests: XCTestCase {
     XCTAssertEqual(image.width * 3, image.height * 4)
   }
 
+  func testImageIOPreservesNarrowLongStaticImageWithinDecodedPixelBudget() throws {
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 1
+    let renderer = UIGraphicsImageRenderer(
+      size: CGSize(width: 128, height: 4_000),
+      format: format
+    )
+    let source = renderer.image { context in
+      UIColor.white.setFill()
+      context.fill(CGRect(x: 0, y: 0, width: 128, height: 4_000))
+    }
+    let fileURL = temporaryURL(extension: "jpg")
+    defer { try? FileManager.default.removeItem(at: fileURL) }
+    try XCTUnwrap(source.jpegData(compressionQuality: 0.9)).write(to: fileURL)
+
+    let asset = try ImageDownsampler.image(
+      at: fileURL,
+      maxPixelSize: ImageDownsampler.maximumStaticPixelDimension
+    )
+    let image = try XCTUnwrap(asset.image.cgImage)
+
+    XCTAssertEqual(image.width, 128)
+    XCTAssertEqual(image.height, 4_000)
+    XCTAssertLessThanOrEqual(
+      try XCTUnwrap(ImageDownsampler.decodedByteCost(of: asset.image)),
+      ImageDownsampler.maximumStaticDecodedByteCost
+    )
+  }
+
+  func testStaticPixelLimitPreservesLongImageButBoundsSquareImageMemory() {
+    XCTAssertEqual(
+      ImageDownsampler.staticPixelLimit(
+        requestedPixelSize: ImageDownsampler.maximumStaticPixelDimension,
+        sourceWidth: 412,
+        sourceHeight: 12_800
+      ),
+      12_800
+    )
+    XCTAssertEqual(
+      ImageDownsampler.staticPixelLimit(
+        requestedPixelSize: ImageDownsampler.maximumStaticPixelDimension,
+        sourceWidth: 20_000,
+        sourceHeight: 20_000
+      ),
+      4_096
+    )
+    XCTAssertEqual(
+      ImageDownsampler.staticPixelLimit(
+        requestedPixelSize: ImageDownsampler.maximumStaticPixelDimension,
+        sourceWidth: 0,
+        sourceHeight: 0
+      ),
+      ImageDownsampler.standardMaximumPixelDimension
+    )
+  }
+
   func testImageIODownsamplerRejectsInvalidInput() throws {
     let fileURL = temporaryURL(extension: "bin")
     defer { try? FileManager.default.removeItem(at: fileURL) }

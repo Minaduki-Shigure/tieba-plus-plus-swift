@@ -490,7 +490,7 @@ actor DownsampledImageRepository {
     guard RemoteImageURLPolicy.allows(url), urlPolicy.allows(url) else {
       throw DownsampledImageError.invalidResponse
     }
-    let maxPixelSize = min(max(requestedSize, 64), 4_096)
+    let maxPixelSize = ImageDownsampler.normalizedRequestedPixelSize(requestedSize)
     let cacheKey = CacheKey(
       urlString: url.absoluteString,
       maxPixelSize: maxPixelSize,
@@ -767,6 +767,9 @@ actor DownsampledImageRepository {
 }
 
 enum ImageDownsampler {
+  static let standardMaximumPixelDimension = 4_096
+  static let maximumStaticPixelDimension = 16_384
+  static let maximumStaticDecodedByteCost = 64 * 1_024 * 1_024
   static let maximumAnimationFrameCount = 500
   static let maximumAnimationFrameDecodedByteCost = 16 * 1_024 * 1_024
 
@@ -786,7 +789,7 @@ enum ImageDownsampler {
     guard frameCount > 0 else {
       throw DownsampledImageError.unreadableImage
     }
-    let requestedPixelSize = min(max(maxPixelSize, 64), 4_096)
+    let requestedPixelSize = normalizedRequestedPixelSize(maxPixelSize)
     let sourceTypeIdentifier = CGImageSourceGetType(source) as String?
     let sourceProperties = properties(of: source)
     let hasHEICSSequenceMetadata = hasHEICSSequenceMetadata(
@@ -858,10 +861,17 @@ enum ImageDownsampler {
       source: source,
       frameCount: frameCount
     )
-    let poster = try thumbnail(
+    let primaryProperties = frameProperties(source: source, index: primaryIndex)
+    let staticPixelSize = staticPixelLimit(
+      requestedPixelSize: requestedPixelSize,
+      sourceWidth: pixelDimension(primaryProperties[kCGImagePropertyPixelWidth]) ?? 0,
+      sourceHeight: pixelDimension(primaryProperties[kCGImagePropertyPixelHeight]) ?? 0
+    )
+    let poster = try staticPoster(
       source: source,
       index: primaryIndex,
-      maxPixelSize: requestedPixelSize
+      maxPixelSize: staticPixelSize,
+      decodedByteBudget: maximumStaticDecodedByteCost
     )
     try Task.checkCancellation()
     return DownsampledImageAsset(image: poster)
@@ -881,7 +891,43 @@ enum ImageDownsampler {
     let pixelsPerFrame = decodedByteBudget / 4
     let budgetedPixelSize = Int(Double(pixelsPerFrame).squareRoot().rounded(.down))
     guard budgetedPixelSize >= 64 else { return nil }
-    return min(min(max(requestedPixelSize, 64), 4_096), budgetedPixelSize)
+    return min(
+      min(max(requestedPixelSize, 64), standardMaximumPixelDimension),
+      budgetedPixelSize
+    )
+  }
+
+  static func normalizedRequestedPixelSize(_ requestedPixelSize: Int) -> Int {
+    min(max(requestedPixelSize, 64), maximumStaticPixelDimension)
+  }
+
+  static func staticPixelLimit(
+    requestedPixelSize: Int,
+    sourceWidth: Int,
+    sourceHeight: Int,
+    decodedByteBudget: Int = maximumStaticDecodedByteCost
+  ) -> Int {
+    let requestedPixelSize = normalizedRequestedPixelSize(requestedPixelSize)
+    guard
+      sourceWidth > 0,
+      sourceHeight > 0,
+      decodedByteBudget >= 4 * 64 * 64
+    else { return min(requestedPixelSize, standardMaximumPixelDimension) }
+
+    let sourceMaximumDimension = max(sourceWidth, sourceHeight)
+    let sourcePixelCount = Double(sourceWidth) * Double(sourceHeight)
+    let budgetedPixelCount = Double(decodedByteBudget / 4)
+    guard sourcePixelCount.isFinite, sourcePixelCount > 0, budgetedPixelCount > 0 else {
+      return min(requestedPixelSize, standardMaximumPixelDimension)
+    }
+    let budgetScale = min(1, sqrt(budgetedPixelCount / sourcePixelCount))
+    let budgetedMaximumDimension = Int(
+      (Double(sourceMaximumDimension) * budgetScale).rounded(.down)
+    )
+    return min(
+      requestedPixelSize,
+      max(min(sourceMaximumDimension, budgetedMaximumDimension), 64)
+    )
   }
 
   static func decodedByteCost(of image: UIImage) -> Int? {
@@ -894,6 +940,33 @@ enum ImageDownsampler {
       return nil
     }
     return bytesPerRow * height
+  }
+
+  private static func staticPoster(
+    source: CGImageSource,
+    index: Int,
+    maxPixelSize: Int,
+    decodedByteBudget: Int
+  ) throws -> UIImage {
+    var pixelSize = normalizedRequestedPixelSize(maxPixelSize)
+    for _ in 0..<8 {
+      try Task.checkCancellation()
+      let image = try thumbnail(source: source, index: index, maxPixelSize: pixelSize)
+      try Task.checkCancellation()
+      guard let cost = decodedByteCost(of: image) else {
+        throw DownsampledImageError.unreadableImage
+      }
+      if cost <= decodedByteBudget {
+        return image
+      }
+      guard pixelSize > 64, decodedByteBudget > 0 else {
+        throw DownsampledImageError.responseTooLarge
+      }
+      let reduction = sqrt(Double(decodedByteBudget) / Double(cost)) * 0.95
+      let reducedPixelSize = Int((Double(pixelSize) * reduction).rounded(.down))
+      pixelSize = max(min(reducedPixelSize, pixelSize - 1), 64)
+    }
+    throw DownsampledImageError.responseTooLarge
   }
 
   static func frame(
@@ -967,7 +1040,7 @@ enum ImageDownsampler {
       kCGImageSourceCreateThumbnailFromImageAlways: true,
       kCGImageSourceCreateThumbnailWithTransform: true,
       kCGImageSourceShouldCacheImmediately: true,
-      kCGImageSourceThumbnailMaxPixelSize: min(max(maxPixelSize, 64), 4_096),
+      kCGImageSourceThumbnailMaxPixelSize: normalizedRequestedPixelSize(maxPixelSize),
     ]
     guard let image = CGImageSourceCreateThumbnailAtIndex(source, index, options as CFDictionary)
     else {
@@ -985,6 +1058,15 @@ enum ImageDownsampler {
     index: Int
   ) -> [CFString: Any] {
     CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any] ?? [:]
+  }
+
+  private static func pixelDimension(_ value: Any?) -> Int? {
+    guard
+      let value = value as? NSNumber,
+      value.int64Value > 0,
+      value.int64Value <= Int64(Int.max)
+    else { return nil }
+    return Int(value.int64Value)
   }
 
   private static func staticPosterIndex(
