@@ -345,7 +345,7 @@ final class ImageGalleryTests: XCTestCase {
         fittedImageSize: fittedImage
       )
     )
-    for invalidScale in [CGFloat.nan, .infinity, 0.5, 65] {
+    for invalidScale in [CGFloat.nan, .infinity, 0.5, 257] {
       XCTAssertNil(
         ImageZoomGeometry.panLimits(
           scale: invalidScale,
@@ -719,7 +719,7 @@ final class ImageGalleryTests: XCTestCase {
       )
     )
 
-    for invalidScale in [CGFloat.nan, .infinity, 0.5, 65] {
+    for invalidScale in [CGFloat.nan, .infinity, 0.5, 257] {
       coordinator.update(
         from: panOverlay(
           scale: invalidScale,

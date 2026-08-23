@@ -82,7 +82,7 @@ struct ImageGalleryPresentation: Identifiable, Equatable, Sendable {
 
 enum ImageZoomGeometry {
   static let defaultMaximumScale: CGFloat = 5
-  static let absoluteMaximumScale: CGFloat = 64
+  static let absoluteMaximumScale: CGFloat = 256
   static let automaticReadingScaleThreshold: CGFloat = 2
 
   static func clampedScale(
