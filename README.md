@@ -20,17 +20,21 @@ and its verified metadata enters the public app source.
 | Local features | Available for history, favorites, filtering, appearance, media preferences, account-isolated followed-forum pinning and layout, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
 | Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies; both newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
-| TiebaLite parity | Current `main` and public `v0.62.1-alpha.1`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
-| Distribution | The public SideStore/LiveContainer source currently serves `v0.62.1-alpha.1` (build 72) |
+| TiebaLite parity | Current `main` and public `v0.62.2-alpha.1`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
+| Distribution | The public SideStore/LiveContainer source currently serves `v0.62.2-alpha.1` (build 73) |
 
 ### Release and validation
 
-- **Current alpha:** `v0.62.1-alpha.1` publishes the current end-user app-code
-  scope and reduces nested-reply text-layout work, constrains personalized-feed
-  rows to their available width, prevents tall content images from painting over
-  later floors, and accepts official thread URLs ending in the inert `#/`
-  fragment while continuing to reject other fragments. It includes independently
-  selectable anonymous or saved-account
+- **Current alpha:** `v0.62.2-alpha.1` publishes the current end-user app-code
+  scope. Full nested-reply pages now precompute displayable replies, keep a
+  stable one-row `List` topology with native reply identities, and avoid repeated
+  active-agreement cache scans above its retained-entry capacity. Extremely tall
+  static images retain bounded inline previews but open at full readable width
+  from the top; explicit fit state and reading progress survive pager recreation
+  and viewport changes, and higher-resolution decoding remains bounded by an
+  actual post-decode memory check. The release retains the `v0.62.1-alpha.1`
+  personalized-feed width, tall-image floor-containment, and official thread-URL
+  fixes. It includes independently selectable anonymous or saved-account
   recommendation personas, bounded static-image new-topic/direct-topic-reply
   composers, and server-reason-bound personalized recommendation feedback. It
   retains the
@@ -226,7 +230,7 @@ and its verified metadata enters the public app source.
   cannot observe submission, and cannot prove that the browser's Baidu account
   matches the active App account. The user must verify or complete browser login.
   All non-performance capabilities in this release-scope block remain included
-  in the public `v0.62.1-alpha.1` IPA.
+  in the public `v0.62.2-alpha.1` IPA.
 - **`v0.61.0-alpha.1` static-image creation:** New-topic and direct-topic-reply
   composers can select, reorder, preview, and remove up to nine static
   images, choose standard or high-definition processing, and select forum-name,
@@ -288,6 +292,13 @@ and its verified metadata enters the public app source.
 - **Automated checks:** GitHub Actions runs package tests and the complete iOS
   simulator test target, validates the app source, tests its release-metadata
   updater, and verifies its public IPA hash.
+  A deterministic iOS 18.5 self-driven Time Profiler records two reversed-order
+  replicates for each full nested-reply scenario without UI-test or network work.
+  For 240 visible replies, the stable-row candidate reduced sampled main-thread
+  work by 11.5% and SwiftUI layout/view-graph work by 13.2% on average. A
+  600-reply mixed visible/placeholder/hidden fixture did not improve main-thread
+  work (mean +2.0%), so these measurements do not establish a universal or
+  physical-device frame-rate improvement.
   Authenticated flows never use real credentials in CI. Login binding, cloud
   favorite reads and mutations, including floor-level marker/action admission,
   stale-confirmation rejection and verified list deletion, followed-forum
@@ -313,7 +324,7 @@ and its verified metadata enters the public app source.
   pass. After the release asset is published and reverified, the release workflow
   derives its date, download URL, byte size, and SHA-256 and updates the source
   atomically; version or concurrent-source mismatches fail closed. The source
-  currently distributes the verified `v0.62.1-alpha.1` IPA (build 72).
+  currently distributes the verified `v0.62.2-alpha.1` IPA (build 73).
 - **Login hotfix:** `v0.54.0-alpha.1` can reach Tieba's account page without
   completing because its callback and Cookie matching are too strict.
   `v0.54.1-alpha.1` made that failure explicit and confirmed that iOS 18.7.2
@@ -332,7 +343,7 @@ and its verified metadata enters the public app source.
   setting that locally retains only threads whose stable forum ID occurs in the
   selected account persona's complete followed-forum index, or the active
   account's index when the persona is anonymous. These reads and the account-
-  persona dislike-feedback UI are included in the public `v0.62.1-alpha.1` IPA;
+  persona dislike-feedback UI are included in the public `v0.62.2-alpha.1` IPA;
   the write is offered only when a row carries valid server-provided reasons and
   still requires disposable-account and physical-device validation.
 - **Search:** Forum, thread, and user search are separated by category. Global
@@ -371,7 +382,10 @@ and its verified metadata enters the public app source.
   selection after explicit confirmation; it can also explicitly approve or
   cancel approval on the canonical topic,
   ordinary floors, and individual replies on the full nested-reply page. Inline
-  nested-reply previews remain read only.
+  nested-reply previews remain read only. Full nested-reply pages maintain a
+  displayable-reply projection and a constant one-row `List` topology so SwiftUI
+  can construct rows on demand; active agreement entries no longer rescan an
+  all-active cache after crossing its retained-entry capacity.
 - **Images:** Responsive image groups open in a zoomable gallery with horizontal
   or vertical one-image paging. Switching direction retains the current image
   and its bounded in-memory zoom state while the occurrence ID remains stable.
@@ -389,7 +403,13 @@ and its verified metadata enters the public app source.
   a local placeholder with the currently unique `(pictureID, postID)` remote
   occurrence; ambiguous initial matches are never guessed. Ordinary unfiltered
   threads can expand the gallery across floors; originals can be explicitly
-  shared or saved through add-only Photos access.
+  shared or saved through add-only Photos access. Extremely tall static images
+  keep a bounded inline preview and start the gallery in a top-aligned,
+  fit-to-width reading mode. The viewer preserves reading progress across
+  orientation changes and explicit fit state across pager recreation, while a
+  dynamic long-image zoom ceiling permits readable portrait and landscape
+  widths. Static gallery decoding may retain up to a 16,384-pixel long edge only
+  when its measured decoded storage remains within 64 MiB.
   Server dynamic-image URLs are retained as independent fallbacks rather than
   animation flags. The downloaded file must identify as a real multi-frame GIF,
   WebP, or HEIC/HEIF sequence before it animates. Metadata is capped at 500 frames;
@@ -690,7 +710,7 @@ and its verified metadata enters the public app source.
   about 18–20%; its anonymous reading and media subtotal remains about 91–95%.
   This measures implemented end-to-end workflows with partial credit for
   device-validation gates; it is not a claim that every path is release-ready.
-  The public `v0.62.1-alpha.1` app-code snapshot matches the current 80–82%
+  The public `v0.62.2-alpha.1` app-code snapshot matches the current 80–82%
   estimate because it includes the static-image composer, recommendation-
   feedback, and selectable recommendation-persona workflows; all retain their
   documented device-validation gates.
