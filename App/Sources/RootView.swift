@@ -600,10 +600,10 @@ struct RootView: View {
   private var followedForumsSection: some View {
     let forums = followedForumsViewModel.homeForums
     if !forums.isEmpty {
-      Section("关注的贴吧") {
+      Section {
         LazyVGrid(
           columns: FollowedForumsLayoutPolicy.columns(
-            preferred: FollowedForumsLayoutMode.resolved(followedForumsLayout),
+            preferred: preferredFollowedForumsLayout,
             dynamicTypeSize: dynamicTypeSize
           ),
           alignment: .leading,
@@ -632,6 +632,20 @@ struct RootView: View {
         NavigationLink(value: RootDestination.followedForums) {
           Label("查看全部", systemImage: "list.bullet")
         }
+      } header: {
+        HStack(spacing: 8) {
+          Text("关注的贴吧")
+            .accessibilityAddTraits(.isHeader)
+          Spacer(minLength: 8)
+          if let action = followedForumsLayoutToggleAction {
+            FollowedForumsLayoutToggleButton(
+              action: action,
+              accessibilityIdentifier: "home-followed-forums-layout-toggle",
+              onToggle: { applyFollowedForumsLayoutToggle(action) }
+            )
+          }
+        }
+        .textCase(nil)
       }
     } else if case .failed(let message) = followedForumsViewModel.state,
       !followedForumsViewModel.isSignedOut
@@ -646,6 +660,28 @@ struct RootView: View {
         }
       }
     }
+  }
+
+  private var preferredFollowedForumsLayout: FollowedForumsLayoutMode {
+    FollowedForumsLayoutMode.resolved(followedForumsLayout)
+  }
+
+  private var followedForumsLayoutToggleAction: FollowedForumsLayoutToggleAction? {
+    FollowedForumsLayoutPolicy.toggleAction(
+      preferred: preferredFollowedForumsLayout,
+      dynamicTypeSize: dynamicTypeSize
+    )
+  }
+
+  private func applyFollowedForumsLayoutToggle(
+    _ action: FollowedForumsLayoutToggleAction
+  ) {
+    guard let target = FollowedForumsLayoutPolicy.validatedToggleTarget(
+      for: action,
+      preferred: preferredFollowedForumsLayout,
+      dynamicTypeSize: dynamicTypeSize
+    ) else { return }
+    followedForumsLayout = target.rawValue
   }
 
   @ViewBuilder

@@ -56,9 +56,10 @@ the private-read row. The target-bound interaction-permission read is likewise
 credited with its guarded server-write workflow rather than duplicated. The
 inbox startup destination improves parity inside the
 existing local-settings credit but is too small to add a full weighted point.
-The followed-forum layout choice likewise improves the completeness of the
+The followed-forum layout choice, including direct switches on both existing
+surfaces at non-accessibility sizes, likewise improves the completeness of the
 existing local-settings credit but does not add a full weighted point because it
-reflows two existing surfaces without adding a data source or workflow.
+only reflows those surfaces without adding a data source or workflow.
 The account-isolated followed-forum pin archive, in contrast, completes
 TiebaLite's local pinned-forum management workflow and presents it consistently
 in the iOS home projection and complete list.
@@ -192,8 +193,9 @@ the source metadata is updated to that tested IPA.
 - Local home-entry customization with a next-launch home, ranking, topic,
   inbox, favorite, or history destination plus an optional discovery section
 - Persistent adaptive-grid or single-column followed-forum layout shared by the
-  six-item home projection and complete list, with accessibility-size fallback
-  and explicit full-list pagination independent from card appearance
+  six-item home projection and complete list, with an explicit switch on each
+  surface at non-accessibility sizes, accessibility-size fallback, and explicit
+  full-list pagination independent from card appearance
 - Account-isolated local followed-forum pins shared by the home projection and
   complete list, with pin, unpin, and copy-name context actions; only exact loaded
   rows are reordered, so stale pins neither fabricate cards nor load another page
@@ -1222,9 +1224,10 @@ the app's SwiftUI hierarchy immediately; Safari, share sheets, and other system
 UI remain system-managed. Unknown stored values normalize to following the system.
 Appearance, sort, and text-size adjustment values are nonsecret local enums.
 The followed-forum layout setting adapts TiebaLite's `listSingle` choice into an
-iOS-native adaptive grid or single column. The home projection and complete
-list resolve the same stored enum, while accessibility Dynamic Type sizes force
-one effective column without overwriting the user's preference. Changing layout
+iOS-native adaptive grid or single column. The home projection and complete list
+both resolve, and at non-accessibility Dynamic Type sizes explicitly toggle, the
+same stored enum, while accessibility Dynamic Type sizes force one effective
+column without overwriting the user's preference. Changing layout
 does not explicitly refresh, start image downloads, or mutate the account-bound
 followed-forum snapshot. The complete list requests another page only after the
 user selects its explicit load-more control; card appearance and layout reflow

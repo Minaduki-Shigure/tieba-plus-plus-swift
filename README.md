@@ -558,7 +558,8 @@ and its verified metadata enters the public app source.
   most six entries from the active account's followed-forum list and can open the
   complete paginated list. The home projection and complete list share a
   persistent adaptive-grid or single-column layout preference, with an explicit
-  switch on the complete list. Layout changes are local and do not reload the
+  switch on each surface at non-accessibility Dynamic Type sizes. Layout changes
+  are local and do not reload the
   account snapshot. The selected, default-off recommendation filter keeps its own
   memory-only, persona-bound index and publishes an allowlist only after the
   server explicitly ends pagination; partial, stalled, invalid, over-limit,

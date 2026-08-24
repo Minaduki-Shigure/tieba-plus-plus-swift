@@ -128,6 +128,14 @@ continuations, invalid page data, transport failure, more than 100 pages, or mor
 than 5,000 retained forums keep the index unavailable. No row, page cursor,
 complete forum-ID set, or lease is stored across accounts or app launches.
 
+At non-accessibility Dynamic Type sizes, the home projection and complete
+followed-forum list expose the same explicit local layout control. It stores only
+the closed, nonsecret adaptive-or-single-column enum in UserDefaults; it does not
+read account credentials, mutate the active session or followed-forum snapshot,
+or authorize pagination or an account write. Accessibility Dynamic Type may
+force one effective column without rewriting the stored preference, and avatar
+rendering remains subject to the existing scoped media policy.
+
 Optional followed-forum avatars and slogans are decoded only inside the same
 bounded authenticated response; displaying them does not issue a second metadata
 request. Core trims and bounds both fields and drops control-bearing values. The

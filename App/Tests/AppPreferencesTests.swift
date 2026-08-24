@@ -259,6 +259,147 @@ final class AppPreferencesTests: XCTestCase {
     }
   }
 
+  func testFollowedForumsLayoutToggleActionUsesStoredPreferenceAtStandardSizes() throws {
+    let adaptive = try XCTUnwrap(
+      FollowedForumsLayoutPolicy.toggleAction(
+        preferred: .adaptive,
+        dynamicTypeSize: .large
+      )
+    )
+    XCTAssertEqual(adaptive.current, .adaptive)
+    XCTAssertEqual(adaptive.target, .singleColumn)
+    XCTAssertEqual(adaptive.systemImage, "list.bullet")
+    XCTAssertEqual(adaptive.actionTitle, "切换为单列")
+    XCTAssertEqual(adaptive.accessibilityValue, "当前为自适应布局")
+
+    let singleColumn = try XCTUnwrap(
+      FollowedForumsLayoutPolicy.toggleAction(
+        preferred: .singleColumn,
+        dynamicTypeSize: .xxxLarge
+      )
+    )
+    XCTAssertEqual(singleColumn.current, .singleColumn)
+    XCTAssertEqual(singleColumn.target, .adaptive)
+    XCTAssertEqual(singleColumn.systemImage, "rectangle.grid.2x2")
+    XCTAssertEqual(singleColumn.actionTitle, "切换为自适应布局")
+    XCTAssertEqual(singleColumn.accessibilityValue, "当前为单列")
+  }
+
+  func testFollowedForumsLayoutAccessibilityFallbackDoesNotOverwriteStoredPreference()
+    throws
+  {
+    let suiteName = "AppPreferencesTests.followed-forums-accessibility.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let accessibilitySizes: [DynamicTypeSize] = [
+      .accessibility1,
+      .accessibility2,
+      .accessibility3,
+      .accessibility4,
+      .accessibility5,
+    ]
+
+    for preferred in FollowedForumsLayoutMode.allCases {
+      defaults.set(preferred.rawValue, forKey: AppPreferenceKey.followedForumsLayout)
+      for size in accessibilitySizes {
+        XCTAssertEqual(
+          FollowedForumsLayoutPolicy.effectiveMode(
+            preferred: preferred,
+            dynamicTypeSize: size
+          ),
+          .singleColumn
+        )
+        XCTAssertNil(
+          FollowedForumsLayoutPolicy.toggleAction(
+            preferred: preferred,
+            dynamicTypeSize: size
+          )
+        )
+        XCTAssertEqual(
+          defaults.string(forKey: AppPreferenceKey.followedForumsLayout),
+          preferred.rawValue
+        )
+      }
+      XCTAssertEqual(
+        FollowedForumsLayoutPolicy.effectiveMode(
+          preferred: FollowedForumsLayoutMode.resolved(
+            defaults.string(forKey: AppPreferenceKey.followedForumsLayout) ?? ""
+          ),
+          dynamicTypeSize: .large
+        ),
+        preferred
+      )
+    }
+  }
+
+  func testFollowedForumsLayoutToggleActionPersistsItsTarget() throws {
+    let suiteName = "AppPreferencesTests.followed-forums-toggle.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    defaults.set(
+      FollowedForumsLayoutMode.adaptive.rawValue,
+      forKey: AppPreferenceKey.followedForumsLayout
+    )
+    let preferred = FollowedForumsLayoutMode.resolved(
+      defaults.string(forKey: AppPreferenceKey.followedForumsLayout) ?? ""
+    )
+    let action = try XCTUnwrap(
+      FollowedForumsLayoutPolicy.toggleAction(
+        preferred: preferred,
+        dynamicTypeSize: .large
+      )
+    )
+
+    defaults.set(action.target.rawValue, forKey: AppPreferenceKey.followedForumsLayout)
+
+    XCTAssertEqual(
+      FollowedForumsLayoutMode.resolved(
+        defaults.string(forKey: AppPreferenceKey.followedForumsLayout) ?? ""
+      ),
+      .singleColumn
+    )
+  }
+
+  func testFollowedForumsLayoutToggleRejectsStaleActions() throws {
+    let action = try XCTUnwrap(
+      FollowedForumsLayoutPolicy.toggleAction(
+        preferred: .adaptive,
+        dynamicTypeSize: .large
+      )
+    )
+    XCTAssertEqual(
+      FollowedForumsLayoutPolicy.validatedToggleTarget(
+        for: action,
+        preferred: .adaptive,
+        dynamicTypeSize: .large
+      ),
+      .singleColumn
+    )
+    XCTAssertNil(
+      FollowedForumsLayoutPolicy.validatedToggleTarget(
+        for: action,
+        preferred: .singleColumn,
+        dynamicTypeSize: .large
+      )
+    )
+    XCTAssertNil(
+      FollowedForumsLayoutPolicy.validatedToggleTarget(
+        for: action,
+        preferred: .adaptive,
+        dynamicTypeSize: .accessibility1
+      )
+    )
+
+    let preferredAfterFirstToggle = action.target
+    XCTAssertNil(
+      FollowedForumsLayoutPolicy.validatedToggleTarget(
+        for: action,
+        preferred: preferredAfterFirstToggle,
+        dynamicTypeSize: .large
+      )
+    )
+  }
+
   func testPersonalizedRecommendationIdentityIsStableAndRepairsInvalidStorage() throws {
     let suiteName = "AppPreferencesTests.personalized.\(UUID().uuidString)"
     let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

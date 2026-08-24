@@ -430,6 +430,59 @@ enum FollowedForumsLayoutPolicy {
       [GridItem(.flexible(), spacing: spacing, alignment: .top)]
     }
   }
+
+  static func toggleAction(
+    preferred: FollowedForumsLayoutMode,
+    dynamicTypeSize: DynamicTypeSize
+  ) -> FollowedForumsLayoutToggleAction? {
+    guard !dynamicTypeSize.isAccessibilitySize else { return nil }
+    return FollowedForumsLayoutToggleAction(current: preferred)
+  }
+
+  static func validatedToggleTarget(
+    for action: FollowedForumsLayoutToggleAction,
+    preferred: FollowedForumsLayoutMode,
+    dynamicTypeSize: DynamicTypeSize
+  ) -> FollowedForumsLayoutMode? {
+    guard action == toggleAction(
+      preferred: preferred,
+      dynamicTypeSize: dynamicTypeSize
+    ) else { return nil }
+    return action.target
+  }
+}
+
+struct FollowedForumsLayoutToggleAction: Equatable, Sendable {
+  let current: FollowedForumsLayoutMode
+
+  var target: FollowedForumsLayoutMode { current.toggled }
+
+  var systemImage: String {
+    switch target {
+    case .adaptive:
+      "rectangle.grid.2x2"
+    case .singleColumn:
+      "list.bullet"
+    }
+  }
+
+  var actionTitle: String {
+    switch target {
+    case .adaptive:
+      "切换为自适应布局"
+    case .singleColumn:
+      "切换为单列"
+    }
+  }
+
+  var accessibilityValue: String {
+    switch current {
+    case .adaptive:
+      "当前为自适应布局"
+    case .singleColumn:
+      "当前为单列"
+    }
+  }
 }
 
 enum ExternalWebOpenMode: String, CaseIterable, Hashable, Identifiable, Sendable {

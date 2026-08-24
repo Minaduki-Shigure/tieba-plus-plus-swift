@@ -55,13 +55,14 @@ struct FollowedForumsView: View {
     .navigationTitle("关注的贴吧")
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
-      if !dynamicTypeSize.isAccessibilitySize {
-        Button(action: toggleLayout) {
-          Image(systemName: preferredLayout == .adaptive ? "list.bullet" : "rectangle.grid.2x2")
+      if let action = layoutToggleAction {
+        ToolbarItem(placement: .navigationBarTrailing) {
+          FollowedForumsLayoutToggleButton(
+            action: action,
+            accessibilityIdentifier: "followed-forums-layout-toggle",
+            onToggle: { applyLayoutToggle(action) }
+          )
         }
-        .accessibilityLabel(preferredLayout == .adaptive ? "切换为单列" : "切换为自适应布局")
-        .help(preferredLayout == .adaptive ? "切换为单列" : "切换为自适应布局")
-        .accessibilityIdentifier("followed-forums-layout-toggle")
       }
     }
     .onAppear { viewModel.fullListSurfaceDidAppear(id: surfaceID) }
@@ -155,7 +156,39 @@ struct FollowedForumsView: View {
     FollowedForumsLayoutMode.resolved(followedForumsLayout)
   }
 
-  private func toggleLayout() {
-    followedForumsLayout = preferredLayout.toggled.rawValue
+  private var layoutToggleAction: FollowedForumsLayoutToggleAction? {
+    FollowedForumsLayoutPolicy.toggleAction(
+      preferred: preferredLayout,
+      dynamicTypeSize: dynamicTypeSize
+    )
+  }
+
+  private func applyLayoutToggle(_ action: FollowedForumsLayoutToggleAction) {
+    guard let target = FollowedForumsLayoutPolicy.validatedToggleTarget(
+      for: action,
+      preferred: preferredLayout,
+      dynamicTypeSize: dynamicTypeSize
+    ) else { return }
+    followedForumsLayout = target.rawValue
+  }
+}
+
+struct FollowedForumsLayoutToggleButton: View {
+  let action: FollowedForumsLayoutToggleAction
+  let accessibilityIdentifier: String
+  let onToggle: () -> Void
+
+  var body: some View {
+    Button(action: onToggle) {
+      Image(systemName: action.systemImage)
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.borderless)
+    .accessibilityLabel("关注贴吧布局")
+    .accessibilityValue(action.accessibilityValue)
+    .accessibilityHint(action.actionTitle)
+    .help(action.actionTitle)
+    .accessibilityIdentifier(accessibilityIdentifier)
   }
 }
