@@ -6,6 +6,7 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class BrowseContentImageLayoutTests: XCTestCase {
+  @MainActor
   func testContainsImageOnlyAcceptsImageContent() {
     let imageURL = URL(string: "https://example.com/image.jpg")!
 
