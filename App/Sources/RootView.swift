@@ -23,6 +23,7 @@ struct RootView: View {
   @State private var showsQuickAccountLogin = false
   @State private var searchHistoryAction: GlobalSearchHistoryAction?
   @State private var linkErrorMessage: String?
+  @State private var pendingFollowedForumUnfollow: FollowedForumUnfollowPrompt?
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @EnvironmentObject private var mediaPlaybackCoordinator: MediaPlaybackCoordinator
@@ -412,18 +413,22 @@ struct RootView: View {
         Text(favoritesViewModel.operationError ?? "未知错误")
       }
       .alert(
-        "无法读取或更新置顶贴吧",
+        followedForumsViewModel.presentedOperationError?.title ?? "无法更新关注的贴吧",
         isPresented: Binding(
           get: {
-            followedForumsViewModel.pinOperationError != nil
+            followedForumsViewModel.presentedOperationError != nil
               && !followedForumsViewModel.hasActiveFullListSurface
           },
-          set: { if !$0 { followedForumsViewModel.dismissPinOperationError() } }
+          set: {
+            if !$0, !followedForumsViewModel.hasActiveFullListSurface {
+              followedForumsViewModel.dismissPresentedOperationError()
+            }
+          }
         )
       ) {
-        Button("好", action: followedForumsViewModel.dismissPinOperationError)
+        Button("好", role: .cancel) {}
       } message: {
-        Text(followedForumsViewModel.pinOperationError ?? "未知错误")
+        Text(followedForumsViewModel.presentedOperationError?.message ?? "未知错误")
       }
     }
     .threadSummaryImageGallery(threadSummaryImageGalleryCoordinator)
@@ -456,6 +461,7 @@ struct RootView: View {
       }
     }
     .onChange(of: path) { path in
+      pendingFollowedForumUnfollow = nil
       searchSuggestionViewModel.cancelAndClear()
       recentForumsViewModel.reload()
       if RootFollowedForumsActivationPolicy.isActive(path: path) {
@@ -470,6 +476,7 @@ struct RootView: View {
       Task { @MainActor in recentForumsViewModel.reload() }
     }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+      pendingFollowedForumUnfollow = nil
       accountViewModel.invalidateForAccountSessionChange()
       Task { @MainActor in await accountViewModel.loadIfNeeded() }
       let loadsImmediately = RootFollowedForumsActivationPolicy.isActive(path: path)
@@ -487,6 +494,19 @@ struct RootView: View {
         change,
         loadImmediately: loadsImmediately
       )
+    }
+    .onChange(of: followedForumsViewModel.forums) { forums in
+      guard let pendingFollowedForumUnfollow else { return }
+      let normalizedName = FollowedForumPin.normalizedForumName(
+        pendingFollowedForumUnfollow.forum.name
+      )
+      guard forums.contains(where: {
+        $0.id == pendingFollowedForumUnfollow.forum.id
+          && FollowedForumPin.normalizedForumName($0.name) == normalizedName
+      }) else {
+        self.pendingFollowedForumUnfollow = nil
+        return
+      }
     }
     .onOpenURL(perform: openTiebaURL)
     .alert(
@@ -611,16 +631,27 @@ struct RootView: View {
         ) {
           ForEach(forums) { forum in
             let isPinned = followedForumsViewModel.isPinned(forum)
+            let unfollowState = followedForumsViewModel.unfollowControlState(for: forum)
             Button {
               path.append(.forum(forum.name))
             } label: {
-              FollowedForumCard(forum: forum, isPinned: isPinned)
+              FollowedForumCard(
+                forum: forum,
+                isPinned: isPinned,
+                isUnfollowing: unfollowState == .busy
+              )
             }
             .buttonStyle(.plain)
             .followedForumContextMenu(
               forum: forum,
               isPinned: isPinned,
-              setPinned: { followedForumsViewModel.setPinned(forum, isPinned: $0) }
+              unfollowState: unfollowState,
+              setPinned: { followedForumsViewModel.setPinned(forum, isPinned: $0) },
+              requestUnfollow: {
+                pendingFollowedForumUnfollow = followedForumsViewModel.unfollowPrompt(
+                  for: forum
+                )
+              }
             )
           }
         }
@@ -628,6 +659,25 @@ struct RootView: View {
         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
+        .confirmationDialog(
+          pendingFollowedForumUnfollow.map { "取消关注 \($0.forum.name)吧？" }
+            ?? "取消关注贴吧？",
+          isPresented: Binding(
+            get: { pendingFollowedForumUnfollow != nil },
+            set: { if !$0 { pendingFollowedForumUnfollow = nil } }
+          ),
+          titleVisibility: .visible
+        ) {
+          if let prompt = pendingFollowedForumUnfollow {
+            Button("取消关注", role: .destructive) {
+              pendingFollowedForumUnfollow = nil
+              followedForumsViewModel.unfollow(prompt)
+            }
+          }
+          Button("取消", role: .cancel) { pendingFollowedForumUnfollow = nil }
+        } message: {
+          Text("这会修改当前贴吧账户的关注列表。")
+        }
 
         NavigationLink(value: RootDestination.followedForums) {
           Label("查看全部", systemImage: "list.bullet")

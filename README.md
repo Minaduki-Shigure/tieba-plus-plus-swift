@@ -139,8 +139,11 @@ and its verified metadata enters the public app source.
   server-supplied forum avatar and slogan; unavailable or disallowed images fall
   back locally without another metadata request. An account-isolated local archive
   can pin exact, already loaded forums on both surfaces; pinned rows move to the
-  front without loading another page, and the same context menu can unpin or copy
-  the public forum name. A default-off setting can reuse
+  front without loading another page. The same context menu can unpin, copy the
+  public forum name, or request an explicitly confirmed server unfollow. That
+  write is bound to the exact loaded row and account lease, preflights current
+  membership, sends at most one change, and rebuilds pagination from page one only
+  after an authoritative result. A default-off setting can reuse
   a verified-complete snapshot to show personalized recommendations only from
   followed forums. An account persona reads the selected account's index without
   changing the App-wide active account; the anonymous persona uses the active
@@ -515,8 +518,9 @@ and its verified metadata enters the public app source.
   forum list share account-isolated local pin ordering. Only an exact forum ID and
   normalized name already present in the authoritative loaded snapshot can move;
   stale or not-yet-loaded pins create no row and cause no pagination. Context
-  menus pin, unpin, or copy the public forum name, and confirmed unfollow cleans
-  only the matching account's pin.
+  menus pin, unpin, copy the public forum name, or open an explicit destructive
+  unfollow confirmation. A confirmed server unfollow rebuilds the old paginated
+  snapshot and cleans only the matching account's pin.
 - **Reply controls:** A default-off local preference can hide topic, floor,
   nested-reply, and inbox quick-reply entry points without hiding reply content,
   read-only navigation, agreement controls, existing drafts, or an already-open
@@ -571,10 +575,16 @@ and its verified metadata enters the public app source.
   and performs no automatic account write. A separate versioned local archive
   retains pins across launches and isolates them by positive account UID; it only
   reorders exact rows already present in that snapshot and never loads another
-  page. The lists provide no inline server unfollow or check-in control. A
-  loaded forum separately reads account-specific follow and check-in state and
-  retains its explicitly
-  confirmed single-forum actions. The home toolbar and account page open the
+  page. Both lists provide an explicitly confirmed inline unfollow control for an
+  exact loaded row. After confirmation, one app-scoped coordinator validates the
+  `userID + sessionRevision` lease, preflights membership, sends at most one
+  unfollow write, and performs only one authoritative read if the result is
+  uncertain. It never retries the write or removes a row optimistically. A
+  confirmed change invalidates the old page cursor and complete recommendation
+  index before loading page one again; a failed or unresolved action keeps the
+  row. Inline check-in remains unavailable. A loaded forum separately reads
+  account-specific follow and check-in state and retains its explicitly confirmed
+  single-forum actions. The home toolbar and account page open the
   same distinct, foreground-only one-click flow described below; neither adds
   an inline list write. Successful private-list
   retrieval still requires physical-device validation and is not asserted by CI

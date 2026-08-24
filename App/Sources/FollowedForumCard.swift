@@ -55,10 +55,16 @@ struct FollowedForumCardPresentation: Equatable, Sendable {
 struct FollowedForumCard: View {
   let forum: FollowedForumItem
   let isPinned: Bool
+  let isUnfollowing: Bool
 
-  init(forum: FollowedForumItem, isPinned: Bool = false) {
+  init(
+    forum: FollowedForumItem,
+    isPinned: Bool = false,
+    isUnfollowing: Bool = false
+  ) {
     self.forum = forum
     self.isPinned = isPinned
+    self.isUnfollowing = isUnfollowing
   }
 
   var body: some View {
@@ -94,12 +100,19 @@ struct FollowedForumCard: View {
 
       Spacer(minLength: 0)
 
-      if isPinned {
-        Image(systemName: "pin.fill")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.tint)
-          .accessibilityHidden(true)
+      ZStack {
+        if isUnfollowing {
+          ProgressView()
+            .controlSize(.small)
+            .accessibilityHidden(true)
+        } else if isPinned {
+          Image(systemName: "pin.fill")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.tint)
+            .accessibilityHidden(true)
+        }
       }
+      .frame(width: 20, height: 20)
     }
     .padding(10)
     .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
@@ -115,7 +128,11 @@ struct FollowedForumCard: View {
     .accessibilityElement(children: .ignore)
     .accessibilityLabel("\(forum.name)吧")
     .accessibilityValue(
-      [isPinned ? "已置顶" : "", presentation.accessibilityValue]
+      [
+        isPinned ? "已置顶" : "",
+        isUnfollowing ? "正在取消关注" : "",
+        presentation.accessibilityValue,
+      ]
         .filter { !$0.isEmpty }
         .joined(separator: "，")
     )
@@ -125,7 +142,9 @@ struct FollowedForumCard: View {
 private struct FollowedForumContextMenuModifier: ViewModifier {
   let forum: FollowedForumItem
   let isPinned: Bool
+  let unfollowState: FollowedForumUnfollowControlState
   let setPinned: (Bool) -> Void
+  let requestUnfollow: () -> Void
 
   func body(content: Content) -> some View {
     content.contextMenu {
@@ -137,11 +156,28 @@ private struct FollowedForumContextMenuModifier: ViewModifier {
           systemImage: isPinned ? "pin.slash" : "pin"
         )
       }
+      .disabled(unfollowState == .busy)
 
       Button {
         UIPasteboard.general.string = forum.name
       } label: {
         Label("复制吧名", systemImage: "doc.on.doc")
+      }
+
+      switch unfollowState {
+      case .available:
+        Divider()
+        Button(role: .destructive, action: requestUnfollow) {
+          Label("取消关注", systemImage: "star.slash")
+        }
+      case .busy:
+        Divider()
+        Button(action: {}) {
+          Label("正在取消关注", systemImage: "hourglass")
+        }
+        .disabled(true)
+      case .unavailable:
+        EmptyView()
       }
     }
   }
@@ -151,13 +187,17 @@ extension View {
   func followedForumContextMenu(
     forum: FollowedForumItem,
     isPinned: Bool,
-    setPinned: @escaping (Bool) -> Void
+    unfollowState: FollowedForumUnfollowControlState = .unavailable,
+    setPinned: @escaping (Bool) -> Void,
+    requestUnfollow: @escaping () -> Void = {}
   ) -> some View {
     modifier(
       FollowedForumContextMenuModifier(
         forum: forum,
         isPinned: isPinned,
-        setPinned: setPinned
+        unfollowState: unfollowState,
+        setPinned: setPinned,
+        requestUnfollow: requestUnfollow
       )
     )
   }

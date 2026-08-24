@@ -150,11 +150,19 @@ absent slogan leaves the existing level and experience presentation intact.
 Neither field affects forum identity,
 pagination, recommendation filtering, navigation, or any account write.
 
-These surfaces remain read only with respect to Tieba: displaying, paginating,
-or locally reordering them must not follow, unfollow, check in, or issue another
-account request automatically. Their context menus may update only the separate
-local pin archive or explicitly copy the public forum name; they offer no inline
-server unfollow or batch check-in control. The endpoint response does
+Displaying, paginating, and locally reordering these surfaces remain read only
+with respect to Tieba and must not follow, unfollow, check in, or issue another
+account request automatically. Their context menus may update the separate local
+pin archive or explicitly copy the public forum name. They may begin an inline
+server unfollow only after a destructive confirmation for an exact row already in
+the loaded snapshot. The confirmation binds the positive forum ID, normalized
+name, and exact `userID + sessionRevision`; the shared coordinator then performs
+one membership preflight, sends at most one changed-state write, and performs at
+most one authoritative read after an uncertain result. It never retries the write
+or removes a row optimistically. An authoritative unfollow notification carries
+the originating session revision, invalidates the entire old cursor and complete
+forum-ID index, and reloads from page one on an eligible surface. The separate
+inline batch-check-in control remains unavailable. The endpoint response does
 not itself establish the active account's identity, so the two-sided lease check
 is protection against stale local publication, not proof that the server honored
 the requested UID. Successful private-list retrieval and server-side account
@@ -920,8 +928,12 @@ loaded authenticated snapshot. Missing, renamed, or not-yet-loaded rows are not
 fabricated and do not trigger pagination or metadata requests. Pin mutations are
 serialized; account/session changes clear visible pin state synchronously, and a
 late old-account result cannot publish into the new account. Confirmed unfollow
-removes only the matching account/forum record. Copying remains an explicit write
-of the public forum name to the pasteboard and never reads existing clipboard data.
+removes only the matching account/forum record after the server relationship
+change has been established; failure or an unresolved outcome preserves both the
+row and its pin. Pin writes and confirmed cleanup are serialized so a pin operation
+already in flight cannot recreate the final record. Copying remains an explicit
+write of the public forum name to the pasteboard and never reads existing clipboard
+data.
 
 The favorite-thread opening preferences are two default-off UserDefaults
 booleans evaluated only after an explicit selection in the local-favorites

@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct FollowedForumsView: View {
@@ -8,6 +9,7 @@ struct FollowedForumsView: View {
   let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @State private var surfaceID = UUID()
+  @State private var pendingUnfollow: FollowedForumUnfollowPrompt?
   @EnvironmentObject private var viewModel: FollowedForumsViewModel
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @AppStorage(AppPreferenceKey.followedForumsLayout)
@@ -42,15 +44,40 @@ struct FollowedForumsView: View {
       }
     }
     .alert(
-      "无法读取或更新置顶贴吧",
+      viewModel.presentedOperationError?.title ?? "无法更新关注的贴吧",
       isPresented: Binding(
-        get: { viewModel.pinOperationError != nil },
-        set: { if !$0 { viewModel.dismissPinOperationError() } }
+        get: {
+          viewModel.presentedOperationError != nil
+            && viewModel.canPresentOperationError(onFullList: surfaceID)
+        },
+        set: {
+          if !$0, viewModel.canPresentOperationError(onFullList: surfaceID) {
+            viewModel.dismissPresentedOperationError()
+          }
+        }
       )
     ) {
-      Button("好", action: viewModel.dismissPinOperationError)
+      Button("好", role: .cancel) {}
     } message: {
-      Text(viewModel.pinOperationError ?? "未知错误")
+      Text(viewModel.presentedOperationError?.message ?? "未知错误")
+    }
+    .confirmationDialog(
+      pendingUnfollow.map { "取消关注 \($0.forum.name)吧？" } ?? "取消关注贴吧？",
+      isPresented: Binding(
+        get: { pendingUnfollow != nil },
+        set: { if !$0 { pendingUnfollow = nil } }
+      ),
+      titleVisibility: .visible
+    ) {
+      if let prompt = pendingUnfollow {
+        Button("取消关注", role: .destructive) {
+          pendingUnfollow = nil
+          viewModel.unfollow(prompt)
+        }
+      }
+      Button("取消", role: .cancel) { pendingUnfollow = nil }
+    } message: {
+      Text("这会修改当前贴吧账户的关注列表。")
     }
     .navigationTitle("关注的贴吧")
     .navigationBarTitleDisplayMode(.inline)
@@ -66,7 +93,24 @@ struct FollowedForumsView: View {
       }
     }
     .onAppear { viewModel.fullListSurfaceDidAppear(id: surfaceID) }
-    .onDisappear { viewModel.fullListSurfaceDidDisappear(id: surfaceID) }
+    .onDisappear {
+      pendingUnfollow = nil
+      viewModel.fullListSurfaceDidDisappear(id: surfaceID)
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+      pendingUnfollow = nil
+    }
+    .onChange(of: viewModel.forums) { forums in
+      guard let pendingUnfollow else { return }
+      let normalizedName = FollowedForumPin.normalizedForumName(pendingUnfollow.forum.name)
+      guard forums.contains(where: {
+        $0.id == pendingUnfollow.forum.id
+          && FollowedForumPin.normalizedForumName($0.name) == normalizedName
+      }) else {
+        self.pendingUnfollow = nil
+        return
+      }
+    }
   }
 
   private var forumList: some View {
@@ -120,6 +164,7 @@ struct FollowedForumsView: View {
       spacing: FollowedForumsLayoutPolicy.spacing
     ) {
       ForEach(forums) { forum in
+        let unfollowState = viewModel.unfollowControlState(for: forum)
         NavigationLink {
           ForumView(
             forumName: forum.name,
@@ -129,13 +174,19 @@ struct FollowedForumsView: View {
             searchHistoryRepository: searchHistoryRepository
           )
         } label: {
-          FollowedForumCard(forum: forum, isPinned: isPinned)
+          FollowedForumCard(
+            forum: forum,
+            isPinned: isPinned,
+            isUnfollowing: unfollowState == .busy
+          )
         }
         .buttonStyle(.plain)
         .followedForumContextMenu(
           forum: forum,
           isPinned: isPinned,
-          setPinned: { viewModel.setPinned(forum, isPinned: $0) }
+          unfollowState: unfollowState,
+          setPinned: { viewModel.setPinned(forum, isPinned: $0) },
+          requestUnfollow: { pendingUnfollow = viewModel.unfollowPrompt(for: forum) }
         )
       }
     }

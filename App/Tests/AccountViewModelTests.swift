@@ -1393,6 +1393,274 @@ final class AccountViewModelTests: XCTestCase {
     viewModel.cancel()
   }
 
+  func testInlineUnfollowRequiresExactLoadedRowAndSuppressesDuplicateConfirmation()
+    async throws
+  {
+    let active = session(userID: 7, name: "active")
+    let target = forum(id: 1, name: "Swift")
+    let vault = AccountVaultSpy(sessions: [active], activeUserID: 7)
+    let service = AccountServiceSpy(
+      followedPages: [
+        1: .success(
+          FollowedForumPageData(forums: [target], currentPage: 1, hasMore: false)
+        )
+      ]
+    )
+    let mutator = SuspendedForumMembershipMutator(
+      outcome: .unchanged(isFollowed: true, message: "write failed")
+    )
+    let pins = TransientFollowedForumPinsStore()
+    addTeardownBlock { _ = await mutator.release() }
+    let viewModel = FollowedForumsViewModel(
+      service: service,
+      vault: vault,
+      pinRepository: pins,
+      forumMembershipMutator: mutator
+    )
+
+    XCTAssertEqual(viewModel.unfollowControlState(for: target), .unavailable)
+    XCTAssertNil(viewModel.unfollowPrompt(for: target))
+    let requestsBeforeLoad = await mutator.requestSnapshot()
+    XCTAssertTrue(requestsBeforeLoad.isEmpty)
+    viewModel.loadIfNeeded()
+    try await waitForAccountState { viewModel.state == .loaded }
+    XCTAssertEqual(viewModel.unfollowControlState(for: target), .available)
+    let mismatchedTarget = forum(id: 1, name: "Different")
+    XCTAssertEqual(viewModel.unfollowControlState(for: mismatchedTarget), .unavailable)
+    XCTAssertNil(viewModel.unfollowPrompt(for: mismatchedTarget))
+    let requestsAfterMismatch = await mutator.requestSnapshot()
+    XCTAssertTrue(requestsAfterMismatch.isEmpty)
+
+    let prompt = try XCTUnwrap(viewModel.unfollowPrompt(for: target))
+    viewModel.unfollow(prompt)
+    await mutator.waitUntilRequested()
+    XCTAssertEqual(viewModel.unfollowingForumID, 1)
+    XCTAssertEqual(viewModel.unfollowControlState(for: target), .busy)
+    viewModel.setPinned(target, isPinned: true)
+    await Task.yield()
+    let pinsWhileBusy = try await pins.pins(accountID: active.id)
+    XCTAssertTrue(pinsWhileBusy.isEmpty)
+    viewModel.unfollow(prompt)
+    let requestsWhileBusy = await mutator.requestSnapshot()
+    XCTAssertEqual(requestsWhileBusy.count, 1)
+    XCTAssertEqual(requestsWhileBusy.first?.forumID, 1)
+    XCTAssertEqual(requestsWhileBusy.first?.forumName, "Swift")
+    XCTAssertEqual(requestsWhileBusy.first?.expectedLease, AccountSessionLease(active))
+    XCTAssertEqual(requestsWhileBusy.first?.previouslyFollowed, true)
+    XCTAssertEqual(requestsWhileBusy.first?.targetFollowed, false)
+    XCTAssertEqual(requestsWhileBusy.first?.verifiesCurrentState, true)
+
+    let released = await mutator.release()
+    XCTAssertTrue(released)
+    try await waitForAccountState { viewModel.unfollowingForumID == nil }
+
+    XCTAssertEqual(viewModel.forums.map(\.id), [1])
+    XCTAssertEqual(viewModel.unfollowOperationError, "write failed")
+    XCTAssertEqual(viewModel.presentedOperationError?.kind, .unfollow)
+  }
+
+  func testInlineUnfollowChangeRebuildsFirstPageAndCompleteIndex() async throws {
+    let active = session(userID: 7, name: "active")
+    let target = forum(id: 1, name: "Swift")
+    let retained = forum(id: 2, name: "iOS")
+    let vault = AccountVaultSpy(sessions: [active], activeUserID: 7)
+    let service = AccountServiceSpy(
+      followedPages: [
+        1: .success(
+          FollowedForumPageData(
+            forums: [target, retained],
+            currentPage: 1,
+            hasMore: false
+          )
+        )
+      ],
+      forumMemberships: [
+        .success(
+          ForumMembershipData(
+            userID: active.id,
+            forumID: target.id,
+            forumName: target.name,
+            isFollowed: true
+          )
+        )
+      ],
+      forumMembershipMutations: [
+        .success(
+          ForumMembershipData(
+            userID: active.id,
+            forumID: target.id,
+            forumName: target.name,
+            isFollowed: false
+          )
+        )
+      ]
+    )
+    let change = ForumMembershipChange(
+      accountID: active.id,
+      sessionRevision: active.sessionRevision,
+      forumID: target.id,
+      isFollowed: false
+    )
+    let recorder = AccountForumMembershipNotificationRecorder()
+    let token = NotificationCenter.default.addObserver(
+      forName: .forumMembershipDidChange,
+      object: nil,
+      queue: nil
+    ) { notification in
+      guard
+        let observedChange = ForumMembershipChange(notification),
+        observedChange.sessionRevision == active.sessionRevision,
+        observedChange.forumID == target.id
+      else { return }
+      recorder.record(observedChange)
+    }
+    defer { NotificationCenter.default.removeObserver(token) }
+    let viewModel = FollowedForumsViewModel(
+      service: service,
+      vault: vault
+    )
+    let indexSurfaceID = UUID()
+    viewModel.completeIndexSurfaceDidAppear(id: indexSurfaceID)
+    try await waitForAccountState {
+      if case .ready(let snapshot) = viewModel.indexState {
+        return snapshot.forumIDs == Set<Int64>([1, 2])
+      }
+      return false
+    }
+
+    await service.setFollowedPageResult(
+      .success(
+        FollowedForumPageData(forums: [retained], currentPage: 1, hasMore: false)
+      ),
+      for: 1
+    )
+    let prompt = try XCTUnwrap(viewModel.unfollowPrompt(for: target))
+    viewModel.unfollow(prompt)
+    try await waitForAccountState {
+      viewModel.unfollowingForumID == nil && recorder.snapshot().count == 1
+    }
+    XCTAssertEqual(viewModel.forums.map(\.id), [1, 2])
+    let requestsBeforeNotification = await service.followedRequestSnapshot()
+    XCTAssertEqual(requestsBeforeNotification.map(\.page), [1])
+    let membershipReads = await service.forumMembershipRequestCount()
+    let membershipWrites = await service.forumMembershipMutationCount()
+    XCTAssertEqual(membershipReads, 1)
+    XCTAssertEqual(membershipWrites, 1)
+    XCTAssertEqual(recorder.snapshot(), [change])
+
+    viewModel.forumMembershipDidChange(try XCTUnwrap(recorder.snapshot().first))
+    try await waitForAccountState {
+      guard viewModel.forums.map(\.id) == [2] else { return false }
+      if case .ready(let snapshot) = viewModel.indexState {
+        return snapshot.forumIDs == Set<Int64>([2])
+      }
+      return false
+    }
+
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 1])
+    viewModel.completeIndexSurfaceDidDisappear(id: indexSurfaceID)
+  }
+
+  func testInlineUnfollowFailureFromOldLeaseDoesNotAppearForNewAccount() async throws {
+    let first = session(userID: 7, name: "first")
+    let second = session(userID: 8, name: "second")
+    let target = forum(id: 1, name: "Swift")
+    let vault = AccountVaultSpy(sessions: [first, second], activeUserID: 7)
+    let service = AccountServiceSpy(
+      followedPages: [
+        1: .success(
+          FollowedForumPageData(forums: [target], currentPage: 1, hasMore: false)
+        )
+      ]
+    )
+    let mutator = SuspendedForumMembershipMutator(
+      outcome: .unchanged(isFollowed: true, message: "old failure")
+    )
+    addTeardownBlock { _ = await mutator.release() }
+    let viewModel = FollowedForumsViewModel(
+      service: service,
+      vault: vault,
+      forumMembershipMutator: mutator
+    )
+    viewModel.loadIfNeeded()
+    try await waitForAccountState { viewModel.state == .loaded }
+
+    let prompt = try XCTUnwrap(viewModel.unfollowPrompt(for: target))
+    viewModel.unfollow(prompt)
+    await mutator.waitUntilRequested()
+    try await vault.switchActive(to: 8)
+    viewModel.accountSessionDidChange()
+    let released = await mutator.release()
+    XCTAssertTrue(released)
+    try await waitForAccountState {
+      viewModel.state == .loaded && viewModel.unfollowingForumID == nil
+    }
+
+    XCTAssertNil(viewModel.unfollowOperationError)
+    XCTAssertEqual(viewModel.unfollowControlState(for: target), .available)
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests.map(\.userID), [7, 8])
+  }
+
+  func testInlineUnfollowPromptCannotCrossSameUserSessionRevision() async throws {
+    let first = session(userID: 7, name: "first")
+    let rotated = session(userID: 7, name: "rotated")
+    let target = forum(id: 1, name: "Swift")
+    let vault = AccountVaultSpy(sessions: [first], activeUserID: 7)
+    let service = AccountServiceSpy(
+      followedPages: [
+        1: .success(
+          FollowedForumPageData(forums: [target], currentPage: 1, hasMore: false)
+        )
+      ]
+    )
+    let mutator = SuspendedForumMembershipMutator(
+      outcome: .unchanged(isFollowed: true, message: "must not run")
+    )
+    addTeardownBlock { _ = await mutator.release() }
+    let viewModel = FollowedForumsViewModel(
+      service: service,
+      vault: vault,
+      forumMembershipMutator: mutator
+    )
+    viewModel.loadIfNeeded()
+    try await waitForAccountState { viewModel.state == .loaded }
+    let stalePrompt = try XCTUnwrap(viewModel.unfollowPrompt(for: target))
+
+    try await vault.upsert(rotated)
+    viewModel.accountSessionDidChange()
+    try await waitForAccountState {
+      viewModel.state == .loaded
+        && viewModel.unfollowControlState(for: target) == .available
+    }
+    viewModel.unfollow(stalePrompt)
+    await Task.yield()
+
+    let mutationRequests = await mutator.requestSnapshot()
+    XCTAssertTrue(mutationRequests.isEmpty)
+    XCTAssertNil(viewModel.unfollowingForumID)
+  }
+
+  func testOnlyOldestActiveFullListPresentsSharedOperationError() {
+    let viewModel = FollowedForumsViewModel(
+      service: AccountServiceSpy(),
+      vault: AccountVaultSpy()
+    )
+    let first = UUID()
+    let second = UUID()
+
+    viewModel.fullListSurfaceDidAppear(id: first)
+    viewModel.fullListSurfaceDidAppear(id: second)
+    XCTAssertTrue(viewModel.canPresentOperationError(onFullList: first))
+    XCTAssertFalse(viewModel.canPresentOperationError(onFullList: second))
+
+    viewModel.fullListSurfaceDidDisappear(id: first)
+    XCTAssertTrue(viewModel.canPresentOperationError(onFullList: second))
+    viewModel.fullListSurfaceDidDisappear(id: second)
+    viewModel.cancel()
+  }
+
   func testCompleteIndexSurfaceRegistrationIsIdempotentAndStopsAfterLastConsumerLeaves()
     async throws
   {
@@ -1622,6 +1890,57 @@ private struct AccountTestFailure: LocalizedError, Sendable {
   var errorDescription: String? { message }
 }
 
+private actor SuspendedForumMembershipMutator: ForumMembershipMutating {
+  private let outcome: ForumMembershipMutationOutcome
+  private var requests: [ForumMembershipMutationRequest] = []
+  private var continuation: CheckedContinuation<Void, Never>?
+  private var didRequest = false
+  private var requestWaiters: [CheckedContinuation<Void, Never>] = []
+
+  init(outcome: ForumMembershipMutationOutcome) {
+    self.outcome = outcome
+  }
+
+  func setFollowed(
+    _ request: ForumMembershipMutationRequest
+  ) async -> ForumMembershipMutationOutcome {
+    requests.append(request)
+    didRequest = true
+    let waiters = requestWaiters
+    requestWaiters.removeAll()
+    waiters.forEach { $0.resume() }
+    await withCheckedContinuation { continuation = $0 }
+    return outcome
+  }
+
+  func waitUntilRequested() async {
+    if didRequest { return }
+    await withCheckedContinuation { requestWaiters.append($0) }
+  }
+
+  func release() -> Bool {
+    guard let continuation else { return false }
+    self.continuation = nil
+    continuation.resume()
+    return true
+  }
+
+  func requestSnapshot() -> [ForumMembershipMutationRequest] { requests }
+}
+
+private final class AccountForumMembershipNotificationRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var changes: [ForumMembershipChange] = []
+
+  func record(_ change: ForumMembershipChange) {
+    lock.withLock { changes.append(change) }
+  }
+
+  func snapshot() -> [ForumMembershipChange] {
+    lock.withLock { changes }
+  }
+}
+
 private struct AccountSessionNotificationSnapshot: Equatable, Sendable {
   let kind: String?
   let accountID: Int64?
@@ -1756,18 +2075,26 @@ private actor SuspendedFollowedForumPinsRepository: FollowedForumPinsRepository 
 private actor AccountServiceSpy: AccountService {
   private let validation: Result<ValidatedAccount, AccountTestFailure>
   private var followedPages: [Int: Result<FollowedForumPageData, AccountTestFailure>]
+  private var forumMemberships: [Result<ForumMembershipData, AccountTestFailure>]
+  private var forumMembershipMutations: [Result<ForumMembershipData, AccountTestFailure>]
   private var validatedBDUSSLength: Int?
   private var validatedSTOKENLength: Int?
   private var followedRequests: [FollowedRequest] = []
+  private var forumMembershipRequestCountValue = 0
+  private var forumMembershipMutationCountValue = 0
 
   init(
     validation: Result<ValidatedAccount, AccountTestFailure> = .failure(
       AccountTestFailure(message: "unexpected validation")
     ),
-    followedPages: [Int: Result<FollowedForumPageData, AccountTestFailure>] = [:]
+    followedPages: [Int: Result<FollowedForumPageData, AccountTestFailure>] = [:],
+    forumMemberships: [Result<ForumMembershipData, AccountTestFailure>] = [],
+    forumMembershipMutations: [Result<ForumMembershipData, AccountTestFailure>] = []
   ) {
     self.validation = validation
     self.followedPages = followedPages
+    self.forumMemberships = forumMemberships
+    self.forumMembershipMutations = forumMembershipMutations
   }
 
   func validate(credential: AccountCredentials) async throws -> ValidatedAccount {
@@ -1793,7 +2120,11 @@ private actor AccountServiceSpy: AccountService {
     forumID: Int64,
     forumName: String
   ) async throws -> ForumMembershipData {
-    throw AccountTestFailure(message: "unexpected forum-membership request")
+    forumMembershipRequestCountValue += 1
+    guard !forumMemberships.isEmpty else {
+      throw AccountTestFailure(message: "unexpected forum-membership request")
+    }
+    return try forumMemberships.removeFirst().get()
   }
 
   func forumAccountState(
@@ -1810,7 +2141,11 @@ private actor AccountServiceSpy: AccountService {
     forumName: String,
     isFollowed: Bool
   ) async throws -> ForumMembershipData {
-    throw AccountTestFailure(message: "unexpected forum-membership mutation")
+    forumMembershipMutationCountValue += 1
+    guard !forumMembershipMutations.isEmpty else {
+      throw AccountTestFailure(message: "unexpected forum-membership mutation")
+    }
+    return try forumMembershipMutations.removeFirst().get()
   }
 
   func checkInToForum(
@@ -1834,6 +2169,8 @@ private actor AccountServiceSpy: AccountService {
   }
 
   func followedRequestSnapshot() -> [FollowedRequest] { followedRequests }
+  func forumMembershipRequestCount() -> Int { forumMembershipRequestCountValue }
+  func forumMembershipMutationCount() -> Int { forumMembershipMutationCountValue }
 }
 
 private actor AccountVaultSpy: AccountVault, AccountSessionLookup {

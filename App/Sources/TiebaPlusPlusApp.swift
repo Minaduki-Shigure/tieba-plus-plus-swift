@@ -46,6 +46,7 @@ struct TiebaPlusPlusApp: App {
   private let accountVault: any AccountVault
   private let accountSessionLookup: any AccountSessionLookup
   private let accountService: any AccountService
+  private let accountAccess: AccountAccess
   private let personalizedFeedbackService: any PersonalizedFeedbackService
   private let contentAgreementStore: ContentAgreementStore
   private let threadCloudFavoriteStore: ThreadCloudFavoriteStore
@@ -68,6 +69,16 @@ struct TiebaPlusPlusApp: App {
     self.accountVault = accountVault
     self.accountSessionLookup = accountVault
     self.accountService = accountService
+    let forumMembershipMutator = ForumMembershipMutationCoordinator(
+      vault: accountVault,
+      service: accountService
+    )
+    let accountAccess = AccountAccess(
+      vault: accountVault,
+      service: accountService,
+      forumMembershipMutator: forumMembershipMutator
+    )
+    self.accountAccess = accountAccess
     self.personalizedFeedbackService = TiebaCorePersonalizedFeedbackService(
       client: authenticatedClient
     )
@@ -75,10 +86,10 @@ struct TiebaPlusPlusApp: App {
       wrappedValue: FollowedForumsViewModel(
         service: accountService,
         vault: accountVault,
-        pinRepository: FileFollowedForumPinsStore.live()
+        pinRepository: FileFollowedForumPinsStore.live(),
+        forumMembershipMutator: forumMembershipMutator
       )
     )
-    let accountAccess = AccountAccess(vault: accountVault, service: accountService)
     let composerImageAttachmentStore = ComposerImageAttachmentStore.live()
     let textReplyDraftStore = FileTextReplyDraftStore.live()
     let newThreadDraftStore = FileNewThreadDraftStore.live()
@@ -164,7 +175,7 @@ struct TiebaPlusPlusApp: App {
         }
         .environment(
           \.accountAccess,
-          AccountAccess(vault: accountVault, service: accountService)
+          accountAccess
         )
         .environment(\.contentAgreementStore, contentAgreementStore)
         .environment(\.threadCloudFavoriteStore, threadCloudFavoriteStore)
@@ -235,7 +246,7 @@ struct TiebaPlusPlusApp: App {
         )
         .environment(
           \.accountAccess,
-          AccountAccess(vault: accountVault, service: accountService)
+          accountAccess
         )
         .environment(\.contentAgreementStore, contentAgreementStore)
         .environment(\.threadCloudFavoriteStore, threadCloudFavoriteStore)

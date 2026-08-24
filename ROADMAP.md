@@ -72,6 +72,9 @@ workflow and therefore does not add a weighted point.
 The default image-watermark preference likewise closes a narrow composer habit
 gap inside the existing local-settings credit. It adds no upload, write target,
 or weighted point.
+The explicitly confirmed followed-list unfollow action closes a TiebaLite workflow
+gap while reusing the already credited forum-membership endpoint and shared list
+snapshot. It therefore adds no weighted point by itself.
 Cloud favorites now consume independent only-thread-author and descending-order
 opening preferences while retaining the server-provided marked-post anchor. This
 closes another narrow TiebaLite habit gap without adding a request or weighted
@@ -929,9 +932,14 @@ archive persists only positive account UID, forum ID, normalized public name, an
 pin time. It projects only exact rows already loaded for that account, orders
 pinned rows newest first, leaves all other rows in server order, and never requests
 another page. Home and complete-list context menus pin, unpin, or explicitly copy
-the forum name; stale pins create no row, and confirmed unfollow removes only the
-matching account's pin. These local actions initiate no automatic server
-operation, and the lists still provide no inline unfollow or check-in controls.
+the forum name; stale pins create no row. They also expose a destructive inline
+unfollow only after explicit confirmation of an exact loaded row. The app validates
+the loaded `userID + sessionRevision` lease, performs one authoritative membership
+preflight, sends at most one changed-state write, and performs at most one readback
+when the result is uncertain. It never retries the write or deletes only the local
+row. An authoritative change invalidates the entire old page cursor and complete
+forum-ID index, reloads from page one while an eligible surface is active, and
+removes only the matching account's pin. Inline check-in remains unavailable.
 The home toolbar and account page open the same separate foreground one-click
 flow, which consumes its own authoritative catalog and explicit confirmation
 snapshot. The home entry is shown only for an active account with complete
