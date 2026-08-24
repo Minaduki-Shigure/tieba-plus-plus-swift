@@ -7,8 +7,15 @@ struct ThreadSummaryImagePreview: Identifiable, Equatable, Sendable {
   var id: Int { contentOffset }
 }
 
+struct ThreadSummaryVideoPreview: Identifiable, Hashable, Sendable {
+  let contentOffset: Int
+  let video: BrowseVideoContent
+
+  var id: Int { contentOffset }
+}
+
 enum ThreadSummaryMedia: Equatable, Sendable {
-  case video(URL)
+  case video(ThreadSummaryVideoPreview)
   case images([ThreadSummaryImagePreview], totalCount: Int)
 }
 
@@ -30,9 +37,10 @@ enum ThreadSummaryPresentation {
     for (contentOffset, content) in thread.contents.enumerated() {
       switch content {
       case .video(let video):
-        if let cover = video.cover {
-          return .video(cover)
-        }
+        guard isPresentableVideo(video) else { continue }
+        return .video(
+          ThreadSummaryVideoPreview(contentOffset: contentOffset, video: video)
+        )
       case .image(let thumbnail, let fullSize, _, let dynamic, _, _):
         totalImageCount += 1
         guard images.count < 3 else { continue }
@@ -54,6 +62,12 @@ enum ThreadSummaryPresentation {
 
     guard totalImageCount > 0 else { return nil }
     return .images(images, totalCount: totalImageCount)
+  }
+
+  private static func isPresentableVideo(_ video: BrowseVideoContent) -> Bool {
+    BrowseVideoPresentationPolicy.playbackURL(for: video) != nil
+      || BrowseVideoPresentationPolicy.pageURL(for: video) != nil
+      || video.cover.map(RemoteImageURLPolicy.allows) == true
   }
 
   static func mediaPresentation(
@@ -86,12 +100,14 @@ struct ThreadSummaryRow: View {
   let showsForum: Bool
   let showsAuthor: Bool
 
-  @Environment(\.contentMediaLoadBehavior) private var contentMediaLoadBehavior
   @Environment(\.contentImagePreviewQuality) private var contentImagePreviewQuality
   @Environment(\.appAccentColor) private var appAccentColor
   @Environment(\.hidesThreadListMedia) private var hidesThreadListMedia
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
   @Environment(\.openThreadSummaryImage) private var openThreadSummaryImage
+  @Environment(\.externalWebOpenMode) private var externalWebOpenMode
+  @Environment(\.openExternalWeb) private var openExternalWeb
+  @Environment(\.openURL) private var openURL
 
   init(
     thread: BrowseThread,
@@ -208,33 +224,12 @@ struct ThreadSummaryRow: View {
   @ViewBuilder
   private func expandedMediaPreview(_ media: ThreadSummaryMedia) -> some View {
     switch media {
-    case .video(let coverURL):
-      mediaAccessibility(label: "视频预览") {
-        ZStack {
-          ThreadPreviewImage(
-            url: coverURL,
-            role: .videoCover,
-            loadAccessibilityLabel: "加载视频封面",
-            successAccessibilityLabel: "视频预览"
-          )
-          Image(systemName: "play.circle.fill")
-            .font(.system(size: 38))
-            .symbolRenderingMode(.palette)
-            .foregroundStyle(.white, .black.opacity(0.55))
-            .accessibilityHidden(true)
-            .allowsHitTesting(false)
-        }
-        .frame(maxWidth: 360)
-        .frame(height: 150)
-        .background(Color.black.opacity(0.88))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .frame(maxWidth: .infinity, alignment: .leading)
-      }
+    case .video(let preview):
+      expandedVideoPreview(preview)
     case .images(let images, let totalCount):
       if images.count == 1, let image = images.first {
         ThreadPreviewImage(
           url: image.previewURL,
-          role: .staticImage,
           loadAccessibilityLabel: "加载帖子图片",
           successAccessibilityLabel: "图片预览",
           openAccessibilityLabel: "打开图片，共 \(totalCount) 张",
@@ -251,7 +246,6 @@ struct ThreadSummaryRow: View {
             ZStack(alignment: .bottomTrailing) {
               ThreadPreviewImage(
                 url: image.previewURL,
-                role: .staticImage,
                 loadAccessibilityLabel: "加载帖子图片 \(index + 1)",
                 successAccessibilityLabel: "图片预览 \(index + 1)，共 \(totalCount) 张",
                 openAccessibilityLabel: "打开图片 \(index + 1)，共 \(totalCount) 张",
@@ -279,6 +273,47 @@ struct ThreadSummaryRow: View {
     }
   }
 
+  @ViewBuilder
+  private func expandedVideoPreview(_ preview: ThreadSummaryVideoPreview) -> some View {
+    switch BrowseVideoPresentationPolicy.primaryAction(for: preview.video) {
+    case .play, .openPage:
+      BrowseVideoView(
+        video: preview.video,
+        tracksAnimationVisibility: false,
+        maximumPreviewPixelSize: 720,
+        maximumWidth: 360,
+        fixedHeight: 150,
+        openPage: openVideoPage
+      )
+      .id(ThreadSummaryVideoPlaybackIdentity(threadID: thread.id, preview: preview))
+      .background(Color.black.opacity(0.88))
+      .clipShape(RoundedRectangle(cornerRadius: 6))
+      .frame(maxWidth: .infinity, alignment: .leading)
+    case .unavailable:
+      if let coverURL = preview.video.cover, RemoteImageURLPolicy.allows(coverURL) {
+        ZStack {
+          ThreadPreviewImage(
+            url: coverURL,
+            loadAccessibilityLabel: "加载视频封面",
+            successAccessibilityLabel: "视频封面",
+            appliesContentThumbnailDimming: false
+          )
+          Image(systemName: "play.circle.fill")
+            .font(.system(size: 38))
+            .symbolRenderingMode(.palette)
+            .foregroundStyle(.white, .black.opacity(0.55))
+            .accessibilityHidden(true)
+            .allowsHitTesting(false)
+        }
+        .frame(maxWidth: 360)
+        .frame(height: 150)
+        .background(Color.black.opacity(0.88))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
+    }
+  }
+
   private func imageOpenAction(for image: ThreadSummaryImagePreview) -> (() -> Void)? {
     guard openThreadSummaryImage.isAvailable else { return nil }
     return { openImage(image) }
@@ -291,18 +326,22 @@ struct ThreadSummaryRow: View {
     )
   }
 
-  @ViewBuilder
-  private func mediaAccessibility<Content: View>(
-    label: String,
-    @ViewBuilder content: () -> Content
-  ) -> some View {
-    switch contentMediaLoadBehavior {
-    case .automatic, .economicalNetworkOnly:
-      content()
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(label)
-    case .userInitiated:
-      content()
+  private func openVideoPage(_ pageURL: URL) {
+    switch ThreadSummaryVideoPageRouter.disposition(
+      for: pageURL,
+      mode: externalWebOpenMode
+    ) {
+    case .tieba(let target):
+      guard let appURL = TiebaLink.appURL(for: target) else { return }
+      openURL(appURL)
+    case .system(let url):
+      openURL(url)
+    case .inAppSafari(let url):
+      if !openExternalWeb(url) {
+        openURL(url)
+      }
+    case .rejected:
+      break
     }
   }
 
@@ -506,37 +545,43 @@ struct ThreadSummaryRow: View {
   }
 }
 
-enum ThreadPreviewImageRole: Equatable, Sendable {
-  case staticImage
-  case videoCover
+struct ThreadSummaryVideoPlaybackIdentity: Hashable, Sendable {
+  let threadID: Int64
+  let preview: ThreadSummaryVideoPreview
+}
 
-  var appliesContentThumbnailDimming: Bool {
-    self == .staticImage
+enum ThreadSummaryVideoPageRouter {
+  static func disposition(
+    for url: URL,
+    mode: ExternalWebOpenMode
+  ) -> BrowseContentLinkDisposition {
+    guard let pageURL = SecureTiebaURL.videoPage(url) else { return .rejected }
+    return BrowseContentLinkRouter.disposition(for: pageURL, mode: mode)
   }
 }
 
 private struct ThreadPreviewImage: View {
   let url: URL
-  let role: ThreadPreviewImageRole
   let loadAccessibilityLabel: String
   let successAccessibilityLabel: String
   let openAccessibilityLabel: String?
   let onOpen: (() -> Void)?
+  let appliesContentThumbnailDimming: Bool
 
   init(
     url: URL,
-    role: ThreadPreviewImageRole,
     loadAccessibilityLabel: String,
     successAccessibilityLabel: String,
     openAccessibilityLabel: String? = nil,
-    onOpen: (() -> Void)? = nil
+    onOpen: (() -> Void)? = nil,
+    appliesContentThumbnailDimming: Bool = true
   ) {
     self.url = url
-    self.role = role
     self.loadAccessibilityLabel = loadAccessibilityLabel
     self.successAccessibilityLabel = successAccessibilityLabel
     self.openAccessibilityLabel = openAccessibilityLabel
     self.onOpen = onOpen
+    self.appliesContentThumbnailDimming = appliesContentThumbnailDimming
   }
 
   @Environment(\.contentMediaLoadBehavior) private var contentMediaLoadBehavior
@@ -583,7 +628,7 @@ private struct ThreadPreviewImage: View {
 
   private func renderedPreview(_ asset: DownsampledImageAsset) -> some View {
     RemoteImageAssetView(asset: asset, contentMode: .fill)
-      .contentThumbnailDimming(applies: role.appliesContentThumbnailDimming)
+      .contentThumbnailDimming(applies: appliesContentThumbnailDimming)
   }
 
   private var failureSystemImage: String {

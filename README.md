@@ -469,7 +469,12 @@ and its verified metadata enters the public app source.
   is off. If a server video fragment has no stream accepted by the HTTPS playback
   policy, a bounded credential-free HTTP(S) landing page can be opened only by
   an explicit tap. A valid stream remains primary and playback failure never
-  redirects automatically.
+  redirects automatically. Current `main` also reuses that single lazy player
+  for expanded thread-list cards: a playable cover or no-cover placeholder
+  allocates no player until the user taps Play, a cover-only fragment preserves
+  the prior static preview, and compact-media mode remains a passive summary.
+  This list-card interaction is not yet present in the public
+  `v0.62.3-alpha.1` IPA.
 - **Links and sharing:** Supported Tieba links stay in the native router with
   post and reply context. External HTTPS links use the selected system or Safari
   presentation, while forum and thread sharing emits canonical HTTPS links.

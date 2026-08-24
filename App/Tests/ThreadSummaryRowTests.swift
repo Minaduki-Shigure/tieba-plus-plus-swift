@@ -4,14 +4,15 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class ThreadSummaryRowTests: XCTestCase {
-  func testThreadPreviewImageRoleOnlyDarkensStaticImages() {
-    XCTAssertTrue(ThreadPreviewImageRole.staticImage.appliesContentThumbnailDimming)
-    XCTAssertFalse(ThreadPreviewImageRole.videoCover.appliesContentThumbnailDimming)
-  }
-
-  func testVideoCoverTakesPriorityOverImages() throws {
+  func testFirstVideoTakesPriorityOverImagesAndPreservesItsContentOffset() throws {
     let imageURL = try XCTUnwrap(URL(string: "https://example.com/image.jpg"))
     let coverURL = try XCTUnwrap(URL(string: "https://example.com/video.jpg"))
+    let video = BrowseVideoContent(
+      url: nil,
+      cover: coverURL,
+      width: 1280,
+      height: 720
+    )
     let thread = makeThread(
       contents: [
         .image(
@@ -21,18 +22,19 @@ final class ThreadSummaryRowTests: XCTestCase {
           width: 100,
           height: 100
         ),
-        .video(url: nil, cover: coverURL, width: 1280, height: 720),
+        .video(video),
       ]
     )
+    let expected = ThreadSummaryVideoPreview(contentOffset: 1, video: video)
 
-    XCTAssertEqual(ThreadSummaryPresentation.media(for: thread), .video(coverURL))
+    XCTAssertEqual(ThreadSummaryPresentation.media(for: thread), .video(expected))
     XCTAssertEqual(
       ThreadSummaryPresentation.mediaPresentation(for: thread, hidesMedia: false),
-      .expanded(.video(coverURL))
+      .expanded(.video(expected))
     )
     XCTAssertEqual(
       ThreadSummaryPresentation.mediaPresentation(for: thread, hidesMedia: true),
-      .collapsed(.video(coverURL))
+      .collapsed(.video(expected))
     )
   }
 
@@ -207,23 +209,32 @@ final class ThreadSummaryRowTests: XCTestCase {
     )
   }
 
-  func testVideoWithoutCoverDoesNotCreateNewMediaSemantics() throws {
+  func testVideoWithoutCoverRemainsPlayableAndTakesPriorityOverLaterImages() throws {
     let videoURL = try XCTUnwrap(URL(string: "https://example.com/video.mp4"))
+    let video = BrowseVideoContent(
+      url: videoURL,
+      cover: nil,
+      width: 1280,
+      height: 720
+    )
     let videoOnlyThread = makeThread(
-      contents: [.video(url: videoURL, cover: nil, width: 1280, height: 720)]
+      contents: [.video(video)]
     )
+    let expected = ThreadSummaryVideoPreview(contentOffset: 0, video: video)
 
-    XCTAssertNil(
-      ThreadSummaryPresentation.mediaPresentation(for: videoOnlyThread, hidesMedia: false)
+    XCTAssertEqual(
+      ThreadSummaryPresentation.mediaPresentation(for: videoOnlyThread, hidesMedia: false),
+      .expanded(.video(expected))
     )
-    XCTAssertNil(
-      ThreadSummaryPresentation.mediaPresentation(for: videoOnlyThread, hidesMedia: true)
+    XCTAssertEqual(
+      ThreadSummaryPresentation.mediaPresentation(for: videoOnlyThread, hidesMedia: true),
+      .collapsed(.video(expected))
     )
 
     let imageURL = try XCTUnwrap(URL(string: "https://example.com/image.jpg"))
     let threadWithImage = makeThread(
       contents: [
-        .video(url: videoURL, cover: nil, width: 1280, height: 720),
+        .video(video),
         .image(
           thumbnail: imageURL,
           fullSize: nil,
@@ -236,22 +247,125 @@ final class ThreadSummaryRowTests: XCTestCase {
 
     XCTAssertEqual(
       ThreadSummaryPresentation.mediaPresentation(for: threadWithImage, hidesMedia: false),
-      .expanded(
-        .images(
-          [ThreadSummaryImagePreview(contentOffset: 1, previewURL: imageURL)],
-          totalCount: 1
-        )
-      )
+      .expanded(.video(expected))
     )
     XCTAssertEqual(
       ThreadSummaryPresentation.mediaPresentation(for: threadWithImage, hidesMedia: true),
-      .collapsed(
-        .images(
-          [ThreadSummaryImagePreview(contentOffset: 1, previewURL: imageURL)],
-          totalCount: 1
-        )
+      .collapsed(.video(expected))
+    )
+  }
+
+  func testCompletelyUnusableVideoDoesNotHideLaterImages() throws {
+    let unsafeStreamURL = try XCTUnwrap(URL(string: "http://video.example/movie.mp4"))
+    let unsafeCoverURL = try XCTUnwrap(URL(string: "http://video.example/cover.jpg"))
+    let unsafePageURL = try XCTUnwrap(URL(string: "javascript:alert(1)"))
+    let imageURL = try XCTUnwrap(URL(string: "https://example.com/image.jpg"))
+    let thread = makeThread(
+      contents: [
+        .video(
+          BrowseVideoContent(
+            url: unsafeStreamURL,
+            cover: unsafeCoverURL,
+            width: 1280,
+            height: 720,
+            pageURL: unsafePageURL
+          )
+        ),
+        .image(
+          thumbnail: imageURL,
+          fullSize: nil,
+          original: nil,
+          width: 100,
+          height: 100
+        ),
+      ]
+    )
+
+    XCTAssertEqual(
+      ThreadSummaryPresentation.media(for: thread),
+      .images(
+        [ThreadSummaryImagePreview(contentOffset: 1, previewURL: imageURL)],
+        totalCount: 1
       )
     )
+  }
+
+  func testVideoPlaybackIdentitySeparatesThreadsOffsetsAndSources() throws {
+    let firstVideo = BrowseVideoContent(
+      url: try XCTUnwrap(URL(string: "https://example.com/first.mp4")),
+      cover: nil,
+      width: 1280,
+      height: 720
+    )
+    let secondVideo = BrowseVideoContent(
+      url: try XCTUnwrap(URL(string: "https://example.com/second.mp4")),
+      cover: nil,
+      width: 1280,
+      height: 720
+    )
+    let basePreview = ThreadSummaryVideoPreview(contentOffset: 2, video: firstVideo)
+    let base = ThreadSummaryVideoPlaybackIdentity(threadID: 42, preview: basePreview)
+
+    XCTAssertEqual(
+      base,
+      ThreadSummaryVideoPlaybackIdentity(threadID: 42, preview: basePreview)
+    )
+    XCTAssertNotEqual(
+      base,
+      ThreadSummaryVideoPlaybackIdentity(threadID: 43, preview: basePreview)
+    )
+    XCTAssertNotEqual(
+      base,
+      ThreadSummaryVideoPlaybackIdentity(
+        threadID: 42,
+        preview: ThreadSummaryVideoPreview(contentOffset: 3, video: firstVideo)
+      )
+    )
+    XCTAssertNotEqual(
+      base,
+      ThreadSummaryVideoPlaybackIdentity(
+        threadID: 42,
+        preview: ThreadSummaryVideoPreview(contentOffset: 2, video: secondVideo)
+      )
+    )
+  }
+
+  func testVideoPageRouterKeepsTiebaInternalAndHonorsExternalPreference() throws {
+    let tiebaURL = try XCTUnwrap(
+      URL(string: "https://tieba.baidu.com/p/10957526376?see_lz=0#/")
+    )
+    let target = try XCTUnwrap(TiebaLink.target(from: tiebaURL))
+    XCTAssertEqual(
+      ThreadSummaryVideoPageRouter.disposition(for: tiebaURL, mode: .systemBrowser),
+      .tieba(target)
+    )
+
+    let externalURL = try XCTUnwrap(URL(string: "https://video.example/watch/42"))
+    XCTAssertEqual(
+      ThreadSummaryVideoPageRouter.disposition(for: externalURL, mode: .systemBrowser),
+      .system(externalURL)
+    )
+    XCTAssertEqual(
+      ThreadSummaryVideoPageRouter.disposition(for: externalURL, mode: .inAppSafari),
+      .inAppSafari(externalURL)
+    )
+  }
+
+  func testVideoPageRouterRejectsUnsafeURLs() throws {
+    let rejected = [
+      "javascript:alert(1)",
+      "https://user@video.example/watch/42",
+      "https://video.example/watch/%0A42",
+    ]
+
+    for rawValue in rejected {
+      let url = try XCTUnwrap(URL(string: rawValue))
+      XCTAssertEqual(
+        ThreadSummaryVideoPageRouter.disposition(for: url, mode: .inAppSafari),
+        .rejected,
+        rawValue
+      )
+    }
   }
 
   func testPinnedThreadNeverLoadsInlineMedia() throws {

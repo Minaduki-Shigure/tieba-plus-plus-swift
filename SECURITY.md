@@ -1206,7 +1206,14 @@ confirms the player is inline. Owner and session checks prevent stale callbacks
 from cleaning up a replacement session. A cancelled entry confirms inline and
 may finish only its matching pending cleanup; a cancelled exit remains
 full-screen and keeps cleanup pending. A different video cannot replace the
-item while the current player is non-inline. Picture in Picture and automatic
+item while the current player is non-inline. Expanded thread-list cards reuse
+this exact controller. Each rendered leaf receives a fresh opaque owner, while
+the thread ID, exact content offset, and video value form its stable SwiftUI
+identity. Merely scrolling a cover or no-cover placeholder into view creates no
+player; compact-media mode does not instantiate the playback leaf at all.
+Hiding, removing, or recycling the active row invokes the same owner-disappearance
+cleanup, while owner and session checks prevent a late row callback from stopping
+its successor. Picture in Picture and automatic
 Picture in Picture startup are disabled.
 
 Server-declared and AVFoundation voice durations are accepted only as finite

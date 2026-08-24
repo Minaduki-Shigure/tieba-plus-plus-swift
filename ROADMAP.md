@@ -87,6 +87,11 @@ anonymous picture-page endpoint, adds no new content source, and therefore does
 not add a weighted point. A single Root-level presenter keeps gallery state out
 of scrolling rows; uncertain image ownership and active filtering fail closed
 to the already filtered card.
+Explicit list-card video playback closes the corresponding narrow TiebaLite
+interaction gap inside the existing media credit. It reuses the one established
+lazy AVKit player, stream policy, landing-page router, and playback coordinator;
+it adds no endpoint, media source, or weighted point. Compact-media mode remains
+passive, and an expanded card allocates no player before an explicit Play tap.
 The configurable forum primary action likewise completes a narrow local habit
 setting by rearranging existing controls, so it remains inside the existing
 local-settings credit rather than adding a weighted point.
@@ -186,7 +191,8 @@ the source metadata is updated to that tested IPA.
 - Global default sorting with normalized per-forum sort memory
 - Server-defined forum channels with bounded server-provided sorting menus and cursor pagination
 - Shared rich thread cards across forum, channel, hot-topic, global-search, and public profiles
-- Compact pinned rows, bounded author avatars, topic-state badges, image previews, and video covers
+- Compact pinned rows, bounded author avatars, topic-state badges, image previews,
+  and explicit non-autoplay video playback on expanded thread cards
 - Forum header, statistics, rules state, and featured classifications
 - Public forum introductions with original avatars and server statistics
 - Full forum-rule documents with publisher and rich section content
@@ -416,7 +422,11 @@ and effect on later recommendations.
    post bodies, list previews, and the zoom gallery on iOS 16 and iOS 18.7.2,
    including single-frame containers, Reduce Motion, backgrounding, rapid and
    cancelled paging, memory pressure, save/share byte preservation, and static
-   fallback at the frame and decoded-memory limits
+   fallback at the frame and decoded-memory limits. Also validate expanded
+   thread-card video Play, pause, scrubbing, native full-screen entry/exit,
+   landing-page fallback, offscreen cleanup, and compact-mode switching inside
+   every whole-row navigation surface; none of those media actions may open the
+   thread destination, and scrolling covers alone must leave the player unallocated
 2. Real-device validation of the persistent image cache on iOS 16 and iOS 18.7.2,
    including cold-relaunch hits, preview/original size boundaries, TTL and LRU
    eviction, clearing against in-flight downloads, storage pressure, and logical
@@ -668,7 +678,10 @@ destruction until a transition outcome confirms the player is inline. A
 cancelled entry can complete only its matching pending cleanup, while a
 cancelled exit remains full-screen and keeps cleanup pending. Stale transitions
 cannot tear down a newer session, and another video cannot replace a non-inline
-item.
+item. Post bodies and expanded thread-list cards share this same playback leaf;
+list cards preserve the exact video occurrence even when no cover survives, and
+compact-media rows never construct that leaf. Removing a playing row or changing
+its source invokes the same owner cleanup as a post-body video.
 
 TiebaLite also preserves the `PbContent.type == 5` text field as a video landing
 page. Tieba++ keeps that field independently from the media stream. Core trims
@@ -1046,8 +1059,12 @@ user themes without reordering or filtering the server result set. Only an ordin
 locally visible row whose surface displays its author constructs the 24-point
 avatar view. Pinned rows, filtered placeholders, hidden rows, and profile-owned
 thread lists deliberately issue no author-avatar request. Ordinary rows load at
-most three image thumbnails or one video cover; a cover is never an autoplaying
-player. Every requested image still passes the existing HTTPS URL normalization,
+most three image thumbnails or one video cover. The expanded video surface is
+never autoplaying: a playable fragment remains cover-only, or a local placeholder
+when no cover exists, until an explicit Play tap initializes the one shared
+player. A fragment with only a safe cover preserves the prior static preview;
+a completely unusable fragment cannot hide later valid images. Every requested
+image still passes the existing HTTPS URL normalization,
 credential-free downloader, redirect policy, transfer-time byte limit, and pixel
 downsampling. Automatic 720-pixel previews stop at 16 MiB; higher-resolution
 explicit image views retain the 80 MiB ceiling.

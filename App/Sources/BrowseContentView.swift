@@ -808,15 +808,35 @@ enum BrowseVideoPresentationPolicy {
   }
 }
 
-private struct BrowseVideoView: View {
+struct BrowseVideoView: View {
   let video: BrowseVideoContent
   let tracksAnimationVisibility: Bool
   let maximumPreviewPixelSize: Int
+  let maximumWidth: CGFloat
+  let fixedHeight: CGFloat?
   let openPage: (URL) -> Void
 
   @State private var ownerID = UUID()
   @Environment(\.contentMediaLoadBehavior) private var contentMediaLoadBehavior
   @EnvironmentObject private var controller: VideoPlaybackController
+
+  init(
+    video: BrowseVideoContent,
+    tracksAnimationVisibility: Bool,
+    maximumPreviewPixelSize: Int,
+    maximumWidth: CGFloat = 560,
+    fixedHeight: CGFloat? = nil,
+    openPage: @escaping (URL) -> Void
+  ) {
+    self.video = video
+    self.tracksAnimationVisibility = tracksAnimationVisibility
+    self.maximumPreviewPixelSize = max(maximumPreviewPixelSize, 1)
+    self.maximumWidth = maximumWidth.isFinite && maximumWidth >= 44 ? maximumWidth : 560
+    self.fixedHeight = fixedHeight.flatMap {
+      $0.isFinite && $0 >= 44 ? $0 : nil
+    }
+    self.openPage = openPage
+  }
 
   private var aspectRatio: CGFloat {
     guard video.width > 0, video.height > 0 else { return 16 / 9 }
@@ -824,6 +844,27 @@ private struct BrowseVideoView: View {
   }
 
   var body: some View {
+    framedVideoSurface
+      .onChange(of: playbackURL) { controller.sourceDidChange(ownerID: ownerID, to: $0) }
+      .onDisappear { controller.ownerDidDisappear(ownerID) }
+  }
+
+  @ViewBuilder
+  private var framedVideoSurface: some View {
+    if let fixedHeight {
+      videoSurface
+        .frame(maxWidth: maximumWidth)
+        .frame(height: fixedHeight)
+        .clipped()
+    } else {
+      videoSurface
+        .aspectRatio(aspectRatio, contentMode: .fit)
+        .frame(maxWidth: maximumWidth)
+        .clipped()
+    }
+  }
+
+  private var videoSurface: some View {
     Group {
       if
         let playbackURL,
@@ -878,7 +919,7 @@ private struct BrowseVideoView: View {
                 }
               }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
           } else {
             Color.black.opacity(0.88)
               .accessibilityHidden(true)
@@ -894,6 +935,7 @@ private struct BrowseVideoView: View {
                 .symbolRenderingMode(.palette)
                 .foregroundStyle(.white, .black.opacity(0.55))
             }
+            .buttonStyle(.borderless)
             .accessibilityLabel("播放视频")
             .accessibilityHint(
               Text(failureMessage.map { "\($0) 再次尝试播放。" } ?? "开始播放")
@@ -909,7 +951,7 @@ private struct BrowseVideoView: View {
                 .padding(.vertical, 9)
                 .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 6))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
             .accessibilityHint("在网页中打开")
           case .unavailable:
             Label("视频不可用", systemImage: "video.slash")
@@ -945,18 +987,13 @@ private struct BrowseVideoView: View {
                 .padding(.vertical, 7)
                 .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 6))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
             .accessibilityHint("改用网页打开")
             .padding(8)
           }
         }
       }
     }
-    .aspectRatio(aspectRatio, contentMode: .fit)
-    .frame(maxWidth: 560)
-    .clipped()
-    .onChange(of: playbackURL) { controller.sourceDidChange(ownerID: ownerID, to: $0) }
-    .onDisappear { controller.ownerDidDisappear(ownerID) }
   }
 
   private var playbackURL: URL? {
