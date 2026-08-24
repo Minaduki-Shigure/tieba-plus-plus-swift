@@ -9,6 +9,12 @@ enum AppPreferenceKey {
   static let textSizeAdjustment = "TiebaPlusPlus.textSizeAdjustment"
   static let defaultForumSort = "TiebaPlusPlus.defaultForumSort"
   static let forumPrimaryAction = "TiebaPlusPlus.forumPrimaryAction"
+  static let forumBatchCheckInDelayMode =
+    "TiebaPlusPlus.forumBatchCheckInDelayMode"
+  static let forumBatchCheckInUsesOfficialBatch =
+    "TiebaPlusPlus.forumBatchCheckInUsesOfficialBatch"
+  static let forumBatchCheckInStopsAfterSingleFailure =
+    "TiebaPlusPlus.forumBatchCheckInStopsAfterSingleFailure"
   static let homeStartDestination = "TiebaPlusPlus.homeStartDestination"
   static let homeShowsDiscovery = "TiebaPlusPlus.homeShowsDiscovery"
   static let homeShowsRecentForums = "TiebaPlusPlus.homeShowsRecentForums"
@@ -145,12 +151,47 @@ enum AppTextSizeAdjustment: Int, CaseIterable, Hashable, Identifiable, Sendable 
 enum AppPreferenceDefaults {
   static let homeShowsDiscovery = true
   static let personalizedFollowedForumsOnly = false
+  static let forumBatchCheckInUsesOfficialBatch = true
+  static let forumBatchCheckInStopsAfterSingleFailure = true
   static let favoriteThreadsOpenOnlyAuthor = false
   static let favoriteThreadsOpenDescending = false
   static let cloudFavoriteThreadsOpenOnlyAuthor = true
   static let cloudFavoriteThreadsOpenDescending = false
   static let hidesReplyEntryPoints = false
   static let showsPostAndReplyRiskNotice = true
+}
+
+enum ForumBatchCheckInDelayMode:
+  String, CaseIterable, Hashable, Identifiable, Sendable
+{
+  case slow
+  case fast
+
+  static let defaultValue = Self.slow
+
+  var id: Self { self }
+
+  var displayName: String {
+    switch self {
+    case .slow:
+      "慢速（随机 3.5–8 秒）"
+    case .fast:
+      "快速（固定 2 秒）"
+    }
+  }
+
+  var delayMillisecondsRange: ClosedRange<UInt64> {
+    switch self {
+    case .slow:
+      3_500...7_999
+    case .fast:
+      2_000...2_000
+    }
+  }
+
+  static func resolved(_ rawValue: String) -> Self {
+    Self(rawValue: rawValue) ?? defaultValue
+  }
 }
 
 enum ComposerImageWatermarkPreference:

@@ -27,6 +27,14 @@ struct AppSettingsView: View {
   private var defaultForumSort = ForumThreadSort.replyTime.rawValue
   @AppStorage(AppPreferenceKey.forumPrimaryAction)
   private var forumPrimaryAction = ForumPrimaryAction.defaultValue.rawValue
+  @AppStorage(AppPreferenceKey.forumBatchCheckInDelayMode)
+  private var forumBatchCheckInDelayMode = ForumBatchCheckInDelayMode.defaultValue.rawValue
+  @AppStorage(AppPreferenceKey.forumBatchCheckInUsesOfficialBatch)
+  private var forumBatchCheckInUsesOfficialBatch =
+    AppPreferenceDefaults.forumBatchCheckInUsesOfficialBatch
+  @AppStorage(AppPreferenceKey.forumBatchCheckInStopsAfterSingleFailure)
+  private var forumBatchCheckInStopsAfterSingleFailure =
+    AppPreferenceDefaults.forumBatchCheckInStopsAfterSingleFailure
   @AppStorage(AppPreferenceKey.homeStartDestination)
   private var homeStartDestination = AppStartDestination.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.homeShowsDiscovery)
@@ -175,6 +183,29 @@ struct AppSettingsView: View {
         case .loaded:
           EmptyView()
         }
+      }
+
+      Section {
+        Picker("单吧签到间隔", selection: forumBatchCheckInDelayModeSelection) {
+          ForEach(ForumBatchCheckInDelayMode.allCases) { mode in
+            Text(mode.displayName).tag(mode)
+          }
+        }
+        .pickerStyle(.menu)
+        .accessibilityIdentifier("settings-forum-batch-check-in-delay-mode")
+
+        Toggle("优先使用官方批签", isOn: $forumBatchCheckInUsesOfficialBatch)
+          .accessibilityIdentifier("settings-forum-batch-check-in-official-batch")
+
+        Toggle("单吧签到失败后停止", isOn: $forumBatchCheckInStopsAfterSingleFailure)
+          .accessibilityIdentifier("settings-forum-batch-check-in-stop-after-failure")
+      } header: {
+        Text("一键签到")
+      } footer: {
+        Text(
+          "这些设置只影响从一键签到页面主动开始的前台流程，不会创建后台或定时任务。"
+            + "关闭失败中止后，仅在单吧签到已明确失败时继续；账户变化、取消或结果未知时仍会停止。"
+        )
       }
 
       Section {
@@ -517,6 +548,13 @@ struct AppSettingsView: View {
     Binding(
       get: { ForumPrimaryAction.resolved(forumPrimaryAction) },
       set: { forumPrimaryAction = $0.rawValue }
+    )
+  }
+
+  private var forumBatchCheckInDelayModeSelection: Binding<ForumBatchCheckInDelayMode> {
+    Binding(
+      get: { ForumBatchCheckInDelayMode.resolved(forumBatchCheckInDelayMode) },
+      set: { forumBatchCheckInDelayMode = $0.rawValue }
     )
   }
 

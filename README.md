@@ -18,7 +18,7 @@ and its verified metadata enters the public app source.
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, media preferences, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
-| Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary, followed forums, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session, authenticated poll state, and experimental content approval |
+| Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary, followed forums, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies; both newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
 | TiebaLite parity | Current `main` and public `v0.62.3-alpha.1`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.62.3-alpha.1` (build 74) |
@@ -180,6 +180,12 @@ and its verified metadata enters the public app source.
   for review without retrying or sending individual check-ins. There is no
   background or automatic check-in, and real-account behavior remains a
   physical-device validation gate.
+  Settings can instead disable the official batch and process every target
+  individually, choose TiebaLite's slow random 3.5-to-under-8-second interval or
+  fixed 2-second interval, and continue after an authoritative single-forum
+  failure. The confirmation freezes all three choices for that run. Continuing
+  never retries the failed forum and never applies to an account change,
+  cancellation, or dispatched result that cannot be confirmed.
   Multi-image galleries can switch between horizontal and vertical one-image
   paging while retaining a stable selected occurrence and bounded zoom state. A
   server-provided dynamic-image candidate now remains separate from static and
@@ -290,6 +296,12 @@ and its verified metadata enters the public app source.
   catalog only; the existing in-page snapshot confirmation remains the write
   boundary. This navigation-only addition introduces no endpoint or background
   behavior and is not included in the public `v0.62.3-alpha.1` IPA.
+- **Current-main one-click check-in execution settings:** The confirmation now
+  freezes whether to use the official batch, whether an authoritative single-
+  forum failure stops later targets, and whether individual requests use the
+  slow random or fixed 2-second interval. Defaults retain official batch, slow
+  mode, and stop-on-failure. Account changes, cancellation, and uncertain
+  dispatched outcomes always stop without retry, regardless of the setting.
 - **`v0.61.0-alpha.1` static-image creation:** New-topic and direct-topic-reply
   composers can select, reorder, preview, and remove up to nine static
   images, choose standard or high-definition processing, and select forum-name,
@@ -794,7 +806,12 @@ and its verified metadata enters the public app source.
   that refresh never become individual check-in writes. Once a batch may have
   reached the server, an uncertain response triggers read-only reconciliation
   for the exact dispatched forums; unresolved outcomes remain visibly
-  unconfirmed, with no retry or single-write fallback. All supported writes
+  unconfirmed, with no retry or single-write fallback. The user may disable the
+  official batch or allow later individual targets after a definitively failed
+  single-forum request; the confirmation freezes those choices and the selected
+  slow or fast interval. A failed target is never retried, while any uncertain
+  single result, cancellation, or account-lease change still stops the
+  run. All supported writes
   require explicit user confirmation; the configurable composer-entry risk
   notice is not that confirmation. Background and automatic check-in are not
   implemented.

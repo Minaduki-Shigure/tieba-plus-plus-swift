@@ -4,6 +4,13 @@ struct ForumBatchCheckInView: View {
   @StateObject private var viewModel: ForumBatchCheckInViewModel
   @State private var showsStartConfirmation = false
   @State private var acceptedStartConfirmation = false
+  @AppStorage(AppPreferenceKey.forumBatchCheckInDelayMode)
+  private var delayMode = ForumBatchCheckInDelayMode.defaultValue.rawValue
+  @AppStorage(AppPreferenceKey.forumBatchCheckInUsesOfficialBatch)
+  private var usesOfficialBatch = AppPreferenceDefaults.forumBatchCheckInUsesOfficialBatch
+  @AppStorage(AppPreferenceKey.forumBatchCheckInStopsAfterSingleFailure)
+  private var stopsAfterSingleFailure =
+    AppPreferenceDefaults.forumBatchCheckInStopsAfterSingleFailure
 
   init(access: AccountAccess) {
     _viewModel = StateObject(wrappedValue: ForumBatchCheckInViewModel(access: access))
@@ -105,7 +112,7 @@ struct ForumBatchCheckInView: View {
             }
             .buttonStyle(.borderedProminent)
             .accessibilityLabel("开始为 \(summary.pending) 个贴吧签到")
-            .accessibilityHint("确认后会在当前页面发起官方一键签到")
+            .accessibilityHint("确认后会按当前设置在前台执行一键签到")
           }
         case .needsReview:
           Label(
@@ -382,18 +389,29 @@ struct ForumBatchCheckInView: View {
       "将使用当前贴吧账户开始一键签到。",
       "本次只在当前页面前台启动，不会创建后台或定时任务。"
     ]
-    if
+    if !confirmation.executionPolicy.usesOfficialBatch {
+      parts.insert("已按设置跳过官方批签，本次待签到贴吧将逐个处理。", at: 1)
+    } else if
       confirmation.officialBatchEligibleCount > 0,
       let minimumLevel = confirmation.minimumOfficialLevel,
       let maximumCount = confirmation.maximumOfficialCount
     {
       parts.insert(
-        "等级 \(minimumLevel) 及以上的贴吧会先使用官方批签，最多 \(maximumCount) 个；本次符合条件 \(confirmation.officialBatchEligibleCount) 个，其余待签到贴吧将逐个处理。",
+        "等级 \(minimumLevel) 及以上的贴吧会先使用官方批签，最多 \(maximumCount) 个；"
+          + "本次符合条件 \(confirmation.officialBatchEligibleCount) 个，"
+          + "其余待签到贴吧将逐个处理。",
         at: 1
       )
     } else {
-      parts.insert("本次待签到贴吧将逐个处理。", at: 1)
+      parts.insert("本次没有可使用官方批签的目标，待签到贴吧将逐个处理。", at: 1)
     }
+    parts.append("逐个处理的请求间隔为\(confirmation.executionPolicy.delayMode.displayName)。")
+    parts.append(
+      confirmation.executionPolicy.stopsAfterSingleFailure
+        ? "首个明确的单吧签到失败后会停止。"
+        : "明确的单吧签到失败后会继续，但不会自动重试失败请求。"
+    )
+    parts.append("账户变化、取消或结果未知时始终停止。")
     parts.append("停止或离开页面不会撤回已经发出的请求。")
     return parts.joined(separator: " ")
   }
@@ -404,7 +422,12 @@ struct ForumBatchCheckInView: View {
   ) -> String {
     switch phase {
     case .ready:
-      return "共关注 \(summary.total) 个贴吧，待签到 \(summary.pending) 个，可官方批签 \(summary.eligible) 个，已跳过 \(summary.skipped) 个"
+      let prefix = "共关注 \(summary.total) 个贴吧，待签到 \(summary.pending) 个，"
+      if usesOfficialBatch {
+        return prefix + "可官方批签 \(summary.eligible) 个，已跳过 \(summary.skipped) 个"
+      }
+      return prefix
+        + "官方批签已关闭，将逐个处理 \(summary.pending) 个，已跳过 \(summary.skipped) 个"
     case .completed, .needsReview, .failed:
       return "共关注 \(summary.total) 个贴吧，本次已处理 \(summary.processed) 个，成功 \(summary.succeeded) 个，失败 \(summary.failed) 个，待核对 \(summary.unconfirmed) 个，已跳过 \(summary.skipped) 个，未执行 \(summary.stopped) 个"
     }
@@ -414,7 +437,7 @@ struct ForumBatchCheckInView: View {
     summary: ForumBatchCheckInSummary,
     phase: ForumBatchCheckInPresentationPhase
   ) -> String {
-    if phase == .ready { return "可批签" }
+    if phase == .ready { return usesOfficialBatch ? "可批签" : "将逐吧" }
     return summary.unconfirmed > 0 ? "待核对" : "失败"
   }
 
@@ -422,13 +445,21 @@ struct ForumBatchCheckInView: View {
     summary: ForumBatchCheckInSummary,
     phase: ForumBatchCheckInPresentationPhase
   ) -> Int {
-    if phase == .ready { return summary.eligible }
+    if phase == .ready { return usesOfficialBatch ? summary.eligible : summary.pending }
     return summary.unconfirmed > 0 ? summary.unconfirmed : summary.failed
   }
 
   private func requestStartConfirmation() {
-    viewModel.requestStartConfirmation()
+    viewModel.requestStartConfirmation(policy: selectedExecutionPolicy)
     showsStartConfirmation = viewModel.pendingConfirmation != nil
+  }
+
+  private var selectedExecutionPolicy: ForumBatchCheckInExecutionPolicy {
+    ForumBatchCheckInExecutionPolicy(
+      delayMode: ForumBatchCheckInDelayMode.resolved(delayMode),
+      usesOfficialBatch: usesOfficialBatch,
+      stopsAfterSingleFailure: stopsAfterSingleFailure
+    )
   }
 
   private func cancelStartConfirmation() {

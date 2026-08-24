@@ -47,6 +47,33 @@ struct ForumBatchCheckInConfirmation: Equatable, Sendable {
   let officialBatchEligibleCount: Int
   let minimumOfficialLevel: Int?
   let maximumOfficialCount: Int?
+  let executionPolicy: ForumBatchCheckInExecutionPolicy
+
+  init(
+    targetCount: Int,
+    officialBatchEligibleCount: Int,
+    minimumOfficialLevel: Int?,
+    maximumOfficialCount: Int?,
+    executionPolicy: ForumBatchCheckInExecutionPolicy = .defaultValue
+  ) {
+    self.targetCount = targetCount
+    self.officialBatchEligibleCount = officialBatchEligibleCount
+    self.minimumOfficialLevel = minimumOfficialLevel
+    self.maximumOfficialCount = maximumOfficialCount
+    self.executionPolicy = executionPolicy
+  }
+}
+
+struct ForumBatchCheckInExecutionPolicy: Equatable, Sendable {
+  let delayMode: ForumBatchCheckInDelayMode
+  let usesOfficialBatch: Bool
+  let stopsAfterSingleFailure: Bool
+
+  static let defaultValue = Self(
+    delayMode: .defaultValue,
+    usesOfficialBatch: AppPreferenceDefaults.forumBatchCheckInUsesOfficialBatch,
+    stopsAfterSingleFailure: AppPreferenceDefaults.forumBatchCheckInStopsAfterSingleFailure
+  )
 }
 
 enum ForumBatchCheckInState: Equatable, Sendable {
@@ -66,9 +93,20 @@ private enum ForumBatchResultApplication {
   case invalid
 }
 
+private enum ForumSingleResultApplication {
+  case succeeded
+  case definitiveFailure
+  case unconfirmed
+}
+
 private struct ForumBatchCheckInTask {
   let operationID: UUID
   let task: Task<ForumBatchCheckInData, Error>
+}
+
+private struct ForumBatchCheckInDelayTask {
+  let operationID: UUID
+  let task: Task<Void, Never>
 }
 
 @MainActor
@@ -82,17 +120,19 @@ final class ForumBatchCheckInViewModel: ObservableObject {
   @Published private(set) var errorMessage: String?
 
   private let access: AccountAccess
-  private let interRequestDelay: @Sendable () async -> Void
+  private let interRequestDelay: @Sendable (ForumBatchCheckInDelayMode) async -> Void
   private var catalog: ForumCheckInCatalogData?
   private var currentLease: ForumBatchCheckInSessionLease?
   private var operation: ForumBatchCheckInOperation?
   private var batchTask: ForumBatchCheckInTask?
+  private var delayTask: ForumBatchCheckInDelayTask?
   private var generation = 0
 
   init(
     access: AccountAccess,
-    interRequestDelay: @escaping @Sendable () async -> Void = {
-      try? await Task.sleep(nanoseconds: 4_000_000_000)
+    interRequestDelay: @escaping @Sendable (ForumBatchCheckInDelayMode) async -> Void = { mode in
+      let milliseconds = UInt64.random(in: mode.delayMillisecondsRange)
+      try? await Task.sleep(nanoseconds: milliseconds * 1_000_000)
     }
   ) {
     self.access = access
@@ -178,7 +218,9 @@ final class ForumBatchCheckInViewModel: ObservableObject {
     }
   }
 
-  func requestStartConfirmation() {
+  func requestStartConfirmation(
+    policy: ForumBatchCheckInExecutionPolicy = .defaultValue
+  ) {
     guard
       case .ready = state,
       pendingConfirmation == nil,
@@ -186,12 +228,15 @@ final class ForumBatchCheckInViewModel: ObservableObject {
       currentLease != nil,
       entries.contains(where: { $0.outcome == .pending })
     else { return }
-    let policy = catalog.officialBatchPolicy
+    let officialPolicy = catalog.officialBatchPolicy
     pendingConfirmation = ForumBatchCheckInConfirmation(
       targetCount: entries.filter { $0.outcome == .pending }.count,
-      officialBatchEligibleCount: officialBatchEligibleTargets().count,
-      minimumOfficialLevel: policy?.minimumLevel,
-      maximumOfficialCount: policy?.maximumForumCount
+      officialBatchEligibleCount: policy.usesOfficialBatch
+        ? officialBatchEligibleTargets().count
+        : 0,
+      minimumOfficialLevel: officialPolicy?.minimumLevel,
+      maximumOfficialCount: officialPolicy?.maximumForumCount,
+      executionPolicy: policy
     )
   }
 
@@ -201,7 +246,7 @@ final class ForumBatchCheckInViewModel: ObservableObject {
 
   func confirmStart() async {
     guard
-      pendingConfirmation != nil,
+      let confirmation = pendingConfirmation,
       case .ready = state,
       let expectedLease = currentLease,
       catalog != nil,
@@ -211,26 +256,14 @@ final class ForumBatchCheckInViewModel: ObservableObject {
       pendingConfirmation = nil
       return
     }
-    let initialOfficialTargets = officialBatchEligibleTargets().map {
-      ForumBatchCheckInTarget(forumID: $0.id, forumName: $0.forumName)
-    }
+    let executionPolicy = confirmation.executionPolicy
+    let initialOfficialTargets = executionPolicy.usesOfficialBatch
+      ? officialBatchEligibleTargets().map {
+        ForumBatchCheckInTarget(forumID: $0.id, forumName: $0.forumName)
+      }
+      : []
     let initialOfficialTargetIDs = Set(initialOfficialTargets.map(\.forumID))
     pendingConfirmation = nil
-
-    let session: StoredAccountSession
-    do {
-      guard
-        let activeSession = try await access.vault.activeSession(),
-        ForumBatchCheckInSessionLease(activeSession) == expectedLease
-      else {
-        resetForChangedAccount()
-        return
-      }
-      session = activeSession
-    } catch {
-      failForUnreadableAccount(summary: summary())
-      return
-    }
 
     generation &+= 1
     let requestGeneration = generation
@@ -241,8 +274,33 @@ final class ForumBatchCheckInViewModel: ObservableObject {
     defer {
       if operation?.id == activeOperation.id {
         clearBatchTask(for: activeOperation.id)
+        clearDelayTask(for: activeOperation.id)
         operation = nil
       }
+    }
+
+    let session: StoredAccountSession
+    do {
+      guard let activeSession = try await access.vault.activeSession() else {
+        guard operationIsCurrent(activeOperation, generation: requestGeneration) else { return }
+        resetForChangedAccount()
+        return
+      }
+      guard operationIsCurrent(activeOperation, generation: requestGeneration) else { return }
+      guard ForumBatchCheckInSessionLease(activeSession) == expectedLease else {
+        resetForChangedAccount()
+        return
+      }
+      session = activeSession
+    } catch {
+      guard operationIsCurrent(activeOperation, generation: requestGeneration) else { return }
+      failForUnreadableAccount(summary: summary())
+      return
+    }
+    if Task.isCancelled { activeOperation.requestStop() }
+    if activeOperation.shouldStop() {
+      finishStopped(operation: activeOperation, generation: requestGeneration)
+      return
     }
 
     if !initialOfficialTargetIDs.isEmpty {
@@ -333,6 +391,11 @@ final class ForumBatchCheckInViewModel: ObservableObject {
         return
       }
       guard await keepCurrentLease(expectedLease, operation: activeOperation) else { return }
+      if Task.isCancelled { activeOperation.requestStop() }
+      if activeOperation.shouldStop() {
+        finishStopped(operation: activeOperation, generation: requestGeneration)
+        return
+      }
 
       let target = entries[index]
       entries[index].outcome = .inProgress
@@ -350,20 +413,31 @@ final class ForumBatchCheckInViewModel: ObservableObject {
       guard operationIsCurrent(activeOperation, generation: requestGeneration) else { return }
       guard await keepCurrentLease(expectedLease, operation: activeOperation) else { return }
 
-      var didSucceed = false
+      let application: ForumSingleResultApplication
       switch result {
       case .success(let accountState):
         if confirmedSingleResult(accountState, target: target, lease: expectedLease) {
           entries[index].outcome = .succeeded
-          didSucceed = true
+          application = .succeeded
           if let checkIn = accountState.checkIn {
             postCheckInChange(checkIn, target: target, lease: expectedLease)
           }
+        } else if confirmedUnsignedSingleResult(
+          accountState,
+          target: target,
+          lease: expectedLease
+        ) {
+          entries[index].outcome = .failed(message: "贴吧没有确认签到成功。")
+          application = .definitiveFailure
         } else {
-          entries[index].outcome = .failed(message: "贴吧没有确认签到结果。")
+          entries[index].outcome = .unconfirmed(message: singleOutcomeUnknownMessage)
+          application = .unconfirmed
         }
       case .failure(let error):
-        didSucceed = await reconcileSingleFailure(
+        if error is CancellationError {
+          activeOperation.requestStop()
+        }
+        application = await reconcileSingleFailure(
           error,
           session: session,
           target: target,
@@ -376,18 +450,36 @@ final class ForumBatchCheckInViewModel: ObservableObject {
       }
 
       updateRunningState(operation: activeOperation)
-      if case .failed = entries[index].outcome {
+      switch application {
+      case .unconfirmed:
+        markPendingStopped()
+        errorMessage = singleOutcomeUnknownMessage
+        state = .needsReview(summary: summary())
+        return
+      case .definitiveFailure where executionPolicy.stopsAfterSingleFailure:
         markPendingStopped()
         errorMessage = "一键签到在首个单吧失败后停止，未自动重试。"
         finish(operation: activeOperation, generation: requestGeneration)
         return
+      case .succeeded, .definitiveFailure:
+        break
       }
-      if didSucceed,
-        !activeOperation.shouldStop(),
+      if !activeOperation.shouldStop(),
         entries.contains(where: { $0.outcome == .pending })
       {
         let delay = interRequestDelay
-        await Task.detached { await delay() }.value
+        let pacingTask = Task.detached { await delay(executionPolicy.delayMode) }
+        delayTask = ForumBatchCheckInDelayTask(
+          operationID: activeOperation.id,
+          task: pacingTask
+        )
+        await withTaskCancellationHandler {
+          await pacingTask.value
+        } onCancel: {
+          activeOperation.requestStop()
+          pacingTask.cancel()
+        }
+        clearDelayTask(for: activeOperation.id)
         if Task.isCancelled { activeOperation.requestStop() }
         guard operationIsCurrent(activeOperation, generation: requestGeneration) else { return }
       }
@@ -402,13 +494,18 @@ final class ForumBatchCheckInViewModel: ObservableObject {
     if batchTask?.operationID == operation.id {
       batchTask?.task.cancel()
     }
+    if delayTask?.operationID == operation.id {
+      delayTask?.task.cancel()
+    }
     state = .stopping(progress: progress())
   }
 
   func accountSessionDidChange() async {
     operation?.requestStop()
     batchTask?.task.cancel()
+    delayTask?.task.cancel()
     batchTask = nil
+    delayTask = nil
     operation = nil
     generation &+= 1
     resetForChangedAccount()
@@ -671,7 +768,7 @@ final class ForumBatchCheckInViewModel: ObservableObject {
     lease: ForumBatchCheckInSessionLease,
     operation expectedOperation: ForumBatchCheckInOperation,
     generation expectedGeneration: Int
-  ) async -> Bool {
+  ) async -> ForumSingleResultApplication {
     let service = access.service
     let readback = Task.detached {
       try await service.forumAccountState(
@@ -681,9 +778,13 @@ final class ForumBatchCheckInViewModel: ObservableObject {
       )
     }
     let result = await readback.result
-    guard operationIsCurrent(expectedOperation, generation: expectedGeneration) else { return false }
-    guard await keepCurrentLease(lease, operation: expectedOperation) else { return false }
-    guard entries.indices.contains(entryIndex), entries[entryIndex].id == target.id else { return false }
+    guard operationIsCurrent(expectedOperation, generation: expectedGeneration) else {
+      return .unconfirmed
+    }
+    guard await keepCurrentLease(lease, operation: expectedOperation) else { return .unconfirmed }
+    guard entries.indices.contains(entryIndex), entries[entryIndex].id == target.id else {
+      return .unconfirmed
+    }
 
     switch result {
     case .success(let state):
@@ -692,17 +793,20 @@ final class ForumBatchCheckInViewModel: ObservableObject {
         if let checkIn = state.checkIn {
           postCheckInChange(checkIn, target: target, lease: lease)
         }
-        return true
+        return .succeeded
       }
       if confirmedUnsignedSingleResult(state, target: target, lease: lease) {
-        entries[entryIndex].outcome = .failed(message: singleFailureMessage(writeError))
+        entries[entryIndex].outcome = .failed(
+          message: definitiveSingleFailureMessage(writeError)
+        )
+        return .definitiveFailure
       } else {
-        entries[entryIndex].outcome = .failed(message: singleOutcomeUnknownMessage)
+        entries[entryIndex].outcome = .unconfirmed(message: singleOutcomeUnknownMessage)
       }
     case .failure:
-      entries[entryIndex].outcome = .failed(message: singleOutcomeUnknownMessage)
+      entries[entryIndex].outcome = .unconfirmed(message: singleOutcomeUnknownMessage)
     }
-    return false
+    return .unconfirmed
   }
 
   private func postCheckInChange(
@@ -723,6 +827,13 @@ final class ForumBatchCheckInViewModel: ObservableObject {
 
   private var singleOutcomeUnknownMessage: String {
     "签到请求已派发，但贴吧未能确认结果。请先重新进入该吧核对，勿立即重试。"
+  }
+
+  private func definitiveSingleFailureMessage(_ error: any Error) -> String {
+    if error is CancellationError {
+      return "签到请求已停止；贴吧确认该吧仍未签到。"
+    }
+    return singleFailureMessage(error)
   }
 
   private func singleFailureMessage(_ error: any Error) -> String {
@@ -848,6 +959,11 @@ final class ForumBatchCheckInViewModel: ObservableObject {
   private func clearBatchTask(for operationID: UUID) {
     guard batchTask?.operationID == operationID else { return }
     batchTask = nil
+  }
+
+  private func clearDelayTask(for operationID: UUID) {
+    guard delayTask?.operationID == operationID else { return }
+    delayTask = nil
   }
 
   private func leaseState(

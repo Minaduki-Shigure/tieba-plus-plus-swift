@@ -28,7 +28,7 @@ from that source.
 | Anonymous discovery, search, and forums | 20 | 18–19 | Core browsing, ranking, recommendations, categories, and search are implemented; a few niche discovery paths remain. Account-bound dislike feedback is credited under server writes, not anonymous reading |
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, shared text selection/copying, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
-| Local data, settings, and customization | 10 | 7 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, a TiebaLite-compatible default image-watermark choice, reply-entry visibility, a default-on composer risk notice, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
+| Local data, settings, and customization | 10 | 7 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, confirmation-frozen foreground check-in execution settings, a TiebaLite-compatible default image-watermark choice, reply-entry visibility, a default-on composer risk notice, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, Home-toolbar quick switching, a self-profile summary, an authenticated current-account following list with a guarded mutual filter, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 14 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, server-reason-bound personalized recommendation dislike feedback, three text/classic-emoticon reply targets, equivalent new-topic creation, bounded static-image new-topic/direct-topic-reply creation, direct inline-preview reply entry, and credential-free official reporting entry points have guarded implementations; real batch-check-in behavior, creation, poll and interaction-restriction success, broader uploaded media, unresolvable cloud rows, native reporting, and other reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
@@ -137,6 +137,10 @@ foreground flow where TiebaLite places a daily action. It appears only for an
 active account with complete credentials, and opening it performs catalog reads
 only; the existing confirmation remains the write boundary. It adds no endpoint,
 write target, background behavior, or weighted point.
+The one-click execution settings close another narrow TiebaLite habit gap inside
+that same foreground workflow. They add no endpoint, write target, automatic or
+background behavior, or weighted point; the confirmation freezes the selected
+batch, failure, and pacing policy for one explicit run.
 The Home account control now preserves its ordinary account-management tap while
 adding a native long-press menu for exact saved-account switching and direct
 account addition. It consumes only the existing nonsecret account summaries and
@@ -371,7 +375,11 @@ the source metadata is updated to that tested IPA.
   a batch dispatch limited to their intersection. Official rejections and dropped
   targets never fall back to individual writes; an uncertain batch outcome is
   reconciled only through authoritative per-forum reads and is never retried.
-  Background and automatic check-in are not implemented
+  The confirmation also freezes whether official batch is enabled, whether an
+  authoritative single-forum failure stops later targets, and whether individual
+  requests use a random 3.5-to-under-8-second or fixed 2-second interval. Unknown
+  outcomes, cancellation, and account changes always stop. Background and
+  automatic check-in are not implemented
 - Account-bound approval and cancellation on the canonical topic, ordinary
   floors, and both parent and child items in a full nested-reply page, with
   explicit confirmation and lease-guarded read-only recovery
@@ -485,7 +493,9 @@ and effect on later recommendations.
    partially eligible confirmation snapshots, newly eligible and removed
    targets, official per-forum rejection, malformed or lost acknowledgements,
    read-only reconciliation without retry or single-write fallback,
-   cancellation, and a second explicit run. Also cover mutual-follow value `2`,
+   official-batch-disabled sequential execution, both pacing modes, definitive-
+   failure continue/stop behavior, cancellation, and a second explicit run. Also
+   cover mutual-follow value `2`,
    the permission field-deletion matrix and `0`/`1` meaning, idempotence, rate
    limits, expired credentials, server errors, uncertain failures, mandatory
    read-only reconciliation, cross-operation exclusion, account switching, and
@@ -1379,7 +1389,13 @@ become single-forum writes. If the batch may have reached the server but its
 response is missing, malformed, oversized, or incomplete, the exact dispatched
 targets enter an outcome-unknown path. The App performs only authoritative
 per-forum reads, reports unresolved targets as unconfirmed, and does not retry
-the batch or degrade to individual writes. The flow remains foreground-only,
+the batch or degrade to individual writes. A local policy may skip the official
+batch and process every confirmed target individually. It may also continue to a
+later target after readback proves that a failed individual request left the
+current forum unsigned, but it never retries that target. A malformed or
+unconfirmed result, cancellation, or account-lease change always stops.
+The policy and its slow random or fixed 2-second pacing mode are frozen into the
+same explicit confirmation snapshot. The flow remains foreground-only,
 explicitly initiated, memory-only, and subject to real-device validation; it
 does not implement TiebaLite's background or automatic sign-in.
 

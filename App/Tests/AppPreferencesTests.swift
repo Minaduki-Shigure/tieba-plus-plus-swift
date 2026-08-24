@@ -84,6 +84,72 @@ final class AppPreferencesTests: XCTestCase {
     XCTAssertEqual(ForumPrimaryAction.resolved(""), .newThread)
   }
 
+  func testForumBatchCheckInPreferencesUseStableValuesAndTiebaLiteDefaults() {
+    XCTAssertEqual(
+      AppPreferenceKey.forumBatchCheckInDelayMode,
+      "TiebaPlusPlus.forumBatchCheckInDelayMode"
+    )
+    XCTAssertEqual(
+      AppPreferenceKey.forumBatchCheckInUsesOfficialBatch,
+      "TiebaPlusPlus.forumBatchCheckInUsesOfficialBatch"
+    )
+    XCTAssertEqual(
+      AppPreferenceKey.forumBatchCheckInStopsAfterSingleFailure,
+      "TiebaPlusPlus.forumBatchCheckInStopsAfterSingleFailure"
+    )
+    XCTAssertEqual(ForumBatchCheckInDelayMode.defaultValue, .slow)
+    XCTAssertEqual(ForumBatchCheckInDelayMode.allCases, [.slow, .fast])
+    XCTAssertEqual(
+      ForumBatchCheckInDelayMode.allCases.map(\.rawValue),
+      ["slow", "fast"]
+    )
+    XCTAssertEqual(
+      ForumBatchCheckInDelayMode.allCases.map(\.displayName),
+      ["慢速（随机 3.5–8 秒）", "快速（固定 2 秒）"]
+    )
+    XCTAssertEqual(ForumBatchCheckInDelayMode.slow.delayMillisecondsRange, 3_500...7_999)
+    XCTAssertEqual(ForumBatchCheckInDelayMode.fast.delayMillisecondsRange, 2_000...2_000)
+    XCTAssertEqual(ForumBatchCheckInDelayMode.resolved("slow"), .slow)
+    XCTAssertEqual(ForumBatchCheckInDelayMode.resolved("fast"), .fast)
+    XCTAssertEqual(ForumBatchCheckInDelayMode.resolved(""), .slow)
+    XCTAssertEqual(ForumBatchCheckInDelayMode.resolved("future-value"), .slow)
+    XCTAssertTrue(AppPreferenceDefaults.forumBatchCheckInUsesOfficialBatch)
+    XCTAssertTrue(AppPreferenceDefaults.forumBatchCheckInStopsAfterSingleFailure)
+  }
+
+  func testForumBatchCheckInPreferencesPersistInUserDefaults() throws {
+    let suiteName = "AppPreferencesTests.forum-batch-check-in.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    XCTAssertNil(defaults.object(forKey: AppPreferenceKey.forumBatchCheckInDelayMode))
+    XCTAssertNil(defaults.object(forKey: AppPreferenceKey.forumBatchCheckInUsesOfficialBatch))
+    XCTAssertNil(
+      defaults.object(forKey: AppPreferenceKey.forumBatchCheckInStopsAfterSingleFailure)
+    )
+
+    defaults.set(
+      ForumBatchCheckInDelayMode.fast.rawValue,
+      forKey: AppPreferenceKey.forumBatchCheckInDelayMode
+    )
+    defaults.set(false, forKey: AppPreferenceKey.forumBatchCheckInUsesOfficialBatch)
+    defaults.set(false, forKey: AppPreferenceKey.forumBatchCheckInStopsAfterSingleFailure)
+
+    let reloadedDefaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    XCTAssertEqual(
+      ForumBatchCheckInDelayMode.resolved(
+        reloadedDefaults.string(forKey: AppPreferenceKey.forumBatchCheckInDelayMode) ?? ""
+      ),
+      .fast
+    )
+    XCTAssertFalse(
+      reloadedDefaults.bool(forKey: AppPreferenceKey.forumBatchCheckInUsesOfficialBatch)
+    )
+    XCTAssertFalse(
+      reloadedDefaults.bool(forKey: AppPreferenceKey.forumBatchCheckInStopsAfterSingleFailure)
+    )
+  }
+
   func testForumPrimaryActionPersistsInUserDefaults() throws {
     let suiteName = "AppPreferencesTests.forum-primary-action.\(UUID().uuidString)"
     let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

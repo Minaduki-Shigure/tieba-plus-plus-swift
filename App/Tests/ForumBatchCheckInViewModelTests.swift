@@ -54,6 +54,79 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
     XCTAssertNil(viewModel.pendingConfirmation)
   }
 
+  func testStartConfirmationFreezesCompleteExecutionPolicy() async {
+    let session = makeBatchSession(userID: 1)
+    let vault = ForumBatchCheckInVaultSpy(session: session)
+    let service = ForumBatchCheckInServiceSpy(
+      catalogs: [session.sessionRevision: catalog(userID: 1)]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+    var selectedPolicy = ForumBatchCheckInExecutionPolicy(
+      delayMode: .fast,
+      usesOfficialBatch: false,
+      stopsAfterSingleFailure: false
+    )
+    await viewModel.loadIfNeeded()
+
+    viewModel.requestStartConfirmation(policy: selectedPolicy)
+    selectedPolicy = .defaultValue
+
+    XCTAssertEqual(
+      viewModel.pendingConfirmation,
+      ForumBatchCheckInConfirmation(
+        targetCount: 2,
+        officialBatchEligibleCount: 0,
+        minimumOfficialLevel: 4,
+        maximumOfficialCount: 1,
+        executionPolicy: ForumBatchCheckInExecutionPolicy(
+          delayMode: .fast,
+          usesOfficialBatch: false,
+          stopsAfterSingleFailure: false
+        )
+      )
+    )
+    XCTAssertEqual(selectedPolicy, .defaultValue)
+  }
+
+  func testDisablingOfficialBatchChecksEveryPendingTargetIndividually() async {
+    let session = makeBatchSession(userID: 1)
+    let vault = ForumBatchCheckInVaultSpy(session: session)
+    let service = ForumBatchCheckInServiceSpy(
+      catalogs: [session.sessionRevision: catalog(userID: 1)],
+      singleResults: [
+        10: .success(confirmedSingle(userID: 1, id: 10, name: "A")),
+        20: .success(confirmedSingle(userID: 1, id: 20, name: "B")),
+      ]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+    viewModel.requestStartConfirmation(
+      policy: ForumBatchCheckInExecutionPolicy(
+        delayMode: .slow,
+        usesOfficialBatch: false,
+        stopsAfterSingleFailure: true
+      )
+    )
+
+    await viewModel.confirmStart()
+
+    let batchRequestCount = await service.batchRequestCount()
+    let singleForumIDs = await service.singleForumIDs()
+    let authorizedTargets = await service.lastAuthorizedTargets()
+    XCTAssertEqual(batchRequestCount, 0)
+    XCTAssertEqual(singleForumIDs, [10, 20])
+    XCTAssertNil(authorizedTargets)
+    XCTAssertEqual(
+      viewModel.entries.map(\.outcome),
+      [
+        .succeeded,
+        .succeeded,
+        .skipped(message: "贴吧未提供可确认的签到状态，已跳过。"),
+        .skipped(message: "贴吧标记该目标禁止签到，已跳过。"),
+      ]
+    )
+  }
+
   func testUnknownAndForbiddenTargetsAreSkippedAndNeverWritten() async {
     let session = makeBatchSession(userID: 1)
     let vault = ForumBatchCheckInVaultSpy(session: session)
@@ -338,6 +411,40 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
     XCTAssertEqual(Array(viewModel.entries.map(\.outcome).prefix(2)), [.stopped, .stopped])
   }
 
+  func testStopDuringConfirmSessionPreflightPreventsEveryWrite() async throws {
+    let session = makeBatchSession(userID: 1)
+    let vault = ForumBatchCheckInVaultSpy(
+      session: session,
+      suspendedActiveSessionCallNumbers: [3]
+    )
+    let service = ForumBatchCheckInServiceSpy(
+      catalogs: [session.sessionRevision: catalog(userID: 1)]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+    viewModel.requestStartConfirmation()
+    let run = Task { await viewModel.confirmStart() }
+    try await waitForBatchCheckInTest { await vault.activeSessionRequestCount() == 3 }
+
+    viewModel.requestStop()
+    await vault.releaseActiveSession(callNumber: 3)
+    await run.value
+
+    let batchRequestCount = await service.batchRequestCount()
+    let singleForumIDs = await service.singleForumIDs()
+    XCTAssertEqual(batchRequestCount, 0)
+    XCTAssertEqual(singleForumIDs, [])
+    XCTAssertEqual(
+      viewModel.entries.map(\.outcome),
+      [
+        .stopped,
+        .stopped,
+        .skipped(message: "贴吧未提供可确认的签到状态，已跳过。"),
+        .skipped(message: "贴吧标记该目标禁止签到，已跳过。"),
+      ]
+    )
+  }
+
   func testStopBeforeNextDispatchMarksOnlyUnstartedTargetsStopped() async throws {
     let session = makeBatchSession(userID: 1)
     let vault = ForumBatchCheckInVaultSpy(session: session)
@@ -442,7 +549,7 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
     let delayGate = ForumBatchCheckInDelayGate()
     let viewModel = ForumBatchCheckInViewModel(
       access: AccountAccess(vault: vault, service: service),
-      interRequestDelay: { await delayGate.wait() }
+      interRequestDelay: { _ in await delayGate.wait() }
     )
     await viewModel.loadIfNeeded()
     viewModel.requestStartConfirmation()
@@ -451,6 +558,115 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
 
     run.cancel()
     await delayGate.release()
+    await run.value
+
+    let singleForumIDs = await service.singleForumIDs()
+    XCTAssertEqual(singleForumIDs, [10])
+    XCTAssertEqual(viewModel.entries.map(\.outcome), [.succeeded, .stopped])
+  }
+
+  func testRequestStopCancelsInterRequestDelayAndEndsWithoutNextDispatch() async throws {
+    let session = makeBatchSession(userID: 1)
+    let vault = ForumBatchCheckInVaultSpy(session: session)
+    let service = ForumBatchCheckInServiceSpy(
+      catalogs: [
+        session.sessionRevision: catalogWithoutOfficialBatch(userID: 1, ids: [10, 20])
+      ],
+      singleResults: [
+        10: .success(confirmedSingle(userID: 1, id: 10, name: "F10")),
+        20: .success(confirmedSingle(userID: 1, id: 20, name: "F20")),
+      ]
+    )
+    let delayProbe = ForumBatchCheckInCancellationAwareDelayProbe()
+    let viewModel = makeViewModel(
+      vault: vault,
+      service: service,
+      interRequestDelay: { _ in await delayProbe.wait() }
+    )
+    await viewModel.loadIfNeeded()
+    viewModel.requestStartConfirmation()
+    let run = Task { await viewModel.confirmStart() }
+    try await waitForBatchCheckInTest { await delayProbe.didStart() }
+
+    viewModel.requestStop()
+    do {
+      try await waitForBatchCheckInTest(timeout: 1) {
+        await delayProbe.didObserveCancellation()
+      }
+    } catch {
+      run.cancel()
+      await run.value
+      throw error
+    }
+    await run.value
+
+    let singleForumIDs = await service.singleForumIDs()
+    XCTAssertEqual(singleForumIDs, [10])
+    XCTAssertEqual(viewModel.entries.map(\.outcome), [.succeeded, .stopped])
+  }
+
+  func testServiceCancellationStopsLaterSinglesEvenWhenPolicyAllowsContinuation() async {
+    let session = makeBatchSession(userID: 1)
+    let vault = ForumBatchCheckInVaultSpy(session: session)
+    let service = ForumBatchCheckInServiceSpy(
+      catalogs: [
+        session.sessionRevision: catalogWithoutOfficialBatch(userID: 1, ids: [10, 20])
+      ],
+      singleResults: [
+        10: .cancellation,
+        20: .success(confirmedSingle(userID: 1, id: 20, name: "F20")),
+      ],
+      readbackResults: [
+        10: .success(unsignedSingle(userID: 1, id: 10, name: "F10"))
+      ]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+    viewModel.requestStartConfirmation(
+      policy: ForumBatchCheckInExecutionPolicy(
+        delayMode: .fast,
+        usesOfficialBatch: false,
+        stopsAfterSingleFailure: false
+      )
+    )
+
+    await viewModel.confirmStart()
+
+    let singleForumIDs = await service.singleForumIDs()
+    let readbackForumIDs = await service.readbackForumIDs()
+    XCTAssertEqual(singleForumIDs, [10])
+    XCTAssertEqual(readbackForumIDs, [10])
+    XCTAssertEqual(
+      viewModel.entries.map(\.outcome),
+      [.failed(message: "签到请求已停止；贴吧确认该吧仍未签到。"), .stopped]
+    )
+  }
+
+  func testStopDuringLeaseRecheckPreventsNextSingleDispatch() async throws {
+    let session = makeBatchSession(userID: 1)
+    let vault = ForumBatchCheckInVaultSpy(
+      session: session,
+      suspendedActiveSessionCallNumbers: [6]
+    )
+    let service = ForumBatchCheckInServiceSpy(
+      catalogs: [
+        session.sessionRevision: catalogWithoutOfficialBatch(userID: 1, ids: [10, 20])
+      ],
+      singleResults: [
+        10: .success(confirmedSingle(userID: 1, id: 10, name: "F10")),
+        20: .success(confirmedSingle(userID: 1, id: 20, name: "F20")),
+      ]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+    viewModel.requestStartConfirmation()
+    let run = Task { await viewModel.confirmStart() }
+    try await waitForBatchCheckInTest { await vault.activeSessionRequestCount() == 6 }
+
+    let singleForumIDsBeforeStop = await service.singleForumIDs()
+    XCTAssertEqual(singleForumIDsBeforeStop, [10])
+    viewModel.requestStop()
+    await vault.releaseActiveSession(callNumber: 6)
     await run.value
 
     let singleForumIDs = await service.singleForumIDs()
@@ -474,7 +690,7 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
     let delayGate = ForumBatchCheckInDelayGate()
     let viewModel = ForumBatchCheckInViewModel(
       access: AccountAccess(vault: vault, service: service),
-      interRequestDelay: { await delayGate.wait() }
+      interRequestDelay: { _ in await delayGate.wait() }
     )
     await viewModel.loadIfNeeded()
     viewModel.requestStartConfirmation()
@@ -516,6 +732,104 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
       [.failed(message: "server rejected"), .stopped]
     )
     XCTAssertEqual(viewModel.errorMessage, "一键签到在首个单吧失败后停止，未自动重试。")
+  }
+
+  func testDefinitiveSingleFailureContinuesWithoutRetryWhenPolicyAllows() async {
+    let session = makeBatchSession(userID: 1)
+    let vault = ForumBatchCheckInVaultSpy(session: session)
+    let service = ForumBatchCheckInServiceSpy(
+      catalogs: [
+        session.sessionRevision: catalogWithoutOfficialBatch(userID: 1, ids: [10, 20])
+      ],
+      singleResults: [
+        10: .failure(.init(message: "server rejected")),
+        20: .success(confirmedSingle(userID: 1, id: 20, name: "F20")),
+      ],
+      readbackResults: [
+        10: .success(unsignedSingle(userID: 1, id: 10, name: "F10"))
+      ]
+    )
+    let delayRecorder = ForumBatchCheckInDelayRecorder()
+    let viewModel = makeViewModel(
+      vault: vault,
+      service: service,
+      interRequestDelay: { mode in await delayRecorder.record(mode) }
+    )
+    await viewModel.loadIfNeeded()
+    viewModel.requestStartConfirmation(
+      policy: ForumBatchCheckInExecutionPolicy(
+        delayMode: .fast,
+        usesOfficialBatch: false,
+        stopsAfterSingleFailure: false
+      )
+    )
+
+    await viewModel.confirmStart()
+
+    let singleForumIDs = await service.singleForumIDs()
+    let readbackForumIDs = await service.readbackForumIDs()
+    let recordedDelayModes = await delayRecorder.recordedModes()
+    XCTAssertEqual(singleForumIDs, [10, 20])
+    XCTAssertEqual(readbackForumIDs, [10])
+    XCTAssertEqual(recordedDelayModes, [.fast])
+    XCTAssertEqual(
+      viewModel.entries.map(\.outcome),
+      [.failed(message: "server rejected"), .succeeded]
+    )
+    guard case .completed(let summary) = viewModel.state else {
+      return XCTFail("expected later targets to complete after a definitive failure")
+    }
+    XCTAssertEqual(summary.processed, 2)
+    XCTAssertEqual(summary.succeeded, 1)
+    XCTAssertEqual(summary.failed, 1)
+    XCTAssertNil(viewModel.errorMessage)
+  }
+
+  func testFrozenDelayModeIsUsedOnlyBetweenPendingSingleWrites() async {
+    for frozenMode in ForumBatchCheckInDelayMode.allCases {
+      let session = makeBatchSession(userID: 1)
+      let vault = ForumBatchCheckInVaultSpy(session: session)
+      let service = ForumBatchCheckInServiceSpy(
+        catalogs: [
+          session.sessionRevision: catalogWithoutOfficialBatch(userID: 1, ids: [10, 20])
+        ],
+        singleResults: [
+          10: .success(confirmedSingle(userID: 1, id: 10, name: "F10")),
+          20: .success(confirmedSingle(userID: 1, id: 20, name: "F20")),
+        ]
+      )
+      let delayRecorder = ForumBatchCheckInDelayRecorder()
+      let viewModel = makeViewModel(
+        vault: vault,
+        service: service,
+        interRequestDelay: { mode in await delayRecorder.record(mode) }
+      )
+      await viewModel.loadIfNeeded()
+      var selectedPolicy = ForumBatchCheckInExecutionPolicy(
+        delayMode: frozenMode,
+        usesOfficialBatch: false,
+        stopsAfterSingleFailure: true
+      )
+      viewModel.requestStartConfirmation(policy: selectedPolicy)
+      guard let frozenConfirmation = viewModel.pendingConfirmation else {
+        XCTFail("expected the selected execution policy to be frozen for confirmation")
+        continue
+      }
+      selectedPolicy = ForumBatchCheckInExecutionPolicy(
+        delayMode: frozenMode == .slow ? .fast : .slow,
+        usesOfficialBatch: true,
+        stopsAfterSingleFailure: false
+      )
+
+      await viewModel.confirmStart()
+
+      let recordedDelayModes = await delayRecorder.recordedModes()
+      let singleForumIDs = await service.singleForumIDs()
+      XCTAssertEqual(frozenConfirmation.executionPolicy.delayMode, frozenMode)
+      XCTAssertNotEqual(frozenConfirmation.executionPolicy, selectedPolicy)
+      XCTAssertEqual(recordedDelayModes, [frozenMode])
+      XCTAssertEqual(singleForumIDs, [10, 20])
+    }
   }
 
   func testTransportLossReconcilesConfirmedSignedWithoutRetryingWrite() async {
@@ -572,35 +886,53 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
     )
   }
 
-  func testTransportLossAndReadbackFailureExposeOutcomeUnknownAndStop() async {
-    let session = makeBatchSession(userID: 1)
-    let vault = ForumBatchCheckInVaultSpy(session: session)
-    let service = ForumBatchCheckInServiceSpy(
-      catalogs: [
-        session.sessionRevision: catalogWithoutOfficialBatch(userID: 1, ids: [10, 20])
-      ],
-      singleResults: [10: .failure(.init(message: "connection lost"))],
-      readbackResults: [10: .failure(.init(message: "readback lost"))]
-    )
-    let viewModel = makeViewModel(vault: vault, service: service)
-    await viewModel.loadIfNeeded()
-    viewModel.requestStartConfirmation()
+  func testTransportLossAndReadbackFailureRequireReviewRegardlessOfFailurePolicy() async {
+    for stopsAfterSingleFailure in [true, false] {
+      let session = makeBatchSession(userID: 1)
+      let vault = ForumBatchCheckInVaultSpy(session: session)
+      let service = ForumBatchCheckInServiceSpy(
+        catalogs: [
+          session.sessionRevision: catalogWithoutOfficialBatch(userID: 1, ids: [10, 20])
+        ],
+        singleResults: [10: .failure(.init(message: "connection lost"))],
+        readbackResults: [10: .failure(.init(message: "readback lost"))]
+      )
+      let viewModel = makeViewModel(vault: vault, service: service)
+      await viewModel.loadIfNeeded()
+      viewModel.requestStartConfirmation(
+        policy: ForumBatchCheckInExecutionPolicy(
+          delayMode: .fast,
+          usesOfficialBatch: false,
+          stopsAfterSingleFailure: stopsAfterSingleFailure
+        )
+      )
 
-    await viewModel.confirmStart()
+      await viewModel.confirmStart()
 
-    let singleForumIDs = await service.singleForumIDs()
-    let readbackForumIDs = await service.readbackForumIDs()
-    XCTAssertEqual(singleForumIDs, [10])
-    XCTAssertEqual(readbackForumIDs, [10])
-    XCTAssertEqual(
-      viewModel.entries.map(\.outcome),
-      [
-        .failed(
-          message: "签到请求已派发，但贴吧未能确认结果。请先重新进入该吧核对，勿立即重试。"
-        ),
-        .stopped,
-      ]
-    )
+      let singleForumIDs = await service.singleForumIDs()
+      let readbackForumIDs = await service.readbackForumIDs()
+      XCTAssertEqual(singleForumIDs, [10])
+      XCTAssertEqual(readbackForumIDs, [10])
+      XCTAssertEqual(
+        viewModel.entries.map(\.outcome),
+        [
+          .unconfirmed(
+            message: "签到请求已派发，但贴吧未能确认结果。请先重新进入该吧核对，勿立即重试。"
+          ),
+          .stopped,
+        ]
+      )
+      guard case .needsReview(let summary) = viewModel.state else {
+        XCTFail("expected an unknown dispatched result to require review")
+        continue
+      }
+      XCTAssertEqual(summary.unconfirmed, 1)
+      XCTAssertEqual(summary.stopped, 1)
+      XCTAssertEqual(
+        viewModel.errorMessage,
+        "签到请求已派发，但贴吧未能确认结果。请先重新进入该吧核对，勿立即重试。"
+      )
+    }
   }
 
   func testBatchAuthorizationChangeStopsWithoutAnySingleWrite() async {
@@ -958,11 +1290,14 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
 @MainActor
 private func makeViewModel(
   vault: ForumBatchCheckInVaultSpy,
-  service: ForumBatchCheckInServiceSpy
+  service: ForumBatchCheckInServiceSpy,
+  interRequestDelay: @escaping @Sendable (ForumBatchCheckInDelayMode) async -> Void = {
+    _ in
+  }
 ) -> ForumBatchCheckInViewModel {
   ForumBatchCheckInViewModel(
     access: AccountAccess(vault: vault, service: service),
-    interRequestDelay: {}
+    interRequestDelay: interRequestDelay
   )
 }
 
@@ -1078,13 +1413,19 @@ private enum ForumBatchCheckInServiceResult: Sendable {
   case batchFailure(ForumBatchCheckInError)
 }
 
+private enum ForumBatchCheckInSingleResult: Sendable {
+  case success(ForumAccountStateData)
+  case failure(ForumBatchCheckInTestFailure)
+  case cancellation
+}
+
 private actor ForumBatchCheckInServiceSpy: AccountService {
   private let catalogs: [UUID: ForumCheckInCatalogData]
   private let batchResults: [
     UUID: ForumBatchCheckInServiceResult
   ]
   private let singleResults: [
-    Int64: Result<ForumAccountStateData, ForumBatchCheckInTestFailure>
+    Int64: ForumBatchCheckInSingleResult
   ]
   private let readbackResults: [
     Int64: Result<ForumAccountStateData, ForumBatchCheckInTestFailure>
@@ -1112,7 +1453,7 @@ private actor ForumBatchCheckInServiceSpy: AccountService {
       UUID: ForumBatchCheckInServiceResult
     ] = [:],
     singleResults: [
-      Int64: Result<ForumAccountStateData, ForumBatchCheckInTestFailure>
+      Int64: ForumBatchCheckInSingleResult
     ] = [:],
     readbackResults: [
       Int64: Result<ForumAccountStateData, ForumBatchCheckInTestFailure>
@@ -1233,7 +1574,14 @@ private actor ForumBatchCheckInServiceSpy: AccountService {
     guard let result = singleResults[forumID] else {
       throw ForumBatchCheckInTestFailure(message: "unexpected single write")
     }
-    return try result.get()
+    switch result {
+    case .success(let state):
+      return state
+    case .failure(let error):
+      throw error
+    case .cancellation:
+      throw CancellationError()
+    }
   }
 
   func releaseSingles() {
@@ -1268,18 +1616,45 @@ private actor ForumBatchCheckInServiceSpy: AccountService {
 
 private actor ForumBatchCheckInVaultSpy: AccountVault {
   private var session: StoredAccountSession?
+  private let suspendedActiveSessionCallNumbers: Set<Int>
+  private var activeSessionRequests = 0
+  private var releasedActiveSessionCallNumbers = Set<Int>()
+  private var activeSessionWaiters = [Int: [CheckedContinuation<Void, Never>]]()
 
-  init(session: StoredAccountSession?) {
+  init(
+    session: StoredAccountSession?,
+    suspendedActiveSessionCallNumbers: Set<Int> = []
+  ) {
     self.session = session
+    self.suspendedActiveSessionCallNumbers = suspendedActiveSessionCallNumbers
   }
 
   func accountSummaries() async throws -> [AccountSummary] { [] }
-  func activeSession() async throws -> StoredAccountSession? { session }
+  func activeSession() async throws -> StoredAccountSession? {
+    activeSessionRequests += 1
+    let callNumber = activeSessionRequests
+    if suspendedActiveSessionCallNumbers.contains(callNumber),
+      !releasedActiveSessionCallNumbers.contains(callNumber)
+    {
+      await withCheckedContinuation {
+        activeSessionWaiters[callNumber, default: []].append($0)
+      }
+    }
+    return session
+  }
   func upsert(_ session: StoredAccountSession) async throws { self.session = session }
   func switchActive(to userID: Int64) async throws {}
   func remove(userID: Int64) async throws { session = nil }
   func removeAll() async throws { session = nil }
   func replaceActive(with session: StoredAccountSession?) { self.session = session }
+
+  func releaseActiveSession(callNumber: Int) {
+    releasedActiveSessionCallNumbers.insert(callNumber)
+    let continuations = activeSessionWaiters.removeValue(forKey: callNumber) ?? []
+    continuations.forEach { $0.resume() }
+  }
+
+  func activeSessionRequestCount() -> Int { activeSessionRequests }
 }
 
 private actor ForumBatchCheckInDelayGate {
@@ -1299,6 +1674,33 @@ private actor ForumBatchCheckInDelayGate {
   }
 
   func waiterCount() -> Int { waiters.count }
+}
+
+private actor ForumBatchCheckInDelayRecorder {
+  private var modes: [ForumBatchCheckInDelayMode] = []
+
+  func record(_ mode: ForumBatchCheckInDelayMode) {
+    modes.append(mode)
+  }
+
+  func recordedModes() -> [ForumBatchCheckInDelayMode] { modes }
+}
+
+private actor ForumBatchCheckInCancellationAwareDelayProbe {
+  private var started = false
+  private var cancellationObserved = false
+
+  func wait() async {
+    started = true
+    do {
+      try await Task.sleep(for: .seconds(60))
+    } catch is CancellationError {
+      cancellationObserved = true
+    } catch {}
+  }
+
+  func didStart() -> Bool { started }
+  func didObserveCancellation() -> Bool { cancellationObserved }
 }
 
 @MainActor

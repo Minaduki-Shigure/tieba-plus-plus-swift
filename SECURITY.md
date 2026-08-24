@@ -393,6 +393,19 @@ accepted only when the error code is zero, the returned sign user ID matches the
 expected account, `is_sign_in` is exactly one, and the returned consecutive-day
 and rank values are nonnegative integers.
 
+Foreground one-click check-in stores only three nonsecret local preferences:
+individual-request pacing, use of the official batch, and whether a definitively
+failed single-forum request stops later targets. The write confirmation must
+freeze those values for the entire run. Disabling stop-on-failure may continue
+only after authoritative readback proves that the exact current-account forum is
+still unsigned; it must not retry that forum. An unknown or malformed result, a
+cancellation, or any `userID + sessionRevision` change
+must stop later writes regardless of preference. Disabling the official batch
+must not call or probe the batch write endpoint and must not bypass per-target
+lease checks. Neither pacing mode authorizes background or scheduled work.
+The official batch's structured authorization-change result also stops the run;
+the single-forum service does not expose a separate authorization-error type.
+
 Approval state for a topic, ordinary post, or nested reply must come from an
 authenticated protobuf response, never from the anonymous default value of
 `Agree.has_agree`. Topic and post reads use PB Page; nested-reply reads use PB
