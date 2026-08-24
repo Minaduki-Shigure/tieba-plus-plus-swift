@@ -860,6 +860,17 @@ entry points. When an account is active, a separate authenticated PB Page plus P
 Floor approval read may mirror only that already validated page descriptor; it
 must not add a credential to or otherwise change the anonymous content request.
 
+The standalone complete-page origin action may be constructed only after a
+loaded snapshot supplies a positive parent PID owned by the expected positive
+thread ID. A returned thread summary, when present, must match that ID; filtered
+parent or thread context constructs no action. The route carries exactly the
+expected thread and validated parent PID, never a child ID, title, author, or
+other display field. Deriving or rendering the toolbar action performs no
+request; the existing credential-free thread reader starts only after an
+explicit tap. The sheet already overlaying a thread never constructs this route.
+If child-only resolution fails on an independent page, the existing recovery
+action may use only a positive expected thread ID and no guessed parent anchor.
+
 Earlier-floor thread loading reuses the existing credential-free anonymous PB
 request and sends only the public thread ID, adjacent numeric page, active sort,
 and only-thread-author flag. It is exposed only for ascending pages whose server

@@ -236,7 +236,7 @@
             historyRepository: ThreadScrollPerformanceHistoryRepository(),
             favoritesRepository: ThreadScrollPerformanceFavoritesRepository(),
             searchHistoryRepository: ThreadScrollPerformanceSearchHistoryRepository(),
-            showsDismissButton: false
+            presentationContext: .navigation
           )
         } else {
           ThreadView(

@@ -525,7 +525,7 @@ struct UserProfileView: View {
         historyRepository: historyRepository,
         favoritesRepository: favoritesRepository,
         searchHistoryRepository: searchHistoryRepository,
-        showsDismissButton: false
+        presentationContext: .navigation
       )
     }
   }

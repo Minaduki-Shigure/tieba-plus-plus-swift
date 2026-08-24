@@ -1,6 +1,65 @@
 import Combine
 import SwiftUI
 
+enum CommentsPresentationContext: Hashable, Sendable {
+  case sheet
+  case navigation
+
+  var showsDismissButton: Bool { self == .sheet }
+}
+
+struct CommentsOriginThreadPresentation: Equatable, Sendable {
+  let route: TiebaThreadRoute
+  let accessibilityHint: String
+}
+
+enum CommentsOriginThreadNavigationPolicy {
+  static func loadedPresentation(
+    presentationContext: CommentsPresentationContext,
+    state: LoadState,
+    expectedThreadID: Int64,
+    thread: BrowseThread?,
+    parentPost: CommentParentPostContext?
+  ) -> CommentsOriginThreadPresentation? {
+    guard
+      presentationContext == .navigation,
+      state == .loaded,
+      expectedThreadID > 0,
+      let parentPost,
+      parentPost.id > 0,
+      parentPost.threadID == expectedThreadID,
+      parentPost.localVisibility == .visible
+    else { return nil }
+    if let thread {
+      guard thread.id == expectedThreadID, thread.localVisibility == .visible else {
+        return nil
+      }
+    }
+    let hint = parentPost.floor > 0
+      ? "跳转到第 \(parentPost.floor) 楼"
+      : "跳转到原帖中的父楼"
+    return CommentsOriginThreadPresentation(
+      route: TiebaThreadRoute(threadID: expectedThreadID, postID: parentPost.id),
+      accessibilityHint: hint
+    )
+  }
+
+  static func failureFallbackRoute(
+    presentationContext: CommentsPresentationContext,
+    recordsOwningThreadVisit: Bool,
+    state: LoadState,
+    threadID: Int64
+  ) -> TiebaThreadRoute? {
+    guard
+      presentationContext == .navigation,
+      recordsOwningThreadVisit,
+      threadID > 0,
+      case .failed = state
+    else { return nil }
+    return TiebaThreadRoute(threadID: threadID)
+  }
+}
+
 struct CommentsView: View {
   @Environment(\.dismiss) private var dismiss
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -33,7 +92,7 @@ struct CommentsView: View {
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
-  private let showsDismissButton: Bool
+  private let presentationContext: CommentsPresentationContext
   private let recordsOwningThreadVisit: Bool
   private let onInboxReplyComposerPresented: ((InboxReplyIntent) -> Void)?
 
@@ -45,7 +104,7 @@ struct CommentsView: View {
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository,
-    showsDismissButton: Bool = true,
+    presentationContext: CommentsPresentationContext = .sheet,
     replyIntent: InboxReplyIntent? = nil,
     onInboxReplyComposerPresented: ((InboxReplyIntent) -> Void)? = nil
   ) {
@@ -53,7 +112,7 @@ struct CommentsView: View {
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
-    self.showsDismissButton = showsDismissButton
+    self.presentationContext = presentationContext
     self.recordsOwningThreadVisit = false
     self.onInboxReplyComposerPresented = onInboxReplyComposerPresented
     _pendingInboxReplyIntent = State(initialValue: replyIntent)
@@ -71,7 +130,7 @@ struct CommentsView: View {
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository,
-    showsDismissButton: Bool = true,
+    presentationContext: CommentsPresentationContext = .sheet,
     replyIntent: InboxReplyIntent? = nil,
     onInboxReplyComposerPresented: ((InboxReplyIntent) -> Void)? = nil
   ) {
@@ -79,7 +138,7 @@ struct CommentsView: View {
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
-    self.showsDismissButton = showsDismissButton
+    self.presentationContext = presentationContext
     self.recordsOwningThreadVisit = false
     self.onInboxReplyComposerPresented = onInboxReplyComposerPresented
     _pendingInboxReplyIntent = State(initialValue: replyIntent)
@@ -101,7 +160,7 @@ struct CommentsView: View {
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository,
-    showsDismissButton: Bool = true,
+    presentationContext: CommentsPresentationContext = .sheet,
     replyIntent: InboxReplyIntent? = nil,
     onInboxReplyComposerPresented: ((InboxReplyIntent) -> Void)? = nil
   ) {
@@ -109,7 +168,7 @@ struct CommentsView: View {
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
-    self.showsDismissButton = showsDismissButton
+    self.presentationContext = presentationContext
     self.recordsOwningThreadVisit = true
     self.onInboxReplyComposerPresented = onInboxReplyComposerPresented
     _pendingInboxReplyIntent = State(initialValue: replyIntent)
@@ -130,9 +189,8 @@ struct CommentsView: View {
       case .failed(let message):
         VStack(spacing: 16) {
           ErrorStateView(message: message, retry: viewModel.reload)
-          if recordsOwningThreadVisit {
+          if let route = originThreadFailureFallbackRoute {
             NavigationLink {
-              let route = TiebaThreadRoute(threadID: viewModel.threadID, postID: nil)
               ThreadView(
                 thread: route.placeholderThread,
                 service: service,
@@ -143,8 +201,13 @@ struct CommentsView: View {
               )
             } label: {
               Label("查看原帖", systemImage: "doc.text")
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.bordered)
+            .accessibilityHint("打开主题首页")
+            .accessibilityIdentifier("comments-open-origin-thread-fallback")
+            .help("查看原帖")
           }
         }
       case .loaded:
@@ -214,7 +277,21 @@ struct CommentsView: View {
       )
     }
     .toolbar {
-      if showsDismissButton {
+      if let presentation = originThreadPresentation {
+        ToolbarItem(placement: .navigationBarTrailing) {
+          Button {
+            linkedTarget = .thread(presentation.route)
+          } label: {
+            Label("查看原帖", systemImage: "doc.text")
+              .labelStyle(.iconOnly)
+          }
+          .accessibilityLabel("查看原帖")
+          .accessibilityHint(presentation.accessibilityHint)
+          .accessibilityIdentifier("comments-open-origin-thread")
+          .help("查看原帖")
+        }
+      }
+      if presentationContext.showsDismissButton {
         ToolbarItem(placement: .confirmationAction) {
           Button("完成") { dismiss() }
         }
@@ -1345,6 +1422,25 @@ struct CommentsView: View {
       return "\(floor) 楼的回复"
     }
     return "楼中楼"
+  }
+
+  private var originThreadPresentation: CommentsOriginThreadPresentation? {
+    CommentsOriginThreadNavigationPolicy.loadedPresentation(
+      presentationContext: presentationContext,
+      state: viewModel.state,
+      expectedThreadID: viewModel.threadID,
+      thread: viewModel.thread,
+      parentPost: viewModel.parentPost
+    )
+  }
+
+  private var originThreadFailureFallbackRoute: TiebaThreadRoute? {
+    CommentsOriginThreadNavigationPolicy.failureFallbackRoute(
+      presentationContext: presentationContext,
+      recordsOwningThreadVisit: recordsOwningThreadVisit,
+      state: viewModel.state,
+      threadID: viewModel.threadID
+    )
   }
 }
 

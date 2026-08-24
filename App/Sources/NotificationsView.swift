@@ -322,7 +322,7 @@ struct NotificationsView: View {
         historyRepository: historyRepository,
         favoritesRepository: favoritesRepository,
         searchHistoryRepository: searchHistoryRepository,
-        showsDismissButton: false
+        presentationContext: .navigation
       )
     }
   }
@@ -363,7 +363,7 @@ struct NotificationsView: View {
         historyRepository: historyRepository,
         favoritesRepository: favoritesRepository,
         searchHistoryRepository: searchHistoryRepository,
-        showsDismissButton: false,
+        presentationContext: .navigation,
         replyIntent: intent,
         onInboxReplyComposerPresented: markReplyRouteEstablished
       )

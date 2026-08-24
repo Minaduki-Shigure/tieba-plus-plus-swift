@@ -5427,6 +5427,78 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testCommentsOriginRouteDerivationDoesNotPrefetchOwningThread() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 801)
+    let parent = Fixtures.commentParentPost(id: 8_010, threadID: thread.id, floor: 7)
+    let target = Fixtures.comment(
+      id: 8_011,
+      threadID: thread.id,
+      parentPostID: parent.id
+    )
+    await service.enqueueComments(
+      .value(
+        Fixtures.commentPage(
+          threadID: thread.id,
+          postID: parent.id,
+          comments: [target],
+          currentPage: 1,
+          hasMore: false,
+          parentPost: parent,
+          thread: thread
+        )
+      )
+    )
+    let viewModel = CommentsViewModel(
+      threadID: thread.id,
+      resolvingCommentID: target.id,
+      service: service
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+    let directBefore = await service.commentRequestSnapshot()
+    let aroundBefore = await service.aroundCommentRequestSnapshot()
+    let resolvingBefore = await service.resolvingCommentRequestSnapshot()
+    let postsBefore = await service.postRequestSnapshot()
+
+    let presentation = CommentsOriginThreadNavigationPolicy.loadedPresentation(
+      presentationContext: .navigation,
+      state: viewModel.state,
+      expectedThreadID: viewModel.threadID,
+      thread: viewModel.thread,
+      parentPost: viewModel.parentPost
+    )
+
+    let directAfter = await service.commentRequestSnapshot()
+    let aroundAfter = await service.aroundCommentRequestSnapshot()
+    let resolvingAfter = await service.resolvingCommentRequestSnapshot()
+    let postsAfter = await service.postRequestSnapshot()
+    XCTAssertEqual(
+      presentation?.route,
+      TiebaThreadRoute(threadID: thread.id, postID: parent.id)
+    )
+    XCTAssertEqual(directAfter, directBefore)
+    XCTAssertEqual(aroundAfter, aroundBefore)
+    XCTAssertEqual(resolvingAfter, resolvingBefore)
+    XCTAssertEqual(
+      resolvingAfter,
+      [
+        CommentRequest(
+          threadID: thread.id,
+          postID: 0,
+          page: 1,
+          commentID: target.id
+        )
+      ]
+    )
+    XCTAssertTrue(directAfter.isEmpty)
+    XCTAssertTrue(aroundAfter.isEmpty)
+    XCTAssertEqual(postsAfter, postsBefore)
+    XCTAssertTrue(postsAfter.isEmpty)
+  }
+
+  @MainActor
   func testCommentAgreementDescriptorsAccumulateAcrossPagesThenReplaceOnRefresh()
     async throws
   {

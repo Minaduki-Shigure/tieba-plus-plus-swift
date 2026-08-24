@@ -127,6 +127,13 @@ reply types still expose no guessed exact target, but may open a separately
 validated positive thread ID. This reuses existing anonymous readers and adds no
 request, data source, or weighted point. The public `v0.62.3-alpha.1` IPA does
 not include this interaction.
+Standalone complete nested-reply pages now expose TiebaLite's owning-thread
+action after the parent floor has been validated. It opens the exact parent PID;
+the sheet already presented over a thread omits the redundant action. Route
+derivation performs no request and reuses the existing anonymous thread reader
+only after an explicit tap, so this closes a narrow navigation gap without a new
+endpoint, data source, or weighted point. The public `v0.62.3-alpha.1` IPA does
+not include this interaction.
 The configurable forum primary action likewise completes a narrow local habit
 setting by rearranging existing controls, so it remains inside the existing
 local-settings credit rather than adding a weighted point.
@@ -1337,7 +1344,12 @@ No-history mode updates the recording flag inside the existing versioned
 history archive, so it does not create a competing source of truth or delete
 favorites. Pure-reading mode is transient and removes author chrome, filter
 placeholders, and nested-reply entry points without changing post data or the
-persisted sort. The independent hide-reply-entry preference is persistent,
+persisted sort. This intentionally remains separate from TiebaLite's immersive
+command, which also reloads from page one with only-thread-author enabled and
+leaves that filter enabled after exit. Any future iOS equivalent must present
+that destructive position reset and persistent filter change explicitly rather
+than silently changing the existing local-only control. The independent
+hide-reply-entry preference is persistent,
 defaults off, and removes the topic, floor, nested-reply, and inbox quick-reply
 controls while retaining reply content, ordinary notification navigation,
 text selection/copying, agreement controls, drafts, and any composer that is
@@ -1702,7 +1714,11 @@ Both parent and child content use the same local-filter snapshot and the normal
 rich-content, media, internal-link, profile, and copy boundaries. The page
 rejects responses whose thread or parent identity differs from the request and
 drops nonpositive, cross-context, or duplicate child IDs before they reach the
-list. It uses a `ScrollView` with a `LazyVStack`, stable native reply identities,
+list. When that validated page is pushed independently, a toolbar action opens
+the owning thread at the exact parent floor. The action is absent while loading,
+after an initial failure, for filtered ownership context, and in the sheet that
+already overlays the owning thread. It uses a `ScrollView` with a `LazyVStack`,
+stable native reply identities,
 and a pagination sentinel keyed by the raw tail, retained count, and page so a
 hidden-only appended page can rearm automatic loading. In two reversed-order,
 production-like iOS 18.5 profiles, this container change reduced sampled

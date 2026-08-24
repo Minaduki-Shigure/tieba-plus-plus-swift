@@ -493,7 +493,7 @@ struct ForumPostSearchView: View {
         historyRepository: historyRepository,
         favoritesRepository: favoritesRepository,
         searchHistoryRepository: searchHistoryRepository,
-        showsDismissButton: false
+        presentationContext: .navigation
       )
       .id("forum-search-comment:\(threadID):\(commentID)")
     case .user(let userID):

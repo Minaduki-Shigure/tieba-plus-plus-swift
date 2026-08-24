@@ -490,6 +490,9 @@ and its verified metadata enters the public app source.
   displayable-reply projection and a lazy vertical scroll topology so SwiftUI
   constructs only rows required near the viewport; active agreement entries no
   longer rescan an all-active cache after crossing its retained-entry capacity.
+  Current-main standalone nested-reply pages also expose a validated toolbar
+  route back to the exact parent floor; the sheet presented over an existing
+  thread omits that redundant action.
 - **Images:** Responsive image groups open in a zoomable gallery with horizontal
   or vertical one-image paging. Switching direction retains the current image
   and its bounded in-memory zoom state while the occurrence ID remains stable.
