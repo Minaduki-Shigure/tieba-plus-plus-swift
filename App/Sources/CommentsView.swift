@@ -26,7 +26,7 @@ struct CommentsView: View {
   @State private var inboxReplyComposerIntent: InboxReplyIntent?
   @State private var selectableTextPresentation: SelectableTextPresentation?
   #if PERFORMANCE_HARNESS
-    @State private var performanceVisibleCommentIDs = Set<Int64>()
+    @State private var performanceVisibilityTracker = PerformanceCommentVisibilityTracker()
   #endif
   let service:
     any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
@@ -1198,13 +1198,13 @@ struct CommentsView: View {
         viewModel.loadMoreIfNeeded(current: comment)
         #if PERFORMANCE_HARNESS
           if ThreadScrollPerformanceScenario.requested?.isCommentsScenario == true {
-            performanceVisibleCommentIDs.insert(comment.id)
+            performanceVisibilityTracker.commentDidAppear(comment.id)
           }
         #endif
       }
       #if PERFORMANCE_HARNESS
         .onDisappear {
-          performanceVisibleCommentIDs.remove(comment.id)
+          performanceVisibilityTracker.commentDidDisappear(comment.id)
         }
       #endif
   }
@@ -1272,7 +1272,7 @@ struct CommentsView: View {
             scrollToComment(targetID, proxy: proxy, anchor: .top)
           }
           try await Task.sleep(for: .milliseconds(260))
-          guard performanceVisibleCommentIDs.contains(targetID) else {
+          guard performanceVisibilityTracker.contains(targetID) else {
             _ = frameRecorder.stop()
             assertionFailure("Comments performance scroll target did not appear")
             return
@@ -1297,7 +1297,7 @@ struct CommentsView: View {
     @MainActor
     private func waitForPerformanceAppearance(of commentID: Int64) async throws -> Bool {
       for _ in 0..<50 {
-        if performanceVisibleCommentIDs.contains(commentID) { return true }
+        if performanceVisibilityTracker.contains(commentID) { return true }
         try await Task.sleep(for: .milliseconds(20))
       }
       return false
@@ -1342,3 +1342,22 @@ private struct CommentHighlightToken: Equatable {
   let commentID: Int64
   let generation = UUID()
 }
+
+#if PERFORMANCE_HARNESS
+  @MainActor
+  private final class PerformanceCommentVisibilityTracker {
+    private var visibleCommentIDs = Set<Int64>()
+
+    func commentDidAppear(_ commentID: Int64) {
+      visibleCommentIDs.insert(commentID)
+    }
+
+    func commentDidDisappear(_ commentID: Int64) {
+      visibleCommentIDs.remove(commentID)
+    }
+
+    func contains(_ commentID: Int64) -> Bool {
+      visibleCommentIDs.contains(commentID)
+    }
+  }
+#endif
