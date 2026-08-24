@@ -123,6 +123,52 @@ struct ForumMembershipChange: Equatable, Sendable {
   }
 }
 
+struct UserRelationshipChange: Equatable, Sendable {
+  let accountID: Int64
+  let sessionRevision: UUID
+  let targetUserID: Int64
+  let isFollowed: Bool
+
+  init(
+    accountID: Int64,
+    sessionRevision: UUID,
+    targetUserID: Int64,
+    isFollowed: Bool
+  ) {
+    self.accountID = accountID
+    self.sessionRevision = sessionRevision
+    self.targetUserID = targetUserID
+    self.isFollowed = isFollowed
+  }
+
+  init?(_ notification: Notification) {
+    guard
+      let accountID = accountNotificationInt64(
+        notification.userInfo?[AccountNotificationKey.accountID]
+      ),
+      let sessionRevisionValue = notification.userInfo?[AccountNotificationKey.sessionRevision]
+        as? String,
+      let sessionRevision = UUID(uuidString: sessionRevisionValue),
+      let targetUserID = accountNotificationInt64(
+        notification.userInfo?[AccountNotificationKey.targetUserID]
+      ),
+      let isFollowed = accountNotificationInt64(
+        notification.userInfo?[AccountNotificationKey.isFollowed]
+      ),
+      accountID > 0,
+      targetUserID > 0,
+      accountID != targetUserID,
+      isFollowed == 0 || isFollowed == 1
+    else { return nil }
+    self.init(
+      accountID: accountID,
+      sessionRevision: sessionRevision,
+      targetUserID: targetUserID,
+      isFollowed: isFollowed == 1
+    )
+  }
+}
+
 struct ForumCheckInChange: Equatable, Sendable {
   let accountID: Int64
   let sessionRevision: UUID
@@ -310,6 +356,9 @@ extension Notification.Name {
   static let forumMembershipDidChange = Notification.Name(
     "TiebaPlusPlus.forumMembershipDidChange"
   )
+  static let userRelationshipDidChange = Notification.Name(
+    "TiebaPlusPlus.userRelationshipDidChange"
+  )
   static let forumCheckInDidChange = Notification.Name(
     "TiebaPlusPlus.forumCheckInDidChange"
   )
@@ -351,6 +400,19 @@ enum AccountChangeNotifications {
       name: .forumMembershipDidChange,
       object: nil,
       userInfo: userInfo
+    )
+  }
+
+  static func postUserRelationshipChange(_ change: UserRelationshipChange) {
+    NotificationCenter.default.post(
+      name: .userRelationshipDidChange,
+      object: nil,
+      userInfo: [
+        AccountNotificationKey.accountID: NSNumber(value: change.accountID),
+        AccountNotificationKey.sessionRevision: change.sessionRevision.uuidString,
+        AccountNotificationKey.targetUserID: NSNumber(value: change.targetUserID),
+        AccountNotificationKey.isFollowed: NSNumber(value: change.isFollowed),
+      ]
     )
   }
 
@@ -410,6 +472,7 @@ private enum AccountNotificationKey {
   static let sessionRevision = "sessionRevision"
   static let forumID = "forumID"
   static let forumName = "forumName"
+  static let targetUserID = "targetUserID"
   static let isFollowed = "isFollowed"
   static let consecutiveDays = "consecutiveDays"
   static let rank = "rank"

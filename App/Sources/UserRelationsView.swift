@@ -12,10 +12,12 @@ struct UserRelationsView: View {
   @StateObject private var followingViewModel: UserRelationsViewModel
   @StateObject private var followersViewModel: UserRelationsViewModel
   @State private var selectedKind: UserRelationKind
+  @State private var pendingFollow: UserRelationFollowPrompt?
 
   init(
     userID: Int64,
     initialKind: UserRelationKind,
+    accountAccess: AccountAccess?,
     service: any BrowseService & ForumPostSearchService & UserProfileService
       & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
@@ -30,7 +32,8 @@ struct UserRelationsView: View {
       wrappedValue: UserRelationsViewModel(
         userID: userID,
         kind: .following,
-        service: service
+        service: service,
+        accountAccess: accountAccess
       )
     )
     _followersViewModel = StateObject(
@@ -63,16 +66,76 @@ struct UserRelationsView: View {
     .navigationTitle("关注与粉丝")
     .navigationBarTitleDisplayMode(.inline)
     .refreshable { await selectedViewModel.refresh() }
-    .task(id: selectedKind) { selectedViewModel.loadIfNeeded() }
+    .task(id: selectedKind) {
+      selectedViewModel.loadIfNeeded()
+      if selectedKind == .following {
+        await followingViewModel.resolveManagementAccessIfNeeded()
+      }
+    }
     .onDisappear {
+      pendingFollow = nil
       followingViewModel.cancel()
       followersViewModel.cancel()
+    }
+    .onChange(of: selectedKind) { _ in pendingFollow = nil }
+    .onChange(of: followingViewModel.users) { users in
+      guard let pendingFollow else { return }
+      guard users.contains(pendingFollow.user) else {
+        self.pendingFollow = nil
+        return
+      }
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+      pendingFollow = nil
+      let token = followingViewModel.invalidateForAccountSessionChange()
+      Task { @MainActor in
+        await followingViewModel.resolveManagementAccessAfterSessionChange(ifCurrent: token)
+      }
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .userRelationshipDidChange)) {
+      notification in
+      guard let change = UserRelationshipChange(notification) else { return }
+      if followingViewModel.userRelationshipDidChange(change) {
+        pendingFollow = nil
+      }
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       Task { @MainActor in
         followingViewModel.reloadAfterContentFilterChange()
         followersViewModel.reloadAfterContentFilterChange()
       }
+    }
+    .confirmationDialog(
+      pendingFollow?.targetFollowed == true ? "关注这名用户？" : "取消关注这名用户？",
+      isPresented: Binding(
+        get: { pendingFollow != nil },
+        set: { if !$0 { pendingFollow = nil } }
+      ),
+      titleVisibility: .visible
+    ) {
+      if let pendingFollow {
+        if pendingFollow.targetFollowed {
+          Button("关注") { confirmFollowChange(pendingFollow) }
+        } else {
+          Button("取消关注", role: .destructive) { confirmFollowChange(pendingFollow) }
+        }
+      }
+      Button("取消", role: .cancel) { pendingFollow = nil }
+    } message: {
+      Text(
+        "这会修改当前贴吧账户对“\(pendingFollow?.user.preferredName ?? "这名用户")”的关注状态。"
+      )
+    }
+    .alert(
+      "无法更新用户关注",
+      isPresented: Binding(
+        get: { followingViewModel.relationshipMutationError != nil },
+        set: { if !$0 { followingViewModel.dismissRelationshipMutationError() } }
+      )
+    ) {
+      Button("好", role: .cancel) { followingViewModel.dismissRelationshipMutationError() }
+    } message: {
+      Text(followingViewModel.relationshipMutationError ?? "无法完成用户关注操作。")
     }
   }
 
@@ -141,16 +204,21 @@ struct UserRelationsView: View {
           visibility: user.localVisibility,
           placeholder: "已屏蔽此用户"
         ) {
-          NavigationLink {
-            UserProfileView(
-              userID: user.id,
-              service: service,
-              historyRepository: historyRepository,
-              favoritesRepository: favoritesRepository,
-              searchHistoryRepository: searchHistoryRepository
-            )
-          } label: {
-            UserRelationRow(user: user)
+          HStack(spacing: 6) {
+            NavigationLink {
+              UserProfileView(
+                userID: user.id,
+                service: service,
+                historyRepository: historyRepository,
+                favoritesRepository: favoritesRepository,
+                searchHistoryRepository: searchHistoryRepository
+              )
+            } label: {
+              UserRelationRow(user: user)
+            }
+            .buttonStyle(.plain)
+
+            followControl(for: user, viewModel: viewModel)
           }
         }
         .frame(minHeight: 44)
@@ -181,6 +249,55 @@ struct UserRelationsView: View {
       LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
         .listRowSeparator(.hidden)
     }
+  }
+
+  @ViewBuilder
+  private func followControl(
+    for user: BrowseRelatedUser,
+    viewModel: UserRelationsViewModel
+  ) -> some View {
+    switch viewModel.followControlState(for: user) {
+    case .hidden:
+      EmptyView()
+    case .followed(let isEnabled):
+      Button {
+        pendingFollow = viewModel.followPrompt(for: user)
+      } label: {
+        Image(systemName: "person.crop.circle.badge.checkmark")
+          .frame(width: 44, height: 44)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(.borderless)
+      .disabled(!isEnabled)
+      .opacity(isEnabled ? 1 : 0.45)
+      .accessibilityLabel("取消关注用户")
+      .accessibilityValue(isEnabled ? "已关注" : "已关注，需要刷新后才能更改")
+      .help("取消关注用户")
+    case .notFollowed(let isEnabled):
+      Button {
+        pendingFollow = viewModel.followPrompt(for: user)
+      } label: {
+        Image(systemName: "person.badge.plus")
+          .frame(width: 44, height: 44)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(.borderless)
+      .disabled(!isEnabled)
+      .opacity(isEnabled ? 1 : 0.45)
+      .accessibilityLabel("关注用户")
+      .accessibilityValue(isEnabled ? "未关注" : "未关注，需要刷新后才能更改")
+      .help("关注用户")
+    case .mutating(let targetFollowed):
+      ProgressView()
+        .controlSize(.small)
+        .frame(width: 44, height: 44)
+        .accessibilityLabel(targetFollowed ? "正在关注用户" : "正在取消关注用户")
+    }
+  }
+
+  private func confirmFollowChange(_ prompt: UserRelationFollowPrompt) {
+    pendingFollow = nil
+    followingViewModel.setFollowed(prompt)
   }
 }
 

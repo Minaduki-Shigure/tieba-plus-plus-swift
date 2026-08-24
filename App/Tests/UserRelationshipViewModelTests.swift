@@ -5,6 +5,71 @@ import XCTest
 
 @MainActor
 final class UserRelationshipViewModelTests: XCTestCase {
+  func testRelationshipChangeNotificationRequiresStrictCompletePayload() throws {
+    let revision = uuid(1)
+    let validFields: [AnyHashable: Any] = [
+      "accountID": NSNumber(value: 1),
+      "sessionRevision": revision.uuidString,
+      "targetUserID": NSNumber(value: 99),
+      "isFollowed": NSNumber(value: 1),
+    ]
+
+    XCTAssertEqual(
+      UserRelationshipChange(
+        Notification(name: .userRelationshipDidChange, userInfo: validFields)
+      ),
+      UserRelationshipChange(
+        accountID: 1,
+        sessionRevision: revision,
+        targetUserID: 99,
+        isFollowed: true
+      )
+    )
+
+    for missingKey in ["accountID", "sessionRevision", "targetUserID", "isFollowed"] {
+      var fields = validFields
+      fields.removeValue(forKey: missingKey)
+      XCTAssertNil(
+        UserRelationshipChange(
+          Notification(name: .userRelationshipDidChange, userInfo: fields)
+        ),
+        "Expected missing \(missingKey) to invalidate the notification"
+      )
+    }
+
+    let invalidOverrides: [[String: Any]] = [
+      ["sessionRevision": "not-a-uuid"],
+      ["accountID": NSNumber(value: 0)],
+      ["accountID": NSNumber(value: -1)],
+      ["targetUserID": NSNumber(value: 0)],
+      ["targetUserID": NSNumber(value: -99)],
+      ["targetUserID": NSNumber(value: 1)],
+      ["isFollowed": NSNumber(value: -1)],
+      ["isFollowed": NSNumber(value: 2)],
+    ]
+    for override in invalidOverrides {
+      var fields = validFields
+      override.forEach { fields[$0.key] = $0.value }
+      XCTAssertNil(
+        UserRelationshipChange(
+          Notification(name: .userRelationshipDidChange, userInfo: fields)
+        ),
+        "Expected invalid relationship payload to be rejected: \(override)"
+      )
+    }
+
+    for rawValue in [NSNumber(value: 0), NSNumber(value: 1)] {
+      var fields = validFields
+      fields["isFollowed"] = rawValue
+      XCTAssertEqual(
+        UserRelationshipChange(
+          Notification(name: .userRelationshipDidChange, userInfo: fields)
+        )?.isFollowed,
+        rawValue.boolValue
+      )
+    }
+  }
+
   func testInvalidTargetIsHiddenWithoutReadingAccountOrCallingService() async {
     let vault = RelationshipVaultSpy(session: session(userID: 1, revision: uuid(1)))
     let service = RelationshipServiceSpy()
@@ -132,6 +197,78 @@ final class UserRelationshipViewModelTests: XCTestCase {
     XCTAssertEqual(revisions, [oldSession.sessionRevision, newSession.sessionRevision])
   }
 
+  func testMatchingRelationshipChangeOverridesSuspendedReadAndInvalidatesItsResult() async throws {
+    let active = session(userID: 1, revision: uuid(1))
+    let service = RelationshipServiceSpy(reads: [
+      active.sessionRevision: [
+        .value(relationship(userID: 1, isFollowed: false)),
+        .suspended(id: 1, value: relationship(userID: 1, isFollowed: false)),
+      ]
+    ])
+    addTeardownBlock { await service.releaseAll() }
+    let vault = RelationshipVaultSpy(session: active)
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+
+    let staleReload = Task { await viewModel.reload() }
+    try await waitForRelationshipTest { await service.readRequestCount() == 2 }
+    viewModel.userRelationshipDidChange(
+      UserRelationshipChange(
+        accountID: active.id,
+        sessionRevision: active.sessionRevision,
+        targetUserID: 99,
+        isFollowed: true
+      )
+    )
+
+    XCTAssertEqual(viewModel.state, .ready(isFollowed: true))
+    XCTAssertNil(viewModel.errorMessage)
+
+    await service.releaseRead(id: 1)
+    await staleReload.value
+
+    XCTAssertEqual(viewModel.state, .ready(isFollowed: true))
+    XCTAssertNil(viewModel.errorMessage)
+    let reads = await service.readRequestCount()
+    XCTAssertEqual(reads, 2)
+  }
+
+  func testRelationshipChangeIgnoresDifferentAccountRevisionAndTarget() async {
+    let active = session(userID: 1, revision: uuid(1))
+    let service = RelationshipServiceSpy(reads: [
+      active.sessionRevision: [.value(relationship(userID: 1, isFollowed: false))]
+    ])
+    let vault = RelationshipVaultSpy(session: active)
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+
+    let unrelatedChanges = [
+      UserRelationshipChange(
+        accountID: 2,
+        sessionRevision: active.sessionRevision,
+        targetUserID: 99,
+        isFollowed: true
+      ),
+      UserRelationshipChange(
+        accountID: active.id,
+        sessionRevision: uuid(2),
+        targetUserID: 99,
+        isFollowed: true
+      ),
+      UserRelationshipChange(
+        accountID: active.id,
+        sessionRevision: active.sessionRevision,
+        targetUserID: 100,
+        isFollowed: true
+      ),
+    ]
+    for change in unrelatedChanges {
+      viewModel.userRelationshipDidChange(change)
+      XCTAssertEqual(viewModel.state, .ready(isFollowed: false))
+      XCTAssertNil(viewModel.errorMessage)
+    }
+  }
+
   func testNoOpAndConcurrentTapsNeverIssueMoreThanOneMutation() async throws {
     let active = session(userID: 1, revision: uuid(1))
     let service = RelationshipServiceSpy(
@@ -187,6 +324,88 @@ final class UserRelationshipViewModelTests: XCTestCase {
     let writeRequests = await service.writeRequestCount()
     XCTAssertEqual(readRequests, 1)
     XCTAssertEqual(writeRequests, 1)
+  }
+
+  func testAuthoritativeMutationPublishesRevisionBoundRelationshipChange() async {
+    let active = session(userID: 1, revision: uuid(1))
+    let service = RelationshipServiceSpy(
+      reads: [active.sessionRevision: [.value(relationship(userID: 1, isFollowed: false))]],
+      writes: [
+        active.sessionRevision: [.value(relationship(userID: 1, isFollowed: true))]
+      ]
+    )
+    let recorder = UserRelationshipNotificationRecorder()
+    let token = NotificationCenter.default.addObserver(
+      forName: .userRelationshipDidChange,
+      object: nil,
+      queue: nil
+    ) { notification in
+      guard
+        let change = UserRelationshipChange(notification),
+        change.accountID == active.id,
+        change.sessionRevision == active.sessionRevision,
+        change.targetUserID == 99
+      else { return }
+      recorder.record(change)
+    }
+    defer { NotificationCenter.default.removeObserver(token) }
+    let vault = RelationshipVaultSpy(session: active)
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+
+    await viewModel.setFollowed(true)
+
+    XCTAssertEqual(viewModel.state, .ready(isFollowed: true))
+    XCTAssertEqual(
+      recorder.snapshot(),
+      [
+        UserRelationshipChange(
+          accountID: active.id,
+          sessionRevision: active.sessionRevision,
+          targetUserID: 99,
+          isFollowed: true
+        )
+      ]
+    )
+  }
+
+  func testRelationshipChangeCannotOverrideActiveMutation() async throws {
+    let active = session(userID: 1, revision: uuid(1))
+    let service = RelationshipServiceSpy(
+      reads: [active.sessionRevision: [.value(relationship(userID: 1, isFollowed: false))]],
+      writes: [
+        active.sessionRevision: [
+          .suspended(id: 1, value: relationship(userID: 1, isFollowed: true))
+        ]
+      ]
+    )
+    addTeardownBlock { await service.releaseAll() }
+    let vault = RelationshipVaultSpy(session: active)
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+
+    let mutation = Task { await viewModel.setFollowed(true) }
+    try await waitForRelationshipTest { await service.writeRequestCount() == 1 }
+    viewModel.userRelationshipDidChange(
+      UserRelationshipChange(
+        accountID: active.id,
+        sessionRevision: active.sessionRevision,
+        targetUserID: 99,
+        isFollowed: false
+      )
+    )
+
+    XCTAssertEqual(
+      viewModel.state,
+      .mutating(previouslyFollowed: false, targetFollowed: true)
+    )
+
+    await service.releaseWrite(id: 1)
+    await mutation.value
+
+    XCTAssertEqual(viewModel.state, .ready(isFollowed: true))
+    let writes = await service.writeRequestCount()
+    XCTAssertEqual(writes, 1)
   }
 
   func testUnchangedMutationReadbackPublishesServerStateAndVisibleError() async {
@@ -470,6 +689,19 @@ private enum RelationshipWriteScript: Sendable {
 private struct RelationshipTestFailure: LocalizedError, Sendable {
   let message: String
   var errorDescription: String? { message }
+}
+
+private final class UserRelationshipNotificationRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var changes: [UserRelationshipChange] = []
+
+  func record(_ change: UserRelationshipChange) {
+    lock.withLock { changes.append(change) }
+  }
+
+  func snapshot() -> [UserRelationshipChange] {
+    lock.withLock { changes }
+  }
 }
 
 private actor RelationshipServiceSpy: AccountService {

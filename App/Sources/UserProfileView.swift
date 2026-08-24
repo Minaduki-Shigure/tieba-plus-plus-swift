@@ -214,6 +214,7 @@ struct UserProfileView: View {
         UserRelationsView(
           userID: viewModel.userID,
           initialKind: relationKind,
+          accountAccess: accountAccess,
           service: service,
           historyRepository: historyRepository,
           favoritesRepository: favoritesRepository,
@@ -1005,7 +1006,17 @@ private struct UserRelationshipControl: View {
       }
       .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
         pendingFollowedState = nil
-        Task { @MainActor in await viewModel.accountSessionDidChange() }
+        let token = viewModel.invalidateForAccountSessionChange()
+        Task { @MainActor in
+          await viewModel.reloadAfterAccountSessionChange(ifCurrent: token)
+        }
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .userRelationshipDidChange)) {
+        notification in
+        guard let change = UserRelationshipChange(notification) else { return }
+        if viewModel.userRelationshipDidChange(change) {
+          pendingFollowedState = nil
+        }
       }
       .confirmationDialog(
         pendingFollowedState == true ? "关注这名用户？" : "取消关注这名用户？",

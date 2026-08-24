@@ -248,6 +248,508 @@ final class UserRelationsViewModelTests: XCTestCase {
     XCTAssertEqual(requests.map(\.page), [1, 1])
   }
 
+  func testOwnFollowingManagementRequiresFullCredentialsWithoutPerRowRelationshipReads()
+    async throws
+  {
+    let active = relationSession(userID: 7, revision: relationUUID(1))
+    let first = BrowseRelatedUser.fixture(id: 80)
+    let second = BrowseRelatedUser.fixture(id: 81)
+    let browseService = UserRelationServiceStub(
+      stubs: [.value(.fixture(users: [first, second], totalCount: 2))]
+    )
+    let accountService = UserRelationAccountServiceSpy()
+    let vault = UserRelationVaultSpy(session: active)
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: browseService,
+      accountAccess: AccountAccess(vault: vault, service: accountService)
+    )
+
+    viewModel.loadIfNeeded()
+    await viewModel.resolveManagementAccessIfNeeded()
+    try await waitForRelations { viewModel.state == .loaded }
+
+    XCTAssertEqual(viewModel.followControlState(for: first), .followed(isEnabled: true))
+    XCTAssertEqual(viewModel.followControlState(for: second), .followed(isEnabled: true))
+    let relationshipReads = await accountService.readRequestCount()
+    XCTAssertEqual(relationshipReads, 0)
+  }
+
+  func testManagementControlsStayHiddenOutsideExactFullCredentialOwnerFollowingList()
+    async throws
+  {
+    let target = BrowseRelatedUser.fixture(id: 90)
+    let active = relationSession(userID: 7, revision: relationUUID(1))
+    let incomplete = relationSession(
+      userID: 7,
+      revision: relationUUID(2),
+      hasFullCredentials: false
+    )
+    let accountService = UserRelationAccountServiceSpy()
+    let otherUser = UserRelationsViewModel(
+      userID: 8,
+      kind: .following,
+      service: UserRelationServiceStub(stubs: [.value(.fixture(users: [target]))]),
+      accountAccess: AccountAccess(
+        vault: UserRelationVaultSpy(session: active),
+        service: accountService
+      )
+    )
+    let followers = UserRelationsViewModel(
+      userID: 7,
+      kind: .followers,
+      service: UserRelationServiceStub(stubs: [.value(.fixture(users: [target]))]),
+      accountAccess: AccountAccess(
+        vault: UserRelationVaultSpy(session: active),
+        service: accountService
+      )
+    )
+    let incompleteOwner = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: UserRelationServiceStub(stubs: [.value(.fixture(users: [target]))]),
+      accountAccess: AccountAccess(
+        vault: UserRelationVaultSpy(session: incomplete),
+        service: accountService
+      )
+    )
+    let viewModels = [otherUser, followers, incompleteOwner]
+
+    for viewModel in viewModels {
+      viewModel.loadIfNeeded()
+      await viewModel.resolveManagementAccessIfNeeded()
+    }
+    try await waitForRelations { viewModels.allSatisfy { $0.state == .loaded } }
+
+    for viewModel in viewModels {
+      XCTAssertEqual(viewModel.followControlState(for: target), .hidden)
+      XCTAssertNil(viewModel.followPrompt(for: target))
+    }
+    let relationshipReads = await accountService.readRequestCount()
+    let relationshipWrites = await accountService.writeRequestCount()
+    XCTAssertEqual(relationshipReads, 0)
+    XCTAssertEqual(relationshipWrites, 0)
+  }
+
+  func testUnfollowKeepsLoadedRowAndAllowsOneWriteRefollowInPlace() async throws {
+    let active = relationSession(userID: 7, revision: relationUUID(1))
+    let target = BrowseRelatedUser.fixture(id: 91)
+    let browseService = UserRelationServiceStub(
+      stubs: [.value(.fixture(users: [target], totalCount: 1))]
+    )
+    let accountService = UserRelationAccountServiceSpy(
+      writes: [
+        .value(relationData(userID: 7, targetUserID: 91, isFollowed: false)),
+        .value(relationData(userID: 7, targetUserID: 91, isFollowed: true)),
+      ]
+    )
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: browseService,
+      accountAccess: AccountAccess(
+        vault: UserRelationVaultSpy(session: active),
+        service: accountService
+      )
+    )
+
+    viewModel.loadIfNeeded()
+    await viewModel.resolveManagementAccessIfNeeded()
+    try await waitForRelations { viewModel.state == .loaded }
+    let unfollowPrompt = try XCTUnwrap(viewModel.followPrompt(for: target))
+
+    viewModel.setFollowed(unfollowPrompt)
+    try await waitForRelations {
+      viewModel.mutatingUserID == nil && viewModel.followedState(for: target) == false
+    }
+
+    XCTAssertEqual(viewModel.users, [target])
+    XCTAssertEqual(viewModel.totalCount, 1)
+    XCTAssertEqual(viewModel.followControlState(for: target), .notFollowed(isEnabled: true))
+    var writes = await accountService.writeRequestsSnapshot()
+    XCTAssertEqual(
+      writes,
+      [
+        UserRelationWriteRequest(
+          userID: 7,
+          sessionRevision: active.sessionRevision,
+          targetUserID: 91,
+          isFollowed: false
+        )
+      ]
+    )
+
+    let refollowPrompt = try XCTUnwrap(viewModel.followPrompt(for: target))
+    XCTAssertTrue(refollowPrompt.targetFollowed)
+    viewModel.setFollowed(refollowPrompt)
+    try await waitForRelations {
+      viewModel.mutatingUserID == nil && viewModel.followedState(for: target) == true
+    }
+
+    XCTAssertEqual(viewModel.users, [target])
+    XCTAssertEqual(viewModel.totalCount, 1)
+    writes = await accountService.writeRequestsSnapshot()
+    XCTAssertEqual(writes.map(\.isFollowed), [false, true])
+    let relationshipReads = await accountService.readRequestCount()
+    XCTAssertEqual(relationshipReads, 0)
+  }
+
+  func testSameUserRevisionChangeRejectsOldPromptWithoutWriting() async throws {
+    let oldSession = relationSession(userID: 7, revision: relationUUID(1), credential: "a")
+    let newSession = relationSession(userID: 7, revision: relationUUID(2), credential: "b")
+    let target = BrowseRelatedUser.fixture(id: 92)
+    let browseService = UserRelationServiceStub(
+      stubs: [.value(.fixture(users: [target], totalCount: 1))]
+    )
+    let accountService = UserRelationAccountServiceSpy()
+    let vault = UserRelationVaultSpy(session: oldSession)
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: browseService,
+      accountAccess: AccountAccess(vault: vault, service: accountService)
+    )
+
+    viewModel.loadIfNeeded()
+    await viewModel.resolveManagementAccessIfNeeded()
+    try await waitForRelations { viewModel.state == .loaded }
+    let stalePrompt = try XCTUnwrap(viewModel.followPrompt(for: target))
+
+    await vault.replaceActive(with: newSession)
+    let token = viewModel.invalidateForAccountSessionChange()
+    await viewModel.resolveManagementAccessAfterSessionChange(ifCurrent: token)
+    viewModel.setFollowed(stalePrompt)
+    await Task.yield()
+
+    XCTAssertEqual(viewModel.managementLease, AccountSessionLease(newSession))
+    XCTAssertEqual(viewModel.followControlState(for: target), .followed(isEnabled: true))
+    let writes = await accountService.writeRequestCount()
+    XCTAssertEqual(writes, 0)
+  }
+
+  func testHiddenAndPlaceholderForgedPromptsNeverWrite() async throws {
+    let active = relationSession(userID: 7, revision: relationUUID(1))
+    let lease = AccountSessionLease(active)
+    let hidden = BrowseRelatedUser.fixture(id: 97, localVisibility: .hidden)
+    let placeholder = BrowseRelatedUser.fixture(id: 98, localVisibility: .placeholder)
+    let accountService = UserRelationAccountServiceSpy()
+    let hiddenViewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: UserRelationServiceStub(stubs: [.value(.fixture(users: [hidden]))]),
+      accountAccess: AccountAccess(
+        vault: UserRelationVaultSpy(session: active),
+        service: accountService
+      )
+    )
+    let placeholderViewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: UserRelationServiceStub(stubs: [.value(.fixture(users: [placeholder]))]),
+      accountAccess: AccountAccess(
+        vault: UserRelationVaultSpy(session: active),
+        service: accountService
+      )
+    )
+
+    for viewModel in [hiddenViewModel, placeholderViewModel] {
+      viewModel.loadIfNeeded()
+      await viewModel.resolveManagementAccessIfNeeded()
+    }
+    try await waitForRelations {
+      hiddenViewModel.state == .loaded && placeholderViewModel.state == .loaded
+    }
+
+    hiddenViewModel.setFollowed(
+      UserRelationFollowPrompt(
+        user: hidden,
+        lease: lease,
+        previouslyFollowed: true,
+        targetFollowed: false
+      )
+    )
+    placeholderViewModel.setFollowed(
+      UserRelationFollowPrompt(
+        user: placeholder,
+        lease: lease,
+        previouslyFollowed: true,
+        targetFollowed: false
+      )
+    )
+    await Task.yield()
+
+    XCTAssertEqual(hiddenViewModel.followControlState(for: hidden), .hidden)
+    XCTAssertEqual(placeholderViewModel.followControlState(for: placeholder), .hidden)
+    let writes = await accountService.writeRequestCount()
+    XCTAssertEqual(writes, 0)
+  }
+
+  func testManagementResolverRetriesCancellationAndTransientVaultFailureOnRefresh()
+    async throws
+  {
+    let active = relationSession(userID: 7, revision: relationUUID(1))
+    let target = BrowseRelatedUser.fixture(id: 99)
+    let browseService = UserRelationServiceStub(
+      stubs: [
+        .value(.fixture(users: [target], totalCount: 1)),
+        .value(.fixture(users: [target], totalCount: 1)),
+      ]
+    )
+    let accountService = UserRelationAccountServiceSpy()
+    let vault = UserRelationVaultSpy(
+      session: active,
+      activeSessionScripts: [
+        .cancelled,
+        .failure("vault temporarily unavailable"),
+        .value(active),
+      ]
+    )
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: browseService,
+      accountAccess: AccountAccess(vault: vault, service: accountService)
+    )
+
+    await viewModel.resolveManagementAccessIfNeeded()
+    XCTAssertNil(viewModel.managementLease)
+
+    await viewModel.refresh()
+    XCTAssertNil(viewModel.managementLease)
+    XCTAssertEqual(viewModel.followControlState(for: target), .hidden)
+
+    await viewModel.refresh()
+
+    XCTAssertEqual(viewModel.managementLease, AccountSessionLease(active))
+    XCTAssertEqual(viewModel.followControlState(for: target), .followed(isEnabled: true))
+    let activeReads = await vault.activeSessionReadCount()
+    XCTAssertEqual(activeReads, 3)
+    let relationshipReads = await accountService.readRequestCount()
+    XCTAssertEqual(relationshipReads, 0)
+  }
+
+  func testLateMutationAfterAccountSwitchCannotPublishStateOrNotification() async throws {
+    let oldSession = relationSession(userID: 7, revision: relationUUID(1))
+    let newSession = relationSession(userID: 8, revision: relationUUID(2))
+    let target = BrowseRelatedUser.fixture(id: 93)
+    let browseService = UserRelationServiceStub(
+      stubs: [.value(.fixture(users: [target], totalCount: 1))]
+    )
+    let accountService = UserRelationAccountServiceSpy(
+      writes: [
+        .suspended(
+          id: 701,
+          value: relationData(userID: 7, targetUserID: 93, isFollowed: false)
+        )
+      ]
+    )
+    addTeardownBlock { await accountService.releaseAll() }
+    let vault = UserRelationVaultSpy(session: oldSession)
+    let recorder = UserRelationNotificationRecorder()
+    let notificationToken = NotificationCenter.default.addObserver(
+      forName: .userRelationshipDidChange,
+      object: nil,
+      queue: nil
+    ) { notification in
+      guard
+        let change = UserRelationshipChange(notification),
+        change.sessionRevision == oldSession.sessionRevision,
+        change.targetUserID == target.id
+      else { return }
+      recorder.record(change)
+    }
+    defer { NotificationCenter.default.removeObserver(notificationToken) }
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: browseService,
+      accountAccess: AccountAccess(vault: vault, service: accountService)
+    )
+
+    viewModel.loadIfNeeded()
+    await viewModel.resolveManagementAccessIfNeeded()
+    try await waitForRelations { viewModel.state == .loaded }
+    viewModel.setFollowed(try XCTUnwrap(viewModel.followPrompt(for: target)))
+    try await waitForRelations { await accountService.hasSuspendedWrite(id: 701) }
+
+    await vault.replaceActive(with: newSession)
+    let resumed = await accountService.resumeSuspendedWrite(id: 701)
+    XCTAssertTrue(resumed)
+    try await waitForRelations { viewModel.mutatingUserID == nil }
+
+    XCTAssertEqual(viewModel.users, [target])
+    XCTAssertEqual(viewModel.followControlState(for: target), .hidden)
+    XCTAssertNil(viewModel.relationshipMutationError)
+    XCTAssertTrue(recorder.snapshot().isEmpty)
+    let writes = await accountService.writeRequestCount()
+    XCTAssertEqual(writes, 1)
+  }
+
+  func testLateSecondPageCannotOverwriteConfirmedRelationshipOverride() async throws {
+    let active = relationSession(userID: 7, revision: relationUUID(1))
+    let target = BrowseRelatedUser.fixture(id: 94)
+    let next = BrowseRelatedUser.fixture(id: 95)
+    let browseService = UserRelationServiceStub(
+      stubs: [
+        .value(.fixture(users: [target], totalCount: 2, hasMore: true)),
+        .suspended(702),
+      ]
+    )
+    let accountService = UserRelationAccountServiceSpy(
+      writes: [.value(relationData(userID: 7, targetUserID: 94, isFollowed: false))]
+    )
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: browseService,
+      accountAccess: AccountAccess(
+        vault: UserRelationVaultSpy(session: active),
+        service: accountService
+      )
+    )
+
+    viewModel.loadIfNeeded()
+    await viewModel.resolveManagementAccessIfNeeded()
+    try await waitForRelations { viewModel.state == .loaded }
+    viewModel.loadMoreIfNeeded(current: target)
+    await browseService.waitUntilSuspendedRequestStarted(id: 702)
+
+    viewModel.setFollowed(try XCTUnwrap(viewModel.followPrompt(for: target)))
+    try await waitForRelations {
+      viewModel.mutatingUserID == nil && viewModel.followedState(for: target) == false
+    }
+    let resumed = await browseService.resumeSuspended(
+      id: 702,
+      returning: .fixture(
+        users: [target, next],
+        currentPage: 2,
+        totalCount: 2,
+        hasMore: false
+      )
+    )
+    XCTAssertTrue(resumed)
+    await browseService.waitUntilSuspendedRequestReturned(id: 702)
+    try await waitForRelations { !viewModel.isLoadingMore }
+
+    XCTAssertEqual(viewModel.users, [target, next])
+    XCTAssertEqual(viewModel.followControlState(for: target), .notFollowed(isEnabled: true))
+    let writes = await accountService.writeRequestCount()
+    XCTAssertEqual(writes, 1)
+  }
+
+  func testFailedMutationLocksOnlyRowUntilSuccessfulRefresh() async throws {
+    let active = relationSession(userID: 7, revision: relationUUID(1))
+    let target = BrowseRelatedUser.fixture(id: 96)
+    let browseService = UserRelationServiceStub(
+      stubs: [
+        .value(.fixture(users: [target], totalCount: 1)),
+        .value(.fixture(users: [target], totalCount: 1)),
+      ]
+    )
+    let accountService = UserRelationAccountServiceSpy(writes: [.failure("write failed")])
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: browseService,
+      accountAccess: AccountAccess(
+        vault: UserRelationVaultSpy(session: active),
+        service: accountService
+      )
+    )
+
+    viewModel.loadIfNeeded()
+    await viewModel.resolveManagementAccessIfNeeded()
+    try await waitForRelations { viewModel.state == .loaded }
+    viewModel.setFollowed(try XCTUnwrap(viewModel.followPrompt(for: target)))
+    try await waitForRelations { viewModel.mutatingUserID == nil }
+
+    XCTAssertTrue(viewModel.lockedRelationshipUserIDs.contains(target.id))
+    XCTAssertEqual(viewModel.followControlState(for: target), .followed(isEnabled: false))
+    XCTAssertNil(viewModel.followPrompt(for: target))
+    XCTAssertNotNil(viewModel.relationshipMutationError)
+
+    await viewModel.refresh()
+
+    XCTAssertFalse(viewModel.lockedRelationshipUserIDs.contains(target.id))
+    XCTAssertEqual(viewModel.followControlState(for: target), .followed(isEnabled: true))
+    XCTAssertNotNil(viewModel.followPrompt(for: target))
+    let writes = await accountService.writeRequestCount()
+    XCTAssertEqual(writes, 1)
+  }
+
+  func testRefreshDuringMutationWaitsForWriteAndQueuedFirstPage() async throws {
+    let active = relationSession(userID: 7, revision: relationUUID(1))
+    let target = BrowseRelatedUser.fixture(id: 100)
+    let browseService = UserRelationServiceStub(
+      stubs: [
+        .value(.fixture(users: [target], totalCount: 1)),
+        .suspended(703),
+      ]
+    )
+    let accountService = UserRelationAccountServiceSpy(
+      writes: [
+        .suspended(
+          id: 704,
+          value: relationData(userID: 7, targetUserID: 100, isFollowed: false)
+        )
+      ]
+    )
+    addTeardownBlock { await accountService.releaseAll() }
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: browseService,
+      accountAccess: AccountAccess(
+        vault: UserRelationVaultSpy(session: active),
+        service: accountService
+      )
+    )
+
+    viewModel.loadIfNeeded()
+    await viewModel.resolveManagementAccessIfNeeded()
+    try await waitForRelations { viewModel.state == .loaded }
+    viewModel.setFollowed(try XCTUnwrap(viewModel.followPrompt(for: target)))
+    try await waitForRelations { await accountService.hasSuspendedWrite(id: 704) }
+
+    let refreshProbe = UserRelationAsyncCompletionProbe()
+    let refreshTask = Task { @MainActor in
+      await refreshProbe.markStarted()
+      await viewModel.refresh()
+      await refreshProbe.markCompleted()
+    }
+    try await waitForRelations { await refreshProbe.hasStarted() }
+    await Task.yield()
+
+    var refreshCompleted = await refreshProbe.hasCompleted()
+    XCTAssertFalse(refreshCompleted, "Refresh returned while the relationship write was suspended")
+    var requests = await browseService.requestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1])
+
+    let writeResumed = await accountService.resumeSuspendedWrite(id: 704)
+    XCTAssertTrue(writeResumed)
+    await browseService.waitUntilSuspendedRequestStarted(id: 703)
+
+    refreshCompleted = await refreshProbe.hasCompleted()
+    XCTAssertFalse(refreshCompleted, "Refresh returned before its queued first page completed")
+    requests = await browseService.requestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 1])
+
+    let pageResumed = await browseService.resumeSuspended(
+      id: 703,
+      returning: .fixture(users: [target], totalCount: 1)
+    )
+    XCTAssertTrue(pageResumed)
+    await browseService.waitUntilSuspendedRequestReturned(id: 703)
+    await refreshTask.value
+
+    refreshCompleted = await refreshProbe.hasCompleted()
+    XCTAssertTrue(refreshCompleted)
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.users, [target])
+    XCTAssertNil(viewModel.mutatingUserID)
+  }
+
   func testRelatedUserFilteringCoversIdentityNamesAndIntroductionWithoutDroppingRows() {
     let cases: [(ContentFilterRule, BrowseRelatedUser)] = [
       (.user(id: 70, name: "", list: .block), .fixture(id: 70)),
@@ -375,6 +877,41 @@ final class UserRelationsViewModelTests: XCTestCase {
 
     XCTAssertEqual(message, "贴吧返回了无法识别的数据，接口可能已经更新。")
   }
+
+  private func relationSession(
+    userID: Int64,
+    revision: UUID,
+    credential: Character = "s",
+    hasFullCredentials: Bool = true
+  ) -> StoredAccountSession {
+    StoredAccountSession(
+      id: userID,
+      username: "user-\(userID)",
+      displayName: "User \(userID)",
+      portrait: "portrait-\(userID)",
+      bduss: String(repeating: credential, count: 192),
+      stoken: hasFullCredentials ? String(repeating: credential, count: 64) : nil,
+      createdAt: Date(timeIntervalSince1970: 1),
+      updatedAt: Date(timeIntervalSince1970: 2),
+      sessionRevision: revision
+    )
+  }
+
+  private func relationData(
+    userID: Int64,
+    targetUserID: Int64,
+    isFollowed: Bool
+  ) -> UserRelationshipData {
+    UserRelationshipData(
+      userID: userID,
+      targetUserID: targetUserID,
+      isFollowed: isFollowed
+    )
+  }
+
+  private func relationUUID(_ value: UInt8) -> UUID {
+    UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, value))
+  }
 }
 
 private struct UserRelationRequest: Equatable, Sendable {
@@ -393,6 +930,209 @@ private enum UserRelationStub: Sendable {
   case value(UserRelationPageData)
   case failure
   case suspended(Int)
+}
+
+private struct UserRelationWriteRequest: Equatable, Sendable {
+  let userID: Int64
+  let sessionRevision: UUID
+  let targetUserID: Int64
+  let isFollowed: Bool
+}
+
+private enum UserRelationWriteScript: Sendable {
+  case value(UserRelationshipData)
+  case failure(String)
+  case suspended(id: Int, value: UserRelationshipData)
+}
+
+private enum UserRelationVaultReadScript: Sendable {
+  case value(StoredAccountSession?)
+  case failure(String)
+  case cancelled
+}
+
+private struct UserRelationAccountFailure: LocalizedError, Sendable {
+  let message: String
+  var errorDescription: String? { message }
+}
+
+private final class UserRelationNotificationRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var changes = [UserRelationshipChange]()
+
+  func record(_ change: UserRelationshipChange) {
+    lock.withLock { changes.append(change) }
+  }
+
+  func snapshot() -> [UserRelationshipChange] {
+    lock.withLock { changes }
+  }
+}
+
+private actor UserRelationAsyncCompletionProbe {
+  private var started = false
+  private var completed = false
+
+  func markStarted() { started = true }
+  func markCompleted() { completed = true }
+  func hasStarted() -> Bool { started }
+  func hasCompleted() -> Bool { completed }
+}
+
+private actor UserRelationAccountServiceSpy: AccountService {
+  private var writes: [UserRelationWriteScript]
+  private var readRequests: [UserRelationWriteRequest] = []
+  private var writeRequests: [UserRelationWriteRequest] = []
+  private var suspendedWrites:
+    [Int: (CheckedContinuation<UserRelationshipData, Never>, UserRelationshipData)] = [:]
+
+  init(writes: [UserRelationWriteScript] = []) {
+    self.writes = writes
+  }
+
+  func userRelationship(
+    session: StoredAccountSession,
+    targetUserID: Int64
+  ) async throws -> UserRelationshipData {
+    readRequests.append(
+      UserRelationWriteRequest(
+        userID: session.id,
+        sessionRevision: session.sessionRevision,
+        targetUserID: targetUserID,
+        isFollowed: false
+      )
+    )
+    throw UserRelationAccountFailure(message: "Unexpected relationship read")
+  }
+
+  func setUserFollowed(
+    session: StoredAccountSession,
+    targetUserID: Int64,
+    isFollowed: Bool
+  ) async throws -> UserRelationshipData {
+    writeRequests.append(
+      UserRelationWriteRequest(
+        userID: session.id,
+        sessionRevision: session.sessionRevision,
+        targetUserID: targetUserID,
+        isFollowed: isFollowed
+      )
+    )
+    guard !writes.isEmpty else {
+      throw UserRelationAccountFailure(message: "Unexpected relationship write")
+    }
+    switch writes.removeFirst() {
+    case .value(let relationship):
+      return relationship
+    case .failure(let message):
+      throw UserRelationAccountFailure(message: message)
+    case .suspended(let id, let value):
+      return await withCheckedContinuation { suspendedWrites[id] = ($0, value) }
+    }
+  }
+
+  func readRequestCount() -> Int { readRequests.count }
+  func writeRequestCount() -> Int { writeRequests.count }
+  func writeRequestsSnapshot() -> [UserRelationWriteRequest] { writeRequests }
+  func hasSuspendedWrite(id: Int) -> Bool { suspendedWrites[id] != nil }
+
+  func resumeSuspendedWrite(id: Int) -> Bool {
+    guard let (continuation, value) = suspendedWrites.removeValue(forKey: id) else {
+      return false
+    }
+    continuation.resume(returning: value)
+    return true
+  }
+
+  func releaseAll() {
+    let pending = suspendedWrites.values
+    suspendedWrites.removeAll()
+    pending.forEach { continuation, value in continuation.resume(returning: value) }
+  }
+
+  func validate(credential: AccountCredentials) async throws -> ValidatedAccount {
+    throw UserRelationAccountFailure(message: "Unexpected validation")
+  }
+
+  func followedForums(
+    session: StoredAccountSession,
+    page: Int,
+    pageSize: Int
+  ) async throws -> FollowedForumPageData {
+    throw UserRelationAccountFailure(message: "Unexpected followed forums request")
+  }
+
+  func forumMembership(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> ForumMembershipData {
+    throw UserRelationAccountFailure(message: "Unexpected forum membership request")
+  }
+
+  func forumAccountState(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> ForumAccountStateData {
+    throw UserRelationAccountFailure(message: "Unexpected forum account state request")
+  }
+
+  func setForumFollowed(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String,
+    isFollowed: Bool
+  ) async throws -> ForumMembershipData {
+    throw UserRelationAccountFailure(message: "Unexpected forum mutation")
+  }
+
+  func checkInToForum(
+    session: StoredAccountSession,
+    forumID: Int64,
+    forumName: String
+  ) async throws -> ForumAccountStateData {
+    throw UserRelationAccountFailure(message: "Unexpected check-in request")
+  }
+}
+
+private actor UserRelationVaultSpy: AccountVault {
+  private var session: StoredAccountSession?
+  private var activeSessionScripts: [UserRelationVaultReadScript]
+  private var activeSessionReads = 0
+
+  init(
+    session: StoredAccountSession?,
+    activeSessionScripts: [UserRelationVaultReadScript] = []
+  ) {
+    self.session = session
+    self.activeSessionScripts = activeSessionScripts
+  }
+
+  func replaceActive(with session: StoredAccountSession?) {
+    self.session = session
+  }
+
+  func accountSummaries() async throws -> [AccountSummary] { [] }
+
+  func activeSession() async throws -> StoredAccountSession? {
+    activeSessionReads += 1
+    guard !activeSessionScripts.isEmpty else { return session }
+    switch activeSessionScripts.removeFirst() {
+    case .value(let session):
+      return session
+    case .failure(let message):
+      throw UserRelationAccountFailure(message: message)
+    case .cancelled:
+      throw CancellationError()
+    }
+  }
+
+  func activeSessionReadCount() -> Int { activeSessionReads }
+  func upsert(_ session: StoredAccountSession) async throws { self.session = session }
+  func switchActive(to userID: Int64) async throws {}
+  func remove(userID: Int64) async throws { session = nil }
+  func removeAll() async throws { session = nil }
 }
 
 private actor UserRelationServiceStub: UserProfileService {

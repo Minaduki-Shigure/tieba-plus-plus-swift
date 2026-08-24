@@ -21,7 +21,7 @@ final class UserRelationshipViewModel: ObservableObject {
   private let access: AccountAccess
   private var generation = 0
   private var activeOperation: UserRelationshipOperation?
-  private var currentLease: UserRelationshipSessionLease?
+  private var currentLease: AccountSessionLease?
   private var lastKnownFollowed: Bool?
 
   init(targetUserID: Int64, access: AccountAccess) {
@@ -66,7 +66,7 @@ final class UserRelationshipViewModel: ObservableObject {
         return
       }
 
-      let lease = UserRelationshipSessionLease(session)
+      let lease = AccountSessionLease(session)
       if previousLease != lease {
         lastKnownFollowed = nil
       }
@@ -201,6 +201,14 @@ final class UserRelationshipViewModel: ObservableObject {
       case .current:
         lastKnownFollowed = confirmedFollowed
         state = .ready(isFollowed: confirmedFollowed)
+        AccountChangeNotifications.postUserRelationshipChange(
+          UserRelationshipChange(
+            accountID: expectedLease.userID,
+            sessionRevision: expectedLease.sessionRevision,
+            targetUserID: targetUserID,
+            isFollowed: confirmedFollowed
+          )
+        )
         if confirmedFollowed != isFollowed {
           errorMessage = "贴吧没有确认新的用户关注状态，请重新加载后再试。"
         }
@@ -234,13 +242,40 @@ final class UserRelationshipViewModel: ObservableObject {
   }
 
   func accountSessionDidChange() async {
+    let token = invalidateForAccountSessionChange()
+    await reloadAfterAccountSessionChange(ifCurrent: token)
+  }
+
+  @discardableResult
+  func invalidateForAccountSessionChange() -> Int {
     generation &+= 1
-    let token = generation
+    activeOperation = nil
     clearSnapshot()
     errorMessage = nil
     state = .idle
+    return generation
+  }
+
+  func reloadAfterAccountSessionChange(ifCurrent token: Int) async {
     guard token == generation else { return }
     await reload()
+  }
+
+  @discardableResult
+  func userRelationshipDidChange(_ change: UserRelationshipChange) -> Bool {
+    guard
+      activeOperation == nil,
+      let currentLease,
+      change.accountID == currentLease.userID,
+      change.sessionRevision == currentLease.sessionRevision,
+      change.targetUserID == targetUserID
+    else { return false }
+
+    generation &+= 1
+    lastKnownFollowed = change.isFollowed
+    errorMessage = nil
+    state = .ready(isFollowed: change.isFollowed)
+    return true
   }
 
   func dismissError() {
@@ -256,7 +291,7 @@ final class UserRelationshipViewModel: ObservableObject {
 
   private func resolve(
     _ relationship: UserRelationshipData,
-    lease: UserRelationshipSessionLease
+    lease: AccountSessionLease
   ) throws -> Bool {
     guard
       relationship.userID == lease.userID,
@@ -275,7 +310,7 @@ final class UserRelationshipViewModel: ObservableObject {
   }
 
   private func sessionLeaseState(
-    _ lease: UserRelationshipSessionLease
+    _ lease: AccountSessionLease
   ) async -> UserRelationshipSessionLeaseState {
     do {
       guard let session = try await access.vault.activeSession() else { return .changed }
@@ -288,7 +323,7 @@ final class UserRelationshipViewModel: ObservableObject {
   private func publishMutationFailure(
     operation: UserRelationshipOperation,
     generation requestGeneration: Int,
-    lease: UserRelationshipSessionLease,
+    lease: AccountSessionLease,
     previouslyFollowed: Bool,
     message: String
   ) async {
@@ -329,21 +364,7 @@ private enum UserRelationshipSessionLeaseState: Sendable {
   case unavailable
 }
 
-private struct UserRelationshipSessionLease: Equatable, Sendable {
-  let userID: Int64
-  let sessionRevision: UUID
-
-  init(_ session: StoredAccountSession) {
-    userID = session.id
-    sessionRevision = session.sessionRevision
-  }
-
-  func matches(_ session: StoredAccountSession) -> Bool {
-    userID == session.id && sessionRevision == session.sessionRevision
-  }
-}
-
 private struct UserRelationshipOperation: Sendable {
   let id = UUID()
-  let lease: UserRelationshipSessionLease
+  let lease: AccountSessionLease
 }

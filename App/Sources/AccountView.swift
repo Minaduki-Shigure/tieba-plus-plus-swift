@@ -11,6 +11,7 @@ struct AccountView: View {
 
   @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
   @Environment(\.contentFilterRepository) private var contentFilterRepository
+  @Environment(\.accountAccess) private var accountAccess
   @StateObject private var viewModel: AccountViewModel
   @StateObject private var profileSummaryViewModel: ActiveAccountProfileSummaryViewModel
   @StateObject private var unreadSummaryViewModel: InboxUnreadSummaryViewModel
@@ -260,6 +261,7 @@ struct AccountView: View {
               UserRelationsView(
                 userID: activeAccount.id,
                 initialKind: .followers,
+                accountAccess: accountAccess,
                 service: browseService,
                 historyRepository: historyRepository,
                 favoritesRepository: favoritesRepository,
