@@ -29,7 +29,7 @@ from that source.
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, shared text selection/copying, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
 | Local data, settings, and customization | 10 | 7 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, a TiebaLite-compatible default image-watermark choice, reply-entry visibility, a default-on composer risk notice, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
-| Account, session, and private read flows | 15 | 9 | Login, Home-toolbar quick switching, a self-profile summary, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
+| Account, session, and private read flows | 15 | 9 | Login, Home-toolbar quick switching, a self-profile summary, an authenticated current-account following list with a guarded mutual filter, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 14 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, server-reason-bound personalized recommendation dislike feedback, three text/classic-emoticon reply targets, equivalent new-topic creation, bounded static-image new-topic/direct-topic-reply creation, direct inline-preview reply entry, and credential-free official reporting entry points have guarded implementations; real batch-check-in behavior, creation, poll and interaction-restriction success, broader uploaded media, unresolvable cloud rows, native reporting, and other reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
 | **Total** | **100** | **80–82** | Current full-product estimate; roughly 18–20% remains |
@@ -307,6 +307,11 @@ the source metadata is updated to that tested IPA.
   navigation and child-only nested-reply resolution
 - Read-only public following and follower lists with profile navigation, local
   filtering, refresh, and endpoint-aware pagination
+- Authenticated current-account following pages with inline management and a
+  TiebaLite-style all/mutual filter, exact `has_concerned=2` classification,
+  session-revision isolation, raw-cursor pagination, and a five-page bounded
+  search for later visible mutual rows; incomplete metadata hides the filter instead of
+  guessing
 - Default-off combined public nickname and username presentation
 - Local case-sensitive literal-keyword and exact UID/name user block/allow lists
 - Placeholder or fully hidden presentation for locally blocked content
@@ -867,7 +872,21 @@ The returned `follow_list_switch` and `tips_text` are retained only as opaque
 metadata: observed visible and unavailable results can share the same switch, so
 neither value establishes a privacy state. These public lists likewise do not
 establish whether the active account follows, is followed by, or can mutate any
-listed user; this surface deliberately has no relationship write controls.
+listed user; this public surface deliberately has no relationship write controls.
+
+The exact active account's following page instead uses an authenticated read to
+the same path. Its signed form contains BDUSS, `_client_type=2`, fixed
+`_client_version=12.41.7.1`, one-based `pn`, and `sign`; it intentionally omits
+target UID, STOKEN, Cookie, and device identifiers. The App binds each page to
+one `userID + sessionRevision` before and after transport and never mixes it with
+anonymous pages. Only known `has_concerned` values enable the local all/mutual
+menu, and only exact value 2 is mutual. Missing, malformed, or unknown metadata
+keeps the ordinary list and management actions but hides the filter. Empty
+filtered results scan no more than five raw pages per user-approved attempt, and
+unfollow/refollow changes the action override without rewriting the server's
+mutual snapshot. The minimum authenticated field set and live metadata behavior
+remain a physical-device validation gate, so this closes a narrow workflow gap
+inside the existing private-read credit without adding a weighted point.
 
 An independently authenticated relationship probe now powers an explicit
 follow/unfollow control on another user's profile. It sends the active account

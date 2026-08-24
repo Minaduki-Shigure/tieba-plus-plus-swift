@@ -608,6 +608,10 @@ protocol AccountService: Sendable {
   func selfProfile(
     session: StoredAccountSession
   ) async throws -> AccountProfileSummary
+  func ownFollowing(
+    session: StoredAccountSession,
+    page: Int
+  ) async throws -> UserRelationPageData
   func followedForums(
     session: StoredAccountSession,
     page: Int,
@@ -821,6 +825,13 @@ extension AccountService {
     session: StoredAccountSession
   ) async throws -> AccountProfileSummary {
     throw BrowseError.unavailable("当前账户服务不支持读取本人资料。")
+  }
+
+  func ownFollowing(
+    session: StoredAccountSession,
+    page: Int
+  ) async throws -> UserRelationPageData {
+    throw BrowseError.unavailable("当前账户服务不支持读取本人关注列表。")
   }
 
   func likedForums(

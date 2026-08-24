@@ -136,6 +136,10 @@ let concern = try await authenticatedClient.getConcernFeed(
     credential: sessionCredential,
     expectedUserID: sessionAccount.userID
 )
+let ownFollowing = try await authenticatedClient.getOwnFollowing(
+    credential: sessionCredential,
+    expectedUserID: sessionAccount.userID
+)
 let newThread = try await authenticatedClient.submitNewThread(
     credential: sessionCredential,
     expectedUserID: sessionAccount.userID,
@@ -214,6 +218,15 @@ not advertise a usable sign state; it is not permission to attempt a write.
   UID, and signature, with no account credential or device field. The two
   endpoints retain their distinct validated pagination semantics and share a
   1 MiB response limit.
+- The authenticated current-account following read uses the same
+  `/c/u/follow/followList` path but a distinct fixed signed form: BDUSS,
+  `_client_type=2`, `_client_version=12.41.7.1`, one-based `pn`, and `sign`.
+  It intentionally omits target UID, STOKEN, cookies, and device identifiers.
+  Its requested account ID is caller context rather than a server-echoed
+  identity, so the App must bind every page to one full-session revision. The
+  optional `has_concerned` field is preserved lossily; only exact value 2 means
+  mutual following, and missing or unknown values cannot be treated as a
+  negative result.
 - Search supports `/mo/q/search/forum`, `/mo/q/search/thread`, and
   `/mo/q/search/user`; global thread search is restricted to topic results and
   supports newest/oldest/relevance sorting with endpoint-specific wire values,

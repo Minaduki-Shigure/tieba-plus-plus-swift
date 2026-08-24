@@ -755,6 +755,7 @@ public actor TiebaAuthenticatedClient {
 
   static let accountResponseMaximumBytes = 512 * 1_024
   static let selfProfileResponseMaximumBytes = 2 * 1_024 * 1_024
+  static let ownFollowingResponseMaximumBytes = TiebaPublicSocialPolicy.maximumResponseBodyBytes
   static let userRelationshipResponseMaximumBytes = 2 * 1_024 * 1_024
   static let userFollowWriteResponseMaximumBytes = 64 * 1_024
   static let userInteractionPermissionsResponseMaximumBytes = 64 * 1_024
@@ -1215,6 +1216,28 @@ public actor TiebaAuthenticatedClient {
     return try TiebaAuthenticatedDecoder.selfProfile(
       from: response,
       expectedUserID: expectedUserID
+    )
+  }
+
+  public func getOwnFollowing(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    page: Int = 1
+  ) async throws -> TiebaUserRelationPage {
+    let request = try requestFactory.ownFollowing(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      page: page
+    )
+    let body = try await send(
+      request,
+      maximumBodyBytes: Self.ownFollowingResponseMaximumBytes
+    )
+    return try TiebaPublicSocialDecoder.page(
+      from: body,
+      requestedUserID: expectedUserID,
+      kind: .following,
+      requestedPage: page
     )
   }
 

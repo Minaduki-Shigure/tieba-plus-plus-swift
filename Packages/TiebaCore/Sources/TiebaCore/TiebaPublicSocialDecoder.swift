@@ -165,7 +165,10 @@ enum TiebaPublicSocialDecoder {
           username: username,
           displayName: displayName,
           portrait: portrait,
-          introduction: introduction
+          introduction: introduction,
+          concernState: payload.hasConcerned.map {
+            TiebaRelatedUserConcernState(rawValue: $0)
+          }
         )
       )
     }
@@ -284,6 +287,7 @@ private struct RelatedUserPayload: Decodable {
   let displayName: String?
   let portrait: String?
   let introduction: String?
+  let hasConcerned: Int64?
 
   enum CodingKeys: String, CodingKey {
     case id
@@ -291,6 +295,19 @@ private struct RelatedUserPayload: Decodable {
     case displayName = "name_show"
     case portrait
     case introduction = "intro"
+    case hasConcerned = "has_concerned"
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    id = try container.decode(PublicSocialFlexibleInteger.self, forKey: .id)
+    username = try container.decodeIfPresent(String.self, forKey: .username)
+    displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
+    portrait = try container.decodeIfPresent(String.self, forKey: .portrait)
+    introduction = try container.decodeIfPresent(String.self, forKey: .introduction)
+    hasConcerned = (
+      try? container.decode(PublicSocialFlexibleInteger.self, forKey: .hasConcerned)
+    )?.value
   }
 }
 

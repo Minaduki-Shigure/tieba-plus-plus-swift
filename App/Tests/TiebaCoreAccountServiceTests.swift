@@ -235,6 +235,119 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     }
   }
 
+  func testOwnFollowingRequiresFullSessionAndMapsAuthenticatedConcernMetadata() async throws {
+    let client = AccountClientSpy(
+      ownFollowing: ownFollowingPage(
+        users: [
+          TiebaRelatedUser(
+            id: 9,
+            username: "mutual-user",
+            displayName: "被过滤的互关用户",
+            portrait: "portrait-token?t=1",
+            introduction: "简介",
+            concernState: .mutual
+          )
+        ],
+        page: 2,
+        totalCount: 41,
+        hasMore: true
+      )
+    )
+    let filter = StaticConcernFilterRepository(
+      value: ContentFilterSnapshot(
+        displayMode: .placeholder,
+        blockVideos: false,
+        rules: [.keyword("被过滤", list: .block)]
+      )
+    )
+    let service = TiebaCoreAccountService(client: client, contentFilterRepository: filter)
+
+    let result = try await service.ownFollowing(session: session(), page: 2)
+
+    XCTAssertEqual(result.currentPage, 2)
+    XCTAssertEqual(result.totalCount, 41)
+    XCTAssertTrue(result.hasMore)
+    XCTAssertEqual(result.users.map(\.id), [9])
+    XCTAssertEqual(result.users.first?.concernState, .mutual)
+    XCTAssertEqual(result.users.first?.localVisibility, .placeholder)
+    XCTAssertEqual(
+      result.users.first?.portraitURL,
+      URL(string: "https://himg.bdimg.com/sys/portraitn/item/portrait-token")
+    )
+    let snapshot = await client.snapshot()
+    XCTAssertEqual(
+      snapshot.ownFollowingRequests,
+      [
+        OwnFollowingClientRequest(
+          userID: 7,
+          page: 2,
+          bdussBytes: 192,
+          stokenBytes: 64,
+          cookieName: .bduss
+        )
+      ]
+    )
+  }
+
+  func testOwnFollowingRejectsLegacySessionInvalidPageAndMismatchedResponseContext()
+    async throws
+  {
+    let validPage = ownFollowingPage(users: [], page: 1)
+    let client = AccountClientSpy(ownFollowing: validPage)
+    let service = TiebaCoreAccountService(client: client)
+
+    do {
+      _ = try await service.ownFollowing(session: session(stokenComponent: nil), page: 1)
+      XCTFail("Expected full credentials to be required")
+    } catch let error as BrowseError {
+      XCTAssertEqual(
+        error.errorDescription,
+        "此账户需要重新登录，才能安全读取本人关注列表。"
+      )
+    }
+    do {
+      _ = try await service.ownFollowing(session: session(), page: 0)
+      XCTFail("Expected invalid page to be rejected")
+    } catch let error as BrowseError {
+      XCTAssertEqual(error.errorDescription, "关注列表页码无效，请重新加载后再试。")
+    }
+    let snapshot = await client.snapshot()
+    XCTAssertTrue(snapshot.ownFollowingRequests.isEmpty)
+
+    let invalidPages = [
+      ownFollowingPage(users: [], page: 1, requestedUserID: 8),
+      ownFollowingPage(users: [], page: 1, kind: .followers),
+      ownFollowingPage(users: [], page: 2),
+    ]
+    for response in invalidPages {
+      let mismatchedClient = AccountClientSpy(ownFollowing: response)
+      do {
+        _ = try await TiebaCoreAccountService(
+          client: mismatchedClient
+        ).ownFollowing(session: session(), page: 1)
+        XCTFail("Expected mismatched own-following context to be rejected")
+      } catch let error as BrowseError {
+        XCTAssertEqual(
+          error.errorDescription,
+          "贴吧返回了不匹配的本人关注列表，请重新加载后再试。"
+        )
+      }
+      let mismatchedSnapshot = await mismatchedClient.snapshot()
+      XCTAssertEqual(
+        mismatchedSnapshot.ownFollowingRequests,
+        [
+          OwnFollowingClientRequest(
+            userID: 7,
+            page: 1,
+            bdussBytes: 192,
+            stokenBytes: 64,
+            cookieName: .bduss
+          )
+        ]
+      )
+    }
+  }
+
   func testLikedForumsMapsTargetContextAndForumPresentation() async throws {
     let client = AccountClientSpy(
       likedForums: TiebaFollowedForumPage(
@@ -2053,6 +2166,31 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     )
   }
 
+  private func ownFollowingPage(
+    users: [TiebaRelatedUser],
+    page: Int,
+    requestedUserID: Int64 = 7,
+    kind: TiebaUserRelationKind = .following,
+    totalCount: Int = 0,
+    hasMore: Bool = false
+  ) -> TiebaUserRelationPage {
+    TiebaUserRelationPage(
+      requestedUserID: requestedUserID,
+      kind: kind,
+      users: users,
+      pagination: TiebaPagination(
+        pageSize: 20,
+        currentPage: page,
+        totalPages: 0,
+        totalCount: totalCount,
+        hasMore: hasMore,
+        hasPrevious: page > 1
+      ),
+      notice: "",
+      visibilitySwitch: nil
+    )
+  }
+
   private func signedCoreState(days: Int, rank: Int) -> TiebaForumAccountState {
     TiebaForumAccountState(
       membership: TiebaForumMembership(
@@ -2239,6 +2377,14 @@ private struct SelfProfileClientRequest: Equatable, Sendable {
   let cookieName: TiebaBDUSSCookieName
 }
 
+private struct OwnFollowingClientRequest: Equatable, Sendable {
+  let userID: Int64
+  let page: Int
+  let bdussBytes: Int
+  let stokenBytes: Int
+  let cookieName: TiebaBDUSSCookieName
+}
+
 private struct LikedForumClientRequest: Equatable, Sendable {
   let accountUserID: Int64
   let targetUserID: Int64
@@ -2314,6 +2460,7 @@ private struct AccountClientSnapshot: Sendable {
   let validationCredentialByteCounts: [Int]
   let validationSessionShapes: [SessionCredentialShape]
   let selfProfileRequests: [SelfProfileClientRequest]
+  let ownFollowingRequests: [OwnFollowingClientRequest]
   let likedForumRequests: [LikedForumClientRequest]
   let cloudFavoriteRequests: [CloudFavoriteClientRequest]
   let concernRequests: [ConcernClientRequest]
@@ -2348,6 +2495,7 @@ private actor AccountServiceCompletionProbe {
 private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   private let validation: TiebaAuthenticatedAccount?
   private let selfProfile: TiebaSelfProfileSummary?
+  private let ownFollowing: TiebaUserRelationPage?
   private let likedForums: TiebaFollowedForumPage?
   private let cloudFavorites: TiebaCloudFavoritePage?
   private let concern: TiebaConcernPage?
@@ -2371,6 +2519,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   private var validationCredentialByteCounts: [Int] = []
   private var validationSessionShapes: [SessionCredentialShape] = []
   private var selfProfileRequests: [SelfProfileClientRequest] = []
+  private var ownFollowingRequests: [OwnFollowingClientRequest] = []
   private var likedForumRequests: [LikedForumClientRequest] = []
   private var cloudFavoriteRequests: [CloudFavoriteClientRequest] = []
   private var concernRequests: [ConcernClientRequest] = []
@@ -2398,6 +2547,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   init(
     validation: TiebaAuthenticatedAccount? = nil,
     selfProfile: TiebaSelfProfileSummary? = nil,
+    ownFollowing: TiebaUserRelationPage? = nil,
     likedForums: TiebaFollowedForumPage? = nil,
     cloudFavorites: TiebaCloudFavoritePage? = nil,
     concern: TiebaConcernPage? = nil,
@@ -2421,6 +2571,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   ) {
     self.validation = validation
     self.selfProfile = selfProfile
+    self.ownFollowing = ownFollowing
     self.likedForums = likedForums
     self.cloudFavorites = cloudFavorites
     self.concern = concern
@@ -2479,6 +2630,24 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     )
     guard let selfProfile else { throw AccountClientSpyError.unexpectedCall }
     return selfProfile
+  }
+
+  func getOwnFollowing(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    page: Int
+  ) async throws -> TiebaUserRelationPage {
+    ownFollowingRequests.append(
+      OwnFollowingClientRequest(
+        userID: expectedUserID,
+        page: page,
+        bdussBytes: credential.bduss.utf8.count,
+        stokenBytes: credential.stoken.utf8.count,
+        cookieName: credential.bdussCookieName
+      )
+    )
+    guard let ownFollowing else { throw AccountClientSpyError.unexpectedCall }
+    return ownFollowing
   }
 
   func getCloudFavorites(
@@ -2871,6 +3040,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
       validationCredentialByteCounts: validationCredentialByteCounts,
       validationSessionShapes: validationSessionShapes,
       selfProfileRequests: selfProfileRequests,
+      ownFollowingRequests: ownFollowingRequests,
       likedForumRequests: likedForumRequests,
       cloudFavoriteRequests: cloudFavoriteRequests,
       concernRequests: concernRequests,

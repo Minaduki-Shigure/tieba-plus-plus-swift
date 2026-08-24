@@ -13,6 +13,11 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
     credential: TiebaSessionCredential,
     expectedUserID: Int64
   ) async throws -> TiebaSelfProfileSummary
+  func getOwnFollowing(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    page: Int
+  ) async throws -> TiebaUserRelationPage
   func getFollowedForums(
     credential: TiebaBDUSSCredential,
     userID: Int64,
@@ -250,6 +255,14 @@ extension TiebaAuthenticatedAccountClient {
     credential: TiebaSessionCredential,
     expectedUserID: Int64
   ) async throws -> TiebaSelfProfileSummary {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
+  func getOwnFollowing(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    page: Int
+  ) async throws -> TiebaUserRelationPage {
     throw TiebaClientError.invalidAuthenticatedResponse
   }
 
@@ -573,6 +586,45 @@ struct TiebaCoreAccountService: AccountService {
       followingCount: response.followingCount,
       followerCount: response.followerCount,
       postCount: response.postCount
+    )
+  }
+
+  func ownFollowing(
+    session: StoredAccountSession,
+    page: Int
+  ) async throws -> UserRelationPageData {
+    guard session.id > 0, let credentials = session.credentials else {
+      throw BrowseError.unavailable("此账户需要重新登录，才能安全读取本人关注列表。")
+    }
+    guard (1...Int(Int32.max)).contains(page) else {
+      throw BrowseError.unavailable("关注列表页码无效，请重新加载后再试。")
+    }
+    let response: TiebaUserRelationPage
+    do {
+      response = try await client.getOwnFollowing(
+        credential: Self.coreSessionCredential(credentials),
+        expectedUserID: session.id,
+        page: page
+      )
+      try Task.checkCancellation()
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.accountError(error)
+    }
+    guard
+      response.requestedUserID == session.id,
+      response.kind == .following,
+      response.pagination.currentPage == page
+    else {
+      throw BrowseError.unavailable("贴吧返回了不匹配的本人关注列表，请重新加载后再试。")
+    }
+    let filter = (try? await contentFilterRepository.snapshot()) ?? .empty
+    return try TiebaCoreBrowseService.mapUserRelationPage(
+      response,
+      expectedUserID: session.id,
+      expectedKind: .following,
+      applying: filter
     )
   }
 

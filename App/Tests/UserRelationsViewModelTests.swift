@@ -257,7 +257,9 @@ final class UserRelationsViewModelTests: XCTestCase {
     let browseService = UserRelationServiceStub(
       stubs: [.value(.fixture(users: [first, second], totalCount: 2))]
     )
-    let accountService = UserRelationAccountServiceSpy()
+    let accountService = UserRelationAccountServiceSpy(
+      followingPages: [.value(.fixture(users: [first, second], totalCount: 2))]
+    )
     let vault = UserRelationVaultSpy(session: active)
     let viewModel = UserRelationsViewModel(
       userID: 7,
@@ -272,6 +274,10 @@ final class UserRelationsViewModelTests: XCTestCase {
 
     XCTAssertEqual(viewModel.followControlState(for: first), .followed(isEnabled: true))
     XCTAssertEqual(viewModel.followControlState(for: second), .followed(isEnabled: true))
+    let publicRequests = await browseService.requestSnapshot()
+    let authenticatedRequests = await accountService.followingRequestsSnapshot()
+    XCTAssertTrue(publicRequests.isEmpty)
+    XCTAssertEqual(authenticatedRequests.map(\.page), [1])
     let relationshipReads = await accountService.readRequestCount()
     XCTAssertEqual(relationshipReads, 0)
   }
@@ -325,6 +331,7 @@ final class UserRelationsViewModelTests: XCTestCase {
     for viewModel in viewModels {
       XCTAssertEqual(viewModel.followControlState(for: target), .hidden)
       XCTAssertNil(viewModel.followPrompt(for: target))
+      XCTAssertFalse(viewModel.canSelectFollowingFilter)
     }
     let relationshipReads = await accountService.readRequestCount()
     let relationshipWrites = await accountService.writeRequestCount()
@@ -334,11 +341,12 @@ final class UserRelationsViewModelTests: XCTestCase {
 
   func testUnfollowKeepsLoadedRowAndAllowsOneWriteRefollowInPlace() async throws {
     let active = relationSession(userID: 7, revision: relationUUID(1))
-    let target = BrowseRelatedUser.fixture(id: 91)
+    let target = BrowseRelatedUser.fixture(id: 91, concernState: .mutual)
     let browseService = UserRelationServiceStub(
       stubs: [.value(.fixture(users: [target], totalCount: 1))]
     )
     let accountService = UserRelationAccountServiceSpy(
+      followingPages: [.value(.fixture(users: [target], totalCount: 1))],
       writes: [
         .value(relationData(userID: 7, targetUserID: 91, isFollowed: false)),
         .value(relationData(userID: 7, targetUserID: 91, isFollowed: true)),
@@ -357,6 +365,10 @@ final class UserRelationsViewModelTests: XCTestCase {
     viewModel.loadIfNeeded()
     await viewModel.resolveManagementAccessIfNeeded()
     try await waitForRelations { viewModel.state == .loaded }
+    XCTAssertTrue(viewModel.canSelectFollowingFilter)
+    viewModel.selectFollowingFilter(.mutual)
+    XCTAssertEqual(viewModel.followingFilter, .mutual)
+    XCTAssertEqual(viewModel.displayableUsers, [target])
     let unfollowPrompt = try XCTUnwrap(viewModel.followPrompt(for: target))
 
     viewModel.setFollowed(unfollowPrompt)
@@ -365,6 +377,8 @@ final class UserRelationsViewModelTests: XCTestCase {
     }
 
     XCTAssertEqual(viewModel.users, [target])
+    XCTAssertEqual(viewModel.displayableUsers, [target])
+    XCTAssertEqual(viewModel.followingFilter, .mutual)
     XCTAssertEqual(viewModel.totalCount, 1)
     XCTAssertEqual(viewModel.followControlState(for: target), .notFollowed(isEnabled: true))
     var writes = await accountService.writeRequestsSnapshot()
@@ -402,7 +416,12 @@ final class UserRelationsViewModelTests: XCTestCase {
     let browseService = UserRelationServiceStub(
       stubs: [.value(.fixture(users: [target], totalCount: 1))]
     )
-    let accountService = UserRelationAccountServiceSpy()
+    let accountService = UserRelationAccountServiceSpy(
+      followingPages: [
+        .value(.fixture(users: [target], totalCount: 1)),
+        .value(.fixture(users: [target], totalCount: 1)),
+      ]
+    )
     let vault = UserRelationVaultSpy(session: oldSession)
     let viewModel = UserRelationsViewModel(
       userID: 7,
@@ -433,7 +452,12 @@ final class UserRelationsViewModelTests: XCTestCase {
     let lease = AccountSessionLease(active)
     let hidden = BrowseRelatedUser.fixture(id: 97, localVisibility: .hidden)
     let placeholder = BrowseRelatedUser.fixture(id: 98, localVisibility: .placeholder)
-    let accountService = UserRelationAccountServiceSpy()
+    let accountService = UserRelationAccountServiceSpy(
+      followingPages: [
+        .value(.fixture(users: [hidden])),
+        .value(.fixture(users: [placeholder])),
+      ]
+    )
     let hiddenViewModel = UserRelationsViewModel(
       userID: 7,
       kind: .following,
@@ -496,7 +520,9 @@ final class UserRelationsViewModelTests: XCTestCase {
         .value(.fixture(users: [target], totalCount: 1)),
       ]
     )
-    let accountService = UserRelationAccountServiceSpy()
+    let accountService = UserRelationAccountServiceSpy(
+      followingPages: [.value(.fixture(users: [target], totalCount: 1))]
+    )
     let vault = UserRelationVaultSpy(
       session: active,
       activeSessionScripts: [
@@ -524,7 +550,7 @@ final class UserRelationsViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.managementLease, AccountSessionLease(active))
     XCTAssertEqual(viewModel.followControlState(for: target), .followed(isEnabled: true))
     let activeReads = await vault.activeSessionReadCount()
-    XCTAssertEqual(activeReads, 3)
+    XCTAssertEqual(activeReads, 4)
     let relationshipReads = await accountService.readRequestCount()
     XCTAssertEqual(relationshipReads, 0)
   }
@@ -537,6 +563,7 @@ final class UserRelationsViewModelTests: XCTestCase {
       stubs: [.value(.fixture(users: [target], totalCount: 1))]
     )
     let accountService = UserRelationAccountServiceSpy(
+      followingPages: [.value(.fixture(users: [target], totalCount: 1))],
       writes: [
         .suspended(
           id: 701,
@@ -576,7 +603,9 @@ final class UserRelationsViewModelTests: XCTestCase {
     await vault.replaceActive(with: newSession)
     let resumed = await accountService.resumeSuspendedWrite(id: 701)
     XCTAssertTrue(resumed)
-    try await waitForRelations { viewModel.mutatingUserID == nil }
+    try await waitForRelations {
+      viewModel.mutatingUserID == nil && viewModel.state == .loaded
+    }
 
     XCTAssertEqual(viewModel.users, [target])
     XCTAssertEqual(viewModel.followControlState(for: target), .hidden)
@@ -597,6 +626,10 @@ final class UserRelationsViewModelTests: XCTestCase {
       ]
     )
     let accountService = UserRelationAccountServiceSpy(
+      followingPages: [
+        .value(.fixture(users: [target], totalCount: 2, hasMore: true)),
+        .suspended(702),
+      ],
       writes: [.value(relationData(userID: 7, targetUserID: 94, isFollowed: false))]
     )
     let viewModel = UserRelationsViewModel(
@@ -613,13 +646,13 @@ final class UserRelationsViewModelTests: XCTestCase {
     await viewModel.resolveManagementAccessIfNeeded()
     try await waitForRelations { viewModel.state == .loaded }
     viewModel.loadMoreIfNeeded(current: target)
-    await browseService.waitUntilSuspendedRequestStarted(id: 702)
+    try await waitForRelations { await accountService.hasSuspendedFollowing(id: 702) }
 
     viewModel.setFollowed(try XCTUnwrap(viewModel.followPrompt(for: target)))
     try await waitForRelations {
       viewModel.mutatingUserID == nil && viewModel.followedState(for: target) == false
     }
-    let resumed = await browseService.resumeSuspended(
+    let resumed = await accountService.resumeSuspendedFollowing(
       id: 702,
       returning: .fixture(
         users: [target, next],
@@ -629,7 +662,6 @@ final class UserRelationsViewModelTests: XCTestCase {
       )
     )
     XCTAssertTrue(resumed)
-    await browseService.waitUntilSuspendedRequestReturned(id: 702)
     try await waitForRelations { !viewModel.isLoadingMore }
 
     XCTAssertEqual(viewModel.users, [target, next])
@@ -647,7 +679,13 @@ final class UserRelationsViewModelTests: XCTestCase {
         .value(.fixture(users: [target], totalCount: 1)),
       ]
     )
-    let accountService = UserRelationAccountServiceSpy(writes: [.failure("write failed")])
+    let accountService = UserRelationAccountServiceSpy(
+      followingPages: [
+        .value(.fixture(users: [target], totalCount: 1)),
+        .value(.fixture(users: [target], totalCount: 1)),
+      ],
+      writes: [.failure("write failed")]
+    )
     let viewModel = UserRelationsViewModel(
       userID: 7,
       kind: .following,
@@ -688,6 +726,10 @@ final class UserRelationsViewModelTests: XCTestCase {
       ]
     )
     let accountService = UserRelationAccountServiceSpy(
+      followingPages: [
+        .value(.fixture(users: [target], totalCount: 1)),
+        .suspended(703),
+      ],
       writes: [
         .suspended(
           id: 704,
@@ -723,24 +765,25 @@ final class UserRelationsViewModelTests: XCTestCase {
 
     var refreshCompleted = await refreshProbe.hasCompleted()
     XCTAssertFalse(refreshCompleted, "Refresh returned while the relationship write was suspended")
-    var requests = await browseService.requestSnapshot()
+    var requests = await accountService.followingRequestsSnapshot()
     XCTAssertEqual(requests.map(\.page), [1])
+    let publicRequests = await browseService.requestSnapshot()
+    XCTAssertTrue(publicRequests.isEmpty)
 
     let writeResumed = await accountService.resumeSuspendedWrite(id: 704)
     XCTAssertTrue(writeResumed)
-    await browseService.waitUntilSuspendedRequestStarted(id: 703)
+    try await waitForRelations { await accountService.hasSuspendedFollowing(id: 703) }
 
     refreshCompleted = await refreshProbe.hasCompleted()
     XCTAssertFalse(refreshCompleted, "Refresh returned before its queued first page completed")
-    requests = await browseService.requestSnapshot()
+    requests = await accountService.followingRequestsSnapshot()
     XCTAssertEqual(requests.map(\.page), [1, 1])
 
-    let pageResumed = await browseService.resumeSuspended(
+    let pageResumed = await accountService.resumeSuspendedFollowing(
       id: 703,
       returning: .fixture(users: [target], totalCount: 1)
     )
     XCTAssertTrue(pageResumed)
-    await browseService.waitUntilSuspendedRequestReturned(id: 703)
     await refreshTask.value
 
     refreshCompleted = await refreshProbe.hasCompleted()
@@ -750,9 +793,610 @@ final class UserRelationsViewModelTests: XCTestCase {
     XCTAssertNil(viewModel.mutatingUserID)
   }
 
+  func testMutualFilterRequiresCompleteAuthenticatedMetadataButKeepsManagementAvailable()
+    async throws
+  {
+    let active = relationSession(userID: 7, revision: relationUUID(1))
+    let known = BrowseRelatedUser.fixture(id: 110, concernState: .mutual)
+    let incompleteUsers = [
+      BrowseRelatedUser.fixture(id: 111),
+      BrowseRelatedUser.fixture(id: 112, concernState: .unknown(9)),
+    ]
+
+    for incomplete in incompleteUsers {
+      let accountService = UserRelationAccountServiceSpy(
+        followingPages: [.value(.fixture(users: [known, incomplete], totalCount: 2))]
+      )
+      let viewModel = UserRelationsViewModel(
+        userID: 7,
+        kind: .following,
+        service: UserRelationServiceStub(stubs: []),
+        accountAccess: AccountAccess(
+          vault: UserRelationVaultSpy(session: active),
+          service: accountService
+        )
+      )
+
+      viewModel.loadIfNeeded()
+      try await waitForRelations { viewModel.state == .loaded }
+
+      XCTAssertFalse(viewModel.concernMetadataIsComplete)
+      XCTAssertFalse(viewModel.canSelectFollowingFilter)
+      XCTAssertEqual(viewModel.followControlState(for: known), .followed(isEnabled: true))
+      XCTAssertEqual(viewModel.displayableUsers, [known, incomplete])
+      viewModel.selectFollowingFilter(.mutual)
+      XCTAssertEqual(viewModel.followingFilter, .all)
+    }
+  }
+
+  func testEmptyAuthenticatedPageHasCompleteMetadataAndNoRelationsPresentation() async throws {
+    let active = relationSession(userID: 7, revision: relationUUID(1))
+    let accountService = UserRelationAccountServiceSpy(
+      followingPages: [.value(.fixture(users: [], totalCount: 0))]
+    )
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: UserRelationServiceStub(stubs: []),
+      accountAccess: AccountAccess(
+        vault: UserRelationVaultSpy(session: active),
+        service: accountService
+      )
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitForRelations { viewModel.state == .loaded }
+
+    XCTAssertTrue(viewModel.concernMetadataIsComplete)
+    XCTAssertTrue(viewModel.canSelectFollowingFilter)
+    XCTAssertEqual(viewModel.emptyPresentation, .noRelations)
+  }
+
+  func testCompleteRefreshRestoresFilterAvailabilityAfterIncompleteSnapshot() async throws {
+    let active = relationSession(userID: 7, revision: relationUUID(1))
+    let mutual = BrowseRelatedUser.fixture(id: 113, concernState: .mutual)
+    let missing = BrowseRelatedUser.fixture(id: 114)
+    let complete = BrowseRelatedUser.fixture(id: 114, concernState: .following)
+    let accountService = UserRelationAccountServiceSpy(
+      followingPages: [
+        .value(.fixture(users: [mutual, missing], totalCount: 2)),
+        .value(.fixture(users: [mutual, complete], totalCount: 2)),
+      ]
+    )
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: UserRelationServiceStub(stubs: []),
+      accountAccess: AccountAccess(
+        vault: UserRelationVaultSpy(session: active),
+        service: accountService
+      )
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitForRelations { viewModel.state == .loaded }
+    XCTAssertFalse(viewModel.canSelectFollowingFilter)
+
+    await viewModel.refresh()
+
+    XCTAssertTrue(viewModel.concernMetadataIsComplete)
+    XCTAssertTrue(viewModel.canSelectFollowingFilter)
+    XCTAssertEqual(viewModel.followingFilter, .all)
+  }
+
+  func testCompletePageWithoutMutualShowsAuthoritativeNoMutualState() async throws {
+    let active = relationSession(userID: 7, revision: relationUUID(1))
+    let oneWay = BrowseRelatedUser.fixture(id: 115, concernState: .following)
+    let accountService = UserRelationAccountServiceSpy(
+      followingPages: [.value(.fixture(users: [oneWay], totalCount: 1))]
+    )
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: UserRelationServiceStub(stubs: []),
+      accountAccess: AccountAccess(
+        vault: UserRelationVaultSpy(session: active),
+        service: accountService
+      )
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitForRelations { viewModel.state == .loaded }
+    viewModel.selectFollowingFilter(.mutual)
+
+    XCTAssertEqual(viewModel.followingFilter, .mutual)
+    XCTAssertEqual(viewModel.emptyPresentation, .noMutual)
+    XCTAssertTrue(viewModel.displayableUsers.isEmpty)
+  }
+
+  func testMutualFilterScansFiveRawPagesThenRequiresExplicitContinuation() async throws {
+    let active = relationSession(userID: 7, revision: relationUUID(1))
+    let initial = BrowseRelatedUser.fixture(id: 120, concernState: .following)
+    let skipped = (121...125).map {
+      BrowseRelatedUser.fixture(id: Int64($0), concernState: .notFollowing)
+    }
+    let mutual = BrowseRelatedUser.fixture(id: 126, concernState: .mutual)
+    var pages = [
+      UserRelationStub.value(
+        .fixture(users: [initial], currentPage: 1, totalCount: 99, hasMore: true)
+      )
+    ]
+    pages += skipped.enumerated().map { offset, user in
+      .value(
+        .fixture(
+          users: [user],
+          currentPage: offset + 2,
+          totalCount: 99,
+          hasMore: true
+        )
+      )
+    }
+    pages.append(
+      .value(.fixture(users: [mutual], currentPage: 7, totalCount: 99, hasMore: false))
+    )
+    let accountService = UserRelationAccountServiceSpy(followingPages: pages)
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: UserRelationServiceStub(stubs: []),
+      accountAccess: AccountAccess(
+        vault: UserRelationVaultSpy(session: active),
+        service: accountService
+      )
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitForRelations { viewModel.state == .loaded }
+    viewModel.selectFollowingFilter(.mutual)
+    try await waitForRelations { viewModel.mutualScanIsPaused && !viewModel.isLoadingMore }
+
+    XCTAssertEqual(viewModel.followingFilter, .mutual)
+    XCTAssertTrue(viewModel.displayableUsers.isEmpty)
+    XCTAssertEqual(viewModel.emptyPresentation, .mutualScanPaused)
+    XCTAssertEqual(viewModel.totalCount, 99)
+    var requests = await accountService.followingRequestsSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2, 3, 4, 5, 6])
+
+    let pausedRawTail = try XCTUnwrap(viewModel.users.last)
+    viewModel.loadMoreIfNeeded(current: pausedRawTail)
+    await Task.yield()
+    requests = await accountService.followingRequestsSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2, 3, 4, 5, 6])
+
+    viewModel.continueMutualScan()
+    try await waitForRelations { viewModel.displayableUsers == [mutual] }
+
+    XCTAssertFalse(viewModel.mutualScanIsPaused)
+    XCTAssertEqual(viewModel.users, [initial] + skipped + [mutual])
+    XCTAssertEqual(viewModel.emptyPresentation, .none)
+    requests = await accountService.followingRequestsSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2, 3, 4, 5, 6, 7])
+  }
+
+  func testExistingMutualStillPausesAfterFiveRawPagesWithoutNewVisibleMutual() async throws {
+    let active = relationSession(userID: 7, revision: relationUUID(1))
+    let initialMutual = BrowseRelatedUser.fixture(id: 170, concernState: .mutual)
+    let skipped = (171...175).map {
+      BrowseRelatedUser.fixture(id: Int64($0), concernState: .following)
+    }
+    let nextMutual = BrowseRelatedUser.fixture(id: 176, concernState: .mutual)
+    var pages = [
+      UserRelationStub.value(
+        .fixture(users: [initialMutual], currentPage: 1, totalCount: 99, hasMore: true)
+      )
+    ]
+    pages += skipped.enumerated().map { offset, user in
+      .value(
+        .fixture(
+          users: [user],
+          currentPage: offset + 2,
+          totalCount: 99,
+          hasMore: true
+        )
+      )
+    }
+    pages.append(
+      .value(.fixture(users: [nextMutual], currentPage: 7, totalCount: 99, hasMore: false))
+    )
+    let accountService = UserRelationAccountServiceSpy(followingPages: pages)
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: UserRelationServiceStub(stubs: []),
+      accountAccess: AccountAccess(
+        vault: UserRelationVaultSpy(session: active),
+        service: accountService
+      )
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitForRelations { viewModel.state == .loaded }
+    viewModel.selectFollowingFilter(.mutual)
+    viewModel.loadMoreIfNeeded(current: initialMutual)
+    try await waitForRelations { viewModel.mutualScanIsPaused && !viewModel.isLoadingMore }
+
+    XCTAssertEqual(viewModel.displayableUsers, [initialMutual])
+    XCTAssertEqual(viewModel.emptyPresentation, .none)
+    var requests = await accountService.followingRequestsSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2, 3, 4, 5, 6])
+
+    let pausedRawTail = try XCTUnwrap(viewModel.users.last)
+    viewModel.loadMoreIfNeeded(current: pausedRawTail)
+    await Task.yield()
+    requests = await accountService.followingRequestsSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2, 3, 4, 5, 6])
+
+    viewModel.continueMutualScan()
+    try await waitForRelations { viewModel.displayableUsers == [initialMutual, nextMutual] }
+    requests = await accountService.followingRequestsSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2, 3, 4, 5, 6, 7])
+    XCTAssertFalse(viewModel.mutualScanIsPaused)
+  }
+
+  func testMutualScanFailureDoesNotPresentAFalseSearchingState() async throws {
+    let active = relationSession(userID: 7, revision: relationUUID(1))
+    let oneWay = BrowseRelatedUser.fixture(id: 180, concernState: .following)
+    let accountService = UserRelationAccountServiceSpy(
+      followingPages: [
+        .value(.fixture(users: [oneWay], totalCount: 2, hasMore: true)),
+        .failure,
+      ]
+    )
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: UserRelationServiceStub(stubs: []),
+      accountAccess: AccountAccess(
+        vault: UserRelationVaultSpy(session: active),
+        service: accountService
+      )
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitForRelations { viewModel.state == .loaded }
+    viewModel.selectFollowingFilter(.mutual)
+    try await waitForRelations { viewModel.loadMoreError != nil && !viewModel.isLoadingMore }
+
+    XCTAssertTrue(viewModel.displayableUsers.isEmpty)
+    XCTAssertEqual(viewModel.emptyPresentation, .none)
+    let requests = await accountService.followingRequestsSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2])
+  }
+
+  func testFollowingFilterCannotChangeDuringAnInFlightContinuation() async throws {
+    let active = relationSession(userID: 7, revision: relationUUID(1))
+    let first = BrowseRelatedUser.fixture(id: 185, concernState: .following)
+    let second = BrowseRelatedUser.fixture(id: 186, concernState: .following)
+    let accountService = UserRelationAccountServiceSpy(
+      followingPages: [
+        .value(.fixture(users: [first], totalCount: 2, hasMore: true)),
+        .suspended(803),
+      ]
+    )
+    addTeardownBlock { await accountService.releaseAll() }
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: UserRelationServiceStub(stubs: []),
+      accountAccess: AccountAccess(
+        vault: UserRelationVaultSpy(session: active),
+        service: accountService
+      )
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitForRelations { viewModel.state == .loaded }
+    viewModel.loadMoreIfNeeded(current: first)
+    try await waitForRelations { await accountService.hasSuspendedFollowing(id: 803) }
+
+    viewModel.selectFollowingFilter(.mutual)
+    XCTAssertEqual(viewModel.followingFilter, .all)
+
+    let resumed = await accountService.resumeSuspendedFollowing(
+      id: 803,
+      returning: .fixture(users: [second], currentPage: 2, totalCount: 2, hasMore: false)
+    )
+    XCTAssertTrue(resumed)
+    try await waitForRelations { viewModel.users == [first, second] }
+
+    viewModel.selectFollowingFilter(.mutual)
+    XCTAssertEqual(viewModel.followingFilter, .mutual)
+  }
+
+  func testIncompleteMetadataOnLaterPageStopsScanAndFallsBackToAll() async throws {
+    let active = relationSession(userID: 7, revision: relationUUID(1))
+    let initial = BrowseRelatedUser.fixture(id: 130, concernState: .following)
+    let unknown = BrowseRelatedUser.fixture(id: 131, concernState: .unknown(3))
+    let accountService = UserRelationAccountServiceSpy(
+      followingPages: [
+        .value(.fixture(users: [initial], totalCount: 20, hasMore: true)),
+        .value(.fixture(users: [unknown], currentPage: 2, totalCount: 20, hasMore: true)),
+      ]
+    )
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: UserRelationServiceStub(stubs: []),
+      accountAccess: AccountAccess(
+        vault: UserRelationVaultSpy(session: active),
+        service: accountService
+      )
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitForRelations { viewModel.state == .loaded }
+    XCTAssertTrue(viewModel.canSelectFollowingFilter)
+    viewModel.selectFollowingFilter(.mutual)
+    try await waitForRelations { !viewModel.isLoadingMore }
+
+    XCTAssertFalse(viewModel.concernMetadataIsComplete)
+    XCTAssertFalse(viewModel.canSelectFollowingFilter)
+    XCTAssertEqual(viewModel.followingFilter, .all)
+    XCTAssertFalse(viewModel.mutualScanIsPaused)
+    XCTAssertEqual(viewModel.displayableUsers, [initial, unknown])
+    XCTAssertEqual(viewModel.followControlState(for: initial), .followed(isEnabled: true))
+    let requests = await accountService.followingRequestsSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2])
+  }
+
+  func testHiddenLoadedMutualUsesLocalFilterEmptyStateWithoutAutomaticScan() async throws {
+    let active = relationSession(userID: 7, revision: relationUUID(1))
+    let hiddenMutual = BrowseRelatedUser.fixture(
+      id: 135,
+      concernState: .mutual,
+      localVisibility: .hidden
+    )
+    let rawTail = BrowseRelatedUser.fixture(id: 136, concernState: .following)
+    let accountService = UserRelationAccountServiceSpy(
+      followingPages: [
+        .value(.fixture(users: [hiddenMutual, rawTail], totalCount: 3, hasMore: true)),
+        .value(
+          .fixture(
+            users: [.fixture(id: 137, concernState: .mutual)],
+            currentPage: 2,
+            totalCount: 3,
+            hasMore: false
+          )
+        ),
+      ]
+    )
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: UserRelationServiceStub(stubs: []),
+      accountAccess: AccountAccess(
+        vault: UserRelationVaultSpy(session: active),
+        service: accountService
+      )
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitForRelations { viewModel.state == .loaded }
+    viewModel.selectFollowingFilter(.mutual)
+
+    XCTAssertTrue(viewModel.hasLoadedMutual)
+    XCTAssertTrue(viewModel.displayableUsers.isEmpty)
+    XCTAssertEqual(viewModel.emptyPresentation, .locallyFiltered)
+    XCTAssertFalse(viewModel.mutualScanIsPaused)
+    viewModel.loadMoreIfNeeded(current: rawTail)
+    await Task.yield()
+    let requests = await accountService.followingRequestsSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1])
+  }
+
+  func testMutualScanStopsWhenItFirstFindsOnlyALocallyHiddenMutual() async throws {
+    let active = relationSession(userID: 7, revision: relationUUID(1))
+    let oneWay = BrowseRelatedUser.fixture(id: 138, concernState: .following)
+    let hiddenMutual = BrowseRelatedUser.fixture(
+      id: 139,
+      concernState: .mutual,
+      localVisibility: .hidden
+    )
+    let laterVisibleMutual = BrowseRelatedUser.fixture(id: 140, concernState: .mutual)
+    let accountService = UserRelationAccountServiceSpy(
+      followingPages: [
+        .value(.fixture(users: [oneWay], totalCount: 3, hasMore: true)),
+        .value(
+          .fixture(
+            users: [hiddenMutual],
+            currentPage: 2,
+            totalCount: 3,
+            hasMore: true
+          )
+        ),
+        .value(
+          .fixture(
+            users: [laterVisibleMutual],
+            currentPage: 3,
+            totalCount: 3,
+            hasMore: false
+          )
+        ),
+      ]
+    )
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: UserRelationServiceStub(stubs: []),
+      accountAccess: AccountAccess(
+        vault: UserRelationVaultSpy(session: active),
+        service: accountService
+      )
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitForRelations { viewModel.state == .loaded }
+    viewModel.selectFollowingFilter(.mutual)
+    try await waitForRelations { !viewModel.isLoadingMore && viewModel.hasLoadedMutual }
+
+    XCTAssertTrue(viewModel.displayableUsers.isEmpty)
+    XCTAssertEqual(viewModel.emptyPresentation, .locallyFiltered)
+    XCTAssertFalse(viewModel.mutualScanIsPaused)
+    var requests = await accountService.followingRequestsSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2])
+
+    let hiddenRawTail = try XCTUnwrap(viewModel.users.last)
+    viewModel.loadMoreIfNeeded(current: hiddenRawTail)
+    await Task.yield()
+    requests = await accountService.followingRequestsSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2])
+  }
+
+  func testMutualFilterUsesRawTailForPagination() async throws {
+    let active = relationSession(userID: 7, revision: relationUUID(1))
+    let mutual = BrowseRelatedUser.fixture(id: 140, concernState: .mutual)
+    let rawTail = BrowseRelatedUser.fixture(id: 141, concernState: .following)
+    let next = BrowseRelatedUser.fixture(id: 142, concernState: .mutual)
+    let accountService = UserRelationAccountServiceSpy(
+      followingPages: [
+        .value(.fixture(users: [mutual, rawTail], totalCount: 3, hasMore: true)),
+        .value(.fixture(users: [next], currentPage: 2, totalCount: 3, hasMore: false)),
+      ]
+    )
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: UserRelationServiceStub(stubs: []),
+      accountAccess: AccountAccess(
+        vault: UserRelationVaultSpy(session: active),
+        service: accountService
+      )
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitForRelations { viewModel.state == .loaded }
+    viewModel.selectFollowingFilter(.mutual)
+    XCTAssertEqual(viewModel.displayableUsers, [mutual])
+
+    viewModel.loadMoreIfNeeded(current: mutual)
+    await Task.yield()
+    var requests = await accountService.followingRequestsSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1])
+
+    viewModel.loadMoreIfNeeded(current: rawTail)
+    try await waitForRelations { viewModel.displayableUsers == [mutual, next] }
+    requests = await accountService.followingRequestsSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2])
+  }
+
+  func testLateAuthenticatedFirstPageCannotCrossSessionRevision() async throws {
+    let oldSession = relationSession(userID: 7, revision: relationUUID(1), credential: "a")
+    let newSession = relationSession(userID: 7, revision: relationUUID(2), credential: "b")
+    let stale = BrowseRelatedUser.fixture(id: 150, concernState: .mutual)
+    let replacement = BrowseRelatedUser.fixture(id: 151, concernState: .mutual)
+    let accountService = UserRelationAccountServiceSpy(
+      followingPages: [
+        .suspended(801),
+        .value(.fixture(users: [replacement], totalCount: 1)),
+      ]
+    )
+    addTeardownBlock { await accountService.releaseAll() }
+    let vault = UserRelationVaultSpy(session: oldSession)
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: UserRelationServiceStub(stubs: []),
+      accountAccess: AccountAccess(vault: vault, service: accountService)
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitForRelations { await accountService.hasSuspendedFollowing(id: 801) }
+    await vault.replaceActive(with: newSession)
+    viewModel.accountSessionDidChange(reloadIfActive: true)
+    try await waitForRelations { viewModel.users == [replacement] }
+
+    let resumed = await accountService.resumeSuspendedFollowing(
+      id: 801,
+      returning: .fixture(users: [stale], totalCount: 1)
+    )
+    XCTAssertTrue(resumed)
+    await Task.yield()
+
+    XCTAssertEqual(viewModel.users, [replacement])
+    XCTAssertEqual(viewModel.managementLease, AccountSessionLease(newSession))
+    XCTAssertEqual(viewModel.followingFilter, .all)
+    let requests = await accountService.followingRequestsSnapshot()
+    XCTAssertEqual(requests.map(\.sessionRevision), [oldSession.sessionRevision, newSession.sessionRevision])
+  }
+
+  func testPostRequestLeaseValidationRejectsRevisionChangeWithoutNotification() async throws {
+    let oldSession = relationSession(userID: 7, revision: relationUUID(1), credential: "a")
+    let newSession = relationSession(userID: 7, revision: relationUUID(2), credential: "b")
+    let stale = BrowseRelatedUser.fixture(id: 155, concernState: .mutual)
+    let accountService = UserRelationAccountServiceSpy(followingPages: [.suspended(802)])
+    addTeardownBlock { await accountService.releaseAll() }
+    let vault = UserRelationVaultSpy(session: oldSession)
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: UserRelationServiceStub(stubs: []),
+      accountAccess: AccountAccess(vault: vault, service: accountService)
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitForRelations { await accountService.hasSuspendedFollowing(id: 802) }
+    await vault.replaceActive(with: newSession)
+    let resumed = await accountService.resumeSuspendedFollowing(
+      id: 802,
+      returning: .fixture(users: [stale], totalCount: 1)
+    )
+    XCTAssertTrue(resumed)
+    try await waitForRelations {
+      if case .failed = viewModel.state { return true }
+      return false
+    }
+
+    XCTAssertTrue(viewModel.users.isEmpty)
+    XCTAssertNil(viewModel.managementLease)
+    XCTAssertEqual(viewModel.followingFilter, .all)
+    XCTAssertFalse(viewModel.canSelectFollowingFilter)
+  }
+
+  func testSuccessfulRefreshPreservesMutualFilterForSameLease() async throws {
+    let active = relationSession(userID: 7, revision: relationUUID(1))
+    let revised = relationSession(userID: 7, revision: relationUUID(2), credential: "r")
+    let first = BrowseRelatedUser.fixture(id: 160, concernState: .mutual)
+    let refreshed = BrowseRelatedUser.fixture(id: 161, concernState: .mutual)
+    let accountService = UserRelationAccountServiceSpy(
+      followingPages: [
+        .value(.fixture(users: [first], totalCount: 2)),
+        .value(.fixture(users: [refreshed], totalCount: 2)),
+      ]
+    )
+    let vault = UserRelationVaultSpy(session: active)
+    let viewModel = UserRelationsViewModel(
+      userID: 7,
+      kind: .following,
+      service: UserRelationServiceStub(stubs: []),
+      accountAccess: AccountAccess(
+        vault: vault,
+        service: accountService
+      )
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitForRelations { viewModel.state == .loaded }
+    viewModel.selectFollowingFilter(.mutual)
+    await viewModel.refresh()
+
+    XCTAssertEqual(viewModel.followingFilter, .mutual)
+    XCTAssertEqual(viewModel.displayableUsers, [refreshed])
+    XCTAssertEqual(viewModel.totalCount, 2)
+
+    await vault.replaceActive(with: revised)
+    viewModel.accountSessionDidChange(reloadIfActive: false)
+    XCTAssertEqual(viewModel.followingFilter, .all)
+    XCTAssertTrue(viewModel.users.isEmpty)
+    XCTAssertEqual(viewModel.state, .idle)
+    XCTAssertNil(viewModel.managementLease)
+  }
+
   func testRelatedUserFilteringCoversIdentityNamesAndIntroductionWithoutDroppingRows() {
     let cases: [(ContentFilterRule, BrowseRelatedUser)] = [
-      (.user(id: 70, name: "", list: .block), .fixture(id: 70)),
+      (
+        .user(id: 70, name: "", list: .block),
+        .fixture(id: 70, concernState: .mutual)
+      ),
       (.user(id: nil, name: "显示昵称", list: .block), .fixture(id: 71)),
       (.user(id: nil, name: "account-72", list: .block), .fixture(id: 72)),
       (.keyword("个人简介", list: .block), .fixture(id: 73)),
@@ -782,14 +1426,16 @@ final class UserRelationsViewModelTests: XCTestCase {
           username: "account-80",
           displayName: "被过滤昵称",
           portrait: "portrait-token",
-          introduction: "公开简介"
+          introduction: "公开简介",
+          concernState: .mutual
         ),
         TiebaRelatedUser(
           id: 81,
           username: "account-81",
           displayName: "普通昵称",
           portrait: "file:///private/avatar.png",
-          introduction: "普通简介"
+          introduction: "普通简介",
+          concernState: .unknown(Int64.max)
         )
       ],
       pagination: TiebaPagination(
@@ -826,13 +1472,23 @@ final class UserRelationsViewModelTests: XCTestCase {
     XCTAssertEqual(mapped.users.first?.username, "account-80")
     XCTAssertEqual(mapped.users.first?.displayName, "被过滤昵称")
     XCTAssertEqual(mapped.users.first?.introduction, "公开简介")
+    XCTAssertEqual(mapped.users.first?.concernState, .mutual)
     XCTAssertEqual(mapped.users.first?.localVisibility, .placeholder)
     XCTAssertEqual(mapped.users.first?.portraitURL?.scheme, "https")
     XCTAssertEqual(mapped.users.first?.portraitURL?.host, "himg.bdimg.com")
     XCTAssertEqual(mapped.users.first?.portraitURL?.path, "/sys/portraitn/item/portrait-token")
     XCTAssertNil(mapped.users.first?.portraitURL?.query)
     XCTAssertEqual(mapped.users.last?.localVisibility, .visible)
+    XCTAssertEqual(mapped.users.last?.concernState, .unknown(Int64.max))
     XCTAssertNil(mapped.users.last?.portraitURL)
+
+    for rawValue in [Int64.min, -1, 3, Int64.max] {
+      let state = BrowseRelatedUserConcernState(rawValue: rawValue)
+      XCTAssertEqual(state, .unknown(rawValue))
+      XCTAssertEqual(state.rawValue, rawValue)
+    }
+    XCTAssertEqual(BrowseRelatedUserConcernState(rawValue: 2), .mutual)
+    XCTAssertNotEqual(BrowseRelatedUserConcernState(rawValue: 1), .mutual)
   }
 
   func testCoreMappingRejectsMismatchedUserAndKindContext() {
@@ -920,6 +1576,12 @@ private struct UserRelationRequest: Equatable, Sendable {
   let page: Int
 }
 
+private struct AuthenticatedUserRelationRequest: Equatable, Sendable {
+  let userID: Int64
+  let sessionRevision: UUID
+  let page: Int
+}
+
 private enum UserRelationStubError: Error {
   case failure
   case unexpectedRequest
@@ -980,14 +1642,46 @@ private actor UserRelationAsyncCompletionProbe {
 }
 
 private actor UserRelationAccountServiceSpy: AccountService {
+  private var followingPages: [UserRelationStub]
   private var writes: [UserRelationWriteScript]
+  private var followingRequests: [AuthenticatedUserRelationRequest] = []
   private var readRequests: [UserRelationWriteRequest] = []
   private var writeRequests: [UserRelationWriteRequest] = []
+  private var suspendedFollowing:
+    [Int: CheckedContinuation<UserRelationPageData, any Error>] = [:]
   private var suspendedWrites:
     [Int: (CheckedContinuation<UserRelationshipData, Never>, UserRelationshipData)] = [:]
 
-  init(writes: [UserRelationWriteScript] = []) {
+  init(
+    followingPages: [UserRelationStub] = [],
+    writes: [UserRelationWriteScript] = []
+  ) {
+    self.followingPages = followingPages
     self.writes = writes
+  }
+
+  func ownFollowing(
+    session: StoredAccountSession,
+    page: Int
+  ) async throws -> UserRelationPageData {
+    followingRequests.append(
+      AuthenticatedUserRelationRequest(
+        userID: session.id,
+        sessionRevision: session.sessionRevision,
+        page: page
+      )
+    )
+    guard !followingPages.isEmpty else {
+      throw UserRelationAccountFailure(message: "Unexpected own-following request")
+    }
+    switch followingPages.removeFirst() {
+    case .value(let page):
+      return page
+    case .failure:
+      throw UserRelationAccountFailure(message: "Own-following request failed")
+    case .suspended(let id):
+      return try await withCheckedThrowingContinuation { suspendedFollowing[id] = $0 }
+    }
   }
 
   func userRelationship(
@@ -1032,9 +1726,17 @@ private actor UserRelationAccountServiceSpy: AccountService {
   }
 
   func readRequestCount() -> Int { readRequests.count }
+  func followingRequestsSnapshot() -> [AuthenticatedUserRelationRequest] { followingRequests }
   func writeRequestCount() -> Int { writeRequests.count }
   func writeRequestsSnapshot() -> [UserRelationWriteRequest] { writeRequests }
   func hasSuspendedWrite(id: Int) -> Bool { suspendedWrites[id] != nil }
+  func hasSuspendedFollowing(id: Int) -> Bool { suspendedFollowing[id] != nil }
+
+  func resumeSuspendedFollowing(id: Int, returning page: UserRelationPageData) -> Bool {
+    guard let continuation = suspendedFollowing.removeValue(forKey: id) else { return false }
+    continuation.resume(returning: page)
+    return true
+  }
 
   func resumeSuspendedWrite(id: Int) -> Bool {
     guard let (continuation, value) = suspendedWrites.removeValue(forKey: id) else {
@@ -1045,7 +1747,12 @@ private actor UserRelationAccountServiceSpy: AccountService {
   }
 
   func releaseAll() {
-    let pending = suspendedWrites.values
+    let pendingFollowing = Array(suspendedFollowing.values)
+    suspendedFollowing.removeAll()
+    pendingFollowing.forEach {
+      $0.resume(throwing: UserRelationAccountFailure(message: "Released suspended following"))
+    }
+    let pending = Array(suspendedWrites.values)
     suspendedWrites.removeAll()
     pending.forEach { continuation, value in continuation.resume(returning: value) }
   }
@@ -1214,6 +1921,7 @@ private actor UserRelationServiceStub: UserProfileService {
 extension BrowseRelatedUser {
   fileprivate static func fixture(
     id: Int64,
+    concernState: BrowseRelatedUserConcernState? = nil,
     localVisibility: LocalContentVisibility = .visible
   ) -> BrowseRelatedUser {
     BrowseRelatedUser(
@@ -1222,6 +1930,7 @@ extension BrowseRelatedUser {
       displayName: "显示昵称",
       portraitURL: nil,
       introduction: "个人简介",
+      concernState: concernState,
       localVisibility: localVisibility
     )
   }

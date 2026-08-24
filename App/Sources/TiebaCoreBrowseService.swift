@@ -748,7 +748,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
             username: user.username,
             displayName: user.displayName,
             portraitURL: SecureTiebaURL.portrait(user.portrait),
-            introduction: user.introduction
+            introduction: user.introduction,
+            concernState: mapRelatedUserConcernState(user.concernState)
           )
         )
       },
@@ -770,7 +771,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       response.requestedUserID == expectedUserID,
       response.kind == mapUserRelationKind(expectedKind)
     else {
-      throw BrowseError.unavailable("公开用户关系列表响应与请求不匹配。")
+      throw BrowseError.unavailable("用户关系列表响应与请求不匹配。")
     }
   }
 
@@ -782,6 +783,22 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       .following
     case .followers:
       .followers
+    }
+  }
+
+  private static func mapRelatedUserConcernState(
+    _ state: TiebaRelatedUserConcernState?
+  ) -> BrowseRelatedUserConcernState? {
+    guard let state else { return nil }
+    switch state {
+    case .notFollowing:
+      return .notFollowing
+    case .following:
+      return .following
+    case .mutual:
+      return .mutual
+    case .unknown(let rawValue):
+      return .unknown(rawValue)
     }
   }
 

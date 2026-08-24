@@ -763,6 +763,89 @@ final class TiebaAuthenticatedClientTests: XCTestCase {
     XCTAssertTrue(page.pagination.hasPrevious)
   }
 
+  func testMapsAuthenticatedOwnFollowingAndCarriesExpectedAccountContext() async throws {
+    let body = Data(
+      """
+      {
+        "error_code": 0,
+        "pn": 2,
+        "has_more": 0,
+        "total_follow_num": 1,
+        "follow_list": [
+          {
+            "id": 42,
+            "name": "mutual-user",
+            "name_show": "Mutual User",
+            "has_concerned": 2
+          }
+        ]
+      }
+      """.utf8
+    )
+    let client = TiebaAuthenticatedClient(transport: AuthStubTransport(body: body))
+
+    let page = try await client.getOwnFollowing(
+      credential: sessionCredential(),
+      expectedUserID: 957_339_815,
+      page: 2
+    )
+
+    XCTAssertEqual(page.requestedUserID, 957_339_815)
+    XCTAssertEqual(page.kind, .following)
+    XCTAssertEqual(page.pagination.currentPage, 2)
+    XCTAssertEqual(page.pagination.totalCount, 1)
+    XCTAssertFalse(page.pagination.hasMore)
+    XCTAssertEqual(page.users.map(\.id), [42])
+    XCTAssertEqual(page.users.first?.concernState, .mutual)
+  }
+
+  func testAuthenticatedOwnFollowingRejectsMismatchedPageContext() async {
+    let body = Data(
+      """
+      {
+        "error_code": 0,
+        "pn": 1,
+        "has_more": 0,
+        "total_follow_num": 0,
+        "follow_list": []
+      }
+      """.utf8
+    )
+    let client = TiebaAuthenticatedClient(transport: AuthStubTransport(body: body))
+
+    await assertError(.invalidJSON) {
+      _ = try await client.getOwnFollowing(
+        credential: sessionCredential(),
+        expectedUserID: 957_339_815,
+        page: 2
+      )
+    }
+  }
+
+  func testAuthenticatedOwnFollowingPreservesServerAndMalformedResponseErrors() async {
+    let serverClient = TiebaAuthenticatedClient(
+      transport: AuthStubTransport(
+        body: Data("{\"error_code\":4,\"error_msg\":\"login required\"}".utf8)
+      )
+    )
+    await assertError(.server(code: 4, message: "login required")) {
+      _ = try await serverClient.getOwnFollowing(
+        credential: sessionCredential(),
+        expectedUserID: 957_339_815
+      )
+    }
+
+    let malformedClient = TiebaAuthenticatedClient(
+      transport: AuthStubTransport(body: Data("not-json".utf8))
+    )
+    await assertError(.invalidJSON) {
+      _ = try await malformedClient.getOwnFollowing(
+        credential: sessionCredential(),
+        expectedUserID: 957_339_815
+      )
+    }
+  }
+
   func testDoesNotMixFrequentlyVisitedForumsIntoFollowedForums() async throws {
     let body = Data(
       """
@@ -1042,6 +1125,23 @@ final class TiebaAuthenticatedClientTests: XCTestCase {
       .responseTooLarge(maximumBytes: TiebaAuthenticatedClient.selfProfileResponseMaximumBytes)
     ) {
       _ = try await oversizedProfile.getSelfProfile(
+        credential: sessionCredential(),
+        expectedUserID: 957_339_815
+      )
+    }
+
+    let oversizedFollowing = TiebaAuthenticatedClient(
+      transport: AuthStubTransport(
+        body: Data(
+          repeating: 0,
+          count: TiebaAuthenticatedClient.ownFollowingResponseMaximumBytes + 1
+        )
+      )
+    )
+    await assertError(
+      .responseTooLarge(maximumBytes: TiebaAuthenticatedClient.ownFollowingResponseMaximumBytes)
+    ) {
+      _ = try await oversizedFollowing.getOwnFollowing(
         credential: sessionCredential(),
         expectedUserID: 957_339_815
       )

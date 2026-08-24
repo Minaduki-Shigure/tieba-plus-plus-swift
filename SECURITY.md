@@ -632,6 +632,36 @@ no request. Physical-device validation must cover self and other-user pages,
 pagination termination, empty/privacy responses, expired credentials, account
 switching, and absence of follow, check-in, or other side effects.
 
+The active account's complete following list is a separate authenticated,
+read-only request to `POST https://tiebac.baidu.com/c/u/follow/followList`. The
+App requires a full BDUSS + STOKEN session before authorizing this read, while
+the signed wire form deliberately sends only BDUSS, `_client_type=2`, fixed
+`_client_version=12.41.7.1`, and one-based `pn`; the final form adds only
+`sign`. It must omit `uid` so the server selects the credential owner, and it
+must not send STOKEN, Cookie, Authorization, `client_user_token`, CUID, IMEI,
+Android ID, model, network, timestamp, or other device telemetry. The response
+is limited to 1 MiB before decoding.
+
+That JSON response does not echo the account UID. Core's `requestedUserID` is
+caller-supplied context, not proof that the server associated BDUSS with that
+UID. The App must pair one `StoredAccountSession`'s ID and credentials, verify
+the same UID + `sessionRevision` lease before and after every page, and never
+append a public page to an authenticated snapshot or vice versa. Logout,
+account switching, or same-UID credential rotation invalidates the complete
+snapshot and resets account-specific filtering before another page can publish.
+
+`has_concerned` is untrusted optional display metadata. Decimal integers 0, 1,
+and 2 are preserved as distinct states, exact value 2 alone means mutual
+following, and unknown values remain unknown. A missing, null, or malformed
+field must not fail an otherwise valid row, but it also must never be inferred
+as non-mutual. The mutual filter is available only for an authenticated owner
+snapshot whose retained rows all carry known values on every accumulated page.
+If that compatibility check fails, the App keeps the ordinary list and account
+controls but hides the mutual filter. Local unfollow/refollow state changes only
+the row's action state; it does not rewrite the server snapshot's mutual
+classification. Physical-device validation must still confirm that the minimal
+authenticated form returns complete `has_concerned` metadata.
+
 Public following and follower lists are independent credential-free form reads.
 Following must use `POST https://tiebac.baidu.com/c/u/follow/followList`, and
 followers must use `POST https://tiebac.baidu.com/c/u/fans/page`. Before signing,

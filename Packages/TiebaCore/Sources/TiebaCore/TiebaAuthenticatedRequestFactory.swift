@@ -24,6 +24,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let staticImageUploadClientVersion = "12.41.7.1"
   static let concernClientVersion = "11.10.8.6"
   static let selfProfileClientVersion = "12.52.1.0"
+  static let ownFollowingClientVersion = "12.41.7.1"
   static let userFollowClientVersion = "11.10.8.6"
   static let userInteractionPermissionsClientVersion = "12.41.7.1"
   static let personalizedFeedbackClientVersion = "12.41.7.1"
@@ -254,6 +255,28 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       userAgent: Self.selfProfileUserAgent,
       clientUserToken: String(expectedUserID),
       cookie: "ka=open"
+    )
+  }
+
+  func ownFollowing(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    page: Int
+  ) throws -> URLRequest {
+    try validate(credential)
+    guard expectedUserID > 0 else {
+      throw TiebaClientError.invalidArgument("Expected user ID must be positive.")
+    }
+    try validatePage(page, name: "Page")
+    return try signedFormRequest(
+      path: "/c/u/follow/followList",
+      fields: [
+        ("BDUSS", credential.bduss),
+        ("_client_type", "2"),
+        ("_client_version", Self.ownFollowingClientVersion),
+        ("pn", String(page)),
+      ],
+      userAgent: "bdtb for Android \(Self.ownFollowingClientVersion)"
     )
   }
 

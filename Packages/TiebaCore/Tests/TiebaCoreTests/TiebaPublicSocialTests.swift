@@ -173,9 +173,11 @@ final class TiebaPublicSocialDecoderTests: XCTestCase {
     XCTAssertEqual(result.users.first?.displayName, "First User")
     XCTAssertEqual(result.users.first?.portrait, "tb.1.first")
     XCTAssertEqual(result.users.first?.introduction, "First introduction")
+    XCTAssertEqual(result.users.first?.concernState, .following)
     let second = try XCTUnwrap(result.users.first(where: { $0.id == 102 }))
     XCTAssertEqual(second.preferredName, "second-user")
     XCTAssertEqual(second.portrait, "https://example.test/avatar.jpg")
+    XCTAssertNil(second.concernState)
     XCTAssertEqual(result.users.last?.preferredName, "Valid After Empty")
     XCTAssertEqual(result.pagination.pageSize, 20)
     XCTAssertEqual(result.pagination.currentPage, 2)
@@ -185,6 +187,53 @@ final class TiebaPublicSocialDecoderTests: XCTestCase {
     XCTAssertTrue(result.pagination.hasPrevious)
     XCTAssertEqual(result.notice, "Public list")
     XCTAssertEqual(result.visibilitySwitch, 1)
+  }
+
+  func testFollowingLossilyDecodesConcernStateAndPreservesUnknownRawValues() throws {
+    let users: [[String: Any]] = [
+      ["id": 1, "name": "user-1", "has_concerned": 0],
+      ["id": 2, "name": "user-2", "has_concerned": " 1 "],
+      ["id": 3, "name": "user-3", "has_concerned": 2],
+      ["id": 4, "name": "user-4", "has_concerned": "2"],
+      ["id": 5, "name": "user-5", "has_concerned": String(Int64.max)],
+      ["id": 6, "name": "user-6"],
+      ["id": 7, "name": "user-7", "has_concerned": NSNull()],
+      ["id": 8, "name": "user-8", "has_concerned": true],
+      ["id": 9, "name": "user-9", "has_concerned": ["invalid"]],
+      ["id": 10, "name": "user-10", "has_concerned": ["invalid": 2]],
+      ["id": 11, "name": "user-11", "has_concerned": "2.0"],
+    ]
+
+    let result = try decode(
+      followingBody(users: users, totalCount: users.count),
+      kind: .following
+    )
+
+    XCTAssertEqual(result.users.map(\.id), (1...11).map { Int64($0) })
+    XCTAssertEqual(
+      result.users.map(\.concernState),
+      [
+        .notFollowing,
+        .following,
+        .mutual,
+        .mutual,
+        .unknown(Int64.max),
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+        nil,
+      ]
+    )
+
+    for rawValue in [Int64.min, -1, 3, Int64.max] {
+      let state = TiebaRelatedUserConcernState(rawValue: rawValue)
+      XCTAssertEqual(state, .unknown(rawValue))
+      XCTAssertEqual(state.rawValue, rawValue)
+    }
+    XCTAssertEqual(TiebaRelatedUserConcernState(rawValue: 2), .mutual)
+    XCTAssertNotEqual(TiebaRelatedUserConcernState(rawValue: 1), .mutual)
   }
 
   func testFollowingCompensatesForFalseServerFlagOnFullPage() throws {

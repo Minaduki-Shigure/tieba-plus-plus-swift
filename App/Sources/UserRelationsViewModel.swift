@@ -15,8 +15,35 @@ struct UserRelationFollowPrompt: Equatable, Sendable {
   let targetFollowed: Bool
 }
 
+enum UserRelationFollowingFilter: String, CaseIterable, Identifiable, Hashable, Sendable {
+  case all
+  case mutual
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .all:
+      "我的关注"
+    case .mutual:
+      "互相关注"
+    }
+  }
+}
+
+enum UserRelationEmptyPresentation: Equatable, Sendable {
+  case none
+  case noRelations
+  case locallyFiltered
+  case searchingMutual
+  case mutualScanPaused
+  case noMutual
+}
+
 @MainActor
 final class UserRelationsViewModel: ObservableObject {
+  static let maximumAutomaticMutualPages = 5
+
   @Published private(set) var users: [BrowseRelatedUser] = []
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
@@ -29,6 +56,9 @@ final class UserRelationsViewModel: ObservableObject {
   @Published private(set) var mutatingUserID: Int64?
   @Published private(set) var relationshipMutationError: String?
   @Published private(set) var lockedRelationshipUserIDs = Set<Int64>()
+  @Published private(set) var followingFilter: UserRelationFollowingFilter = .all
+  @Published private(set) var mutualScanIsPaused = false
+  @Published private(set) var concernMetadataIsComplete = false
 
   let userID: Int64
   let kind: UserRelationKind
@@ -40,8 +70,7 @@ final class UserRelationsViewModel: ObservableObject {
   private var loadTask: Task<Void, Never>?
   private var loadGeneration = 0
   private var managementResolutionGeneration = 0
-  private var managementResolutionInFlight = false
-  private var managementIsResolved = false
+  private var loadedPageBinding: UserRelationPageBinding?
   private var knownLoadedUserIDs = Set<Int64>()
   private var loadedUsersByID: [Int64: BrowseRelatedUser] = [:]
   private var relationshipOverrides: [Int64: Bool] = [:]
@@ -64,11 +93,42 @@ final class UserRelationsViewModel: ObservableObject {
   }
 
   var displayableUsers: [BrowseRelatedUser] {
-    users.filter { $0.localVisibility != .hidden }
+    users.filter { user in
+      user.localVisibility != .hidden
+        && (followingFilter == .all || user.concernState == .mutual)
+    }
   }
 
   var hasDisplayableUsers: Bool {
     !displayableUsers.isEmpty
+  }
+
+  var hasLoadedMutual: Bool {
+    users.contains { $0.concernState == .mutual }
+  }
+
+  var canSelectFollowingFilter: Bool {
+    guard
+      kind == .following,
+      state == .loaded,
+      let managementLease,
+      loadedPageBinding == .authenticatedOwner(managementLease),
+      concernMetadataIsComplete
+    else { return false }
+    return true
+  }
+
+  var emptyPresentation: UserRelationEmptyPresentation {
+    guard !hasDisplayableUsers else { return .none }
+    guard !users.isEmpty else { return .noRelations }
+    guard followingFilter == .mutual else { return .locallyFiltered }
+    if hasLoadedMutual {
+      return .locallyFiltered
+    }
+    if loadMoreError != nil { return .none }
+    if isLoadingMore { return .searchingMutual }
+    if mutualScanIsPaused, hasMore { return .mutualScanPaused }
+    return hasMore ? .searchingMutual : .noMutual
   }
 
   func loadIfNeeded() {
@@ -85,9 +145,6 @@ final class UserRelationsViewModel: ObservableObject {
     let queuedBehindMutation = relationshipMutationTask
     await queuedBehindMutation?.value
     await loadTask?.value
-    if kind == .following {
-      await resolveManagementAccessIfNeeded()
-    }
   }
 
   func reloadAfterContentFilterChange() {
@@ -96,77 +153,60 @@ final class UserRelationsViewModel: ObservableObject {
   }
 
   func resolveManagementAccessIfNeeded() async {
-    guard !managementIsResolved, !managementResolutionInFlight else { return }
-    managementResolutionInFlight = true
-    let generation = managementResolutionGeneration
-    defer {
-      if generation == managementResolutionGeneration {
-        managementResolutionInFlight = false
-      }
-    }
-
-    guard
-      kind == .following,
-      userID > 0,
-      let accountAccess
-    else {
-      guard generation == managementResolutionGeneration else { return }
-      managementIsResolved = true
-      clearRelationshipManagementSnapshot()
-      return
-    }
-
-    do {
-      let session = try await accountAccess.vault.activeSession()
-      try Task.checkCancellation()
-      guard generation == managementResolutionGeneration else { return }
-      managementIsResolved = true
-      guard
-        let session,
-        session.id == userID,
-        session.credentials != nil
-      else {
-        clearRelationshipManagementSnapshot()
-        return
-      }
-
-      let lease = AccountSessionLease(session)
-      if overrideLease != lease {
-        clearRelationshipOverrides()
-        overrideLease = lease
-      }
-      managementLease = lease
-    } catch is CancellationError {
-      guard generation == managementResolutionGeneration else { return }
-      managementIsResolved = false
-    } catch {
-      guard generation == managementResolutionGeneration else { return }
-      managementIsResolved = false
-      clearRelationshipManagementSnapshot()
-    }
+    if state == .idle { loadIfNeeded() }
+    await loadTask?.value
   }
 
   @discardableResult
   func invalidateForAccountSessionChange() -> Int {
     managementResolutionGeneration &+= 1
-    managementResolutionInFlight = false
-    managementIsResolved = false
-    activeRelationshipMutation = nil
-    relationshipMutationTask = nil
-    mutatingUserID = nil
-    relationshipMutationError = nil
-    clearRelationshipManagementSnapshot()
-
-    if let resetsRelationshipState = pendingReloadResetsRelationshipState {
-      pendingReloadResetsRelationshipState = nil
-      beginReload(resetsRelationshipState: resetsRelationshipState)
-    }
+    resetForAccountSessionChange(loadImmediately: false)
     return managementResolutionGeneration
   }
 
   func resolveManagementAccessAfterSessionChange(ifCurrent token: Int) async {
     guard token == managementResolutionGeneration else { return }
-    await resolveManagementAccessIfNeeded()
+    loadIfNeeded()
+    await loadTask?.value
+  }
+
+  func accountSessionDidChange(reloadIfActive: Bool) {
+    managementResolutionGeneration &+= 1
+    resetForAccountSessionChange(loadImmediately: reloadIfActive)
+  }
+
+  func selectFollowingFilter(_ filter: UserRelationFollowingFilter) {
+    guard
+      canSelectFollowingFilter,
+      !isLoadingMore,
+      followingFilter != filter
+    else { return }
+    followingFilter = filter
+    mutualScanIsPaused = false
+    paginationEpoch &+= 1
+    guard
+      filter == .mutual,
+      !hasLoadedMutual,
+      hasMore,
+      !isLoadingMore,
+      loadMoreError == nil,
+      state == .loaded
+    else { return }
+    loadUsers(page: currentPage + 1)
+  }
+
+  func continueMutualScan() {
+    guard
+      canSelectFollowingFilter,
+      followingFilter == .mutual,
+      mutualScanIsPaused,
+      hasMore,
+      !isLoadingMore,
+      loadMoreError == nil,
+      state == .loaded
+    else { return }
+    mutualScanIsPaused = false
+    loadUsers(page: currentPage + 1)
   }
 
   func followControlState(for user: BrowseRelatedUser) -> UserRelationFollowControlState {
@@ -175,6 +215,7 @@ final class UserRelationsViewModel: ObservableObject {
       user.localVisibility == .visible,
       let lease = managementLease,
       lease.userID == userID,
+      loadedPageBinding == .authenticatedOwner(lease),
       overrideLease == lease,
       exactLoadedUser(matching: user) != nil,
       user.id != lease.userID
@@ -280,7 +321,14 @@ final class UserRelationsViewModel: ObservableObject {
       hasMore,
       !isLoadingMore,
       loadMoreError == nil,
-      state == .loaded
+      state == .loaded,
+      !(
+        followingFilter == .mutual
+          && (
+            mutualScanIsPaused
+              || (displayableUsers.isEmpty && hasLoadedMutual)
+          )
+      )
     else { return }
     loadUsers(page: currentPage + 1)
   }
@@ -325,10 +373,12 @@ final class UserRelationsViewModel: ObservableObject {
     invalidateCurrentLoad()
     users = []
     loadedUsersByID = [:]
+    knownLoadedUserIDs = []
     currentPage = 0
     hasMore = true
     isLoadingMore = false
     loadMoreError = nil
+    mutualScanIsPaused = false
     totalCount = 0
     notice = ""
     visibilitySwitch = nil
@@ -337,9 +387,6 @@ final class UserRelationsViewModel: ObservableObject {
   }
 
   private func loadInitialPage(resetsRelationshipState: Bool) {
-    let service = service
-    let userID = userID
-    let kind = kind
     let relationshipRevision = relationshipStateRevision
     loadGeneration &+= 1
     let generation = loadGeneration
@@ -350,26 +397,26 @@ final class UserRelationsViewModel: ObservableObject {
         }
       }
       do {
-        let response = try await service.userRelations(userID: userID, kind: kind, page: 1)
+        let identity = try await initialRequestIdentity()
         try Task.checkCancellation()
         guard generation == loadGeneration else { return }
-        users = unique(response.users)
-        loadedUsersByID = Dictionary(uniqueKeysWithValues: users.map { ($0.id, $0) })
-        knownLoadedUserIDs = Set(users.map(\.id))
-        currentPage = response.currentPage
-        hasMore = response.hasMore && !response.users.isEmpty
-        totalCount = response.totalCount
-        notice = response.notice
-        visibilitySwitch = response.visibilitySwitch
-        if resetsRelationshipState, relationshipRevision == relationshipStateRevision {
-          clearRelationshipOverrides()
-          overrideLease = managementLease
-          relationshipMutationError = nil
-        }
-        state = .loaded
-        paginationEpoch &+= 1
+        let response = try await relationPage(identity: identity, page: 1)
+        try Task.checkCancellation()
+        try await validateCurrent(identity)
+        try Task.checkCancellation()
+        guard generation == loadGeneration else { return }
+        try applyInitialPage(
+          response,
+          identity: identity,
+          resetsRelationshipState: resetsRelationshipState,
+          relationshipRevision: relationshipRevision
+        )
       } catch is CancellationError {
-        return
+        guard generation == loadGeneration, !Task.isCancelled else { return }
+        state = .failed("读取用户关系已取消，请重新加载。")
+      } catch UserRelationPageLoadError.sessionChanged {
+        guard generation == loadGeneration, !Task.isCancelled else { return }
+        discardResultsFromChangedSession()
       } catch {
         guard generation == loadGeneration, !Task.isCancelled else { return }
         state = .failed(error.localizedDescription)
@@ -378,14 +425,19 @@ final class UserRelationsViewModel: ObservableObject {
   }
 
   private func loadUsers(page: Int) {
-    let service = service
-    let userID = userID
-    let kind = kind
+    let scansMutual = followingFilter == .mutual
+    let maximumPages = scansMutual ? Self.maximumAutomaticMutualPages : 1
+    let initialDisplayableMutualIDs: Set<Int64> = scansMutual
+      ? Set(displayableUsers.map(\.id))
+      : []
     loadGeneration &+= 1
     let generation = loadGeneration
     loadMoreError = nil
+    mutualScanIsPaused = false
     isLoadingMore = true
     loadTask = Task {
+      var requestedPage = page
+      var loadedPageCount = 0
       defer {
         if generation == loadGeneration {
           isLoadingMore = false
@@ -393,32 +445,259 @@ final class UserRelationsViewModel: ObservableObject {
         }
       }
       do {
-        let response = try await service.userRelations(userID: userID, kind: kind, page: page)
-        try Task.checkCancellation()
-        guard generation == loadGeneration else { return }
-        let merged = merge(users, response.users)
-        let addedItems = merged.count > users.count
-        users = merged
-        for user in response.users where loadedUsersByID[user.id] == nil {
-          loadedUsersByID[user.id] = user
-        }
-        knownLoadedUserIDs.formUnion(response.users.map(\.id))
-        currentPage = response.currentPage
-        hasMore = response.hasMore && !response.users.isEmpty && addedItems
-        totalCount = response.totalCount
-        if !response.notice.isEmpty {
-          notice = response.notice
-        }
-        if let responseSwitch = response.visibilitySwitch {
-          visibilitySwitch = responseSwitch
+        while loadedPageCount < maximumPages {
+          let identity = try await continuationRequestIdentity()
+          try Task.checkCancellation()
+          guard generation == loadGeneration else { return }
+          let response = try await relationPage(identity: identity, page: requestedPage)
+          try Task.checkCancellation()
+          try await validateCurrent(identity)
+          try Task.checkCancellation()
+          guard generation == loadGeneration else { return }
+          try applyContinuationPage(response, identity: identity, requestedPage: requestedPage)
+          loadedPageCount &+= 1
+
+          guard
+            followingFilter == .mutual,
+            hasMore
+          else {
+            mutualScanIsPaused = false
+            return
+          }
+          let addedDisplayableMutual = displayableUsers.contains { user in
+            !initialDisplayableMutualIDs.contains(user.id)
+          }
+          if addedDisplayableMutual
+            || (initialDisplayableMutualIDs.isEmpty && hasLoadedMutual)
+          {
+            mutualScanIsPaused = false
+            return
+          }
+          guard loadedPageCount < maximumPages else {
+            mutualScanIsPaused = true
+            paginationEpoch &+= 1
+            return
+          }
+          guard currentPage < Int(Int32.max) else {
+            hasMore = false
+            return
+          }
+          requestedPage = currentPage + 1
         }
       } catch is CancellationError {
-        return
+        guard generation == loadGeneration, !Task.isCancelled else { return }
+        loadMoreError = "读取更多用户关系已取消，请重试。"
+      } catch UserRelationPageLoadError.sessionChanged {
+        guard generation == loadGeneration, !Task.isCancelled else { return }
+        discardResultsFromChangedSession()
       } catch {
         guard generation == loadGeneration, !Task.isCancelled else { return }
         loadMoreError = error.localizedDescription
       }
     }
+  }
+
+  private func initialRequestIdentity() async throws -> UserRelationRequestIdentity {
+    guard
+      kind == .following,
+      userID > 0,
+      let accountAccess
+    else { return .publicProfile }
+
+    do {
+      guard
+        let session = try await accountAccess.vault.activeSession(),
+        session.id == userID,
+        session.credentials != nil
+      else { return .publicProfile }
+      return .authenticatedOwner(
+        session: session,
+        lease: AccountSessionLease(session)
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      return .publicProfile
+    }
+  }
+
+  private func continuationRequestIdentity() async throws -> UserRelationRequestIdentity {
+    guard let loadedPageBinding else {
+      throw BrowseError.unavailable("用户关系列表缺少可靠的分页来源，请重新加载。")
+    }
+    switch loadedPageBinding {
+    case .publicProfile:
+      return .publicProfile
+    case .authenticatedOwner(let lease):
+      guard let accountAccess else { throw UserRelationPageLoadError.sessionChanged }
+      let session = try await accountAccess.vault.activeSession()
+      guard
+        let session,
+        lease.matches(session),
+        session.credentials != nil
+      else { throw UserRelationPageLoadError.sessionChanged }
+      return .authenticatedOwner(session: session, lease: lease)
+    }
+  }
+
+  private func relationPage(
+    identity: UserRelationRequestIdentity,
+    page: Int
+  ) async throws -> UserRelationPageData {
+    switch identity {
+    case .publicProfile:
+      return try await service.userRelations(userID: userID, kind: kind, page: page)
+    case .authenticatedOwner(let session, let lease):
+      guard
+        kind == .following,
+        userID == lease.userID,
+        let accountAccess
+      else { throw UserRelationPageLoadError.sessionChanged }
+      return try await accountAccess.service.ownFollowing(session: session, page: page)
+    }
+  }
+
+  private func validateCurrent(_ identity: UserRelationRequestIdentity) async throws {
+    guard case .authenticatedOwner(_, let lease) = identity else { return }
+    guard let accountAccess else { throw UserRelationPageLoadError.sessionChanged }
+    let session = try await accountAccess.vault.activeSession()
+    guard
+      let session,
+      lease.matches(session),
+      session.credentials != nil
+    else { throw UserRelationPageLoadError.sessionChanged }
+  }
+
+  private func applyInitialPage(
+    _ response: UserRelationPageData,
+    identity: UserRelationRequestIdentity,
+    resetsRelationshipState: Bool,
+    relationshipRevision: Int
+  ) throws {
+    guard response.currentPage == 1 else {
+      throw BrowseError.unavailable("贴吧返回了错误的用户关系页码，请重新加载后再试。")
+    }
+    install(identity.binding)
+    users = unique(response.users)
+    updateConcernMetadataCompleteness(for: identity.binding)
+    loadedUsersByID = Dictionary(uniqueKeysWithValues: users.map { ($0.id, $0) })
+    knownLoadedUserIDs = Set(users.map(\.id))
+    currentPage = response.currentPage
+    hasMore = response.hasMore && !response.users.isEmpty
+    totalCount = response.totalCount
+    notice = response.notice
+    visibilitySwitch = response.visibilitySwitch
+    if resetsRelationshipState, relationshipRevision == relationshipStateRevision {
+      clearRelationshipOverrides()
+      overrideLease = managementLease
+      relationshipMutationError = nil
+    }
+    state = .loaded
+    paginationEpoch &+= 1
+  }
+
+  private func applyContinuationPage(
+    _ response: UserRelationPageData,
+    identity: UserRelationRequestIdentity,
+    requestedPage: Int
+  ) throws {
+    guard
+      identity.binding == loadedPageBinding,
+      response.currentPage == requestedPage,
+      requestedPage == currentPage + 1
+    else {
+      throw BrowseError.unavailable("贴吧返回了错误的用户关系页码，请重新加载后再试。")
+    }
+    let merged = merge(users, response.users)
+    let addedItems = merged.count > users.count
+    users = merged
+    updateConcernMetadataCompleteness(for: identity.binding)
+    for user in response.users where loadedUsersByID[user.id] == nil {
+      loadedUsersByID[user.id] = user
+    }
+    knownLoadedUserIDs.formUnion(response.users.map(\.id))
+    currentPage = response.currentPage
+    hasMore = response.hasMore && !response.users.isEmpty && addedItems
+    totalCount = response.totalCount
+    if !response.notice.isEmpty {
+      notice = response.notice
+    }
+    if let responseSwitch = response.visibilitySwitch {
+      visibilitySwitch = responseSwitch
+    }
+  }
+
+  private func install(_ binding: UserRelationPageBinding) {
+    if loadedPageBinding != binding {
+      followingFilter = .all
+      mutualScanIsPaused = false
+      clearRelationshipManagementSnapshot()
+      relationshipMutationError = nil
+    }
+    loadedPageBinding = binding
+    switch binding {
+    case .publicProfile:
+      clearRelationshipManagementSnapshot()
+    case .authenticatedOwner(let lease):
+      if overrideLease != lease {
+        clearRelationshipOverrides()
+        overrideLease = lease
+      }
+      managementLease = lease
+    }
+  }
+
+  private func discardResultsFromChangedSession() {
+    resetForAccountSessionChange(loadImmediately: false)
+    state = .failed("账户会话已变化，请重新加载后再试。")
+  }
+
+  private func resetForAccountSessionChange(loadImmediately: Bool) {
+    invalidateCurrentLoad()
+    activeRelationshipMutation = nil
+    relationshipMutationTask = nil
+    pendingReloadResetsRelationshipState = nil
+    mutatingUserID = nil
+    relationshipMutationError = nil
+    followingFilter = .all
+    mutualScanIsPaused = false
+    concernMetadataIsComplete = false
+    loadedPageBinding = nil
+    users = []
+    loadedUsersByID = [:]
+    knownLoadedUserIDs = []
+    currentPage = 0
+    hasMore = true
+    isLoadingMore = false
+    loadMoreError = nil
+    totalCount = 0
+    notice = ""
+    visibilitySwitch = nil
+    clearRelationshipManagementSnapshot()
+    paginationEpoch &+= 1
+    state = loadImmediately ? .loading : .idle
+    if loadImmediately {
+      loadInitialPage(resetsRelationshipState: true)
+    }
+  }
+
+  private func updateConcernMetadataCompleteness(for binding: UserRelationPageBinding) {
+    guard case .authenticatedOwner = binding else {
+      concernMetadataIsComplete = false
+      return
+    }
+    concernMetadataIsComplete = users.allSatisfy { user in
+      guard let concernState = user.concernState else { return false }
+      switch concernState {
+      case .notFollowing, .following, .mutual:
+        true
+      case .unknown:
+        false
+      }
+    }
+    guard !concernMetadataIsComplete else { return }
+    followingFilter = .all
+    mutualScanIsPaused = false
   }
 
   private func performRelationshipMutation(
@@ -505,6 +784,7 @@ final class UserRelationsViewModel: ObservableObject {
   private func relationshipOperationIsCurrent(_ operation: UserRelationFollowOperation) -> Bool {
     activeRelationshipMutation?.id == operation.id
       && managementLease == operation.prompt.lease
+      && loadedPageBinding == .authenticatedOwner(operation.prompt.lease)
       && overrideLease == operation.prompt.lease
   }
 
@@ -564,22 +844,7 @@ final class UserRelationsViewModel: ObservableObject {
 
   private func invalidateRelationshipManagementAfterLeaseChange() {
     managementResolutionGeneration &+= 1
-    let resolutionToken = managementResolutionGeneration
-    managementResolutionInFlight = false
-    managementIsResolved = false
-    activeRelationshipMutation = nil
-    relationshipMutationTask = nil
-    mutatingUserID = nil
-    relationshipMutationError = nil
-    clearRelationshipManagementSnapshot()
-    if let resetsRelationshipState = pendingReloadResetsRelationshipState {
-      pendingReloadResetsRelationshipState = nil
-      beginReload(resetsRelationshipState: resetsRelationshipState)
-    }
-    Task { [weak self] in
-      guard let self else { return }
-      await self.resolveManagementAccessAfterSessionChange(ifCurrent: resolutionToken)
-    }
+    resetForAccountSessionChange(loadImmediately: true)
   }
 
   private func clearRelationshipManagementSnapshot() {
@@ -622,6 +887,29 @@ private enum UserRelationLeaseState: Sendable {
   case current
   case changed
   case unavailable
+}
+
+private enum UserRelationPageBinding: Equatable, Sendable {
+  case publicProfile
+  case authenticatedOwner(AccountSessionLease)
+}
+
+private enum UserRelationRequestIdentity: Sendable {
+  case publicProfile
+  case authenticatedOwner(session: StoredAccountSession, lease: AccountSessionLease)
+
+  var binding: UserRelationPageBinding {
+    switch self {
+    case .publicProfile:
+      .publicProfile
+    case .authenticatedOwner(_, let lease):
+      .authenticatedOwner(lease)
+    }
+  }
+}
+
+private enum UserRelationPageLoadError: Error {
+  case sessionChanged
 }
 
 private struct UserRelationFollowOperation: Sendable {

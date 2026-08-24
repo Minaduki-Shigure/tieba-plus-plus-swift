@@ -516,12 +516,39 @@ enum UserRelationKind: String, CaseIterable, Identifiable, Hashable, Sendable {
   }
 }
 
+enum BrowseRelatedUserConcernState: Hashable, Sendable {
+  case notFollowing
+  case following
+  case mutual
+  case unknown(Int64)
+
+  init(rawValue: Int64) {
+    self =
+      switch rawValue {
+      case 0: .notFollowing
+      case 1: .following
+      case 2: .mutual
+      default: .unknown(rawValue)
+      }
+  }
+
+  var rawValue: Int64 {
+    switch self {
+    case .notFollowing: 0
+    case .following: 1
+    case .mutual: 2
+    case .unknown(let rawValue): rawValue
+    }
+  }
+}
+
 struct BrowseRelatedUser: Identifiable, Hashable, Sendable {
   let id: Int64
   let username: String
   let displayName: String
   let portraitURL: URL?
   let introduction: String
+  let concernState: BrowseRelatedUserConcernState?
   let localVisibility: LocalContentVisibility
 
   init(
@@ -530,6 +557,7 @@ struct BrowseRelatedUser: Identifiable, Hashable, Sendable {
     displayName: String,
     portraitURL: URL?,
     introduction: String,
+    concernState: BrowseRelatedUserConcernState? = nil,
     localVisibility: LocalContentVisibility = .visible
   ) {
     self.id = id
@@ -537,6 +565,7 @@ struct BrowseRelatedUser: Identifiable, Hashable, Sendable {
     self.displayName = displayName
     self.portraitURL = portraitURL
     self.introduction = introduction
+    self.concernState = concernState
     self.localVisibility = localVisibility
   }
 
@@ -554,6 +583,7 @@ struct BrowseRelatedUser: Identifiable, Hashable, Sendable {
       displayName: displayName,
       portraitURL: portraitURL,
       introduction: introduction,
+      concernState: concernState,
       localVisibility: visibility
     )
   }

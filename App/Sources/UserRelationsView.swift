@@ -68,9 +68,6 @@ struct UserRelationsView: View {
     .refreshable { await selectedViewModel.refresh() }
     .task(id: selectedKind) {
       selectedViewModel.loadIfNeeded()
-      if selectedKind == .following {
-        await followingViewModel.resolveManagementAccessIfNeeded()
-      }
     }
     .onDisappear {
       pendingFollow = nil
@@ -87,10 +84,7 @@ struct UserRelationsView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
       pendingFollow = nil
-      let token = followingViewModel.invalidateForAccountSessionChange()
-      Task { @MainActor in
-        await followingViewModel.resolveManagementAccessAfterSessionChange(ifCurrent: token)
-      }
+      followingViewModel.accountSessionDidChange(reloadIfActive: selectedKind == .following)
     }
     .onReceive(NotificationCenter.default.publisher(for: .userRelationshipDidChange)) {
       notification in
@@ -151,6 +145,9 @@ struct UserRelationsView: View {
   @ViewBuilder
   private func relationsSection(for viewModel: UserRelationsViewModel) -> some View {
     Section {
+      if viewModel.canSelectFollowingFilter {
+        followingFilterMenu(viewModel)
+      }
       switch viewModel.state {
       case .idle, .loading:
         HStack {
@@ -186,19 +183,8 @@ struct UserRelationsView: View {
 
   @ViewBuilder
   private func loadedRelations(_ viewModel: UserRelationsViewModel) -> some View {
-    if viewModel.users.isEmpty {
-      EmptyStateView(title: "暂无可显示", systemImage: "person.2.slash")
-        .frame(maxWidth: .infinity)
-        .listRowSeparator(.hidden)
-    } else if !viewModel.hasDisplayableUsers {
-      Label("暂无可显示的用户", systemImage: "eye.slash")
-        .font(.callout)
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
-        .padding(.vertical, 8)
-        .listRowSeparator(.hidden)
-        .accessibilityElement(children: .combine)
-    } else {
+    switch viewModel.emptyPresentation {
+    case .none:
       ForEach(viewModel.displayableUsers) { user in
         LocallyFilteredContent(
           visibility: user.localVisibility,
@@ -223,6 +209,39 @@ struct UserRelationsView: View {
         }
         .frame(minHeight: 44)
       }
+    case .noRelations:
+      EmptyStateView(
+        title: viewModel.kind == .following ? "暂无关注" : "暂无粉丝",
+        systemImage: "person.2.slash"
+      )
+        .frame(maxWidth: .infinity)
+        .listRowSeparator(.hidden)
+    case .locallyFiltered:
+      Label("暂无可显示的用户", systemImage: "eye.slash")
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
+        .padding(.vertical, 8)
+        .listRowSeparator(.hidden)
+        .accessibilityElement(children: .combine)
+    case .searchingMutual:
+      Label("正在查找互相关注", systemImage: "person.2")
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
+        .padding(.vertical, 8)
+        .listRowSeparator(.hidden)
+        .accessibilityElement(children: .combine)
+    case .mutualScanPaused:
+      mutualScanContinuationButton(viewModel)
+    case .noMutual:
+      EmptyStateView(title: "暂无互相关注", systemImage: "person.2.slash")
+        .frame(maxWidth: .infinity)
+        .listRowSeparator(.hidden)
+    }
+
+    if viewModel.mutualScanIsPaused && viewModel.hasDisplayableUsers {
+      mutualScanContinuationButton(viewModel)
     }
 
     if let rawTail = viewModel.users.last {
@@ -249,6 +268,49 @@ struct UserRelationsView: View {
       LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
         .listRowSeparator(.hidden)
     }
+  }
+
+  private func followingFilterMenu(_ viewModel: UserRelationsViewModel) -> some View {
+    Menu {
+      ForEach(UserRelationFollowingFilter.allCases) { filter in
+        Button {
+          viewModel.selectFollowingFilter(filter)
+        } label: {
+          if viewModel.followingFilter == filter {
+            Label(filter.title, systemImage: "checkmark")
+          } else {
+            Text(filter.title)
+          }
+        }
+      }
+    } label: {
+      HStack(spacing: 8) {
+        Text(viewModel.followingFilter.title)
+        Spacer(minLength: 8)
+        Image(systemName: "chevron.down")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.secondary)
+      }
+      .frame(minHeight: 44)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .disabled(viewModel.isLoadingMore)
+    .listRowSeparator(.hidden)
+    .accessibilityLabel("关注列表筛选")
+    .accessibilityValue(viewModel.followingFilter.title)
+  }
+
+  private func mutualScanContinuationButton(_ viewModel: UserRelationsViewModel) -> some View {
+    Button {
+      viewModel.continueMutualScan()
+    } label: {
+      Label("继续查找互相关注", systemImage: "arrow.down.circle")
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
+    }
+    .buttonStyle(.borderless)
+    .listRowSeparator(.hidden)
+    .accessibilityHint("继续加载后续关注列表")
   }
 
   @ViewBuilder

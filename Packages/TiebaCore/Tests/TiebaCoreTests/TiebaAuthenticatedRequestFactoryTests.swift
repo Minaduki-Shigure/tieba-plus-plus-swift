@@ -38,6 +38,61 @@ final class TiebaAuthenticatedRequestFactoryTests: XCTestCase {
     XCTAssertNil(fields["BDUSS"])
   }
 
+  func testOwnFollowingUsesExactAccountBoundFieldSetWithoutTargetUID() throws {
+    let request = try factory.ownFollowing(
+      credential: sessionCredential(),
+      expectedUserID: 957_339_815,
+      page: 2
+    )
+    let fields = try formFields(request)
+
+    XCTAssertEqual(
+      request.url?.absoluteString,
+      "https://tiebac.baidu.com/c/u/follow/followList"
+    )
+    XCTAssertEqual(request.httpMethod, "POST")
+    XCTAssertFalse(request.httpShouldHandleCookies)
+    XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), "bdtb for Android 12.41.7.1")
+    XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+    XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+    XCTAssertNil(request.value(forHTTPHeaderField: "client_user_token"))
+    XCTAssertEqual(
+      Set(fields.keys),
+      ["BDUSS", "_client_type", "_client_version", "pn", "sign"]
+    )
+    XCTAssertEqual(fields["BDUSS"]?.count, 192)
+    XCTAssertEqual(fields["_client_type"], "2")
+    XCTAssertEqual(fields["_client_version"], "12.41.7.1")
+    XCTAssertEqual(fields["pn"], "2")
+    XCTAssertEqual(fields["sign"], "c1631a39f03300bc1336bb22d6f0c97b")
+    XCTAssertNil(fields["uid"])
+    XCTAssertNil(fields["user_id"])
+    XCTAssertNil(fields["stoken"])
+    XCTAssertNil(fields["CUID"])
+    XCTAssertNil(fields["cuid"])
+    XCTAssertNil(fields["phone_imei"])
+    let unsigned = fields.filter { $0.key != "sign" }.map { ($0.key, $0.value) }
+    XCTAssertEqual(fields["sign"], TiebaFormSigner.signature(for: unsigned))
+
+    let customized = TiebaAuthenticatedRequestFactory(
+      configuration: .init(
+        userAgent: "custom-agent",
+        clientVersion: "99.99.99",
+        authenticatedClientVersion: "88.88.88"
+      )
+    )
+    let customizedRequest = try customized.ownFollowing(
+      credential: sessionCredential(),
+      expectedUserID: 957_339_815,
+      page: 2
+    )
+    XCTAssertEqual(customizedRequest.httpBody, request.httpBody)
+    XCTAssertEqual(
+      customizedRequest.value(forHTTPHeaderField: "User-Agent"),
+      "bdtb for Android 12.41.7.1"
+    )
+  }
+
   func testSelfLikedForumsRequestPreservesFollowedForumsWireFields() throws {
     let request = try factory.likedForums(
       credential: credential(),
@@ -297,6 +352,32 @@ final class TiebaAuthenticatedRequestFactoryTests: XCTestCase {
     XCTAssertThrowsError(
       try factory.followedForums(
         credential: credential(), userID: 0, page: 1, pageSize: 50
+      )
+    )
+    XCTAssertThrowsError(
+      try factory.ownFollowing(
+        credential: sessionCredential(), expectedUserID: 0, page: 1
+      )
+    )
+    XCTAssertThrowsError(
+      try factory.ownFollowing(
+        credential: sessionCredential(), expectedUserID: 1, page: 0
+      )
+    )
+    XCTAssertThrowsError(
+      try factory.ownFollowing(
+        credential: sessionCredential(), expectedUserID: 1, page: Int(Int32.max) + 1
+      )
+    )
+    XCTAssertThrowsError(
+      try factory.ownFollowing(
+        credential: TiebaSessionCredential(
+          bduss: String(repeating: "b", count: 192),
+          stoken: "short",
+          bdussCookieName: .bduss
+        ),
+        expectedUserID: 1,
+        page: 1
       )
     )
     XCTAssertThrowsError(

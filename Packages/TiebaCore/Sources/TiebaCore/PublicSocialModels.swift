@@ -5,25 +5,54 @@ public enum TiebaUserRelationKind: Sendable, Hashable {
   case followers
 }
 
+public enum TiebaRelatedUserConcernState: Sendable, Hashable {
+  case notFollowing
+  case following
+  case mutual
+  case unknown(Int64)
+
+  public init(rawValue: Int64) {
+    self =
+      switch rawValue {
+      case 0: .notFollowing
+      case 1: .following
+      case 2: .mutual
+      default: .unknown(rawValue)
+      }
+  }
+
+  public var rawValue: Int64 {
+    switch self {
+    case .notFollowing: 0
+    case .following: 1
+    case .mutual: 2
+    case .unknown(let rawValue): rawValue
+    }
+  }
+}
+
 public struct TiebaRelatedUser: Identifiable, Sendable, Hashable {
   public let id: Int64
   public let username: String
   public let displayName: String
   public let portrait: String
   public let introduction: String
+  public let concernState: TiebaRelatedUserConcernState?
 
   public init(
     id: Int64,
     username: String,
     displayName: String,
     portrait: String,
-    introduction: String
+    introduction: String,
+    concernState: TiebaRelatedUserConcernState? = nil
   ) {
     self.id = id
     self.username = username
     self.displayName = displayName
     self.portrait = portrait
     self.introduction = introduction
+    self.concernState = concernState
   }
 
   public var preferredName: String {

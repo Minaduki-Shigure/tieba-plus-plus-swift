@@ -18,7 +18,7 @@ and its verified metadata enters the public app source.
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, media preferences, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
-| Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary, followed forums, inline management of the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session, authenticated poll state, and experimental content approval |
+| Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary, followed forums, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies; both newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
 | TiebaLite parity | Current `main` and public `v0.62.3-alpha.1`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.62.3-alpha.1` (build 74) |
@@ -124,8 +124,14 @@ and its verified metadata enters the public app source.
   result. This minimum-field HTTPS contract remains a disposable-account
   validation gate.
   When the following list belongs to that exact full-credential account, its
-  visible rows reuse the same guarded mutation path without issuing a relationship
-  request per row. An explicitly confirmed unfollow retains the row and changes
+  pages use a dedicated authenticated read and its visible rows reuse the same
+  guarded mutation path without issuing a relationship request per row. A
+  TiebaLite-style menu switches between all loaded follows and exact server value
+  `has_concerned=2`; it appears only while every retained authenticated row has
+  known relationship metadata. A mutual search that finds no new visible result
+  scans at most five raw pages per attempt before requiring an explicit
+  continuation, without replacing the raw pagination cursor. An explicitly
+  confirmed unfollow retains the row and changes
   its control to refollow, matching TiebaLite's in-place workflow. Prompts and
   results are bound to the loaded row plus `userID + sessionRevision`; account
   rotation discards late results, pagination cannot overwrite newer local state,
@@ -133,6 +139,9 @@ and its verified metadata enters the public app source.
   a matching authoritative update.
   Revision-bearing relationship notifications keep an open profile and list in
   sync. Other users' following lists and every follower list remain read only.
+  The minimum authenticated list fields and live `has_concerned` completeness
+  remain a physical-device validation gate; incomplete `has_concerned` metadata
+  keeps the ordinary list but does not expose a misleading mutual filter.
   The same profile menu now keeps local content filtering separate from a lazy,
   account-bound server interaction-permission editor. For another user, it can
   read and explicitly update whether that user may follow, interact with, or
@@ -413,13 +422,15 @@ and its verified metadata enters the public app source.
   automatic retry; a signed-out composer remains read only and asks for login.
 - **Public information:** Forum introductions, statistics, rules, moderator
   teams, and credential-free user profiles are available. Profiles include
-  independently paginated public topics, replies, following, and followers.
+  independently paginated public topics and replies; other-user following and
+  all follower lists are also public, while the exact active account's own
+  following route upgrades to the authenticated read described below.
   Public liked-forum data remains a bounded preview; a separate complete list is
   available only through an active account session and still performs no write.
-  Relationship lists remain public endpoint snapshots, not general proof of the
-  active account's relationship with any listed user. The only write surface is
-  the exact active account's own following list; other-user lists and all follower
-  lists stay read only.
+  Other-user following lists and all follower lists remain public endpoint
+  snapshots, not general proof of the active account's relationship with any
+  listed user. The only write surface is the authenticated exact active account's
+  own following list; other-user lists and all follower lists stay read only.
 
 ### Threads and media
 
@@ -610,11 +621,11 @@ and its verified metadata enters the public app source.
 - **Current-account profile:** The account page reads a bounded, account-lease-
   bound authenticated summary containing identity, biography, relation counts,
   and reply count. Selecting it opens the same credential-free public profile
-  used elsewhere for public topics, replies, following, and followers. The
-  destination remains a navigation shortcut and does not expose private account
-  history. Its own following list can explicitly unfollow and refollow exact
-  loaded rows while retaining a locally unfollowed row until refresh; no row-level
-  relationship probes are issued.
+  used elsewhere for public topics, replies, and followers. The destination
+  remains a navigation shortcut and does not expose private account history. Its
+  own following list upgrades to an authenticated read and can explicitly
+  unfollow and refollow exact loaded rows while retaining a locally unfollowed
+  row until refresh; no row-level relationship probes are issued.
 - **User liked forums:** A public profile keeps its bounded credential-free
   preview and offers a separate complete list for the current or another user
   when account access is available. The request is read only and paginated; each
