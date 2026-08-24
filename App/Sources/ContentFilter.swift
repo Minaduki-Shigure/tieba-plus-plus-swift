@@ -662,8 +662,8 @@ extension ContentFilterSnapshot {
     result.withLocalPresentation(
       visibility: visibility(for: result, hasKnownVideo: hasKnownVideo),
       thread: applying(to: result.thread),
-      context: result.context.map {
-        $0.withLocalVisibility(visibility(for: $0))
+      contexts: result.contexts.map { context in
+        context.withLocalVisibility(visibility(for: context.summary))
       }
     )
   }

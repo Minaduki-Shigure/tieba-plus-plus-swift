@@ -385,7 +385,9 @@ and its verified metadata enters the public app source.
   still requires disposable-account and physical-device validation.
 - **Search:** Forum, thread, and user search are separated by category. Global
   and per-forum post search provide the supported sort and content filters,
-  local history, and optional credential-free suggestions.
+  local history, optional credential-free suggestions, and independent opening
+  of a matched reply, its exact parent floor, and the owning topic when those
+  same-thread targets are present and valid.
 - **Forum browsing:** Forum and channel lists support pagination, refresh,
   reply-time or creation-time sorting, server-defined classifications, and
   bounded channel menus with independent cursors. The forum toolbar's primary

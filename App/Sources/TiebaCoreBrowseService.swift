@@ -1156,10 +1156,54 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
     _ result: TiebaThreadSearchResult,
     applying filter: ContentFilterSnapshot = .empty
   ) -> ForumPostSearchItem {
-    let mainPostContext = matchingSearchContext(result.mainPost, threadID: result.threadID)
-    let postInfoContext = matchingSearchContext(result.postInfo, threadID: result.threadID)
-    let threadContext = mainPostContext ?? postInfoContext
-    let displayContext = postInfoContext ?? mainPostContext
+    let target = mapForumPostSearchTarget(result.target)
+    let mainPostContext = matchingMainPostContext(
+      result.mainPost,
+      threadID: result.threadID,
+      firstPostID: result.firstPostID
+    )
+    let parentPostContext: TiebaSearchPostContext?
+    if case .comment(let parentPostID, _) = target {
+      parentPostContext = matchingParentPostContext(
+        result.postInfo,
+        threadID: result.threadID,
+        parentPostID: parentPostID
+      )
+    } else {
+      parentPostContext = nil
+    }
+    let threadContext = mainPostContext ?? parentPostContext
+    let displayContexts: [ForumPostSearchContext]
+    switch target {
+    case .thread:
+      displayContexts = []
+    case .post:
+      displayContexts = mainPostContext.map {
+        [mapForumPostSearchContext($0, target: .mainPost(threadID: $0.threadID))]
+      } ?? []
+    case .comment(let parentPostID, _):
+      var contexts: [ForumPostSearchContext] = []
+      if let parentPostContext {
+        contexts.append(
+          mapForumPostSearchContext(
+            parentPostContext,
+            target: .parentPost(
+              threadID: parentPostContext.threadID,
+              postID: parentPostID
+            )
+          )
+        )
+      }
+      if let mainPostContext {
+        contexts.append(
+          mapForumPostSearchContext(
+            mainPostContext,
+            target: .mainPost(threadID: mainPostContext.threadID)
+          )
+        )
+      }
+      displayContexts = contexts
+    }
     let contextTitle = threadContext?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     let contextExcerpt = threadContext?.excerpt.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     let threadTitle = contextTitle.isEmpty ? result.title : contextTitle
@@ -1185,7 +1229,6 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       threadAuthorAvatarURL = SecureTiebaURL.media(result.authorPortraitURL)
     }
     let matchedContents = mapSearchImages(result.images)
-    let target = mapForumPostSearchTarget(result.target)
     let threadReplyCount = target == .thread ? result.replyCount : threadContext?.replyCount ?? 0
 
     let mapped = ForumPostSearchItem(
@@ -1216,16 +1259,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       likeCount: result.likeCount,
       shareCount: result.shareCount,
       matchedContents: matchedContents,
-      context: displayContext.map {
-        ForumPostSearchSummary(
-          postID: $0.postID ?? 0,
-          title: $0.title,
-          excerpt: $0.excerpt,
-          authorID: $0.authorID,
-          authorName: $0.authorName,
-          authorUsername: $0.authorUsername
-        )
-      },
+      contexts: displayContexts,
       matchedAuthorUsername: result.authorUsername
     )
     return filter.applying(to: mapped, hasKnownVideo: result.hasVideo)
@@ -1237,6 +1271,49 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
   ) -> TiebaSearchPostContext? {
     guard threadID > 0, context?.threadID == threadID else { return nil }
     return context
+  }
+
+  private static func matchingMainPostContext(
+    _ context: TiebaSearchPostContext?,
+    threadID: Int64,
+    firstPostID: Int64
+  ) -> TiebaSearchPostContext? {
+    guard let context = matchingSearchContext(context, threadID: threadID) else { return nil }
+    let contextPostID = context.postID ?? 0
+    guard contextPostID <= 0 || firstPostID <= 0 || contextPostID == firstPostID else {
+      return nil
+    }
+    return context
+  }
+
+  private static func matchingParentPostContext(
+    _ context: TiebaSearchPostContext?,
+    threadID: Int64,
+    parentPostID: Int64
+  ) -> TiebaSearchPostContext? {
+    guard
+      parentPostID > 0,
+      let context = matchingSearchContext(context, threadID: threadID),
+      context.postID == parentPostID
+    else { return nil }
+    return context
+  }
+
+  private static func mapForumPostSearchContext(
+    _ context: TiebaSearchPostContext,
+    target: ForumPostSearchContextTarget
+  ) -> ForumPostSearchContext {
+    ForumPostSearchContext(
+      target: target,
+      summary: ForumPostSearchSummary(
+        postID: context.postID ?? 0,
+        title: context.title,
+        excerpt: context.excerpt,
+        authorID: context.authorID,
+        authorName: context.authorName,
+        authorUsername: context.authorUsername
+      )
+    )
   }
 
   private static func mapForumPostSearchTarget(

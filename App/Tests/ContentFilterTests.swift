@@ -489,7 +489,7 @@ final class ContentFilterTests: XCTestCase {
     )
   }
 
-  func testForumPostSearchModelsDefaultVisibleAndCopyLosslessly() {
+  func testForumPostSearchModelsDefaultVisibleAndCopyLosslessly() throws {
     let summary = ForumPostSearchSummary(
       postID: 41,
       title: "Context title",
@@ -507,24 +507,30 @@ final class ContentFilterTests: XCTestCase {
 
     XCTAssertEqual(summary.localVisibility, .visible)
     XCTAssertEqual(item.localVisibility, .visible)
+    XCTAssertEqual(
+      item.contexts.map(\.target),
+      [.parentPost(threadID: 1, postID: 41)]
+    )
 
-    let annotatedSummary = summary.withLocalVisibility(.hidden)
-    XCTAssertEqual(annotatedSummary.localVisibility, .hidden)
-    XCTAssertEqual(annotatedSummary.withLocalVisibility(.visible), summary)
+    let context = try XCTUnwrap(item.contexts.first)
+    let annotatedContext = context.withLocalVisibility(.hidden)
+    XCTAssertEqual(annotatedContext.summary.localVisibility, .hidden)
+    XCTAssertEqual(annotatedContext.withLocalVisibility(.visible), context)
 
     let annotatedItem = item.withLocalPresentation(
       visibility: .placeholder,
       thread: item.thread.withLocalVisibility(.hidden),
-      context: annotatedSummary
+      contexts: [annotatedContext]
     )
     XCTAssertEqual(annotatedItem.localVisibility, .placeholder)
     XCTAssertEqual(annotatedItem.thread.localVisibility, .hidden)
-    XCTAssertEqual(annotatedItem.context?.localVisibility, .hidden)
+    XCTAssertEqual(annotatedItem.contexts.first?.summary.localVisibility, .hidden)
+    XCTAssertEqual(annotatedItem.contexts.first?.target, context.target)
     XCTAssertEqual(
       annotatedItem.withLocalPresentation(
         visibility: item.localVisibility,
         thread: item.thread,
-        context: item.context
+        contexts: item.contexts
       ),
       item
     )
@@ -563,7 +569,7 @@ final class ContentFilterTests: XCTestCase {
         "blocked ID: \(blockedID)"
       )
       XCTAssertEqual(
-        filtered.context?.localVisibility,
+        filtered.contexts.first?.summary.localVisibility,
         expectedContext,
         "blocked ID: \(blockedID)"
       )
@@ -605,7 +611,7 @@ final class ContentFilterTests: XCTestCase {
     let contextFiltered = snapshot.applying(to: blockedContext)
     XCTAssertEqual(contextFiltered.localVisibility, .visible)
     XCTAssertEqual(contextFiltered.thread.localVisibility, .visible)
-    XCTAssertEqual(contextFiltered.context?.localVisibility, .placeholder)
+    XCTAssertEqual(contextFiltered.contexts.first?.summary.localVisibility, .placeholder)
 
     XCTAssertEqual(snapshot.applying(to: allowedContents).localVisibility, .visible)
   }
@@ -630,7 +636,59 @@ final class ContentFilterTests: XCTestCase {
 
     XCTAssertEqual(filtered.localVisibility, .visible)
     XCTAssertEqual(filtered.thread.localVisibility, .visible)
-    XCTAssertEqual(filtered.context?.localVisibility, .hidden)
+    XCTAssertEqual(filtered.contexts.first?.summary.localVisibility, .hidden)
+  }
+
+  func testForumPostSearchParentAndMainContextsAreFilteredIndependently() throws {
+    let parent = ForumPostSearchContext(
+      target: .parentPost(threadID: 1, postID: 31),
+      summary: ForumPostSearchSummary(
+        postID: 31,
+        title: "Parent",
+        excerpt: "Parent content",
+        authorID: 33,
+        authorName: "Blocked parent"
+      )
+    )
+    let main = ForumPostSearchContext(
+      target: .mainPost(threadID: 1),
+      summary: ForumPostSearchSummary(
+        postID: 10,
+        title: "Topic",
+        excerpt: "Topic content",
+        authorID: 44,
+        authorName: "Visible topic"
+      )
+    )
+    let item = forumPostSearchItem(context: nil, contexts: [parent, main])
+    let snapshot = ContentFilterSnapshot(
+      displayMode: .placeholder,
+      blockVideos: false,
+      rules: [.user(id: 33, name: "", list: .block)]
+    )
+
+    let filtered = snapshot.applying(to: item)
+
+    XCTAssertEqual(filtered.contexts.map(\.target), [parent.target, main.target])
+    XCTAssertEqual(
+      filtered.contexts.map(\.summary.localVisibility),
+      [.placeholder, .visible]
+    )
+    let filteredParent = try XCTUnwrap(filtered.contexts.first)
+    let filteredMain = try XCTUnwrap(filtered.contexts.dropFirst().first)
+    XCTAssertNil(
+      ForumPostSearchNavigationPolicy.contextDestination(
+        for: filtered,
+        context: filteredParent
+      )
+    )
+    XCTAssertEqual(
+      ForumPostSearchNavigationPolicy.contextDestination(
+        for: filtered,
+        context: filteredMain
+      ),
+      .thread(thread: filtered.thread, route: TiebaThreadRoute(threadID: 1))
+    )
   }
 
   func testForumPostSearchKnownVideoOnlyAnnotatesMainResultWithoutSynthesizingMedia() {
@@ -645,7 +703,7 @@ final class ContentFilterTests: XCTestCase {
 
     XCTAssertEqual(filtered.localVisibility, .placeholder)
     XCTAssertEqual(filtered.thread.localVisibility, .visible)
-    XCTAssertEqual(filtered.context?.localVisibility, .visible)
+    XCTAssertEqual(filtered.contexts.first?.summary.localVisibility, .visible)
     XCTAssertEqual(filtered.matchedContents, item.matchedContents)
     XCTAssertFalse(
       filtered.matchedContents.contains { content in
@@ -868,6 +926,7 @@ final class ContentFilterTests: XCTestCase {
       authorID: 33,
       authorName: "Context author"
     ),
+    contexts: [ForumPostSearchContext]? = nil,
     matchedContents: [BrowseContent] = []
   ) -> ForumPostSearchItem {
     ForumPostSearchItem(
@@ -908,7 +967,14 @@ final class ContentFilterTests: XCTestCase {
       likeCount: 9,
       shareCount: 10,
       matchedContents: matchedContents,
-      context: context,
+      contexts: contexts ?? context.map {
+        [
+          ForumPostSearchContext(
+            target: .parentPost(threadID: 1, postID: $0.postID),
+            summary: $0
+          )
+        ]
+      } ?? [],
       matchedAuthorUsername: "matched-account"
     )
   }

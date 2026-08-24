@@ -967,14 +967,22 @@ takes precedence: the UI must not render returned activity or create a sentinel,
 and load-more plus retry paths must stop even if the response also contains raw
 threads or advertises another page.
 
-Per-forum search must evaluate the matched entity and its displayed topic or
+Per-forum search must evaluate the matched entity and every displayed topic or
 parent-floor context independently. A keyword or user allow match in one field
-or identity must not exempt a block match in the other entity, and filtering
-must not alter the post or comment target used for navigation. A blocked context
-may be replaced or omitted while a visible match remains navigable; a blocked
-match must suppress the entire row, including its context. Context payloads do
-not expose a video marker, so video blocking applies only to the matched entity.
-Forum and user lookup remain outside this filtering boundary.
+or identity must not exempt a block match in another entity, and filtering must
+not alter any post or comment target used for navigation. Each retained context
+must preserve its source role and original thread ID. A parent-floor route is
+allowed only for a positive same-thread PID that exactly matches the comment
+target's claimed parent; an owning-topic route must use its own matching thread
+ID. Cross-thread, missing, conflicting, placeholder, and hidden contexts must
+not create a route. A visible nested-reply match resolves its positive comment
+ID through the existing bounded anonymous resolver rather than trusting the
+displayed parent PID. Explicit topic and post searches use `TiebaThreadRoute`
+and must not be redirected by an unrelated browsing-history snapshot. A blocked
+context may be replaced or omitted while a visible match remains navigable; a
+blocked match must suppress the entire row, including every context. Context
+payloads do not expose a video marker, so video blocking applies only to the
+matched entity. Forum and user lookup remain outside this filtering boundary.
 
 Remote media uses an ephemeral, credential-free session, rejects cleartext
 requests or redirect destinations, and is decoded through ImageIO with a

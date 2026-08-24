@@ -787,6 +787,29 @@ enum ForumPostSearchTarget: Hashable, Sendable {
   }
 }
 
+enum ForumPostSearchContextTarget: Hashable, Sendable {
+  case mainPost(threadID: Int64)
+  case parentPost(threadID: Int64, postID: Int64)
+
+  var title: String {
+    switch self {
+    case .mainPost:
+      "相关原帖"
+    case .parentPost:
+      "所属楼层"
+    }
+  }
+
+  fileprivate var storageKey: String {
+    switch self {
+    case .mainPost(let threadID):
+      "main:\(threadID)"
+    case .parentPost(let threadID, let postID):
+      "parent:\(threadID):\(postID)"
+    }
+  }
+}
+
 struct ForumPostSearchSummary: Hashable, Sendable {
   let postID: Int64
   let title: String
@@ -827,6 +850,20 @@ struct ForumPostSearchSummary: Hashable, Sendable {
   }
 }
 
+struct ForumPostSearchContext: Identifiable, Hashable, Sendable {
+  var id: String { target.storageKey }
+
+  let target: ForumPostSearchContextTarget
+  let summary: ForumPostSearchSummary
+
+  func withLocalVisibility(_ visibility: LocalContentVisibility) -> Self {
+    ForumPostSearchContext(
+      target: target,
+      summary: summary.withLocalVisibility(visibility)
+    )
+  }
+}
+
 struct ForumPostSearchItem: Identifiable, Hashable, Sendable {
   var id: String { "\(thread.id):\(target.storageKey)" }
 
@@ -843,7 +880,7 @@ struct ForumPostSearchItem: Identifiable, Hashable, Sendable {
   let likeCount: Int
   let shareCount: Int
   let matchedContents: [BrowseContent]
-  let context: ForumPostSearchSummary?
+  let contexts: [ForumPostSearchContext]
   let localVisibility: LocalContentVisibility
 
   init(
@@ -859,7 +896,7 @@ struct ForumPostSearchItem: Identifiable, Hashable, Sendable {
     likeCount: Int,
     shareCount: Int,
     matchedContents: [BrowseContent],
-    context: ForumPostSearchSummary?,
+    contexts: [ForumPostSearchContext] = [],
     matchedAuthorUsername: String = "",
     localVisibility: LocalContentVisibility = .visible
   ) {
@@ -876,14 +913,14 @@ struct ForumPostSearchItem: Identifiable, Hashable, Sendable {
     self.likeCount = likeCount
     self.shareCount = shareCount
     self.matchedContents = matchedContents
-    self.context = context
+    self.contexts = contexts
     self.localVisibility = localVisibility
   }
 
   func withLocalPresentation(
     visibility: LocalContentVisibility,
     thread: BrowseThread,
-    context: ForumPostSearchSummary?
+    contexts: [ForumPostSearchContext]
   ) -> Self {
     ForumPostSearchItem(
       thread: thread,
@@ -898,7 +935,7 @@ struct ForumPostSearchItem: Identifiable, Hashable, Sendable {
       likeCount: likeCount,
       shareCount: shareCount,
       matchedContents: matchedContents,
-      context: context,
+      contexts: contexts,
       matchedAuthorUsername: matchedAuthorUsername,
       localVisibility: visibility
     )

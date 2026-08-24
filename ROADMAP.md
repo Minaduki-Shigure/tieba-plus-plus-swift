@@ -92,6 +92,13 @@ interaction gap inside the existing media credit. It reuses the one established
 lazy AVKit player, stream policy, landing-page router, and playback coordinator;
 it adds no endpoint, media source, or weighted point. Compact-media mode remains
 passive, and an expanded card allocates no player before an explicit Play tap.
+Independent per-forum search navigation likewise closes a narrow TiebaLite
+reading gap inside the existing search credit. A matched result, its exact
+parent-floor context, and its owning-topic context are separate controls; the
+two context identities survive local filtering independently. Explicit topic
+and floor routes bypass unrelated reading history, while a nested-reply match
+uses the existing comment-ID resolver instead of trusting a displayed parent
+PID. This reuses existing anonymous endpoints and adds no weighted point.
 The configurable forum primary action likewise completes a narrow local habit
 setting by rearranging existing controls, so it remains inside the existing
 local-settings credit rather than adding a weighted point.
@@ -188,7 +195,8 @@ the source metadata is updated to that tested IPA.
 - Local filtering for paginated public-profile activity
 - Versioned local global-search history with recent/all, delete, and clear controls
 - Anonymous per-forum post search with newest/relevance sorting
-- Topic-only and topic-plus-reply search filters with target-aware navigation
+- Topic-only and topic-plus-reply search filters with separate matched-reply,
+  exact-parent-floor, and owning-topic navigation
 - Versioned, per-forum local search history with delete and clear controls
 - Forum thread list with pagination and pull to refresh
 - Persistent forum primary-action selection between publishing, refreshing,
@@ -1248,10 +1256,10 @@ matching domain and inspected field: a user allow rule does not override a
 blocked keyword, and a keyword allowed in one field does not override a blocked
 match in another.
 Blocked content can remain as a placeholder or be fully hidden. In per-forum
-search, the matched entity and its displayed topic or parent-floor context are
+search, the matched entity and each displayed topic or parent-floor context are
 filtered independently. A blocked context can be replaced or omitted without
 removing an otherwise visible match; a blocked match suppresses the complete
-row so its nested context cannot reveal it. The independent video-topic switch
+row so none of its contexts can reveal it. The independent video-topic switch
 applies to thread rows; global search and the matched per-forum entity preserve
 the server's public video marker even when no usable cover URL survives media
 normalization.

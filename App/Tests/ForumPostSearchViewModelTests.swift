@@ -31,7 +31,7 @@ final class ForumPostSearchViewModelTests: XCTestCase {
     )
     let coreResult = TiebaThreadSearchResult(
       threadID: 42,
-      firstPostID: 202,
+      firstPostID: 100,
       forumID: 7,
       forumName: "swift",
       title: "Nested match",
@@ -61,9 +61,18 @@ final class ForumPostSearchViewModelTests: XCTestCase {
     XCTAssertEqual(mapped.thread.authorID, 1)
     XCTAssertEqual(mapped.thread.replyCount, 89)
     XCTAssertEqual(mapped.replyCount, 8)
-    XCTAssertEqual(mapped.context?.postID, 202)
-    XCTAssertEqual(mapped.context?.title, "Parent floor")
-    XCTAssertEqual(mapped.context?.authorUsername, "parent-account")
+    XCTAssertEqual(
+      mapped.contexts.map(\.target),
+      [
+        .parentPost(threadID: 42, postID: 202),
+        .mainPost(threadID: 42),
+      ]
+    )
+    XCTAssertEqual(mapped.contexts[0].summary.postID, 202)
+    XCTAssertEqual(mapped.contexts[0].summary.title, "Parent floor")
+    XCTAssertEqual(mapped.contexts[0].summary.authorUsername, "parent-account")
+    XCTAssertEqual(mapped.contexts[1].summary.title, "Opening topic")
+    XCTAssertEqual(mapped.contexts[1].summary.authorUsername, "topic-account")
     XCTAssertEqual(mapped.matchedTitle, "Nested match")
     XCTAssertEqual(mapped.matchedAuthorUsername, "matched-account")
     XCTAssertEqual(
@@ -75,7 +84,7 @@ final class ForumPostSearchViewModelTests: XCTestCase {
   func testCoreMapperDoesNotPairMatchedUsernameWithContextAuthorName() {
     let mainPost = TiebaSearchPostContext(
       threadID: 42,
-      postID: 100,
+      postID: nil,
       title: "Opening topic",
       excerpt: "Opening content",
       authorID: 1,
@@ -84,7 +93,7 @@ final class ForumPostSearchViewModelTests: XCTestCase {
     )
     let coreResult = TiebaThreadSearchResult(
       threadID: 42,
-      firstPostID: 202,
+      firstPostID: 100,
       forumID: 7,
       forumName: "swift",
       title: "Reply match",
@@ -107,6 +116,140 @@ final class ForumPostSearchViewModelTests: XCTestCase {
     XCTAssertEqual(mapped.thread.authorName, "topic author")
     XCTAssertEqual(mapped.thread.authorUsername, "")
     XCTAssertEqual(mapped.matchedAuthorUsername, "reply-account")
+    XCTAssertEqual(mapped.contexts.map(\.target), [.mainPost(threadID: 42)])
+    XCTAssertEqual(mapped.contexts.first?.summary.postID, 0)
+  }
+
+  func testCoreMapperDropsConflictingParentContextWithoutMislabelingMainPost() {
+    let mainPost = TiebaSearchPostContext(
+      threadID: 42,
+      postID: 100,
+      title: "Opening topic",
+      excerpt: "Opening content",
+      authorID: 1,
+      authorName: "topic author",
+      authorPortraitURL: nil
+    )
+    let wrongParent = TiebaSearchPostContext(
+      threadID: 42,
+      postID: 999,
+      title: "Wrong parent",
+      excerpt: "Wrong parent content",
+      authorID: 4,
+      authorName: "wrong parent author",
+      authorPortraitURL: nil
+    )
+    let crossThreadParent = TiebaSearchPostContext(
+      threadID: 43,
+      postID: 202,
+      title: "Cross-thread parent",
+      excerpt: "Cross-thread content",
+      authorID: 5,
+      authorName: "cross-thread author",
+      authorPortraitURL: nil
+    )
+
+    for postInfo in [wrongParent, crossThreadParent] {
+      let coreResult = TiebaThreadSearchResult(
+        threadID: 42,
+        firstPostID: 100,
+        forumID: 7,
+        forumName: "swift",
+        title: "Nested match",
+        excerpt: "Matched comment",
+        authorID: 3,
+        authorName: "matched author",
+        authorPortraitURL: nil,
+        replyCount: 1,
+        likeCount: 0,
+        shareCount: 0,
+        createdAt: nil,
+        images: [],
+        target: .comment(postID: 202, commentID: 301),
+        mainPost: mainPost,
+        postInfo: postInfo
+      )
+
+      let mapped = TiebaCoreBrowseService.mapForumPostSearchResult(coreResult)
+
+      XCTAssertEqual(mapped.contexts.map(\.target), [.mainPost(threadID: 42)])
+      XCTAssertEqual(mapped.contexts.first?.summary.title, "Opening topic")
+    }
+  }
+
+  func testCoreMapperDoesNotUseInvalidParentAsThreadFallback() {
+    let wrongParent = TiebaSearchPostContext(
+      threadID: 42,
+      postID: 999,
+      title: "Wrong parent",
+      excerpt: "Wrong parent content",
+      authorID: 4,
+      authorName: "wrong parent author",
+      authorPortraitURL: nil
+    )
+    let coreResult = TiebaThreadSearchResult(
+      threadID: 42,
+      firstPostID: 0,
+      forumID: 7,
+      forumName: "swift",
+      title: "Nested match",
+      excerpt: "Matched comment",
+      authorID: 3,
+      authorName: "matched author",
+      authorPortraitURL: nil,
+      replyCount: 1,
+      likeCount: 0,
+      shareCount: 0,
+      createdAt: nil,
+      images: [],
+      target: .comment(postID: 202, commentID: 301),
+      postInfo: wrongParent
+    )
+
+    let mapped = TiebaCoreBrowseService.mapForumPostSearchResult(coreResult)
+
+    XCTAssertTrue(mapped.contexts.isEmpty)
+    XCTAssertEqual(mapped.thread.title, "Nested match")
+    XCTAssertEqual(mapped.thread.excerpt, "Matched comment")
+    XCTAssertEqual(mapped.thread.authorID, 3)
+    XCTAssertEqual(mapped.thread.authorName, "matched author")
+  }
+
+  func testCoreMapperRejectsKnownMainPostIDThatConflictsWithFirstPost() {
+    let wrongMain = TiebaSearchPostContext(
+      threadID: 42,
+      postID: 101,
+      title: "Wrong topic",
+      excerpt: "Wrong topic content",
+      authorID: 1,
+      authorName: "wrong topic author",
+      authorPortraitURL: nil
+    )
+    let coreResult = TiebaThreadSearchResult(
+      threadID: 42,
+      firstPostID: 100,
+      forumID: 7,
+      forumName: "swift",
+      title: "Reply match",
+      excerpt: "Matched reply",
+      authorID: 2,
+      authorName: "reply author",
+      authorPortraitURL: nil,
+      replyCount: 1,
+      likeCount: 0,
+      shareCount: 0,
+      createdAt: nil,
+      images: [],
+      target: .post(201),
+      mainPost: wrongMain
+    )
+
+    let mapped = TiebaCoreBrowseService.mapForumPostSearchResult(coreResult)
+
+    XCTAssertTrue(mapped.contexts.isEmpty)
+    XCTAssertEqual(mapped.thread.title, "Reply match")
+    XCTAssertEqual(mapped.thread.authorID, 2)
+    XCTAssertEqual(mapped.thread.authorName, "reply author")
   }
 
   func testCoreMapperPreservesBothSearchPreviewQualitiesAndGalleryFallback() throws {
@@ -975,7 +1118,6 @@ private enum ForumPostSearchFixtures {
       likeCount: 2,
       shareCount: 1,
       matchedContents: [],
-      context: nil,
       localVisibility: localVisibility
     )
   }
