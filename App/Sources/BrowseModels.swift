@@ -665,6 +665,7 @@ struct BrowseUserReply: Identifiable, Hashable, Sendable {
   var postID: Int64 { id.postID }
 
   var navigationTarget: UserReplyNavigationTarget? {
+    guard threadID > 0, postID > 0 else { return nil }
     switch target {
     case .post:
       return .thread(TiebaThreadRoute(threadID: threadID, postID: postID))
@@ -673,6 +674,11 @@ struct BrowseUserReply: Identifiable, Hashable, Sendable {
     case .unsupported:
       return nil
     }
+  }
+
+  var originThreadNavigationTarget: UserReplyNavigationTarget? {
+    guard threadID > 0 else { return nil }
+    return .thread(TiebaThreadRoute(threadID: threadID))
   }
 
   func withLocalVisibility(_ visibility: LocalContentVisibility) -> Self {

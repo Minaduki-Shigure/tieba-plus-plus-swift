@@ -105,8 +105,10 @@ and its verified metadata enters the public app source.
   keeps the server snapshot timestamp in memory per exact account session, and
   rejects stale pages after logout, account switching, or credential rotation.
   Both feeds preserve local filtering and media preferences. Public profiles
-  also expose separate reply history plus following and follower lists;
-  their bounded public liked-forum preview now links to an independently paginated,
+  also expose separate reply history plus following and follower lists. A
+  public-reply card keeps its reply body bound to the exact floor or nested
+  reply, while its topic title independently opens the origin thread. Their
+  bounded public liked-forum preview now links to an independently paginated,
   login-gated complete list for either the current or another user. That list is
   bound to the active account session and target UID and never enters the global
   current-account followed-forum index. The account page reads a bounded,

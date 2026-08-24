@@ -87,6 +87,43 @@ private enum UserProfileActivity: String, CaseIterable, Hashable, Identifiable, 
   }
 }
 
+struct UserActivityReplyRowPresentation: Equatable, Sendable {
+  let replyTarget: UserReplyNavigationTarget?
+  let originThreadTarget: UserReplyNavigationTarget?
+  let originThreadTitle: String?
+  let originThreadAccessibilityLabel: String?
+
+  init(reply: BrowseUserReply) {
+    guard reply.localVisibility == .visible else {
+      replyTarget = nil
+      originThreadTarget = nil
+      originThreadTitle = nil
+      originThreadAccessibilityLabel = nil
+      return
+    }
+
+    let exactTarget = reply.navigationTarget
+    let originTarget = reply.originThreadNavigationTarget
+    let title = reply.threadTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    let displayTitle: String?
+    let accessibilityLabel: String?
+    if title.isEmpty {
+      displayTitle = originTarget == nil ? nil : "查看原主题"
+      accessibilityLabel = originTarget == nil ? nil : "查看原主题"
+    } else {
+      displayTitle = title
+      accessibilityLabel = originTarget == nil
+        ? nil
+        : "打开原主题：\(title)"
+    }
+
+    replyTarget = exactTarget
+    originThreadTarget = originTarget
+    originThreadTitle = displayTitle
+    originThreadAccessibilityLabel = accessibilityLabel
+  }
+}
+
 struct UserProfileView: View {
   @Environment(\.accountAccess) private var accountAccess
   @Environment(\.contentFilterRepository) private var contentFilterRepository
@@ -106,6 +143,7 @@ struct UserProfileView: View {
   @State private var portraitPresentation: UserProfilePortraitPresentation?
   @State private var relationKind: UserRelationKind?
   @State private var threadNavigationRequest: ThreadSummaryNavigationRequest?
+  @State private var userReplyNavigationTarget: UserReplyNavigationTarget?
   @State private var interactionRestrictionsPresentation:
     UserInteractionRestrictionsPresentation?
 
@@ -225,6 +263,13 @@ struct UserProfileView: View {
     .navigationDestination(isPresented: threadNavigationPresented) {
       if let request = threadNavigationRequest {
         threadDestination(request)
+      } else {
+        EmptyView()
+      }
+    }
+    .navigationDestination(isPresented: userReplyNavigationPresented) {
+      if let target = userReplyNavigationTarget {
+        userReplyDestination(for: target)
       } else {
         EmptyView()
       }
@@ -419,14 +464,8 @@ struct UserProfileView: View {
               visibility: reply.localVisibility,
               placeholder: "已屏蔽此公开回复"
             ) {
-              if let target = reply.navigationTarget {
-                NavigationLink {
-                  userReplyDestination(for: target)
-                } label: {
-                  UserActivityReplyRow(reply: reply)
-                }
-              } else {
-                UserActivityReplyRow(reply: reply)
+              UserActivityReplyRow(reply: reply) { target in
+                userReplyNavigationTarget = target
               }
             }
             .frame(minHeight: 44)
@@ -532,6 +571,15 @@ struct UserProfileView: View {
       get: { threadNavigationRequest != nil },
       set: { isPresented in
         if !isPresented { threadNavigationRequest = nil }
+      }
+    )
+  }
+
+  private var userReplyNavigationPresented: Binding<Bool> {
+    Binding(
+      get: { userReplyNavigationTarget != nil },
+      set: { isPresented in
+        if !isPresented { userReplyNavigationTarget = nil }
       }
     )
   }
@@ -1097,8 +1145,64 @@ private struct UserRelationshipControl: View {
 
 private struct UserActivityReplyRow: View {
   let reply: BrowseUserReply
+  let onNavigate: (UserReplyNavigationTarget) -> Void
 
   var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      if let target = presentation.replyTarget {
+        Button {
+          onNavigate(target)
+        } label: {
+          replySummary
+            .frame(minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+            .accessibilityElement(children: .combine)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("打开该回复位置")
+        .help("查看这条回复")
+      } else {
+        replySummary
+          .accessibilityElement(children: .combine)
+      }
+
+      if let title = presentation.originThreadTitle {
+        if let target = presentation.originThreadTarget {
+          Button {
+            onNavigate(target)
+          } label: {
+            HStack(spacing: 8) {
+              Text(title)
+                .lineLimit(2)
+              Spacer(minLength: 0)
+              Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .accessibilityHidden(true)
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel(presentation.originThreadAccessibilityLabel ?? "打开原主题")
+          .help("打开原主题")
+        } else {
+          Text(title)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+        }
+      }
+    }
+    .padding(.vertical, 4)
+  }
+
+  private var presentation: UserActivityReplyRowPresentation {
+    UserActivityReplyRowPresentation(reply: reply)
+  }
+
+  private var replySummary: some View {
     VStack(alignment: .leading, spacing: 6) {
       HStack(alignment: .firstTextBaseline, spacing: 8) {
         if !reply.forumName.isEmpty {
@@ -1122,16 +1226,8 @@ private struct UserActivityReplyRow: View {
         .font(.body)
         .foregroundStyle(.primary)
         .lineLimit(4)
-
-      if !reply.threadTitle.isEmpty {
-        Text(reply.threadTitle)
-          .font(.callout)
-          .foregroundStyle(.secondary)
-          .lineLimit(2)
-      }
     }
-    .padding(.vertical, 4)
-    .accessibilityElement(children: .combine)
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private var targetLabel: String {

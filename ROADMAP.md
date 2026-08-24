@@ -120,6 +120,13 @@ check-in page, Tieba cloud favorites, search, and replies inbox through the iOS
 16-and-later scene lifecycle. They add no endpoint, data source, background
 behavior, or weighted point. The public `v0.62.3-alpha.1` IPA does not include
 them.
+Public-reply cards now match TiebaLite's independent destination controls: the
+reply body retains its exact floor or nested-reply target, while the displayed
+topic title opens the origin thread without carrying that reply anchor. Unknown
+reply types still expose no guessed exact target, but may open a separately
+validated positive thread ID. This reuses existing anonymous readers and adds no
+request, data source, or weighted point. The public `v0.62.3-alpha.1` IPA does
+not include this interaction.
 The configurable forum primary action likewise completes a narrow local habit
 setting by rearranging existing controls, so it remains inside the existing
 local-settings credit rather than adding a weighted point.
@@ -853,7 +860,9 @@ records, so mapping flattens every inner record and terminates only after an
 empty raw page. Ordinary floors navigate with the inner post ID. Nested replies
 send only the thread and inner child ID to the existing public parent resolver;
 the outer group post ID is never treated as a parent. Unknown post types remain
-visible but have no guessed navigation. TiebaLite presents this history only for
+visible but have no guessed reply navigation; their independently validated
+positive origin-thread identity can still open the ordinary topic reader.
+TiebaLite presents this history only for
 the current account, while the separately researched guest contract exposes the
 same public data without credentials or account-only fields.
 The account page now reads a minimal authenticated self-profile summary bound to

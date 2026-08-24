@@ -188,7 +188,7 @@ final class UserRepliesViewModelTests: XCTestCase {
     XCTAssertEqual(requests.map(\.page), [1, 2, 2])
   }
 
-  func testNavigationUsesTheInnerReplyIdentityAndUnknownTypeFailsClosed() {
+  func testNavigationSeparatesExactReplyAndOriginThreadAndUnknownTypeFailsClosed() {
     let post = BrowseUserReply.fixture(threadID: 60, postID: 600, target: .post)
     let comment = BrowseUserReply.fixture(threadID: 61, postID: 601, target: .comment)
     let unknown = BrowseUserReply.fixture(
@@ -203,6 +203,95 @@ final class UserRepliesViewModelTests: XCTestCase {
     )
     XCTAssertEqual(comment.navigationTarget, .comment(threadID: 61, commentID: 601))
     XCTAssertNil(unknown.navigationTarget)
+
+    XCTAssertEqual(
+      post.originThreadNavigationTarget,
+      .thread(TiebaThreadRoute(threadID: 60))
+    )
+    XCTAssertEqual(
+      comment.originThreadNavigationTarget,
+      .thread(TiebaThreadRoute(threadID: 61))
+    )
+    XCTAssertEqual(
+      unknown.originThreadNavigationTarget,
+      .thread(TiebaThreadRoute(threadID: 62))
+    )
+  }
+
+  func testNavigationRejectsNonpositiveReplyIdentities() {
+    let zeroThread = BrowseUserReply.fixture(threadID: 0, postID: 600)
+    let negativeThread = BrowseUserReply.fixture(threadID: -1, postID: 600)
+    let zeroPost = BrowseUserReply.fixture(threadID: 60, postID: 0)
+    let negativePost = BrowseUserReply.fixture(threadID: 60, postID: -1)
+
+    for reply in [zeroThread, negativeThread] {
+      XCTAssertNil(reply.navigationTarget)
+      XCTAssertNil(reply.originThreadNavigationTarget)
+    }
+    for reply in [zeroPost, negativePost] {
+      XCTAssertNil(reply.navigationTarget)
+      XCTAssertEqual(
+        reply.originThreadNavigationTarget,
+        .thread(TiebaThreadRoute(threadID: 60))
+      )
+    }
+  }
+
+  func testReplyRowPresentationKeepsActionsIndependentAndFiltersFailClosed() {
+    let reply = BrowseUserReply.fixture(
+      threadID: 60,
+      postID: 600,
+      threadTitle: " 原主题 "
+    )
+    let presentation = UserActivityReplyRowPresentation(reply: reply)
+
+    XCTAssertEqual(
+      presentation.replyTarget,
+      .thread(TiebaThreadRoute(threadID: 60, postID: 600))
+    )
+    XCTAssertEqual(
+      presentation.originThreadTarget,
+      .thread(TiebaThreadRoute(threadID: 60))
+    )
+    XCTAssertEqual(presentation.originThreadTitle, "原主题")
+    XCTAssertEqual(presentation.originThreadAccessibilityLabel, "打开原主题：原主题")
+
+    let placeholder = UserActivityReplyRowPresentation(
+      reply: reply.withLocalVisibility(.placeholder)
+    )
+    let hidden = UserActivityReplyRowPresentation(
+      reply: reply.withLocalVisibility(.hidden)
+    )
+    XCTAssertNil(placeholder.replyTarget)
+    XCTAssertNil(placeholder.originThreadTarget)
+    XCTAssertNil(placeholder.originThreadTitle)
+    XCTAssertNil(placeholder.originThreadAccessibilityLabel)
+    XCTAssertNil(hidden.replyTarget)
+    XCTAssertNil(hidden.originThreadTarget)
+    XCTAssertNil(hidden.originThreadTitle)
+    XCTAssertNil(hidden.originThreadAccessibilityLabel)
+  }
+
+  func testReplyRowPresentationUsesStableFallbackForUntitledOrigin() {
+    let reply = BrowseUserReply.fixture(
+      threadID: 60,
+      postID: 600,
+      threadTitle: " \n "
+    )
+    let presentation = UserActivityReplyRowPresentation(reply: reply)
+
+    XCTAssertEqual(presentation.originThreadTitle, "查看原主题")
+    XCTAssertEqual(presentation.originThreadAccessibilityLabel, "查看原主题")
+
+    let literalTitle = UserActivityReplyRowPresentation(
+      reply: BrowseUserReply.fixture(
+        threadID: 61,
+        postID: 601,
+        threadTitle: "查看原主题"
+      )
+    )
+    XCTAssertEqual(literalTitle.originThreadTitle, "查看原主题")
+    XCTAssertEqual(literalTitle.originThreadAccessibilityLabel, "打开原主题：查看原主题")
   }
 
   func testCoreMappingAppliesReplyFiltersWithoutDroppingRawItems() {
@@ -328,6 +417,7 @@ extension BrowseUserReply {
   fileprivate static func fixture(
     threadID: Int64,
     postID: Int64,
+    threadTitle: String? = nil,
     target: BrowseUserReplyTarget = .post,
     localVisibility: LocalContentVisibility = .visible
   ) -> BrowseUserReply {
@@ -336,7 +426,7 @@ extension BrowseUserReply {
       postID: postID,
       forumID: 42,
       forumName: "swift",
-      threadTitle: "thread-\(threadID)",
+      threadTitle: threadTitle ?? "thread-\(threadID)",
       excerpt: "reply-\(postID)",
       createdAt: nil,
       authorID: 7,

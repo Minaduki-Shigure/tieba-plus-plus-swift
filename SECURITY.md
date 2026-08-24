@@ -722,6 +722,13 @@ are authoritative; the outer group post ID must never be used as a reply ID or
 nested-reply parent. Type zero can navigate to that exact ordinary floor. Type
 one can pass only the thread ID and inner child ID to the existing child-only
 parent resolver. Unknown types remain non-navigable instead of being guessed.
+The separately actionable topic title may construct only an ordinary origin-
+thread route from a positive thread ID and must never inherit the inner post ID,
+outer group post ID, title text, forum text, or excerpt as routing identity.
+Nonpositive thread or inner post IDs fail closed for their corresponding target.
+Placeholder and hidden replies construct neither action. These two controls
+reuse the existing credential-free readers and perform no request while a list
+row is rendered.
 Pagination ends on an empty raw group list, while duplicate-only or wholly
 unusable mapped pages stop local continuation without rewriting prior results.
 
