@@ -1295,6 +1295,19 @@ count exceeds that bound. Explicit higher-resolution image views retain the
 canceled when the final waiter disappears, so scrolling cannot leave orphaned
 preview transfers running in the background.
 
+A reply counter on an ordinary, locally visible thread card is an explicit
+navigation control only. Card rendering performs no reply lookup or prefetch,
+and the displayed count is neither an identifier nor proof that a displayable
+reply exists. The navigation request reuses the already-rendered card model; its
+canonical link route derives identity only from the validated positive thread ID,
+while a typed first-reply intent is carried separately. After the canonical
+thread response passes the existing identity checks and local filtering, initial
+focus may select its first non-hidden reply. Pinned, hidden, placeholder, and
+invalid-ID cards expose no reply route. Loading or validation failure retains the
+existing error-and-retry path. After a successful load, if no non-hidden reply
+remains, no scroll target is installed; the topic stays at its normal top
+position and reports that no displayable reply is available.
+
 An image gallery always starts from the already filtered `BrowseContent` array
 that owns the tapped image. Whole-thread expansion is available only for an
 ordinary topic floor after a fresh local filter snapshot confirms there are no

@@ -105,6 +105,7 @@ struct UserProfileView: View {
   @State private var contentFilterMessage: String?
   @State private var portraitPresentation: UserProfilePortraitPresentation?
   @State private var relationKind: UserRelationKind?
+  @State private var threadNavigationRequest: ThreadSummaryNavigationRequest?
   @State private var interactionRestrictionsPresentation:
     UserInteractionRestrictionsPresentation?
 
@@ -220,6 +221,13 @@ struct UserProfileView: View {
         )
       }
     }
+    .navigationDestination(isPresented: threadNavigationPresented) {
+      if let request = threadNavigationRequest {
+        threadDestination(request)
+      } else {
+        EmptyView()
+      }
+    }
     .task { viewModel.loadIfNeeded() }
     .task { await accountIdentity.resolve(access: accountAccess) }
     .task(id: selectedActivity) {
@@ -331,17 +339,12 @@ struct UserProfileView: View {
                 visibility: thread.localVisibility,
                 placeholder: "已屏蔽此公开主题"
               ) {
-                NavigationLink {
-                  ThreadView(
-                    thread: thread,
-                    service: service,
-                    historyRepository: historyRepository,
-                    favoritesRepository: favoritesRepository,
-                    searchHistoryRepository: searchHistoryRepository
-                  )
-                } label: {
-                  UserActivityThreadRow(thread: thread)
-                }
+                ThreadSummaryRow(
+                  thread: thread,
+                  showsForum: true,
+                  showsAuthor: false,
+                  onNavigate: { threadNavigationRequest = $0 }
+                )
               }
               .frame(minHeight: 44)
             }
@@ -521,6 +524,28 @@ struct UserProfileView: View {
         }
       }
     )
+  }
+
+  private var threadNavigationPresented: Binding<Bool> {
+    Binding(
+      get: { threadNavigationRequest != nil },
+      set: { isPresented in
+        if !isPresented { threadNavigationRequest = nil }
+      }
+    )
+  }
+
+  private func threadDestination(_ request: ThreadSummaryNavigationRequest) -> some View {
+    ThreadView(
+      thread: request.thread,
+      service: service,
+      historyRepository: historyRepository,
+      favoritesRepository: favoritesRepository,
+      searchHistoryRepository: searchHistoryRepository,
+      linkRoute: request.linkRoute,
+      initialFocus: request.initialFocus
+    )
+    .id(request.destinationID)
   }
 
   @ViewBuilder
@@ -1056,14 +1081,6 @@ private struct UserRelationshipControl: View {
   private func confirmFollowedState(_ isFollowed: Bool) {
     pendingFollowedState = nil
     Task { @MainActor in await viewModel.setFollowed(isFollowed) }
-  }
-}
-
-private struct UserActivityThreadRow: View {
-  let thread: BrowseThread
-
-  var body: some View {
-    ThreadSummaryRow(thread: thread, showsForum: true, showsAuthor: false)
   }
 }
 

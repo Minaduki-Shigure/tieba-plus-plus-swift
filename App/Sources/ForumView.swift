@@ -9,6 +9,7 @@ private enum ForumScrollTarget: Hashable {
 private enum ForumNavigationDestination {
   case newThread(NewThreadTarget)
   case createdThread(BrowseThread)
+  case thread(ThreadSummaryNavigationRequest)
 }
 
 struct ForumView: View {
@@ -154,6 +155,8 @@ struct ForumView: View {
             )
           )
           .id("created-thread:\(createdThread.id):\(createdThread.firstPostID)")
+        case .thread(let request):
+          threadDestination(request)
         case nil:
           EmptyView()
         }
@@ -466,17 +469,10 @@ struct ForumView: View {
           visibility: thread.localVisibility,
           placeholder: "已屏蔽此主题"
         ) {
-          NavigationLink {
-            ThreadView(
-              thread: thread,
-              service: service,
-              historyRepository: historyRepository,
-              favoritesRepository: favoritesRepository,
-              searchHistoryRepository: searchHistoryRepository
-            )
-          } label: {
-            ThreadRow(thread: thread)
-          }
+          ThreadSummaryRow(
+            thread: thread,
+            onNavigate: { navigationDestination = .thread($0) }
+          )
         }
         .onAppear {
           viewModel.loadMoreIfNeeded(current: thread)
@@ -506,6 +502,19 @@ struct ForumView: View {
     }
     .listStyle(.plain)
     .refreshable { await viewModel.refresh() }
+  }
+
+  private func threadDestination(_ request: ThreadSummaryNavigationRequest) -> some View {
+    ThreadView(
+      thread: request.thread,
+      service: service,
+      historyRepository: historyRepository,
+      favoritesRepository: favoritesRepository,
+      searchHistoryRepository: searchHistoryRepository,
+      linkRoute: request.linkRoute,
+      initialFocus: request.initialFocus
+    )
+    .id(request.destinationID)
   }
 }
 
@@ -849,13 +858,5 @@ private struct ForumHeaderView: View {
       }
     }
     .padding(.vertical, 6)
-  }
-}
-
-private struct ThreadRow: View {
-  let thread: BrowseThread
-
-  var body: some View {
-    ThreadSummaryRow(thread: thread)
   }
 }

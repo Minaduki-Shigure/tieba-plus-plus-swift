@@ -92,6 +92,13 @@ interaction gap inside the existing media credit. It reuses the one established
 lazy AVKit player, stream policy, landing-page router, and playback coordinator;
 it adds no endpoint, media source, or weighted point. Compact-media mode remains
 passive, and an expanded card allocates no player before an explicit Play tap.
+Reply-count navigation on shared thread cards closes another narrow TiebaLite
+reading interaction gap. It reuses the canonical thread route and initial-page
+response, adding no endpoint, data source, or weighted point. Its canonical link
+route derives identity from the card's validated positive thread ID and pairs it
+with a typed first-reply intent. After existing response validation and local
+filtering, the first locally displayable reply becomes the initial scroll target,
+otherwise the thread opens normally.
 Independent per-forum search navigation likewise closes a narrow TiebaLite
 reading gap inside the existing search credit. A matched result, its exact
 parent-floor context, and its owning-topic context are separate controls; the
@@ -205,9 +212,11 @@ the source metadata is updated to that tested IPA.
 - Reply-time and creation-time forum sorting
 - Global default sorting with normalized per-forum sort memory
 - Server-defined forum channels with bounded server-provided sorting menus and cursor pagination
-- Shared rich thread cards across forum, channel, hot-topic, global-search, and public profiles
+- Shared rich thread cards across forum, channel, concern, personalized, hot,
+  hot-topic, global-search, and public-profile surfaces
 - Compact pinned rows, bounded author avatars, topic-state badges, image previews,
-  and explicit non-autoplay video playback on expanded thread cards
+  explicit non-autoplay video playback on expanded thread cards, and a separate
+  reply-counter entry to the first locally displayable reply
 - Forum header, statistics, rules state, and featured classifications
 - Public forum introductions with original avatars and server statistics
 - Full forum-rule documents with publisher and rich section content

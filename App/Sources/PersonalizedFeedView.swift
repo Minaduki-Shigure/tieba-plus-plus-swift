@@ -19,6 +19,7 @@ struct PersonalizedFeedView: View {
   @StateObject private var followedForumIndexViewModel: PersonalizedFollowedForumIndexViewModel
   @State private var showsLogin = false
   @State private var feedbackPrompt: PersonalizedFeedbackPrompt?
+  @State private var threadNavigationRequest: ThreadSummaryNavigationRequest?
   @State private var isVisible = false
   @State private var personaReloadTask: Task<Void, Never>?
   @AppStorage(AppPreferenceKey.personalizedFollowedForumsOnly)
@@ -115,6 +116,13 @@ struct PersonalizedFeedView: View {
       followedForumIndexViewModel.accountDataDidChange(
         loadIfNeeded: isVisible && isActive && followedForumsOnly
       )
+    }
+    .navigationDestination(isPresented: threadNavigationPresented) {
+      if let request = threadNavigationRequest {
+        threadDestination(request)
+      } else {
+        EmptyView()
+      }
     }
     .sheet(isPresented: $showsLogin) {
       NavigationStack {
@@ -288,18 +296,11 @@ struct PersonalizedFeedView: View {
             placeholder: "已屏蔽此推荐帖子"
           ) {
             HStack(spacing: 8) {
-              NavigationLink {
-                ThreadView(
-                  thread: item.thread,
-                  service: service,
-                  historyRepository: historyRepository,
-                  favoritesRepository: favoritesRepository,
-                  searchHistoryRepository: searchHistoryRepository
-                )
-              } label: {
-                ThreadSummaryRow(thread: item.thread, showsForum: true)
-                  .frame(maxWidth: .infinity, alignment: .leading)
-              }
+              ThreadSummaryRow(
+                thread: item.thread,
+                showsForum: true,
+                onNavigate: { threadNavigationRequest = $0 }
+              )
               .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
 
               if viewModel.usesAccountPersona, !item.feedbackReasons.isEmpty {
@@ -355,6 +356,28 @@ struct PersonalizedFeedView: View {
     } message: {
       Text(viewModel.feedbackFailure?.message ?? "推荐反馈提交失败，请稍后重试。")
     }
+  }
+
+  private var threadNavigationPresented: Binding<Bool> {
+    Binding(
+      get: { threadNavigationRequest != nil },
+      set: { isPresented in
+        if !isPresented { threadNavigationRequest = nil }
+      }
+    )
+  }
+
+  private func threadDestination(_ request: ThreadSummaryNavigationRequest) -> some View {
+    ThreadView(
+      thread: request.thread,
+      service: service,
+      historyRepository: historyRepository,
+      favoritesRepository: favoritesRepository,
+      searchHistoryRepository: searchHistoryRepository,
+      linkRoute: request.linkRoute,
+      initialFocus: request.initialFocus
+    )
+    .id(request.destinationID)
   }
 
   private func feedbackButton(for item: PersonalizedFeedItem) -> some View {

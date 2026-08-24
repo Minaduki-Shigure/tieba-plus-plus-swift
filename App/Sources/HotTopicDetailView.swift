@@ -9,6 +9,7 @@ struct HotTopicDetailView: View {
   let searchHistoryRepository: any ForumSearchHistoryRepository
 
   @StateObject private var viewModel: HotTopicDetailViewModel
+  @State private var threadNavigationRequest: ThreadSummaryNavigationRequest?
 
   init(
     topic: HotTopicItem,
@@ -46,6 +47,13 @@ struct HotTopicDetailView: View {
     .navigationBarTitleDisplayMode(.inline)
     .task { viewModel.loadIfNeeded() }
     .onDisappear(perform: viewModel.cancel)
+    .navigationDestination(isPresented: threadNavigationPresented) {
+      if let request = threadNavigationRequest {
+        threadDestination(request)
+      } else {
+        EmptyView()
+      }
+    }
     .alert(
       "\u{5237}\u{65b0}\u{5931}\u{8d25}",
       isPresented: Binding(
@@ -89,17 +97,11 @@ struct HotTopicDetailView: View {
             .foregroundStyle(.secondary)
         } else {
           ForEach(viewModel.threads) { thread in
-            NavigationLink {
-              ThreadView(
-                thread: thread,
-                service: service,
-                historyRepository: historyRepository,
-                favoritesRepository: favoritesRepository,
-                searchHistoryRepository: searchHistoryRepository
-              )
-            } label: {
-              HotTopicThreadRow(thread: thread)
-            }
+            ThreadSummaryRow(
+              thread: thread,
+              showsForum: true,
+              onNavigate: { threadNavigationRequest = $0 }
+            )
             .onAppear { viewModel.loadMoreIfNeeded(current: thread) }
           }
         }
@@ -119,6 +121,28 @@ struct HotTopicDetailView: View {
     }
     .listStyle(.plain)
     .refreshable { await viewModel.refresh() }
+  }
+
+  private var threadNavigationPresented: Binding<Bool> {
+    Binding(
+      get: { threadNavigationRequest != nil },
+      set: { isPresented in
+        if !isPresented { threadNavigationRequest = nil }
+      }
+    )
+  }
+
+  private func threadDestination(_ request: ThreadSummaryNavigationRequest) -> some View {
+    ThreadView(
+      thread: request.thread,
+      service: service,
+      historyRepository: historyRepository,
+      favoritesRepository: favoritesRepository,
+      searchHistoryRepository: searchHistoryRepository,
+      linkRoute: request.linkRoute,
+      initialFocus: request.initialFocus
+    )
+    .id(request.destinationID)
   }
 }
 
@@ -180,13 +204,5 @@ private struct HotTopicForumRow: View {
       }
     }
     .padding(.vertical, 3)
-  }
-}
-
-private struct HotTopicThreadRow: View {
-  let thread: BrowseThread
-
-  var body: some View {
-    ThreadSummaryRow(thread: thread, showsForum: true)
   }
 }

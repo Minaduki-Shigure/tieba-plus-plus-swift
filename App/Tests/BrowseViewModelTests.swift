@@ -2657,6 +2657,255 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testThreadInitialFirstReplyFocusTargetsFirstNonHiddenReplyWithoutLocationRequest()
+    async throws
+  {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 4_011, firstPostID: 401_101)
+    let firstPost = Fixtures.post(id: 401_101, threadID: thread.id, floor: 1)
+    let hiddenReply = Fixtures.post(
+      id: 401_102,
+      threadID: thread.id,
+      floor: 2,
+      localVisibility: .hidden
+    )
+    let visibleReply = Fixtures.post(id: 401_103, threadID: thread.id, floor: 3)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [hiddenReply, visibleReply],
+          currentPage: 1,
+          hasMore: false,
+          firstPost: firstPost
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(
+      thread: thread,
+      service: service,
+      initialFocus: .firstReply
+    )
+
+    viewModel.loadIfNeeded()
+    await viewModel.waitForCurrentLoad()
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.firstPost, firstPost)
+    XCTAssertEqual(viewModel.posts, [hiddenReply, visibleReply])
+    XCTAssertEqual(viewModel.firstDisplayableReplyPostID, visibleReply.id)
+    XCTAssertEqual(viewModel.scrollTargetPostID, visibleReply.id)
+    XCTAssertNil(viewModel.positionNotice)
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(
+      requests,
+      [PostRequest(threadID: thread.id, page: 1, pageSize: 30, location: nil)]
+    )
+  }
+
+  @MainActor
+  func testThreadInitialFirstReplyFocusStaysAtTopWhenAllRepliesAreHidden() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 4_012, firstPostID: 401_201)
+    let firstPost = Fixtures.post(id: 401_201, threadID: thread.id, floor: 1)
+    let hiddenReply = Fixtures.post(
+      id: 401_202,
+      threadID: thread.id,
+      floor: 2,
+      localVisibility: .hidden
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [hiddenReply],
+          currentPage: 1,
+          hasMore: false,
+          firstPost: firstPost
+        )
+      )
+    )
+    let laterVisibleReply = Fixtures.post(id: 401_203, threadID: thread.id, floor: 3)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [laterVisibleReply],
+          currentPage: 1,
+          hasMore: false,
+          firstPost: firstPost
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(
+      thread: thread,
+      service: service,
+      initialFocus: .firstReply
+    )
+
+    viewModel.loadIfNeeded()
+    await viewModel.waitForCurrentLoad()
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertNil(viewModel.firstDisplayableReplyPostID)
+    XCTAssertNil(viewModel.scrollTargetPostID)
+    XCTAssertEqual(viewModel.positionNotice, "暂无可显示的回复。")
+
+    await viewModel.refresh()
+
+    XCTAssertEqual(viewModel.posts, [laterVisibleReply])
+    XCTAssertNil(viewModel.scrollTargetPostID)
+    XCTAssertNil(viewModel.positionNotice)
+  }
+
+  @MainActor
+  func testThreadInitialFirstReplyFocusTreatsPlaceholderReplyAsDisplayable() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 4_016)
+    let placeholderReply = Fixtures.post(
+      id: 401_601,
+      threadID: thread.id,
+      localVisibility: .placeholder
+    )
+    let visibleReply = Fixtures.post(id: 401_602, threadID: thread.id)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [placeholderReply, visibleReply],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(
+      thread: thread,
+      service: service,
+      initialFocus: .firstReply
+    )
+
+    viewModel.loadIfNeeded()
+    await viewModel.waitForCurrentLoad()
+
+    XCTAssertEqual(viewModel.firstDisplayableReplyPostID, placeholderReply.id)
+    XCTAssertEqual(viewModel.firstVisibleReplyPostID, visibleReply.id)
+    XCTAssertEqual(viewModel.scrollTargetPostID, placeholderReply.id)
+  }
+
+  @MainActor
+  func testThreadInitialFirstReplyFocusIsConsumedAfterSuccessfulLoad() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 4_013)
+    let initialReply = Fixtures.post(id: 401_301, threadID: thread.id)
+    let refreshedReply = Fixtures.post(id: 401_302, threadID: thread.id)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [initialReply],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [refreshedReply],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(
+      thread: thread,
+      service: service,
+      initialFocus: .firstReply
+    )
+
+    viewModel.loadIfNeeded()
+    await viewModel.waitForCurrentLoad()
+    XCTAssertEqual(viewModel.scrollTargetPostID, initialReply.id)
+    viewModel.consumeScrollTarget()
+
+    await viewModel.refresh()
+
+    XCTAssertEqual(viewModel.posts, [refreshedReply])
+    XCTAssertNil(viewModel.scrollTargetPostID)
+    XCTAssertNil(viewModel.positionNotice)
+  }
+
+  @MainActor
+  func testThreadInitialFirstReplyFocusSurvivesInitialFailure() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 4_014)
+    let reply = Fixtures.post(id: 401_401, threadID: thread.id)
+    await service.enqueuePosts(.failure(StubFailure(message: "thread unavailable")))
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [reply],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(
+      thread: thread,
+      service: service,
+      initialFocus: .firstReply
+    )
+
+    viewModel.loadIfNeeded()
+    await viewModel.waitForCurrentLoad()
+    XCTAssertEqual(viewModel.state, .failed("thread unavailable"))
+
+    viewModel.reload()
+    await viewModel.waitForCurrentLoad()
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.scrollTargetPostID, reply.id)
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(requests.count, 2)
+    XCTAssertTrue(requests.allSatisfy { $0.location == nil })
+  }
+
+  @MainActor
+  func testExplicitPostLocationTakesPriorityOverInitialFirstReplyFocus() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 4_015)
+    let firstReply = Fixtures.post(id: 401_501, threadID: thread.id)
+    let requestedReply = Fixtures.post(id: 401_502, threadID: thread.id)
+    let location = ThreadPostLocation.postID(requestedReply.id)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [firstReply, requestedReply],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(
+      thread: thread,
+      service: service,
+      initialLocation: location,
+      initialFocus: .firstReply
+    )
+
+    viewModel.loadIfNeeded()
+    await viewModel.waitForCurrentLoad()
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.scrollTargetPostID, requestedReply.id)
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(requests.map(\.location), [location])
+  }
+
+  @MainActor
   func testThreadExtractsLegacyFirstPostOnlyWithMatchingMetadata() async throws {
     let service = ScriptedBrowseService()
     let thread = Fixtures.thread(id: 402, firstPostID: 40_201)

@@ -7,6 +7,10 @@ struct ThreadScrollTargetDescriptor: Equatable, Sendable {
   let tracksPrependAnchor: Bool
 }
 
+enum ThreadInitialFocus: Equatable, Sendable {
+  case firstReply
+}
+
 @MainActor
 final class ThreadViewModel: ObservableObject {
   @Published private(set) var thread: BrowseThread
@@ -40,6 +44,7 @@ final class ThreadViewModel: ObservableObject {
   private var loadTask: Task<Void, Never>?
   private var loadGeneration = 0
   private var initialLocation: ThreadPostLocation?
+  private var pendingInitialFocus: ThreadInitialFocus?
   private var failedJumpPage: Int?
   private var lowestLoadedPage = 0
   private var previousLoadAnchorPostID: Int64?
@@ -59,7 +64,8 @@ final class ThreadViewModel: ObservableObject {
     thread: BrowseThread,
     service: any BrowseService,
     options: ThreadBrowseOptions = ThreadBrowseOptions(),
-    initialLocation: ThreadPostLocation? = nil
+    initialLocation: ThreadPostLocation? = nil,
+    initialFocus: ThreadInitialFocus? = nil
   ) {
     self.thread = thread
     self.originThread = nil
@@ -68,6 +74,7 @@ final class ThreadViewModel: ObservableObject {
     self.service = service
     self.options = options
     self.initialLocation = options.sort == .hot ? nil : initialLocation
+    self.pendingInitialFocus = initialFocus
     self.resolvedThreadAuthorAvatarURL = ThreadAuthorAvatarResolver.resolve(
       thread: thread,
       firstPost: nil,
@@ -493,6 +500,7 @@ final class ThreadViewModel: ObservableObject {
         )
 
         var resolvedScrollTarget: Int64?
+        var didResolveInitialReplyFocus = false
         var effectiveLocation = location
         var didFallBackFromMissingPosition = false
         var didHideRequestedPosition = false
@@ -543,6 +551,11 @@ final class ThreadViewModel: ObservableObject {
           })?.id ?? normalized.firstPost.flatMap {
             $0.localVisibility == .hidden ? nil : $0.id
           }
+        } else if replacing, pendingInitialFocus == .firstReply {
+          didResolveInitialReplyFocus = true
+          resolvedScrollTarget = normalized.replies.first(where: {
+            $0.localVisibility != .hidden
+          })?.id
         }
 
         if prepending {
@@ -714,10 +727,13 @@ final class ThreadViewModel: ObservableObject {
             positionNotice = "目标楼层已按本地规则隐藏。"
           } else if didFallBackFromMissingPosition {
             positionNotice = "上次阅读位置已失效或不符合当前筛选，已显示当前可用内容。"
+          } else if didResolveInitialReplyFocus, resolvedScrollTarget == nil {
+            positionNotice = "暂无可显示的回复。"
           } else {
             positionNotice = nil
           }
           initialLocation = nil
+          pendingInitialFocus = nil
         }
         jumpError = nil
         failedJumpPage = nil

@@ -12,6 +12,7 @@ struct ConcernFeedView: View {
 
   @StateObject private var viewModel: ConcernFeedViewModel
   @State private var showsLogin = false
+  @State private var threadNavigationRequest: ThreadSummaryNavigationRequest?
 
   init(
     isActive: Bool,
@@ -65,6 +66,13 @@ struct ConcernFeedView: View {
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       viewModel.contentFilterDidChange()
     }
+    .navigationDestination(isPresented: threadNavigationPresented) {
+      if let request = threadNavigationRequest {
+        threadDestination(request)
+      } else {
+        EmptyView()
+      }
+    }
     .sheet(isPresented: $showsLogin) {
       NavigationStack {
         LoginView(service: accountService, vault: vault) {}
@@ -105,17 +113,11 @@ struct ConcernFeedView: View {
             visibility: thread.localVisibility,
             placeholder: "已屏蔽此关注帖子"
           ) {
-            NavigationLink {
-              ThreadView(
-                thread: thread,
-                service: browseService,
-                historyRepository: historyRepository,
-                favoritesRepository: favoritesRepository,
-                searchHistoryRepository: searchHistoryRepository
-              )
-            } label: {
-              ThreadSummaryRow(thread: thread, showsForum: true)
-            }
+            ThreadSummaryRow(
+              thread: thread,
+              showsForum: true,
+              onNavigate: { threadNavigationRequest = $0 }
+            )
           }
         }
       }
@@ -140,5 +142,27 @@ struct ConcernFeedView: View {
     }
     .listStyle(.plain)
     .refreshable { await viewModel.refresh() }
+  }
+
+  private var threadNavigationPresented: Binding<Bool> {
+    Binding(
+      get: { threadNavigationRequest != nil },
+      set: { isPresented in
+        if !isPresented { threadNavigationRequest = nil }
+      }
+    )
+  }
+
+  private func threadDestination(_ request: ThreadSummaryNavigationRequest) -> some View {
+    ThreadView(
+      thread: request.thread,
+      service: browseService,
+      historyRepository: historyRepository,
+      favoritesRepository: favoritesRepository,
+      searchHistoryRepository: searchHistoryRepository,
+      linkRoute: request.linkRoute,
+      initialFocus: request.initialFocus
+    )
+    .id(request.destinationID)
   }
 }

@@ -409,7 +409,11 @@ and its verified metadata enters the public app source.
 
 - **Thread reading:** Ascending, descending, and hot order, only-author mode,
   page jumps, anchored opening, earlier-page loading, first-floor context, and
-  explicit latest-reply checks are implemented with cursor validation. For a
+  explicit latest-reply checks are implemented with cursor validation. On an
+  ordinary, locally visible shared list card, the reply counter is a separate
+  navigation target that opens the topic at its first locally displayable reply;
+  when the initial response contains no such reply, the normal top-of-thread
+  presentation remains. For a
   logged-in account with an authoritative cloud-favorite snapshot, a visible
   floor's context menu can save, move, or remove the exact cloud marker after a
   separate confirmation; the exact saved PID is marked in the floor content.

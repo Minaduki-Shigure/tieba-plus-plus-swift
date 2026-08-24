@@ -11,6 +11,7 @@ struct HotThreadListView: View {
   let showsNavigationTitle: Bool
 
   @StateObject private var viewModel: HotThreadListViewModel
+  @State private var threadNavigationRequest: ThreadSummaryNavigationRequest?
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Environment(\.appAccentColor) private var appAccentColor
 
@@ -48,6 +49,13 @@ struct HotThreadListView: View {
     .onDisappear(perform: viewModel.cancel)
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       viewModel.reloadForContentFilterChange()
+    }
+    .navigationDestination(isPresented: threadNavigationPresented) {
+      if let request = threadNavigationRequest {
+        threadDestination(request)
+      } else {
+        EmptyView()
+      }
     }
     .alert(
       "刷新失败",
@@ -89,17 +97,12 @@ struct HotThreadListView: View {
             visibility: item.thread.localVisibility,
             placeholder: "已屏蔽此热门帖子"
           ) {
-            NavigationLink {
-              ThreadView(
-                thread: item.thread,
-                service: service,
-                historyRepository: historyRepository,
-                favoritesRepository: favoritesRepository,
-                searchHistoryRepository: searchHistoryRepository
-              )
-            } label: {
-              HotThreadRankRow(item: item)
-            }
+            ThreadSummaryRow(
+              thread: item.thread,
+              showsForum: true,
+              header: { HotThreadRankHeader(item: item) },
+              onNavigate: { threadNavigationRequest = $0 }
+            )
           }
         }
       }
@@ -196,6 +199,28 @@ struct HotThreadListView: View {
     default:
       return base
     }
+  }
+
+  private var threadNavigationPresented: Binding<Bool> {
+    Binding(
+      get: { threadNavigationRequest != nil },
+      set: { isPresented in
+        if !isPresented { threadNavigationRequest = nil }
+      }
+    )
+  }
+
+  private func threadDestination(_ request: ThreadSummaryNavigationRequest) -> some View {
+    ThreadView(
+      thread: request.thread,
+      service: service,
+      historyRepository: historyRepository,
+      favoritesRepository: favoritesRepository,
+      searchHistoryRepository: searchHistoryRepository,
+      linkRoute: request.linkRoute,
+      initialFocus: request.initialFocus
+    )
+    .id(request.destinationID)
   }
 
   @ViewBuilder
@@ -309,28 +334,25 @@ private struct HotThreadTopicRankRow: View {
   }
 }
 
-private struct HotThreadRankRow: View {
+private struct HotThreadRankHeader: View {
   let item: HotThreadRankItem
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      HStack(spacing: 10) {
-        Text("#\(item.rank)")
-          .font(.caption.weight(.bold))
-          .foregroundStyle(.tint)
-          .lineLimit(1)
-          .fixedSize()
-        Spacer(minLength: 8)
-        Label(
-          "热度 \(item.hotScore.formatted(.number.notation(.compactName)))",
-          systemImage: "flame.fill"
-        )
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-          .fixedSize()
-      }
-      ThreadSummaryRow(thread: item.thread, showsForum: true)
+    HStack(spacing: 10) {
+      Text("#\(item.rank)")
+        .font(.caption.weight(.bold))
+        .foregroundStyle(.tint)
+        .lineLimit(1)
+        .fixedSize()
+      Spacer(minLength: 8)
+      Label(
+        "热度 \(item.hotScore.formatted(.number.notation(.compactName)))",
+        systemImage: "flame.fill"
+      )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .fixedSize()
     }
   }
 }

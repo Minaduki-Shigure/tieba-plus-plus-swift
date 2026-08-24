@@ -451,21 +451,87 @@ final class ThreadSummaryRowTests: XCTestCase {
     XCTAssertNil(ThreadSummaryPresentation.authorAvatarURL(for: thread, showsAuthor: true))
   }
 
+  func testThreadSummaryNavigationPolicyBuildsSeparatePrimaryAndReplyRequests() throws {
+    let thread = makeThread(contents: [.text("Text")])
+
+    let primary = try XCTUnwrap(ThreadSummaryNavigationPolicy.primaryRequest(for: thread))
+    XCTAssertEqual(primary.thread, thread)
+    XCTAssertNil(primary.initialFocus)
+    XCTAssertNil(primary.linkRoute)
+    XCTAssertEqual(primary.destinationID, "thread-summary:42:top")
+
+    let replies = try XCTUnwrap(ThreadSummaryNavigationPolicy.repliesRequest(for: thread))
+    XCTAssertEqual(replies.thread, thread)
+    XCTAssertEqual(replies.initialFocus, .firstReply)
+    XCTAssertEqual(replies.linkRoute?.threadID, thread.id)
+    XCTAssertEqual(replies.linkRoute?.options, ThreadBrowseOptions())
+    XCTAssertNil(replies.linkRoute?.postID)
+    XCTAssertEqual(replies.destinationID, "thread-summary:42:replies")
+  }
+
+  func testThreadSummaryReplyNavigationMatchesTiebaLiteForZeroCount() throws {
+    let thread = makeThread(contents: [], replyCount: 0)
+
+    XCTAssertNotNil(ThreadSummaryNavigationPolicy.repliesRequest(for: thread))
+    XCTAssertEqual(
+      ThreadSummaryNavigationPolicy.repliesAccessibilityLabel(replyCount: 0),
+      "打开回复区，当前 0 条回复"
+    )
+    XCTAssertEqual(
+      ThreadSummaryNavigationPolicy.repliesAccessibilityLabel(replyCount: -3),
+      "打开回复区，当前 0 条回复"
+    )
+    XCTAssertEqual(
+      ThreadSummaryNavigationPolicy.repliesAccessibilityLabel(replyCount: 12),
+      "查看 12 条回复，打开回复区"
+    )
+    XCTAssertNotNil(
+      ThreadSummaryNavigationPolicy.repliesRequest(
+        for: makeThread(contents: [], replyCount: -3)
+      )
+    )
+  }
+
+  func testThreadSummaryNavigationRejectsFilteredAndInvalidThreads() {
+    let invalid = makeThread(contents: [], id: 0)
+    XCTAssertNil(ThreadSummaryNavigationPolicy.primaryRequest(for: invalid))
+    XCTAssertNil(ThreadSummaryNavigationPolicy.repliesRequest(for: invalid))
+    let negativeID = makeThread(contents: [], id: -1)
+    XCTAssertNil(ThreadSummaryNavigationPolicy.primaryRequest(for: negativeID))
+    XCTAssertNil(ThreadSummaryNavigationPolicy.repliesRequest(for: negativeID))
+
+    let visible = makeThread(contents: [])
+    for visibility in [LocalContentVisibility.placeholder, .hidden] {
+      let filtered = visible.withLocalVisibility(visibility)
+      XCTAssertNil(ThreadSummaryNavigationPolicy.primaryRequest(for: filtered))
+      XCTAssertNil(ThreadSummaryNavigationPolicy.repliesRequest(for: filtered))
+    }
+  }
+
+  func testPinnedThreadKeepsPrimaryNavigationButHasNoReplyShortcut() {
+    let thread = makeThread(contents: [], isPinned: true)
+
+    XCTAssertNotNil(ThreadSummaryNavigationPolicy.primaryRequest(for: thread))
+    XCTAssertNil(ThreadSummaryNavigationPolicy.repliesRequest(for: thread))
+  }
+
   private func makeThread(
     contents: [BrowseContent],
+    id: Int64 = 42,
     authorName: String = "Author",
     authorUsername: String = "",
     authorAvatarURL: URL? = nil,
+    replyCount: Int = 3,
     isPinned: Bool = false
   ) -> BrowseThread {
     BrowseThread(
-      id: 42,
+      id: id,
       forumID: 7,
       forumName: "swift",
       title: "Thread",
       excerpt: "Excerpt",
       authorName: authorName,
-      replyCount: 3,
+      replyCount: replyCount,
       viewCount: 10,
       createdAt: nil,
       lastReplyAt: nil,

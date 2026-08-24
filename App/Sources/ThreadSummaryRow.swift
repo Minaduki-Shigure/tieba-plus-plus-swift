@@ -95,10 +95,47 @@ enum ThreadSummaryPresentation {
   }
 }
 
-struct ThreadSummaryRow: View {
+struct ThreadSummaryNavigationRequest: Equatable, Sendable {
+  let thread: BrowseThread
+  let initialFocus: ThreadInitialFocus?
+
+  var linkRoute: TiebaThreadRoute? {
+    guard initialFocus == .firstReply, thread.id > 0 else { return nil }
+    return TiebaThreadRoute(threadID: thread.id)
+  }
+
+  var destinationID: String {
+    let focus = initialFocus == .firstReply ? "replies" : "top"
+    return "thread-summary:\(thread.id):\(focus)"
+  }
+}
+
+enum ThreadSummaryNavigationPolicy {
+  static func primaryRequest(for thread: BrowseThread) -> ThreadSummaryNavigationRequest? {
+    guard thread.id > 0, thread.localVisibility == .visible else { return nil }
+    return ThreadSummaryNavigationRequest(thread: thread, initialFocus: nil)
+  }
+
+  static func repliesRequest(for thread: BrowseThread) -> ThreadSummaryNavigationRequest? {
+    guard thread.id > 0, !thread.isPinned, thread.localVisibility == .visible else { return nil }
+    return ThreadSummaryNavigationRequest(thread: thread, initialFocus: .firstReply)
+  }
+
+  static func repliesAccessibilityLabel(replyCount: Int) -> String {
+    let count = max(replyCount, 0)
+    if count == 0 {
+      return "打开回复区，当前 0 条回复"
+    }
+    return "查看 \(count.formatted()) 条回复，打开回复区"
+  }
+}
+
+struct ThreadSummaryRow<Header: View>: View {
   let thread: BrowseThread
   let showsForum: Bool
   let showsAuthor: Bool
+  private let header: () -> Header
+  private let onNavigate: (ThreadSummaryNavigationRequest) -> Void
 
   @Environment(\.contentImagePreviewQuality) private var contentImagePreviewQuality
   @Environment(\.appAccentColor) private var appAccentColor
@@ -112,16 +149,40 @@ struct ThreadSummaryRow: View {
   init(
     thread: BrowseThread,
     showsForum: Bool = false,
-    showsAuthor: Bool = true
+    showsAuthor: Bool = true,
+    onNavigate: @escaping (ThreadSummaryNavigationRequest) -> Void
+  ) where Header == EmptyView {
+    self.init(
+      thread: thread,
+      showsForum: showsForum,
+      showsAuthor: showsAuthor,
+      header: { EmptyView() },
+      onNavigate: onNavigate
+    )
+  }
+
+  init(
+    thread: BrowseThread,
+    showsForum: Bool = false,
+    showsAuthor: Bool = true,
+    @ViewBuilder header: @escaping () -> Header,
+    onNavigate: @escaping (ThreadSummaryNavigationRequest) -> Void
   ) {
     self.thread = thread
     self.showsForum = showsForum
     self.showsAuthor = showsAuthor
+    self.header = header
+    self.onNavigate = onNavigate
   }
 
   var body: some View {
     if thread.isPinned {
-      pinnedRow
+      primaryNavigation {
+        VStack(alignment: .leading, spacing: 6) {
+          header()
+          pinnedRow
+        }
+      }
     } else {
       regularRow
     }
@@ -144,29 +205,70 @@ struct ThreadSummaryRow: View {
 
   private var regularRow: some View {
     VStack(alignment: .leading, spacing: 8) {
-      if !badges.isEmpty {
-        badgeLine
-      }
+      primaryNavigation {
+        VStack(alignment: .leading, spacing: 8) {
+          header()
 
-      Text(displayTitle)
-        .font(.headline)
-        .foregroundStyle(.primary)
-        .lineLimit(3)
-        .fixedSize(horizontal: false, vertical: true)
+          if !badges.isEmpty {
+            badgeLine
+          }
 
-      if shouldShowExcerpt {
-        Text(thread.excerpt)
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-          .lineLimit(3)
-          .fixedSize(horizontal: false, vertical: true)
+          Text(displayTitle)
+            .font(.headline)
+            .foregroundStyle(.primary)
+            .lineLimit(3)
+            .fixedSize(horizontal: false, vertical: true)
+
+          if shouldShowExcerpt {
+            Text(thread.excerpt)
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+              .lineLimit(3)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+
+          contextLine
+        }
       }
 
       mediaPreview
-      contextLine
       metricLine
     }
     .padding(.vertical, 4)
+  }
+
+  private func primaryNavigation<Label: View>(
+    @ViewBuilder label: () -> Label
+  ) -> some View {
+    Group {
+      if let request = ThreadSummaryNavigationPolicy.primaryRequest(for: thread) {
+        Button {
+          onNavigate(request)
+        } label: {
+          primaryNavigationLabel(label: label)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("打开主题")
+      } else {
+        label()
+          .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+      }
+    }
+  }
+
+  private func primaryNavigationLabel<Label: View>(
+    @ViewBuilder label: () -> Label
+  ) -> some View {
+    HStack(alignment: .center, spacing: 8) {
+      label()
+        .frame(maxWidth: .infinity, alignment: .leading)
+      Image(systemName: "chevron.right")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.tertiary)
+        .accessibilityHidden(true)
+    }
+    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+    .contentShape(Rectangle())
   }
 
   private var displayTitle: String {
@@ -438,7 +540,22 @@ struct ThreadSummaryRow: View {
 
   @ViewBuilder
   private var primaryMetrics: some View {
-    ThreadMetric(systemImage: "bubble.left", value: thread.replyCount, label: "回复")
+    if let request = ThreadSummaryNavigationPolicy.repliesRequest(for: thread) {
+      Button {
+        onNavigate(request)
+      } label: {
+        ThreadMetric(systemImage: "bubble.left", value: thread.replyCount, label: "回复")
+          .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(.borderless)
+      .accessibilityLabel(
+        ThreadSummaryNavigationPolicy.repliesAccessibilityLabel(replyCount: thread.replyCount)
+      )
+      .help("查看回复")
+    } else {
+      ThreadMetric(systemImage: "bubble.left", value: thread.replyCount, label: "回复")
+    }
     if thread.viewCount > 0 {
       ThreadMetric(systemImage: "eye", value: thread.viewCount, label: "浏览")
     }
