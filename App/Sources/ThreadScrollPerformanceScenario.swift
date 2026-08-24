@@ -45,8 +45,8 @@
         p95MS: percentile(0.95, in: sorted),
         p99MS: percentile(0.99, in: sorted),
         maximumMS: sorted.last ?? 0,
-        overBudgetCount: sorted.lazy.filter { $0 > expectedFrameDurationMS * 1.5 }.count,
-        overTwoFramesCount: sorted.lazy.filter { $0 > expectedFrameDurationMS * 2.5 }.count
+        overBudgetCount: sorted.lazy.filter { $0 > self.expectedFrameDurationMS * 1.5 }.count,
+        overTwoFramesCount: sorted.lazy.filter { $0 > self.expectedFrameDurationMS * 2.5 }.count
       )
     }
 

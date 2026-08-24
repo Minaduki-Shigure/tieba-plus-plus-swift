@@ -5310,6 +5310,15 @@ final class BrowseViewModelTests: XCTestCase {
 
     XCTAssertFalse(viewModel.hasDisplayableComments)
     XCTAssertTrue(viewModel.displayableComments.isEmpty)
+    XCTAssertEqual(viewModel.paginationTail, hidden)
+    XCTAssertEqual(
+      viewModel.paginationSentinelID,
+      CommentsPaginationSentinelID(
+        tailCommentID: hidden.id,
+        commentCount: 1,
+        page: 1
+      )
+    )
     XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 1)
     XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 0)
 
@@ -5318,6 +5327,8 @@ final class BrowseViewModelTests: XCTestCase {
 
     XCTAssertTrue(viewModel.hasDisplayableComments)
     XCTAssertEqual(viewModel.displayableComments, [visible])
+    XCTAssertNil(viewModel.paginationTail)
+    XCTAssertNil(viewModel.paginationSentinelID)
     XCTAssertEqual(viewModel.commentIndexFullRebuildCount, 1)
     XCTAssertEqual(viewModel.commentIndexIncrementalUpdateCount, 1)
 

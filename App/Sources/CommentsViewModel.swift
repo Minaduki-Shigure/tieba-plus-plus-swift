@@ -23,6 +23,12 @@ private enum CommentPagePlacement: Equatable {
   case after
 }
 
+struct CommentsPaginationSentinelID: Hashable, Sendable {
+  let tailCommentID: Int64
+  let commentCount: Int
+  let page: Int
+}
+
 @MainActor
 final class CommentsViewModel: ObservableObject {
   @Published private(set) var parentPost: CommentParentPostContext?
@@ -254,6 +260,19 @@ final class CommentsViewModel: ObservableObject {
 
   func agreementTarget(forCommentID commentID: Int64) -> ContentAgreementTarget? {
     agreementTargetsByCommentID[commentID]
+  }
+
+  var paginationTail: BrowseComment? {
+    hasMore ? comments.last : nil
+  }
+
+  var paginationSentinelID: CommentsPaginationSentinelID? {
+    guard let paginationTail else { return nil }
+    return CommentsPaginationSentinelID(
+      tailCommentID: paginationTail.id,
+      commentCount: comments.count,
+      page: highestLoadedPage
+    )
   }
 
   private func load(

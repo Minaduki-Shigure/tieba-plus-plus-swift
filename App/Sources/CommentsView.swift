@@ -447,9 +447,13 @@ struct CommentsView: View {
 
   @ViewBuilder
   private var commentsListFooter: some View {
-    if let lastComment = viewModel.comments.last {
+    if
+      let lastComment = viewModel.paginationTail,
+      let sentinelID = viewModel.paginationSentinelID
+    {
       Color.clear
         .frame(height: 1)
+        .id(sentinelID)
         .listRowInsets(EdgeInsets())
         .listRowSeparator(.hidden)
         .accessibilityHidden(true)
@@ -470,9 +474,13 @@ struct CommentsView: View {
 
   @ViewBuilder
   private var commentsScrollFooter: some View {
-    if let lastComment = viewModel.comments.last {
+    if
+      let lastComment = viewModel.paginationTail,
+      let sentinelID = viewModel.paginationSentinelID
+    {
       Color.clear
         .frame(height: 1)
+        .id(sentinelID)
         .accessibilityHidden(true)
         .allowsHitTesting(false)
         .onAppear { viewModel.loadMoreIfNeeded(current: lastComment) }
@@ -1199,6 +1207,7 @@ struct CommentsView: View {
         reduceMotion ? nil : .easeInOut(duration: 0.2),
         value: isHighlighted
       )
+      .accessibilityIdentifier("comments-row-\(comment.id)")
       .onAppear {
         viewModel.loadMoreIfNeeded(current: comment)
         #if PERFORMANCE_HARNESS
