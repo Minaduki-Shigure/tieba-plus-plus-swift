@@ -25,6 +25,16 @@ and its verified metadata enters the public app source.
 
 ### Release and validation
 
+- **Current `main` after `v0.62.2-alpha.1`:** Full nested-reply reading now uses
+  `ScrollView` plus `LazyVStack` rather than `List`, while retaining exact reply
+  identities, anchored opening, prepend restoration, pull to refresh, local
+  filtering, and guarded pagination. A settled, production-like iOS 18.5 paired
+  profile measured 65.9% less sampled main-thread work, 73.5% less SwiftUI
+  layout/view-graph work, and 84.8% less text shaping on average. Frame p95 fell
+  by 73.7% and 69.8% in the two reversed-order replicates; the over-two-frame
+  interval rate fell by 58.2% and 87.3%. A separate no-image gallery-cover
+  candidate regressed and is not shipped. The simulator result is relative
+  evidence, not a physical-device frame-rate guarantee.
 - **Current alpha:** `v0.62.2-alpha.1` publishes the current end-user app-code
   scope. Full nested-reply pages now precompute displayable replies, keep a
   stable one-row `List` topology with native reply identities, and avoid repeated
@@ -292,13 +302,13 @@ and its verified metadata enters the public app source.
 - **Automated checks:** GitHub Actions runs package tests and the complete iOS
   simulator test target, validates the app source, tests its release-metadata
   updater, and verifies its public IPA hash.
-  A deterministic iOS 18.5 self-driven Time Profiler records two reversed-order
-  replicates for each full nested-reply scenario without UI-test or network work.
-  For 240 visible replies, the stable-row candidate reduced sampled main-thread
-  work by 11.5% and SwiftUI layout/view-graph work by 13.2% on average. A
-  600-reply mixed visible/placeholder/hidden fixture did not improve main-thread
-  work (mean +2.0%), so these measurements do not establish a universal or
-  physical-device frame-rate improvement.
+  A deterministic iOS 18.5 self-driven Time Profiler waits for full nested-reply
+  loading and prepositioning before recording two reversed-order replicates per
+  candidate. It mixes short, medium, long, mention, link, emoticon, visible,
+  placeholder, and hidden rows without UI-test or network work, and records both
+  sampled call stacks and normalized CADisplayLink frame intervals. The current
+  container result is summarized above; physical-device finger tracking and
+  inertial scrolling remain a separate validation boundary.
   Authenticated flows never use real credentials in CI. Login binding, cloud
   favorite reads and mutations, including floor-level marker/action admission,
   stale-confirmation rejection and verified list deletion, followed-forum
@@ -383,9 +393,9 @@ and its verified metadata enters the public app source.
   cancel approval on the canonical topic,
   ordinary floors, and individual replies on the full nested-reply page. Inline
   nested-reply previews remain read only. Full nested-reply pages maintain a
-  displayable-reply projection and a constant one-row `List` topology so SwiftUI
-  can construct rows on demand; active agreement entries no longer rescan an
-  all-active cache after crossing its retained-entry capacity.
+  displayable-reply projection and a lazy vertical scroll topology so SwiftUI
+  constructs only rows required near the viewport; active agreement entries no
+  longer rescan an all-active cache after crossing its retained-entry capacity.
 - **Images:** Responsive image groups open in a zoomable gallery with horizontal
   or vertical one-image paging. Switching direction retains the current image
   and its bounded in-memory zoom state while the occurrence ID remains stable.

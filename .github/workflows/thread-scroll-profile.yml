@@ -3,7 +3,7 @@ name: Thread scroll profile
 on:
   workflow_dispatch:
   push:
-    branches: [main, perf/comments-round2]
+    branches: [main]
     paths:
       - .github/workflows/thread-scroll-profile.yml
       - App/Sources/BrowseContentView.swift

@@ -59,13 +59,16 @@ struct BrowseContentView: View {
   }
 
   private var installsImageGalleryCover: Bool {
-    guard onImageOpen == nil else { return false }
     #if PERFORMANCE_HARNESS
-      if ThreadScrollPerformanceScenario.installsLegacyEmptyImageGalleryCovers {
-        return true
+      if ThreadScrollPerformanceScenario.requested?.isCommentsScenario == true {
+        guard onImageOpen == nil else { return false }
+        if ThreadScrollPerformanceScenario.installsLegacyEmptyImageGalleryCovers {
+          return true
+        }
+        return Self.containsImage(contents)
       }
     #endif
-    return Self.containsImage(contents)
+    return onImageOpen == nil
   }
 
   private var content: some View {

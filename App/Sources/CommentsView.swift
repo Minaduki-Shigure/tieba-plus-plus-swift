@@ -287,40 +287,42 @@ struct CommentsView: View {
     #endif
   }
 
-  private var commentsList: some View {
-    List {
-      if let parentPost = viewModel.parentPost,
-        parentPost.localVisibility != .hidden
-      {
-        commentParentPost(parentPost)
-          .id(CommentsListItemID.parentPost(parentPost.id))
-      }
-
-      Section {
-        previousPageListControl
-
-        if !viewModel.hasDisplayableComments {
-          EmptyStateView(title: "暂无可显示的楼中楼回复", systemImage: "bubble.left")
-            .frame(maxWidth: .infinity)
-            .listRowSeparator(.hidden)
+  #if PERFORMANCE_HARNESS
+    private var commentsList: some View {
+      List {
+        if let parentPost = viewModel.parentPost,
+          parentPost.localVisibility != .hidden
+        {
+          commentParentPost(parentPost)
+            .id(CommentsListItemID.parentPost(parentPost.id))
         }
 
-        ForEach(viewModel.displayableComments) { comment in
-          stableCommentListRow(comment)
-        }
+        Section {
+          previousPageListControl
 
-        commentsListFooter
-      } header: {
-        Text("共 \(viewModel.totalCount) 条回复")
-          .font(.subheadline.weight(.semibold))
-          .foregroundStyle(.primary)
-          .textCase(nil)
-          .accessibilityAddTraits(.isHeader)
-          .accessibilityIdentifier("comments-count-header")
+          if !viewModel.hasDisplayableComments {
+            EmptyStateView(title: "暂无可显示的楼中楼回复", systemImage: "bubble.left")
+              .frame(maxWidth: .infinity)
+              .listRowSeparator(.hidden)
+          }
+
+          ForEach(viewModel.displayableComments) { comment in
+            stableCommentListRow(comment)
+          }
+
+          commentsListFooter
+        } header: {
+          Text("共 \(viewModel.totalCount) 条回复")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+            .textCase(nil)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier("comments-count-header")
+        }
       }
+      .listStyle(.plain)
     }
-    .listStyle(.plain)
-  }
+  #endif
 
   private var commentsLazyScroll: some View {
     ScrollView {
@@ -399,22 +401,24 @@ struct CommentsView: View {
     }
   }
 
-  @ViewBuilder
-  private var previousPageListControl: some View {
-    if viewModel.isLoadingPrevious {
-      HStack {
-        Spacer()
-        ProgressView()
-        Spacer()
-      }
-      .listRowSeparator(.hidden)
-    } else if let message = viewModel.loadPreviousError {
-      LoadMoreErrorView(message: message, retry: viewModel.retryLoadPrevious)
+  #if PERFORMANCE_HARNESS
+    @ViewBuilder
+    private var previousPageListControl: some View {
+      if viewModel.isLoadingPrevious {
+        HStack {
+          Spacer()
+          ProgressView()
+          Spacer()
+        }
         .listRowSeparator(.hidden)
-    } else if viewModel.canLoadPrevious {
-      previousPageButton
+      } else if let message = viewModel.loadPreviousError {
+        LoadMoreErrorView(message: message, retry: viewModel.retryLoadPrevious)
+          .listRowSeparator(.hidden)
+      } else if viewModel.canLoadPrevious {
+        previousPageButton
+      }
     }
-  }
+  #endif
 
   @ViewBuilder
   private var previousPageScrollControl: some View {
@@ -445,32 +449,34 @@ struct CommentsView: View {
     .accessibilityIdentifier("comments-load-previous")
   }
 
-  @ViewBuilder
-  private var commentsListFooter: some View {
-    if
-      let lastComment = viewModel.paginationTail,
-      let sentinelID = viewModel.paginationSentinelID
-    {
-      Color.clear
-        .frame(height: 1)
-        .id(sentinelID)
-        .listRowInsets(EdgeInsets())
-        .listRowSeparator(.hidden)
-        .accessibilityHidden(true)
-        .onAppear { viewModel.loadMoreIfNeeded(current: lastComment) }
-    }
-    if viewModel.isLoadingMore {
-      HStack {
-        Spacer()
-        ProgressView()
-        Spacer()
+  #if PERFORMANCE_HARNESS
+    @ViewBuilder
+    private var commentsListFooter: some View {
+      if
+        let lastComment = viewModel.paginationTail,
+        let sentinelID = viewModel.paginationSentinelID
+      {
+        Color.clear
+          .frame(height: 1)
+          .id(sentinelID)
+          .listRowInsets(EdgeInsets())
+          .listRowSeparator(.hidden)
+          .accessibilityHidden(true)
+          .onAppear { viewModel.loadMoreIfNeeded(current: lastComment) }
       }
-      .listRowSeparator(.hidden)
-    } else if let message = viewModel.loadMoreError {
-      LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
+      if viewModel.isLoadingMore {
+        HStack {
+          Spacer()
+          ProgressView()
+          Spacer()
+        }
         .listRowSeparator(.hidden)
+      } else if let message = viewModel.loadMoreError {
+        LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
+          .listRowSeparator(.hidden)
+      }
     }
-  }
+  #endif
 
   @ViewBuilder
   private var commentsScrollFooter: some View {
@@ -1076,20 +1082,22 @@ struct CommentsView: View {
     }
   }
 
-  private func stableCommentListRow(_ comment: BrowseComment) -> some View {
-    presentedCommentRow(
-      VStack(spacing: 0) {
-        LocallyFilteredContent(
-          visibility: comment.localVisibility,
-          placeholder: "已屏蔽此条回复"
-        ) {
-          commentRowContent(comment)
-        }
-      },
-      comment: comment
-    )
-    .listRowBackground(commentHighlightColor(comment))
-  }
+  #if PERFORMANCE_HARNESS
+    private func stableCommentListRow(_ comment: BrowseComment) -> some View {
+      presentedCommentRow(
+        VStack(spacing: 0) {
+          LocallyFilteredContent(
+            visibility: comment.localVisibility,
+            placeholder: "已屏蔽此条回复"
+          ) {
+            commentRowContent(comment)
+          }
+        },
+        comment: comment
+      )
+      .listRowBackground(commentHighlightColor(comment))
+    }
+  #endif
 
   private func stableCommentScrollRow(_ comment: BrowseComment) -> some View {
     presentedCommentRow(
