@@ -5,6 +5,57 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class AppPreferencesTests: XCTestCase {
+  func testDefaultImageWatermarkUsesStableTiebaLiteValuesAndFallback() throws {
+    XCTAssertEqual(
+      AppPreferenceKey.defaultImageWatermark,
+      "TiebaPlusPlus.defaultImageWatermark"
+    )
+    XCTAssertEqual(ComposerImageWatermarkPreference.defaultValue, .forumName)
+    XCTAssertEqual(ComposerImageWatermarkPreference.none.rawValue, "0")
+    XCTAssertEqual(ComposerImageWatermarkPreference.username.rawValue, "1")
+    XCTAssertEqual(ComposerImageWatermarkPreference.forumName.rawValue, "2")
+    XCTAssertEqual(
+      ComposerImageWatermarkPreference.allCases.map(\.title),
+      ["吧名", "用户名", "无水印"]
+    )
+    XCTAssertEqual(ComposerImageWatermarkPreference.none.watermark, .none)
+    XCTAssertEqual(ComposerImageWatermarkPreference.username.watermark, .username)
+    XCTAssertEqual(ComposerImageWatermarkPreference.forumName.watermark, .forumName)
+    XCTAssertEqual(ComposerImageWatermarkPreference(.none), .none)
+    XCTAssertEqual(ComposerImageWatermarkPreference(.username), .username)
+    XCTAssertEqual(ComposerImageWatermarkPreference(.forumName), .forumName)
+    XCTAssertEqual(ComposerImageWatermarkPreference.resolved("0"), .none)
+    XCTAssertEqual(ComposerImageWatermarkPreference.resolved("1"), .username)
+    XCTAssertEqual(ComposerImageWatermarkPreference.resolved("2"), .forumName)
+    XCTAssertEqual(ComposerImageWatermarkPreference.resolved(""), .forumName)
+    XCTAssertEqual(
+      ComposerImageWatermarkPreference.resolved("future-value"),
+      .forumName
+    )
+
+    let suiteName = "AppPreferencesTests.default-image-watermark.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    XCTAssertNil(defaults.object(forKey: AppPreferenceKey.defaultImageWatermark))
+
+    for preference in ComposerImageWatermarkPreference.allCases {
+      defaults.set(
+        preference.rawValue,
+        forKey: AppPreferenceKey.defaultImageWatermark
+      )
+      XCTAssertEqual(
+        defaults.string(forKey: AppPreferenceKey.defaultImageWatermark),
+        preference.rawValue
+      )
+      XCTAssertEqual(
+        ComposerImageWatermarkPreference.resolved(
+          defaults.string(forKey: AppPreferenceKey.defaultImageWatermark) ?? ""
+        ),
+        preference
+      )
+    }
+  }
+
   func testForumPrimaryActionUsesStableTiebaLiteValuesAndFallback() {
     XCTAssertEqual(
       AppPreferenceKey.forumPrimaryAction,

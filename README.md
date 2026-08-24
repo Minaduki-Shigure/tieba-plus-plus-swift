@@ -240,6 +240,12 @@ and its verified metadata enters the public app source.
   matches the active App account. The user must verify or complete browser login.
   All non-performance capabilities in this release-scope block remain included
   in the public `v0.62.3-alpha.1` IPA.
+- **Current-main default image watermark:** Settings can choose forum name,
+  username, or no watermark as the default for a new image-capable composer.
+  The local stored values match TiebaLite's stable `2`, `1`, and `0` contract,
+  respectively, and an unknown value falls back to forum name. A restored draft
+  that already contains images retains its saved watermark; starting a new draft
+  uses the current default without changing an open composer's manual selection.
 - **`v0.61.0-alpha.1` static-image creation:** New-topic and direct-topic-reply
   composers can select, reorder, preview, and remove up to nine static
   images, choose standard or high-definition processing, and select forum-name,
@@ -480,6 +486,10 @@ and its verified metadata enters the public app source.
   return without deleting that draft. It is advisory only: disabling or
   acknowledging it never replaces the separate confirmation of the exact reply
   or topic snapshot immediately before submission.
+- **Composer defaults:** The default image watermark is a local menu preference
+  shared by new-topic and direct-topic-reply composers. It initializes only a
+  draft without images; a restored image draft keeps the watermark bound to its
+  existing attachments and recovery state.
 - **About:** A local About page reads the installed bundle's display name,
   version, and build number. Its explicit source-code action opens only the fixed
   project repository URL through the selected system-browser or in-app Safari

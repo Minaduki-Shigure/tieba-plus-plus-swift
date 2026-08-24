@@ -78,6 +78,8 @@ private struct NewThreadComposerContentView: View {
   @State private var confirmationPreparationGate = SubmissionConfirmationPreparationGate()
   @AppStorage(AppPreferenceKey.showsPostAndReplyRiskNotice)
   private var showsPostAndReplyRiskNotice = AppPreferenceDefaults.showsPostAndReplyRiskNotice
+  @AppStorage(AppPreferenceKey.defaultImageWatermark)
+  private var defaultImageWatermark = ComposerImageWatermarkPreference.defaultValue.rawValue
   @FocusState private var focusedField: FocusedField?
 
   private enum FocusedField: Hashable {
@@ -397,7 +399,7 @@ private struct NewThreadComposerContentView: View {
         content = ""
         attachments = []
         imageQuality = .standard
-        imageWatermark = .forumName
+        imageWatermark = preferredImageWatermark
         contentSelection = .start
         pendingConfirmedReceipt = nil
         deliveredReceipt = nil
@@ -474,7 +476,7 @@ private struct NewThreadComposerContentView: View {
       content = ""
       attachments = []
       imageQuality = .standard
-      imageWatermark = .forumName
+      imageWatermark = preferredImageWatermark
       contentSelection = .start
       pendingConfirmedReceipt = nil
       deliveredReceipt = nil
@@ -656,6 +658,10 @@ private struct NewThreadComposerContentView: View {
     )
   }
 
+  private var preferredImageWatermark: TiebaStaticImageWatermark {
+    ComposerImageWatermarkPreference.resolved(defaultImageWatermark).watermark
+  }
+
   private var errorIsPresented: Binding<Bool> {
     Binding(
       get: { errorMessage != nil },
@@ -675,7 +681,11 @@ private struct NewThreadComposerContentView: View {
       content = entry.draft?.content ?? ""
       attachments = entry.draft?.attachments ?? []
       imageQuality = entry.draft?.attachments.last?.quality ?? .standard
-      imageWatermark = entry.draft?.imageWatermark ?? .forumName
+      imageWatermark = ComposerImageWatermarkPolicy.initialValue(
+        preference: ComposerImageWatermarkPreference.resolved(defaultImageWatermark),
+        hasImageDraft: !attachments.isEmpty,
+        draftWatermark: entry.draft?.imageWatermark
+      )
       contentSelection = ComposerTextSelection(location: content.utf16.count, length: 0)
       didHydrateDraft = true
     }
@@ -926,7 +936,7 @@ private struct NewThreadComposerContentView: View {
         content = ""
         attachments = []
         imageQuality = .standard
-        imageWatermark = .forumName
+        imageWatermark = preferredImageWatermark
         contentSelection = .start
         if let attachmentOwnerUserID {
           await ComposerImageRemovalCoordinator.cleanCandidatesBestEffort(
@@ -964,7 +974,7 @@ private struct NewThreadComposerContentView: View {
         content = ""
         attachments = []
         imageQuality = .standard
-        imageWatermark = .forumName
+        imageWatermark = preferredImageWatermark
         contentSelection = .start
         pendingConfirmedReceipt = nil
         deliveredReceipt = nil

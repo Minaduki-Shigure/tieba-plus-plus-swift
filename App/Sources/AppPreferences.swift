@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import TiebaCore
 
 enum AppPreferenceKey {
   static let appearance = "TiebaPlusPlus.appearance"
@@ -21,6 +22,7 @@ enum AppPreferenceKey {
   static let hidesThreadListMedia = "TiebaPlusPlus.hidesThreadListMedia"
   static let hidesReplyEntryPoints = "TiebaPlusPlus.hidesReplyEntryPoints"
   static let showsPostAndReplyRiskNotice = "TiebaPlusPlus.showsPostAndReplyRiskNotice"
+  static let defaultImageWatermark = "TiebaPlusPlus.defaultImageWatermark"
   static let darkensContentThumbnailsInDarkMode =
     "TiebaPlusPlus.darkensContentThumbnailsInDarkMode"
   static let showsBothUsernameAndNickname =
@@ -143,6 +145,66 @@ enum AppPreferenceDefaults {
   static let favoriteThreadsOpenDescending = false
   static let hidesReplyEntryPoints = false
   static let showsPostAndReplyRiskNotice = true
+}
+
+enum ComposerImageWatermarkPreference:
+  String, CaseIterable, Hashable, Identifiable, Sendable
+{
+  case forumName = "2"
+  case username = "1"
+  case none = "0"
+
+  static let defaultValue = Self.forumName
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .forumName:
+      "吧名"
+    case .username:
+      "用户名"
+    case .none:
+      "无水印"
+    }
+  }
+
+  var watermark: TiebaStaticImageWatermark {
+    switch self {
+    case .forumName:
+      .forumName
+    case .username:
+      .username
+    case .none:
+      .none
+    }
+  }
+
+  init(_ watermark: TiebaStaticImageWatermark) {
+    switch watermark {
+    case .forumName:
+      self = .forumName
+    case .username:
+      self = .username
+    case .none:
+      self = .none
+    }
+  }
+
+  static func resolved(_ rawValue: String) -> Self {
+    Self(rawValue: rawValue) ?? defaultValue
+  }
+}
+
+enum ComposerImageWatermarkPolicy {
+  static func initialValue(
+    preference: ComposerImageWatermarkPreference,
+    hasImageDraft: Bool,
+    draftWatermark: TiebaStaticImageWatermark?
+  ) -> TiebaStaticImageWatermark {
+    guard hasImageDraft, let draftWatermark else { return preference.watermark }
+    return draftWatermark
+  }
 }
 
 enum ForumPrimaryAction: String, CaseIterable, Hashable, Identifiable, Sendable {

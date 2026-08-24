@@ -4,6 +4,25 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class ReplyComposerImageTests: XCTestCase {
+  func testComposerKeepsImageDraftWatermarkInsteadOfCurrentDefault() {
+    XCTAssertEqual(
+      ComposerImageWatermarkPolicy.initialValue(
+        preference: .none,
+        hasImageDraft: true,
+        draftWatermark: .username
+      ),
+      .username
+    )
+    XCTAssertEqual(
+      ComposerImageWatermarkPolicy.initialValue(
+        preference: .username,
+        hasImageDraft: true,
+        draftWatermark: .forumName
+      ),
+      .forumName
+    )
+  }
+
   func testOnlyDirectTopicReplyAllowsAttachments() throws {
     let direct = try replyImageTarget(.thread(firstPostID: 100))
     let floor = try replyImageTarget(.post(postID: 101))

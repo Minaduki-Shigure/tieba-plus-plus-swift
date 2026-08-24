@@ -4,6 +4,25 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class NewThreadComposerImageTests: XCTestCase {
+  func testComposerUsesCurrentDefaultWhenThereIsNoImageDraft() {
+    XCTAssertEqual(
+      ComposerImageWatermarkPolicy.initialValue(
+        preference: .none,
+        hasImageDraft: false,
+        draftWatermark: .username
+      ),
+      .none
+    )
+    XCTAssertEqual(
+      ComposerImageWatermarkPolicy.initialValue(
+        preference: .forumName,
+        hasImageDraft: false,
+        draftWatermark: nil
+      ),
+      .forumName
+    )
+  }
+
   func testAutosaveIdentityIncludesAttachmentOrderAndWatermark() {
     let first = composerImageAttachment(1)
     let second = composerImageAttachment(2)

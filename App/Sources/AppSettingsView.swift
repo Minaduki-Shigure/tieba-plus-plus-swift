@@ -58,6 +58,8 @@ struct AppSettingsView: View {
   private var hidesReplyEntryPoints = AppPreferenceDefaults.hidesReplyEntryPoints
   @AppStorage(AppPreferenceKey.showsPostAndReplyRiskNotice)
   private var showsPostAndReplyRiskNotice = AppPreferenceDefaults.showsPostAndReplyRiskNotice
+  @AppStorage(AppPreferenceKey.defaultImageWatermark)
+  private var defaultImageWatermark = ComposerImageWatermarkPreference.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.darkensContentThumbnailsInDarkMode)
   private var darkensContentThumbnailsInDarkMode = true
   @AppStorage(AppPreferenceKey.showsBothUsernameAndNickname)
@@ -170,6 +172,14 @@ struct AppSettingsView: View {
       }
 
       Section {
+        Picker("默认图片水印", selection: defaultImageWatermarkSelection) {
+          ForEach(ComposerImageWatermarkPreference.allCases) { watermark in
+            Text(watermark.title).tag(watermark)
+          }
+        }
+        .pickerStyle(.menu)
+        .accessibilityIdentifier("settings-default-image-watermark")
+
         Toggle("隐藏回复入口", isOn: $hidesReplyEntryPoints)
           .accessibilityIdentifier("settings-hide-reply-entry-points")
 
@@ -179,9 +189,10 @@ struct AppSettingsView: View {
         Text("阅读与回复")
       } footer: {
         Text(
-          "开启后，会隐藏主题、楼层、楼中楼和消息列表中的回复按钮；"
+          "默认图片水印用于新建且尚未附图的发帖或回复草稿；已有图片的草稿保留其原水印。"
+            + "隐藏回复入口开启后，会隐藏主题、楼层、楼中楼和消息列表中的回复按钮；"
             + "不会隐藏回复内容或删除草稿。风险提示默认开启，会在进入发帖或回复编辑器时显示；"
-            + "关闭后，实际发送或发布前仍需逐次确认。两项设置只保存在本机，切换时不会发起网络请求。"
+            + "关闭后，实际发送或发布前仍需逐次确认。这些设置只保存在本机，切换时不会发起网络请求。"
         )
       }
 
@@ -487,6 +498,13 @@ struct AppSettingsView: View {
     Binding(
       get: { ForumPrimaryAction.resolved(forumPrimaryAction) },
       set: { forumPrimaryAction = $0.rawValue }
+    )
+  }
+
+  private var defaultImageWatermarkSelection: Binding<ComposerImageWatermarkPreference> {
+    Binding(
+      get: { ComposerImageWatermarkPreference.resolved(defaultImageWatermark) },
+      set: { defaultImageWatermark = $0.rawValue }
     )
   }
 

@@ -28,7 +28,7 @@ from that source.
 | Anonymous discovery, search, and forums | 20 | 18–19 | Core browsing, ranking, recommendations, categories, and search are implemented; a few niche discovery paths remain. Account-bound dislike feedback is credited under server writes, not anonymous reading |
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, shared text selection/copying, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
-| Local data, settings, and customization | 10 | 7 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, account-isolated followed-forum pinning and layout, a configurable forum primary action, reply-entry visibility, a default-on composer risk notice, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
+| Local data, settings, and customization | 10 | 7 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, account-isolated followed-forum pinning and layout, a configurable forum primary action, a TiebaLite-compatible default image-watermark choice, reply-entry visibility, a default-on composer risk notice, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, switching, a self-profile summary, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 14 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, server-reason-bound personalized recommendation dislike feedback, three text/classic-emoticon reply targets, equivalent new-topic creation, bounded static-image new-topic/direct-topic-reply creation, direct inline-preview reply entry, and credential-free official reporting entry points have guarded implementations; real batch-check-in behavior, creation, poll and interaction-restriction success, broader uploaded media, unresolvable cloud rows, native reporting, and other reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
@@ -68,6 +68,9 @@ covered together without adding an authenticated request.
 The composer-entry risk notice likewise completes one narrow TiebaLite habit
 setting and hardens an existing creation flow, but adds no new write target or
 workflow and therefore does not add a weighted point.
+The default image-watermark preference likewise closes a narrow composer habit
+gap inside the existing local-settings credit. It adds no upload, write target,
+or weighted point.
 The local About destination closes another narrow settings gap but adds no data
 source or workflow, so it also remains inside the existing settings credit.
 The shared selectable-text panel closes one narrow TiebaLite interaction gap
@@ -353,6 +356,13 @@ compilation, and never retries an uncertain dispatched chunk. The final write is
 bound to an immutable target, content, attachment order, processing choice,
 watermark, session, and submission ID. Restart recovery performs no network work
 until an explicit resume, while locked outcomes remain read-only.
+The shared settings menu now stores TiebaLite's stable `0`/`1`/`2` watermark
+values, defaults to forum name, and fails back to that default for unknown
+values. A composer without an image draft adopts the current preference, while
+a restored draft with images retains the watermark already bound to those
+attachments. Discarding a draft or explicitly starting another topic returns to
+the current default; changing the preference never mutates a live image draft or
+starts network work.
 
 Attachment removal and terminal submission cleanup write a durable bounded
 tombstone but do not physically delete the private composer JPEG in current
