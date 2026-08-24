@@ -48,6 +48,13 @@ final class AccountViewModel: ObservableObject {
     }
   }
 
+  func invalidateForAccountSessionChange() {
+    generation &+= 1
+    accounts = []
+    state = .idle
+    errorMessage = nil
+  }
+
   func switchAccount(to userID: Int64) async {
     await mutate(change: .switchAccount, accountID: userID) {
       try await vault.switchActive(to: userID)

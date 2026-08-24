@@ -424,8 +424,10 @@ confirmation. For reply and new-topic creation, this confirmation must bind an
 immutable target-and-content snapshot immediately before dispatch. Editing,
 dismissing the confirmation, changing the account session, or leaving the page
 invalidates that snapshot. The configurable composer-entry risk notice is
-advisory and must never satisfy this confirmation requirement. Automatic,
-scheduled, and batch check-in are deliberately unsupported. `disagree` or
+advisory and must never satisfy this confirmation requirement. The home and
+account-page one-click entries only read the authoritative catalog until the
+same foreground confirmation is accepted. Automatic, scheduled, and background
+check-in are deliberately unsupported. `disagree` or
 downvote, rich-media topic/reply creation, editing, deletion, native reporting, and
 every other authenticated content write remain unsupported and must not be
 inferred from the approval, reply, or new-topic endpoints.

@@ -93,6 +93,90 @@ final class AccountViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.state, .loaded)
   }
 
+  func testSessionChangeSynchronouslyInvalidatesLoadedAccountSnapshot() async throws {
+    let active = StoredAccountSession(
+      id: 7,
+      username: "active",
+      displayName: "Active",
+      portrait: "portrait-7",
+      bduss: String(repeating: "b", count: AccountCredentialFormat.bdussLength),
+      stoken: String(repeating: "s", count: AccountCredentialFormat.stokenLength),
+      createdAt: Date(timeIntervalSince1970: 1),
+      updatedAt: Date(timeIntervalSince1970: 2)
+    )
+    let vault = AccountVaultSpy(sessions: [active], activeUserID: active.id)
+    let viewModel = AccountViewModel(vault: vault)
+
+    await viewModel.loadIfNeeded()
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.activeAccount?.id, active.id)
+    XCTAssertTrue(viewModel.activeAccount?.hasFullCredentials == true)
+
+    viewModel.invalidateForAccountSessionChange()
+
+    XCTAssertEqual(viewModel.state, .idle)
+    XCTAssertTrue(viewModel.accounts.isEmpty)
+    XCTAssertNil(viewModel.activeAccount)
+
+    try await vault.remove(userID: active.id)
+    await viewModel.loadIfNeeded()
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertTrue(viewModel.accounts.isEmpty)
+  }
+
+  func testInvalidatedInFlightReloadCannotRestoreStaleFullCredentialAccount() async throws {
+    let stale = AccountSummary(
+      id: 7,
+      username: "stale",
+      displayName: "Stale",
+      portraitURL: nil,
+      isActive: true,
+      hasFullCredentials: true,
+      updatedAt: Date(timeIntervalSince1970: 1)
+    )
+    let vault = OutOfOrderSummaryVault(first: [stale], second: [])
+    let viewModel = AccountViewModel(vault: vault)
+
+    let staleReload = Task { await viewModel.reload() }
+    try await waitForAccountState { await vault.requestCount() == 1 }
+    viewModel.invalidateForAccountSessionChange()
+    await viewModel.loadIfNeeded()
+    await staleReload.value
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertTrue(viewModel.accounts.isEmpty)
+    XCTAssertNil(viewModel.activeAccount)
+  }
+
+  func testSessionChangeReloadFailureCannotRetainStaleFullCredentialAccount() async {
+    let stale = AccountSummary(
+      id: 7,
+      username: "stale",
+      displayName: "Stale",
+      portraitURL: nil,
+      isActive: true,
+      hasFullCredentials: true,
+      updatedAt: Date(timeIntervalSince1970: 1)
+    )
+    let vault = ScriptedSummaryVault(
+      scripts: [
+        .success([stale]),
+        .failure(AccountTestFailure(message: "vault unavailable")),
+      ]
+    )
+    let viewModel = AccountViewModel(vault: vault)
+
+    await viewModel.loadIfNeeded()
+    XCTAssertEqual(viewModel.activeAccount, stale)
+
+    viewModel.invalidateForAccountSessionChange()
+    await viewModel.loadIfNeeded()
+
+    XCTAssertEqual(viewModel.state, .failed("vault unavailable"))
+    XCTAssertTrue(viewModel.accounts.isEmpty)
+    XCTAssertNil(viewModel.activeAccount)
+  }
+
   func testExplicitResetRecoversAccountViewModelFromUnreadableArchive() async {
     let vault = RecoverableAccountVault()
     let viewModel = AccountViewModel(vault: vault)
@@ -1784,6 +1868,27 @@ private actor RecoverableAccountVault: AccountVault {
   }
 
   func resetCount() -> Int { resets }
+}
+
+private actor ScriptedSummaryVault: AccountVault {
+  private var scripts: [Result<[AccountSummary], AccountTestFailure>]
+
+  init(scripts: [Result<[AccountSummary], AccountTestFailure>]) {
+    self.scripts = scripts
+  }
+
+  func accountSummaries() async throws -> [AccountSummary] {
+    guard !scripts.isEmpty else {
+      throw AccountTestFailure(message: "missing account-summary script")
+    }
+    return try scripts.removeFirst().get()
+  }
+
+  func activeSession() async throws -> StoredAccountSession? { nil }
+  func upsert(_ session: StoredAccountSession) async throws {}
+  func switchActive(to userID: Int64) async throws {}
+  func remove(userID: Int64) async throws {}
+  func removeAll() async throws {}
 }
 
 private actor FailingSummaryAccountVault: AccountVault {

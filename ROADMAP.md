@@ -105,6 +105,11 @@ carried. It adds neither a data source nor a workflow, so it adds no weighted po
 The separate fan-reminder entry consumes the existing optional `fans` field and
 opens the already credited public follower list. It adds no endpoint, background
 work, persistence, or weighted point.
+The home-level one-click check-in entry likewise exposes the existing guarded
+foreground flow where TiebaLite places a daily action. It appears only for an
+active account with complete credentials, and opening it performs catalog reads
+only; the existing confirmation remains the write boundary. It adds no endpoint,
+write target, background behavior, or weighted point.
 The official-report handoff closes the end-user reporting-entry gap for visible
 topics, floors, and nested replies and therefore adds one weighted point. It does
 not claim native reporting parity: the credential-free preflight only resolves a
@@ -315,9 +320,9 @@ the source metadata is updated to that tested IPA.
   unfollow confirmation
 - Authoritative per-forum check-in state and explicitly confirmed single-forum
   check-in, with already-signed idempotence
-- Foreground-only one-click check-in from the account page, with an explicit
-  confirmation snapshot, a fresh official eligibility refresh, and a batch
-  dispatch limited to their intersection. Official rejections and dropped
+- Foreground-only one-click check-in from the home toolbar or account page, with
+  an explicit confirmation snapshot, a fresh official eligibility refresh, and
+  a batch dispatch limited to their intersection. Official rejections and dropped
   targets never fall back to individual writes; an uncertain batch outcome is
   reconciled only through authoritative per-forum reads and is never retried.
   Background and automatic check-in are not implemented
@@ -888,8 +893,10 @@ another page. Home and complete-list context menus pin, unpin, or explicitly cop
 the forum name; stale pins create no row, and confirmed unfollow removes only the
 matching account's pin. These local actions initiate no automatic server
 operation, and the lists still provide no inline unfollow or check-in controls.
-The account page's separate foreground one-click
-flow consumes its own authoritative catalog and explicit confirmation snapshot.
+The home toolbar and account page open the same separate foreground one-click
+flow, which consumes its own authoritative catalog and explicit confirmation
+snapshot. The home entry is shown only for an active account with complete
+credentials, and opening either entry performs no check-in write.
 Opening a forum continues to use the separate, explicitly confirmed
 per-forum membership and check-in workflow. Client-side lease checks prevent a
 late page from being published under another local session, but successful
@@ -1269,8 +1276,10 @@ disabling the composer-entry notice is never this write authorization. Anonymous
 browsing must continue to work without creating, reading, or storing an account
 session.
 
-Foreground batch check-in uses the official forum catalog and batch endpoint,
-but user confirmation remains the write-authorization boundary. The client
+Foreground batch check-in uses the official forum catalog and batch endpoint.
+The home toolbar and account page open the same flow, and merely entering it
+performs catalog reads only; user confirmation remains the write-authorization
+boundary. The client
 normalizes and binds the ordered official-batch subset shown for confirmation,
 then refreshes the official catalog immediately before dispatch and sends only
 its intersection with the fresh eligible set. Newly eligible forums are not

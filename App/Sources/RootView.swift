@@ -44,6 +44,7 @@ struct RootView: View {
   @StateObject private var globalSearchHistoryViewModel: GlobalSearchHistoryViewModel
   @StateObject private var recentForumsViewModel: BrowsingHistoryViewModel
   @StateObject private var searchSuggestionViewModel: SearchSuggestionViewModel
+  @StateObject private var accountViewModel: AccountViewModel
   @StateObject private var threadSummaryImageGalleryCoordinator:
     ThreadSummaryImageGalleryCoordinator
 
@@ -86,6 +87,7 @@ struct RootView: View {
     _searchSuggestionViewModel = StateObject(
       wrappedValue: SearchSuggestionViewModel(service: service)
     )
+    _accountViewModel = StateObject(wrappedValue: AccountViewModel(vault: accountVault))
     _threadSummaryImageGalleryCoordinator = StateObject(
       wrappedValue: ThreadSummaryImageGalleryCoordinator(
         remoteService: service as? any ThreadPictureGalleryService,
@@ -212,6 +214,22 @@ struct RootView: View {
       .listStyle(.insetGrouped)
       .navigationTitle("贴吧++")
       .toolbar {
+        if RootAccountActionPolicy.showsBatchCheckIn(
+          for: accountViewModel.activeAccount,
+          state: accountViewModel.state
+        ) {
+          ToolbarItem(placement: .navigationBarLeading) {
+            Button {
+              path.append(.batchCheckIn)
+            } label: {
+              Image(systemName: "checkmark.seal")
+            }
+            .accessibilityLabel("一键签到")
+            .accessibilityHint("打开前台一键签到页面")
+            .help("一键签到")
+          }
+        }
+
         ToolbarItemGroup(placement: .navigationBarTrailing) {
           Button {
             path.append(.account)
@@ -311,6 +329,10 @@ struct RootView: View {
             favoritesRepository: favoritesRepository,
             searchHistoryRepository: searchHistoryRepository
           )
+        case .batchCheckIn:
+          ForumBatchCheckInView(
+            access: AccountAccess(vault: accountVault, service: accountService)
+          )
         case .notifications:
           NotificationsView(
             browseService: service,
@@ -397,6 +419,7 @@ struct RootView: View {
       mediaPlaybackCoordinator.setSceneActive(scenePhase == .active)
     }
     .task { await globalSearchHistoryViewModel.loadIfNeeded() }
+    .task { await accountViewModel.loadIfNeeded() }
     .onChange(of: query) { searchSuggestionViewModel.inputChanged($0) }
     .onChange(of: searchSuggestionsEnabled) {
       searchSuggestionViewModel.setEnabled($0)
@@ -422,6 +445,8 @@ struct RootView: View {
       Task { @MainActor in recentForumsViewModel.reload() }
     }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+      accountViewModel.invalidateForAccountSessionChange()
+      Task { @MainActor in await accountViewModel.loadIfNeeded() }
       let loadsImmediately = RootFollowedForumsActivationPolicy.isActive(path: path)
         || followedForumsViewModel.hasActiveFullListSurface
         || followedForumsViewModel.hasActiveCompleteIndexSurface
@@ -793,12 +818,23 @@ enum RootDestination: Hashable {
   case history
   case favorites
   case followedForums
+  case batchCheckIn
   case notifications
   case account
   case settings
   case thread(ThreadHistorySnapshot)
   case linkedThread(TiebaThreadRoute)
   case user(Int64)
+}
+
+enum RootAccountActionPolicy {
+  static func showsBatchCheckIn(
+    for account: AccountSummary?,
+    state: LoadState
+  ) -> Bool {
+    guard state == .loaded, let account else { return false }
+    return account.isActive && account.hasFullCredentials
+  }
 }
 
 enum RootFollowedForumsActivationPolicy {

@@ -82,6 +82,7 @@ final class RootStartupNavigationTests: XCTestCase {
       .history,
       .favorites,
       .followedForums,
+      .batchCheckIn,
       .notifications,
       .account,
       .settings,
@@ -100,6 +101,52 @@ final class RootStartupNavigationTests: XCTestCase {
         path: [.forum("swift"), .followedForums]
       )
     )
+  }
+
+  func testHomeBatchCheckInShortcutRequiresActiveFullCredentials() {
+    let updatedAt = Date(timeIntervalSince1970: 1_700_000_000)
+    let account: (_ isActive: Bool, _ hasFullCredentials: Bool) -> AccountSummary = {
+      isActive, hasFullCredentials in
+      AccountSummary(
+        id: 7,
+        username: "tester",
+        displayName: "Tester",
+        portraitURL: nil,
+        isActive: isActive,
+        hasFullCredentials: hasFullCredentials,
+        updatedAt: updatedAt
+      )
+    }
+
+    XCTAssertFalse(
+      RootAccountActionPolicy.showsBatchCheckIn(for: nil, state: .loaded)
+    )
+    XCTAssertFalse(
+      RootAccountActionPolicy.showsBatchCheckIn(
+        for: account(false, true),
+        state: .loaded
+      )
+    )
+    XCTAssertFalse(
+      RootAccountActionPolicy.showsBatchCheckIn(
+        for: account(true, false),
+        state: .loaded
+      )
+    )
+    XCTAssertTrue(
+      RootAccountActionPolicy.showsBatchCheckIn(
+        for: account(true, true),
+        state: .loaded
+      )
+    )
+    for state in [LoadState.idle, .loading, .failed("unreadable")] {
+      XCTAssertFalse(
+        RootAccountActionPolicy.showsBatchCheckIn(
+          for: account(true, true),
+          state: state
+        )
+      )
+    }
   }
 
   func testFavoriteForumDestinationIsUnaffectedByThreadOverrides() {

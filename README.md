@@ -18,7 +18,7 @@ and its verified metadata enters the public app source.
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, media preferences, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
-| Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, explicitly confirmed foreground one-click check-in, authenticated poll state, and experimental content approval |
+| Accounts | Current `main` supports bound Web login, switching, logout, an account-bound self-profile summary, followed forums, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies; both newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
 | TiebaLite parity | Current `main` and public `v0.62.3-alpha.1`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.62.3-alpha.1` (build 74) |
@@ -262,6 +262,12 @@ and its verified metadata enters the public app source.
   comments, and active filters remain limited to the same card. This source-only
   workflow still needs iOS 18 device validation for touch routing inside a
   `NavigationLink` and is not included in the public `v0.62.3-alpha.1` IPA.
+- **Current-main Home one-click check-in entry:** For an active account with
+  complete credentials, Home exposes a toolbar shortcut to the same foreground-
+  only flow already available from Account. Opening it reads the authoritative
+  catalog only; the existing in-page snapshot confirmation remains the write
+  boundary. This navigation-only addition introduces no endpoint or background
+  behavior and is not included in the public `v0.62.3-alpha.1` IPA.
 - **`v0.61.0-alpha.1` static-image creation:** New-topic and direct-topic-reply
   composers can select, reorder, preview, and remove up to nine static
   images, choose standard or high-definition processing, and select forum-name,
@@ -553,10 +559,12 @@ and its verified metadata enters the public app source.
   and performs no automatic account write. A separate versioned local archive
   retains pins across launches and isolates them by positive account UID; it only
   reorders exact rows already present in that snapshot and never loads another
-  page. The lists provide no inline server unfollow or check-in control. A loaded forum separately reads
-  account-specific follow and check-in state and retains its explicitly
-  confirmed single-forum actions. The account page provides the distinct,
-  foreground-only one-click flow described below. Successful private-list
+  page. The lists provide no inline server unfollow or check-in control. A
+  loaded forum separately reads account-specific follow and check-in state and
+  retains its explicitly
+  confirmed single-forum actions. The home toolbar and account page open the
+  same distinct, foreground-only one-click flow described below; neither adds
+  an inline list write. Successful private-list
   retrieval still requires physical-device validation and is not asserted by CI
   fixtures.
 - **Current-account profile:** The account page reads a bounded, account-lease-
