@@ -527,6 +527,12 @@ struct CloudFavoritesView: View {
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
 
+  @AppStorage(AppPreferenceKey.cloudFavoriteThreadsOpenOnlyAuthor)
+  private var cloudFavoriteThreadsOpenOnlyAuthor =
+    AppPreferenceDefaults.cloudFavoriteThreadsOpenOnlyAuthor
+  @AppStorage(AppPreferenceKey.cloudFavoriteThreadsOpenDescending)
+  private var cloudFavoriteThreadsOpenDescending =
+    AppPreferenceDefaults.cloudFavoriteThreadsOpenDescending
   @StateObject private var viewModel: CloudFavoritesViewModel
 
   init(
@@ -654,14 +660,20 @@ struct CloudFavoritesView: View {
       )
     } else {
       NavigationLink {
-        let route = thread.threadRoute
+        let navigation = thread.navigation(
+          applying: FavoriteThreadOpenOverrides(
+            onlyThreadAuthor: cloudFavoriteThreadsOpenOnlyAuthor,
+            descending: cloudFavoriteThreadsOpenDescending
+          )
+        )
         ThreadView(
-          thread: route.placeholderThread,
+          thread: navigation.route.placeholderThread,
           service: browseService,
           historyRepository: historyRepository,
           favoritesRepository: favoritesRepository,
           searchHistoryRepository: searchHistoryRepository,
-          linkRoute: route
+          linkRoute: navigation.route,
+          initialBrowseOptions: navigation.options
         )
       } label: {
         CloudFavoriteThreadRow(

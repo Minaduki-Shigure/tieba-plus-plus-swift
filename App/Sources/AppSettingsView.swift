@@ -41,6 +41,12 @@ struct AppSettingsView: View {
   @AppStorage(AppPreferenceKey.favoriteThreadsOpenDescending)
   private var favoriteThreadsOpenDescending =
     AppPreferenceDefaults.favoriteThreadsOpenDescending
+  @AppStorage(AppPreferenceKey.cloudFavoriteThreadsOpenOnlyAuthor)
+  private var cloudFavoriteThreadsOpenOnlyAuthor =
+    AppPreferenceDefaults.cloudFavoriteThreadsOpenOnlyAuthor
+  @AppStorage(AppPreferenceKey.cloudFavoriteThreadsOpenDescending)
+  private var cloudFavoriteThreadsOpenDescending =
+    AppPreferenceDefaults.cloudFavoriteThreadsOpenDescending
   @AppStorage(AppPreferenceKey.searchSuggestionsEnabled)
   private var searchSuggestionsEnabled = false
   @AppStorage(AppPreferenceKey.personalizedFollowedForumsOnly)
@@ -229,6 +235,19 @@ struct AppSettingsView: View {
         Text(
           "开启后，推荐页只显示已关注贴吧中的帖子；账号个性使用所选账号，"
             + "匿名个性使用当前账号，且筛选仅在本机完成。"
+        )
+      }
+
+      Section {
+        Toggle("打开时只看楼主", isOn: $cloudFavoriteThreadsOpenOnlyAuthor)
+
+        Toggle("打开时使用倒序", isOn: $cloudFavoriteThreadsOpenDescending)
+      } header: {
+        Text("贴吧收藏")
+      } footer: {
+        Text(
+          "仅影响从当前登录账号的贴吧云收藏进入帖子；收藏楼层定位会同时保留。"
+            + "实际模式会按现有规则记录到浏览记录。"
         )
       }
 

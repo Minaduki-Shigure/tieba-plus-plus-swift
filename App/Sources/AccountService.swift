@@ -172,6 +172,20 @@ struct CloudFavoriteThread: Identifiable, Hashable, Sendable {
   var threadRoute: TiebaThreadRoute {
     TiebaThreadRoute(threadID: id, postID: markPostID)
   }
+
+  func navigation(
+    applying overrides: FavoriteThreadOpenOverrides
+  ) -> CloudFavoriteThreadNavigation {
+    CloudFavoriteThreadNavigation(
+      route: threadRoute,
+      options: overrides.applying(to: threadRoute.options)
+    )
+  }
+}
+
+struct CloudFavoriteThreadNavigation: Hashable, Sendable {
+  let route: TiebaThreadRoute
+  let options: ThreadBrowseOptions
 }
 
 struct CloudFavoritePage: Hashable, Sendable {

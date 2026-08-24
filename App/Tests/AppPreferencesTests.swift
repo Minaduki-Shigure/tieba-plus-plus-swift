@@ -703,6 +703,19 @@ final class AppPreferencesTests: XCTestCase {
     )
   }
 
+  func testCloudFavoriteThreadOpenPreferencesUseStableKeysAndTiebaLiteDefaults() {
+    XCTAssertEqual(
+      AppPreferenceKey.cloudFavoriteThreadsOpenOnlyAuthor,
+      "TiebaPlusPlus.cloudFavoriteThreadsOpenOnlyAuthor"
+    )
+    XCTAssertEqual(
+      AppPreferenceKey.cloudFavoriteThreadsOpenDescending,
+      "TiebaPlusPlus.cloudFavoriteThreadsOpenDescending"
+    )
+    XCTAssertTrue(AppPreferenceDefaults.cloudFavoriteThreadsOpenOnlyAuthor)
+    XCTAssertFalse(AppPreferenceDefaults.cloudFavoriteThreadsOpenDescending)
+  }
+
   func testFavoriteThreadOpenOverridesApplyAllForceOnCombinations() {
     let original = ThreadBrowseOptions(sort: .hot, onlyThreadAuthor: false)
     let combinations: [(Bool, Bool, ThreadPostSort, Bool)] = [

@@ -5,6 +5,41 @@ import XCTest
 
 @MainActor
 final class CloudFavoritesViewModelTests: XCTestCase {
+  func testCloudFavoriteRoutePreservesAnchorAndAppliesOpenPreferences() {
+    let thread = CloudFavoriteThread(
+      id: 42,
+      title: "A saved thread",
+      forumName: "swift",
+      authorName: "author",
+      markPostID: 99,
+      latestPostID: 100,
+      latestFloor: 8,
+      hasUpdates: true,
+      isDeleted: false,
+      updatedAt: Date(timeIntervalSince1970: 1)
+    )
+    let combinations: [(Bool, Bool, ThreadPostSort, Bool)] = [
+      (false, false, .ascending, false),
+      (true, false, .ascending, true),
+      (false, true, .descending, false),
+      (true, true, .descending, true),
+    ]
+
+    for (onlyThreadAuthor, descending, expectedSort, expectedOnlyThreadAuthor) in combinations {
+      let navigation = thread.navigation(
+        applying: FavoriteThreadOpenOverrides(
+          onlyThreadAuthor: onlyThreadAuthor,
+          descending: descending
+        )
+      )
+
+      XCTAssertEqual(navigation.route.threadID, 42)
+      XCTAssertEqual(navigation.route.postID, 99)
+      XCTAssertEqual(navigation.options.sort, expectedSort)
+      XCTAssertEqual(navigation.options.onlyThreadAuthor, expectedOnlyThreadAuthor)
+    }
+  }
+
   func testPaginationReplacesDuplicateWithNewServerDataAndStopsAfterEmptyPage() async throws {
     let active = cloudSession(userID: 7)
     let vault = CloudFavoritesVaultSpy(session: active)

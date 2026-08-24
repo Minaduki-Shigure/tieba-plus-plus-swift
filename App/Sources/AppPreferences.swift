@@ -31,6 +31,10 @@ enum AppPreferenceKey {
     "TiebaPlusPlus.favoriteThreadsOpenOnlyAuthor"
   static let favoriteThreadsOpenDescending =
     "TiebaPlusPlus.favoriteThreadsOpenDescending"
+  static let cloudFavoriteThreadsOpenOnlyAuthor =
+    "TiebaPlusPlus.cloudFavoriteThreadsOpenOnlyAuthor"
+  static let cloudFavoriteThreadsOpenDescending =
+    "TiebaPlusPlus.cloudFavoriteThreadsOpenDescending"
   static let personalizedRecommendationCUID =
     "TiebaPlusPlus.personalizedRecommendationCUID"
   static let personalizedRecommendationPersona =
@@ -143,6 +147,8 @@ enum AppPreferenceDefaults {
   static let personalizedFollowedForumsOnly = false
   static let favoriteThreadsOpenOnlyAuthor = false
   static let favoriteThreadsOpenDescending = false
+  static let cloudFavoriteThreadsOpenOnlyAuthor = true
+  static let cloudFavoriteThreadsOpenDescending = false
   static let hidesReplyEntryPoints = false
   static let showsPostAndReplyRiskNotice = true
 }

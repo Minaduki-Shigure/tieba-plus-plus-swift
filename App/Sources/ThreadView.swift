@@ -53,6 +53,7 @@ struct ThreadView: View {
     searchHistoryRepository: any ForumSearchHistoryRepository,
     historySnapshot: ThreadHistorySnapshot? = nil,
     linkRoute: TiebaThreadRoute? = nil,
+    initialBrowseOptions: ThreadBrowseOptions? = nil,
     replyIntent: InboxReplyIntent? = nil,
     onInboxReplyComposerPresented: ((InboxReplyIntent) -> Void)? = nil
   ) {
@@ -68,7 +69,7 @@ struct ThreadView: View {
       wrappedValue: ThreadViewModel(
         thread: thread,
         service: service,
-        options: linkRoute?.options ?? ThreadBrowseOptions(),
+        options: initialBrowseOptions ?? linkRoute?.options ?? ThreadBrowseOptions(),
         initialLocation: linkRoute.flatMap { route in
           route.postID.map { ThreadPostLocation.postID($0) }
         }
