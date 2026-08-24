@@ -487,6 +487,11 @@ and its verified metadata enters the public app source.
 - **Links and sharing:** Supported Tieba links stay in the native router with
   post and reply context. External HTTPS links use the selected system or Safari
   presentation, while forum and thread sharing emits canonical HTTPS links.
+  The app-owned scheme also exposes strict navigation-only routes for a search
+  landing with recent history, browsing history, account cloud favorites, and
+  either inbox segment. These routes carry no account or credential data;
+  app-only routes embedded in post content are rejected instead of being handed
+  back to iOS for re-entry.
 - **Text selection and copying:** Context-menu copy actions for a visible topic
   or ordinary floor, an inline nested-reply preview, and the parent or child row
   of a full nested-reply page open one shared local panel. Its projected text is

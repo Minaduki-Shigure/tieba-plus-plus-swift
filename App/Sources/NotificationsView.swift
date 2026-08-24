@@ -22,7 +22,8 @@ struct NotificationsView: View {
     contentFilterRepository: any ContentFilterRepository,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
-    searchHistoryRepository: any ForumSearchHistoryRepository
+    searchHistoryRepository: any ForumSearchHistoryRepository,
+    initialKind: InboxKind = .replies
   ) {
     self.browseService = browseService
     self.accountService = accountService
@@ -34,7 +35,8 @@ struct NotificationsView: View {
       wrappedValue: NotificationsViewModel(
         service: accountService,
         vault: vault,
-        contentFilterRepository: contentFilterRepository
+        contentFilterRepository: contentFilterRepository,
+        selectedKind: initialKind
       )
     )
   }

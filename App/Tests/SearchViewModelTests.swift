@@ -5,6 +5,22 @@ import XCTest
 
 final class SearchViewModelTests: XCTestCase {
   @MainActor
+  func testEmptyInitialSearchRemainsIdleWithoutIssuingRequests() async {
+    let service = ScriptedSearchService()
+    let viewModel = SearchViewModel(query: "   ", service: service)
+
+    viewModel.loadIfNeeded()
+
+    XCTAssertEqual(viewModel.submittedQuery, "")
+    for scope in SearchScope.allCases {
+      viewModel.selectScope(scope)
+      XCTAssertEqual(viewModel.state, .idle)
+    }
+    let counts = await service.requestCounts()
+    XCTAssertEqual(counts, SearchRequestCounts(forums: 0, threads: 0, users: 0))
+  }
+
+  @MainActor
   func testInitialSearchLoadsOnlyDefaultForumScope() async throws {
     let service = ScriptedSearchService()
     let exact = SearchFixtures.forum(id: 1, name: "swift")
@@ -397,7 +413,7 @@ final class SearchViewModelTests: XCTestCase {
   }
 
   @MainActor
-  func testThreadSortChangeKeepsEmptyQueryFailureWithoutRequest() async {
+  func testThreadSortChangeKeepsEmptyQueryIdleWithoutRequest() async {
     let service = ScriptedSearchService()
     let viewModel = SearchViewModel(
       query: "",
@@ -409,7 +425,7 @@ final class SearchViewModelTests: XCTestCase {
     viewModel.setThreadSort(.oldest)
 
     XCTAssertEqual(viewModel.threadSort, .oldest)
-    XCTAssertEqual(viewModel.threadState, .failed("请输入搜索关键词。"))
+    XCTAssertEqual(viewModel.threadState, .idle)
     XCTAssertFalse(viewModel.hasResults)
     let counts = await service.requestCounts()
     XCTAssertEqual(counts, SearchRequestCounts(forums: 0, threads: 0, users: 0))
@@ -585,7 +601,7 @@ final class SearchViewModelTests: XCTestCase {
   }
 
   @MainActor
-  func testContentFilterChangeKeepsEmptyThreadQueryFailureWithoutRequest() async {
+  func testContentFilterChangeKeepsEmptyQueryIdleWithoutRequest() async {
     let service = ScriptedSearchService()
     let viewModel = SearchViewModel(query: "", service: service)
     viewModel.submit("   ")
@@ -593,8 +609,8 @@ final class SearchViewModelTests: XCTestCase {
 
     viewModel.reloadThreadsAfterContentFilterChange()
 
-    XCTAssertEqual(viewModel.threadState, .failed("请输入搜索关键词。"))
-    XCTAssertEqual(viewModel.userState, .failed("请输入搜索关键词。"))
+    XCTAssertEqual(viewModel.threadState, .idle)
+    XCTAssertEqual(viewModel.userState, .idle)
     let counts = await service.requestCounts()
     XCTAssertEqual(counts, SearchRequestCounts(forums: 0, threads: 0, users: 0))
   }
@@ -639,7 +655,7 @@ final class SearchViewModelTests: XCTestCase {
 
     viewModel.submit("   ")
     XCTAssertEqual(viewModel.submittedQuery, "")
-    XCTAssertEqual(viewModel.state, .failed("请输入搜索关键词。"))
+    XCTAssertEqual(viewModel.state, .idle)
 
     let resumed = await service.resumeForums(
       id: 201,
@@ -652,10 +668,10 @@ final class SearchViewModelTests: XCTestCase {
     await searchDrainMainActor()
 
     XCTAssertNil(viewModel.exactForum)
-    XCTAssertEqual(viewModel.state, .failed("请输入搜索关键词。"))
+    XCTAssertEqual(viewModel.state, .idle)
     for scope in SearchScope.allCases {
       viewModel.selectScope(scope)
-      XCTAssertEqual(viewModel.state, .failed("请输入搜索关键词。"))
+      XCTAssertEqual(viewModel.state, .idle)
     }
     let counts = await service.requestCounts()
     XCTAssertEqual(counts, SearchRequestCounts(forums: 1, threads: 0, users: 0))
@@ -691,7 +707,7 @@ final class SearchViewModelTests: XCTestCase {
 
     viewModel.submit("   ")
 
-    XCTAssertEqual(viewModel.state, .failed("请输入搜索关键词。"))
+    XCTAssertEqual(viewModel.state, .idle)
     let counts = await service.requestCounts()
     XCTAssertEqual(counts, SearchRequestCounts(forums: 0, threads: 0, users: 0))
   }

@@ -41,6 +41,9 @@ enum BrowseContentLinkRouter {
     case "http":
       guard let host = components.host, !host.isEmpty else { return .rejected }
       return .system(url)
+    case TiebaLink.appScheme:
+      // App-only navigation links must never escape rich content through the system.
+      return .rejected
     default:
       return .system(url)
     }

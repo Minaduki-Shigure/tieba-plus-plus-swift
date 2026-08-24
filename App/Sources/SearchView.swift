@@ -10,8 +10,11 @@ struct SearchView: View {
   let onSearchSubmitted: @MainActor (String) -> Void
 
   @StateObject private var viewModel: SearchViewModel
+  @ObservedObject private var globalSearchHistoryViewModel: GlobalSearchHistoryViewModel
   @State private var query: String
   @State private var threadNavigationRequest: ThreadSummaryNavigationRequest?
+  @State private var confirmsClearingSearchHistory = false
+  @FocusState private var searchIsFocused: Bool
 
   init(
     query: String,
@@ -21,6 +24,7 @@ struct SearchView: View {
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository,
+    globalSearchHistoryViewModel: GlobalSearchHistoryViewModel,
     onSearchSubmitted: @escaping @MainActor (String) -> Void
   ) {
     self.browseService = browseService
@@ -28,40 +32,54 @@ struct SearchView: View {
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
     self.onSearchSubmitted = onSearchSubmitted
+    _globalSearchHistoryViewModel = ObservedObject(
+      wrappedValue: globalSearchHistoryViewModel
+    )
     _query = State(initialValue: query)
     _viewModel = StateObject(wrappedValue: SearchViewModel(query: query, service: searchService))
   }
 
   var body: some View {
     VStack(spacing: 0) {
-      Picker(
-        "搜索范围",
-        selection: Binding(
-          get: { viewModel.selectedScope },
-          set: { viewModel.selectScope($0) }
-        )
-      ) {
-        ForEach(SearchScope.allCases) { scope in
-          Text(scope.title).tag(scope)
+      if !viewModel.submittedQuery.isEmpty {
+        Picker(
+          "搜索范围",
+          selection: Binding(
+            get: { viewModel.selectedScope },
+            set: { viewModel.selectScope($0) }
+          )
+        ) {
+          ForEach(SearchScope.allCases) { scope in
+            Text(scope.title).tag(scope)
+          }
         }
-      }
-      .pickerStyle(.segmented)
-      .padding(.horizontal, 16)
-      .padding(.vertical, 8)
-      .background(.regularMaterial)
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.regularMaterial)
 
-      Divider()
-      if viewModel.selectedScope == .threads {
-        threadSortPicker
         Divider()
+        if viewModel.selectedScope == .threads {
+          threadSortPicker
+          Divider()
+        }
       }
       selectedResults
     }
     .navigationTitle(viewModel.submittedQuery.isEmpty ? "搜索" : viewModel.submittedQuery)
     .navigationBarTitleDisplayMode(.inline)
     .searchable(text: $query, prompt: "搜索贴吧、帖子和用户")
+    .compatibleSearchFocus($searchIsFocused)
     .onSubmit(of: .search, submitSearch)
-    .task { viewModel.loadIfNeeded() }
+    .task {
+      viewModel.loadIfNeeded()
+      guard viewModel.submittedQuery.isEmpty else { return }
+      await globalSearchHistoryViewModel.loadIfNeeded()
+      guard !Task.isCancelled, viewModel.submittedQuery.isEmpty else { return }
+      if #available(iOS 18.0, *) {
+        searchIsFocused = true
+      }
+    }
     .onDisappear(perform: viewModel.cancel)
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       Task { @MainActor in viewModel.reloadThreadsAfterContentFilterChange() }
@@ -84,12 +102,27 @@ struct SearchView: View {
     } message: {
       Text(viewModel.refreshError ?? "无法刷新搜索结果。")
     }
+    .confirmationDialog(
+      "清空全部搜索记录？",
+      isPresented: $confirmsClearingSearchHistory,
+      titleVisibility: .visible
+    ) {
+      Button("清空", role: .destructive) {
+        Task { await globalSearchHistoryViewModel.deleteAll() }
+      }
+      Button("取消", role: .cancel) {}
+    } message: {
+      Text("这会删除保存在本机的全部全局搜索记录。")
+    }
   }
 
   private func submitSearch() {
     let submittedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
     viewModel.submit(query)
-    guard !submittedQuery.isEmpty else { return }
+    guard !submittedQuery.isEmpty else {
+      Task { await globalSearchHistoryViewModel.loadIfNeeded() }
+      return
+    }
     onSearchSubmitted(submittedQuery)
   }
 
@@ -115,7 +148,9 @@ struct SearchView: View {
 
   @ViewBuilder
   private var selectedResults: some View {
-    if !viewModel.hasResults {
+    if viewModel.submittedQuery.isEmpty {
+      searchLanding
+    } else if !viewModel.hasResults {
       switch viewModel.state {
       case .idle, .loading:
         ProgressView()
@@ -133,6 +168,92 @@ struct SearchView: View {
         threadResults
       case .users:
         userResults
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var searchLanding: some View {
+    if globalSearchHistoryViewModel.isLoading,
+      globalSearchHistoryViewModel.entries.isEmpty
+    {
+      ProgressView()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    } else if globalSearchHistoryViewModel.entries.isEmpty {
+      if let message = globalSearchHistoryViewModel.errorMessage {
+        ErrorStateView(message: message) {
+          Task { await globalSearchHistoryViewModel.retry() }
+        }
+      } else {
+        EmptyStateView(title: "暂无搜索记录", systemImage: "magnifyingglass")
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+      }
+    } else {
+      List {
+        Section {
+          ForEach(globalSearchHistoryViewModel.entries) { entry in
+            Button {
+              query = entry.query
+              submitSearch()
+            } label: {
+              HStack(spacing: 10) {
+                Image(systemName: "clock")
+                  .foregroundStyle(.secondary)
+                  .accessibilityHidden(true)
+                Text(entry.query)
+                  .foregroundStyle(.primary)
+                  .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(entry.searchedAt, style: .relative)
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+                  .lineLimit(1)
+              }
+              .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+          }
+          .onDelete(perform: deleteSearchHistory)
+        } header: {
+          HStack {
+            Text("最近搜索")
+            Spacer()
+            Button {
+              confirmsClearingSearchHistory = true
+            } label: {
+              Image(systemName: "trash")
+                .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("清空搜索记录")
+            .help("清空搜索记录")
+          }
+        }
+
+        if let message = globalSearchHistoryViewModel.errorMessage {
+          Section("搜索记录错误") {
+            Label(message, systemImage: "exclamationmark.triangle")
+              .foregroundStyle(.secondary)
+            Button {
+              Task { await globalSearchHistoryViewModel.retry() }
+            } label: {
+              Label("重试", systemImage: "arrow.clockwise")
+            }
+          }
+        }
+      }
+      .listStyle(.insetGrouped)
+    }
+  }
+
+  private func deleteSearchHistory(at offsets: IndexSet) {
+    let entries = globalSearchHistoryViewModel.entries
+    let ids = offsets.compactMap { index in
+      entries.indices.contains(index) ? entries[index].id : nil
+    }
+    Task {
+      for id in ids {
+        await globalSearchHistoryViewModel.delete(id: id)
       }
     }
   }
@@ -315,6 +436,17 @@ struct SearchView: View {
       "text.page"
     case .users:
       "person.crop.circle"
+    }
+  }
+}
+
+private extension View {
+  @ViewBuilder
+  func compatibleSearchFocus(_ binding: FocusState<Bool>.Binding) -> some View {
+    if #available(iOS 18.0, *) {
+      searchFocused(binding)
+    } else {
+      self
     }
   }
 }

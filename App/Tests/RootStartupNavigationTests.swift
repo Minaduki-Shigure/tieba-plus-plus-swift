@@ -26,7 +26,7 @@ final class RootStartupNavigationTests: XCTestCase {
       (.home, []),
       (.hotThreads, [.explore(.hot)]),
       (.hotTopics, [.hotTopics]),
-      (.notifications, [.notifications]),
+      (.notifications, [.notifications(.replies)]),
       (.favorites, [.favorites]),
       (.history, [.history]),
     ]
@@ -36,6 +36,66 @@ final class RootStartupNavigationTests: XCTestCase {
         RootStartupNavigation.initialPath(startDestination: testCase.destination),
         testCase.expected
       )
+    }
+  }
+
+  func testAppRoutesRemainTopmostForEveryStartDestination() {
+    let routes: [(route: TiebaAppRoute, expected: RootDestination)] = [
+      (.search, .search("")),
+      (.history, .history),
+      (.cloudFavorites, .cloudFavorites),
+      (.notifications(.replies), .notifications(.replies)),
+      (.notifications(.mentions), .notifications(.mentions)),
+    ]
+
+    for startDestination in AppStartDestination.allCases {
+      let initialPath = RootStartupNavigation.initialPath(
+        startDestination: startDestination
+      )
+      for route in routes {
+        let path = RootStartupNavigation.appending(
+          appRoute: route.route,
+          to: initialPath
+        )
+
+        XCTAssertEqual(Array(path.dropLast()), initialPath)
+        XCTAssertEqual(path.last, route.expected)
+      }
+    }
+  }
+
+  func testURLRoutingAcceptsContentAndAppRoutesWithoutReplacingTheExistingPath() throws {
+    let existingPath: [RootDestination] = [.history]
+    let cases: [(value: String, expected: RootDestination)] = [
+      ("https://tieba.baidu.com/f?kw=swift", .forum("swift")),
+      ("tieba-plus-plus://thread/42", .linkedThread(TiebaThreadRoute(threadID: 42))),
+      ("tieba-plus-plus://search", .search("")),
+      ("tieba-plus-plus://favorite", .cloudFavorites),
+      ("tieba-plus-plus://notifications/1", .notifications(.mentions)),
+    ]
+
+    for testCase in cases {
+      let url = try XCTUnwrap(URL(string: testCase.value))
+      let path = try XCTUnwrap(
+        RootStartupNavigation.appending(url: url, to: existingPath)
+      )
+      XCTAssertEqual(Array(path.dropLast()), existingPath)
+      XCTAssertEqual(path.last, testCase.expected)
+    }
+  }
+
+  func testURLRoutingRejectsInvalidOrNoncanonicalURLsWithoutProducingAPath() throws {
+    let existingPath: [RootDestination] = [.history]
+    let values = [
+      "https://example.com/path",
+      "tieba-plus-plus://search?",
+      "tieba-plus-plus://notifications/2",
+      "tieba-plus-plus://favorite/",
+    ]
+
+    for value in values {
+      let url = try XCTUnwrap(URL(string: value))
+      XCTAssertNil(RootStartupNavigation.appending(url: url, to: existingPath), value)
     }
   }
 
@@ -83,7 +143,9 @@ final class RootStartupNavigationTests: XCTestCase {
       .favorites,
       .followedForums,
       .batchCheckIn,
-      .notifications,
+      .notifications(.replies),
+      .notifications(.mentions),
+      .cloudFavorites,
       .account,
       .settings,
       .thread(thread),

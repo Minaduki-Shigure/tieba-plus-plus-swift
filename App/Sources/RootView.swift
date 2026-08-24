@@ -28,6 +28,7 @@ struct RootView: View {
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @EnvironmentObject private var mediaPlaybackCoordinator: MediaPlaybackCoordinator
   @EnvironmentObject private var followedForumsViewModel: FollowedForumsViewModel
+  @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
   @AppStorage(AppPreferenceKey.homeShowsRecentForums)
   private var homeShowsRecentForums = true
   @AppStorage(AppPreferenceKey.homeShowsDiscovery)
@@ -301,6 +302,7 @@ struct RootView: View {
             historyRepository: historyRepository,
             favoritesRepository: favoritesRepository,
             searchHistoryRepository: searchHistoryRepository,
+            globalSearchHistoryViewModel: globalSearchHistoryViewModel,
             onSearchSubmitted: { globalSearchHistoryViewModel.record($0) }
           )
         case .hotTopics:
@@ -352,12 +354,23 @@ struct RootView: View {
           ForumBatchCheckInView(
             access: AccountAccess(vault: accountVault, service: accountService)
           )
-        case .notifications:
+        case .notifications(let initialKind):
           NotificationsView(
             browseService: service,
             accountService: accountService,
             vault: accountVault,
             contentFilterRepository: contentFilterRepository,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository,
+            initialKind: initialKind
+          )
+        case .cloudFavorites:
+          CloudFavoritesView(
+            browseService: service,
+            accountService: accountService,
+            vault: accountVault,
+            cloudFavoriteStore: threadCloudFavoriteStore,
             historyRepository: historyRepository,
             favoritesRepository: favoritesRepository,
             searchHistoryRepository: searchHistoryRepository
@@ -971,11 +984,11 @@ struct RootView: View {
   }
 
   private func openTiebaURL(_ url: URL) {
-    guard let target = TiebaLink.target(from: url) else {
-      linkErrorMessage = "该链接不是受支持的贴吧、帖子或用户链接。"
+    guard let routedPath = RootStartupNavigation.appending(url: url, to: path) else {
+      linkErrorMessage = "该链接不是受支持的贴吧内容或应用链接。"
       return
     }
-    openTiebaTarget(target)
+    path = routedPath
   }
 
   private func openTiebaTarget(_ target: TiebaLinkTarget) {
@@ -998,7 +1011,8 @@ enum RootDestination: Hashable {
   case favorites
   case followedForums
   case batchCheckIn
-  case notifications
+  case notifications(InboxKind)
+  case cloudFavorites
   case account
   case settings
   case thread(ThreadHistorySnapshot)
@@ -1032,7 +1046,7 @@ enum RootStartupNavigation {
     case .hotTopics:
       [.hotTopics]
     case .notifications:
-      [.notifications]
+      [.notifications(.replies)]
     case .favorites:
       [.favorites]
     case .history:
@@ -1052,6 +1066,37 @@ enum RootStartupNavigation {
       result.append(.linkedThread(route))
     case .user(let userID):
       result.append(.user(userID))
+    }
+    return result
+  }
+
+  static func appending(
+    url: URL,
+    to path: [RootDestination]
+  ) -> [RootDestination]? {
+    if let target = TiebaLink.target(from: url) {
+      return appending(target: target, to: path)
+    }
+    if let appRoute = TiebaAppLink.route(from: url) {
+      return appending(appRoute: appRoute, to: path)
+    }
+    return nil
+  }
+
+  static func appending(
+    appRoute: TiebaAppRoute,
+    to path: [RootDestination]
+  ) -> [RootDestination] {
+    var result = path
+    switch appRoute {
+    case .search:
+      result.append(.search(""))
+    case .history:
+      result.append(.history)
+    case .cloudFavorites:
+      result.append(.cloudFavorites)
+    case .notifications(let kind):
+      result.append(.notifications(kind))
     }
     return result
   }

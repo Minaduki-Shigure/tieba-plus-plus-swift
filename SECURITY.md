@@ -1477,11 +1477,29 @@ favorite, or browsing-history enum, with unknown values falling back to home; it
 store a URL, query, forum name, content identifier, or account destination. The
 resolved value is snapshotted once when the app process starts and must not
 redirect an active session. A supported external forum, thread, or user link is
-appended above the startup destination through the same strict router. Hiding
+appended above the startup destination through the strict content router. Hiding
 the discovery section changes only local home presentation and must not broaden
 any destination, request, clipboard, or credential boundary. Its explicit paste
 control is not constructed while hidden, and no replacement clipboard read may
 be introduced elsewhere.
+
+The registered app-owned scheme has two nonoverlapping consumers. Public content,
+sharing, and the explicit clipboard control may resolve only validated forum,
+thread, and user targets. A separate navigation-only parser accepts exact
+canonical routes for empty search, browsing history, account cloud favorites,
+and the replies or mentions inbox segment. It rejects credentials, ports, query
+strings, fragments, aliases, encoded route names, trailing or additional path
+segments, and unknown notification indices. Parsing and Root mapping cannot read
+the account vault, select an account, issue a request, or authorize a mutation;
+the destination page performs its ordinary signed-out and credential checks.
+App-only routes found in rich content are rejected before system dispatch so
+untrusted post text cannot reopen this app through that otherwise private route
+surface. A cold-start app route is appended above, and does not replace, the
+closed persisted startup destination.
+An external HTTPS page opened in Safari or the system browser may still redirect
+back to a publicly registered custom scheme outside this app's control. The
+accepted routes therefore remain navigation-only and cannot carry an account,
+credential, request field, or mutation command.
 
 Automated tests use synthetic fixed-length placeholders only. Real `BDUSS`,
 `STOKEN`, `tbs`, cookies, passwords, or private account responses must never be

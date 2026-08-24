@@ -77,10 +77,7 @@ final class SearchViewModel: ObservableObject {
   }
 
   func loadIfNeeded() {
-    guard !submittedQuery.isEmpty else {
-      submit(submittedQuery)
-      return
-    }
+    guard !submittedQuery.isEmpty else { return }
     loadIfNeeded(selectedScope)
   }
 
@@ -96,12 +93,7 @@ final class SearchViewModel: ObservableObject {
     resetAllResults()
     submittedQuery = query
 
-    guard !query.isEmpty else {
-      for scope in SearchScope.allCases {
-        setState(.failed("请输入搜索关键词。"), for: scope)
-      }
-      return
-    }
+    guard !query.isEmpty else { return }
     loadIfNeeded(selectedScope)
   }
 
@@ -110,10 +102,7 @@ final class SearchViewModel: ObservableObject {
     threadSort = sort
     invalidateLoad(.threads)
     resetResults(for: .threads)
-    guard !submittedQuery.isEmpty else {
-      setState(.failed("请输入搜索关键词。"), for: .threads)
-      return
-    }
+    guard !submittedQuery.isEmpty else { return }
     guard selectedScope == .threads else { return }
     start(.threads, query: submittedQuery, preservingResults: false)
   }
@@ -135,10 +124,7 @@ final class SearchViewModel: ObservableObject {
   func reloadThreadsAfterContentFilterChange() {
     invalidateLoad(.threads)
     resetResults(for: .threads)
-    guard !submittedQuery.isEmpty else {
-      setState(.failed("请输入搜索关键词。"), for: .threads)
-      return
-    }
+    guard !submittedQuery.isEmpty else { return }
     guard selectedScope == .threads else { return }
     start(.threads, query: submittedQuery, preservingResults: false)
   }
@@ -199,10 +185,7 @@ final class SearchViewModel: ObservableObject {
   }
 
   private func restart(_ scope: SearchScope, preservingResults: Bool) {
-    guard !submittedQuery.isEmpty else {
-      setState(.failed("请输入搜索关键词。"), for: scope)
-      return
-    }
+    guard !submittedQuery.isEmpty else { return }
     invalidateLoad(scope)
     if !preservingResults {
       resetResults(for: scope)

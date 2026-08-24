@@ -110,6 +110,10 @@ two context identities survive local filtering independently. Explicit topic
 and floor routes bypass unrelated reading history, while a nested-reply match
 uses the existing comment-ID resolver instead of trusting a displayed parent
 PID. This reuses existing anonymous endpoints and adds no weighted point.
+The app-owned search, history, cloud-favorite, and inbox routes close another
+narrow TiebaLite navigation gap. They expose only already credited destinations,
+add no endpoint or account choice, and keep app-only routes outside public rich
+content and clipboard parsing, so they add no weighted point.
 The configurable forum primary action likewise completes a narrow local habit
 setting by rearranging existing controls, so it remains inside the existing
 local-settings credit rather than adding a weighted point.
@@ -249,7 +253,9 @@ the source metadata is updated to that tested IPA.
   new-topic composers, separate from final submission confirmation
 - Home-screen recent-forum history, expanded by default and independently hideable
 - Canonical forum/thread sharing and browse-mode-aware thread-link copying
-- Strict internal routing for supported Tieba HTTPS, pasted official-scheme, and app links
+- Strict internal routing for supported Tieba HTTPS, pasted official-scheme,
+  content links, and navigation-only app links matching TiebaLite's search,
+  history, account-favorite, and two inbox entry points
 - Default-system external HTTPS opening with an optional in-app Safari view
 - Local About page with bundle version/build information and an explicit fixed
   source-repository action using the selected external-Web policy
@@ -1040,21 +1046,35 @@ through the system share sheet. Thread copying additionally carries an exact
 construction uses structured components rather than interpolating unescaped
 forum names.
 
-One parser handles in-app rich links, explicit clipboard pastes, and the
-registered app-owned `tieba-plus-plus` scheme. It requires the exact Tieba host,
-standard ports, exact paths, nonempty bounded forum names, positive 64-bit IDs,
-and unambiguous supported state. Valid `see_lz` and post anchors are preserved
-when opening a thread. Cleartext official links are accepted only as route text;
-the destination is loaded through the existing HTTPS-only API client. External
-HTTPS links default to the user's system browser and can instead use a
-system-managed in-app Safari view; external HTTP links remain system actions in
-both modes. Link credentials are rejected, and unchanged external URLs retain
-their input query and fragment rather than being rebuilt. The Safari view does
-not reuse the login Web view or expose its page, Cookie state, or navigation
-history to the app. The app does not register Baidu's official scheme,
-automatically inspect the clipboard, claim Universal Links without Baidu's AASA
-authorization, or fabricate a browsing-history snapshot before the linked
-thread has loaded successfully.
+The content parser handles in-app rich links, explicit clipboard pastes, and the
+forum, thread, and user subset of the registered app-owned `tieba-plus-plus`
+scheme. It requires the exact Tieba host, standard ports, exact paths, nonempty
+bounded forum names, positive 64-bit IDs, and unambiguous supported state. Valid
+`see_lz` and post anchors are preserved when opening a thread. A separate strict
+app-navigation parser accepts only canonical `tieba-plus-plus://search`,
+`tieba-plus-plus://history`, `tieba-plus-plus://favorite`, and
+`tieba-plus-plus://notifications/0|1` URLs. As in TiebaLite, `favorite` opens the
+active account's server-side favorites rather than the app's local archive, and
+notification values `0` and `1` select replies and mentions respectively. These
+routes append above the configured startup destination, select no account, carry
+no data, and perform no write. The empty search route stays idle, focuses the
+search field on iOS 18 or later, and projects the same local recent-search archive
+on every supported OS instead of issuing an empty request or showing an input
+error. Other destination pages retain their ordinary signed-out or incomplete-
+credential state. Rich content and the explicit clipboard control cannot consume
+app-only routes, and an unrecognized app-owned URL is rejected instead of being
+handed to the system to reopen this app.
+
+Cleartext official links are accepted only as route text; the destination is
+loaded through the existing HTTPS-only API client. External HTTPS links default
+to the user's system browser and can instead use a system-managed in-app Safari
+view; external HTTP links remain system actions in both modes. Link credentials
+are rejected, and unchanged external URLs retain their input query and fragment
+rather than being rebuilt. The Safari view does not reuse the login Web view or
+expose its page, Cookie state, or navigation history to the app. The app does not
+register Baidu's official scheme, automatically inspect the clipboard, claim
+Universal Links without Baidu's AASA authorization, or fabricate a browsing-
+history snapshot before the linked thread has loaded successfully.
 The About page reads only local display/version/build strings and exposes one
 exact, credential-free HTTPS source-repository URL after an explicit tap. That
 destination is code-defined rather than constructed from Bundle, account, or

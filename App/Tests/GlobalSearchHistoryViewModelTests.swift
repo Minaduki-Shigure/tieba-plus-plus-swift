@@ -5,6 +5,34 @@ import XCTest
 
 final class GlobalSearchHistoryViewModelTests: XCTestCase {
   @MainActor
+  func testConcurrentInitialLoadsShareOneRepositoryRead() async throws {
+    let repository = SerialGlobalSearchHistoryRepository(
+      initialEntries: [
+        GlobalSearchHistoryEntry(query: "swift", searchedAt: globalViewModelDate(1))
+      ],
+      suspendFirstEntriesRead: true
+    )
+    let viewModel = GlobalSearchHistoryViewModel(repository: repository)
+
+    let firstLoad = Task { await viewModel.loadIfNeeded() }
+    try await globalHistoryWaitUntil { await repository.entriesRequestCount() == 1 }
+    let secondLoad = Task { await viewModel.loadIfNeeded() }
+    await globalHistoryDrainMainActor()
+
+    let sharedRequestCount = await repository.entriesRequestCount()
+    XCTAssertEqual(sharedRequestCount, 1)
+    let resumed = await repository.resumeFirstEntriesRead()
+    XCTAssertTrue(resumed)
+    await firstLoad.value
+    await secondLoad.value
+
+    XCTAssertEqual(viewModel.entries.map(\.query), ["swift"])
+    let finalRequestCount = await repository.entriesRequestCount()
+    XCTAssertEqual(finalRequestCount, 1)
+    XCTAssertFalse(viewModel.isLoading)
+  }
+
+  @MainActor
   func testRapidRecordsAreSerializedInSubmissionOrder() async throws {
     let repository = SerialGlobalSearchHistoryRepository(suspendFirstRecord: true)
     let viewModel = GlobalSearchHistoryViewModel(repository: repository)
@@ -103,19 +131,29 @@ private actor SerialGlobalSearchHistoryRepository: GlobalSearchHistoryRepository
   private var stored: [GlobalSearchHistoryEntry]
   private var requests: [GlobalSearchRecordRequest] = []
   private var entriesRequests = 0
+  private var shouldSuspendFirstEntriesRead: Bool
+  private var firstEntriesContinuation: CheckedContinuation<Void, Never>?
   private var shouldSuspendFirstRecord: Bool
   private var firstRecordContinuation: CheckedContinuation<Void, Never>?
 
   init(
     initialEntries: [GlobalSearchHistoryEntry] = [],
+    suspendFirstEntriesRead: Bool = false,
     suspendFirstRecord: Bool = false
   ) {
     stored = initialEntries
+    shouldSuspendFirstEntriesRead = suspendFirstEntriesRead
     shouldSuspendFirstRecord = suspendFirstRecord
   }
 
   func entries() async throws -> [GlobalSearchHistoryEntry] {
     entriesRequests += 1
+    if shouldSuspendFirstEntriesRead {
+      shouldSuspendFirstEntriesRead = false
+      await withCheckedContinuation { continuation in
+        firstEntriesContinuation = continuation
+      }
+    }
     return stored.sorted { $0.searchedAt > $1.searchedAt }
   }
 
@@ -149,6 +187,13 @@ private actor SerialGlobalSearchHistoryRepository: GlobalSearchHistoryRepository
   func recordRequestsSnapshot() -> [GlobalSearchRecordRequest] { requests }
   func entriesRequestCount() -> Int { entriesRequests }
   func storedEntries() -> [GlobalSearchHistoryEntry] { stored }
+
+  func resumeFirstEntriesRead() -> Bool {
+    guard let continuation = firstEntriesContinuation else { return false }
+    firstEntriesContinuation = nil
+    continuation.resume()
+    return true
+  }
 
   func resumeFirstRecord() -> Bool {
     guard let continuation = firstRecordContinuation else { return false }

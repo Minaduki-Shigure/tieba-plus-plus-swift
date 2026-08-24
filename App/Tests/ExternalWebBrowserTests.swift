@@ -171,6 +171,8 @@ final class ExternalWebBrowserTests: XCTestCase {
       "https:///missing-host",
       "https://tieba.baidu.com/p/42",
       "tieba-plus-plus://thread/42",
+      "tieba-plus-plus://search",
+      "tieba-plus-plus://notifications/1",
       "mailto:user@example.com",
     ]
 
@@ -224,6 +226,50 @@ final class ExternalWebBrowserTests: XCTestCase {
           BrowseContentLinkRouter.disposition(for: url, mode: mode),
           .tieba(target),
           url.absoluteString
+        )
+      }
+    }
+  }
+
+  func testAppOnlyRoutesAreRejectedInsteadOfReopenedThroughTheSystem() throws {
+    let routes: [TiebaAppRoute] = [
+      .search,
+      .history,
+      .cloudFavorites,
+      .notifications(.replies),
+      .notifications(.mentions),
+    ]
+
+    for route in routes {
+      let url = try XCTUnwrap(TiebaAppLink.appURL(for: route))
+      XCTAssertNil(TiebaLink.target(from: url))
+      for mode in ExternalWebOpenMode.allCases {
+        XCTAssertEqual(
+          BrowseContentLinkRouter.disposition(for: url, mode: mode),
+          .rejected,
+          url.absoluteString
+        )
+      }
+    }
+  }
+
+  func testMalformedAppOwnedRoutesAreAlsoRejectedInsteadOfSystemDispatched() throws {
+    let values = [
+      "tieba-plus-plus://user@search",
+      "tieba-plus-plus://search?",
+      "tieba-plus-plus://search/%2F",
+      "tieba-plus-plus://notifications/%31",
+      "tieba-plus-plus://unknown",
+    ]
+
+    for value in values {
+      let url = try XCTUnwrap(URL(string: value))
+      XCTAssertNil(TiebaLink.target(from: url), value)
+      for mode in ExternalWebOpenMode.allCases {
+        XCTAssertEqual(
+          BrowseContentLinkRouter.disposition(for: url, mode: mode),
+          .rejected,
+          value
         )
       }
     }

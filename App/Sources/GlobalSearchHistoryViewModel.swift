@@ -8,6 +8,7 @@ final class GlobalSearchHistoryViewModel: ObservableObject {
   @Published private(set) var errorMessage: String?
 
   private let repository: any GlobalSearchHistoryRepository
+  private var initialLoadTask: Task<Void, Never>?
   private var recordTask: Task<Void, Never>?
   private var hasLoaded = false
   private var lastRecordTimestamp: Date?
@@ -18,7 +19,18 @@ final class GlobalSearchHistoryViewModel: ObservableObject {
 
   func loadIfNeeded() async {
     guard !hasLoaded else { return }
-    await reload()
+    if let initialLoadTask {
+      await initialLoadTask.value
+      return
+    }
+
+    let task = Task { [weak self] in
+      guard let self else { return }
+      await self.reload()
+    }
+    initialLoadTask = task
+    await task.value
+    initialLoadTask = nil
   }
 
   func record(_ rawQuery: String) {
