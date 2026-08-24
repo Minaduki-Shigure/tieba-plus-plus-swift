@@ -85,6 +85,32 @@ final class TiebaPicturePageRequestFactoryTests: XCTestCase {
     XCTAssertEqual(fields["pic_index"], "9")
   }
 
+  func testPicturePageSourceUsesOnlyTheTypedObjectValue() throws {
+    let cases: [(TiebaPicturePageSource, String)] = [
+      (.post, "pb"),
+      (.forum, "frs"),
+      (.index, "index"),
+    ]
+
+    for (source, expectedValue) in cases {
+      let request = try factory.picturePage(
+        forumID: 2_432_903,
+        forumName: "minecraft",
+        threadID: 6_639_694_648,
+        cursor: try cursor(),
+        direction: .next,
+        onlyThreadAuthor: false,
+        source: source
+      )
+      let fields = try formFields(request)
+
+      XCTAssertEqual(fields["obj_type"], expectedValue)
+      XCTAssertEqual(fields["page_name"], "PB")
+      let unsigned = fields.filter { $0.key != "sign" }.map { ($0.key, $0.value) }
+      XCTAssertEqual(fields["sign"], TiebaFormSigner.signature(for: unsigned))
+    }
+  }
+
   func testFormEncodingPreservesForumNamePlus() throws {
     let request = try factory.picturePage(
       forumID: 1,

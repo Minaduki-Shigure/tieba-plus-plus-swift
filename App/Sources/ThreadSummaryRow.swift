@@ -1,13 +1,20 @@
 import SwiftUI
 
+struct ThreadSummaryImagePreview: Identifiable, Equatable, Sendable {
+  let contentOffset: Int
+  let previewURL: URL
+
+  var id: Int { contentOffset }
+}
+
 enum ThreadSummaryMedia: Equatable, Sendable {
   case video(URL)
-  case images([URL], totalCount: Int)
+  case images([ThreadSummaryImagePreview], totalCount: Int)
 }
 
 enum ThreadSummaryMediaPresentation: Equatable, Sendable {
   case expanded(ThreadSummaryMedia)
-  case collapsed(ThreadListMediaSummary)
+  case collapsed(ThreadSummaryMedia)
 }
 
 enum ThreadSummaryPresentation {
@@ -16,25 +23,37 @@ enum ThreadSummaryPresentation {
     quality: ContentImagePreviewQuality = .standard
   ) -> ThreadSummaryMedia? {
     guard !thread.isPinned else { return nil }
-    if let cover = thread.contents.compactMap({ content -> URL? in
-      guard case .video(let video) = content else { return nil }
-      return video.cover
-    }).first {
-      return .video(cover)
-    }
-    let images = thread.contents.compactMap { content -> URL? in
-      guard case .image(let thumbnail, let fullSize, _, let dynamic, _, _) = content else {
-        return nil
+    var images: [ThreadSummaryImagePreview] = []
+    images.reserveCapacity(3)
+    var totalImageCount = 0
+
+    for (contentOffset, content) in thread.contents.enumerated() {
+      switch content {
+      case .video(let video):
+        if let cover = video.cover {
+          return .video(cover)
+        }
+      case .image(let thumbnail, let fullSize, _, let dynamic, _, _):
+        totalImageCount += 1
+        guard images.count < 3 else { continue }
+        images.append(
+          ThreadSummaryImagePreview(
+            contentOffset: contentOffset,
+            previewURL: BrowseContentImageSourceResolver.previewURL(
+              thumbnail: thumbnail,
+              fullSize: fullSize,
+              dynamic: dynamic,
+              quality: quality
+            )
+          )
+        )
+      default:
+        continue
       }
-      return BrowseContentImageSourceResolver.previewURL(
-        thumbnail: thumbnail,
-        fullSize: fullSize,
-        dynamic: dynamic,
-        quality: quality
-      )
     }
-    guard !images.isEmpty else { return nil }
-    return .images(Array(images.prefix(3)), totalCount: images.count)
+
+    guard totalImageCount > 0 else { return nil }
+    return .images(images, totalCount: totalImageCount)
   }
 
   static func mediaPresentation(
@@ -45,12 +64,7 @@ enum ThreadSummaryPresentation {
     guard let media = media(for: thread, quality: quality) else { return nil }
     guard hidesMedia else { return .expanded(media) }
 
-    switch media {
-    case .video:
-      return .collapsed(.video)
-    case .images(_, let totalCount):
-      return .collapsed(.images(count: totalCount))
-    }
+    return .collapsed(media)
   }
 
   static func authorAvatarURL(for thread: BrowseThread, showsAuthor: Bool) -> URL? {
@@ -77,6 +91,7 @@ struct ThreadSummaryRow: View {
   @Environment(\.appAccentColor) private var appAccentColor
   @Environment(\.hidesThreadListMedia) private var hidesThreadListMedia
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
+  @Environment(\.openThreadSummaryImage) private var openThreadSummaryImage
 
   init(
     thread: BrowseThread,
@@ -159,12 +174,34 @@ struct ThreadSummaryRow: View {
       hidesMedia: hidesThreadListMedia,
       quality: contentImagePreviewQuality
     ) {
-    case .some(.collapsed(let summary)):
-      CompactListMediaView(summary: summary)
+    case .some(.collapsed(let media)):
+      collapsedMediaPreview(media)
     case .some(.expanded(let media)):
       expandedMediaPreview(media)
     case .none:
       EmptyView()
+    }
+  }
+
+  @ViewBuilder
+  private func collapsedMediaPreview(_ media: ThreadSummaryMedia) -> some View {
+    switch media {
+    case .video:
+      CompactListMediaView(summary: .video)
+    case .images(let images, let totalCount):
+      let summary = ThreadListMediaSummary.images(count: totalCount)
+      if let firstImage = images.first, openThreadSummaryImage.isAvailable {
+        Button {
+          openImage(firstImage)
+        } label: {
+          CompactListMediaView(summary: summary, permitsHitTesting: true)
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("打开 \(max(totalCount, 0).formatted()) 张图片")
+        .help("打开图片")
+      } else {
+        CompactListMediaView(summary: summary)
+      }
     }
   }
 
@@ -193,52 +230,65 @@ struct ThreadSummaryRow: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .frame(maxWidth: .infinity, alignment: .leading)
       }
-    case .images(let imageURLs, let totalCount):
-      if imageURLs.count == 1, let imageURL = imageURLs.first {
-        mediaAccessibility(label: "图片预览") {
-          ThreadPreviewImage(
-            url: imageURL,
-            role: .staticImage,
-            loadAccessibilityLabel: "加载帖子图片",
-            successAccessibilityLabel: "图片预览"
-          )
-          .frame(maxWidth: 360)
-          .frame(height: 150)
-          .clipShape(RoundedRectangle(cornerRadius: 6))
-          .frame(maxWidth: .infinity, alignment: .leading)
-        }
+    case .images(let images, let totalCount):
+      if images.count == 1, let image = images.first {
+        ThreadPreviewImage(
+          url: image.previewURL,
+          role: .staticImage,
+          loadAccessibilityLabel: "加载帖子图片",
+          successAccessibilityLabel: "图片预览",
+          openAccessibilityLabel: "打开图片，共 \(totalCount) 张",
+          onOpen: imageOpenAction(for: image)
+        )
+        .frame(maxWidth: 360)
+        .frame(height: 150)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .frame(maxWidth: .infinity, alignment: .leading)
       } else {
-        mediaAccessibility(label: "\(totalCount) 张图片预览") {
-          HStack(spacing: 5) {
-            ForEach(Array(imageURLs.prefix(3).enumerated()), id: \.offset) { index, url in
-              ZStack(alignment: .bottomTrailing) {
-                ThreadPreviewImage(
-                  url: url,
-                  role: .staticImage,
-                  loadAccessibilityLabel: "加载帖子图片 \(index + 1)",
-                  successAccessibilityLabel: "图片预览 \(index + 1)，共 \(totalCount) 张"
-                )
-                if index == 2, totalCount > imageURLs.count {
-                  Label(totalCount.formatted(), systemImage: "photo")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(Color.black.opacity(0.7))
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                    .padding(5)
-                    .accessibilityHidden(true)
-                    .allowsHitTesting(false)
-                }
+        HStack(spacing: 5) {
+          ForEach(images) { image in
+            let index = images.firstIndex(of: image) ?? 0
+            ZStack(alignment: .bottomTrailing) {
+              ThreadPreviewImage(
+                url: image.previewURL,
+                role: .staticImage,
+                loadAccessibilityLabel: "加载帖子图片 \(index + 1)",
+                successAccessibilityLabel: "图片预览 \(index + 1)，共 \(totalCount) 张",
+                openAccessibilityLabel: "打开图片 \(index + 1)，共 \(totalCount) 张",
+                onOpen: imageOpenAction(for: image)
+              )
+              if index == 2, totalCount > images.count {
+                Label(totalCount.formatted(), systemImage: "photo")
+                  .font(.caption2.weight(.semibold))
+                  .foregroundStyle(.white)
+                  .padding(.horizontal, 6)
+                  .padding(.vertical, 3)
+                  .background(Color.black.opacity(0.7))
+                  .clipShape(RoundedRectangle(cornerRadius: 4))
+                  .padding(5)
+                  .accessibilityHidden(true)
+                  .allowsHitTesting(false)
               }
-              .frame(maxWidth: .infinity)
-              .frame(height: 94)
-              .clipShape(RoundedRectangle(cornerRadius: 4))
             }
+            .frame(maxWidth: .infinity)
+            .frame(height: 94)
+            .clipShape(RoundedRectangle(cornerRadius: 4))
           }
         }
       }
     }
+  }
+
+  private func imageOpenAction(for image: ThreadSummaryImagePreview) -> (() -> Void)? {
+    guard openThreadSummaryImage.isAvailable else { return nil }
+    return { openImage(image) }
+  }
+
+  private func openImage(_ image: ThreadSummaryImagePreview) {
+    _ = openThreadSummaryImage(
+      thread: thread,
+      contentOffset: image.contentOffset
+    )
   }
 
   @ViewBuilder
@@ -470,6 +520,24 @@ private struct ThreadPreviewImage: View {
   let role: ThreadPreviewImageRole
   let loadAccessibilityLabel: String
   let successAccessibilityLabel: String
+  let openAccessibilityLabel: String?
+  let onOpen: (() -> Void)?
+
+  init(
+    url: URL,
+    role: ThreadPreviewImageRole,
+    loadAccessibilityLabel: String,
+    successAccessibilityLabel: String,
+    openAccessibilityLabel: String? = nil,
+    onOpen: (() -> Void)? = nil
+  ) {
+    self.url = url
+    self.role = role
+    self.loadAccessibilityLabel = loadAccessibilityLabel
+    self.successAccessibilityLabel = successAccessibilityLabel
+    self.openAccessibilityLabel = openAccessibilityLabel
+    self.onOpen = onOpen
+  }
 
   @Environment(\.contentMediaLoadBehavior) private var contentMediaLoadBehavior
 
@@ -481,9 +549,7 @@ private struct ThreadPreviewImage: View {
     ) { phase in
       switch phase {
       case .success(let asset, _):
-        RemoteImageAssetView(asset: asset, contentMode: .fill)
-          .contentThumbnailDimming(applies: role.appliesContentThumbnailDimming)
-          .accessibilityLabel(successAccessibilityLabel)
+        successfulPreview(asset)
       case .failure:
         previewPlaceholder(systemImage: failureSystemImage)
       case .empty:
@@ -498,6 +564,26 @@ private struct ThreadPreviewImage: View {
     }
     .buttonStyle(.borderless)
     .clipped()
+  }
+
+  @ViewBuilder
+  private func successfulPreview(_ asset: DownsampledImageAsset) -> some View {
+    if let onOpen {
+      Button(action: onOpen) {
+        renderedPreview(asset)
+          .accessibilityHidden(true)
+      }
+      .buttonStyle(.borderless)
+      .accessibilityLabel(openAccessibilityLabel ?? successAccessibilityLabel)
+    } else {
+      renderedPreview(asset)
+        .accessibilityLabel(successAccessibilityLabel)
+    }
+  }
+
+  private func renderedPreview(_ asset: DownsampledImageAsset) -> some View {
+    RemoteImageAssetView(asset: asset, contentMode: .fill)
+      .contentThumbnailDimming(applies: role.appliesContentThumbnailDimming)
   }
 
   private var failureSystemImage: String {

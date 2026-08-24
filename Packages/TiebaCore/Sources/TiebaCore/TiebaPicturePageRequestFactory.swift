@@ -13,7 +13,8 @@ extension TiebaRequestFactory {
     threadID: Int64,
     cursor: TiebaPicturePageCursor,
     direction: TiebaPicturePageDirection,
-    onlyThreadAuthor: Bool
+    onlyThreadAuthor: Bool,
+    source: TiebaPicturePageSource = .post
   ) throws -> URLRequest {
     try validateConfiguration()
     guard forumID > 0 else {
@@ -49,7 +50,7 @@ extension TiebaRequestFactory {
       ("kw", forumName),
       ("next", String(nextCount)),
       ("not_see_lz", onlyThreadAuthor ? "0" : "1"),
-      ("obj_type", "pb"),
+      ("obj_type", source.rawValue),
       ("page_name", "PB"),
       ("pic_id", cursor.pictureID),
       ("pic_index", String(cursor.overallIndex)),

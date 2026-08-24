@@ -69,7 +69,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
         threadID: request.context.threadID,
         cursor: cursor,
         direction: direction,
-        onlyThreadAuthor: request.context.onlyThreadAuthor
+        onlyThreadAuthor: request.context.onlyThreadAuthor,
+        source: Self.mapPicturePageSource(request.context.source)
       )
     } catch is CancellationError {
       throw CancellationError()
@@ -96,6 +97,19 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       occurrences: occurrences,
       totalCount: response.totalPictureCount
     )
+  }
+
+  static func mapPicturePageSource(
+    _ source: ThreadPictureGalleryContext.Source
+  ) -> TiebaPicturePageSource {
+    switch source {
+    case .post:
+      .post
+    case .forum:
+      .forum
+    case .index:
+      .index
+    }
   }
 
   func threads(
@@ -859,6 +873,7 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       authorUsername: authorUsername(thread.author),
       authorAvatarURL: SecureTiebaURL.portrait(thread.author?.portrait),
       firstPostID: thread.firstPostID,
+      contentPostID: summaryContentPostID(for: thread),
       shareCount: max(thread.shareCount, 0),
       agreeCount: max(thread.agreeCount, 0),
       disagreeCount: max(thread.disagreeCount, 0),
@@ -870,6 +885,18 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       isServerHidden: thread.isHidden,
       isLive: thread.isLive
     )
+  }
+
+  static func summaryContentPostID(for thread: TiebaThread) -> Int64 {
+    let images = thread.content.images
+    guard !images.isEmpty else { return max(thread.firstPostID, 0) }
+    let knownPostIDs = images.compactMap(\.postID)
+    guard
+      !knownPostIDs.isEmpty,
+      knownPostIDs.count == images.count,
+      Set(knownPostIDs).count == 1
+    else { return 0 }
+    return knownPostIDs[0]
   }
 
   static func mapThread(
@@ -1085,9 +1112,21 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       authorUsername: result.authorUsername,
       authorAvatarURL: SecureTiebaURL.media(result.authorPortraitURL),
       firstPostID: result.firstPostID,
+      contentPostID: summaryContentPostID(for: result),
       shareCount: max(result.shareCount, 0),
       agreeCount: max(result.likeCount, 0)
     )
+  }
+
+  private static func summaryContentPostID(for result: TiebaThreadSearchResult) -> Int64 {
+    switch result.target {
+    case .thread:
+      max(result.firstPostID, 0)
+    case .post(let postID):
+      max(postID, 0)
+    case .comment:
+      0
+    }
   }
 
   static func mapGlobalThreadSearchPage(

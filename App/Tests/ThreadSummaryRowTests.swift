@@ -32,7 +32,7 @@ final class ThreadSummaryRowTests: XCTestCase {
     )
     XCTAssertEqual(
       ThreadSummaryPresentation.mediaPresentation(for: thread, hidesMedia: true),
-      .collapsed(.video)
+      .collapsed(.video(coverURL))
     )
   }
 
@@ -48,15 +48,80 @@ final class ThreadSummaryRowTests: XCTestCase {
 
     XCTAssertEqual(
       ThreadSummaryPresentation.media(for: thread),
-      .images(Array(urls.prefix(3)), totalCount: 4)
+      .images(
+        Array(urls.prefix(3).enumerated()).map {
+          ThreadSummaryImagePreview(contentOffset: $0.offset, previewURL: $0.element)
+        },
+        totalCount: 4
+      )
     )
     XCTAssertEqual(
       ThreadSummaryPresentation.mediaPresentation(for: thread, hidesMedia: false),
-      .expanded(.images(Array(urls.prefix(3)), totalCount: 4))
+      .expanded(
+        .images(
+          Array(urls.prefix(3).enumerated()).map {
+            ThreadSummaryImagePreview(contentOffset: $0.offset, previewURL: $0.element)
+          },
+          totalCount: 4
+        )
+      )
     )
     XCTAssertEqual(
       ThreadSummaryPresentation.mediaPresentation(for: thread, hidesMedia: true),
-      .collapsed(.images(count: 4))
+      .collapsed(
+        .images(
+          Array(urls.prefix(3).enumerated()).map {
+            ThreadSummaryImagePreview(contentOffset: $0.offset, previewURL: $0.element)
+          },
+          totalCount: 4
+        )
+      )
+    )
+  }
+
+  func testImagePreviewKeepsOriginalContentOffsetsAcrossInlineText() throws {
+    let repeatedThumbnail = try XCTUnwrap(URL(string: "https://example.com/repeated.jpg"))
+    let highDefinition = try XCTUnwrap(URL(string: "https://example.com/high-definition.jpg"))
+    let thread = makeThread(
+      contents: [
+        .text("before"),
+        .image(
+          thumbnail: repeatedThumbnail,
+          fullSize: highDefinition,
+          original: nil,
+          width: 100,
+          height: 100
+        ),
+        .text("between"),
+        .image(
+          thumbnail: repeatedThumbnail,
+          fullSize: nil,
+          original: nil,
+          width: 100,
+          height: 100
+        ),
+      ]
+    )
+
+    XCTAssertEqual(
+      ThreadSummaryPresentation.media(for: thread, quality: .standard),
+      .images(
+        [
+          ThreadSummaryImagePreview(contentOffset: 1, previewURL: repeatedThumbnail),
+          ThreadSummaryImagePreview(contentOffset: 3, previewURL: repeatedThumbnail),
+        ],
+        totalCount: 2
+      )
+    )
+    XCTAssertEqual(
+      ThreadSummaryPresentation.media(for: thread, quality: .highDefinition),
+      .images(
+        [
+          ThreadSummaryImagePreview(contentOffset: 1, previewURL: highDefinition),
+          ThreadSummaryImagePreview(contentOffset: 3, previewURL: repeatedThumbnail),
+        ],
+        totalCount: 2
+      )
     )
   }
 
@@ -77,11 +142,17 @@ final class ThreadSummaryRowTests: XCTestCase {
 
     XCTAssertEqual(
       ThreadSummaryPresentation.media(for: thread, quality: .standard),
-      .images([thumbnail], totalCount: 1)
+      .images(
+        [ThreadSummaryImagePreview(contentOffset: 0, previewURL: thumbnail)],
+        totalCount: 1
+      )
     )
     XCTAssertEqual(
       ThreadSummaryPresentation.media(for: thread, quality: .highDefinition),
-      .images([fullSize], totalCount: 1)
+      .images(
+        [ThreadSummaryImagePreview(contentOffset: 0, previewURL: fullSize)],
+        totalCount: 1
+      )
     )
     XCTAssertEqual(
       ThreadSummaryPresentation.mediaPresentation(
@@ -89,7 +160,12 @@ final class ThreadSummaryRowTests: XCTestCase {
         hidesMedia: true,
         quality: .highDefinition
       ),
-      .collapsed(.images(count: 1))
+      .collapsed(
+        .images(
+          [ThreadSummaryImagePreview(contentOffset: 0, previewURL: fullSize)],
+          totalCount: 1
+        )
+      )
     )
   }
 
@@ -109,11 +185,25 @@ final class ThreadSummaryRowTests: XCTestCase {
 
     XCTAssertEqual(
       ThreadSummaryPresentation.mediaPresentation(for: thread, hidesMedia: true),
-      .collapsed(.images(count: 4))
+      .collapsed(
+        .images(
+          (0..<3).map {
+            ThreadSummaryImagePreview(contentOffset: $0, previewURL: repeatedURL)
+          },
+          totalCount: 4
+        )
+      )
     )
     XCTAssertEqual(
       ThreadSummaryPresentation.mediaPresentation(for: thread, hidesMedia: false),
-      .expanded(.images([repeatedURL, repeatedURL, repeatedURL], totalCount: 4))
+      .expanded(
+        .images(
+          (0..<3).map {
+            ThreadSummaryImagePreview(contentOffset: $0, previewURL: repeatedURL)
+          },
+          totalCount: 4
+        )
+      )
     )
   }
 
@@ -146,11 +236,21 @@ final class ThreadSummaryRowTests: XCTestCase {
 
     XCTAssertEqual(
       ThreadSummaryPresentation.mediaPresentation(for: threadWithImage, hidesMedia: false),
-      .expanded(.images([imageURL], totalCount: 1))
+      .expanded(
+        .images(
+          [ThreadSummaryImagePreview(contentOffset: 1, previewURL: imageURL)],
+          totalCount: 1
+        )
+      )
     )
     XCTAssertEqual(
       ThreadSummaryPresentation.mediaPresentation(for: threadWithImage, hidesMedia: true),
-      .collapsed(.images(count: 1))
+      .collapsed(
+        .images(
+          [ThreadSummaryImagePreview(contentOffset: 1, previewURL: imageURL)],
+          totalCount: 1
+        )
+      )
     )
   }
 

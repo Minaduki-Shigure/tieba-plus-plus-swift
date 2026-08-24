@@ -101,7 +101,8 @@ final class BrowseViewModelTests: XCTestCase {
       width: 640,
       height: 480,
       originalByteCount: 0,
-      dynamicURL: dynamicImageURL
+      dynamicURL: dynamicImageURL,
+      postID: 77
     )
     let unsafeImage = TiebaImage(
       thumbnailURL: try XCTUnwrap(URL(string: "ftp://img.example/unsafe.jpg")),
@@ -109,7 +110,8 @@ final class BrowseViewModelTests: XCTestCase {
       originalURL: nil,
       width: 100,
       height: 100,
-      originalByteCount: 0
+      originalByteCount: 0,
+      postID: 77
     )
     let fallbackImageURL = try XCTUnwrap(URL(string: "https://img.example/fallback.jpg"))
     let recoverableImage = TiebaImage(
@@ -118,7 +120,8 @@ final class BrowseViewModelTests: XCTestCase {
       originalURL: nil,
       width: 320,
       height: 240,
-      originalByteCount: 0
+      originalByteCount: 0,
+      postID: 77
     )
     let video = TiebaVideo(
       streamURL: try XCTUnwrap(URL(string: "https://video.example/stream.mp4")),
@@ -185,6 +188,7 @@ final class BrowseViewModelTests: XCTestCase {
 
     XCTAssertEqual(mapped.id, 42)
     XCTAssertEqual(mapped.firstPostID, 43)
+    XCTAssertEqual(mapped.contentPostID, 77)
     XCTAssertEqual(mapped.authorName, "author-account")
     XCTAssertEqual(mapped.authorUsername, "author-account")
     XCTAssertEqual(
@@ -249,6 +253,73 @@ final class BrowseViewModelTests: XCTestCase {
         return video.cover?.absoluteString == "https://img.example/video.jpg"
           && video.pageURL?.absoluteString == "https://video.example/watch/42"
       }
+    )
+  }
+
+  func testThreadSummaryImagePostIdentityFailsClosedWhenMetadataIsAmbiguous() {
+    func image(postID: Int64?) -> TiebaImage {
+      TiebaImage(
+        thumbnailURL: nil,
+        fullSizeURL: nil,
+        originalURL: nil,
+        width: 1,
+        height: 1,
+        originalByteCount: 0,
+        postID: postID
+      )
+    }
+
+    func thread(images: [TiebaImage]) -> TiebaThread {
+      TiebaThread(
+        id: 42,
+        firstPostID: 43,
+        forumID: 7,
+        forumName: "swift",
+        title: "Image identity",
+        content: TiebaContent(fragments: images.map(TiebaContentFragment.image)),
+        author: nil,
+        kind: .article,
+        tabID: 0,
+        viewCount: 0,
+        replyCount: 0,
+        shareCount: 0,
+        agreeCount: 0,
+        disagreeCount: 0,
+        createdAt: nil,
+        lastReplyAt: nil,
+        isPinned: false,
+        isFeatured: false,
+        isShared: false,
+        isHidden: false,
+        isLive: false
+      )
+    }
+
+    XCTAssertEqual(
+      TiebaCoreBrowseService.summaryContentPostID(for: thread(images: [])),
+      43
+    )
+    XCTAssertEqual(
+      TiebaCoreBrowseService.summaryContentPostID(for: thread(images: [image(postID: nil)])),
+      0
+    )
+    XCTAssertEqual(
+      TiebaCoreBrowseService.summaryContentPostID(
+        for: thread(images: [image(postID: 77), image(postID: 77)])
+      ),
+      77
+    )
+    XCTAssertEqual(
+      TiebaCoreBrowseService.summaryContentPostID(
+        for: thread(images: [image(postID: 77), image(postID: nil)])
+      ),
+      0
+    )
+    XCTAssertEqual(
+      TiebaCoreBrowseService.summaryContentPostID(
+        for: thread(images: [image(postID: 77), image(postID: 88)])
+      ),
+      0
     )
   }
 
@@ -347,6 +418,7 @@ final class BrowseViewModelTests: XCTestCase {
     let result = TiebaThreadSearchResult(
       threadID: 50,
       firstPostID: 51,
+      matchedPostID: 55,
       forumID: 7,
       forumName: "swift",
       title: "Search result",
@@ -372,23 +444,37 @@ final class BrowseViewModelTests: XCTestCase {
           width: 640,
           height: 480
         ),
-      ]
+      ],
+      target: .post(55)
     )
 
     let mapped = TiebaCoreBrowseService.mapThreadSearchResult(result)
 
     XCTAssertEqual(mapped.firstPostID, 51)
+    XCTAssertEqual(mapped.contentPostID, 55)
     XCTAssertEqual(mapped.authorUsername, "author-account")
     XCTAssertEqual(mapped.authorAvatarURL, authorAvatarURL)
     XCTAssertEqual(mapped.agreeCount, 8)
     XCTAssertEqual(mapped.shareCount, 3)
     XCTAssertEqual(
       ThreadSummaryPresentation.media(for: mapped),
-      .images([thumbnailURL, fallbackURL], totalCount: 2)
+      .images(
+        [
+          ThreadSummaryImagePreview(contentOffset: 1, previewURL: thumbnailURL),
+          ThreadSummaryImagePreview(contentOffset: 2, previewURL: fallbackURL),
+        ],
+        totalCount: 2
+      )
     )
     XCTAssertEqual(
       ThreadSummaryPresentation.media(for: mapped, quality: .highDefinition),
-      .images([highDefinitionURL, fallbackURL], totalCount: 2)
+      .images(
+        [
+          ThreadSummaryImagePreview(contentOffset: 1, previewURL: highDefinitionURL),
+          ThreadSummaryImagePreview(contentOffset: 2, previewURL: fallbackURL),
+        ],
+        totalCount: 2
+      )
     )
 
     let unsafePortraitResult = TiebaThreadSearchResult(
@@ -410,6 +496,29 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertNil(
       TiebaCoreBrowseService.mapThreadSearchResult(unsafePortraitResult).authorAvatarURL
     )
+  }
+
+  func testCommentSearchResultDoesNotClaimTheParentPostAsItsImageAnchor() {
+    let result = TiebaThreadSearchResult(
+      threadID: 50,
+      firstPostID: 51,
+      matchedPostID: 55,
+      forumID: 7,
+      forumName: "swift",
+      title: "Matched comment",
+      excerpt: "Excerpt",
+      authorID: 9,
+      authorName: "Author",
+      authorPortraitURL: nil,
+      replyCount: 1,
+      likeCount: 0,
+      shareCount: 0,
+      createdAt: nil,
+      images: [],
+      target: .comment(postID: 55, commentID: 56)
+    )
+
+    XCTAssertEqual(TiebaCoreBrowseService.mapThreadSearchResult(result).contentPostID, 0)
   }
 
   func testGlobalThreadSearchFilteringPreservesOrderIdentityAndPagination() {
@@ -5605,13 +5714,15 @@ final class BrowseViewModelTests: XCTestCase {
       id: partialInitialThread.id,
       forumID: 0,
       forumName: "Recovered Forum",
-      firstPostID: parentID
+      firstPostID: parentID,
+      contentPostID: 8_799
     )
     let resolvedThread = Fixtures.thread(
       id: partialInitialThread.id,
       forumID: 100,
       forumName: "Recovered Forum",
-      firstPostID: parentID
+      firstPostID: parentID,
+      contentPostID: 8_799
     )
     let parent = Fixtures.commentParentPost(
       id: parentID,
@@ -5669,6 +5780,7 @@ final class BrowseViewModelTests: XCTestCase {
     try await waitUntil { viewModel.comments.map(\.id) == [original.id, appended.id] }
 
     XCTAssertEqual(viewModel.thread, resolvedThread)
+    XCTAssertEqual(viewModel.thread?.contentPostID, 8_799)
     XCTAssertEqual(
       viewModel.parentAgreementTarget,
       ContentAgreementTarget(thread: resolvedThread, parentPost: parent)
@@ -7050,6 +7162,7 @@ private enum Fixtures {
     forumID: Int64 = 100,
     forumName: String = "Swift",
     firstPostID: Int64 = 0,
+    contentPostID: Int64? = nil,
     isPinned: Bool = false,
     isFeatured: Bool = false
   ) -> BrowseThread {
@@ -7066,6 +7179,7 @@ private enum Fixtures {
       lastReplyAt: Date(timeIntervalSince1970: 1_700_000_100),
       contents: [.text("thread content")],
       firstPostID: firstPostID,
+      contentPostID: contentPostID,
       isPinned: isPinned,
       isFeatured: isFeatured
     )

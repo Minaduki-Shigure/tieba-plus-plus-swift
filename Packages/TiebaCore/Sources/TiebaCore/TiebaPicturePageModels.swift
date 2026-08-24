@@ -5,6 +5,12 @@ public enum TiebaPicturePageDirection: Sendable, Hashable {
   case previous
 }
 
+public enum TiebaPicturePageSource: String, Sendable, Hashable {
+  case post = "pb"
+  case forum = "frs"
+  case index
+}
+
 public struct TiebaPicturePageCursor: Sendable, Hashable {
   public let pictureID: String
   public let overallIndex: Int

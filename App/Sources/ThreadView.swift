@@ -1347,51 +1347,23 @@ struct ThreadView: View {
   }
 
   private func openPictureGallery(post: BrowsePost, contentOffset: Int) {
+    let remoteService = service as? any ThreadPictureGalleryService
     guard
       effectiveVisibility(for: post) == .visible,
-      let presentation = ImageGalleryPresentation(
+      let route = ThreadImageGalleryRouteFactory.make(
+        context: ThreadPictureGalleryContext(
+          forumID: viewModel.thread.forumID,
+          forumName: viewModel.thread.forumName,
+          threadID: viewModel.thread.id,
+          onlyThreadAuthor: viewModel.options.onlyThreadAuthor
+        ),
+        postID: post.id,
         contents: post.contents,
-        selectedContentOffset: contentOffset
+        selectedContentOffset: contentOffset,
+        remoteService: remoteService
       )
     else { return }
-
-    let remoteService = service as? any ThreadPictureGalleryService
-    let galleryService: any ThreadPictureGalleryService
-    if let remoteService {
-      galleryService = remoteService
-    } else {
-      galleryService = UnavailableThreadPictureGalleryService()
-    }
-
-    let localOccurrences = presentation.items.enumerated().map { pair in
-      let (imageIndex, item) = pair
-      return ThreadPictureOccurrence(
-        localURL: item.url,
-        pictureID: remoteService?.pictureIdentifier(for: item.url) ?? "",
-        postID: post.id,
-        contentOffset: item.contentOffset,
-        width: item.width,
-        height: item.height,
-        imageOrdinal: imageIndex + 1
-      )
-    }
-    let selectedID = ThreadPictureOccurrenceID.local(
-      postID: post.id,
-      contentOffset: contentOffset
-    )
-    let galleryViewModel = ThreadImageGalleryViewModel(
-      context: ThreadPictureGalleryContext(
-        forumID: viewModel.thread.forumID,
-        forumName: viewModel.thread.forumName,
-        threadID: viewModel.thread.id,
-        onlyThreadAuthor: viewModel.options.onlyThreadAuthor
-      ),
-      localOccurrences: localOccurrences,
-      selectedID: selectedID,
-      isRemoteLoadingEnabled: false,
-      service: galleryService
-    )
-    let route = ThreadImageGalleryRoute(viewModel: galleryViewModel)
+    let galleryViewModel = route.viewModel
     pictureGalleryRoute = route
 
     guard remoteService != nil, self.viewModel.thread.kind == .article else { return }

@@ -997,6 +997,7 @@ enum LocalContentVisibility: String, Codable, Hashable, Sendable {
 struct BrowseThread: Identifiable, Hashable, Sendable {
   let id: Int64
   let firstPostID: Int64
+  let contentPostID: Int64
   let forumID: Int64
   let forumName: String
   let title: String
@@ -1038,6 +1039,7 @@ struct BrowseThread: Identifiable, Hashable, Sendable {
     authorUsername: String = "",
     authorAvatarURL: URL? = nil,
     firstPostID: Int64 = 0,
+    contentPostID: Int64? = nil,
     shareCount: Int = 0,
     agreeCount: Int = 0,
     disagreeCount: Int = 0,
@@ -1052,6 +1054,11 @@ struct BrowseThread: Identifiable, Hashable, Sendable {
   ) {
     self.id = id
     self.firstPostID = firstPostID
+    if let contentPostID {
+      self.contentPostID = max(contentPostID, 0)
+    } else {
+      self.contentPostID = 0
+    }
     self.forumID = forumID
     self.forumName = forumName
     self.title = title
@@ -1101,6 +1108,7 @@ struct BrowseThread: Identifiable, Hashable, Sendable {
       authorUsername: authorUsername,
       authorAvatarURL: authorAvatarURL,
       firstPostID: firstPostID,
+      contentPostID: contentPostID,
       shareCount: shareCount,
       agreeCount: agreeCount,
       disagreeCount: disagreeCount,

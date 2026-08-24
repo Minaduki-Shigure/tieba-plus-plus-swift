@@ -10,6 +10,67 @@ struct ThreadImageGalleryRoute: Identifiable {
   }
 }
 
+@MainActor
+enum ThreadImageGalleryRouteFactory {
+  static func make(
+    context: ThreadPictureGalleryContext,
+    postID: Int64,
+    contents: [BrowseContent],
+    selectedContentOffset: Int,
+    remoteService: (any ThreadPictureGalleryService)?
+  ) -> ThreadImageGalleryRoute? {
+    guard
+      postID > 0,
+      let presentation = ImageGalleryPresentation(
+        contents: contents,
+        selectedContentOffset: selectedContentOffset
+      )
+    else { return nil }
+    return make(
+      context: context,
+      postID: postID,
+      presentation: presentation,
+      remoteService: remoteService
+    )
+  }
+
+  static func make(
+    context: ThreadPictureGalleryContext,
+    postID: Int64,
+    presentation: ImageGalleryPresentation,
+    remoteService: (any ThreadPictureGalleryService)?
+  ) -> ThreadImageGalleryRoute? {
+    guard postID > 0 else { return nil }
+    let galleryService: any ThreadPictureGalleryService
+    if let remoteService {
+      galleryService = remoteService
+    } else {
+      galleryService = UnavailableThreadPictureGalleryService()
+    }
+    let localOccurrences = presentation.items.enumerated().map { pair in
+      let (imageIndex, item) = pair
+      return ThreadPictureOccurrence(
+        localURL: item.url,
+        pictureID: remoteService?.pictureIdentifier(for: item.url) ?? "",
+        postID: postID,
+        contentOffset: item.contentOffset,
+        width: item.width,
+        height: item.height,
+        imageOrdinal: imageIndex + 1
+      )
+    }
+    let selectedItem = presentation.items[presentation.initialIndex]
+    let viewModel = ThreadImageGalleryViewModel(
+      context: context,
+      localOccurrences: localOccurrences,
+      selectedID: .local(postID: postID, contentOffset: selectedItem.contentOffset),
+      isRemoteLoadingEnabled: false,
+      service: galleryService
+    )
+    return ThreadImageGalleryRoute(viewModel: viewModel)
+  }
+}
+
 struct UnavailableThreadPictureGalleryService: ThreadPictureGalleryService {
   func picturePage(for request: ThreadPicturePageRequest) async throws -> ThreadPicturePage {
     throw BrowseError.unavailable("当前浏览服务不支持整帖图片浏览。")

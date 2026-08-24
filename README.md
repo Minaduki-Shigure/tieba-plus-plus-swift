@@ -250,6 +250,18 @@ and its verified metadata enters the public app source.
   independent only-thread-author and descending-order defaults. Opening a cloud
   favorite applies those options without losing its saved post anchor; existing
   local-favorite preferences and their defaults remain unchanged.
+- **Current-main list image galleries:** A loaded image thumbnail, or a collapsed
+  image-count summary, opens the existing full-screen gallery directly instead
+  of entering the thread first. The exact original content offset is retained,
+  including for repeated URLs and interleaved text. One Root-level presenter is
+  shared by every list, so rows gain neither a persistent gallery model nor a
+  per-row cover. The already filtered card is always the immediate fallback.
+  Only an article with an authoritative image-owning post ID and an empty content-
+  filter policy may extend through anonymous `picpage` using the feed/index
+  request source; missing, partial, or conflicting image ownership, matched
+  comments, and active filters remain limited to the same card. This source-only
+  workflow still needs iOS 18 device validation for touch routing inside a
+  `NavigationLink` and is not included in the public `v0.62.3-alpha.1` IPA.
 - **`v0.61.0-alpha.1` static-image creation:** New-topic and direct-topic-reply
   composers can select, reorder, preview, and remove up to nine static
   images, choose standard or high-definition processing, and select forum-name,
@@ -421,8 +433,14 @@ and its verified metadata enters the public app source.
   also carries scale and clamped offset when whole-thread metadata first replaces
   a local placeholder with the currently unique `(pictureID, postID)` remote
   occurrence; ambiguous initial matches are never guessed. Ordinary unfiltered
-  threads can expand the gallery across floors; originals can be explicitly
-  shared or saved through add-only Photos access. Extremely tall static images
+  threads can expand the gallery across floors. Current-main list thumbnails
+  and collapsed image summaries open the same gallery at their exact content
+  offset through one Root-level presenter. A card can expand through the
+  feed/index picture contract only when every represented image has one shared,
+  positive owning-post identity and the content-filter policy permits whole-
+  thread loading; otherwise it retains the complete same-card fallback.
+  Originals can be explicitly shared or saved through add-only Photos access.
+  Extremely tall static images
   keep a bounded inline preview and start the gallery in a top-aligned,
   fit-to-width reading mode. The viewer preserves reading progress across
   orientation changes and explicit fit state across pager recreation, while a

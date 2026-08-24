@@ -57,21 +57,30 @@ struct ThreadPictureOccurrence: Identifiable, Equatable, Sendable {
 }
 
 struct ThreadPictureGalleryContext: Equatable, Sendable {
+  enum Source: Equatable, Sendable {
+    case post
+    case forum
+    case index
+  }
+
   let forumID: Int64
   let forumName: String
   let threadID: Int64
   let onlyThreadAuthor: Bool
+  let source: Source
 
   init(
     forumID: Int64,
     forumName: String,
     threadID: Int64,
-    onlyThreadAuthor: Bool = false
+    onlyThreadAuthor: Bool = false,
+    source: Source = .post
   ) {
     self.forumID = forumID
     self.forumName = forumName
     self.threadID = threadID
     self.onlyThreadAuthor = onlyThreadAuthor
+    self.source = source
   }
 
   fileprivate var canRequestRemotePictures: Bool {

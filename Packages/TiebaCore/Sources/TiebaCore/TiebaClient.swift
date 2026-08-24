@@ -448,7 +448,8 @@ public actor TiebaClient {
     threadID: Int64,
     cursor: TiebaPicturePageCursor,
     direction: TiebaPicturePageDirection = .next,
-    onlyThreadAuthor: Bool = false
+    onlyThreadAuthor: Bool = false,
+    source: TiebaPicturePageSource = .post
   ) async throws -> TiebaPicturePage {
     let request = try requestFactory.picturePage(
       forumID: forumID,
@@ -456,7 +457,8 @@ public actor TiebaClient {
       threadID: threadID,
       cursor: cursor,
       direction: direction,
-      onlyThreadAuthor: onlyThreadAuthor
+      onlyThreadAuthor: onlyThreadAuthor,
+      source: source
     )
     let body = try await send(
       request,

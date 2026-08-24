@@ -14,6 +14,7 @@ struct RootView: View {
   let accountSessionLookup: any AccountSessionLookup
   let accountService: any AccountService
   let personalizedFeedbackService: any PersonalizedFeedbackService
+  let contentFilterRepository: any ContentFilterRepository
 
   @State private var query = ""
   @State private var path: [RootDestination]
@@ -23,7 +24,6 @@ struct RootView: View {
   @State private var linkErrorMessage: String?
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-  @Environment(\.contentFilterRepository) private var contentFilterRepository
   @EnvironmentObject private var mediaPlaybackCoordinator: MediaPlaybackCoordinator
   @EnvironmentObject private var followedForumsViewModel: FollowedForumsViewModel
   @AppStorage(AppPreferenceKey.homeShowsRecentForums)
@@ -44,6 +44,8 @@ struct RootView: View {
   @StateObject private var globalSearchHistoryViewModel: GlobalSearchHistoryViewModel
   @StateObject private var recentForumsViewModel: BrowsingHistoryViewModel
   @StateObject private var searchSuggestionViewModel: SearchSuggestionViewModel
+  @StateObject private var threadSummaryImageGalleryCoordinator:
+    ThreadSummaryImageGalleryCoordinator
 
   init(
     service: any BrowseService & SearchService & ForumPostSearchService & HotTopicService
@@ -57,6 +59,7 @@ struct RootView: View {
     accountSessionLookup: any AccountSessionLookup,
     accountService: any AccountService,
     personalizedFeedbackService: any PersonalizedFeedbackService,
+    contentFilterRepository: any ContentFilterRepository,
     startDestination: AppStartDestination
   ) {
     self.service = service
@@ -67,6 +70,7 @@ struct RootView: View {
     self.accountSessionLookup = accountSessionLookup
     self.accountService = accountService
     self.personalizedFeedbackService = personalizedFeedbackService
+    self.contentFilterRepository = contentFilterRepository
     _path = State(
       initialValue: RootStartupNavigation.initialPath(startDestination: startDestination)
     )
@@ -81,6 +85,12 @@ struct RootView: View {
     )
     _searchSuggestionViewModel = StateObject(
       wrappedValue: SearchSuggestionViewModel(service: service)
+    )
+    _threadSummaryImageGalleryCoordinator = StateObject(
+      wrappedValue: ThreadSummaryImageGalleryCoordinator(
+        remoteService: service as? any ThreadPictureGalleryService,
+        contentFilterRepository: contentFilterRepository
+      )
     )
   }
 
@@ -376,6 +386,7 @@ struct RootView: View {
         Text(followedForumsViewModel.pinOperationError ?? "未知错误")
       }
     }
+    .threadSummaryImageGallery(threadSummaryImageGalleryCoordinator)
     .onAppear {
       favoritesViewModel.reload()
       recentForumsViewModel.reload()

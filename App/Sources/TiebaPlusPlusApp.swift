@@ -230,6 +230,7 @@ struct TiebaPlusPlusApp: App {
           accountSessionLookup: accountSessionLookup,
           accountService: accountService,
           personalizedFeedbackService: personalizedFeedbackService,
+          contentFilterRepository: contentFilterRepository,
           startDestination: startDestination
         )
         .environment(
@@ -305,6 +306,7 @@ struct TiebaPlusPlusApp: App {
         accountSessionLookup: accountSessionLookup,
         accountService: accountService,
         personalizedFeedbackService: personalizedFeedbackService,
+        contentFilterRepository: contentFilterRepository,
         startDestination: startDestination
       )
     }

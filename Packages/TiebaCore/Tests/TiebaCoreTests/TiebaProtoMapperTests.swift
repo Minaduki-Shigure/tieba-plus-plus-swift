@@ -5,7 +5,7 @@ import XCTest
 @testable import TiebaCore
 
 final class TiebaProtoMapperTests: XCTestCase {
-  func testAnimatedImageSourceFieldsUseAuthoritativeStringWireTags() throws {
+  func testImageMetadataUsesAuthoritativeWireTags() throws {
     var content = PbContent()
     content.dynamic = "x"
     XCTAssertEqual(
@@ -20,8 +20,16 @@ final class TiebaProtoMapperTests: XCTestCase {
       Data([0x92, 0x01, 0x01, 0x79])
     )
 
+    var anchoredMedia = Media()
+    anchoredMedia.postID = 7
+    XCTAssertEqual(
+      try anchoredMedia.serializedData(),
+      Data([0x88, 0x01, 0x07])
+    )
+
     XCTAssertEqual(PbContent().dynamic, "")
     XCTAssertEqual(Media().dynamicPic, "")
+    XCTAssertEqual(Media().postID, 0)
   }
 
   func testPbContentImagePreservesOnlyNormalizedDynamicURLStrings() throws {
@@ -61,6 +69,7 @@ final class TiebaProtoMapperTests: XCTestCase {
     var fixture = ProtoFixtures.postPage().data
     fixture.thread.originThreadInfo.media[0].dynamicPic =
       "https://img.example/thread-animated.webp"
+    fixture.thread.originThreadInfo.media[0].postID = 77
 
     var image = try XCTUnwrap(
       TiebaProtoMapper.postPage(fixture).thread.content.images.first
@@ -72,12 +81,14 @@ final class TiebaProtoMapperTests: XCTestCase {
       image.dynamicURL?.absoluteString,
       "https://img.example/thread-animated.webp"
     )
+    XCTAssertEqual(image.postID, 77)
 
     fixture.thread.originThreadInfo.media[0].dynamicPic = "data:image/gif;base64,R0lGODlh"
     image = try XCTUnwrap(
       TiebaProtoMapper.postPage(fixture).thread.content.images.first
     )
     XCTAssertNil(image.dynamicURL)
+    XCTAssertEqual(image.postID, 77)
   }
 
   func testTiebaImageInitializerKeepsDynamicURLSourceCompatibility() {
@@ -91,6 +102,7 @@ final class TiebaProtoMapperTests: XCTestCase {
     )
 
     XCTAssertNil(image.dynamicURL)
+    XCTAssertNil(image.postID)
   }
 
   func testPbContentVideoPreservesOnlyHTTPPageURLs() throws {

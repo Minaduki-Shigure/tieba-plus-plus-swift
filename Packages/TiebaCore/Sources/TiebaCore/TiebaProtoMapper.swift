@@ -1313,7 +1313,8 @@ enum TiebaProtoMapper {
         width: Int(proto.width),
         height: Int(proto.height),
         originalByteCount: Int(proto.originSize),
-        dynamicURL: remoteURL(proto.dynamicPic)
+        dynamicURL: remoteURL(proto.dynamicPic),
+        postID: proto.postID
       )
     )
   }

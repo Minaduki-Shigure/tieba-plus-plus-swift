@@ -21,9 +21,10 @@ closure. TiebaLite is authored by zzc10086 and contributors and is released
 under GPL-3.0; this project is distributed under the same license.
 
 The response-only `PbContent.dynamic` and `Media.dynamic_pic` fields used to
-preserve server-provided animated-image source URLs are adapted from TiebaLite
-commit `268f388c7824ae2c8f6ed549827a943ec8a7f352`, specifically its
-`PbContent.proto` and `Media.proto` definitions.
+preserve server-provided animated-image source URLs, together with the
+`Media.post_id` field used to bind a list image to its owning post, are adapted
+from TiebaLite commit `268f388c7824ae2c8f6ed549827a943ec8a7f352`, specifically
+its `PbContent.proto` and `Media.proto` definitions.
 
 The `Agree.diff_agree_num` field used for post score display is adapted from
 TiebaLite commit `b8409486a2f7bd85881835163bd2c1ebe4fed7f7`.

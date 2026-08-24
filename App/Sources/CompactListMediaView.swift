@@ -34,6 +34,12 @@ enum ThreadListMediaSummary: Equatable, Sendable {
 
 struct CompactListMediaView: View {
   let summary: ThreadListMediaSummary
+  private let permitsHitTesting: Bool
+
+  init(summary: ThreadListMediaSummary, permitsHitTesting: Bool = false) {
+    self.summary = summary
+    self.permitsHitTesting = permitsHitTesting
+  }
 
   var body: some View {
     Label(summary.title, systemImage: summary.systemImage)
@@ -44,9 +50,13 @@ struct CompactListMediaView: View {
       .padding(.vertical, 6)
       .background(Color(uiColor: .secondarySystemFill))
       .clipShape(RoundedRectangle(cornerRadius: 6))
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .allowsHitTesting(false)
+      .frame(maxWidth: maximumWidth, alignment: .leading)
+      .allowsHitTesting(permitsHitTesting)
       .accessibilityElement(children: .ignore)
       .accessibilityLabel(summary.accessibilityLabel)
+  }
+
+  private var maximumWidth: CGFloat? {
+    permitsHitTesting ? nil : .infinity
   }
 }

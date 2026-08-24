@@ -703,6 +703,7 @@ final class CommentsViewModel: ObservableObject {
       authorUsername: responseThread.authorUsername,
       authorAvatarURL: responseThread.authorAvatarURL,
       firstPostID: resolvedFirstPostID,
+      contentPostID: responseThread.contentPostID,
       shareCount: responseThread.shareCount,
       agreeCount: responseThread.agreeCount,
       disagreeCount: responseThread.disagreeCount,

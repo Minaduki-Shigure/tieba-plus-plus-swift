@@ -81,6 +81,12 @@ The shared selectable-text panel closes one narrow TiebaLite interaction gap
 across existing visible post and reply surfaces, but adds no data source or
 readable content, so it remains inside the existing reading credit rather than
 adding a weighted point.
+Direct list-image gallery entry likewise closes a narrow TiebaLite interaction
+gap inside the existing media credit. It reuses the established viewer and
+anonymous picture-page endpoint, adds no new content source, and therefore does
+not add a weighted point. A single Root-level presenter keeps gallery state out
+of scrolling rows; uncertain image ownership and active filtering fail closed
+to the already filtered card.
 The configurable forum primary action likewise completes a narrow local habit
 setting by rearranging existing controls, so it remains inside the existing
 local-settings credit rather than adding a weighted point.
@@ -697,8 +703,19 @@ while continuation windows include their anchor, so no UI logic assumes a fixed
 response size. Empty, duplicate-only, malformed, stale-generation, or
 inconsistent-total responses stop only the affected direction and retain the
 local fallback. Changing thread options or filters cancels and dismisses the
-session. Nested replies, origin cards, search results, forum rules, profiles,
-and filtered threads deliberately keep the same-content gallery.
+session. Current-main thread-list thumbnails and collapsed image summaries use
+one Root-level presenter and retain the exact tapped source offset without
+installing a route, task, or cover in every scrolling row. Their already filtered
+card opens immediately. Remote expansion uses the typed `index` picture source
+only when every represented media item carries the same positive `Media.post_id`,
+or a normal search result provides an authoritative matched-post target. Missing,
+partial, or conflicting ownership, matched comments, active content filters,
+nested replies, origin cards, forum rules, and profile avatars deliberately keep
+the same-content gallery. User-profile topic cards follow TiebaLite's shared
+feed-card behavior and may expand only when their `Media.post_id` is complete
+and unambiguous. Ordinary floor galleries retain the typed `pb` source;
+the unused `frs` value is represented but is not presented as an implemented
+forum-gallery workflow.
 
 The gallery uses one `UIPageViewController` implementation for horizontal and
 vertical one-image paging. Direction is transient to the current presentation;
