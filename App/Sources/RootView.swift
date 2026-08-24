@@ -20,6 +20,7 @@ struct RootView: View {
   @State private var path: [RootDestination]
   @State private var showsAllSearchHistory = false
   @State private var showsRecentForums = true
+  @State private var showsQuickAccountLogin = false
   @State private var searchHistoryAction: GlobalSearchHistoryAction?
   @State private var linkErrorMessage: String?
   @Environment(\.scenePhase) private var scenePhase
@@ -231,13 +232,30 @@ struct RootView: View {
         }
 
         ToolbarItemGroup(placement: .navigationBarTrailing) {
-          Button {
-            path.append(.account)
+          Menu {
+            accountQuickSwitchMenu
           } label: {
-            Image(systemName: "person.crop.circle")
+            accountToolbarLabel
+          } primaryAction: {
+            path.append(.account)
           }
-          .accessibilityLabel("账户")
+          .disabled(accountViewModel.isMutating)
+          .accessibilityLabel(
+            accountViewModel.isMutating ? "正在切换账户" : "账户"
+          )
+          .accessibilityHint("轻点管理账户，长按快速切换")
           .help("账户")
+          .alert(
+            "账户切换失败",
+            isPresented: Binding(
+              get: { accountViewModel.errorMessage != nil },
+              set: { if !$0 { accountViewModel.clearError() } }
+            )
+          ) {
+            Button("好", role: .cancel) { accountViewModel.clearError() }
+          } message: {
+            Text(accountViewModel.errorMessage ?? "无法切换账户。")
+          }
 
           Button {
             path.append(.settings)
@@ -409,6 +427,13 @@ struct RootView: View {
       }
     }
     .threadSummaryImageGallery(threadSummaryImageGalleryCoordinator)
+    .sheet(isPresented: $showsQuickAccountLogin) {
+      NavigationStack {
+        LoginView(service: accountService, vault: accountVault) {
+          Task { await accountViewModel.loadIfNeeded() }
+        }
+      }
+    }
     .onAppear {
       favoritesViewModel.reload()
       recentForumsViewModel.reload()
@@ -501,6 +526,74 @@ struct RootView: View {
     } message: {
       Text(searchHistoryActionMessage)
     }
+  }
+
+  @ViewBuilder
+  private var accountQuickSwitchMenu: some View {
+    if case .loaded = accountViewModel.state, !accountViewModel.accounts.isEmpty {
+      Section("切换账户") {
+        ForEach(accountViewModel.accounts) { account in
+          Button {
+            Task { await accountViewModel.switchAccount(to: account.id) }
+          } label: {
+            Label(
+              account.preferredName,
+              systemImage: account.isActive ? "checkmark.circle.fill" : "person.crop.circle"
+            )
+          }
+          .disabled(!accountViewModel.canSwitch(to: account.id))
+          .accessibilityLabel(
+            account.isActive
+              ? "\(account.preferredName)，当前账户"
+              : "切换到\(account.preferredName)"
+          )
+        }
+      }
+    } else if case .loading = accountViewModel.state {
+      Button {} label: {
+        Label("正在读取账户", systemImage: "hourglass")
+      }
+      .disabled(true)
+    } else if case .failed = accountViewModel.state {
+      Button {
+        Task { await accountViewModel.reload() }
+      } label: {
+        Label("重新载入账户", systemImage: "arrow.clockwise")
+      }
+    }
+
+    Section {
+      Button {
+        showsQuickAccountLogin = true
+      } label: {
+        Label("添加账户", systemImage: "person.badge.plus")
+      }
+      .disabled(accountViewModel.hasLoadFailure)
+
+      Button {
+        path.append(.account)
+      } label: {
+        Label("账户管理", systemImage: "person.crop.circle")
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var accountToolbarLabel: some View {
+    Group {
+      if accountViewModel.isMutating {
+        ProgressView()
+          .controlSize(.small)
+      } else {
+        Image(
+          systemName: accountViewModel.activeAccount == nil
+            ? "person.crop.circle"
+            : "person.crop.circle.fill"
+        )
+      }
+    }
+    .frame(width: 28, height: 28)
+    .accessibilityHidden(true)
   }
 
   @ViewBuilder

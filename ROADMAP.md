@@ -29,7 +29,7 @@ from that source.
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, shared text selection/copying, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
 | Local data, settings, and customization | 10 | 7 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, a TiebaLite-compatible default image-watermark choice, reply-entry visibility, a default-on composer risk notice, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
-| Account, session, and private read flows | 15 | 9 | Login, switching, a self-profile summary, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
+| Account, session, and private read flows | 15 | 9 | Login, Home-toolbar quick switching, a self-profile summary, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 14 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, server-reason-bound personalized recommendation dislike feedback, three text/classic-emoticon reply targets, equivalent new-topic creation, bounded static-image new-topic/direct-topic-reply creation, direct inline-preview reply entry, and credential-free official reporting entry points have guarded implementations; real batch-check-in behavior, creation, poll and interaction-restriction success, broader uploaded media, unresolvable cloud rows, native reporting, and other reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
 | **Total** | **100** | **80–82** | Current full-product estimate; roughly 18–20% remains |
@@ -115,6 +115,11 @@ foreground flow where TiebaLite places a daily action. It appears only for an
 active account with complete credentials, and opening it performs catalog reads
 only; the existing confirmation remains the write boundary. It adds no endpoint,
 write target, background behavior, or weighted point.
+The Home account control now preserves its ordinary account-management tap while
+adding a native long-press menu for exact saved-account switching and direct
+account addition. It consumes only the existing nonsecret account summaries and
+Keychain-vault mutation, adds no endpoint or private read, and therefore remains
+inside the existing account-session credit rather than adding a weighted point.
 The official-report handoff closes the end-user reporting-entry gap for visible
 topics, floors, and nested replies and therefore adds one weighted point. It does
 not claim native reporting parity: the credential-free preflight only resolves a
@@ -164,6 +169,8 @@ the source metadata is updated to that tested IPA.
 - Foreground account-bound concern feed shown only for a saved account, with
   explicit-selection activation, opaque cursor pagination, per-session in-memory
   timestamps, local filtering, and UID-plus-session-revision isolation
+- Home account control with ordinary account-management opening plus a native
+  long-press menu for exact saved-account switching and direct account addition
 - Ranked anonymous hot-topic discovery with images and discussion counts
 - Hot-topic details with related forums and cursor-aware thread pagination
 - Categorized anonymous forum, thread, and user search

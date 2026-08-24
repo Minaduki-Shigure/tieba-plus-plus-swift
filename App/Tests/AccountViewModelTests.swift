@@ -19,6 +19,8 @@ final class AccountViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.state, .loaded)
     XCTAssertEqual(viewModel.accounts.map(\.id), [2, 1])
     XCTAssertEqual(viewModel.activeAccount?.id, 2)
+    XCTAssertFalse(viewModel.canSwitch(to: 2))
+    XCTAssertTrue(viewModel.canSwitch(to: 1))
 
     await viewModel.switchAccount(to: 1)
     XCTAssertEqual(viewModel.activeAccount?.id, 1)
@@ -26,6 +28,133 @@ final class AccountViewModelTests: XCTestCase {
     await viewModel.removeActiveAccount()
     XCTAssertEqual(viewModel.accounts.map(\.id), [2])
     XCTAssertEqual(viewModel.activeAccount?.id, 2)
+  }
+
+  func testSwitchAccountRejectsUnloadedCurrentAndUnknownTargets() async {
+    let activeID: Int64 = 88_002
+    let inactiveID: Int64 = 88_001
+    let vault = AccountVaultSpy(
+      sessions: [
+        session(userID: inactiveID, name: "one", updatedAt: 10),
+        session(userID: activeID, name: "two", updatedAt: 20),
+      ],
+      activeUserID: activeID
+    )
+    let viewModel = AccountViewModel(vault: vault)
+    let notificationRecorder = AccountSessionNotificationRecorder()
+    let notificationToken = NotificationCenter.default.addObserver(
+      forName: .accountSessionDidChange,
+      object: nil,
+      queue: nil
+    ) { notification in
+      let snapshot = AccountSessionNotificationSnapshot(notification)
+      guard snapshot.accountID == inactiveID || snapshot.accountID == activeID else { return }
+      notificationRecorder.record(snapshot)
+    }
+    defer { NotificationCenter.default.removeObserver(notificationToken) }
+
+    XCTAssertFalse(viewModel.canSwitch(to: inactiveID))
+    await viewModel.switchAccount(to: inactiveID)
+
+    await viewModel.loadIfNeeded()
+    await viewModel.switchAccount(to: activeID)
+    await viewModel.switchAccount(to: 99)
+
+    let rejectedRequests = await vault.switchRequestSnapshot()
+    XCTAssertTrue(rejectedRequests.isEmpty)
+    XCTAssertTrue(notificationRecorder.snapshot().isEmpty)
+    XCTAssertEqual(viewModel.activeAccount?.id, activeID)
+
+    await viewModel.switchAccount(to: inactiveID)
+
+    let acceptedRequests = await vault.switchRequestSnapshot()
+    XCTAssertEqual(acceptedRequests, [inactiveID])
+    XCTAssertEqual(viewModel.activeAccount?.id, inactiveID)
+    XCTAssertEqual(
+      notificationRecorder.snapshot(),
+      [
+        AccountSessionNotificationSnapshot(
+          kind: AccountSessionChangeKind.switchAccount.rawValue,
+          accountID: inactiveID
+        )
+      ]
+    )
+  }
+
+  func testSwitchAccountFailurePreservesLoadedSnapshotAndPostsNoNotification() async {
+    let activeID: Int64 = 88_012
+    let inactiveID: Int64 = 88_011
+    let vault = AccountVaultSpy(
+      sessions: [
+        session(userID: inactiveID, name: "one", updatedAt: 10),
+        session(userID: activeID, name: "two", updatedAt: 20),
+      ],
+      activeUserID: activeID,
+      switchFailure: AccountTestFailure(message: "switch failed")
+    )
+    let viewModel = AccountViewModel(vault: vault)
+    let notificationRecorder = AccountSessionNotificationRecorder()
+    let notificationToken = NotificationCenter.default.addObserver(
+      forName: .accountSessionDidChange,
+      object: nil,
+      queue: nil
+    ) { notification in
+      let snapshot = AccountSessionNotificationSnapshot(notification)
+      guard snapshot.accountID == inactiveID else { return }
+      notificationRecorder.record(snapshot)
+    }
+    defer { NotificationCenter.default.removeObserver(notificationToken) }
+
+    await viewModel.loadIfNeeded()
+    await viewModel.switchAccount(to: inactiveID)
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.activeAccount?.id, activeID)
+    XCTAssertEqual(viewModel.errorMessage, "switch failed")
+    XCTAssertTrue(notificationRecorder.snapshot().isEmpty)
+  }
+
+  func testSwitchAccountRejectsConcurrentTargetAndDoesNotRestoreInvalidatedSnapshot() async
+    throws
+  {
+    let activeID: Int64 = 88_022
+    let firstTargetID: Int64 = 88_021
+    let secondTargetID: Int64 = 88_023
+    let vault = SuspendedSwitchAccountVault(
+      initial: [
+        accountSummary(id: activeID, name: "active", isActive: true, updatedAt: 30),
+        accountSummary(id: firstTargetID, name: "first", isActive: false, updatedAt: 20),
+        accountSummary(id: secondTargetID, name: "second", isActive: false, updatedAt: 10),
+      ],
+      switched: [
+        accountSummary(id: firstTargetID, name: "first", isActive: true, updatedAt: 40),
+        accountSummary(id: activeID, name: "active", isActive: false, updatedAt: 30),
+        accountSummary(id: secondTargetID, name: "second", isActive: false, updatedAt: 10),
+      ]
+    )
+    let viewModel = AccountViewModel(vault: vault)
+
+    await viewModel.loadIfNeeded()
+    let switchTask = Task { await viewModel.switchAccount(to: firstTargetID) }
+    await vault.waitUntilSwitchRequested()
+
+    XCTAssertTrue(viewModel.isMutating)
+    XCTAssertFalse(viewModel.canSwitch(to: secondTargetID))
+    await viewModel.switchAccount(to: secondTargetID)
+    let requestsBeforeRelease = await vault.switchRequestSnapshot()
+    XCTAssertEqual(requestsBeforeRelease, [firstTargetID])
+
+    viewModel.invalidateForAccountSessionChange()
+    XCTAssertEqual(viewModel.state, .idle)
+    XCTAssertTrue(viewModel.accounts.isEmpty)
+
+    let released = await vault.releaseSwitch()
+    XCTAssertTrue(released)
+    await switchTask.value
+
+    XCTAssertFalse(viewModel.isMutating)
+    XCTAssertEqual(viewModel.state, .idle)
+    XCTAssertTrue(viewModel.accounts.isEmpty)
   }
 
   func testSuccessfulLoginValidatesBeforePersistingSession() async throws {
@@ -1455,6 +1584,23 @@ final class AccountViewModelTests: XCTestCase {
     )
   }
 
+  private func accountSummary(
+    id: Int64,
+    name: String,
+    isActive: Bool,
+    updatedAt: TimeInterval
+  ) -> AccountSummary {
+    AccountSummary(
+      id: id,
+      username: name,
+      displayName: name,
+      portraitURL: nil,
+      isActive: isActive,
+      hasFullCredentials: true,
+      updatedAt: Date(timeIntervalSince1970: updatedAt)
+    )
+  }
+
   private func forum(id: Int64, name: String) -> FollowedForumItem {
     FollowedForumItem(id: id, name: name, level: Int(id), experience: Int(id * 10))
   }
@@ -1474,6 +1620,34 @@ private struct CredentialLengths: Equatable, Sendable {
 private struct AccountTestFailure: LocalizedError, Sendable {
   let message: String
   var errorDescription: String? { message }
+}
+
+private struct AccountSessionNotificationSnapshot: Equatable, Sendable {
+  let kind: String?
+  let accountID: Int64?
+
+  init(kind: String?, accountID: Int64?) {
+    self.kind = kind
+    self.accountID = accountID
+  }
+
+  init(_ notification: Notification) {
+    kind = notification.userInfo?["kind"] as? String
+    accountID = (notification.userInfo?["accountID"] as? NSNumber)?.int64Value
+  }
+}
+
+private final class AccountSessionNotificationRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var snapshots: [AccountSessionNotificationSnapshot] = []
+
+  func record(_ snapshot: AccountSessionNotificationSnapshot) {
+    lock.withLock { snapshots.append(snapshot) }
+  }
+
+  func snapshot() -> [AccountSessionNotificationSnapshot] {
+    lock.withLock { snapshots }
+  }
 }
 
 private enum FollowedForumPinsMutation: Equatable, Sendable {
@@ -1667,15 +1841,19 @@ private actor AccountVaultSpy: AccountVault, AccountSessionLookup {
   private var activeUserID: Int64?
   private var activeSessionScript: [StoredAccountSession?]
   private var activeReads = 0
+  private var switchRequests: [Int64] = []
+  private let switchFailure: AccountTestFailure?
 
   init(
     sessions: [StoredAccountSession] = [],
     activeUserID: Int64? = nil,
-    activeSessionScript: [StoredAccountSession?] = []
+    activeSessionScript: [StoredAccountSession?] = [],
+    switchFailure: AccountTestFailure? = nil
   ) {
     self.sessions = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
     self.activeUserID = activeUserID
     self.activeSessionScript = activeSessionScript
+    self.switchFailure = switchFailure
   }
 
   func accountSummaries() async throws -> [AccountSummary] {
@@ -1708,6 +1886,8 @@ private actor AccountVaultSpy: AccountVault, AccountSessionLookup {
   }
 
   func switchActive(to userID: Int64) async throws {
+    switchRequests.append(userID)
+    if let switchFailure { throw switchFailure }
     guard sessions[userID] != nil else { throw AccountVaultError.accountNotFound }
     activeUserID = userID
   }
@@ -1729,6 +1909,57 @@ private actor AccountVaultSpy: AccountVault, AccountSessionLookup {
   func session(userID: Int64) -> StoredAccountSession? { sessions[userID] }
   func sessionCount() -> Int { sessions.count }
   func activeSessionReadCount() -> Int { activeReads }
+  func switchRequestSnapshot() -> [Int64] { switchRequests }
+}
+
+private actor SuspendedSwitchAccountVault: AccountVault {
+  private let initialSummaries: [AccountSummary]
+  private let switchedSummaries: [AccountSummary]
+  private var didSwitch = false
+  private var switchContinuation: CheckedContinuation<Void, Never>?
+  private var switchWasRequested = false
+  private var switchWaiters: [CheckedContinuation<Void, Never>] = []
+  private var switchRequests: [Int64] = []
+
+  init(initial: [AccountSummary], switched: [AccountSummary]) {
+    initialSummaries = initial
+    switchedSummaries = switched
+  }
+
+  func accountSummaries() async throws -> [AccountSummary] {
+    didSwitch ? switchedSummaries : initialSummaries
+  }
+
+  func activeSession() async throws -> StoredAccountSession? { nil }
+  func upsert(_ session: StoredAccountSession) async throws {}
+
+  func switchActive(to userID: Int64) async throws {
+    switchRequests.append(userID)
+    guard !switchWasRequested else { return }
+    switchWasRequested = true
+    let waiters = switchWaiters
+    switchWaiters.removeAll()
+    waiters.forEach { $0.resume() }
+    await withCheckedContinuation { switchContinuation = $0 }
+    didSwitch = true
+  }
+
+  func remove(userID: Int64) async throws {}
+  func removeAll() async throws {}
+
+  func waitUntilSwitchRequested() async {
+    if switchWasRequested { return }
+    await withCheckedContinuation { switchWaiters.append($0) }
+  }
+
+  func releaseSwitch() -> Bool {
+    guard let switchContinuation else { return false }
+    self.switchContinuation = nil
+    switchContinuation.resume()
+    return true
+  }
+
+  func switchRequestSnapshot() -> [Int64] { switchRequests }
 }
 
 private actor SuspendedActiveSessionReadVault: AccountVault {

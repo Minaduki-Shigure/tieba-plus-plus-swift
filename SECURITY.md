@@ -65,6 +65,18 @@ Baidu's account-security controls to invalidate sessions. A user-confirmed
 local reset may delete an unreadable account archive without touching browsing
 history, favorites, or the remote Baidu account.
 
+The Home account menu may render only the nonsecret `AccountSummary` projection;
+it must not receive a stored session or credential. A quick-switch request is
+accepted only after a complete summary load, for an exact saved nonactive UID,
+and while no account mutation is in flight. Current, unknown, unloaded, and
+concurrent targets are rejected before the vault is called. A successful switch
+still goes through the Keychain-backed vault and the shared account-session
+notification. Root synchronously invalidates its account projection, and other
+private-state subscribers are notified to invalidate before reloading. Direct
+account addition reuses the same bounded nonpersistent Web login and independent
+validation flow described above; the menu does not add another credential-
+capture path.
+
 Anonymous and authenticated networking are separate clients backed by
 independent ephemeral URL sessions. Anonymous request factories have no account
 parameter and must remain credential-free. Authenticated request factories send

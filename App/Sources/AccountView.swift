@@ -158,7 +158,10 @@ struct AccountView: View {
               AccountRow(account: account)
             }
             .buttonStyle(.plain)
-            .disabled(viewModel.isMutating)
+            .disabled(
+              viewModel.isMutating
+                || (!account.isActive && !viewModel.canSwitch(to: account.id))
+            )
             .swipeActions(edge: .trailing) {
               Button(role: .destructive) {
                 Task { await viewModel.remove(userID: account.id) }

@@ -24,6 +24,11 @@ final class AccountViewModel: ObservableObject {
     return false
   }
 
+  func canSwitch(to userID: Int64) -> Bool {
+    guard state == .loaded, !isMutating else { return false }
+    return accounts.contains { $0.id == userID && !$0.isActive }
+  }
+
   func loadIfNeeded() async {
     guard state == .idle else { return }
     await reload()
@@ -56,6 +61,7 @@ final class AccountViewModel: ObservableObject {
   }
 
   func switchAccount(to userID: Int64) async {
+    guard canSwitch(to: userID) else { return }
     await mutate(change: .switchAccount, accountID: userID) {
       try await vault.switchActive(to: userID)
     }
