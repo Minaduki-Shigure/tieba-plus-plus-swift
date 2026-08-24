@@ -315,6 +315,8 @@ struct CommentsView: View {
           .font(.subheadline.weight(.semibold))
           .foregroundStyle(.primary)
           .textCase(nil)
+          .accessibilityAddTraits(.isHeader)
+          .accessibilityIdentifier("comments-count-header")
       }
     }
     .listStyle(.plain)
@@ -340,6 +342,8 @@ struct CommentsView: View {
           .padding(.horizontal, 14)
           .padding(.vertical, 9)
           .background(Color(uiColor: .secondarySystemBackground))
+          .accessibilityAddTraits(.isHeader)
+          .accessibilityIdentifier("comments-count-header")
 
         previousPageScrollControl
 
@@ -359,6 +363,7 @@ struct CommentsView: View {
         commentsScrollFooter
       }
     }
+    .accessibilityIdentifier("comments-scroll")
   }
 
   private func commentParentPost(_ parentPost: CommentParentPostContext) -> some View {

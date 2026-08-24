@@ -171,8 +171,8 @@ unless options[:analyses].empty?
       report << "Frame intervals: **p95 #{format('%.2f ms', frames.fetch('p95MS'))}**, " \
                 "**p99 #{format('%.2f ms', frames.fetch('p99MS'))}**, " \
                 "**max #{format('%.2f ms', frames.fetch('maximumMS'))}**; " \
-                "#{frames.fetch('overBudgetCount')} over-budget and " \
-                "#{frames.fetch('overTwoFramesCount')} over-two-frame intervals."
+                "#{format('%.2f%%', frames.fetch('overBudgetCount').to_f / frames.fetch('frameCount') * 100)} over-budget and " \
+                "#{format('%.2f%%', frames.fetch('overTwoFramesCount').to_f / frames.fetch('frameCount') * 100)} over-two-frame intervals."
       report << ""
     end
     report << "| Inclusive category | Weight | Main-thread share |"
@@ -281,15 +281,25 @@ if profile_plan
     report << ""
 
     frame_metrics = [
-      ["Frame p95 (ms)", "p95MS"],
-      ["Frame p99 (ms)", "p99MS"],
-      ["Maximum frame interval (ms)", "maximumMS"],
-      ["Over-budget intervals", "overBudgetCount"],
-      ["Over-two-frame intervals", "overTwoFramesCount"],
+      ["Frame p95 (ms)", ->(frames) { frames.fetch("p95MS").to_f }],
+      ["Frame p99 (ms)", ->(frames) { frames.fetch("p99MS").to_f }],
+      ["Maximum frame interval (ms)", ->(frames) { frames.fetch("maximumMS").to_f }],
+      [
+        "Over-budget interval rate (%)",
+        ->(frames) {
+          frames.fetch("overBudgetCount").to_f / frames.fetch("frameCount") * 100
+        },
+      ],
+      [
+        "Over-two-frame interval rate (%)",
+        ->(frames) {
+          frames.fetch("overTwoFramesCount").to_f / frames.fetch("frameCount") * 100
+        },
+      ],
     ]
     report << "| Frame metric | Control r1 | Candidate r1 | Delta r1 | Control r2 | Candidate r2 | Delta r2 | Mean paired delta | Direction |"
     report << "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |"
-    frame_metrics.each do |metric_name, key|
+    frame_metrics.each do |metric_name, value_for|
       replicate_values = %w[1 2].map do |replicate|
         rows = profile_plan.select do |row|
           row.fetch("comparison") == comparison && row.fetch("replicate") == replicate
@@ -300,8 +310,8 @@ if profile_plan
         candidate = candidate_row && parsed_frames[candidate_row.fetch("profile_id")]
         next unless control && candidate
 
-        control_value = control.fetch(key).to_f
-        candidate_value = candidate.fetch(key).to_f
+        control_value = value_for.call(control)
+        candidate_value = value_for.call(candidate)
         [control_value, candidate_value, percent_delta(control_value, candidate_value)]
       end
       deltas = replicate_values.filter_map { |values| values&.fetch(2) }
