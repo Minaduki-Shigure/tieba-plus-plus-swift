@@ -141,7 +141,50 @@ class SideStoreSourceUpdaterTest < Minitest::Test
     assert_includes "#{stdout}#{stderr}", "duplicate JSON key"
   end
 
+  def test_validator_rejects_tampered_quick_action_manifest
+    project = YAML.safe_load_file(@project_path, aliases: false)
+    project_quick_actions(project).first["UIApplicationShortcutItemIconSymbolName"] = "checkmark.circle"
+    File.write(@project_path, YAML.dump(project))
+
+    output, status = run_validator
+
+    refute status.success?
+    assert_includes output, "UIApplicationShortcutItems must exactly declare"
+  end
+
+  def test_validator_rejects_missing_quick_action_manifest
+    project = YAML.safe_load_file(@project_path, aliases: false)
+    project_quick_actions(project).pop
+    File.write(@project_path, YAML.dump(project))
+
+    output, status = run_validator
+
+    refute status.success?
+    assert_includes output, "UIApplicationShortcutItems must exactly declare"
+  end
+
+  def test_validator_rejects_extra_quick_action_fields
+    project = YAML.safe_load_file(@project_path, aliases: false)
+    project_quick_actions(project).first["UIApplicationShortcutItemSubtitle"] = "额外字段"
+    File.write(@project_path, YAML.dump(project))
+
+    output, status = run_validator
+
+    refute status.success?
+    assert_includes output, "UIApplicationShortcutItems must exactly declare"
+  end
+
   private
+
+  def project_quick_actions(project)
+    project.dig(
+      "targets",
+      "TiebaPlusPlus",
+      "info",
+      "properties",
+      "UIApplicationShortcutItems"
+    )
+  end
 
   def write_pre_release_source_fixture
     source = JSON.parse(File.read(@source_path))
@@ -177,14 +220,20 @@ class SideStoreSourceUpdaterTest < Minitest::Test
   end
 
   def assert_source_valid
-    stdout, stderr, status = Open3.capture3(
+    output, status = run_validator(ipa: true)
+    assert status.success?, "validator failed: #{output}"
+  end
+
+  def run_validator(ipa: false)
+    arguments = [
       RbConfig.ruby,
       File.join(REPOSITORY_ROOT, "Scripts", "validate_sidestore_source.rb"),
       "--source", @source_path,
-      "--project", @project_path,
-      "--ipa", @ipa_path
-    )
-    assert status.success?, "validator failed: #{stdout}#{stderr}"
+      "--project", @project_path
+    ]
+    arguments.concat(["--ipa", @ipa_path]) if ipa
+    stdout, stderr, status = Open3.capture3(*arguments)
+    ["#{stdout}#{stderr}", status]
   end
 
   def release_tag(version)

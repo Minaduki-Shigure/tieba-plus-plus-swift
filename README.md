@@ -17,7 +17,7 @@ and its verified metadata enters the public app source.
 | Area | Current state |
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
-| Local features | Available for history, favorites, filtering, appearance, media preferences, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, and a next-launch destination including the inbox |
+| Local features | Available for history, favorites, filtering, appearance, media preferences, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, a next-launch destination including the inbox, and ordered iOS Home Screen quick actions for existing destinations |
 | Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary, followed forums, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies; both newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
 | TiebaLite parity | Current `main` and public `v0.62.3-alpha.1`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
@@ -302,6 +302,26 @@ and its verified metadata enters the public app source.
   slow random or fixed 2-second interval. Defaults retain official batch, slow
   mode, and stop-on-failure. Account changes, cancellation, and uncertain
   dispatched outcomes always stop without retry, regardless of the setting.
+- **Current-main iOS Home Screen quick actions:** On iOS 16 or later, the static
+  actions appear in this order: `一键签到`, `我的收藏`, `搜索`, and `我的消息`.
+  They open the existing foreground one-click check-in page, Tieba cloud
+  favorites, search, and the replies inbox, respectively, across cold and warm
+  scene launches. Except for an already-topmost check-in page, a shortcut resets
+  navigation to one fresh landing page so old child navigation and presentations
+  cannot hide it; Back returns Home. An already-topmost check-in page is
+  preserved so an active foreground run is not stopped. Unknown action types and
+  actions carrying an additional payload are rejected. A check-in shortcut
+  performs only the page's catalog read until the user
+  explicitly confirms inside that page; it does not authorize or schedule a
+  background check-in. Signed-out users see each destination's existing state
+  instead of having an account selected implicitly. These navigation-only
+  actions add no endpoint or weighted parity point and are not included in the
+  public `v0.62.3-alpha.1` IPA. The static menu is an OS registration for a
+  standalone SideStore installation. LiveContainer does not install a guest as
+  its own SpringBoard app and instead recommends a separate Launch App Shortcut,
+  so this project does not claim that the four guest manifest items appear on a
+  LiveContainer-created Home Screen icon. Both standalone delivery and guest
+  scene-delegate compatibility remain physical-device validation gates.
 - **`v0.61.0-alpha.1` static-image creation:** New-topic and direct-topic-reply
   composers can select, reorder, preview, and remove up to nine static
   images, choose standard or high-definition processing, and select forum-name,
@@ -524,8 +544,10 @@ and its verified metadata enters the public app source.
   post and reply context. External HTTPS links use the selected system or Safari
   presentation, while forum and thread sharing emits canonical HTTPS links.
   The app-owned scheme also exposes strict navigation-only routes for a search
-  landing with recent history, browsing history, account cloud favorites, and
-  either inbox segment. These routes carry no account or credential data;
+  landing with recent history, browsing history, account cloud favorites, the
+  foreground one-click check-in page, and either inbox segment. The check-in
+  route opens only that page and retains its explicit in-page confirmation
+  before any write. These routes carry no account or credential data;
   app-only routes embedded in post content are rejected instead of being handed
   back to iOS for re-entry.
 - **Text selection and copying:** Context-menu copy actions for a visible topic

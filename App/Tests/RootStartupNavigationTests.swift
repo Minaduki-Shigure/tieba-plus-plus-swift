@@ -44,6 +44,7 @@ final class RootStartupNavigationTests: XCTestCase {
       (.search, .search("")),
       (.history, .history),
       (.cloudFavorites, .cloudFavorites),
+      (.batchCheckIn, .batchCheckIn),
       (.notifications(.replies), .notifications(.replies)),
       (.notifications(.mentions), .notifications(.mentions)),
     ]
@@ -71,6 +72,7 @@ final class RootStartupNavigationTests: XCTestCase {
       ("tieba-plus-plus://thread/42", .linkedThread(TiebaThreadRoute(threadID: 42))),
       ("tieba-plus-plus://search", .search("")),
       ("tieba-plus-plus://favorite", .cloudFavorites),
+      ("tieba-plus-plus://check-in", .batchCheckIn),
       ("tieba-plus-plus://notifications/1", .notifications(.mentions)),
     ]
 
@@ -91,12 +93,86 @@ final class RootStartupNavigationTests: XCTestCase {
       "tieba-plus-plus://search?",
       "tieba-plus-plus://notifications/2",
       "tieba-plus-plus://favorite/",
+      "tieba-plus-plus://check-in/",
     ]
 
     for value in values {
       let url = try XCTUnwrap(URL(string: value))
       XCTAssertNil(RootStartupNavigation.appending(url: url, to: existingPath), value)
     }
+  }
+
+  func testQuickActionsReplaceMatchingNonCheckInNavigationWithFreshLanding() {
+    let cases: [(action: HomeScreenQuickAction, destination: RootDestination)] = [
+      (.search, .search("")),
+      (.cloudFavorites, .cloudFavorites),
+      (.notificationReplies, .notifications(.replies)),
+    ]
+
+    for (index, testCase) in cases.enumerated() {
+      let path: [RootDestination] = [.history, testCase.destination]
+      let invocation = rootQuickActionInvocation(index + 1, action: testCase.action)
+      XCTAssertEqual(
+        RootStartupNavigation.applyingQuickAction(
+          invocation: invocation,
+          to: path
+        ),
+        [.homeScreenQuickAction(invocation)]
+      )
+    }
+  }
+
+  func testQuickActionReplacesAnOlderMatchingActivation() {
+    let oldInvocation = rootQuickActionInvocation(1, action: .search)
+    let newInvocation = rootQuickActionInvocation(2, action: .search)
+
+    XCTAssertEqual(
+      RootStartupNavigation.applyingQuickAction(
+        invocation: newInvocation,
+        to: [.history, .homeScreenQuickAction(oldInvocation)]
+      ),
+      [.homeScreenQuickAction(newInvocation)]
+    )
+  }
+
+  func testBatchCheckInQuickActionPreservesMatchingPageSoAnActiveRunIsNotStopped() {
+    let invocation = rootQuickActionInvocation(1, action: .batchCheckIn)
+    let paths: [[RootDestination]] = [
+      [.history, .batchCheckIn],
+      [.history, .homeScreenQuickAction(invocation)],
+    ]
+
+    for path in paths {
+      XCTAssertEqual(
+        RootStartupNavigation.applyingQuickAction(
+          invocation: rootQuickActionInvocation(2, action: .batchCheckIn),
+          to: path
+        ),
+        path
+      )
+    }
+  }
+
+  func testQuickActionsReplaceADifferentCurrentDestination() {
+    let path: [RootDestination] = [.forum("swift")]
+    let invocation = rootQuickActionInvocation(1, action: .batchCheckIn)
+
+    XCTAssertEqual(
+      RootStartupNavigation.applyingQuickAction(
+        invocation: invocation,
+        to: path
+      ),
+      [.homeScreenQuickAction(invocation)]
+    )
+  }
+
+  func testQuickActionSetsItsUniqueLandingOnAnEmptyColdStartPath() {
+    let invocation = rootQuickActionInvocation(1, action: .search)
+
+    XCTAssertEqual(
+      RootStartupNavigation.applyingQuickAction(invocation: invocation, to: []),
+      [.homeScreenQuickAction(invocation)]
+    )
   }
 
   func testLinkTargetsRemainTopmostForEveryStartDestination() {
@@ -146,6 +222,7 @@ final class RootStartupNavigationTests: XCTestCase {
       .notifications(.replies),
       .notifications(.mentions),
       .cloudFavorites,
+      .homeScreenQuickAction(rootQuickActionInvocation(1, action: .search)),
       .account,
       .settings,
       .thread(thread),
@@ -310,6 +387,17 @@ final class RootStartupNavigationTests: XCTestCase {
     XCTAssertEqual(favoriteThread.browseOptions.sort, .descending)
     XCTAssertTrue(favoriteThread.browseOptions.onlyThreadAuthor)
   }
+}
+
+private func rootQuickActionInvocation(
+  _ value: Int,
+  action: HomeScreenQuickAction
+) -> HomeScreenQuickActionInvocation {
+  precondition((0...255).contains(value))
+  return HomeScreenQuickActionInvocation(
+    id: UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, UInt8(value))),
+    action: action
+  )
 }
 
 private extension RootDestination {

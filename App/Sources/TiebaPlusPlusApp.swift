@@ -5,6 +5,8 @@ import TiebaCore
 @main
 @MainActor
 struct TiebaPlusPlusApp: App {
+  @UIApplicationDelegateAdaptor(TiebaApplicationDelegate.self)
+  private var applicationDelegate
   @StateObject private var externalWebPresentation: ExternalWebPresentationModel
   @StateObject private var contentReportCoordinator: ContentReportCoordinator
   @StateObject private var contentMediaNetworkMonitor = ContentMediaNetworkMonitor()
@@ -219,6 +221,7 @@ struct TiebaPlusPlusApp: App {
         .environmentObject(voicePlaybackController)
         .environmentObject(videoPlaybackController)
         .environmentObject(followedForumsViewModel)
+        .environmentObject(externalWebPresentation)
         .background {
           ExternalWebBrowserPresenter(page: externalWebPresentation.page) { pageID in
             externalWebPresentation.dismiss(id: pageID)
@@ -290,6 +293,7 @@ struct TiebaPlusPlusApp: App {
         .environmentObject(voicePlaybackController)
         .environmentObject(videoPlaybackController)
         .environmentObject(followedForumsViewModel)
+        .environmentObject(externalWebPresentation)
         .background {
           ExternalWebBrowserPresenter(page: externalWebPresentation.page) { pageID in
             externalWebPresentation.dismiss(id: pageID)

@@ -9,6 +9,7 @@ final class TiebaAppLinkTests: XCTestCase {
       (.search, "tieba-plus-plus://search"),
       (.history, "tieba-plus-plus://history"),
       (.cloudFavorites, "tieba-plus-plus://favorite"),
+      (.batchCheckIn, "tieba-plus-plus://check-in"),
       (.notifications(.replies), "tieba-plus-plus://notifications/0"),
       (.notifications(.mentions), "tieba-plus-plus://notifications/1"),
     ]
@@ -44,6 +45,10 @@ final class TiebaAppLinkTests: XCTestCase {
       "tieba-plus-plus://search/%2F",
       "tieba-plus-plus://favorite/",
       "tieba-plus-plus://favorites",
+      "tieba-plus-plus://check-in/",
+      "tieba-plus-plus://checkin",
+      "tieba-plus-plus://check-in?source=shortcut",
+      "tieba-plus-plus://check-in#shortcut",
       "tieba-plus-plus://notifications",
       "tieba-plus-plus://notifications/",
       "tieba-plus-plus://notifications/00",
@@ -77,6 +82,7 @@ final class TiebaAppLinkTests: XCTestCase {
       .search,
       .history,
       .cloudFavorites,
+      .batchCheckIn,
       .notifications(.replies),
       .notifications(.mentions),
     ]

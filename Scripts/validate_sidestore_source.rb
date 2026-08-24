@@ -46,6 +46,33 @@ class SideStoreSourceValidator
 
   PERMISSION_KEYS = %w[entitlements privacy].freeze
 
+  QUICK_ACTIONS = [
+    {
+      "UIApplicationShortcutItemType" =>
+        "io.github.minaduki.tieba-plus-plus.quick-action.batch-check-in",
+      "UIApplicationShortcutItemTitle" => "一键签到",
+      "UIApplicationShortcutItemIconSymbolName" => "checkmark.seal.fill"
+    },
+    {
+      "UIApplicationShortcutItemType" =>
+        "io.github.minaduki.tieba-plus-plus.quick-action.cloud-favorites",
+      "UIApplicationShortcutItemTitle" => "我的收藏",
+      "UIApplicationShortcutItemIconSymbolName" => "bookmark.fill"
+    },
+    {
+      "UIApplicationShortcutItemType" =>
+        "io.github.minaduki.tieba-plus-plus.quick-action.search",
+      "UIApplicationShortcutItemTitle" => "搜索",
+      "UIApplicationShortcutItemIconSymbolName" => "magnifyingglass"
+    },
+    {
+      "UIApplicationShortcutItemType" =>
+        "io.github.minaduki.tieba-plus-plus.quick-action.notifications",
+      "UIApplicationShortcutItemTitle" => "我的消息",
+      "UIApplicationShortcutItemIconSymbolName" => "envelope.fill"
+    }
+  ].freeze
+
   def initialize(source_path:, project_path:, ipa_path: nil)
     @source_path = source_path
     @project_path = project_path
@@ -128,6 +155,8 @@ class SideStoreSourceValidator
            "MARKETING_VERSION must use x.y.z format")
     assert(build_version.match?(/\A[1-9]\d*\z/),
            "CURRENT_PROJECT_VERSION must be a positive decimal integer")
+    assert(info_properties["UIApplicationShortcutItems"] == QUICK_ACTIONS,
+           "UIApplicationShortcutItems must exactly declare the supported quick actions in order")
 
     entitlement_settings = values_for_key(target, "CODE_SIGN_ENTITLEMENTS").reject do |value|
       value.nil? || value.to_s.empty?

@@ -4,6 +4,7 @@ enum TiebaAppRoute: Hashable, Sendable {
   case search
   case history
   case cloudFavorites
+  case batchCheckIn
   case notifications(InboxKind)
 }
 
@@ -19,6 +20,8 @@ enum TiebaAppLink {
       components.host = "history"
     case .cloudFavorites:
       components.host = "favorite"
+    case .batchCheckIn:
+      components.host = "check-in"
     case .notifications(let kind):
       components.host = "notifications"
       switch kind {
@@ -53,6 +56,8 @@ enum TiebaAppLink {
       route = .history
     case ("favorite", ""):
       route = .cloudFavorites
+    case ("check-in", ""):
+      route = .batchCheckIn
     case ("notifications", "/0"):
       route = .notifications(.replies)
     case ("notifications", "/1"):

@@ -48,6 +48,19 @@ targets:
             CFBundleURLName: io.github.minaduki.tieba-plus-plus
             CFBundleURLSchemes:
               - tieba-plus-plus
+        UIApplicationShortcutItems:
+          - UIApplicationShortcutItemType: io.github.minaduki.tieba-plus-plus.quick-action.batch-check-in
+            UIApplicationShortcutItemTitle: "一键签到"
+            UIApplicationShortcutItemIconSymbolName: checkmark.seal.fill
+          - UIApplicationShortcutItemType: io.github.minaduki.tieba-plus-plus.quick-action.cloud-favorites
+            UIApplicationShortcutItemTitle: "我的收藏"
+            UIApplicationShortcutItemIconSymbolName: bookmark.fill
+          - UIApplicationShortcutItemType: io.github.minaduki.tieba-plus-plus.quick-action.search
+            UIApplicationShortcutItemTitle: "搜索"
+            UIApplicationShortcutItemIconSymbolName: magnifyingglass
+          - UIApplicationShortcutItemType: io.github.minaduki.tieba-plus-plus.quick-action.notifications
+            UIApplicationShortcutItemTitle: "我的消息"
+            UIApplicationShortcutItemIconSymbolName: envelope.fill
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false

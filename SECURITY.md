@@ -1530,11 +1530,13 @@ The registered app-owned scheme has two nonoverlapping consumers. Public content
 sharing, and the explicit clipboard control may resolve only validated forum,
 thread, and user targets. A separate navigation-only parser accepts exact
 canonical routes for empty search, browsing history, account cloud favorites,
-and the replies or mentions inbox segment. It rejects credentials, ports, query
-strings, fragments, aliases, encoded route names, trailing or additional path
-segments, and unknown notification indices. Parsing and Root mapping cannot read
-the account vault, select an account, issue a request, or authorize a mutation;
-the destination page performs its ordinary signed-out and credential checks.
+the foreground one-click check-in page, and the replies or mentions inbox
+segment. It rejects credentials, ports, query strings, fragments, aliases,
+encoded route names, trailing or additional path segments, and unknown
+notification indices. Parsing and Root mapping cannot read the account vault,
+select an account, issue a request, or authorize a mutation; the check-in route
+does not bypass the page's explicit confirmation, and every destination performs
+its ordinary signed-out and credential checks.
 App-only routes found in rich content are rejected before system dispatch so
 untrusted post text cannot reopen this app through that otherwise private route
 surface. A cold-start app route is appended above, and does not replace, the
@@ -1543,6 +1545,30 @@ An external HTTPS page opened in Safari or the system browser may still redirect
 back to a publicly registered custom scheme outside this app's control. The
 accepted routes therefore remain navigation-only and cannot carry an account,
 credential, request field, or mutation command.
+
+The iOS 16-and-later static Home Screen quick actions are likewise navigation-
+only. Their fixed order is one-click check-in, Tieba cloud favorites, search,
+and the replies inbox. Both cold-start scene connection options and warm-scene
+shortcut callbacks must pass through the same closed action-type mapping. An
+unknown type or any shortcut item carrying an additional payload is rejected;
+no payload field may become a route, account, request argument, or write command.
+Dispatch resets the old navigation subtree to one uniquely identified destination
+so hidden child navigation or presentation cannot absorb a repeated shortcut. It
+preserves an already-topmost check-in page because reconstructing it would stop
+foreground work, and dismisses shared and Root-owned presentation state before
+routing. It must not read the account vault, select an account, or replace a
+page's ordinary signed-out state.
+
+The one-click check-in shortcut opens only the existing foreground page. Initial
+catalog loading remains read-only, and the page's immutable in-page confirmation
+continues to be the sole authorization for a batch or individual check-in write.
+The shortcut must not start, pre-authorize, resume, schedule, or background a
+check-in. These entries introduce no endpoint or credential field. They are
+current-`main` behavior and are not included in public `v0.62.3-alpha.1`.
+They are OS-registered only for a standalone installation. A LiveContainer guest
+uses the container's separate launch shortcut and must not be assumed to own the
+host's SpringBoard quick-action menu. The scene bridge must pass both standalone
+and LiveContainer launch/return testing before this feature is release-ready.
 
 Automated tests use synthetic fixed-length placeholders only. Real `BDUSS`,
 `STOKEN`, `tbs`, cookies, passwords, or private account responses must never be

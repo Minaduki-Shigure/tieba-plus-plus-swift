@@ -110,10 +110,16 @@ two context identities survive local filtering independently. Explicit topic
 and floor routes bypass unrelated reading history, while a nested-reply match
 uses the existing comment-ID resolver instead of trusting a displayed parent
 PID. This reuses existing anonymous endpoints and adds no weighted point.
-The app-owned search, history, cloud-favorite, and inbox routes close another
-narrow TiebaLite navigation gap. They expose only already credited destinations,
-add no endpoint or account choice, and keep app-only routes outside public rich
-content and clipboard parsing, so they add no weighted point.
+The app-owned search, history, cloud-favorite, foreground check-in-page, and inbox
+routes close another narrow TiebaLite navigation gap. They expose only already
+credited destinations, add no endpoint or account choice, and keep app-only
+routes outside public rich content and clipboard parsing, so they add no weighted
+point.
+The ordered iOS Home Screen quick actions expose the existing foreground batch-
+check-in page, Tieba cloud favorites, search, and replies inbox through the iOS
+16-and-later scene lifecycle. They add no endpoint, data source, background
+behavior, or weighted point. The public `v0.62.3-alpha.1` IPA does not include
+them.
 The configurable forum primary action likewise completes a narrow local habit
 setting by rearranging existing controls, so it remains inside the existing
 local-settings credit rather than adding a weighted point.
@@ -1081,18 +1087,47 @@ scheme. It requires the exact Tieba host, standard ports, exact paths, nonempty
 bounded forum names, positive 64-bit IDs, and unambiguous supported state. Valid
 `see_lz` and post anchors are preserved when opening a thread. A separate strict
 app-navigation parser accepts only canonical `tieba-plus-plus://search`,
-`tieba-plus-plus://history`, `tieba-plus-plus://favorite`, and
-`tieba-plus-plus://notifications/0|1` URLs. As in TiebaLite, `favorite` opens the
-active account's server-side favorites rather than the app's local archive, and
-notification values `0` and `1` select replies and mentions respectively. These
-routes append above the configured startup destination, select no account, carry
-no data, and perform no write. The empty search route stays idle, focuses the
+`tieba-plus-plus://history`, `tieba-plus-plus://favorite`,
+`tieba-plus-plus://check-in`, and `tieba-plus-plus://notifications/0|1` URLs. As
+in TiebaLite, `favorite` opens the active account's server-side favorites rather
+than the app's local archive, notification values `0` and `1` select replies and
+mentions respectively, and `check-in` opens only the existing foreground page
+whose explicit confirmation remains required before any write. These routes
+append above the configured startup destination, select no account, carry no
+data, and perform no write. The empty search route stays idle, focuses the
 search field on iOS 18 or later, and projects the same local recent-search archive
 on every supported OS instead of issuing an empty request or showing an input
 error. Other destination pages retain their ordinary signed-out or incomplete-
 credential state. Rich content and the explicit clipboard control cannot consume
 app-only routes, and an unrecognized app-owned URL is rejected instead of being
 handed to the system to reopen this app.
+
+On iOS 16 or later, the static Home Screen quick-action order is `一键签到`,
+`我的收藏`, `搜索`, then `我的消息`. Those entries resolve only to the existing
+foreground batch-check-in page, account cloud favorites, empty search landing,
+and replies inbox. The scene bridge handles both a cold launch from connection
+options and a warm invocation delivered to the active scene. It resets the old
+navigation subtree to one validated, uniquely identified destination, so an
+internal Picker, child `NavigationLink`, or child-owned modal cannot swallow a
+repeated shortcut; Back returns Home. An already-topmost check-in page is
+preserved instead, because reconstructing it would intentionally stop foreground
+work. Shared and Root-owned login, gallery, report, alert, and in-app Safari
+presentations are dismissed before routing.
+Every unknown shortcut type and every shortcut carrying an additional payload is
+rejected rather than interpreting user data. A shortcut selects no account:
+signed-out and incomplete-session states remain owned by the destination page.
+
+The check-in shortcut is navigation only. Opening the page may read the existing
+authoritative forum catalog, but no write is dispatched until the same in-page
+snapshot confirmation described below. It does not add background, scheduled,
+or automatic check-in. The four shortcuts reuse existing routes and services,
+add no endpoint or weighted parity point, and are not present in the public
+`v0.62.3-alpha.1` IPA.
+The static menu is expected only when the IPA is installed as its own SideStore
+app. A LiveContainer guest is not independently registered with SpringBoard; its
+documented Home Screen entry is a LiveContainer Launch App Shortcut. Therefore
+the guest manifest menu is not counted as available on that icon, and the custom
+scene delegate must be validated separately inside LiveContainer before release.
 
 Cleartext official links are accepted only as route text; the destination is
 loaded through the existing HTTPS-only API client. External HTTPS links default

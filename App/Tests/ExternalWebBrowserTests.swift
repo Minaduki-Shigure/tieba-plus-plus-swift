@@ -236,6 +236,7 @@ final class ExternalWebBrowserTests: XCTestCase {
       .search,
       .history,
       .cloudFavorites,
+      .batchCheckIn,
       .notifications(.replies),
       .notifications(.mentions),
     ]

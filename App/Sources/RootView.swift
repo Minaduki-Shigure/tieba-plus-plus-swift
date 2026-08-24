@@ -28,7 +28,10 @@ struct RootView: View {
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @EnvironmentObject private var mediaPlaybackCoordinator: MediaPlaybackCoordinator
   @EnvironmentObject private var followedForumsViewModel: FollowedForumsViewModel
+  @EnvironmentObject private var sceneDelegate: TiebaSceneDelegate
+  @EnvironmentObject private var externalWebPresentation: ExternalWebPresentationModel
   @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
+  @Environment(\.contentReportCoordinator) private var contentReportCoordinator
   @AppStorage(AppPreferenceKey.homeShowsRecentForums)
   private var homeShowsRecentForums = true
   @AppStorage(AppPreferenceKey.homeShowsDiscovery)
@@ -375,6 +378,8 @@ struct RootView: View {
             favoritesRepository: favoritesRepository,
             searchHistoryRepository: searchHistoryRepository
           )
+        case .homeScreenQuickAction(let invocation):
+          homeScreenQuickActionDestination(invocation)
         case .account:
           AccountView(
             browseService: service,
@@ -487,6 +492,10 @@ struct RootView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: .forumBrowsingHistoryDidChange)) { _ in
       Task { @MainActor in recentForumsViewModel.reload() }
+    }
+    .onReceive(sceneDelegate.$pendingQuickAction.compactMap { $0 }) {
+      invocation in
+      openHomeScreenQuickAction(invocation)
     }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
       pendingFollowedForumUnfollow = nil
@@ -991,6 +1000,76 @@ struct RootView: View {
     path = routedPath
   }
 
+  private func openHomeScreenQuickAction(_ invocation: HomeScreenQuickActionInvocation) {
+    guard sceneDelegate.consume(invocation) else { return }
+    dismissRootPresentationsForHomeScreenQuickAction()
+    path = RootStartupNavigation.applyingQuickAction(
+      invocation: invocation,
+      to: path
+    )
+  }
+
+  private func dismissRootPresentationsForHomeScreenQuickAction() {
+    showsQuickAccountLogin = false
+    searchHistoryAction = nil
+    linkErrorMessage = nil
+    pendingFollowedForumUnfollow = nil
+    accountViewModel.clearError()
+    favoritesViewModel.dismissOperationError()
+    followedForumsViewModel.dismissPresentedOperationError()
+    threadSummaryImageGalleryCoordinator.dismiss()
+    contentReportCoordinator?.cancelPendingRequest()
+    contentReportCoordinator?.dismissReportPage()
+    contentReportCoordinator?.dismissError()
+    if let page = externalWebPresentation.page {
+      externalWebPresentation.dismiss(id: page.id)
+    }
+  }
+
+  @ViewBuilder
+  private func homeScreenQuickActionDestination(
+    _ invocation: HomeScreenQuickActionInvocation
+  ) -> some View {
+    switch invocation.action {
+    case .batchCheckIn:
+      ForumBatchCheckInView(
+        access: AccountAccess(vault: accountVault, service: accountService)
+      )
+    case .cloudFavorites:
+      CloudFavoritesView(
+        browseService: service,
+        accountService: accountService,
+        vault: accountVault,
+        cloudFavoriteStore: threadCloudFavoriteStore,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository
+      )
+    case .search:
+      SearchView(
+        query: "",
+        browseService: service,
+        searchService: service,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository,
+        globalSearchHistoryViewModel: globalSearchHistoryViewModel,
+        onSearchSubmitted: { globalSearchHistoryViewModel.record($0) }
+      )
+    case .notificationReplies:
+      NotificationsView(
+        browseService: service,
+        accountService: accountService,
+        vault: accountVault,
+        contentFilterRepository: contentFilterRepository,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository,
+        initialKind: .replies
+      )
+    }
+  }
+
   private func openTiebaTarget(_ target: TiebaLinkTarget) {
     path = RootStartupNavigation.appending(target: target, to: path)
   }
@@ -1013,6 +1092,7 @@ enum RootDestination: Hashable {
   case batchCheckIn
   case notifications(InboxKind)
   case cloudFavorites
+  case homeScreenQuickAction(HomeScreenQuickActionInvocation)
   case account
   case settings
   case thread(ThreadHistorySnapshot)
@@ -1088,17 +1168,52 @@ enum RootStartupNavigation {
     to path: [RootDestination]
   ) -> [RootDestination] {
     var result = path
+    result.append(destination(for: appRoute))
+    return result
+  }
+
+  static func applyingQuickAction(
+    invocation: HomeScreenQuickActionInvocation,
+    to path: [RootDestination]
+  ) -> [RootDestination] {
+    let route = invocation.appRoute
+    // A check-in page owns foreground work that its disappearance intentionally
+    // stops. Every other launch replaces the old navigation subtree with a
+    // unique landing page so child routes, selections, and modals cannot hide it.
+    if
+      invocation.action == .batchCheckIn,
+      let current = path.last,
+      represents(route, destination: current)
+    {
+      return path
+    }
+
+    return [.homeScreenQuickAction(invocation)]
+  }
+
+  private static func destination(for appRoute: TiebaAppRoute) -> RootDestination {
     switch appRoute {
     case .search:
-      result.append(.search(""))
+      .search("")
     case .history:
-      result.append(.history)
+      .history
     case .cloudFavorites:
-      result.append(.cloudFavorites)
+      .cloudFavorites
+    case .batchCheckIn:
+      .batchCheckIn
     case .notifications(let kind):
-      result.append(.notifications(kind))
+      .notifications(kind)
     }
-    return result
+  }
+
+  private static func represents(
+    _ appRoute: TiebaAppRoute,
+    destination: RootDestination
+  ) -> Bool {
+    if case .homeScreenQuickAction(let invocation) = destination {
+      return invocation.appRoute == appRoute
+    }
+    return destination == self.destination(for: appRoute)
   }
 }
 
