@@ -29,12 +29,12 @@ and its verified metadata enters the public app source.
   `ScrollView` plus `LazyVStack` rather than `List`, while retaining exact reply
   identities, anchored opening, prepend restoration, pull to refresh, local
   filtering, and guarded pagination. A settled, production-like iOS 18.5 paired
-  profile measured 65.9% less sampled main-thread work, 73.5% less SwiftUI
-  layout/view-graph work, and 84.8% less text shaping on average. Frame p95 fell
-  by 73.7% and 69.8% in the two reversed-order replicates; the over-two-frame
-  interval rate fell by 58.2% and 87.3%. A separate no-image gallery-cover
-  candidate regressed and is not shipped. The simulator result is relative
-  evidence, not a physical-device frame-rate guarantee.
+  profile measured 58.5% less sampled main-thread work, 66.9% less SwiftUI
+  layout/view-graph work, and 80.0% less text shaping on average. Frame p95 fell
+  by 75.5% and 64.9% in the two reversed-order replicates; the over-two-frame
+  interval rate fell by 59.1% and 62.9%. A separate no-image gallery-cover
+  candidate produced mixed results and is not shipped. The simulator result is
+  relative evidence, not a physical-device frame-rate guarantee.
 - **Current alpha:** `v0.62.2-alpha.1` publishes the current end-user app-code
   scope. Full nested-reply pages now precompute displayable replies, keep a
   stable one-row `List` topology with native reply identities, and avoid repeated

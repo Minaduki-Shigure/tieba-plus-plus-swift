@@ -1516,11 +1516,11 @@ list. It uses a `ScrollView` with a `LazyVStack`, stable native reply identities
 and a pagination sentinel keyed by the raw tail, retained count, and page so a
 hidden-only appended page can rearm automatic loading. In two reversed-order,
 production-like iOS 18.5 profiles, this container change reduced sampled
-main-thread work by 58.3% and 73.4%, and reduced frame-interval p95 by 73.7% and
-69.8%. A separately profiled no-image gallery-cover candidate regressed and is
-retained only in the performance harness, not production. Its authenticated PB
-Floor overlay batch-reads the parent and every retained child after first
-verifying the parent's topic-or-floor identity through PB Page.
+main-thread work by 66.0% and 50.9%, and reduced frame-interval p95 by 75.5% and
+64.9%. A separately profiled no-image gallery-cover candidate had mixed results
+and is retained only in the performance harness, not production. Its
+authenticated PB Floor overlay batch-reads the parent and every retained child
+after first verifying the parent's topic-or-floor identity through PB Page.
 Pull to refresh explicitly invalidates the matching authenticated read cache and
 repeats that batch read even when the anonymous response returns the same target
 set. A hidden anchor produces an explicit notice instead of an invalid scroll
