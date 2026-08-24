@@ -6,6 +6,31 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class BrowseContentImageLayoutTests: XCTestCase {
+  func testContainsImageOnlyAcceptsImageContent() {
+    let imageURL = URL(string: "https://example.com/image.jpg")!
+
+    XCTAssertFalse(BrowseContentView.containsImage([]))
+    XCTAssertFalse(
+      BrowseContentView.containsImage([
+        .text("正文"),
+        .mention(name: "用户", userID: 1),
+        .emoticon(name: "微笑", url: nil),
+      ])
+    )
+    XCTAssertTrue(
+      BrowseContentView.containsImage([
+        .text("正文"),
+        .image(
+          thumbnail: imageURL,
+          fullSize: nil,
+          original: nil,
+          width: 320,
+          height: 240
+        ),
+      ])
+    )
+  }
+
   func testBlocksGroupOnlyConsecutiveImagesAndPreserveOriginalOffsets() throws {
     let firstImageURL = try url("https://example.com/first.jpg")
     let firstFullSizeURL = try url("https://example.com/first-full.jpg")

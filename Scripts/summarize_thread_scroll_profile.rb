@@ -5,7 +5,7 @@ require "json"
 require "optparse"
 require "csv"
 
-options = { analyses: [] }
+options = { analyses: [], frames: [] }
 OptionParser.new do |parser|
   parser.on("--metrics PATH") { |value| options[:metrics] = value }
   parser.on("--build-log PATH") { |value| options[:build_log] = value }
@@ -19,6 +19,12 @@ OptionParser.new do |parser|
     abort "--analysis expects LABEL=PATH" unless label && path
 
     options[:analyses] << [label, path]
+  end
+  parser.on("--frames LABEL=PATH") do |value|
+    label, path = value.split("=", 2)
+    abort "--frames expects LABEL=PATH" unless label && path
+
+    options[:frames] << [label, path]
   end
   parser.on("--profile-plan PATH") { |value| options[:profile_plan] = value }
   parser.on("--profile-results PATH") { |value| options[:profile_results] = value }
@@ -94,12 +100,12 @@ if profile_plan
   report << "This run performs two isolated Profile-only A/B comparisons. Each side is recorded " \
             "twice, and the order is reversed for the second replicate."
   report << ""
-  report << "Recording begins before CommentsView is constructed. The A/B switch changes only " \
-            "the List row collection/identity path; model filtering and agreement-cache changes " \
-            "are common to both variants."
+  report << "CommentsView loads, lays out, and prepositions before recording begins. Each A/B " \
+            "comparison changes one rendering decision, and frame intervals are captured during " \
+            "the same steady-state autoscroll window."
   report << ""
-  report << "- `comments`: 240 visible nested replies; the candidate guarantees one List row per item and uses the ForEach identity."
-  report << "- `comments-mixed`: 600 nested replies with visible, placeholder, and hidden states; the candidate precomputes displayable items before List construction."
+  report << "- `gallery-cover`: 240 production-like replies; the candidate avoids installing an image gallery cover on rows without images."
+  report << "- `comments-container`: 600 production-like visible, placeholder, and hidden replies; both sides use the gallery guard, while the candidate replaces List with ScrollView plus LazyVStack."
   report << ""
   report << "| Order | Profile | Comparison | Variant | Replicate | Scenario | Experiment |"
   report << "| ---: | --- | --- | --- | ---: | --- | --- |"
@@ -130,6 +136,14 @@ if environment
 end
 
 parsed_analyses = {}
+parsed_frames = options[:frames].to_h.filter_map do |label, path|
+  contents = read_file(path)
+  next unless contents
+
+  [label, JSON.parse(contents)]
+rescue JSON::ParserError
+  nil
+end.to_h
 unless options[:analyses].empty?
   report << "## Self-driven Time Profiler analysis"
   report << ""
@@ -153,6 +167,14 @@ unless options[:analyses].empty?
     report << ""
     report << "Main-thread running samples: **#{format('%.0f ms', main_weight)}**"
     report << ""
+    if (frames = parsed_frames[label])
+      report << "Frame intervals: **p95 #{format('%.2f ms', frames.fetch('p95MS'))}**, " \
+                "**p99 #{format('%.2f ms', frames.fetch('p99MS'))}**, " \
+                "**max #{format('%.2f ms', frames.fetch('maximumMS'))}**; " \
+                "#{frames.fetch('overBudgetCount')} over-budget and " \
+                "#{frames.fetch('overTwoFramesCount')} over-two-frame intervals."
+      report << ""
+    end
     report << "| Inclusive category | Weight | Main-thread share |"
     report << "| --- | ---: | ---: |"
     analysis.fetch("categories", {}).each do |category, values|
@@ -194,7 +216,7 @@ if profile_plan
   report << ""
 
   comparison_metrics = {
-    "comments" => [
+    "gallery-cover" => [
       ["Main-thread running", ->(analysis) { analysis.dig("totals", "main weight ms").to_f }],
       ["SwiftUI layout/view graph", ->(analysis) { category_weight(analysis, "SwiftUI layout and view graph") }],
       ["Text shaping/measurement", ->(analysis) { category_weight(analysis, "Text shaping and measurement") }],
@@ -202,7 +224,7 @@ if profile_plan
       ["App implementation frames", ->(analysis) { category_weight(analysis, "App implementation frames") }],
       ["Scaled-text layout", ->(analysis) { category_weight(analysis, "Scaled-text layout") }],
     ],
-    "comments-mixed" => [
+    "comments-container" => [
       ["Main-thread running", ->(analysis) { analysis.dig("totals", "main weight ms").to_f }],
       ["SwiftUI layout/view graph", ->(analysis) { category_weight(analysis, "SwiftUI layout and view graph") }],
       ["Text shaping/measurement", ->(analysis) { category_weight(analysis, "Text shaping and measurement") }],
@@ -250,6 +272,55 @@ if profile_plan
 
         control, candidate, delta = values
         [format("%.0f", control), format("%.0f", candidate), delta ? format("%+.1f%%", delta) : "n/a"]
+      end
+      paired_mean = mean(deltas)
+      report << "| #{metric_name} | #{formatted[0]} | #{formatted[1]} | #{formatted[2]} | " \
+                "#{formatted[3]} | #{formatted[4]} | #{formatted[5]} | " \
+                "#{paired_mean ? format('%+.1f%%', paired_mean) : 'n/a'} | #{direction} |"
+    end
+    report << ""
+
+    frame_metrics = [
+      ["Frame p95 (ms)", "p95MS"],
+      ["Frame p99 (ms)", "p99MS"],
+      ["Maximum frame interval (ms)", "maximumMS"],
+      ["Over-budget intervals", "overBudgetCount"],
+      ["Over-two-frame intervals", "overTwoFramesCount"],
+    ]
+    report << "| Frame metric | Control r1 | Candidate r1 | Delta r1 | Control r2 | Candidate r2 | Delta r2 | Mean paired delta | Direction |"
+    report << "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |"
+    frame_metrics.each do |metric_name, key|
+      replicate_values = %w[1 2].map do |replicate|
+        rows = profile_plan.select do |row|
+          row.fetch("comparison") == comparison && row.fetch("replicate") == replicate
+        end
+        control_row = rows.find { |row| row.fetch("variant") == "control" }
+        candidate_row = rows.find { |row| row.fetch("variant") == "candidate" }
+        control = control_row && parsed_frames[control_row.fetch("profile_id")]
+        candidate = candidate_row && parsed_frames[candidate_row.fetch("profile_id")]
+        next unless control && candidate
+
+        control_value = control.fetch(key).to_f
+        candidate_value = candidate.fetch(key).to_f
+        [control_value, candidate_value, percent_delta(control_value, candidate_value)]
+      end
+      deltas = replicate_values.filter_map { |values| values&.fetch(2) }
+      direction = if deltas.length < 2
+                    "incomplete"
+                  elsif deltas.all?(&:negative?)
+                    "both lower"
+                  elsif deltas.all?(&:positive?)
+                    "both higher"
+                  elsif deltas.all?(&:zero?)
+                    "both unchanged"
+                  else
+                    "mixed"
+                  end
+      formatted = replicate_values.flat_map do |values|
+        next ["unavailable", "unavailable", "unavailable"] unless values
+
+        control, candidate, delta = values
+        [format("%.2f", control), format("%.2f", candidate), delta ? format("%+.1f%%", delta) : "n/a"]
       end
       paired_mean = mean(deltas)
       report << "| #{metric_name} | #{formatted[0]} | #{formatted[1]} | #{formatted[2]} | " \

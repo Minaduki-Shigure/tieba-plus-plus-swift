@@ -3,7 +3,7 @@ name: Thread scroll profile
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, perf/comments-round2]
     paths:
       - .github/workflows/thread-scroll-profile.yml
       - App/Sources/BrowseContentView.swift
@@ -165,6 +165,7 @@ jobs:
           while IFS= read -r profile_id; do
             samples="$ARTIFACT_DIR/time-profiler-$profile_id-samples.xml"
             analysis="$ARTIFACT_DIR/time-profiler-$profile_id-analysis.json"
+            frames="$ARTIFACT_DIR/frame-metrics-$profile_id.json"
             if [ ! -s "$samples" ]; then
               echo "$profile_id: samples unavailable" >&2
               failed=1
@@ -180,6 +181,18 @@ jobs:
               and (.categories["XCTest UI automation"].weight_ms // 0) == 0
             ' "$analysis" > /dev/null; then
               echo "$profile_id: analysis did not contain a clean scrolling sample" >&2
+              failed=1
+            fi
+            if [ ! -s "$frames" ] || ! jq -e '
+              .frameCount > 100
+              and .expectedFrameDurationMS > 0
+              and .p95MS > 0
+              and .p99MS >= .p95MS
+              and .maximumMS >= .p99MS
+              and .overBudgetCount >= 0
+              and .overTwoFramesCount >= 0
+            ' "$frames" > /dev/null; then
+              echo "$profile_id: frame metrics were missing or invalid" >&2
               failed=1
             fi
           done <<< "$profile_ids"
@@ -203,6 +216,7 @@ jobs:
           mkdir -p "$ARTIFACT_DIR"
           profile_args=()
           analysis_args=()
+          frame_args=()
           plan="$ARTIFACT_DIR/time-profiler-plan.tsv"
           results="$ARTIFACT_DIR/time-profiler-results.tsv"
           if [ -s "$plan" ]; then
@@ -211,6 +225,9 @@ jobs:
               if [ "$ordinal" = ordinal ]; then continue; fi
               analysis_args+=(
                 --analysis "$profile_id=$ARTIFACT_DIR/time-profiler-$profile_id-analysis.json"
+              )
+              frame_args+=(
+                --frames "$profile_id=$ARTIFACT_DIR/frame-metrics-$profile_id.json"
               )
             done < "$plan"
           fi
@@ -236,6 +253,7 @@ jobs:
             --xctrace-log "$ARTIFACT_DIR/xctrace.log" \
             "${profile_args[@]}" \
             "${analysis_args[@]}" \
+            "${frame_args[@]}" \
             --environment "$ARTIFACT_DIR/environment.txt" \
             --output "$ARTIFACT_DIR/report.md"
           cat "$ARTIFACT_DIR/report.md" >> "$GITHUB_STEP_SUMMARY"

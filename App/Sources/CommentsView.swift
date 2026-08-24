@@ -26,7 +26,7 @@ struct CommentsView: View {
   @State private var inboxReplyComposerIntent: InboxReplyIntent?
   @State private var selectableTextPresentation: SelectableTextPresentation?
   #if PERFORMANCE_HARNESS
-    @State private var performanceAppearedCommentIDs = Set<Int64>()
+    @State private var performanceVisibleCommentIDs = Set<Int64>()
   #endif
   let service:
     any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
@@ -149,157 +149,10 @@ struct CommentsView: View {
         }
       case .loaded:
         ScrollViewReader { proxy in
-          List {
-            if let parentPost = viewModel.parentPost,
-              parentPost.localVisibility != .hidden
-            {
-              LocallyFilteredContent(
-                visibility: parentPost.localVisibility,
-                placeholder: "已屏蔽父楼"
-              ) {
-                CommentParentPostView(
-                  post: parentPost,
-                  thread: viewModel.thread,
-                  agreementTarget: viewModel.parentAgreementTarget,
-                  service: service,
-                  historyRepository: historyRepository,
-                  favoritesRepository: favoritesRepository,
-                  searchHistoryRepository: searchHistoryRepository,
-                  openMentionedUser: openMentionedUser,
-                  openTiebaLink: openTiebaLink,
-                  requestAgreementChange: requestAgreementChange,
-                  retryAgreement: retryAgreement,
-                  requestReply: replyEntriesVisible
-                    ? parentReplyContext.map { context in
-                      {
-                        guard replyEntriesVisible else { return }
-                        presentReplyComposer(context)
-                      }
-                    }
-                    : nil,
-                  reportTarget: viewModel.thread.flatMap { thread in
-                    ContentReportTarget(thread: thread, parentPost: parentPost)
-                  },
-                  selectText: presentSelectableText
-                )
-              }
-              .id(CommentsListItemID.parentPost(parentPost.id))
-            }
-
-            Section {
-              if viewModel.isLoadingPrevious {
-                HStack {
-                  Spacer()
-                  ProgressView()
-                  Spacer()
-                }
-                .listRowSeparator(.hidden)
-              } else if let message = viewModel.loadPreviousError {
-                LoadMoreErrorView(message: message, retry: viewModel.retryLoadPrevious)
-                  .listRowSeparator(.hidden)
-              } else if viewModel.canLoadPrevious {
-                Button(action: viewModel.loadPrevious) {
-                  Label("加载更早回复", systemImage: "arrow.up")
-                    .font(.subheadline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 4)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.tint)
-                .accessibilityIdentifier("comments-load-previous")
-              }
-
-              if !viewModel.hasDisplayableComments {
-                EmptyStateView(title: "暂无可显示的楼中楼回复", systemImage: "bubble.left")
-                  .frame(maxWidth: .infinity)
-                  .listRowSeparator(.hidden)
-              }
-
-              #if PERFORMANCE_HARNESS
-                if ThreadScrollPerformanceScenario.usesLegacyCommentsRows {
-                  ForEach(viewModel.comments) { comment in
-                    legacyCommentListRow(comment)
-                  }
-                } else {
-                  ForEach(viewModel.displayableComments) { comment in
-                    stableCommentListRow(comment)
-                  }
-                }
-              #else
-                ForEach(viewModel.displayableComments) { comment in
-                  stableCommentListRow(comment)
-                }
-              #endif
-
-              if let lastComment = viewModel.comments.last {
-                Color.clear
-                  .frame(height: 1)
-                  .listRowInsets(EdgeInsets())
-                  .listRowSeparator(.hidden)
-                  .accessibilityHidden(true)
-                  .onAppear { viewModel.loadMoreIfNeeded(current: lastComment) }
-              }
-              if viewModel.isLoadingMore {
-                HStack {
-                  Spacer()
-                  ProgressView()
-                  Spacer()
-                }
-                .listRowSeparator(.hidden)
-              } else if let message = viewModel.loadMoreError {
-                LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
-                  .listRowSeparator(.hidden)
-              }
-            } header: {
-              Text("共 \(viewModel.totalCount) 条回复")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
-                .textCase(nil)
-            }
-          }
-          .listStyle(.plain)
-          #if PERFORMANCE_HARNESS
-            .task {
-              await runPerformanceAutoscroll(proxy: proxy)
-            }
-          #endif
-          .task(id: viewModel.scrollTargetCommentID) {
-            guard let commentID = viewModel.scrollTargetCommentID else { return }
-            await Task.yield()
-            guard !Task.isCancelled else { return }
-            scrollToComment(commentID, proxy: proxy, anchor: .center)
-            highlightedComment = CommentHighlightToken(commentID: commentID)
-            viewModel.consumeScrollTarget()
-          }
-          .task(id: viewModel.prependRestoreCommentID) {
-            guard let commentID = viewModel.prependRestoreCommentID else { return }
-            await Task.yield()
-            guard !Task.isCancelled else { return }
-            scrollToComment(commentID, proxy: proxy, anchor: .top)
-            viewModel.consumePrependRestoreTarget()
-          }
-          .task(id: highlightedComment) {
-            guard let token = highlightedComment else { return }
-            do {
-              try await Task.sleep(nanoseconds: 1_500_000_000)
-            } catch {
-              return
-            }
-            guard !Task.isCancelled, highlightedComment == token else { return }
-            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) {
-              highlightedComment = nil
-            }
-          }
-          .refreshable {
-            let previousAgreementRefreshEpoch = viewModel.agreementExplicitRefreshEpoch
-            await viewModel.refresh()
-            if
-              viewModel.agreementExplicitRefreshEpoch != previousAgreementRefreshEpoch,
-              let contentAgreementStore
-            {
-              await contentAgreementStore.refreshDescriptors(for: agreementScopeID)
-            }
-          }
+          decoratedCommentsScroller(
+            commentsScroller,
+            proxy: proxy
+          )
         }
       }
     }
@@ -419,6 +272,266 @@ struct CommentsView: View {
         linkedTarget = .thread(route)
       }
     }
+  }
+
+  @ViewBuilder
+  private var commentsScroller: some View {
+    #if PERFORMANCE_HARNESS
+      if ThreadScrollPerformanceScenario.usesLegacyCommentsList {
+        commentsList
+      } else {
+        commentsLazyScroll
+      }
+    #else
+      commentsLazyScroll
+    #endif
+  }
+
+  private var commentsList: some View {
+    List {
+      if let parentPost = viewModel.parentPost,
+        parentPost.localVisibility != .hidden
+      {
+        commentParentPost(parentPost)
+          .id(CommentsListItemID.parentPost(parentPost.id))
+      }
+
+      Section {
+        previousPageListControl
+
+        if !viewModel.hasDisplayableComments {
+          EmptyStateView(title: "暂无可显示的楼中楼回复", systemImage: "bubble.left")
+            .frame(maxWidth: .infinity)
+            .listRowSeparator(.hidden)
+        }
+
+        ForEach(viewModel.displayableComments) { comment in
+          stableCommentListRow(comment)
+        }
+
+        commentsListFooter
+      } header: {
+        Text("共 \(viewModel.totalCount) 条回复")
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(.primary)
+          .textCase(nil)
+      }
+    }
+    .listStyle(.plain)
+  }
+
+  private var commentsLazyScroll: some View {
+    ScrollView {
+      LazyVStack(spacing: 0) {
+        if let parentPost = viewModel.parentPost,
+          parentPost.localVisibility != .hidden
+        {
+          commentParentPost(parentPost)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .id(CommentsListItemID.parentPost(parentPost.id))
+          Divider()
+        }
+
+        Text("共 \(viewModel.totalCount) 条回复")
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(.primary)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.horizontal, 14)
+          .padding(.vertical, 9)
+          .background(Color(uiColor: .secondarySystemBackground))
+
+        previousPageScrollControl
+
+        if !viewModel.hasDisplayableComments {
+          EmptyStateView(title: "暂无可显示的楼中楼回复", systemImage: "bubble.left")
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 20)
+        }
+
+        ForEach(viewModel.displayableComments) { comment in
+          stableCommentScrollRow(comment)
+          Divider()
+            .padding(.leading, 56)
+        }
+
+        commentsScrollFooter
+      }
+    }
+  }
+
+  private func commentParentPost(_ parentPost: CommentParentPostContext) -> some View {
+    LocallyFilteredContent(
+      visibility: parentPost.localVisibility,
+      placeholder: "已屏蔽父楼"
+    ) {
+      CommentParentPostView(
+        post: parentPost,
+        thread: viewModel.thread,
+        agreementTarget: viewModel.parentAgreementTarget,
+        service: service,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository,
+        openMentionedUser: openMentionedUser,
+        openTiebaLink: openTiebaLink,
+        requestAgreementChange: requestAgreementChange,
+        retryAgreement: retryAgreement,
+        requestReply: replyEntriesVisible
+          ? parentReplyContext.map { context in
+            {
+              guard replyEntriesVisible else { return }
+              presentReplyComposer(context)
+            }
+          }
+          : nil,
+        reportTarget: viewModel.thread.flatMap { thread in
+          ContentReportTarget(thread: thread, parentPost: parentPost)
+        },
+        selectText: presentSelectableText
+      )
+    }
+  }
+
+  @ViewBuilder
+  private var previousPageListControl: some View {
+    if viewModel.isLoadingPrevious {
+      HStack {
+        Spacer()
+        ProgressView()
+        Spacer()
+      }
+      .listRowSeparator(.hidden)
+    } else if let message = viewModel.loadPreviousError {
+      LoadMoreErrorView(message: message, retry: viewModel.retryLoadPrevious)
+        .listRowSeparator(.hidden)
+    } else if viewModel.canLoadPrevious {
+      previousPageButton
+    }
+  }
+
+  @ViewBuilder
+  private var previousPageScrollControl: some View {
+    if viewModel.isLoadingPrevious {
+      ProgressView()
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+    } else if let message = viewModel.loadPreviousError {
+      LoadMoreErrorView(message: message, retry: viewModel.retryLoadPrevious)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    } else if viewModel.canLoadPrevious {
+      previousPageButton
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    }
+  }
+
+  private var previousPageButton: some View {
+    Button(action: viewModel.loadPrevious) {
+      Label("加载更早回复", systemImage: "arrow.up")
+        .font(.subheadline)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
+    }
+    .buttonStyle(.plain)
+    .foregroundStyle(.tint)
+    .accessibilityIdentifier("comments-load-previous")
+  }
+
+  @ViewBuilder
+  private var commentsListFooter: some View {
+    if let lastComment = viewModel.comments.last {
+      Color.clear
+        .frame(height: 1)
+        .listRowInsets(EdgeInsets())
+        .listRowSeparator(.hidden)
+        .accessibilityHidden(true)
+        .onAppear { viewModel.loadMoreIfNeeded(current: lastComment) }
+    }
+    if viewModel.isLoadingMore {
+      HStack {
+        Spacer()
+        ProgressView()
+        Spacer()
+      }
+      .listRowSeparator(.hidden)
+    } else if let message = viewModel.loadMoreError {
+      LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
+        .listRowSeparator(.hidden)
+    }
+  }
+
+  @ViewBuilder
+  private var commentsScrollFooter: some View {
+    if let lastComment = viewModel.comments.last {
+      Color.clear
+        .frame(height: 1)
+        .accessibilityHidden(true)
+        .allowsHitTesting(false)
+        .onAppear { viewModel.loadMoreIfNeeded(current: lastComment) }
+    }
+    if viewModel.isLoadingMore {
+      ProgressView()
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+    } else if let message = viewModel.loadMoreError {
+      LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    }
+  }
+
+  private func decoratedCommentsScroller<Content: View>(
+    _ content: Content,
+    proxy: ScrollViewProxy
+  ) -> some View {
+    #if PERFORMANCE_HARNESS
+      let profiledContent = content.task {
+        await runPerformanceAutoscroll(proxy: proxy)
+      }
+    #else
+      let profiledContent = content
+    #endif
+    return profiledContent
+      .task(id: viewModel.scrollTargetCommentID) {
+        guard let commentID = viewModel.scrollTargetCommentID else { return }
+        await Task.yield()
+        guard !Task.isCancelled else { return }
+        scrollToComment(commentID, proxy: proxy, anchor: .center)
+        highlightedComment = CommentHighlightToken(commentID: commentID)
+        viewModel.consumeScrollTarget()
+      }
+      .task(id: viewModel.prependRestoreCommentID) {
+        guard let commentID = viewModel.prependRestoreCommentID else { return }
+        await Task.yield()
+        guard !Task.isCancelled else { return }
+        scrollToComment(commentID, proxy: proxy, anchor: .top)
+        viewModel.consumePrependRestoreTarget()
+      }
+      .task(id: highlightedComment) {
+        guard let token = highlightedComment else { return }
+        do {
+          try await Task.sleep(nanoseconds: 1_500_000_000)
+        } catch {
+          return
+        }
+        guard !Task.isCancelled, highlightedComment == token else { return }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) {
+          highlightedComment = nil
+        }
+      }
+      .refreshable {
+        let previousAgreementRefreshEpoch = viewModel.agreementExplicitRefreshEpoch
+        await viewModel.refresh()
+        if
+          viewModel.agreementExplicitRefreshEpoch != previousAgreementRefreshEpoch,
+          let contentAgreementStore
+        {
+          await contentAgreementStore.refreshDescriptors(for: agreementScopeID)
+        }
+      }
   }
 
   private func recordDirectVisitIfNeeded() async {
@@ -951,7 +1064,7 @@ struct CommentsView: View {
   }
 
   private func stableCommentListRow(_ comment: BrowseComment) -> some View {
-    presentedCommentListRow(
+    presentedCommentRow(
       VStack(spacing: 0) {
         LocallyFilteredContent(
           visibility: comment.localVisibility,
@@ -962,22 +1075,23 @@ struct CommentsView: View {
       },
       comment: comment
     )
+    .listRowBackground(commentHighlightColor(comment))
   }
 
-  #if PERFORMANCE_HARNESS
-    private func legacyCommentListRow(_ comment: BrowseComment) -> some View {
-      presentedCommentListRow(
-        LocallyFilteredContent(
-          visibility: comment.localVisibility,
-          placeholder: "已屏蔽此条回复"
-        ) {
-          commentRowContent(comment)
-        }
-        .id(CommentsListItemID.comment(comment.id)),
-        comment: comment
-      )
-    }
-  #endif
+  private func stableCommentScrollRow(_ comment: BrowseComment) -> some View {
+    presentedCommentRow(
+      LocallyFilteredContent(
+        visibility: comment.localVisibility,
+        placeholder: "已屏蔽此条回复"
+      ) {
+        commentRowContent(comment)
+      }
+      .padding(.horizontal, 14)
+      .padding(.vertical, 8),
+      comment: comment
+    )
+    .background(commentHighlightColor(comment))
+  }
 
   private func commentRowContent(_ comment: BrowseComment) -> some View {
     StableRenderBoundary(
@@ -1063,15 +1177,12 @@ struct CommentsView: View {
     .equatable()
   }
 
-  private func presentedCommentListRow<Content: View>(
+  private func presentedCommentRow<Content: View>(
     _ content: Content,
     comment: BrowseComment
   ) -> some View {
     let isHighlighted = highlightedComment?.commentID == comment.id
     return content
-      .listRowBackground(
-        isHighlighted ? appAccentColor.color.opacity(0.12) : Color.clear
-      )
       .overlay(alignment: .leading) {
         if isHighlighted {
           appAccentColor.color
@@ -1087,10 +1198,21 @@ struct CommentsView: View {
         viewModel.loadMoreIfNeeded(current: comment)
         #if PERFORMANCE_HARNESS
           if ThreadScrollPerformanceScenario.requested?.isCommentsScenario == true {
-            performanceAppearedCommentIDs.insert(comment.id)
+            performanceVisibleCommentIDs.insert(comment.id)
           }
         #endif
       }
+      #if PERFORMANCE_HARNESS
+        .onDisappear {
+          performanceVisibleCommentIDs.remove(comment.id)
+        }
+      #endif
+  }
+
+  private func commentHighlightColor(_ comment: BrowseComment) -> Color {
+    highlightedComment?.commentID == comment.id
+      ? appAccentColor.color.opacity(0.12)
+      : Color.clear
   }
 
   private func scrollToComment(
@@ -1098,15 +1220,7 @@ struct CommentsView: View {
     proxy: ScrollViewProxy,
     anchor: UnitPoint
   ) {
-    #if PERFORMANCE_HARNESS
-      if ThreadScrollPerformanceScenario.usesLegacyCommentsRows {
-        proxy.scrollTo(CommentsListItemID.comment(commentID), anchor: anchor)
-      } else {
-        proxy.scrollTo(commentID, anchor: anchor)
-      }
-    #else
-      proxy.scrollTo(commentID, anchor: anchor)
-    #endif
+    proxy.scrollTo(commentID, anchor: anchor)
   }
 
   #if PERFORMANCE_HARNESS
@@ -1132,22 +1246,42 @@ struct CommentsView: View {
             assertionFailure("Comments performance scroll target did not appear")
             return
           }
-          try await Task.sleep(for: .milliseconds(200))
+          try await Task.sleep(for: .milliseconds(500))
         }
         let forwardTargets = Array(targetIDs.dropFirst(initialTargetIndex + 1).prefix(20))
         guard !forwardTargets.isEmpty else { return }
 
+        guard ThreadScrollPerformanceScenario.writeSelfDrivenProfileMarker(phase: "ready") else {
+          assertionFailure("Could not mark the settled comments fixture as ready")
+          return
+        }
+        guard try await ThreadScrollPerformanceScenario.waitForSelfDrivenProfileStart() else {
+          return
+        }
+        guard ThreadScrollPerformanceScenario.writeSelfDrivenProfileMarker(phase: "started") else {
+          assertionFailure("Could not mark the comments performance profile as started")
+          return
+        }
+
         let backwardTargets = Array(forwardTargets.dropLast().reversed())
+        let frameRecorder = ThreadScrollFrameRecorder()
+        frameRecorder.start()
         for targetID in forwardTargets + backwardTargets + forwardTargets {
           try Task.checkCancellation()
           withAnimation(.linear(duration: 0.22)) {
             scrollToComment(targetID, proxy: proxy, anchor: .top)
           }
           try await Task.sleep(for: .milliseconds(260))
-          guard performanceAppearedCommentIDs.contains(targetID) else {
+          guard performanceVisibleCommentIDs.contains(targetID) else {
+            _ = frameRecorder.stop()
             assertionFailure("Comments performance scroll target did not appear")
             return
           }
+        }
+        let frameMetrics = frameRecorder.stop()
+        guard ThreadScrollPerformanceScenario.writeFrameMetrics(frameMetrics) else {
+          assertionFailure("Could not write comments frame metrics")
+          return
         }
         guard ThreadScrollPerformanceScenario.writeSelfDrivenProfileMarker(phase: "completed") else {
           assertionFailure("Could not mark the performance autoscroll as completed")
@@ -1163,7 +1297,7 @@ struct CommentsView: View {
     @MainActor
     private func waitForPerformanceAppearance(of commentID: Int64) async throws -> Bool {
       for _ in 0..<50 {
-        if performanceAppearedCommentIDs.contains(commentID) { return true }
+        if performanceVisibleCommentIDs.contains(commentID) { return true }
         try await Task.sleep(for: .milliseconds(20))
       }
       return false
@@ -1194,7 +1328,6 @@ struct CommentsView: View {
 
 private enum CommentsListItemID: Hashable {
   case parentPost(Int64)
-  case comment(Int64)
 }
 
 private struct CommentsRowRenderKey: Equatable, Sendable {

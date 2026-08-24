@@ -45,6 +45,7 @@ record_profile() {
   local trace_path="$artifact_dir/time-profiler-$profile_id.trace"
   local samples_path="$artifact_dir/time-profiler-$profile_id-samples.xml"
   local recorder_log="$artifact_dir/xctrace-$profile_id.log"
+  local frame_metrics_path="$artifact_dir/frame-metrics-$profile_id.json"
   local launch_output
   local app_pid
   local recorder_ready=0
@@ -58,12 +59,14 @@ record_profile() {
   rm -rf "$trace_path"
   rm -f \
     "$samples_path" \
-    "$recorder_log"
+    "$recorder_log" \
+    "$frame_metrics_path"
   rm -f \
     "$marker_prefix-ready" \
     "$marker_prefix-go" \
     "$marker_prefix-started" \
-    "$marker_prefix-completed"
+    "$marker_prefix-completed" \
+    "$marker_prefix-frames.json"
   xcrun simctl terminate "$simulator_id" "$bundle_id" 2>/dev/null || true
 
   if ! launch_output="$({
@@ -89,7 +92,7 @@ record_profile() {
     return 1
   fi
 
-  for _ in $(seq 1 100); do
+  for _ in $(seq 1 200); do
     if [[ -f "$marker_prefix-ready" ]]; then break; fi
     if ! kill -0 "$app_pid" 2>/dev/null; then break; fi
     sleep 0.1
@@ -144,6 +147,11 @@ record_profile() {
     echo "$profile_id: autoscroll did not start and complete inside the trace window" >> "$log_path"
     return 1
   fi
+  if [[ ! -s "$marker_prefix-frames.json" ]]; then
+    echo "$profile_id: frame metrics were not written" >> "$log_path"
+    return 1
+  fi
+  cp "$marker_prefix-frames.json" "$frame_metrics_path"
 
   if ! xcrun xctrace export \
     --input "$trace_path" \

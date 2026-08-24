@@ -45,7 +45,7 @@ struct BrowseContentView: View {
 
   @ViewBuilder
   var body: some View {
-    if onImageOpen == nil {
+    if installsImageGalleryCover {
       content
         .fullScreenCover(item: $imageGalleryPresentation) { presentation in
           ImageViewer(
@@ -56,6 +56,16 @@ struct BrowseContentView: View {
     } else {
       content
     }
+  }
+
+  private var installsImageGalleryCover: Bool {
+    guard onImageOpen == nil else { return false }
+    #if PERFORMANCE_HARNESS
+      if ThreadScrollPerformanceScenario.installsLegacyEmptyImageGalleryCovers {
+        return true
+      }
+    #endif
+    return Self.containsImage(contents)
   }
 
   private var content: some View {
@@ -271,6 +281,13 @@ struct BrowseContentView: View {
       }
     }
     return result
+  }
+
+  static func containsImage(_ contents: [BrowseContent]) -> Bool {
+    contents.contains { content in
+      if case .image = content { return true }
+      return false
+    }
   }
 
   static func mentionURL(for userID: Int64) -> URL? {

@@ -1,12 +1,76 @@
 #if PERFORMANCE_HARNESS
   import Foundation
+  import QuartzCore
   import SwiftUI
+
+  struct ThreadScrollFrameMetrics: Codable, Equatable, Sendable {
+    let frameCount: Int
+    let expectedFrameDurationMS: Double
+    let p50MS: Double
+    let p95MS: Double
+    let p99MS: Double
+    let maximumMS: Double
+    let overBudgetCount: Int
+    let overTwoFramesCount: Int
+  }
+
+  @MainActor
+  final class ThreadScrollFrameRecorder: NSObject {
+    private var displayLink: CADisplayLink?
+    private var previousTimestamp: CFTimeInterval?
+    private var intervalsMS: [Double] = []
+    private var expectedFrameDurationMS = 1_000.0 / 60.0
+
+    func start() {
+      guard displayLink == nil else { return }
+      intervalsMS.removeAll(keepingCapacity: true)
+      previousTimestamp = nil
+      let displayLink = CADisplayLink(target: self, selector: #selector(recordFrame(_:)))
+      if displayLink.duration.isFinite, displayLink.duration > 0 {
+        expectedFrameDurationMS = displayLink.duration * 1_000
+      }
+      displayLink.add(to: .main, forMode: .common)
+      self.displayLink = displayLink
+    }
+
+    func stop() -> ThreadScrollFrameMetrics {
+      displayLink?.invalidate()
+      displayLink = nil
+      previousTimestamp = nil
+      let sorted = intervalsMS.sorted()
+      return ThreadScrollFrameMetrics(
+        frameCount: sorted.count,
+        expectedFrameDurationMS: expectedFrameDurationMS,
+        p50MS: percentile(0.50, in: sorted),
+        p95MS: percentile(0.95, in: sorted),
+        p99MS: percentile(0.99, in: sorted),
+        maximumMS: sorted.last ?? 0,
+        overBudgetCount: sorted.lazy.filter { $0 > expectedFrameDurationMS * 1.5 }.count,
+        overTwoFramesCount: sorted.lazy.filter { $0 > expectedFrameDurationMS * 2.5 }.count
+      )
+    }
+
+    @objc private func recordFrame(_ displayLink: CADisplayLink) {
+      defer { previousTimestamp = displayLink.timestamp }
+      guard let previousTimestamp else { return }
+      let intervalMS = (displayLink.timestamp - previousTimestamp) * 1_000
+      guard intervalMS.isFinite, intervalMS > 0 else { return }
+      intervalsMS.append(intervalMS)
+    }
+
+    private func percentile(_ percentile: Double, in sorted: [Double]) -> Double {
+      guard !sorted.isEmpty else { return 0 }
+      let rank = max(Int(ceil(Double(sorted.count) * percentile)) - 1, 0)
+      return sorted[min(rank, sorted.count - 1)]
+    }
+  }
 
   enum ThreadScrollPerformanceExperiment: String, Sendable {
     case control
     case omitInlineMinimumScale = "omit-inline-minimum-scale"
     case omitLongTextFixedSize = "omit-long-text-fixed-size"
-    case stabilizeCommentsRows = "stabilize-comments-rows"
+    case skipEmptyImageGalleryCover = "skip-empty-image-gallery-cover"
+    case lazyCommentsContainer = "lazy-comments-container"
 
     static let requested: Self = {
       guard
@@ -45,16 +109,21 @@
     }()
 
     static let appliesInlinePreviewMinimumScaleFactor =
-      requested != .inlineReplies
-      || ThreadScrollPerformanceExperiment.requested != .omitInlineMinimumScale
+      requested == .inlineReplies
+      && ThreadScrollPerformanceExperiment.requested != .omitInlineMinimumScale
 
     static let appliesLongTextFixedSize =
-      requested != .longPlainText
-      || ThreadScrollPerformanceExperiment.requested != .omitLongTextFixedSize
+      requested == .longPlainText
+      && ThreadScrollPerformanceExperiment.requested != .omitLongTextFixedSize
 
-    static var usesLegacyCommentsRows: Bool {
+    static var installsLegacyEmptyImageGalleryCovers: Bool {
       guard requested?.isCommentsScenario == true else { return false }
-      return ThreadScrollPerformanceExperiment.requested != .stabilizeCommentsRows
+      return ThreadScrollPerformanceExperiment.requested == .control
+    }
+
+    static var usesLegacyCommentsList: Bool {
+      guard requested?.isCommentsScenario == true else { return false }
+      return ThreadScrollPerformanceExperiment.requested != .lazyCommentsContainer
     }
 
     var isCommentsScenario: Bool {
@@ -70,7 +139,7 @@
       guard isSelfDrivenProfileRequested, let markerURL = profileMarkerURL(phase: "go") else {
         return false
       }
-      for _ in 0..<100 {
+      for _ in 0..<300 {
         if FileManager.default.fileExists(atPath: markerURL.path) { return true }
         try await Task.sleep(for: .milliseconds(100))
       }
@@ -83,6 +152,20 @@
       guard let markerURL = profileMarkerURL(phase: phase) else { return false }
       do {
         try phase.write(to: markerURL, atomically: true, encoding: .utf8)
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    @discardableResult
+    @MainActor
+    static func writeFrameMetrics(_ metrics: ThreadScrollFrameMetrics) -> Bool {
+      guard let metricsURL = profileMarkerURL(phase: "frames.json") else { return false }
+      do {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(metrics).write(to: metricsURL, options: .atomic)
         return true
       } catch {
         return false
@@ -142,24 +225,10 @@
   @MainActor
   struct ThreadScrollPerformanceRootView: View {
     let scenario: ThreadScrollPerformanceScenario
-    @State private var presentsProfileContent: Bool
-
-    init(scenario: ThreadScrollPerformanceScenario) {
-      self.scenario = scenario
-      _presentsProfileContent = State(
-        initialValue: !scenario.isCommentsScenario
-          || !ThreadScrollPerformanceScenario.isSelfDrivenProfileRequested
-      )
-    }
 
     var body: some View {
       NavigationStack {
-        if !presentsProfileContent {
-          ProgressView()
-            .task {
-              await startCommentsProfile()
-            }
-        } else if scenario.isCommentsScenario {
+        if scenario.isCommentsScenario {
           CommentsView(
             threadID: ThreadScrollPerformanceFixture.threadID,
             postID: ThreadScrollPerformanceFixture.commentsParentPostID,
@@ -179,29 +248,6 @@
           )
         }
       }
-    }
-
-    private func startCommentsProfile() async {
-      guard scenario.isCommentsScenario else { return }
-      guard ThreadScrollPerformanceScenario.writeSelfDrivenProfileMarker(phase: "ready") else {
-        assertionFailure("Could not mark the comments performance fixture as ready")
-        return
-      }
-      do {
-        guard try await ThreadScrollPerformanceScenario.waitForSelfDrivenProfileStart() else {
-          return
-        }
-      } catch is CancellationError {
-        return
-      } catch {
-        assertionFailure("Unexpected comments performance start failure: \(error)")
-        return
-      }
-      guard ThreadScrollPerformanceScenario.writeSelfDrivenProfileMarker(phase: "started") else {
-        assertionFailure("Could not mark the comments performance profile as started")
-        return
-      }
-      presentsProfileContent = true
     }
   }
 
@@ -467,7 +513,7 @@
         authorName: "楼中楼测试用户 \(index) 的较长昵称",
         authorPortraitURL: nil,
         createdAt: Date(timeIntervalSince1970: 1_700_000_000 + TimeInterval(index)),
-        contents: [.text(text(floor: index, targetLength: 150, paragraphCount: 1))],
+        contents: detailCommentContents(index: index),
         authorLevel: (index % 18) + 1,
         authorIPLocation: "测试环境",
         agreeScore: index % 97,
@@ -476,6 +522,31 @@
         threadID: threadID,
         parentPostID: commentsParentPostID
       )
+    }
+
+    private static func detailCommentContents(index: Int) -> [BrowseContent] {
+      if index.isMultiple(of: 13) {
+        return [.text(text(floor: index, targetLength: 520, paragraphCount: 2))]
+      }
+      if index.isMultiple(of: 5) {
+        return [
+          .text("回复 "),
+          .mention(name: "被回复用户 \(index - 1)", userID: 40_000 + Int64(index)),
+          .text("：\(text(floor: index, targetLength: 96, paragraphCount: 1))"),
+          .emoticon(name: "微笑", url: nil),
+        ]
+      }
+      if index.isMultiple(of: 7) {
+        return [
+          .text(text(floor: index, targetLength: 72, paragraphCount: 1)),
+          .link(
+            label: "查看相关主题",
+            url: URL(string: "https://tieba.baidu.com/p/\(threadID)")!
+          ),
+        ]
+      }
+      let targetLength = 42 + (index % 4) * 48
+      return [.text(text(floor: index, targetLength: targetLength, paragraphCount: 1))]
     }
 
     private static func text(floor: Int, targetLength: Int, paragraphCount: Int) -> String {

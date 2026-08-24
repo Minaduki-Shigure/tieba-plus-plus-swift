@@ -1,9 +1,9 @@
 ordinal	profile_id	comparison	variant	replicate	scenario	experiment
-1	comments-control-r1	comments	control	1	nested-comments	control
-2	comments-candidate-r1	comments	candidate	1	nested-comments	stabilize-comments-rows
-3	comments-mixed-candidate-r1	comments-mixed	candidate	1	mixed-nested-comments	stabilize-comments-rows
-4	comments-mixed-control-r1	comments-mixed	control	1	mixed-nested-comments	control
-5	comments-candidate-r2	comments	candidate	2	nested-comments	stabilize-comments-rows
-6	comments-control-r2	comments	control	2	nested-comments	control
-7	comments-mixed-control-r2	comments-mixed	control	2	mixed-nested-comments	control
-8	comments-mixed-candidate-r2	comments-mixed	candidate	2	mixed-nested-comments	stabilize-comments-rows
+1	gallery-cover-control-r1	gallery-cover	control	1	nested-comments	control
+2	gallery-cover-candidate-r1	gallery-cover	candidate	1	nested-comments	skip-empty-image-gallery-cover
+3	comments-container-candidate-r1	comments-container	candidate	1	mixed-nested-comments	lazy-comments-container
+4	comments-container-control-r1	comments-container	control	1	mixed-nested-comments	skip-empty-image-gallery-cover
+5	gallery-cover-candidate-r2	gallery-cover	candidate	2	nested-comments	skip-empty-image-gallery-cover
+6	gallery-cover-control-r2	gallery-cover	control	2	nested-comments	control
+7	comments-container-control-r2	comments-container	control	2	mixed-nested-comments	skip-empty-image-gallery-cover
+8	comments-container-candidate-r2	comments-container	candidate	2	mixed-nested-comments	lazy-comments-container
