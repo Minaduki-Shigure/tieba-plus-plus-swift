@@ -4,6 +4,18 @@ import SwiftUI
 struct AccountAccess: Sendable {
   let vault: any AccountVault
   let service: any AccountService
+  let forumMembershipMutator: any ForumMembershipMutating
+
+  init(
+    vault: any AccountVault,
+    service: any AccountService,
+    forumMembershipMutator: (any ForumMembershipMutating)? = nil
+  ) {
+    self.vault = vault
+    self.service = service
+    self.forumMembershipMutator = forumMembershipMutator
+      ?? ForumMembershipMutationCoordinator(vault: vault, service: service)
+  }
 }
 
 private struct AccountAccessEnvironmentKey: EnvironmentKey {
@@ -71,11 +83,18 @@ enum AccountSessionChangeKind: String, Sendable {
 
 struct ForumMembershipChange: Equatable, Sendable {
   let accountID: Int64
+  let sessionRevision: UUID?
   let forumID: Int64
   let isFollowed: Bool
 
-  init(accountID: Int64, forumID: Int64, isFollowed: Bool) {
+  init(
+    accountID: Int64,
+    sessionRevision: UUID? = nil,
+    forumID: Int64,
+    isFollowed: Bool
+  ) {
     self.accountID = accountID
+    self.sessionRevision = sessionRevision
     self.forumID = forumID
     self.isFollowed = isFollowed
   }
@@ -86,8 +105,18 @@ struct ForumMembershipChange: Equatable, Sendable {
       let forumID = notification.userInfo?[AccountNotificationKey.forumID] as? NSNumber,
       let isFollowed = notification.userInfo?[AccountNotificationKey.isFollowed] as? NSNumber
     else { return nil }
+    let sessionRevision: UUID?
+    if let value = notification.userInfo?[AccountNotificationKey.sessionRevision] {
+      guard let rawValue = value as? String, let revision = UUID(uuidString: rawValue) else {
+        return nil
+      }
+      sessionRevision = revision
+    } else {
+      sessionRevision = nil
+    }
     self.init(
       accountID: accountID.int64Value,
+      sessionRevision: sessionRevision,
       forumID: forumID.int64Value,
       isFollowed: isFollowed.boolValue
     )
@@ -310,14 +339,18 @@ enum AccountChangeNotifications {
   }
 
   static func postForumMembershipChange(_ change: ForumMembershipChange) {
+    var userInfo: [AnyHashable: Any] = [
+      AccountNotificationKey.accountID: NSNumber(value: change.accountID),
+      AccountNotificationKey.forumID: NSNumber(value: change.forumID),
+      AccountNotificationKey.isFollowed: NSNumber(value: change.isFollowed),
+    ]
+    if let sessionRevision = change.sessionRevision {
+      userInfo[AccountNotificationKey.sessionRevision] = sessionRevision.uuidString
+    }
     NotificationCenter.default.post(
       name: .forumMembershipDidChange,
       object: nil,
-      userInfo: [
-        AccountNotificationKey.accountID: NSNumber(value: change.accountID),
-        AccountNotificationKey.forumID: NSNumber(value: change.forumID),
-        AccountNotificationKey.isFollowed: NSNumber(value: change.isFollowed),
-      ]
+      userInfo: userInfo
     )
   }
 

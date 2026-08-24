@@ -21,7 +21,7 @@ final class ForumMembershipViewModel: ObservableObject {
   private let access: AccountAccess
   private var generation = 0
   private var isMutationRunning = false
-  private var currentLease: SessionLease?
+  private var currentLease: AccountSessionLease?
   private var lastKnownFollowed: Bool?
 
   init(forumID: Int64, forumName: String, access: AccountAccess) {
@@ -59,7 +59,7 @@ final class ForumMembershipViewModel: ObservableObject {
         state = .signedOut
         return
       }
-      let lease = SessionLease(session)
+      let lease = AccountSessionLease(session)
       if let previousLease, previousLease != lease {
         lastKnownFollowed = nil
       }
@@ -114,62 +114,48 @@ final class ForumMembershipViewModel: ObservableObject {
     )
     defer { isMutationRunning = false }
 
-    do {
-      guard
-        let session = try await access.vault.activeSession(),
-        SessionLease(session) == expectedLease
-      else {
-        await reload()
-        return
-      }
-      let membership = try await access.service.setForumFollowed(
-        session: session,
+    let outcome = await access.forumMembershipMutator.setFollowed(
+      ForumMembershipMutationRequest(
         forumID: forumID,
         forumName: forumName,
-        isFollowed: isFollowed
-      )
-
-      guard
-        membership.userID == expectedLease.userID,
-        membership.forumID == forumID,
-        membership.isFollowed == isFollowed
-      else {
-        throw BrowseError.unavailable("贴吧没有确认新的关注状态，请重新加载后再试。")
-      }
-
-      let change = ForumMembershipChange(
-        accountID: expectedLease.userID,
-        forumID: forumID,
-        isFollowed: membership.isFollowed
-      )
-      if requestGeneration == generation {
-        switch await sessionLeaseState(expectedLease) {
-        case .current:
-          lastKnownFollowed = membership.isFollowed
-          state = .ready(isFollowed: membership.isFollowed)
-        case .changed:
-          currentLease = nil
-          lastKnownFollowed = nil
-          state = .idle
-        case .unavailable:
-          failForUnreadableAccount(previouslyFollowed: previouslyFollowed)
-        }
-      }
-      AccountChangeNotifications.postForumMembershipChange(change)
-    } catch is CancellationError {
-      guard requestGeneration == generation else { return }
-      await reconcileAfterMutationFailure(
-        lease: expectedLease,
         previouslyFollowed: previouslyFollowed,
-        message: "贴吧未能确认关注操作结果，已重新读取当前状态。"
+        targetFollowed: isFollowed,
+        expectedLease: expectedLease,
+        verifiesCurrentState: false
       )
-    } catch {
-      guard requestGeneration == generation else { return }
-      await reconcileAfterMutationFailure(
-        lease: expectedLease,
-        previouslyFollowed: previouslyFollowed,
-        message: error.localizedDescription
-      )
+    )
+    guard requestGeneration == generation else { return }
+
+    switch outcome {
+    case .confirmed(let confirmation):
+      switch confirmation.leaseState {
+      case .current:
+        lastKnownFollowed = confirmation.change.isFollowed
+        state = .ready(isFollowed: confirmation.change.isFollowed)
+        errorMessage = confirmation.warning
+      case .changed:
+        currentLease = nil
+        lastKnownFollowed = nil
+        state = .idle
+      case .unavailable:
+        lastKnownFollowed = confirmation.change.isFollowed
+        state = .failed(previouslyFollowed: confirmation.change.isFollowed)
+        errorMessage = confirmation.warning ?? "无法读取当前账户，请稍后重试。"
+      }
+    case .unchanged(let isFollowed, let message):
+      lastKnownFollowed = isFollowed
+      state = .ready(isFollowed: isFollowed)
+      errorMessage = message
+    case .sessionChanged:
+      await reload()
+    case .unavailable(let retainedFollowed, let message):
+      lastKnownFollowed = retainedFollowed
+      state = .failed(previouslyFollowed: retainedFollowed)
+      errorMessage = message
+    case .rejected(let message):
+      lastKnownFollowed = previouslyFollowed
+      state = .ready(isFollowed: previouslyFollowed)
+      errorMessage = message
     }
   }
 
@@ -183,6 +169,13 @@ final class ForumMembershipViewModel: ObservableObject {
       change.forumID == forumID,
       change.accountID == currentLease?.userID
     else { return }
+    if
+      case .mutating(_, let targetFollowed) = state,
+      targetFollowed == change.isFollowed,
+      change.sessionRevision == currentLease?.sessionRevision
+    {
+      return
+    }
     if case .ready(let isFollowed) = state, isFollowed == change.isFollowed {
       return
     }
@@ -197,10 +190,10 @@ final class ForumMembershipViewModel: ObservableObject {
     forumID > 0 && !forumName.isEmpty
   }
 
-  private func sessionLeaseState(_ lease: SessionLease) async -> SessionLeaseState {
+  private func sessionLeaseState(_ lease: AccountSessionLease) async -> AccountSessionLeaseState {
     do {
       guard let session = try await access.vault.activeSession() else { return .changed }
-      return lease == SessionLease(session) ? .current : .changed
+      return lease.matches(session) ? .current : .changed
     } catch {
       return .unavailable
     }
@@ -209,91 +202,5 @@ final class ForumMembershipViewModel: ObservableObject {
   private func failForUnreadableAccount(previouslyFollowed: Bool?) {
     state = .failed(previouslyFollowed: previouslyFollowed)
     errorMessage = "无法读取当前账户，请稍后重试。"
-  }
-
-  private func reconcileAfterMutationFailure(
-    lease: SessionLease,
-    previouslyFollowed: Bool,
-    message: String
-  ) async {
-    switch await sessionLeaseState(lease) {
-    case .current:
-      break
-    case .changed:
-      await reload()
-      return
-    case .unavailable:
-      failForUnreadableAccount(previouslyFollowed: previouslyFollowed)
-      return
-    }
-
-    generation &+= 1
-    let reconciliationGeneration = generation
-    do {
-      guard
-        let session = try await access.vault.activeSession(),
-        SessionLease(session) == lease
-      else {
-        await reload()
-        return
-      }
-      let membership = try await access.service.forumMembership(
-        session: session,
-        forumID: forumID,
-        forumName: forumName
-      )
-      guard
-        membership.userID == lease.userID,
-        membership.forumID == forumID
-      else {
-        throw BrowseError.unavailable("贴吧返回了不匹配的关注状态，请重新加载后再试。")
-      }
-      guard reconciliationGeneration == generation else { return }
-      switch await sessionLeaseState(lease) {
-      case .current:
-        lastKnownFollowed = membership.isFollowed
-        state = .ready(isFollowed: membership.isFollowed)
-        errorMessage = message
-        AccountChangeNotifications.postForumMembershipChange(
-          ForumMembershipChange(
-            accountID: lease.userID,
-            forumID: forumID,
-            isFollowed: membership.isFollowed
-          )
-        )
-      case .changed:
-        await reload()
-      case .unavailable:
-        failForUnreadableAccount(previouslyFollowed: previouslyFollowed)
-      }
-    } catch {
-      guard reconciliationGeneration == generation else { return }
-      switch await sessionLeaseState(lease) {
-      case .current:
-        lastKnownFollowed = previouslyFollowed
-        state = .ready(isFollowed: previouslyFollowed)
-        errorMessage = message
-      case .changed:
-        await reload()
-      case .unavailable:
-        failForUnreadableAccount(previouslyFollowed: previouslyFollowed)
-      }
-    }
-  }
-}
-
-private enum SessionLeaseState: Sendable {
-  case current
-  case changed
-  case unavailable
-}
-
-private struct SessionLease: Equatable, Sendable {
-  let userID: Int64
-  let sessionRevision: UUID
-
-  init(_ session: StoredAccountSession) {
-    userID = session.id
-    sessionRevision = session.sessionRevision
   }
 }

@@ -110,6 +110,22 @@ struct StoredAccountSession:
   }
 }
 
+struct AccountSessionLease: Hashable, Sendable {
+  let userID: Int64
+  let sessionRevision: UUID
+
+  init(_ session: StoredAccountSession) {
+    userID = session.id
+    sessionRevision = session.sessionRevision
+  }
+
+  func matches(_ session: StoredAccountSession) -> Bool {
+    userID == session.id && sessionRevision == session.sessionRevision
+  }
+}
+
+typealias FollowedForumsSessionLease = AccountSessionLease
+
 struct AccountSummary: Identifiable, Hashable, Sendable {
   let id: Int64
   let username: String
