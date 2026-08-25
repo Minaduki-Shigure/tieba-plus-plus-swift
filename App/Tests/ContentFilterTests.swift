@@ -203,7 +203,7 @@ final class ContentFilterTests: XCTestCase {
       snapshot.visibility(
         for: thread(
           title: String(repeating: "a", count: 8_192),
-          excerpt: "ordinary"
+          excerpt: "text"
         )
       ),
       .visible
