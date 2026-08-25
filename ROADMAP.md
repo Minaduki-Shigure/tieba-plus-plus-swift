@@ -32,6 +32,10 @@ routing and public-profile identity label preservation likewise improve existing
 local-settings and public-reading areas without adding a data source or weighted point.
 The independent OLED dark-surface choice improves the existing appearance and
 customization credit without changing the current weighted estimate.
+Current-main `PbContent` image mapping also closes a narrow compatibility gap by
+retaining `src`, `big_src`, and `cdn_src_active` fallback fields across ordinary
+floors and nested replies. It reuses the existing media pipeline and therefore
+does not add a data source or weighted point.
 
 | Capability area | Weight | Credited points | Current basis |
 | --- | ---: | ---: | --- |
@@ -847,6 +851,16 @@ single-column. Sanitized 0.5-through-2 aspect ratios feed a deterministic
 shortest-column assignment whose ties choose the lower column. Nonfinite
 proposals or spacing and invalid dimensions are normalized before frame
 calculation.
+
+The protobuf mapping feeding those runs keeps `cdn_src` and `big_cdn_src` as the
+canonical preview and full-size choices, then falls back to `cdn_src_active` or
+`src` for a preview and `big_src` for a full-size image. Candidates continue to
+pass the existing HTTP(S) normalization and App media-URL validation. A type-20
+image whose only source is `src` also treats that same value as its original,
+matching TiebaLite's renderer; an ordinary type-3 `src` fallback does not invent
+an original URL. Fixture coverage exercises the wire tags, ordinary-post and
+full nested-reply paths, source priority, and unsafe-scheme rejection. The
+change adds no request, credential use, cache key, or new rendering surface.
 
 Media playback uses one main-actor application coordinator rather than allowing
 each rendered control to play independently. Voice and video compete for one

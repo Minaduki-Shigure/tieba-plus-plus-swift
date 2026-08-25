@@ -1317,15 +1317,24 @@ enum TiebaProtoMapper {
 
   private static func image(_ proto: PbContent) -> TiebaImage {
     let dimensions = proto.bsize.split(separator: ",", maxSplits: 1).compactMap { Int($0) }
+    let sourceURL = TiebaMediaURLPolicy.normalizedURL(from: proto.src)
     return TiebaImage(
-      thumbnailURL: remoteURL(proto.cdnSrc),
-      fullSizeURL: remoteURL(proto.bigCdnSrc),
-      originalURL: remoteURL(proto.originSrc),
+      thumbnailURL: firstMediaURL(proto.cdnSrc, proto.cdnSrcActive) ?? sourceURL,
+      fullSizeURL: firstMediaURL(proto.bigCdnSrc, proto.bigSrc),
+      originalURL: TiebaMediaURLPolicy.normalizedURL(from: proto.originSrc)
+        ?? (proto.type == 20 ? sourceURL : nil),
       width: dimensions.first ?? Int(proto.width),
       height: dimensions.count > 1 ? dimensions[1] : Int(proto.height),
       originalByteCount: Int(proto.originSize),
       dynamicURL: remoteURL(proto.dynamic)
     )
+  }
+
+  private static func firstMediaURL(_ rawValues: String...) -> URL? {
+    for rawValue in rawValues {
+      if let url = TiebaMediaURLPolicy.normalizedURL(from: rawValue) { return url }
+    }
+    return nil
   }
 
   private static func mediaFragment(_ proto: Media) -> TiebaContentFragment {

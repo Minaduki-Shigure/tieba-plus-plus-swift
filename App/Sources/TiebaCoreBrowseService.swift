@@ -2243,19 +2243,11 @@ enum SecureTiebaURL {
   }
 
   static func media(_ url: URL?) -> URL? {
-    guard let url else { return nil }
-    return normalized(url, allowHTTPUpgradeOnly: true)
+    TiebaMediaURLPolicy.normalizedURL(url)
   }
 
   static func media(_ rawValue: String?) -> URL? {
-    guard let rawValue else { return nil }
-    let trimmedValue = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmedValue.isEmpty else { return nil }
-    let absoluteValue =
-      trimmedValue.hasPrefix("//")
-      ? "https:\(trimmedValue)"
-      : trimmedValue
-    return media(URL(string: absoluteValue))
+    TiebaMediaURLPolicy.normalizedURL(from: rawValue)
   }
 
   static func web(_ url: URL?) -> URL? {

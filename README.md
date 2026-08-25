@@ -25,6 +25,17 @@ and its verified metadata enters the public app source.
 
 ### Release and validation
 
+- **Current-main image-source fallback:** Rich-content image decoding now retains
+  Tieba's legacy `src` and `big_src` fields plus the active-CDN
+  `cdn_src_active` field instead of treating those otherwise valid images as
+  unavailable. Existing `cdn_src` and `big_cdn_src` values keep priority; an
+  invalid candidate falls through only to another HTTP(S) candidate. Type-20
+  images use their sole `src` value for both display and original-file access,
+  matching TiebaLite, while ordinary type-3 `src` values remain preview
+  fallbacks and do not invent an original. The same Core mapping covers thread
+  summaries, ordinary floors, full nested replies, parent-floor context, and
+  shared origins without adding a request or credential, and it keeps the
+  existing media URL authorization rules.
 - **Current-main followed-forum check-in marks:** Home and the complete current-
   account followed-forum list reuse one foreground official check-in catalog
   read and show a small check beside level information only for an exact
@@ -694,6 +705,12 @@ and its verified metadata enters the public app source.
   positive owning-post identity and the content-filter policy permits whole-
   thread loading; otherwise it retains the complete same-card fallback.
   Originals can be explicitly shared or saved through add-only Photos access.
+  Protobuf image source selection preserves the canonical CDN preview and full-
+  size fields first, then uses `cdn_src_active`/`src` and `big_src` as
+  HTTP(S) fallbacks. Type-20 `src`-only images retain that same source for
+  original-file viewing and export. This applies uniformly to ordinary floors,
+  full nested replies, parent-floor context, thread summaries, and shared
+  origins; no fallback starts a separate metadata request.
   Extremely tall static images
   keep a bounded inline preview and start the gallery in a top-aligned,
   fit-to-width reading mode. The viewer preserves reading progress across

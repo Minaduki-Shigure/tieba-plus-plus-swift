@@ -13,6 +13,14 @@ final class TiebaProtoMapperTests: XCTestCase {
       Data([0x82, 0x01, 0x01, 0x78])
     )
 
+    var fallbackSources = PbContent()
+    fallbackSources.bigSrc = "b"
+    fallbackSources.cdnSrcActive = "a"
+    XCTAssertEqual(
+      try fallbackSources.serializedData(),
+      Data([0x32, 0x01, 0x62, 0xA2, 0x02, 0x01, 0x61])
+    )
+
     var media = Media()
     media.dynamicPic = "y"
     XCTAssertEqual(
@@ -28,8 +36,152 @@ final class TiebaProtoMapperTests: XCTestCase {
     )
 
     XCTAssertEqual(PbContent().dynamic, "")
+    XCTAssertEqual(PbContent().bigSrc, "")
+    XCTAssertEqual(PbContent().cdnSrcActive, "")
     XCTAssertEqual(Media().dynamicPic, "")
     XCTAssertEqual(Media().postID, 0)
+  }
+
+  func testType20NestedReplyImageUsesSrcOnlyFallback() throws {
+    var fixture = ProtoFixtures.commentPage().data
+    var content = PbContent()
+    content.type = 20
+    content.src = "//img.example/nested-type20.jpg"
+    content.bsize = "320,640"
+    fixture.subpostList[0].content = [content]
+
+    let image = try XCTUnwrap(
+      TiebaProtoMapper.commentPage(fixture).comments.first?.content.images.first
+    )
+
+    XCTAssertEqual(image.thumbnailURL?.absoluteString, "https://img.example/nested-type20.jpg")
+    XCTAssertNil(image.fullSizeURL)
+    XCTAssertEqual(image.originalURL, image.thumbnailURL)
+    XCTAssertEqual(image.width, 320)
+    XCTAssertEqual(image.height, 640)
+  }
+
+  func testOrdinaryPostImageUsesSrcOnlyFallbackWithoutInventingAnOriginal() throws {
+    var fixture = ProtoFixtures.postPage().data
+    var content = PbContent()
+    content.type = 3
+    content.src = "https://img.example/floor-src-only.jpg"
+    content.width = 800
+    content.height = 600
+    fixture.postList[0].content = [content]
+
+    let image = try XCTUnwrap(
+      TiebaProtoMapper.postPage(fixture).posts.first?.content.images.first
+    )
+
+    XCTAssertEqual(image.thumbnailURL?.absoluteString, "https://img.example/floor-src-only.jpg")
+    XCTAssertNil(image.fullSizeURL)
+    XCTAssertNil(image.originalURL)
+    XCTAssertEqual(image.width, 800)
+    XCTAssertEqual(image.height, 600)
+  }
+
+  func testPbContentImageUsesBigSrcAndActiveCDNFallbacks() throws {
+    var bigSource = PbContent()
+    bigSource.type = 3
+    bigSource.bigSrc = "https://img.example/legacy-full.jpg"
+
+    var activeCDN = PbContent()
+    activeCDN.type = 3
+    activeCDN.cdnSrcActive = "https://img.example/active-thumb.jpg"
+
+    let bigSourceImage = try mappedPbContentImage(bigSource)
+    XCTAssertNil(bigSourceImage.thumbnailURL)
+    XCTAssertEqual(
+      bigSourceImage.fullSizeURL?.absoluteString,
+      "https://img.example/legacy-full.jpg"
+    )
+
+    let activeCDNImage = try mappedPbContentImage(activeCDN)
+    XCTAssertEqual(
+      activeCDNImage.thumbnailURL?.absoluteString,
+      "https://img.example/active-thumb.jpg"
+    )
+    XCTAssertNil(activeCDNImage.fullSizeURL)
+  }
+
+  func testPbContentImageKeepsCanonicalSourcePriority() throws {
+    var content = PbContent()
+    content.type = 3
+    content.cdnSrc = "https://img.example/canonical-thumb.jpg"
+    content.cdnSrcActive = "https://img.example/active-thumb.jpg"
+    content.src = "https://img.example/fallback-thumb.jpg"
+    content.bigCdnSrc = "https://img.example/canonical-full.jpg"
+    content.bigSrc = "https://img.example/legacy-full.jpg"
+
+    let image = try mappedPbContentImage(content)
+
+    XCTAssertEqual(
+      image.thumbnailURL?.absoluteString,
+      "https://img.example/canonical-thumb.jpg"
+    )
+    XCTAssertEqual(
+      image.fullSizeURL?.absoluteString,
+      "https://img.example/canonical-full.jpg"
+    )
+  }
+
+  func testPbContentImageFallbacksRejectUnsafeSchemes() throws {
+    var unsafe = PbContent()
+    unsafe.type = 20
+    unsafe.cdnSrc = "file:///private/canonical.jpg"
+    unsafe.cdnSrcActive = "javascript:alert(1)"
+    unsafe.src = "data:image/png;base64,AA=="
+    unsafe.bigCdnSrc = "com.baidu.tieba://image/canonical"
+    unsafe.bigSrc = "ftp://img.example/legacy.jpg"
+
+    var image = try mappedPbContentImage(unsafe)
+    XCTAssertNil(image.thumbnailURL)
+    XCTAssertNil(image.fullSizeURL)
+    XCTAssertNil(image.originalURL)
+    XCTAssertNil(image.dynamicURL)
+
+    unsafe.src = "https://img.example/safe-fallback.jpg"
+    unsafe.bigSrc = "https://img.example/safe-full-fallback.jpg"
+    image = try mappedPbContentImage(unsafe)
+    XCTAssertEqual(
+      image.thumbnailURL?.absoluteString,
+      "https://img.example/safe-fallback.jpg"
+    )
+    XCTAssertEqual(
+      image.fullSizeURL?.absoluteString,
+      "https://img.example/safe-full-fallback.jpg"
+    )
+  }
+
+  func testPbContentImageFallbacksSkipValuesRejectedByTheSharedMediaPolicy() throws {
+    var content = PbContent()
+    content.type = 20
+    content.cdnSrc = "https://user:password@img.example/rejected-thumb.jpg"
+    content.cdnSrcActive = "https://img.example/safe-thumb.jpg"
+    content.bigCdnSrc = "http://example.com/rejected-full.jpg"
+    content.bigSrc = "https://img.example/safe-full.jpg"
+    content.originSrc = "https://user@img.example/rejected-original.jpg"
+    content.src = "https://img.example/safe-original.jpg"
+
+    let image = try mappedPbContentImage(content)
+
+    XCTAssertEqual(image.thumbnailURL?.absoluteString, "https://img.example/safe-thumb.jpg")
+    XCTAssertEqual(image.fullSizeURL?.absoluteString, "https://img.example/safe-full.jpg")
+    XCTAssertEqual(image.originalURL?.absoluteString, "https://img.example/safe-original.jpg")
+  }
+
+  func testPbContentImageFallbackUsesTheSharedMediaHTTPUpgrade() throws {
+    var content = PbContent()
+    content.type = 3
+    content.src = "http://imgsrc.baidu.com/forum/fallback.jpg"
+
+    let image = try mappedPbContentImage(content)
+
+    XCTAssertEqual(
+      image.thumbnailURL?.absoluteString,
+      "https://imgsrc.baidu.com/forum/fallback.jpg"
+    )
   }
 
   func testPbContentImagePreservesOnlyNormalizedDynamicURLStrings() throws {
@@ -866,6 +1018,14 @@ final class TiebaProtoMapperTests: XCTestCase {
         return video
       }.first
     )
+  }
+
+  private func mappedPbContentImage(_ content: PbContent) throws -> TiebaImage {
+    var fixture = ProtoFixtures.threadPage().data
+    fixture.threadList[0].firstPostContent = [content]
+
+    let thread = try XCTUnwrap(TiebaProtoMapper.threadPage(fixture).threads.first)
+    return try XCTUnwrap(thread.content.images.first)
   }
 
   private func structuredVideo(from fixture: PbPageResIdl.DataRes) throws -> TiebaVideo {
