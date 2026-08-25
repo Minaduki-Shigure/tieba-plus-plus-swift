@@ -848,6 +848,19 @@ expose a separate explicit fallback but never opens it automatically. Supported
 Tieba links remain internal, external HTTPS follows the selected system/Safari
 preference, and HTTP remains system-owned.
 
+The shared rich-content and video-page router also implements TiebaLite's
+`/mo/q/checkurl` compatibility behavior without relying on the remote redirect
+page. Only exact standard-port `tieba.baidu.com` and `wapp.baidu.com` wrappers
+with the exact path and one raw lowercase `url` query key are unwrapped. The
+credential-free absolute HTTP(S) target is decoded once, bounded, checked for
+encoded control characters, and routed again so a wrapped forum or thread still
+uses native navigation. Query metadata, total bytes, and recursive depth are
+bounded; malformed official wrappers fail closed, while non-official lookalikes
+retain ordinary external-link behavior. The known leading `http://https://`
+producer defect is repaired once without rewriting the same text inside a valid
+path or query. System-browser and unavailable-Safari fallbacks receive the
+validated target explicitly rather than reopening the wrapper.
+
 Voice sharing and Files saving are explicit, one-shot exports. They use a
 separate ephemeral credential-free HTTPS session that rejects redirects,
 non-200 and partial responses,

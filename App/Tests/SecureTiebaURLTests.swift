@@ -233,6 +233,24 @@ final class SecureTiebaURLTests: XCTestCase {
     XCTAssertNil(SecureTiebaURL.media(unrelated))
   }
 
+  func testBaiduHTTPUpgradeMovesExplicitDefaultPortToHTTPSDefault() throws {
+    let defaultPort = try XCTUnwrap(
+      URL(string: "http://imgsrc.baidu.com:80/forum/a.jpg")
+    )
+    XCTAssertEqual(
+      SecureTiebaURL.media(defaultPort)?.absoluteString,
+      "https://imgsrc.baidu.com/forum/a.jpg"
+    )
+
+    let nonstandardPort = try XCTUnwrap(
+      URL(string: "http://imgsrc.baidu.com:8080/forum/a.jpg")
+    )
+    XCTAssertEqual(
+      SecureTiebaURL.media(nonstandardPort)?.absoluteString,
+      "https://imgsrc.baidu.com:8080/forum/a.jpg"
+    )
+  }
+
   func testWebPreservesUnmodifiedHTTPAndHTTPSURLsVerbatim() throws {
     for rawValue in [
       "https://example.com/a%2Fb?next=%2F%2f&empty=#part%2F",

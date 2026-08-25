@@ -139,14 +139,17 @@ struct BrowseContentView: View {
           onUserMention(userID)
           return .handled
         }
-        guard let onTiebaLink else { return .systemAction }
-        onTiebaLink(target)
-        return .handled
-      case .system:
-        return .systemAction
+        if let onTiebaLink {
+          onTiebaLink(target)
+          return .handled
+        }
+        guard let appURL = TiebaLink.appURL(for: target) else { return .discarded }
+        return .systemAction(appURL)
+      case .system(let url):
+        return .systemAction(url)
       case .inAppSafari(let url):
         imageGalleryPresentation = nil
-        return openExternalWeb(url) ? .handled : .systemAction
+        return openExternalWeb(url) ? .handled : .systemAction(url)
       case .rejected:
         return .discarded
       }

@@ -2244,6 +2244,9 @@ enum SecureTiebaURL {
       break
     case "http" where isUpgradeable(host):
       components.scheme = "https"
+      if components.port == 80 {
+        components.port = nil
+      }
       requiresRebuild = true
     case "http" where !allowHTTPUpgradeOnly:
       break

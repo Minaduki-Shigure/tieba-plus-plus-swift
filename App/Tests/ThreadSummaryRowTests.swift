@@ -351,6 +351,22 @@ final class ThreadSummaryRowTests: XCTestCase {
     )
   }
 
+  func testVideoPageRouterResolvesOfficialCheckURLDestination() throws {
+    let destination = try XCTUnwrap(
+      URL(string: "https://video.example/watch/42?q=one#part")
+    )
+    let wrapper = try threadSummaryCheckURL(wrapping: destination.absoluteString)
+
+    XCTAssertEqual(
+      ThreadSummaryVideoPageRouter.disposition(for: wrapper, mode: .systemBrowser),
+      .system(destination)
+    )
+    XCTAssertEqual(
+      ThreadSummaryVideoPageRouter.disposition(for: wrapper, mode: .inAppSafari),
+      .inAppSafari(destination)
+    )
+  }
+
   func testVideoPageRouterRejectsUnsafeURLs() throws {
     let rejected = [
       "javascript:alert(1)",
@@ -608,6 +624,15 @@ final class ThreadSummaryRowTests: XCTestCase {
 
     XCTAssertNotNil(ThreadSummaryNavigationPolicy.primaryRequest(for: thread))
     XCTAssertNil(ThreadSummaryNavigationPolicy.repliesRequest(for: thread))
+  }
+
+  private func threadSummaryCheckURL(wrapping target: String) throws -> URL {
+    var components = URLComponents()
+    components.scheme = "https"
+    components.host = "tieba.baidu.com"
+    components.path = "/mo/q/checkurl"
+    components.queryItems = [URLQueryItem(name: "url", value: target)]
+    return try XCTUnwrap(components.url)
   }
 
   private func makeThread(

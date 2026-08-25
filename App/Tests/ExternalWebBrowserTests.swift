@@ -163,6 +163,27 @@ final class ExternalWebBrowserTests: XCTestCase {
   }
 
   @MainActor
+  func testPresentationModelStoresResolvedOfficialCheckURLDestination() throws {
+    let destination = try XCTUnwrap(
+      URL(string: "https://example.com/article?q=one#part")
+    )
+    let wrapper = try checkURL(wrapping: destination.absoluteString)
+    let model = ExternalWebPresentationModel()
+
+    XCTAssertTrue(model.requestPresentation(for: wrapper))
+    XCTAssertEqual(model.page?.url, destination)
+
+    let pageID = try XCTUnwrap(model.page?.id)
+    model.dismiss(id: pageID)
+
+    let nativeWrapper = try checkURL(
+      wrapping: "https://tieba.baidu.com/p/42?pid=99"
+    )
+    XCTAssertFalse(model.requestPresentation(for: nativeWrapper))
+    XCTAssertNil(model.page)
+  }
+
+  @MainActor
   func testPresentationModelRejectsNonExternalHTTPSRequests() throws {
     let model = ExternalWebPresentationModel()
     let values = [
@@ -194,6 +215,342 @@ final class ExternalWebBrowserTests: XCTestCase {
       BrowseContentLinkRouter.disposition(for: url, mode: .inAppSafari),
       .inAppSafari(url)
     )
+  }
+
+  func testOfficialCheckURLPreservesExternalDestinationSyntax() throws {
+    let targetValue =
+      "https://example.com/a%2Fb?item=one&item=&flag&plus=a+b&encoded=a%2Bb&percent=100%25#part%2Fone"
+    let targetURL = try XCTUnwrap(URL(string: targetValue))
+    let wrapper = try checkURL(
+      wrapping: targetValue,
+      metadata: [
+        URLQueryItem(name: "from", value: "pb"),
+        URLQueryItem(name: "source", value: "content"),
+        URLQueryItem(name: "literal", value: "100%25-not-an-escape"),
+      ]
+    )
+    let decodedTarget = try XCTUnwrap(
+      URLComponents(url: wrapper, resolvingAgainstBaseURL: false)?.queryItems?
+        .filter { $0.name == "url" }
+        .single?.value
+    )
+
+    XCTAssertEqual(decodedTarget, targetValue)
+    XCTAssertTrue(wrapper.absoluteString.contains("plus%3Da+b"))
+    XCTAssertTrue(wrapper.absoluteString.contains("encoded%3Da%252Bb"))
+    XCTAssertEqual(
+      BrowseContentLinkRouter.disposition(for: wrapper, mode: .systemBrowser),
+      .system(targetURL)
+    )
+    XCTAssertEqual(
+      BrowseContentLinkRouter.disposition(for: wrapper, mode: .inAppSafari),
+      .inAppSafari(targetURL)
+    )
+  }
+
+  func testOfficialCheckURLAcceptsCanonicalizedUnicodeDestination() throws {
+    let targetValue = "https://example.com/贴吧/链接?q=中文#段落"
+    let targetURL = try XCTUnwrap(URL(string: targetValue))
+    let wrapper = try checkURL(wrapping: targetValue)
+
+    XCTAssertEqual(
+      BrowseContentLinkRouter.disposition(for: wrapper, mode: .systemBrowser),
+      .system(targetURL)
+    )
+  }
+
+  func testOfficialCheckURLRerunsNativeAndExternalRouting() throws {
+    let nativeCases: [(String, TiebaLinkTarget)] = [
+      (
+        "https://tieba.baidu.com/p/42?see_lz=1&pid=99#/",
+        .thread(TiebaThreadRoute(threadID: 42, onlyThreadAuthor: true, postID: 99))
+      ),
+      (
+        "http://tieba.baidu.com/f?kw=swift",
+        .forum("swift")
+      ),
+    ]
+    for (targetValue, expectedTarget) in nativeCases {
+      let wrapper = try checkURL(wrapping: targetValue, host: "wapp.baidu.com")
+      for mode in ExternalWebOpenMode.allCases {
+        XCTAssertEqual(
+          BrowseContentLinkRouter.disposition(for: wrapper, mode: mode),
+          .tieba(expectedTarget),
+          targetValue
+        )
+      }
+    }
+
+    let externalHTTP = try XCTUnwrap(URL(string: "http://example.com/article?q=one"))
+    let wrapper = try checkURL(
+      wrapping: externalHTTP.absoluteString,
+      scheme: "http",
+      port: 80
+    )
+    for mode in ExternalWebOpenMode.allCases {
+      XCTAssertEqual(
+        BrowseContentLinkRouter.disposition(for: wrapper, mode: mode),
+        .system(externalHTTP)
+      )
+    }
+
+    let securedWrapper = try XCTUnwrap(SecureTiebaURL.videoPage(wrapper))
+    let securedComponents = try XCTUnwrap(
+      URLComponents(url: securedWrapper, resolvingAgainstBaseURL: false)
+    )
+    XCTAssertEqual(securedComponents.scheme, "https")
+    XCTAssertNil(securedComponents.port)
+    XCTAssertEqual(
+      BrowseContentLinkRouter.disposition(for: securedWrapper, mode: .inAppSafari),
+      .system(externalHTTP)
+    )
+  }
+
+  func testOfficialCheckURLRepairsOnlyKnownLeadingDuplicatedScheme() throws {
+    let repairedURL = try XCTUnwrap(URL(string: "https://example.com/document"))
+    let repairedWrapper = try checkURL(
+      wrapping: "http://https://example.com/document"
+    )
+    XCTAssertEqual(
+      BrowseContentLinkRouter.disposition(for: repairedWrapper, mode: .inAppSafari),
+      .inAppSafari(repairedURL)
+    )
+
+    let preservedValue =
+      "https://example.com/path/http://https://value?q=http://https://value"
+    let preservedURL = try XCTUnwrap(URL(string: preservedValue))
+    let preservedWrapper = try checkURL(wrapping: preservedValue)
+    XCTAssertEqual(
+      BrowseContentLinkRouter.disposition(for: preservedWrapper, mode: .systemBrowser),
+      .system(preservedURL)
+    )
+  }
+
+  func testOfficialCheckURLRejectsAmbiguousOrMalformedEnvelope() throws {
+    let encodedTarget = "https%3A%2F%2Fexample.com%2Farticle"
+    let values = [
+      "https://tieba.baidu.com/mo/q/checkurl",
+      "https://tieba.baidu.com/mo/q/checkurl?",
+      "https://tieba.baidu.com/mo/q/checkurl?url",
+      "https://tieba.baidu.com/mo/q/checkurl?url=",
+      "https://tieba.baidu.com/mo/q/checkurl?url=\(encodedTarget)&url=\(encodedTarget)",
+      "https://tieba.baidu.com/mo/q/checkurl?url=\(encodedTarget)&url=http%3A%2F%2Fexample.org",
+      "https://tieba.baidu.com/mo/q/checkurl?URL=\(encodedTarget)",
+      "https://tieba.baidu.com/mo/q/checkurl?URL=\(encodedTarget)&url=\(encodedTarget)",
+      "https://tieba.baidu.com/mo/q/checkurl?u%72l=\(encodedTarget)",
+      "https://tieba.baidu.com/mo/q/checkurl?u%72l=\(encodedTarget)&url=\(encodedTarget)",
+      "ftp://tieba.baidu.com/mo/q/checkurl?url=\(encodedTarget)",
+      "https://user@tieba.baidu.com/mo/q/checkurl?url=\(encodedTarget)",
+      "https://tieba.baidu.com:/mo/q/checkurl?url=\(encodedTarget)",
+      "https://tieba.baidu.com:444/mo/q/checkurl?url=\(encodedTarget)",
+      "https://tieba.baidu.com/mo/q/checkurl?url=\(encodedTarget)#",
+      "https://tieba.baidu.com/mo/q/checkurl?url=\(encodedTarget)#part",
+      "https://tieba.baidu.com/mo/q/checkurl?url=\(encodedTarget)#/",
+    ]
+
+    for value in values {
+      let url = try XCTUnwrap(URL(string: value), value)
+      for mode in ExternalWebOpenMode.allCases {
+        XCTAssertEqual(
+          BrowseContentLinkRouter.disposition(for: url, mode: mode),
+          .rejected,
+          value
+        )
+      }
+    }
+
+    let tooManyItems = (0..<16).map {
+      URLQueryItem(name: "metadata\($0)", value: "value")
+    }
+    let tooManyItemsWrapper = try checkURL(
+      wrapping: "https://example.com/article",
+      metadata: tooManyItems
+    )
+    let oversizedEnvelope = try checkURL(
+      wrapping: "https://example.com/article",
+      metadata: [URLQueryItem(name: "metadata", value: String(repeating: "a", count: 33_000))]
+    )
+    for wrapper in [tooManyItemsWrapper, oversizedEnvelope] {
+      XCTAssertEqual(
+        BrowseContentLinkRouter.disposition(for: wrapper, mode: .systemBrowser),
+        .rejected
+      )
+    }
+  }
+
+  func testOfficialCheckURLRejectsUnsafeDestinations() throws {
+    let oversizedPrefix = "https://example.com/"
+    let oversizedTarget = oversizedPrefix + String(
+      repeating: "a",
+      count: 8_193 - oversizedPrefix.utf8.count
+    )
+    let values = [
+      "https://user@example.com/article",
+      "https://user:password@example.com/article",
+      "https:///missing-host",
+      "/relative/path",
+      "//example.com/scheme-relative",
+      "javascript:alert(1)",
+      "file:///tmp/document.txt",
+      "data:text/plain,hello",
+      "mailto:user@example.com",
+      "tieba-plus-plus://thread/42",
+      "com.baidu.tieba://unidispatch/pb?tid=42",
+      "HTTP://https://example.com/article",
+      "http://http://example.com/article",
+      "https://http://example.com/article",
+      "https://example.com:/article",
+      "https://example.com/%0A",
+      "https://example.com/%250A",
+      "https://example.com/?literal=100%25&bad=%250A",
+      " https://example.com/article",
+      "https://example.com/article ",
+      oversizedTarget,
+    ]
+
+    for value in values {
+      let wrapper = try checkURL(wrapping: value)
+      for mode in ExternalWebOpenMode.allCases {
+        XCTAssertEqual(
+          BrowseContentLinkRouter.disposition(for: wrapper, mode: mode),
+          .rejected,
+          value
+        )
+      }
+    }
+
+    let unicodePrefix = "https://example.com/"
+    let unicodeTarget = unicodePrefix + String(
+      repeating: "帖",
+      count: (8_192 - unicodePrefix.utf8.count) / "帖".utf8.count
+    )
+    let canonicalUnicodeTarget = try XCTUnwrap(URL(string: unicodeTarget))
+    XCTAssertLessThanOrEqual(unicodeTarget.utf8.count, 8_192)
+    XCTAssertGreaterThan(canonicalUnicodeTarget.absoluteString.utf8.count, 8_192)
+    let unicodeWrapper = try checkURL(wrapping: unicodeTarget)
+    XCTAssertEqual(
+      BrowseContentLinkRouter.disposition(for: unicodeWrapper, mode: .systemBrowser),
+      .rejected
+    )
+  }
+
+  func testOfficialCheckURLBoundsNestedUnwrapping() throws {
+    let targetURL = try XCTUnwrap(URL(string: "https://example.com/final"))
+    var fourLayers = targetURL
+    for _ in 0..<4 {
+      fourLayers = try checkURL(wrapping: fourLayers.absoluteString)
+    }
+    XCTAssertEqual(
+      BrowseContentLinkRouter.disposition(for: fourLayers, mode: .inAppSafari),
+      .inAppSafari(targetURL)
+    )
+
+    let fiveLayers = try checkURL(wrapping: fourLayers.absoluteString)
+    XCTAssertEqual(
+      BrowseContentLinkRouter.disposition(for: fiveLayers, mode: .inAppSafari),
+      .rejected
+    )
+  }
+
+  func testOfficialCheckURLAcceptsPayloadAndMetadataBounds() throws {
+    let prefix = "https://example.com/"
+    let boundedValue = prefix + String(
+      repeating: "a",
+      count: 8_192 - prefix.utf8.count
+    )
+    let boundedTarget = try XCTUnwrap(URL(string: boundedValue))
+    let boundedMetadata = (0..<15).map {
+      URLQueryItem(name: "metadata\($0)", value: "value")
+    }
+    let wrapper = try checkURL(
+      wrapping: boundedValue,
+      metadata: boundedMetadata
+    )
+
+    XCTAssertEqual(
+      BrowseContentLinkRouter.disposition(for: wrapper, mode: .systemBrowser),
+      .system(boundedTarget)
+    )
+  }
+
+  func testOfficialCheckURLBoundsExactEnvelopeBytes() throws {
+    let targetValue = "https://example.com/article"
+    let targetURL = try XCTUnwrap(URL(string: targetValue))
+    let base = try checkURL(
+      wrapping: targetValue,
+      metadata: [URLQueryItem(name: "padding", value: "")]
+    )
+    let paddingCount = 32_768 - base.absoluteString.utf8.count
+    XCTAssertGreaterThan(paddingCount, 0)
+
+    let bounded = try checkURL(
+      wrapping: targetValue,
+      metadata: [URLQueryItem(name: "padding", value: String(repeating: "a", count: paddingCount))]
+    )
+    let oversized = try checkURL(
+      wrapping: targetValue,
+      metadata: [
+        URLQueryItem(name: "padding", value: String(repeating: "a", count: paddingCount + 1))
+      ]
+    )
+    XCTAssertEqual(bounded.absoluteString.utf8.count, 32_768)
+    XCTAssertEqual(oversized.absoluteString.utf8.count, 32_769)
+    XCTAssertEqual(
+      BrowseContentLinkRouter.disposition(for: bounded, mode: .systemBrowser),
+      .system(targetURL)
+    )
+    XCTAssertEqual(
+      BrowseContentLinkRouter.disposition(for: oversized, mode: .systemBrowser),
+      .rejected
+    )
+  }
+
+  func testCheckURLLookalikesRemainOrdinaryExternalLinks() throws {
+    let target = "https%3A%2F%2Ftieba.baidu.com%2Fp%2F42"
+    let values = [
+      "https://tieba.baidu.com.evil.example/mo/q/checkurl?url=\(target)",
+      "https://tiebac.baidu.com/mo/q/checkurl?url=\(target)",
+      "https://tieba.baidu.com/mo/q/checkurl/extra?url=\(target)",
+    ]
+
+    for value in values {
+      let url = try XCTUnwrap(URL(string: value))
+      XCTAssertEqual(
+        BrowseContentLinkRouter.disposition(for: url, mode: .systemBrowser),
+        .system(url),
+        value
+      )
+      XCTAssertEqual(
+        BrowseContentLinkRouter.disposition(for: url, mode: .inAppSafari),
+        .inAppSafari(url),
+        value
+      )
+    }
+  }
+
+  func testNonCanonicalOfficialCheckURLPathsAreRejected() throws {
+    let target = "https%3A%2F%2Ftieba.baidu.com%2Fp%2F42"
+    let values = [
+      "https://tieba.baidu.com/mo/q/%63heckurl?url=\(target)",
+      "https://tieba.baidu.com/mo/q%2Fcheckurl?url=\(target)",
+      "https://tieba.baidu.com/mo/q%252Fcheckurl?url=\(target)",
+      "https://tieba.baidu.com./mo/q/checkurl?url=\(target)",
+      "https://tieba.baidu.com/MO/Q/CHECKURL?url=\(target)",
+      "https://tieba.baidu.com/mo/q/checkurl/?url=\(target)",
+      "https://tieba.baidu.com/mo/q/checkurl;jsessionid=x?url=\(target)",
+      "https://tieba.baidu.com//mo//q//checkurl?url=\(target)",
+    ]
+
+    for value in values {
+      let url = try XCTUnwrap(URL(string: value))
+      for mode in ExternalWebOpenMode.allCases {
+        XCTAssertEqual(
+          BrowseContentLinkRouter.disposition(for: url, mode: mode),
+          .rejected,
+          value
+        )
+      }
+    }
   }
 
   func testTiebaTargetsTakePriorityOverExternalModes() throws {
@@ -431,4 +788,20 @@ private extension BrowseContentLinkDisposition {
       nil
     }
   }
+}
+
+private func checkURL(
+  wrapping target: String,
+  scheme: String = "https",
+  host: String = "tieba.baidu.com",
+  port: Int? = nil,
+  metadata: [URLQueryItem] = []
+) throws -> URL {
+  var components = URLComponents()
+  components.scheme = scheme
+  components.host = host
+  components.port = port
+  components.path = "/mo/q/checkurl"
+  components.queryItems = metadata + [URLQueryItem(name: "url", value: target)]
+  return try XCTUnwrap(components.url)
 }

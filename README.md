@@ -81,6 +81,15 @@ and its verified metadata enters the public app source.
   page that omits or locally hides the target instead shows a dismissible notice
   without a futile retry. No account write or background request is added. This
   source-only interaction is not in the public `v0.62.3-alpha.1` IPA.
+- **Later `main` link routing:** Rich-content and video landing links locally
+  resolve Baidu's official `/mo/q/checkurl` wrapper before normal navigation.
+  Resolved Tieba destinations stay inside the app; external HTTP(S) destinations
+  retain the selected system/Safari behavior and their query and fragment. The
+  resolver accepts only exact official hosts and path, one unambiguous `url`
+  payload, bounded metadata and nesting, and credential-free absolute Web
+  targets. Malformed official wrappers fail closed, while lookalike third-party
+  URLs remain ordinary external links. This source-only compatibility improvement
+  is not in the public `v0.62.3-alpha.1` IPA.
 - **`v0.60.6-alpha.1` rollback scope:** Physical-device testing on iOS 18.7.2
   found that
   the `v0.60.5-alpha.1` thread `List`, per-row visibility, and render-plan cache
