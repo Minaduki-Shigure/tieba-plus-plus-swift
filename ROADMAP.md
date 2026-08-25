@@ -197,6 +197,18 @@ The floor-level cloud-favorite marker and context action close a TiebaLite
 reading-workflow gap by exposing the existing confirmed thread-detail mutation
 at an exact retained floor. They add no endpoint or write target, so they remain
 inside the existing server-write credit rather than adding a weighted point.
+The cloud-favorite saved-position-to-latest handoff closes the corresponding
+private-reading gap. A consistent, nondeleted row still opens its marked PID
+first, then offers one explicit jump to the distinct positive maximum PID and
+its positive floor. The jump preserves an ascending or descending sort and the
+selected only-author option; hot order exposes no exact-position action. A
+transport or request failure retains the current page and retries the same PID;
+a returned missing or locally hidden target instead produces a dismissible notice
+without a futile retry. Invalid, unchanged, or incomplete update metadata exposes
+no action. This reuses the existing anonymous post reader, adds no account write
+or background request,
+and remains inside the existing private-read credit without adding a weighted
+point. The public `v0.62.3-alpha.1` IPA does not include this interaction.
 The followed-forum avatar and slogan presentation similarly preserves optional
 metadata that the existing authenticated response and Core decoder already
 carried. It adds neither a data source nor a workflow, so it adds no weighted point.
@@ -424,6 +436,7 @@ the source metadata is updated to that tested IPA.
   local archive pins exact already-loaded rows across both list surfaces without
   adding a private request
 - Separate Tieba cloud favorites with offset pagination, saved-post navigation,
+  a dismissible saved-position-to-latest-update handoff for consistent metadata,
   deleted-thread state, account-lease isolation, and confirmed list deletion only
   after raw thread/forum rebinding, plus confirmed thread-detail add, saved-floor
   update, and removal with read-only reconciliation. Exact visible floors expose

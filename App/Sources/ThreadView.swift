@@ -41,6 +41,7 @@ struct ThreadView: View {
   @State private var inboxReplyIntentGeneration = 0
   @State private var inboxReplyNotice: String?
   @State private var inboxReplyComposerIntent: InboxReplyIntent?
+  @State private var dismissedCloudFavoriteUpdate: CloudFavoriteThreadUpdate?
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Environment(\.dismiss) private var dismiss
   @Environment(\.hidesReplyEntryPoints) private var hidesReplyEntryPoints
@@ -52,6 +53,7 @@ struct ThreadView: View {
   @Environment(\.contentReportCoordinator) private var contentReportCoordinator
   private let historySnapshot: ThreadHistorySnapshot?
   private let linkRoute: TiebaThreadRoute?
+  private let cloudFavoriteUpdate: CloudFavoriteThreadUpdate?
   private let allowsLedgerIdentityForLinkPlaceholder: Bool
   private let onInboxReplyComposerPresented: ((InboxReplyIntent) -> Void)?
 
@@ -66,6 +68,7 @@ struct ThreadView: View {
     linkRoute: TiebaThreadRoute? = nil,
     initialBrowseOptions: ThreadBrowseOptions? = nil,
     initialFocus: ThreadInitialFocus? = nil,
+    cloudFavoriteUpdate: CloudFavoriteThreadUpdate? = nil,
     replyIntent: InboxReplyIntent? = nil,
     onInboxReplyComposerPresented: ((InboxReplyIntent) -> Void)? = nil
   ) {
@@ -75,11 +78,16 @@ struct ThreadView: View {
     self.searchHistoryRepository = searchHistoryRepository
     self.historySnapshot = historySnapshot
     self.linkRoute = linkRoute
+    let acceptedCloudFavoriteUpdate = cloudFavoriteUpdate.flatMap { update in
+      update.route.threadID == thread.id ? update : nil
+    }
+    self.cloudFavoriteUpdate = acceptedCloudFavoriteUpdate
     self.allowsLedgerIdentityForLinkPlaceholder = linkRoute.map {
       thread == $0.placeholderThread
     } ?? false
     self.onInboxReplyComposerPresented = onInboxReplyComposerPresented
     _pendingInboxReplyIntent = State(initialValue: replyIntent)
+    _dismissedCloudFavoriteUpdate = State(initialValue: nil)
     _viewModel = StateObject(
       wrappedValue: ThreadViewModel(
         thread: thread,
@@ -695,6 +703,26 @@ struct ThreadView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+      } else if
+        cloudFavoriteUpdate != dismissedCloudFavoriteUpdate,
+        viewModel.state == .loaded,
+        !viewModel.isJumping,
+        !viewModel.isCheckingLatestReplies,
+        viewModel.options.sort != .hot,
+        let cloudFavoriteUpdate,
+        let postID = cloudFavoriteUpdate.route.postID
+      {
+        ThreadCloudFavoriteUpdateBanner(
+          floor: cloudFavoriteUpdate.floor,
+          open: {
+            if viewModel.jump(toPostID: postID) {
+              dismissedCloudFavoriteUpdate = cloudFavoriteUpdate
+            }
+          },
+          dismiss: {
+            dismissedCloudFavoriteUpdate = cloudFavoriteUpdate
+          }
+        )
       }
 
       if replyEntriesVisible, let context = topicReplyContext {
@@ -2075,6 +2103,70 @@ struct ThreadView: View {
         cloudFavoriteErrorMessage = error.localizedDescription
       }
     }
+  }
+}
+
+private struct ThreadCloudFavoriteUpdateBanner: View {
+  let floor: Int
+  let open: () -> Void
+  let dismiss: () -> Void
+
+  var body: some View {
+    VStack(spacing: 0) {
+      Divider()
+      ViewThatFits(in: .horizontal) {
+        HStack(spacing: 10) {
+          updateLabel
+          Spacer(minLength: 8)
+          openButton
+          dismissButton
+        }
+        VStack(alignment: .leading, spacing: 10) {
+          HStack(spacing: 10) {
+            updateLabel
+            Spacer(minLength: 8)
+            dismissButton
+          }
+          openButton
+        }
+      }
+      .padding(.horizontal, 14)
+      .padding(.vertical, 10)
+    }
+    .background(Color(uiColor: .secondarySystemBackground))
+    .accessibilityIdentifier("thread-cloud-favorite-update")
+  }
+
+  private var updateLabel: some View {
+    Label(
+      "云收藏更新到 \(floor.formatted()) 楼",
+      systemImage: "arrow.up.circle.fill"
+    )
+    .font(.footnote)
+    .foregroundStyle(.secondary)
+    .fixedSize(horizontal: false, vertical: true)
+  }
+
+  private var openButton: some View {
+    Button(action: open) {
+      Label("查看最新", systemImage: "arrow.down.circle")
+        .lineLimit(1)
+        .frame(minWidth: 44, minHeight: 44)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.borderless)
+    .accessibilityIdentifier("thread-cloud-favorite-open-latest")
+  }
+
+  private var dismissButton: some View {
+    Button(action: dismiss) {
+      Image(systemName: "xmark.circle.fill")
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel("关闭更新提示")
+    .accessibilityIdentifier("thread-cloud-favorite-dismiss-update")
   }
 }
 

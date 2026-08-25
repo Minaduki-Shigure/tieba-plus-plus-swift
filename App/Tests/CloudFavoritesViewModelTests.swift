@@ -37,6 +37,31 @@ final class CloudFavoritesViewModelTests: XCTestCase {
       XCTAssertEqual(navigation.route.postID, 99)
       XCTAssertEqual(navigation.options.sort, expectedSort)
       XCTAssertEqual(navigation.options.onlyThreadAuthor, expectedOnlyThreadAuthor)
+      XCTAssertEqual(navigation.update?.route.threadID, 42)
+      XCTAssertEqual(navigation.update?.route.postID, 100)
+      XCTAssertEqual(navigation.update?.floor, 8)
+    }
+  }
+
+  func testCloudFavoriteUpdateRequiresConsistentUsableMetadata() {
+    let overrides = FavoriteThreadOpenOverrides()
+    let validWithoutMarkedPosition = cloudUpdateItem(markPostID: nil)
+      .navigation(applying: overrides)
+    XCTAssertEqual(validWithoutMarkedPosition.update?.route.postID, 100)
+    XCTAssertEqual(validWithoutMarkedPosition.update?.floor, 8)
+
+    let rejected = [
+      cloudUpdateItem(id: 0),
+      cloudUpdateItem(latestPostID: nil),
+      cloudUpdateItem(latestPostID: 0),
+      cloudUpdateItem(latestPostID: 99),
+      cloudUpdateItem(latestFloor: nil),
+      cloudUpdateItem(latestFloor: 0),
+      cloudUpdateItem(hasUpdates: false),
+      cloudUpdateItem(isDeleted: true),
+    ]
+    for thread in rejected {
+      XCTAssertNil(thread.navigation(applying: overrides).update)
     }
   }
 
@@ -846,6 +871,28 @@ private func cloudItem(
     hasUpdates: latestFloor != nil,
     isDeleted: isDeleted,
     updatedAt: Date(timeIntervalSince1970: TimeInterval(id))
+  )
+}
+
+private func cloudUpdateItem(
+  id: Int64 = 42,
+  markPostID: Int64? = 99,
+  latestPostID: Int64? = 100,
+  latestFloor: Int? = 8,
+  hasUpdates: Bool = true,
+  isDeleted: Bool = false
+) -> CloudFavoriteThread {
+  CloudFavoriteThread(
+    id: id,
+    title: "Thread \(id)",
+    forumName: "swift",
+    authorName: "author",
+    markPostID: markPostID,
+    latestPostID: latestPostID,
+    latestFloor: latestFloor,
+    hasUpdates: hasUpdates,
+    isDeleted: isDeleted,
+    updatedAt: Date(timeIntervalSince1970: 1)
   )
 }
 

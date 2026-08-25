@@ -4056,6 +4056,290 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testThreadPostJumpReplacesPageAtExactPostAndPreservesOptions() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 5_601)
+    let initialPost = Fixtures.post(id: 560_101, threadID: thread.id)
+    let latestPost = Fixtures.post(id: 560_109, threadID: thread.id)
+    let options = ThreadBrowseOptions(sort: .descending, onlyThreadAuthor: true)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [initialPost],
+          currentPage: 1,
+          hasMore: true,
+          totalPages: 5
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [latestPost],
+          currentPage: 4,
+          hasMore: true,
+          totalPages: 5
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(
+      thread: thread,
+      service: service,
+      options: options
+    )
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    XCTAssertTrue(viewModel.jump(toPostID: latestPost.id))
+
+    try await waitUntil {
+      viewModel.scrollTargetPostID == latestPost.id && !viewModel.isJumping
+    }
+    XCTAssertEqual(viewModel.posts, [latestPost])
+    XCTAssertEqual(viewModel.options, options)
+    XCTAssertFalse(viewModel.canRetryJump)
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 1])
+    XCTAssertEqual(requests.map(\.location), [nil, .postID(latestPost.id)])
+    XCTAssertTrue(requests.allSatisfy { $0.options == options })
+  }
+
+  @MainActor
+  func testThreadPostJumpDoesNotGuessExactTargetInHotSort() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 5_603)
+    let hotPost = Fixtures.post(id: 560_301, threadID: thread.id)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [hotPost],
+          currentPage: 1,
+          hasMore: false,
+          totalPages: 1
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(
+      thread: thread,
+      service: service,
+      options: ThreadBrowseOptions(sort: .hot)
+    )
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    XCTAssertFalse(viewModel.jump(toPostID: 560_399))
+
+    let requestCount = await service.postRequestCount()
+    XCTAssertEqual(requestCount, 1)
+    XCTAssertEqual(viewModel.posts, [hotPost])
+    XCTAssertFalse(viewModel.isJumping)
+    XCTAssertNil(viewModel.jumpError)
+  }
+
+  @MainActor
+  func testThreadPostJumpFailureKeepsCurrentPostsAndRetriesSamePost() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 5_602)
+    let initialPost = Fixtures.post(id: 560_201, threadID: thread.id)
+    let latestPost = Fixtures.post(id: 560_209, threadID: thread.id)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [initialPost],
+          currentPage: 1,
+          hasMore: true,
+          totalPages: 5
+        )
+      )
+    )
+    await service.enqueuePosts(.failure(StubFailure(message: "latest jump failed")))
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [latestPost],
+          currentPage: 4,
+          hasMore: true,
+          totalPages: 5
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    XCTAssertTrue(viewModel.jump(toPostID: latestPost.id))
+
+    try await waitUntil {
+      viewModel.jumpError == "latest jump failed" && !viewModel.isJumping
+    }
+    XCTAssertEqual(viewModel.posts, [initialPost])
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertTrue(viewModel.canRetryJump)
+
+    viewModel.retryJump()
+
+    try await waitUntil {
+      viewModel.scrollTargetPostID == latestPost.id && viewModel.jumpError == nil
+    }
+    XCTAssertEqual(viewModel.posts, [latestPost])
+    XCTAssertFalse(viewModel.canRetryJump)
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(
+      requests.map(\.location),
+      [nil, .postID(latestPost.id), .postID(latestPost.id)]
+    )
+  }
+
+  @MainActor
+  func testThreadPostJumpMissingTargetKeepsCurrentPostsWithDismissibleError() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 5_604)
+    let initialPost = Fixtures.post(id: 560_401, threadID: thread.id)
+    let requestedPostID: Int64 = 560_499
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [initialPost],
+          currentPage: 1,
+          hasMore: true,
+          totalPages: 5
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [Fixtures.post(id: 560_490, threadID: thread.id)],
+          currentPage: 4,
+          hasMore: true,
+          totalPages: 5
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    XCTAssertTrue(viewModel.jump(toPostID: requestedPostID))
+
+    try await waitUntil { viewModel.jumpError != nil && !viewModel.isJumping }
+    XCTAssertEqual(viewModel.posts, [initialPost])
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertFalse(viewModel.canRetryJump)
+    XCTAssertEqual(
+      viewModel.jumpError,
+      "未能在返回页面中定位目标楼层，当前内容保持不变。"
+    )
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(requests.map(\.location), [nil, .postID(requestedPostID)])
+    viewModel.dismissJumpError()
+    XCTAssertNil(viewModel.jumpError)
+  }
+
+  @MainActor
+  func testThreadPostJumpHiddenTargetKeepsCurrentPostsWithDismissibleError() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 5_606)
+    let initialPost = Fixtures.post(id: 560_601, threadID: thread.id)
+    let hiddenPost = Fixtures.post(id: 560_609, threadID: thread.id)
+      .withLocalVisibility(.hidden)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [initialPost],
+          currentPage: 1,
+          hasMore: true,
+          totalPages: 5
+        )
+      )
+    )
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [hiddenPost],
+          currentPage: 4,
+          hasMore: true,
+          totalPages: 5
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    XCTAssertTrue(viewModel.jump(toPostID: hiddenPost.id))
+
+    try await waitUntil { viewModel.jumpError != nil && !viewModel.isJumping }
+    XCTAssertEqual(viewModel.posts, [initialPost])
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertFalse(viewModel.canRetryJump)
+    XCTAssertEqual(
+      viewModel.jumpError,
+      "目标楼层已按本地规则隐藏，当前内容保持不变。"
+    )
+  }
+
+  @MainActor
+  func testThreadPostJumpNetworkFailureFromEmptyPageRemainsRetryable() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 5_605)
+    let latestPost = Fixtures.post(id: 560_509, threadID: thread.id)
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [],
+          currentPage: 1,
+          hasMore: false,
+          totalPages: 1
+        )
+      )
+    )
+    await service.enqueuePosts(.failure(StubFailure(message: "latest jump failed")))
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [latestPost],
+          currentPage: 4,
+          hasMore: true,
+          totalPages: 5
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+    viewModel.loadIfNeeded()
+    try await waitUntil { viewModel.state == .loaded }
+
+    XCTAssertTrue(viewModel.jump(toPostID: latestPost.id))
+    try await waitUntil { viewModel.jumpError != nil && !viewModel.isJumping }
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertTrue(viewModel.canRetryJump)
+    XCTAssertTrue(viewModel.posts.isEmpty)
+
+    viewModel.retryJump()
+
+    try await waitUntil { viewModel.scrollTargetPostID == latestPost.id }
+    XCTAssertEqual(viewModel.posts, [latestPost])
+    XCTAssertFalse(viewModel.canRetryJump)
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(
+      requests.map(\.location),
+      [nil, .postID(latestPost.id), .postID(latestPost.id)]
+    )
+  }
+
+  @MainActor
   func testThreadPageJumpClearsPreviousPaginationFailure() async throws {
     let service = ScriptedBrowseService()
     let thread = Fixtures.thread(id: 561)

@@ -11,6 +11,25 @@ enum ThreadInitialFocus: Equatable, Sendable {
   case firstReply
 }
 
+private enum ThreadJumpDestination: Equatable, Sendable {
+  case page(Int)
+  case postID(Int64)
+}
+
+private enum ThreadPostJumpError: LocalizedError, Sendable {
+  case hidden
+  case missing
+
+  var errorDescription: String? {
+    switch self {
+    case .hidden:
+      "目标楼层已按本地规则隐藏，当前内容保持不变。"
+    case .missing:
+      "未能在返回页面中定位目标楼层，当前内容保持不变。"
+    }
+  }
+}
+
 @MainActor
 final class ThreadViewModel: ObservableObject {
   @Published private(set) var thread: BrowseThread
@@ -45,7 +64,7 @@ final class ThreadViewModel: ObservableObject {
   private var loadGeneration = 0
   private var initialLocation: ThreadPostLocation?
   private var pendingInitialFocus: ThreadInitialFocus?
-  private var failedJumpPage: Int?
+  private var failedJumpDestination: ThreadJumpDestination?
   private var lowestLoadedPage = 0
   private var previousLoadAnchorPostID: Int64?
   private var nextPagePostID: Int64?
@@ -175,7 +194,7 @@ final class ThreadViewModel: ObservableObject {
     previousLoadAnchorPostID = nil
     jumpError = nil
     positionNotice = nil
-    failedJumpPage = nil
+    failedJumpDestination = nil
     nextPagePostID = nil
     descendingFallbackPage = nil
     scrollTargetPostID = nil
@@ -224,10 +243,39 @@ final class ThreadViewModel: ObservableObject {
   func jump(toPage page: Int) {
     guard !isCheckingLatestReplies else { return }
     guard page > 0, totalPages == 0 || page <= totalPages else {
-      failedJumpPage = nil
+      failedJumpDestination = nil
       jumpError = totalPages > 0 ? "请输入 1 到 \(totalPages) 之间的页码。" : "页码必须大于 0。"
       return
     }
+    startJump(
+      page: page,
+      location: .pageNumber,
+      destination: .page(page)
+    )
+  }
+
+  @discardableResult
+  func jump(toPostID postID: Int64) -> Bool {
+    guard
+      !isCheckingLatestReplies,
+      !isJumping,
+      state == .loaded,
+      options.sort != .hot,
+      postID > 0
+    else { return false }
+    startJump(
+      page: 1,
+      location: .postID(postID),
+      destination: .postID(postID)
+    )
+    return true
+  }
+
+  private func startJump(
+    page: Int,
+    location: ThreadPostLocation,
+    destination: ThreadJumpDestination
+  ) {
     invalidateCurrentLoad()
     isLoadingMore = false
     isLoadingPrevious = false
@@ -238,22 +286,27 @@ final class ThreadViewModel: ObservableObject {
     isRestoringPrependPosition = false
     previousLoadAnchorPostID = nil
     jumpError = nil
-    failedJumpPage = nil
+    failedJumpDestination = destination
     initialLocation = nil
     isJumping = true
-    load(page: page, replacing: true, location: .pageNumber, jumping: true)
+    load(page: page, replacing: true, location: location, jumping: true)
   }
 
   func retryJump() {
-    guard let page = failedJumpPage, !isJumping else { return }
-    jump(toPage: page)
+    guard let failedJumpDestination, !isJumping else { return }
+    switch failedJumpDestination {
+    case .page(let page):
+      jump(toPage: page)
+    case .postID(let postID):
+      _ = jump(toPostID: postID)
+    }
   }
 
-  var canRetryJump: Bool { failedJumpPage != nil }
+  var canRetryJump: Bool { failedJumpDestination != nil }
 
   func dismissJumpError() {
     jumpError = nil
-    failedJumpPage = nil
+    failedJumpDestination = nil
   }
 
   func dismissPositionNotice() {
@@ -521,11 +574,17 @@ final class ThreadViewModel: ObservableObject {
             replies: normalized.replies
           ) {
             if target.localVisibility == .hidden {
+              if jumping {
+                throw ThreadPostJumpError.hidden
+              }
               didHideRequestedPosition = true
             } else {
               resolvedScrollTarget = postID
             }
           } else {
+            if jumping {
+              throw ThreadPostJumpError.missing
+            }
             didFallBackFromMissingPosition = true
             let locationResponse = response
             do {
@@ -746,7 +805,7 @@ final class ThreadViewModel: ObservableObject {
           pendingInitialFocus = nil
         }
         jumpError = nil
-        failedJumpPage = nil
+        failedJumpDestination = nil
         state = .loaded
         if canAdvancePastDuplicateAscendingPage {
           let request = nextLoadMoreRequest()
@@ -759,16 +818,27 @@ final class ThreadViewModel: ObservableObject {
         }
       } catch is CancellationError {
         return
+      } catch let error as ThreadPostJumpError {
+        guard generation == loadGeneration, !Task.isCancelled else { return }
+        failedJumpDestination = nil
+        jumpError = error.localizedDescription
+        state = .loaded
       } catch {
         guard generation == loadGeneration, !Task.isCancelled else { return }
         if prepending {
           loadPreviousError = error.localizedDescription
         } else if jumping {
-          failedJumpPage = page
+          if failedJumpDestination == nil {
+            failedJumpDestination = Self.jumpDestination(page: page, location: location)
+          }
           jumpError = error.localizedDescription
-          state = firstPost == nil && posts.isEmpty
-            ? .failed(error.localizedDescription)
-            : .loaded
+          if case .postID? = failedJumpDestination {
+            state = .loaded
+          } else {
+            state = firstPost == nil && posts.isEmpty
+              ? .failed(error.localizedDescription)
+              : .loaded
+          }
         } else if replacing {
           state = .failed(error.localizedDescription)
         } else {
@@ -783,6 +853,20 @@ final class ThreadViewModel: ObservableObject {
     loadTask?.cancel()
     loadTask = nil
     isCheckingLatestReplies = false
+  }
+
+  private static func jumpDestination(
+    page: Int,
+    location: ThreadPostLocation?
+  ) -> ThreadJumpDestination? {
+    switch location {
+    case .pageNumber:
+      .page(page)
+    case .postID(let postID):
+      postID > 0 ? .postID(postID) : nil
+    case .pageCursor(_), .latestReplies(after: _), nil:
+      nil
+    }
   }
 
   private func nextLoadMoreRequest() -> (page: Int, location: ThreadPostLocation) {

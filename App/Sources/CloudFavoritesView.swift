@@ -673,7 +673,8 @@ struct CloudFavoritesView: View {
           favoritesRepository: favoritesRepository,
           searchHistoryRepository: searchHistoryRepository,
           linkRoute: navigation.route,
-          initialBrowseOptions: navigation.options
+          initialBrowseOptions: navigation.options,
+          cloudFavoriteUpdate: navigation.update
         )
       } label: {
         CloudFavoriteThreadRow(

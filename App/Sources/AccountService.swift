@@ -178,7 +178,15 @@ struct CloudFavoriteThread: Identifiable, Hashable, Sendable {
   ) -> CloudFavoriteThreadNavigation {
     CloudFavoriteThreadNavigation(
       route: threadRoute,
-      options: overrides.applying(to: threadRoute.options)
+      options: overrides.applying(to: threadRoute.options),
+      update: !isDeleted && hasUpdates
+        ? CloudFavoriteThreadUpdate(
+          threadID: id,
+          markedPostID: markPostID,
+          latestPostID: latestPostID,
+          latestFloor: latestFloor
+        )
+        : nil
     )
   }
 }
@@ -186,6 +194,30 @@ struct CloudFavoriteThread: Identifiable, Hashable, Sendable {
 struct CloudFavoriteThreadNavigation: Hashable, Sendable {
   let route: TiebaThreadRoute
   let options: ThreadBrowseOptions
+  let update: CloudFavoriteThreadUpdate?
+}
+
+struct CloudFavoriteThreadUpdate: Hashable, Sendable {
+  let route: TiebaThreadRoute
+  let floor: Int
+
+  init?(
+    threadID: Int64,
+    markedPostID: Int64?,
+    latestPostID: Int64?,
+    latestFloor: Int?
+  ) {
+    guard
+      threadID > 0,
+      let latestPostID,
+      latestPostID > 0,
+      latestPostID != markedPostID,
+      let latestFloor,
+      latestFloor > 0
+    else { return nil }
+    route = TiebaThreadRoute(threadID: threadID, postID: latestPostID)
+    floor = latestFloor
+  }
 }
 
 struct CloudFavoritePage: Hashable, Sendable {
