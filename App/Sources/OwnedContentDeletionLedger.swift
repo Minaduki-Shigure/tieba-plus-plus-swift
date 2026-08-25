@@ -1349,7 +1349,7 @@ actor TransientOwnedContentDeletionLedger: OwnedContentDeletionLedgerRepository 
     guard phase == .accepted || phase == .outcomeUnknown else {
       throw OwnedContentDeletionLedgerError.invalidTransition
     }
-    try OwnedContentDeletionLedgerModel.transition(
+    return try OwnedContentDeletionLedgerModel.transition(
       records: &storedRecords,
       key: key,
       operationID: operationID,

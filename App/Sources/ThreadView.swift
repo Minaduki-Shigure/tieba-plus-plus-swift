@@ -94,6 +94,10 @@ struct ThreadView: View {
   }
 
   var body: some View {
+    threadRouting
+  }
+
+  private var threadContent: some View {
     Group {
       if !deletionProjectionResolved {
         ProgressView()
@@ -113,432 +117,460 @@ struct ThreadView: View {
         postList
       }
     }
-    .navigationTitle(threadNavigationTitle)
-    .environment(\.contentReportScopeID, reportScopeID)
-    .navigationBarTitleDisplayMode(.inline)
-    .safeAreaInset(edge: .top, spacing: 0) {
-      VStack(spacing: 0) {
+  }
+
+  private var threadChrome: some View {
+    threadContent
+      .navigationTitle(threadNavigationTitle)
+      .environment(\.contentReportScopeID, reportScopeID)
+      .navigationBarTitleDisplayMode(.inline)
+      .safeAreaInset(edge: .top, spacing: 0) {
+        VStack(spacing: 0) {
+          if
+            deletionProjectionResolved,
+            ownedContentDeletionAcceptedTopic == nil,
+            !isPureReadingMode
+          {
+            optionsBar
+          }
+          if !deletionProjectionResolved || ownedContentDeletionAcceptedTopic != nil {
+            EmptyView()
+          } else if let ownedContentDeletionInProgress {
+            ownedContentDeletionProgress(ownedContentDeletionInProgress)
+          } else if let ownedContentDeletionUnknownTarget {
+            ownedContentDeletionUnknown(ownedContentDeletionUnknownTarget)
+          }
+        }
+      }
+      .safeAreaInset(edge: .bottom, spacing: 0) {
+        if deletionProjectionResolved, ownedContentDeletionAcceptedTopic == nil {
+          threadBottomInset
+        }
+      }
+      .toolbar { threadToolbar }
+  }
+
+  @ToolbarContentBuilder
+  private var threadToolbar: some ToolbarContent {
+    ToolbarItem(placement: .principal) {
+      navigationPrincipal
+    }
+
+    ToolbarItemGroup(placement: .navigationBarTrailing) {
+      if deletionProjectionResolved, ownedContentDeletionAcceptedTopic == nil {
+        Menu {
+          ForEach(ThreadReadingMode.allCases) { mode in
+            Button {
+              selectReadingMode(mode)
+            } label: {
+              Label(
+                mode.title,
+                systemImage: readingMode == mode ? "checkmark" : mode.systemImage
+              )
+            }
+            .accessibilityLabel(
+              readingMode == mode ? "\(mode.title)，当前" : mode.title
+            )
+          }
+        } label: {
+          Image(systemName: readingMode.systemImage)
+        }
+        .accessibilityLabel("阅读模式，当前为 \(readingMode.title)")
+        .accessibilityIdentifier("thread-reading-mode-menu")
+        .help("阅读模式：\(readingMode.title)")
+
         if
+          let shareURL = TiebaLink.canonicalURL(
+            for: .thread(TiebaThreadRoute(threadID: viewModel.thread.id))
+          ),
+          let copyURL = TiebaLink.threadCopyURL(
+            threadID: viewModel.thread.id,
+            onlyThreadAuthor: viewModel.options.onlyThreadAuthor
+          )
+        {
+          TiebaShareMenu(
+            url: shareURL,
+            copyURL: copyURL,
+            title: viewModel.thread.title.isEmpty
+              ? "帖子 \(viewModel.thread.id)"
+              : viewModel.thread.title
+          )
+        }
+
+        LocalFavoriteButton(target: favoriteTarget, repository: favoritesRepository)
+
+        ThreadCloudFavoriteControlSlot(
+          store: threadCloudFavoriteStore,
+          target: threadCloudFavoriteTarget,
+          currentPosition: currentCloudFavoritePosition,
+          requestAction: requestCloudFavoriteAction,
+          retry: retryCloudFavorite
+        )
+
+        Button {
+          pageInput = viewModel.currentPage > 0 ? String(viewModel.currentPage) : ""
+          showsPageJump = true
+        } label: {
+          Image(systemName: "number.square")
+        }
+        .disabled(
+          viewModel.totalPages <= 1
+            || viewModel.isJumping
+            || viewModel.isCheckingLatestReplies
+        )
+        .accessibilityLabel("跳转页码")
+        .help("跳转页码")
+
+        if !isPureReadingMode {
+          ThreadTopicActionsMenu(
+            reportTarget: topicReportTarget,
+            deletionStore: ownedContentDeletionStore,
+            deletionTarget: topicDeletionTarget,
+            requestDeletion: requestOwnedContentDeletion
+          )
+        }
+      }
+    }
+  }
+
+  private var threadDialogs: some View {
+    threadChrome
+      .alert("跳转页码", isPresented: $showsPageJump) {
+        TextField("页码", text: $pageInput)
+          .keyboardType(.numberPad)
+        Button("跳转") {
+          viewModel.jump(toPage: Int(pageInput) ?? 0)
+        }
+        Button("取消", role: .cancel) {}
+      } message: {
+        if viewModel.totalPages > 0 {
+          Text("当前第 \(max(viewModel.currentPage, 1)) 页，共 \(viewModel.totalPages) 页")
+        }
+      }
+      .confirmationDialog(
+        "进入沉浸阅读？",
+        isPresented: immersiveReadingConfirmationIsPresented,
+        titleVisibility: .visible
+      ) {
+        if let pendingImmersiveReadingConfirmation {
+          Button("进入并回到第一页") {
+            confirmImmersiveReading(pendingImmersiveReadingConfirmation)
+          }
+        }
+        Button("取消", role: .cancel) {
+          pendingImmersiveReadingConfirmation = nil
+        }
+      } message: {
+        Text(
+          "将回到第 1 页并只加载楼主内容。退出沉浸阅读后仍会保持“只看楼主”，可在帖子顶部关闭。"
+        )
+      }
+      .confirmationDialog(
+        pendingAgreementChange?.confirmationTitle ?? "更新点赞状态？",
+        isPresented: agreementConfirmationIsPresented,
+        titleVisibility: .visible
+      ) {
+        if let pendingAgreementChange {
+          if pendingAgreementChange.targetAgreed {
+            Button(pendingAgreementChange.actionTitle) {
+              confirmAgreementChange(pendingAgreementChange)
+            }
+          } else {
+            Button(pendingAgreementChange.actionTitle, role: .destructive) {
+              confirmAgreementChange(pendingAgreementChange)
+            }
+          }
+        }
+        Button("取消", role: .cancel) { pendingAgreementChange = nil }
+      } message: {
+        Text(pendingAgreementChange?.confirmationMessage ?? "")
+      }
+      .confirmationDialog(
+        pendingCloudFavoriteAction?.title ?? "更新贴吧云收藏？",
+        isPresented: cloudFavoriteConfirmationIsPresented,
+        titleVisibility: .visible
+      ) {
+        if let pendingCloudFavoriteAction {
+          if pendingCloudFavoriteAction.isDestructive {
+            Button(pendingCloudFavoriteAction.actionTitle, role: .destructive) {
+              confirmCloudFavoriteAction(pendingCloudFavoriteAction)
+            }
+          } else {
+            Button(pendingCloudFavoriteAction.actionTitle) {
+              confirmCloudFavoriteAction(pendingCloudFavoriteAction)
+            }
+          }
+        }
+        Button("取消", role: .cancel) { pendingCloudFavoriteAction = nil }
+      } message: {
+        Text(pendingCloudFavoriteAction?.message ?? "")
+      }
+      .confirmationDialog(
+        pendingOwnedContentDeletion?.confirmationTitle ?? "删除本人内容？",
+        isPresented: ownedContentDeletionConfirmationIsPresented,
+        titleVisibility: .visible
+      ) {
+        if let pendingOwnedContentDeletion {
+          Button(pendingOwnedContentDeletion.actionTitle, role: .destructive) {
+            confirmOwnedContentDeletion(pendingOwnedContentDeletion)
+          }
+        }
+        Button("取消", role: .cancel) { pendingOwnedContentDeletion = nil }
+      } message: {
+        Text(pendingOwnedContentDeletion?.confirmationMessage ?? "")
+      }
+      .alert("无法更新点赞状态", isPresented: agreementErrorIsPresented) {
+        Button("好", role: .cancel) { agreementErrorMessage = nil }
+      } message: {
+        Text(agreementErrorMessage ?? "无法完成点赞操作。")
+      }
+      .alert("无法更新贴吧云收藏", isPresented: cloudFavoriteErrorIsPresented) {
+        Button("重新读取") {
+          cloudFavoriteErrorMessage = nil
+          if let target = threadCloudFavoriteTarget {
+            retryCloudFavorite(target)
+          }
+        }
+        Button("好", role: .cancel) { cloudFavoriteErrorMessage = nil }
+      } message: {
+        Text(cloudFavoriteErrorMessage ?? "无法完成云收藏操作。")
+      }
+      .alert("无法删除内容", isPresented: ownedContentDeletionErrorIsPresented) {
+        Button("好", role: .cancel) { ownedContentDeletionErrorMessage = nil }
+      } message: {
+        Text(ownedContentDeletionErrorMessage ?? "无法完成删除操作。")
+      }
+      .fullScreenCover(
+        item: $pictureGalleryRoute,
+        onDismiss: cancelPictureGallery
+      ) { route in
+        ThreadImageGalleryView(viewModel: route.viewModel)
+      }
+  }
+
+  private var threadTasks: some View {
+    threadDialogs
+      .task { await bootstrapThread() }
+      .task(
+        id: ContentAgreementRegistrationTaskID(
+          descriptorEpoch: viewModel.agreementDescriptorEpoch,
+          isEnabled: deletionProjectionResolved
+            && ownedContentDeletionAcceptedTopic == nil
+            && !isPureReadingMode
+        )
+      ) {
+        guard let contentAgreementStore else { return }
+        guard
           deletionProjectionResolved,
           ownedContentDeletionAcceptedTopic == nil,
           !isPureReadingMode
-        {
-          optionsBar
+        else {
+          contentAgreementStore.removeScope(agreementScopeID)
+          return
         }
-        if !deletionProjectionResolved || ownedContentDeletionAcceptedTopic != nil {
-          EmptyView()
-        } else if let ownedContentDeletionInProgress {
-          ownedContentDeletionProgress(ownedContentDeletionInProgress)
-        } else if let ownedContentDeletionUnknownTarget {
-          ownedContentDeletionUnknown(ownedContentDeletionUnknownTarget)
+        await contentAgreementStore.replaceDescriptors(
+          viewModel.agreementReadDescriptors,
+          for: agreementScopeID
+        )
+      }
+      .task(id: threadCloudFavoriteTarget) {
+        guard let threadCloudFavoriteStore, let target = threadCloudFavoriteTarget else {
+          threadCloudFavoriteStore?.deactivate(cloudFavoriteScopeID)
+          return
         }
+        await threadCloudFavoriteStore.activate(target, for: cloudFavoriteScopeID)
       }
-    }
-    .safeAreaInset(edge: .bottom, spacing: 0) {
-      if deletionProjectionResolved, ownedContentDeletionAcceptedTopic == nil {
-        threadBottomInset
+      .task(
+        id: InboxReplyIntentResolutionTaskID(
+          loadState: viewModel.state,
+          hidesReplyEntryPoints: hidesReplyEntryPoints
+        )
+      ) {
+        await consumeInboxReplyIntentIfReady()
       }
-    }
-    .toolbar {
-      ToolbarItem(placement: .principal) {
-        navigationPrincipal
-      }
-
-      ToolbarItemGroup(placement: .navigationBarTrailing) {
-        if deletionProjectionResolved, ownedContentDeletionAcceptedTopic == nil {
-          Menu {
-            ForEach(ThreadReadingMode.allCases) { mode in
-              Button {
-                selectReadingMode(mode)
-              } label: {
-                Label(
-                  mode.title,
-                  systemImage: readingMode == mode ? "checkmark" : mode.systemImage
-                )
-              }
-              .accessibilityLabel(
-                readingMode == mode ? "\(mode.title)，当前" : mode.title
-              )
-            }
-          } label: {
-            Image(systemName: readingMode.systemImage)
+      .task(id: viewModel.state) {
+        guard
+          deletionProjectionResolved,
+          !hasRecordedHistoryVisit,
+          !Task.isCancelled,
+          viewModel.state == .loaded,
+          ownedContentDeletionAcceptedTopic == nil,
+          !viewModel.thread.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return }
+        hasRecordedHistoryVisit = true
+        let requestedPostID = restoredHistorySnapshot?.lastPostID ?? linkRoute?.postID
+        let resolvedPost = requestedPostID.flatMap { postID in
+          viewModel.post(withID: postID).flatMap {
+            $0.localVisibility == .hidden ? nil : $0
           }
-          .accessibilityLabel("阅读模式，当前为 \(readingMode.title)")
-          .accessibilityIdentifier("thread-reading-mode-menu")
-          .help("阅读模式：\(readingMode.title)")
-
-          if
-            let shareURL = TiebaLink.canonicalURL(
-              for: .thread(TiebaThreadRoute(threadID: viewModel.thread.id))
-            ),
-            let copyURL = TiebaLink.threadCopyURL(
-              threadID: viewModel.thread.id,
-              onlyThreadAuthor: viewModel.options.onlyThreadAuthor
+        }
+        try? await historyRepository.record(
+          .thread(
+            ThreadHistorySnapshot(
+              thread: viewModel.thread,
+              resolvedAuthorAvatarURL: threadAuthorAvatarURL,
+              browseOptions: viewModel.options,
+              lastPostID: resolvedPost?.id,
+              lastFloor: resolvedPost?.floor
             )
-          {
-            TiebaShareMenu(
-              url: shareURL,
-              copyURL: copyURL,
-              title: viewModel.thread.title.isEmpty
-                ? "帖子 \(viewModel.thread.id)"
-                : viewModel.thread.title
-            )
-          }
-
-          LocalFavoriteButton(target: favoriteTarget, repository: favoritesRepository)
-
-          ThreadCloudFavoriteControlSlot(
-            store: threadCloudFavoriteStore,
-            target: threadCloudFavoriteTarget,
-            currentPosition: currentCloudFavoritePosition,
-            requestAction: requestCloudFavoriteAction,
-            retry: retryCloudFavorite
           )
+        )
+      }
+      .task(
+        id: ThreadProgressTaskID(
+          postID: visiblePost?.id,
+          isRestoringPrependPosition: viewModel.isRestoringPrependPosition
+        )
+      ) {
+        guard
+          deletionProjectionResolved,
+          ownedContentDeletionAcceptedTopic == nil,
+          let visiblePost,
+          !viewModel.isRestoringPrependPosition
+        else { return }
+        try? await Task.sleep(nanoseconds: 600_000_000)
+        guard !Task.isCancelled, !viewModel.isRestoringPrependPosition else { return }
+        await persistProgress(visiblePost, options: viewModel.options)
+      }
+  }
 
-          Button {
-            pageInput = viewModel.currentPage > 0 ? String(viewModel.currentPage) : ""
-            showsPageJump = true
-          } label: {
-            Image(systemName: "number.square")
-          }
-          .disabled(
-            viewModel.totalPages <= 1
-              || viewModel.isJumping
-              || viewModel.isCheckingLatestReplies
-          )
-          .accessibilityLabel("跳转页码")
-          .help("跳转页码")
-
-          if !isPureReadingMode {
-            ThreadTopicActionsMenu(
-              reportTarget: topicReportTarget,
-              deletionStore: ownedContentDeletionStore,
-              deletionTarget: topicDeletionTarget,
-              requestDeletion: requestOwnedContentDeletion
-            )
-          }
-        }
-      }
-    }
-    .alert("跳转页码", isPresented: $showsPageJump) {
-      TextField("页码", text: $pageInput)
-        .keyboardType(.numberPad)
-      Button("跳转") {
-        viewModel.jump(toPage: Int(pageInput) ?? 0)
-      }
-      Button("取消", role: .cancel) {}
-    } message: {
-      if viewModel.totalPages > 0 {
-        Text("当前第 \(max(viewModel.currentPage, 1)) 页，共 \(viewModel.totalPages) 页")
-      }
-    }
-    .confirmationDialog(
-      "进入沉浸阅读？",
-      isPresented: immersiveReadingConfirmationIsPresented,
-      titleVisibility: .visible
-    ) {
-      if let pendingImmersiveReadingConfirmation {
-        Button("进入并回到第一页") {
-          confirmImmersiveReading(pendingImmersiveReadingConfirmation)
-        }
-      }
-      Button("取消", role: .cancel) {
+  private var threadLifecycle: some View {
+    threadTasks
+      .onChange(of: viewModel.options) { options in
         pendingImmersiveReadingConfirmation = nil
-      }
-    } message: {
-      Text(
-        "将回到第 1 页并只加载楼主内容。退出沉浸阅读后仍会保持“只看楼主”，可在帖子顶部关闭。"
-      )
-    }
-    .confirmationDialog(
-      pendingAgreementChange?.confirmationTitle ?? "更新点赞状态？",
-      isPresented: agreementConfirmationIsPresented,
-      titleVisibility: .visible
-    ) {
-      if let pendingAgreementChange {
-        if pendingAgreementChange.targetAgreed {
-          Button(pendingAgreementChange.actionTitle) {
-            confirmAgreementChange(pendingAgreementChange)
-          }
-        } else {
-          Button(pendingAgreementChange.actionTitle, role: .destructive) {
-            confirmAgreementChange(pendingAgreementChange)
-          }
-        }
-      }
-      Button("取消", role: .cancel) { pendingAgreementChange = nil }
-    } message: {
-      Text(pendingAgreementChange?.confirmationMessage ?? "")
-    }
-    .confirmationDialog(
-      pendingCloudFavoriteAction?.title ?? "更新贴吧云收藏？",
-      isPresented: cloudFavoriteConfirmationIsPresented,
-      titleVisibility: .visible
-    ) {
-      if let pendingCloudFavoriteAction {
-        if pendingCloudFavoriteAction.isDestructive {
-          Button(pendingCloudFavoriteAction.actionTitle, role: .destructive) {
-            confirmCloudFavoriteAction(pendingCloudFavoriteAction)
-          }
-        } else {
-          Button(pendingCloudFavoriteAction.actionTitle) {
-            confirmCloudFavoriteAction(pendingCloudFavoriteAction)
-          }
-        }
-      }
-      Button("取消", role: .cancel) { pendingCloudFavoriteAction = nil }
-    } message: {
-      Text(pendingCloudFavoriteAction?.message ?? "")
-    }
-    .confirmationDialog(
-      pendingOwnedContentDeletion?.confirmationTitle ?? "删除本人内容？",
-      isPresented: ownedContentDeletionConfirmationIsPresented,
-      titleVisibility: .visible
-    ) {
-      if let pendingOwnedContentDeletion {
-        Button(pendingOwnedContentDeletion.actionTitle, role: .destructive) {
-          confirmOwnedContentDeletion(pendingOwnedContentDeletion)
-        }
-      }
-      Button("取消", role: .cancel) { pendingOwnedContentDeletion = nil }
-    } message: {
-      Text(pendingOwnedContentDeletion?.confirmationMessage ?? "")
-    }
-    .alert("无法更新点赞状态", isPresented: agreementErrorIsPresented) {
-      Button("好", role: .cancel) { agreementErrorMessage = nil }
-    } message: {
-      Text(agreementErrorMessage ?? "无法完成点赞操作。")
-    }
-    .alert("无法更新贴吧云收藏", isPresented: cloudFavoriteErrorIsPresented) {
-      Button("重新读取") {
-        cloudFavoriteErrorMessage = nil
-        if let target = threadCloudFavoriteTarget {
-          retryCloudFavorite(target)
-        }
-      }
-      Button("好", role: .cancel) { cloudFavoriteErrorMessage = nil }
-    } message: {
-      Text(cloudFavoriteErrorMessage ?? "无法完成云收藏操作。")
-    }
-    .alert("无法删除内容", isPresented: ownedContentDeletionErrorIsPresented) {
-      Button("好", role: .cancel) { ownedContentDeletionErrorMessage = nil }
-    } message: {
-      Text(ownedContentDeletionErrorMessage ?? "无法完成删除操作。")
-    }
-    .fullScreenCover(
-      item: $pictureGalleryRoute,
-      onDismiss: cancelPictureGallery
-    ) { route in
-      ThreadImageGalleryView(viewModel: route.viewModel)
-    }
-    .task { await bootstrapThread() }
-    .task(
-      id: ContentAgreementRegistrationTaskID(
-        descriptorEpoch: viewModel.agreementDescriptorEpoch,
-        isEnabled: deletionProjectionResolved
-          && ownedContentDeletionAcceptedTopic == nil
-          && !isPureReadingMode
-      )
-    ) {
-      guard let contentAgreementStore else { return }
-      guard
-        deletionProjectionResolved,
-        ownedContentDeletionAcceptedTopic == nil,
-        !isPureReadingMode
-      else {
-        contentAgreementStore.removeScope(agreementScopeID)
-        return
-      }
-      await contentAgreementStore.replaceDescriptors(
-        viewModel.agreementReadDescriptors,
-        for: agreementScopeID
-      )
-    }
-    .task(id: threadCloudFavoriteTarget) {
-      guard let threadCloudFavoriteStore, let target = threadCloudFavoriteTarget else {
-        threadCloudFavoriteStore?.deactivate(cloudFavoriteScopeID)
-        return
-      }
-      await threadCloudFavoriteStore.activate(target, for: cloudFavoriteScopeID)
-    }
-    .task(
-      id: InboxReplyIntentResolutionTaskID(
-        loadState: viewModel.state,
-        hidesReplyEntryPoints: hidesReplyEntryPoints
-      )
-    ) {
-      await consumeInboxReplyIntentIfReady()
-    }
-    .task(id: viewModel.state) {
-      guard
-        deletionProjectionResolved,
-        !hasRecordedHistoryVisit,
-        !Task.isCancelled,
-        viewModel.state == .loaded,
-        ownedContentDeletionAcceptedTopic == nil,
-        !viewModel.thread.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      else { return }
-      hasRecordedHistoryVisit = true
-      let requestedPostID = restoredHistorySnapshot?.lastPostID ?? linkRoute?.postID
-      let resolvedPost = requestedPostID.flatMap { postID in
-        viewModel.post(withID: postID).flatMap {
-          $0.localVisibility == .hidden ? nil : $0
-        }
-      }
-      try? await historyRepository.record(
-        .thread(
-          ThreadHistorySnapshot(
-            thread: viewModel.thread,
-            resolvedAuthorAvatarURL: threadAuthorAvatarURL,
-            browseOptions: viewModel.options,
-            lastPostID: resolvedPost?.id,
-            lastFloor: resolvedPost?.floor
-          )
+        let normalizedMode = ThreadReadingModePolicy.normalized(
+          readingMode,
+          options: options
         )
-      )
-    }
-    .task(
-      id: ThreadProgressTaskID(
-        postID: visiblePost?.id,
-        isRestoringPrependPosition: viewModel.isRestoringPrependPosition
-      )
-    ) {
-      guard
-        deletionProjectionResolved,
-        ownedContentDeletionAcceptedTopic == nil,
-        let visiblePost,
-        !viewModel.isRestoringPrependPosition
-      else { return }
-      try? await Task.sleep(nanoseconds: 600_000_000)
-      guard !Task.isCancelled, !viewModel.isRestoringPrependPosition else { return }
-      await persistProgress(visiblePost, options: viewModel.options)
-    }
-    .onChange(of: viewModel.options) { options in
-      pendingImmersiveReadingConfirmation = nil
-      let normalizedMode = ThreadReadingModePolicy.normalized(
-        readingMode,
-        options: options
-      )
-      if normalizedMode != readingMode {
-        setReadingMode(normalizedMode)
-      }
-      cancelPictureGallery()
-      scrollPositionCoalescer.reset()
-      scrollPosition = .empty
-      persistBrowseOptions(options)
-    }
-    .onDisappear {
-      scrollPositionCoalescer.cancelPendingPublication()
-      if
-        deletionProjectionResolved,
-        ownedContentDeletionAcceptedTopic == nil,
-        let latestVisiblePost,
-        !viewModel.isRestoringPrependPosition
-      {
-        let options = viewModel.options
-        Task { await persistProgress(latestVisiblePost, options: options) }
-      } else if deletionProjectionResolved, ownedContentDeletionAcceptedTopic == nil {
-        persistBrowseOptions(viewModel.options)
-      }
-      cancelPictureGallery()
-      contentReportCoordinator?.invalidate(scopeID: reportScopeID)
-      pendingAgreementChange = nil
-      pendingImmersiveReadingConfirmation = nil
-      pendingCloudFavoriteAction = nil
-      pendingOwnedContentDeletion = nil
-      ownedContentDeletionErrorMessage = nil
-      clearSelectableTextRoute()
-      contentAgreementStore?.removeScope(agreementScopeID)
-      threadCloudFavoriteStore?.deactivate(cloudFavoriteScopeID)
-      viewModel.cancel()
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
-      invalidateInboxReplyIntentForAccountChange()
-      pendingAgreementChange = nil
-      agreementErrorMessage = nil
-      pendingCloudFavoriteAction = nil
-      cloudFavoriteErrorMessage = nil
-      pendingOwnedContentDeletion = nil
-      ownedContentDeletionErrorMessage = nil
-    }
-    .onChange(of: replyComposerContext) { context in
-      if context == nil {
-        inboxReplyComposerIntent = nil
-      }
-    }
-    .onChange(of: hidesReplyEntryPoints) { isHidden in
-      if isHidden {
-        invalidatePendingInboxReplyIntentForHiddenPreference()
-      }
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
-      guard deletionProjectionResolved, ownedContentDeletionAcceptedTopic == nil else {
-        return
-      }
-      cancelPictureGallery()
-      contentReportCoordinator?.invalidate(scopeID: reportScopeID)
-      pendingCloudFavoriteAction = nil
-      clearSelectableTextRoute()
-      scrollPositionCoalescer.reset()
-      Task { @MainActor in
+        if normalizedMode != readingMode {
+          setReadingMode(normalizedMode)
+        }
+        cancelPictureGallery()
+        scrollPositionCoalescer.reset()
         scrollPosition = .empty
-        viewModel.reload()
+        persistBrowseOptions(options)
       }
-    }
-    .navigationDestination(isPresented: linkedTargetPresented) {
-      if let linkedTarget {
-        TiebaLinkDestination(
-          target: linkedTarget,
-          service: service,
-          historyRepository: historyRepository,
-          favoritesRepository: favoritesRepository,
-          searchHistoryRepository: searchHistoryRepository
-        )
-      }
-    }
-    .navigationDestination(isPresented: replyComposerPresented) {
-      if let replyComposerContext {
-        ReplyComposerView(
-          context: replyComposerContext,
-          verifyVisibility: verifyReplyVisibility,
-          onConfirmed: handleConfirmedReply
-        )
-      }
-    }
-    .sheet(item: $sheetRoute) { route in
-      switch route {
-      case .comments(let commentsRoute):
-        NavigationStack {
-          switch commentsRoute {
-          case .post(let threadID, let postID):
-            CommentsView(
-              threadID: threadID,
-              postID: postID,
-              service: service,
-              historyRepository: historyRepository,
-              favoritesRepository: favoritesRepository,
-              searchHistoryRepository: searchHistoryRepository
-            )
-          case .comment(let threadID, let postID, let commentID):
-            CommentsView(
-              threadID: threadID,
-              postID: postID,
-              aroundCommentID: commentID,
-              service: service,
-              historyRepository: historyRepository,
-              favoritesRepository: favoritesRepository,
-              searchHistoryRepository: searchHistoryRepository
-            )
-          }
+      .onDisappear {
+        scrollPositionCoalescer.cancelPendingPublication()
+        if
+          deletionProjectionResolved,
+          ownedContentDeletionAcceptedTopic == nil,
+          let latestVisiblePost,
+          !viewModel.isRestoringPrependPosition
+        {
+          let options = viewModel.options
+          Task { await persistProgress(latestVisiblePost, options: options) }
+        } else if deletionProjectionResolved, ownedContentDeletionAcceptedTopic == nil {
+          persistBrowseOptions(viewModel.options)
         }
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
-      case .selectableText(let presentation):
-        SelectableTextSheet(
-          presentation: presentation,
-          onCommand: performSelectableTextCommand
-        )
+        cancelPictureGallery()
+        contentReportCoordinator?.invalidate(scopeID: reportScopeID)
+        pendingAgreementChange = nil
+        pendingImmersiveReadingConfirmation = nil
+        pendingCloudFavoriteAction = nil
+        pendingOwnedContentDeletion = nil
+        ownedContentDeletionErrorMessage = nil
+        clearSelectableTextRoute()
+        contentAgreementStore?.removeScope(agreementScopeID)
+        threadCloudFavoriteStore?.deactivate(cloudFavoriteScopeID)
+        viewModel.cancel()
       }
+      .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+        invalidateInboxReplyIntentForAccountChange()
+        pendingAgreementChange = nil
+        agreementErrorMessage = nil
+        pendingCloudFavoriteAction = nil
+        cloudFavoriteErrorMessage = nil
+        pendingOwnedContentDeletion = nil
+        ownedContentDeletionErrorMessage = nil
+      }
+      .onChange(of: replyComposerContext) { context in
+        if context == nil {
+          inboxReplyComposerIntent = nil
+        }
+      }
+      .onChange(of: hidesReplyEntryPoints) { isHidden in
+        if isHidden {
+          invalidatePendingInboxReplyIntentForHiddenPreference()
+        }
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
+        guard deletionProjectionResolved, ownedContentDeletionAcceptedTopic == nil else {
+          return
+        }
+        cancelPictureGallery()
+        contentReportCoordinator?.invalidate(scopeID: reportScopeID)
+        pendingCloudFavoriteAction = nil
+        clearSelectableTextRoute()
+        scrollPositionCoalescer.reset()
+        Task { @MainActor in
+          scrollPosition = .empty
+          viewModel.reload()
+        }
+      }
+  }
+
+  private var threadRouting: some View {
+    threadLifecycle
+      .navigationDestination(isPresented: linkedTargetPresented) {
+        if let linkedTarget {
+          TiebaLinkDestination(
+            target: linkedTarget,
+            service: service,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
+          )
+        }
+      }
+      .navigationDestination(isPresented: replyComposerPresented) {
+        if let replyComposerContext {
+          ReplyComposerView(
+            context: replyComposerContext,
+            verifyVisibility: verifyReplyVisibility,
+            onConfirmed: handleConfirmedReply
+          )
+        }
+      }
+      .sheet(item: $sheetRoute) { route in
+        threadSheet(route)
+      }
+  }
+
+  @ViewBuilder
+  private func threadSheet(_ route: ThreadSheetRoute) -> some View {
+    switch route {
+    case .comments(let commentsRoute):
+      NavigationStack {
+        switch commentsRoute {
+        case .post(let threadID, let postID):
+          CommentsView(
+            threadID: threadID,
+            postID: postID,
+            service: service,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
+          )
+        case .comment(let threadID, let postID, let commentID):
+          CommentsView(
+            threadID: threadID,
+            postID: postID,
+            aroundCommentID: commentID,
+            service: service,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
+          )
+        }
+      }
+      .presentationDetents([.medium, .large])
+      .presentationDragIndicator(.visible)
+    case .selectableText(let presentation):
+      SelectableTextSheet(
+        presentation: presentation,
+        onCommand: performSelectableTextCommand
+      )
     }
   }
 
