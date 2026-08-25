@@ -52,6 +52,7 @@ final class ThreadViewModel: ObservableObject {
   private var descendingFallbackPage: Int?
   private var agreementTargetsByPostID: [Int64: ContentAgreementTarget] = [:]
   private var postsByID: [Int64: BrowsePost] = [:]
+  private var acceptedDeletionPostIDs = Set<Int64>()
   private(set) var scrollTargetsByPostID: [Int64: ThreadScrollTargetDescriptor] = [:]
   private(set) var resolvedThreadAuthorAvatarURL: URL?
   private(set) var firstDisplayableReplyPostID: Int64?
@@ -899,6 +900,9 @@ final class ThreadViewModel: ObservableObject {
     firstPost replacementFirstPost: BrowsePost?,
     posts replacementPosts: [BrowsePost]
   ) -> Bool {
+    let replacementPosts = replacementPosts.filter {
+      !acceptedDeletionPostIDs.contains($0.id)
+    }
     let firstPostChanged = firstPost != replacementFirstPost
     let postsChanged = posts != replacementPosts
     guard firstPostChanged || postsChanged else { return false }
@@ -918,7 +922,11 @@ final class ThreadViewModel: ObservableObject {
   ) {
     var accepted: [BrowsePost] = []
     accepted.reserveCapacity(candidates.count)
-    for post in candidates where post.id > 0 && postsByID[post.id] == nil {
+    for post in candidates where
+      post.id > 0
+      && !acceptedDeletionPostIDs.contains(post.id)
+      && postsByID[post.id] == nil
+    {
       accepted.append(post)
     }
     guard !accepted.isEmpty else {
@@ -969,6 +977,33 @@ final class ThreadViewModel: ObservableObject {
 
   func post(withID postID: Int64) -> BrowsePost? {
     postsByID[postID]
+  }
+
+  @discardableResult
+  func applyAcceptedContentDeletion(_ target: OwnedContentDeletionTarget) -> Bool {
+    guard
+      target.kind == .post,
+      target.threadID == thread.id,
+      target.forumID == thread.forumID,
+      target.forumName
+        == thread.forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+          .precomposedStringWithCanonicalMapping,
+      target.objectID != thread.firstPostID,
+      !acceptedDeletionPostIDs.contains(target.objectID)
+    else { return false }
+    let matches = posts.filter { $0.id == target.objectID }
+    guard matches.allSatisfy({ post in
+      post.threadID == target.threadID
+        && post.floor == target.floor
+        && post.authorID == target.authorID
+    }) else { return false }
+    acceptedDeletionPostIDs.insert(target.objectID)
+    if !matches.isEmpty {
+      posts.removeAll { $0.id == target.objectID }
+      rebuildPostIndexes()
+    }
+    replaceAgreementDescriptors(with: agreementReadDescriptors)
+    return true
   }
 
   func agreementTarget(forPostID postID: Int64) -> ContentAgreementTarget? {
@@ -1164,9 +1199,13 @@ final class ThreadViewModel: ObservableObject {
       ?? (shouldExtractLegacyFirstPost ? firstPostCandidates.first : nil)
     let replies: [BrowsePost]
     if let resolvedFirstPost {
-      replies = page.posts.filter { $0.id != resolvedFirstPost.id && $0.floor != 1 }
+      replies = page.posts.filter {
+        $0.id != resolvedFirstPost.id
+          && $0.floor != 1
+          && !acceptedDeletionPostIDs.contains($0.id)
+      }
     } else {
-      replies = page.posts
+      replies = page.posts.filter { !acceptedDeletionPostIDs.contains($0.id) }
     }
 
     guard replies.allSatisfy({ $0.id > 0 && $0.threadID == threadID }) else {
@@ -1239,6 +1278,7 @@ final class ThreadViewModel: ObservableObject {
     return newItems.filter {
       $0.id > 0
         && $0.threadID == threadID
+        && !acceptedDeletionPostIDs.contains($0.id)
         && postsByID[$0.id] == nil
         && seen.insert($0.id).inserted
     }

@@ -826,6 +826,11 @@ enum TiebaAuthenticatedDecoder {
     try agreementWriteScore(from: body)
   }
 
+  static func checkOwnedContentDeletionAcknowledgement(from body: Data) throws {
+    let object = try responseObject(from: body)
+    try checkServerError(object)
+  }
+
   private static func responseObject(from body: Data) throws -> [String: Any] {
     do {
       guard

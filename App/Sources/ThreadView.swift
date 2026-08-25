@@ -29,6 +29,10 @@ struct ThreadView: View {
   @State private var cloudFavoriteScopeID = UUID()
   @State private var pendingCloudFavoriteAction: ThreadCloudFavoritePendingAction?
   @State private var cloudFavoriteErrorMessage: String?
+  @State private var pendingOwnedContentDeletion: PendingOwnedContentDeletion?
+  @State private var ownedContentDeletionInProgress: OwnedContentDeletionTarget?
+  @State private var ownedContentDeletionUnknownTarget: OwnedContentDeletionTarget?
+  @State private var ownedContentDeletionErrorMessage: String?
   @State private var replyComposerContext: TextReplyComposerContext?
   @State private var pendingInboxReplyIntent: InboxReplyIntent?
   @State private var isResolvingInboxReplyIntent = false
@@ -36,11 +40,13 @@ struct ThreadView: View {
   @State private var inboxReplyNotice: String?
   @State private var inboxReplyComposerIntent: InboxReplyIntent?
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.dismiss) private var dismiss
   @Environment(\.hidesReplyEntryPoints) private var hidesReplyEntryPoints
   @Environment(\.accountAccess) private var accountAccess
   @Environment(\.contentFilterRepository) private var contentFilterRepository
   @Environment(\.contentAgreementStore) private var contentAgreementStore
   @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
+  @Environment(\.ownedContentDeletionStore) private var ownedContentDeletionStore
   @Environment(\.contentReportCoordinator) private var contentReportCoordinator
   private let historySnapshot: ThreadHistorySnapshot?
   private let linkRoute: TiebaThreadRoute?
@@ -100,8 +106,15 @@ struct ThreadView: View {
     .environment(\.contentReportScopeID, reportScopeID)
     .navigationBarTitleDisplayMode(.inline)
     .safeAreaInset(edge: .top, spacing: 0) {
-      if !isPureReadingMode {
-        optionsBar
+      VStack(spacing: 0) {
+        if !isPureReadingMode {
+          optionsBar
+        }
+        if let ownedContentDeletionInProgress {
+          ownedContentDeletionProgress(ownedContentDeletionInProgress)
+        } else if let ownedContentDeletionUnknownTarget {
+          ownedContentDeletionUnknown(ownedContentDeletionUnknownTarget)
+        }
       }
     }
     .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -177,7 +190,12 @@ struct ThreadView: View {
         .help("跳转页码")
 
         if !isPureReadingMode {
-          ContentReportTopicMenu(target: topicReportTarget)
+          ThreadTopicActionsMenu(
+            reportTarget: topicReportTarget,
+            deletionStore: ownedContentDeletionStore,
+            deletionTarget: topicDeletionTarget,
+            requestDeletion: requestOwnedContentDeletion
+          )
         }
       }
     }
@@ -251,6 +269,20 @@ struct ThreadView: View {
     } message: {
       Text(pendingCloudFavoriteAction?.message ?? "")
     }
+    .confirmationDialog(
+      pendingOwnedContentDeletion?.confirmationTitle ?? "删除本人内容？",
+      isPresented: ownedContentDeletionConfirmationIsPresented,
+      titleVisibility: .visible
+    ) {
+      if let pendingOwnedContentDeletion {
+        Button(pendingOwnedContentDeletion.actionTitle, role: .destructive) {
+          confirmOwnedContentDeletion(pendingOwnedContentDeletion)
+        }
+      }
+      Button("取消", role: .cancel) { pendingOwnedContentDeletion = nil }
+    } message: {
+      Text(pendingOwnedContentDeletion?.confirmationMessage ?? "")
+    }
     .alert("无法更新点赞状态", isPresented: agreementErrorIsPresented) {
       Button("好", role: .cancel) { agreementErrorMessage = nil }
     } message: {
@@ -266,6 +298,11 @@ struct ThreadView: View {
       Button("好", role: .cancel) { cloudFavoriteErrorMessage = nil }
     } message: {
       Text(cloudFavoriteErrorMessage ?? "无法完成云收藏操作。")
+    }
+    .alert("无法删除内容", isPresented: ownedContentDeletionErrorIsPresented) {
+      Button("好", role: .cancel) { ownedContentDeletionErrorMessage = nil }
+    } message: {
+      Text(ownedContentDeletionErrorMessage ?? "无法完成删除操作。")
     }
     .fullScreenCover(
       item: $pictureGalleryRoute,
@@ -322,6 +359,11 @@ struct ThreadView: View {
       await consumeInboxReplyIntentIfReady()
     }
     .task(id: viewModel.state) {
+      if viewModel.state == .loaded, let ownedContentDeletionStore {
+        ownedContentDeletionUnknownTarget = ownedContentDeletionStore.outcomeUnknownTarget(
+          threadID: viewModel.thread.id
+        )
+      }
       guard
         !hasRecordedHistoryVisit,
         !Task.isCancelled,
@@ -385,6 +427,8 @@ struct ThreadView: View {
       pendingAgreementChange = nil
       pendingImmersiveReadingConfirmation = nil
       pendingCloudFavoriteAction = nil
+      pendingOwnedContentDeletion = nil
+      ownedContentDeletionErrorMessage = nil
       clearSelectableTextRoute()
       contentAgreementStore?.removeScope(agreementScopeID)
       threadCloudFavoriteStore?.deactivate(cloudFavoriteScopeID)
@@ -396,6 +440,8 @@ struct ThreadView: View {
       agreementErrorMessage = nil
       pendingCloudFavoriteAction = nil
       cloudFavoriteErrorMessage = nil
+      pendingOwnedContentDeletion = nil
+      ownedContentDeletionErrorMessage = nil
     }
     .onChange(of: replyComposerContext) { context in
       if context == nil {
@@ -628,9 +674,49 @@ struct ThreadView: View {
     return TextReplyComposerContext(thread: viewModel.thread, firstPost: firstPost)
   }
 
+  private func ownedContentDeletionProgress(
+    _ target: OwnedContentDeletionTarget
+  ) -> some View {
+    HStack(spacing: 10) {
+      ProgressView()
+      Text(target.kind == .topic ? "正在删除主题" : "正在删除第 \(target.floor) 楼")
+        .font(.footnote)
+      Spacer(minLength: 0)
+    }
+    .padding(.horizontal, 14)
+    .frame(minHeight: 40)
+    .background(.regularMaterial)
+    .accessibilityIdentifier("owned-content-deletion-progress")
+  }
+
+  private func ownedContentDeletionUnknown(
+    _ target: OwnedContentDeletionTarget
+  ) -> some View {
+    HStack(spacing: 10) {
+      Image(systemName: "exclamationmark.triangle.fill")
+        .foregroundStyle(.orange)
+      Text(
+        target.kind == .topic
+          ? "主题删除结果未确认，请在官方客户端核对，勿立即重试"
+          : "第 \(target.floor) 楼删除结果未确认，请在官方客户端核对，勿立即重试"
+      )
+      .font(.footnote)
+      Spacer(minLength: 0)
+    }
+    .padding(.horizontal, 14)
+    .frame(minHeight: 40)
+    .background(.regularMaterial)
+    .accessibilityIdentifier("owned-content-deletion-unknown")
+  }
+
   private var topicReportTarget: ContentReportTarget? {
     guard let firstPost = viewModel.firstPost else { return nil }
     return ContentReportTarget(thread: viewModel.thread, post: firstPost)
+  }
+
+  private var topicDeletionTarget: OwnedContentDeletionTarget? {
+    guard let firstPost = viewModel.firstPost else { return nil }
+    return OwnedContentDeletionTarget(thread: viewModel.thread, post: firstPost)
   }
 
   private var replyEntriesVisible: Bool {
@@ -1003,6 +1089,8 @@ struct ThreadView: View {
                     reportTarget: isPureReadingMode
                       ? nil
                       : ContentReportTarget(thread: viewModel.thread, post: firstPost),
+                    deletionTarget: nil,
+                    requestDeletion: requestOwnedContentDeletion,
                     openComments: { commentID in
                       presentComments(
                         threadID: firstPost.threadID,
@@ -1107,6 +1195,10 @@ struct ThreadView: View {
                     reportTarget: isPureReadingMode
                       ? nil
                       : ContentReportTarget(thread: viewModel.thread, post: post),
+                    deletionTarget: isPureReadingMode
+                      ? nil
+                      : OwnedContentDeletionTarget(thread: viewModel.thread, post: post),
+                    requestDeletion: requestOwnedContentDeletion,
                     openComments: { commentID in
                       presentComments(
                         threadID: post.threadID,
@@ -1539,6 +1631,24 @@ struct ThreadView: View {
     )
   }
 
+  private var ownedContentDeletionConfirmationIsPresented: Binding<Bool> {
+    Binding(
+      get: { pendingOwnedContentDeletion != nil },
+      set: { isPresented in
+        if !isPresented { pendingOwnedContentDeletion = nil }
+      }
+    )
+  }
+
+  private var ownedContentDeletionErrorIsPresented: Binding<Bool> {
+    Binding(
+      get: { ownedContentDeletionErrorMessage != nil },
+      set: { isPresented in
+        if !isPresented { ownedContentDeletionErrorMessage = nil }
+      }
+    )
+  }
+
   private var immersiveReadingConfirmationIsPresented: Binding<Bool> {
     Binding(
       get: { pendingImmersiveReadingConfirmation != nil },
@@ -1606,6 +1716,7 @@ struct ThreadView: View {
   ) {
     guard !isPureReadingMode else { return }
     pendingCloudFavoriteAction = nil
+    pendingOwnedContentDeletion = nil
     pendingAgreementChange = PendingContentAgreementChange(
       target: target,
       targetAgreed: targetAgreed
@@ -1645,7 +1756,75 @@ struct ThreadView: View {
   private func requestCloudFavoriteAction(_ action: ThreadCloudFavoritePendingAction) {
     guard cloudFavoriteActionIsCurrent(action) else { return }
     pendingAgreementChange = nil
+    pendingOwnedContentDeletion = nil
     pendingCloudFavoriteAction = action
+  }
+
+  private func requestOwnedContentDeletion(_ pending: PendingOwnedContentDeletion) {
+    guard !isPureReadingMode else { return }
+    guard ownedContentDeletionInProgress == nil else {
+      ownedContentDeletionErrorMessage = "当前已有删除操作正在进行，请等待结果。"
+      return
+    }
+    pendingAgreementChange = nil
+    pendingCloudFavoriteAction = nil
+    pendingOwnedContentDeletion = pending
+  }
+
+  private func confirmOwnedContentDeletion(_ pending: PendingOwnedContentDeletion) {
+    pendingOwnedContentDeletion = nil
+    guard let ownedContentDeletionStore else {
+      ownedContentDeletionErrorMessage = "当前账户服务不支持删除内容。"
+      return
+    }
+    ownedContentDeletionInProgress = pending.target
+    Task { @MainActor in
+      defer {
+        if ownedContentDeletionInProgress == pending.target {
+          ownedContentDeletionInProgress = nil
+        }
+      }
+      do {
+        let receipt = try await ownedContentDeletionStore.delete(pending)
+        guard receipt.target == pending.target else {
+          ownedContentDeletionErrorMessage = "贴吧返回的删除目标不一致，请重新加载核对。"
+          return
+        }
+        switch receipt.target.kind {
+        case .topic:
+          ownedContentDeletionUnknownTarget = nil
+          replyComposerContext = nil
+          sheetRoute = nil
+          dismiss()
+        case .post:
+          if ownedContentDeletionUnknownTarget == receipt.target {
+            ownedContentDeletionUnknownTarget = nil
+          }
+          if commentsSheetTargets(receipt.target) {
+            sheetRoute = nil
+          }
+          guard viewModel.applyAcceptedContentDeletion(receipt.target) else {
+            ownedContentDeletionErrorMessage = "贴吧已受理删除，但当前页面已变化，请重新加载核对。"
+            return
+          }
+        }
+      } catch {
+        if let deletionError = error as? OwnedContentDeletionError,
+          deletionError == .outcomeUnknown
+        {
+          ownedContentDeletionUnknownTarget = pending.target
+        }
+        ownedContentDeletionErrorMessage = error.localizedDescription
+      }
+    }
+  }
+
+  private func commentsSheetTargets(_ target: OwnedContentDeletionTarget) -> Bool {
+    guard let sheetRoute, case .comments(let route) = sheetRoute else { return false }
+    switch route {
+    case .post(let threadID, let postID), .comment(let threadID, let postID, _):
+      return threadID == target.threadID && postID == target.objectID
+    }
   }
 
   private func requestFloorCloudFavoriteAction(_ action: ThreadCloudFavoritePendingAction) {
@@ -2064,6 +2243,8 @@ private struct PostView: View, Equatable {
   let requestInlineCommentReplyIsAvailable: Bool
   let reportThread: BrowseThread
   let reportTarget: ContentReportTarget?
+  let deletionTarget: OwnedContentDeletionTarget?
+  let requestDeletion: (PendingOwnedContentDeletion) -> Void
   let openComments: (Int64?) -> Void
   let selectText: (String) -> Void
 
@@ -2071,6 +2252,7 @@ private struct PostView: View, Equatable {
   @Environment(\.accountAccess) private var accountAccess
   @Environment(\.contentAgreementStore) private var contentAgreementStore
   @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
+  @Environment(\.ownedContentDeletionStore) private var ownedContentDeletionStore
 
   nonisolated static func == (lhs: PostView, rhs: PostView) -> Bool {
     lhs.post == rhs.post
@@ -2088,6 +2270,7 @@ private struct PostView: View, Equatable {
       && lhs.reportThread.firstPostID == rhs.reportThread.firstPostID
       && lhs.reportThread.localVisibility == rhs.reportThread.localVisibility
       && lhs.reportTarget == rhs.reportTarget
+      && lhs.deletionTarget == rhs.deletionTarget
       && lhs.requestReplyIsAvailable == rhs.requestReplyIsAvailable
       && lhs.requestInlineCommentReplyIsAvailable
         == rhs.requestInlineCommentReplyIsAvailable
@@ -2211,6 +2394,13 @@ private struct PostView: View, Equatable {
         isPureReadingMode: isPureReadingMode,
         requestAction: requestCloudFavoriteAction
       )
+      if !isPureReadingMode {
+        OwnedContentDeletionMenuSlot(
+          store: ownedContentDeletionStore,
+          target: deletionTarget,
+          requestDeletion: requestDeletion
+        )
+      }
     }
   }
 

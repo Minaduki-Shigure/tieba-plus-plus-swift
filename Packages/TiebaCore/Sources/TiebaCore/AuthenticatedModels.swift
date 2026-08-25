@@ -586,3 +586,27 @@ public struct TiebaAgreementPage: Sendable, Hashable {
     self.pagination = pagination
   }
 }
+
+public enum TiebaOwnedContentDeletionTarget: Sendable, Hashable {
+  case thread(firstPostID: Int64)
+  case post(postID: Int64)
+}
+
+public struct TiebaOwnedContentDeletionReceipt: Sendable, Hashable {
+  public let userID: Int64
+  public let forumID: Int64
+  public let threadID: Int64
+  public let target: TiebaOwnedContentDeletionTarget
+
+  public init(
+    userID: Int64,
+    forumID: Int64,
+    threadID: Int64,
+    target: TiebaOwnedContentDeletionTarget
+  ) {
+    self.userID = userID
+    self.forumID = forumID
+    self.threadID = threadID
+    self.target = target
+  }
+}

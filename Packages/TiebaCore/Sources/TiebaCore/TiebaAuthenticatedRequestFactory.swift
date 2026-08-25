@@ -28,6 +28,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let userFollowClientVersion = "11.10.8.6"
   static let userInteractionPermissionsClientVersion = "12.41.7.1"
   static let personalizedFeedbackClientVersion = "12.41.7.1"
+  static let ownedContentDeletionClientVersion = "12.41.7.1"
   static let personalizedReadClientVersion = TiebaRequestFactory.personalizedClientVersion
   static let officialCheckInClientVersion = "11.10.8.6"
   static let officialCheckInGuideClientVersion = "12.41.7.1"
@@ -1693,6 +1694,67 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
         ("thread_id", String(threadID)),
       ],
       userAgent: "bdtb for Android \(clientVersion)"
+    )
+  }
+
+  func deleteOwnedContent(
+    credential: TiebaBDUSSCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    target: TiebaOwnedContentDeletionTarget,
+    tbs: String
+  ) throws -> URLRequest {
+    try validate(credential)
+    guard expectedUserID > 0 else {
+      throw TiebaClientError.invalidArgument("Expected user ID must be positive.")
+    }
+    try validatePositiveID(forumID, name: "Forum ID")
+    try validatePositiveID(threadID, name: "Thread ID")
+    let forumName = try normalizedForumName(forumName)
+    guard Self.isValidTBS(tbs) else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+
+    let path: String
+    var fields: [(String, String)] = [
+      ("BDUSS", credential.bduss),
+      ("_client_version", Self.ownedContentDeletionClientVersion),
+      ("fid", String(forumID)),
+      ("word", forumName),
+      ("z", String(threadID)),
+    ]
+    switch target {
+    case .thread(let firstPostID):
+      try validatePositiveID(firstPostID, name: "First post ID")
+      path = "/c/c/bawu/delthread"
+      fields.append(contentsOf: [
+        ("tbs", tbs),
+        ("src", "1"),
+        ("is_vipdel", "0"),
+        ("delete_my_thread", "1"),
+        ("is_frs_mask", "0"),
+      ])
+    case .post(let postID):
+      try validatePositiveID(postID, name: "Post ID")
+      path = "/c/c/bawu/delpost"
+      fields.append(contentsOf: [
+        ("pid", String(postID)),
+        ("isfloor", "0"),
+        ("src", "1"),
+        ("is_vipdel", "0"),
+        ("delete_my_post", "1"),
+        ("tbs", tbs),
+      ])
+    }
+
+    return try signedFormRequest(
+      host: Self.writeHost,
+      path: path,
+      fields: fields,
+      userAgent: "bdtb for Android \(Self.ownedContentDeletionClientVersion)",
+      cookie: "ka=open"
     )
   }
 

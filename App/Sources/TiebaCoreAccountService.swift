@@ -217,6 +217,14 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
     target: TiebaAgreementTarget,
     isAgreed: Bool
   ) async throws -> TiebaAgreementState
+  func deleteOwnedContent(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    target: TiebaOwnedContentDeletionTarget
+  ) async throws -> TiebaOwnedContentDeletionReceipt
 }
 
 extension TiebaAuthenticatedAccountClient {
@@ -492,6 +500,17 @@ extension TiebaAuthenticatedAccountClient {
     target: TiebaAgreementTarget,
     isAgreed: Bool
   ) async throws -> TiebaAgreementState {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
+  func deleteOwnedContent(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    target: TiebaOwnedContentDeletionTarget
+  ) async throws -> TiebaOwnedContentDeletionReceipt {
     throw TiebaClientError.invalidAuthenticatedResponse
   }
 }
@@ -1691,6 +1710,75 @@ struct TiebaCoreAccountService: AccountService {
     }
   }
 
+  func deleteOwnedContent(
+    session: StoredAccountSession,
+    target: OwnedContentDeletionTarget
+  ) async throws -> OwnedContentDeletionReceipt {
+    guard
+      session.id > 0,
+      session.id == target.authorID,
+      let credentials = session.credentials
+    else {
+      throw OwnedContentDeletionError.unavailable(
+        "只有当前账户本人发布的内容可以删除；请重新登录或切换账户后再试。"
+      )
+    }
+    let coreTarget: TiebaOwnedContentDeletionTarget = switch target.kind {
+    case .topic:
+      .thread(firstPostID: target.objectID)
+    case .post:
+      .post(postID: target.objectID)
+    }
+    do {
+      let response = try await client.deleteOwnedContent(
+        credential: Self.coreSessionCredential(credentials),
+        expectedUserID: session.id,
+        forumID: target.forumID,
+        forumName: target.forumName,
+        threadID: target.threadID,
+        target: coreTarget
+      )
+      guard
+        response.userID == session.id,
+        response.forumID == target.forumID,
+        response.threadID == target.threadID,
+        response.target == coreTarget
+      else {
+        throw OwnedContentDeletionError.outcomeUnknown
+      }
+      return OwnedContentDeletionReceipt(
+        accountID: session.id,
+        sessionRevision: session.sessionRevision,
+        target: target
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch TiebaClientError.ownedContentDeletionOutcomeUnknown {
+      throw OwnedContentDeletionError.outcomeUnknown
+    } catch TiebaClientError.ownedContentDeletionWriteConflict {
+      throw OwnedContentDeletionError.unavailable("同一内容已有删除操作正在进行。")
+    } catch let error as TiebaClientError {
+      switch error {
+      case .server(let code, _):
+        throw OwnedContentDeletionError.unavailable(
+          "贴吧拒绝了删除请求（错误码 \(code)），请重新加载后再试。"
+        )
+      case .invalidArgument, .invalidAuthenticatedResponse:
+        throw OwnedContentDeletionError.unavailable(
+          "删除目标或当前账户已经变化，请重新加载后再试。"
+        )
+      default:
+        throw OwnedContentDeletionError.unavailable(
+          Self.accountError(error).errorDescription ?? "无法删除内容，请稍后重试。"
+        )
+      }
+    } catch let error as OwnedContentDeletionError {
+      throw error
+    } catch {
+      throw OwnedContentDeletionError.unavailable("无法删除内容，请稍后重试。")
+    }
+  }
+
   private static func membershipData(
     _ membership: TiebaForumMembership
   ) -> ForumMembershipData {
@@ -2605,6 +2693,10 @@ struct TiebaCoreAccountService: AccountService {
       message = "该帖已有另一项推荐反馈正在提交。"
     case .personalizedFeedbackOutcomeUnknown:
       message = "贴吧尚未确认推荐反馈结果，应用不会自动重发请求。"
+    case .ownedContentDeletionWriteConflict:
+      message = "同一内容已有删除操作正在进行。"
+    case .ownedContentDeletionOutcomeUnknown:
+      message = "删除请求可能已经发出，但贴吧未能确认结果；请在官方客户端核对，勿立即重试。"
     case .replyChallengeRequired, .replyOutcomeUnknown, .replySubmissionIDConflict:
       message = "账户请求失败，请稍后重试。"
     case .server(let code, _):

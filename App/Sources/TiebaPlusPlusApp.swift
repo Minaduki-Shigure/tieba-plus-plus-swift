@@ -52,6 +52,7 @@ struct TiebaPlusPlusApp: App {
   private let personalizedFeedbackService: any PersonalizedFeedbackService
   private let contentAgreementStore: ContentAgreementStore
   private let threadCloudFavoriteStore: ThreadCloudFavoriteStore
+  private let ownedContentDeletionStore: OwnedContentDeletionStore
   private let textReplySubmissionStore: TextReplySubmissionStore
   private let newThreadSubmissionStore: NewThreadSubmissionStore
   private let composerImageAttachmentStore: ComposerImageAttachmentStore
@@ -114,6 +115,7 @@ struct TiebaPlusPlusApp: App {
     self.composerImageAttachmentStore = composerImageAttachmentStore
     self.contentAgreementStore = ContentAgreementStore(access: accountAccess)
     self.threadCloudFavoriteStore = ThreadCloudFavoriteStore(access: accountAccess)
+    self.ownedContentDeletionStore = OwnedContentDeletionStore(access: accountAccess)
     self.textReplySubmissionStore = TextReplySubmissionStore(
       access: accountAccess,
       drafts: textReplyDraftStore,
@@ -181,6 +183,7 @@ struct TiebaPlusPlusApp: App {
         )
         .environment(\.contentAgreementStore, contentAgreementStore)
         .environment(\.threadCloudFavoriteStore, threadCloudFavoriteStore)
+        .environment(\.ownedContentDeletionStore, ownedContentDeletionStore)
         .environment(\.textReplySubmissionStore, textReplySubmissionStore)
         .environment(\.newThreadSubmissionStore, newThreadSubmissionStore)
         .environment(\.composerImageAttachmentStore, composerImageAttachmentStore)
@@ -253,6 +256,7 @@ struct TiebaPlusPlusApp: App {
         )
         .environment(\.contentAgreementStore, contentAgreementStore)
         .environment(\.threadCloudFavoriteStore, threadCloudFavoriteStore)
+        .environment(\.ownedContentDeletionStore, ownedContentDeletionStore)
         .environment(\.textReplySubmissionStore, textReplySubmissionStore)
         .environment(\.newThreadSubmissionStore, newThreadSubmissionStore)
         .environment(\.composerImageAttachmentStore, composerImageAttachmentStore)

@@ -30,6 +30,10 @@ private struct ThreadCloudFavoriteStoreEnvironmentKey: EnvironmentKey {
   static let defaultValue: ThreadCloudFavoriteStore? = nil
 }
 
+private struct OwnedContentDeletionStoreEnvironmentKey: EnvironmentKey {
+  static let defaultValue: OwnedContentDeletionStore? = nil
+}
+
 private struct TextReplySubmissionStoreEnvironmentKey: EnvironmentKey {
   static let defaultValue: TextReplySubmissionStore? = nil
 }
@@ -56,6 +60,11 @@ extension EnvironmentValues {
   var threadCloudFavoriteStore: ThreadCloudFavoriteStore? {
     get { self[ThreadCloudFavoriteStoreEnvironmentKey.self] }
     set { self[ThreadCloudFavoriteStoreEnvironmentKey.self] = newValue }
+  }
+
+  var ownedContentDeletionStore: OwnedContentDeletionStore? {
+    get { self[OwnedContentDeletionStoreEnvironmentKey.self] }
+    set { self[OwnedContentDeletionStoreEnvironmentKey.self] = newValue }
   }
 
   var textReplySubmissionStore: TextReplySubmissionStore? {

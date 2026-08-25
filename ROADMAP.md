@@ -30,7 +30,7 @@ from that source.
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
 | Local data, settings, and customization | 10 | 7 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, hierarchical settings navigation, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, confirmation-frozen foreground check-in execution settings, a TiebaLite-compatible default image-watermark choice, reply-entry visibility, a default-on composer risk notice with an experimental reply-only system handoff attempt pending physical validation, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, Home-toolbar quick switching, a self-profile summary, an authenticated current-account following list with a guarded mutual filter, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
-| Server writes, creation, and social actions | 15 | 14 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, server-reason-bound personalized recommendation dislike feedback, three text/classic-emoticon reply targets, equivalent new-topic creation, bounded static-image new-topic/direct-topic-reply creation, direct inline-preview reply entry, and credential-free official reporting entry points have guarded implementations; real batch-check-in behavior, creation, poll and interaction-restriction success, broader uploaded media, unresolvable cloud rows, native reporting, and other reactions remain unavailable or unvalidated |
+| Server writes, creation, and social actions | 15 | 14 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, server-reason-bound personalized recommendation dislike feedback, three text/classic-emoticon reply targets, equivalent new-topic creation, bounded static-image new-topic/direct-topic-reply creation, owner-only topic/ordinary-floor deletion, direct inline-preview reply entry, and credential-free official reporting entry points have guarded implementations; real batch-check-in behavior, creation, deletion, poll and interaction-restriction success, broader uploaded media, unresolvable cloud rows, native reporting, and other reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
 | **Total** | **100** | **80–82** | Current full-product estimate; roughly 18–20% remains |
 
@@ -78,6 +78,18 @@ iOS-native destinations without changing their storage keys, defaults, account
 boundaries, or local loading behavior. It improves discoverability inside the
 existing local-settings credit and adds no data source, preference, or weighted
 workflow point.
+The first owner-deletion phase closes the loaded-topic and ordinary-floor paths
+without claiming moderator authority. A public row can only make the control a
+candidate: the authenticated Core probe must independently bind the active UID,
+forum, thread, exact post, author, floor kind, and fresh `tbs` before a single
+write. Definite acknowledgement, definite rejection, and outcome-unknown remain
+separate; unknown targets are retained and cannot be automatically resent. This
+remains inside the existing server-write point until disposable-account testing
+validates the minimum field set. Nested-reply deletion remains unimplemented
+because the compared TiebaLite source contains contradictory concrete parameters
+for that irreversible request. Durable unknown-outcome persistence and an
+endpoint-specific authoritative absence proof also remain before this workflow
+can leave disposable-account validation.
 The explicitly confirmed followed-list unfollow action closes a TiebaLite workflow
 gap while reusing the already credited forum-membership endpoint and shared list
 snapshot. It therefore adds no weighted point by itself.

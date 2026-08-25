@@ -1720,5 +1720,32 @@ all three bit directions, idempotence, cross-operation exclusion, known and
 uncertain failures, cancellation, logout, account switching, and same-UID
 credential rotation before this leaves validation builds.
 
+Deletion of self-authored content is limited to loaded topics and ordinary
+floors. The App may use a visible author UID only to decide whether to present a
+candidate action; Core must independently probe the exact authenticated PB page
+and bind the active UID, forum ID and canonical name, thread ID, target post ID,
+floor kind, target author UID, and a fresh valid `tbs` before dispatch. Topic
+deletion additionally requires both the thread author and first-floor author to
+match the active UID. Moderator deletion flags are always disabled.
+
+After a separate destructive confirmation, Core may send at most one signed
+HTTPS form request to the exact `tiebac.baidu.com/c/c/bawu/delthread` or
+`/c/c/bawu/delpost` path. The write contains BDUSS, fixed client version,
+forum/thread/target IDs, canonical forum name, fresh `tbs`, and only the fixed
+self-deletion flags; it contains no STOKEN, device identifier, advertising
+identifier, stored cookie jar, or Authorization header. A complete BDUSS/STOKEN
+session is nevertheless required at the App boundary to bind the account lease.
+Equivalent in-flight requests share one operation and different targets for the
+same account serialize before repeating preflight. A zero-code response is
+treated as an accepted request, not as independent readback proof. Network,
+HTTP, cancellation-after-dispatch, response-size, empty, or malformed outcomes
+become outcome-unknown, remain visible, and are locked against automatic resend.
+Nested-reply deletion remains disabled until a disposable-account capture
+resolves the conflicting `isfloor` and `src` contracts in the compared client.
+The current unknown-outcome lock is process-local; restarting the App is not
+evidence that the first request failed. Until a durable pending-operation ledger
+and an endpoint-specific authoritative absence proof exist, a user must verify
+the target through an official client before manually confirming another delete.
+
 Report security issues privately to the repository owner rather than opening a
 public issue.

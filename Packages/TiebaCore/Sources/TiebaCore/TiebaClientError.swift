@@ -23,6 +23,8 @@ public enum TiebaClientError: Error, Sendable, Equatable {
   case userInteractionPermissionsOutcomeUnknown
   case personalizedFeedbackWriteConflict
   case personalizedFeedbackOutcomeUnknown
+  case ownedContentDeletionWriteConflict
+  case ownedContentDeletionOutcomeUnknown
   case replyChallengeRequired(message: String)
   case replyOutcomeUnknown
   case replySubmissionIDConflict
@@ -77,6 +79,10 @@ extension TiebaClientError: LocalizedError {
       "A different recommendation-feedback operation is already running for this thread."
     case .personalizedFeedbackOutcomeUnknown:
       "The recommendation feedback may have been sent, but Tieba did not return a verifiable acknowledgement."
+    case .ownedContentDeletionWriteConflict:
+      "A different deletion operation is already running for this content."
+    case .ownedContentDeletionOutcomeUnknown:
+      "The deletion request may have been sent, but Tieba did not return a verifiable acknowledgement."
     case .replyChallengeRequired(let message):
       message.isEmpty
         ? "Tieba requires additional verification before this reply can be submitted."

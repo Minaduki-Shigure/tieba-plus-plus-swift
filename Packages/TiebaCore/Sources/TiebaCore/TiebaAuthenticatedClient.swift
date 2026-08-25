@@ -324,6 +324,59 @@ private struct TiebaAgreementAccountTail: Sendable {
   let task: Task<Void, Never>
 }
 
+private struct TiebaOwnedContentDeletionResourceKey: Hashable, Sendable {
+  let userID: Int64
+  let forumID: Int64
+  let threadID: Int64
+  let target: TiebaOwnedContentDeletionTarget
+}
+
+private struct TiebaOwnedContentDeletionIdentity:
+  Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  private let bduss: String
+  private let stoken: String
+  private let cookieName: TiebaBDUSSCookieName
+  let forumName: String
+
+  init(credential: TiebaSessionCredential, forumName: String) {
+    bduss = credential.bduss
+    stoken = credential.stoken
+    cookieName = credential.bdussCookieName
+    self.forumName = forumName
+  }
+
+  var description: String { "TiebaOwnedContentDeletionIdentity(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(self, children: ["forumName": forumName], displayStyle: .struct)
+  }
+}
+
+private struct TiebaOwnedContentDeletionFlight:
+  Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let id: UUID
+  let identity: TiebaOwnedContentDeletionIdentity
+  let task: Task<TiebaOwnedContentDeletionReceipt, Swift.Error>
+
+  var description: String { "TiebaOwnedContentDeletionFlight(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(self, children: ["id": id, "identity": identity], displayStyle: .struct)
+  }
+}
+
+private struct TiebaOwnedContentDeletionAccountTail: Sendable {
+  let id: UUID
+  let task: Task<Void, Never>
+}
+
+private enum TiebaOwnedContentDeletionTerminal: Sendable {
+  case accepted(TiebaOwnedContentDeletionReceipt)
+  case outcomeUnknown
+}
+
 private struct TiebaThreadCloudFavoriteResourceKey: Hashable, Sendable {
   let userID: Int64
   let threadID: Int64
@@ -782,6 +835,7 @@ public actor TiebaAuthenticatedClient {
   static let agreementPageResponseMaximumBytes = 8 * 1_024 * 1_024
   static let subpostAgreementPageResponseMaximumBytes = 4 * 1_024 * 1_024
   static let threadAgreementWriteResponseMaximumBytes = 64 * 1_024
+  static let ownedContentDeletionWriteResponseMaximumBytes = 64 * 1_024
   static let textReplyWriteResponseMaximumBytes = 128 * 1_024
   static let retainedTextReplySubmissionLimit = 64
   static let newThreadWriteResponseMaximumBytes = 128 * 1_024
@@ -840,6 +894,14 @@ public actor TiebaAuthenticatedClient {
   private var agreementSharedWaiterCounts = [UUID: Int]()
   private var agreementConflictWaiterCounts = [TiebaAgreementResourceKey: Int]()
   private var agreementAccountTails = [Int64: TiebaAgreementAccountTail]()
+  private var ownedContentDeletionFlights = [
+    TiebaOwnedContentDeletionResourceKey: TiebaOwnedContentDeletionFlight
+  ]()
+  private var ownedContentDeletionAccountTails = [Int64: TiebaOwnedContentDeletionAccountTail]()
+  // Irreversible accepted/unknown targets stay locked across credential rotations.
+  private var ownedContentDeletionTerminals = [
+    TiebaOwnedContentDeletionResourceKey: TiebaOwnedContentDeletionTerminal
+  ]()
   private var threadCloudFavoriteFlights = [
     TiebaThreadCloudFavoriteResourceKey: TiebaThreadCloudFavoriteFlight
   ]()
@@ -2484,6 +2546,86 @@ public actor TiebaAuthenticatedClient {
     return try await task.value
   }
 
+  public func deleteOwnedContent(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    target: TiebaOwnedContentDeletionTarget
+  ) async throws -> TiebaOwnedContentDeletionReceipt {
+    try Task.checkCancellation()
+    let forumName = try requestFactory.normalizedForumName(forumName)
+    let resourceKey = TiebaOwnedContentDeletionResourceKey(
+      userID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      target: target
+    )
+    if let terminal = ownedContentDeletionTerminals[resourceKey] {
+      switch terminal {
+      case .accepted(let receipt):
+        return receipt
+      case .outcomeUnknown:
+        throw TiebaClientError.ownedContentDeletionOutcomeUnknown
+      }
+    }
+
+    let identity = TiebaOwnedContentDeletionIdentity(
+      credential: credential,
+      forumName: forumName
+    )
+    if let flight = ownedContentDeletionFlights[resourceKey] {
+      guard flight.identity == identity else {
+        throw TiebaClientError.ownedContentDeletionWriteConflict
+      }
+      return try await flight.task.value
+    }
+
+    let flightID = UUID()
+    let predecessor = ownedContentDeletionAccountTails[expectedUserID]?.task
+    let task: Task<TiebaOwnedContentDeletionReceipt, Swift.Error> = Task.detached { [self] in
+      await predecessor?.value
+      return try await performOwnedContentDeletion(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        target: target
+      )
+    }
+    ownedContentDeletionFlights[resourceKey] = TiebaOwnedContentDeletionFlight(
+      id: flightID,
+      identity: identity,
+      task: task
+    )
+    let tailID = UUID()
+    let tailTask = Task.detached { _ = await task.result }
+    ownedContentDeletionAccountTails[expectedUserID] = TiebaOwnedContentDeletionAccountTail(
+      id: tailID,
+      task: tailTask
+    )
+    defer {
+      clearOwnedContentDeletionFlight(
+        resourceKey: resourceKey,
+        flightID: flightID,
+        userID: expectedUserID,
+        tailID: tailID
+      )
+    }
+    do {
+      let receipt = try await task.value
+      retainOwnedContentDeletionTerminal(.accepted(receipt), for: resourceKey)
+      return receipt
+    } catch TiebaClientError.ownedContentDeletionOutcomeUnknown {
+      retainOwnedContentDeletionTerminal(.outcomeUnknown, for: resourceKey)
+      throw TiebaClientError.ownedContentDeletionOutcomeUnknown
+    } catch {
+      throw error
+    }
+  }
+
   private func performAgreementWrite(
     credential: TiebaBDUSSCredential,
     expectedUserID: Int64,
@@ -2545,6 +2687,78 @@ public actor TiebaAuthenticatedClient {
       }
       throw error
     }
+  }
+
+  private func performOwnedContentDeletion(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    target: TiebaOwnedContentDeletionTarget
+  ) async throws -> TiebaOwnedContentDeletionReceipt {
+    let targetPostID: Int64
+    switch target {
+    case .thread(let firstPostID):
+      targetPostID = firstPostID
+    case .post(let postID):
+      targetPostID = postID
+    }
+    let pageRequest = try requestFactory.agreementPage(
+      credential: credential.bdussCredential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      page: 1,
+      pageSize: 2,
+      sort: .ascending,
+      onlyThreadAuthor: false,
+      location: .postID(targetPostID),
+      includeSubposts: false,
+      subpostsSortedByAgree: true,
+      subpostPageSize: 4
+    )
+    let pageResponse: PbPageResIdl = try await sendProtobuf(
+      pageRequest,
+      maximumBodyBytes: Self.agreementPageResponseMaximumBytes
+    )
+    let context = try TiebaAuthenticatedDecoder.ownedContentDeletionContext(
+      from: pageResponse,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      forumName: forumName,
+      threadID: threadID,
+      target: target
+    )
+    try Task.checkCancellation()
+
+    let writeRequest = try requestFactory.deleteOwnedContent(
+      credential: credential.bdussCredential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      forumName: forumName,
+      threadID: threadID,
+      target: target,
+      tbs: context.tbs
+    )
+    do {
+      let body = try await send(
+        writeRequest,
+        maximumBodyBytes: Self.ownedContentDeletionWriteResponseMaximumBytes
+      )
+      try TiebaAuthenticatedDecoder.checkOwnedContentDeletionAcknowledgement(from: body)
+    } catch let error as TiebaClientError {
+      if case .server = error { throw error }
+      throw TiebaClientError.ownedContentDeletionOutcomeUnknown
+    } catch {
+      throw TiebaClientError.ownedContentDeletionOutcomeUnknown
+    }
+    return TiebaOwnedContentDeletionReceipt(
+      userID: context.userID,
+      forumID: context.forumID,
+      threadID: context.threadID,
+      target: context.target
+    )
   }
 
   private func performThreadCloudFavoriteWrite(
@@ -3922,6 +4136,27 @@ public actor TiebaAuthenticatedClient {
     if agreementAccountTails[userID]?.id == tailID {
       agreementAccountTails.removeValue(forKey: userID)
     }
+  }
+
+  private func clearOwnedContentDeletionFlight(
+    resourceKey: TiebaOwnedContentDeletionResourceKey,
+    flightID: UUID,
+    userID: Int64,
+    tailID: UUID
+  ) {
+    if ownedContentDeletionFlights[resourceKey]?.id == flightID {
+      ownedContentDeletionFlights.removeValue(forKey: resourceKey)
+    }
+    if ownedContentDeletionAccountTails[userID]?.id == tailID {
+      ownedContentDeletionAccountTails.removeValue(forKey: userID)
+    }
+  }
+
+  private func retainOwnedContentDeletionTerminal(
+    _ terminal: TiebaOwnedContentDeletionTerminal,
+    for resourceKey: TiebaOwnedContentDeletionResourceKey
+  ) {
+    ownedContentDeletionTerminals[resourceKey] = terminal
   }
 
   private func getThreadCloudFavoriteContext(

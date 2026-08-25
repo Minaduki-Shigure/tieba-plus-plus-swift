@@ -488,6 +488,112 @@ struct ContentAgreementPageData: Hashable, Sendable {
   let agreements: [ContentAgreementData]
 }
 
+enum OwnedContentDeletionKind: Hashable, Sendable {
+  case topic
+  case post
+}
+
+struct OwnedContentDeletionTarget: Hashable, Sendable {
+  let kind: OwnedContentDeletionKind
+  let forumID: Int64
+  let forumName: String
+  let threadID: Int64
+  let objectID: Int64
+  let authorID: Int64
+  let floor: Int
+
+  init?(
+    kind: OwnedContentDeletionKind,
+    forumID: Int64,
+    forumName: String,
+    threadID: Int64,
+    objectID: Int64,
+    authorID: Int64,
+    floor: Int
+  ) {
+    let forumName = forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    guard
+      forumID > 0,
+      !forumName.isEmpty,
+      forumName.count <= 100,
+      !forumName.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+      threadID > 0,
+      objectID > 0,
+      authorID > 0
+    else { return nil }
+    switch kind {
+    case .topic:
+      guard floor == 1 else { return nil }
+    case .post:
+      guard floor > 1 else { return nil }
+    }
+    self.kind = kind
+    self.forumID = forumID
+    self.forumName = forumName
+    self.threadID = threadID
+    self.objectID = objectID
+    self.authorID = authorID
+    self.floor = floor
+  }
+
+  init?(thread: BrowseThread, post: BrowsePost) {
+    guard
+      thread.id > 0,
+      post.threadID == thread.id,
+      post.localVisibility == .visible,
+      thread.localVisibility == .visible
+    else { return nil }
+    if post.floor == 1 {
+      guard
+        thread.firstPostID == post.id,
+        thread.authorID > 0,
+        thread.authorID == post.authorID
+      else { return nil }
+      self.init(
+        kind: .topic,
+        forumID: thread.forumID,
+        forumName: thread.forumName,
+        threadID: thread.id,
+        objectID: post.id,
+        authorID: post.authorID,
+        floor: post.floor
+      )
+    } else {
+      guard post.floor > 1, post.id != thread.firstPostID else { return nil }
+      self.init(
+        kind: .post,
+        forumID: thread.forumID,
+        forumName: thread.forumName,
+        threadID: thread.id,
+        objectID: post.id,
+        authorID: post.authorID,
+        floor: post.floor
+      )
+    }
+  }
+}
+
+struct OwnedContentDeletionReceipt: Hashable, Sendable {
+  let accountID: Int64
+  let sessionRevision: UUID
+  let target: OwnedContentDeletionTarget
+}
+
+enum OwnedContentDeletionError: LocalizedError, Equatable, Sendable {
+  case unavailable(String)
+  case outcomeUnknown
+
+  var errorDescription: String? {
+    switch self {
+    case .unavailable(let message):
+      message
+    case .outcomeUnknown:
+      "删除请求可能已经发出，但贴吧未能确认结果。请在官方客户端核对，勿立即重试。"
+    }
+  }
+}
+
 struct ComposerImageUploadResult:
   Sendable, Hashable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
 {
@@ -780,9 +886,20 @@ protocol AccountService: Sendable {
     target: ContentAgreementTarget,
     isAgreed: Bool
   ) async throws -> ContentAgreementData
+  func deleteOwnedContent(
+    session: StoredAccountSession,
+    target: OwnedContentDeletionTarget
+  ) async throws -> OwnedContentDeletionReceipt
 }
 
 extension AccountService {
+  func deleteOwnedContent(
+    session: StoredAccountSession,
+    target: OwnedContentDeletionTarget
+  ) async throws -> OwnedContentDeletionReceipt {
+    throw OwnedContentDeletionError.unavailable("当前账户服务不支持删除内容。")
+  }
+
   nonisolated func prepareStaticImageUpload(
     session: StoredAccountSession,
     submissionID: UUID,
