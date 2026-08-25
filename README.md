@@ -20,13 +20,18 @@ and its verified metadata enters the public app source.
 | Local features | Available for history, favorites, filtering, appearance, media preferences, explicit standard/pure/only-author immersive thread-reading modes, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, a next-launch destination including the inbox, and ordered iOS Home Screen quick actions for existing destinations. The reply notice's system handoff attempt is implemented but remains pending physical-device validation |
 | Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary, followed forums, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with a shared Home-toolbar/account-page message badge, separate optional fan-reminder badge, and authoritative reply actions, Tieba cloud favorites with a saved-position-to-latest-update handoff, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies plus explicitly confirmed deletion of the active account's own topic or ordinary floor; these newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
-| TiebaLite parity | Current `main` and public `v0.62.3-alpha.1`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
-| Distribution | The public SideStore/LiveContainer source currently serves `v0.62.3-alpha.1` (build 74) |
+| TiebaLite parity | Current `main` and public `v0.63.0-alpha.1`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
+| Distribution | The public SideStore/LiveContainer source currently serves `v0.63.0-alpha.1` (build 75) |
 
 ### Release and validation
 
-- **Current alpha:** `v0.62.3-alpha.1` publishes the current end-user app-code
-  scope. Full nested-reply reading uses `ScrollView` plus `LazyVStack` rather
+- **Current alpha:** `v0.63.0-alpha.1` publishes the current end-user app-code
+  scope. It adds the accumulated navigation, media-entry/export, Home/account,
+  settings, durable owner-deletion, cloud-favorite update, legacy-link, and
+  guarded official-wrapper routing work described below. Experimental account
+  writes and custom-scheme handoff retain their documented physical-device and
+  disposable-account gates. It retains `v0.62.3-alpha.1`'s full nested-reply
+  reading, which uses `ScrollView` plus `LazyVStack` rather
   than `List`, while retaining exact reply identities, anchored opening, prepend
   restoration, pull to refresh, local filtering, and guarded pagination. Its
   pagination sentinel rearms when a hidden-only page changes the raw tail,
@@ -54,7 +59,8 @@ and its verified metadata enters the public app source.
   followed-forum management, and guarded creation and social actions. Account
   reads and writes that are marked experimental still require disposable-account
   or physical-device validation.
-- **Later `main` source:** an active full-credential account can request deletion
+- **`v0.63.0` owner deletion and cloud-favorite updates:** An active full-
+  credential account can request deletion
   of its own loaded topic or ordinary floor after a separate destructive
   confirmation. Core re-probes the exact authenticated target, author, forum,
   thread, and fresh `tbs` immediately before one signed write. A clear zero-code
@@ -79,17 +85,16 @@ and its verified metadata enters the public app source.
   unchanged, or deleted update targets expose no action. A transport or request
   failure keeps the current page and retries only that explicit PID; a returned
   page that omits or locally hides the target instead shows a dismissible notice
-  without a futile retry. No account write or background request is added. This
-  source-only interaction is not in the public `v0.62.3-alpha.1` IPA.
-- **Later `main` link routing:** Rich-content and video landing links locally
+  without a futile retry. The cloud-favorite handoff itself adds no account write
+  or background request.
+- **`v0.63.0` link routing:** Rich-content and video landing links locally
   resolve Baidu's official `/mo/q/checkurl` wrapper before normal navigation.
   Resolved Tieba destinations stay inside the app; external HTTP(S) destinations
   retain the selected system/Safari behavior and their query and fragment. The
   resolver accepts only exact official hosts and path, one unambiguous `url`
   payload, bounded metadata and nesting, and credential-free absolute Web
   targets. Malformed official wrappers fail closed, while lookalike third-party
-  URLs remain ordinary external links. This source-only compatibility improvement
-  is not in the public `v0.62.3-alpha.1` IPA.
+  URLs remain ordinary external links.
 - **`v0.60.6-alpha.1` rollback scope:** Physical-device testing on iOS 18.7.2
   found that
   the `v0.60.5-alpha.1` thread `List`, per-row visibility, and render-plan cache
@@ -314,8 +319,8 @@ and its verified metadata enters the public app source.
   cannot observe submission, and cannot prove that the browser's Baidu account
   matches the active App account. The user must verify or complete browser login.
   All non-performance capabilities in this release-scope block remain included
-  in the public `v0.62.3-alpha.1` IPA.
-- **Current-main experimental official-client reply handoff:** The default-on
+  in the public `v0.63.0-alpha.1` IPA.
+- **`v0.63.0` experimental official-client reply handoff:** The default-on
   entry warning for topic, floor, and nested replies now offers TiebaLite's
   official-client choice beside continuing or returning. A dedicated builder
   passes the full undocumented compatibility template observed in TiebaLite to
@@ -330,17 +335,17 @@ and its verified metadata enters the public app source.
   expose this PB-reply handoff. Compatibility with the current iOS official
   client and its actual landing positions remains unverified on both SideStore
   and LiveContainer installations.
-- **Current-main default image watermark:** Settings can choose forum name,
+- **`v0.63.0` default image watermark:** Settings can choose forum name,
   username, or no watermark as the default for a new image-capable composer.
   The local stored values match TiebaLite's stable `2`, `1`, and `0` contract,
   respectively, and an unknown value falls back to forum name. A restored draft
   that already contains images retains its saved watermark; starting a new draft
   uses the current default without changing an open composer's manual selection.
-- **Current-main cloud-favorite opening habits:** Tieba cloud favorites now have
+- **`v0.63.0` cloud-favorite opening habits:** Tieba cloud favorites now have
   independent only-thread-author and descending-order defaults. Opening a cloud
   favorite applies those options without losing its saved post anchor; existing
   local-favorite preferences and their defaults remain unchanged.
-- **Current-main list image galleries:** A loaded image thumbnail, or a collapsed
+- **`v0.63.0` list image galleries:** A loaded image thumbnail, or a collapsed
   image-count summary, opens the existing full-screen gallery directly instead
   of entering the thread first. The exact original content offset is retained,
   including for repeated URLs and interleaved text. One Root-level presenter is
@@ -349,10 +354,10 @@ and its verified metadata enters the public app source.
   Only an article with an authoritative image-owning post ID and an empty content-
   filter policy may extend through anonymous `picpage` using the feed/index
   request source; missing, partial, or conflicting image ownership, matched
-  comments, and active filters remain limited to the same card. This source-only
-  workflow still needs iOS 18 device validation for touch routing inside a
-  `NavigationLink` and is not included in the public `v0.62.3-alpha.1` IPA.
-- **Current-main list-card context navigation:** Ordinary shared thread cards in
+  comments, and active filters remain limited to the same card. This workflow
+  still needs iOS 18 device validation for touch routing inside a
+  `NavigationLink`.
+- **`v0.63.0` list-card context navigation:** Ordinary shared thread cards in
   recommendation, concern, hot, search, topic-detail, and profile lists keep the
   existing primary topic and reply-count actions while making a displayed forum
   name and author independently openable. The context line sits outside the
@@ -361,8 +366,8 @@ and its verified metadata enters the public app source.
   display option, and a valid forum name or positive public UID; otherwise the
   existing label remains passive. Pinned rows retain their compact topic-only
   presentation. This adds no endpoint, per-row state, or thread/nested-reply
-  scroll work and is not included in the public `v0.62.3-alpha.1` IPA.
-- **Current-main voice Files export:** Every voice control keeps the existing
+  scroll work.
+- **`v0.63.0` voice Files export:** Every voice control keeps the existing
   explicit share action and adds a separate Files action. Both targets reuse one
   credential-free, 16 MiB-bounded download and the same byte-format,
   audio-only, duration, and AVFoundation validation before a canonical-extension
@@ -373,21 +378,20 @@ and its verified metadata enters the public app source.
   prevents overlapping preparation, rejects mismatched or duplicate completion,
   and discards late results after source replacement or view disappearance.
   This is a foreground user-selected export, not a background download queue,
-  fixed media directory, or persistent app cache. It is not included in the
-  public `v0.62.3-alpha.1` IPA.
-- **Current-main Home one-click check-in entry:** For an active account with
+  fixed media directory, or persistent app cache.
+- **`v0.63.0` Home one-click check-in entry:** For an active account with
   complete credentials, Home exposes a toolbar shortcut to the same foreground-
   only flow already available from Account. Opening it reads the authoritative
   catalog only; the existing in-page snapshot confirmation remains the write
   boundary. This navigation-only addition introduces no endpoint or background
-  behavior and is not included in the public `v0.62.3-alpha.1` IPA.
-- **Current-main one-click check-in execution settings:** The confirmation now
+  behavior.
+- **`v0.63.0` one-click check-in execution settings:** The confirmation now
   freezes whether to use the official batch, whether an authoritative single-
   forum failure stops later targets, and whether individual requests use the
   slow random or fixed 2-second interval. Defaults retain official batch, slow
   mode, and stop-on-failure. Account changes, cancellation, and uncertain
   dispatched outcomes always stop without retry, regardless of the setting.
-- **Current-main iOS Home Screen quick actions:** On iOS 16 or later, the static
+- **`v0.63.0` iOS Home Screen quick actions:** On iOS 16 or later, the static
   actions appear in this order: `一键签到`, `我的收藏`, `搜索`, and `我的消息`.
   They open the existing foreground one-click check-in page, Tieba cloud
   favorites, search, and the replies inbox, respectively, across cold and warm
@@ -400,9 +404,9 @@ and its verified metadata enters the public app source.
   explicitly confirms inside that page; it does not authorize or schedule a
   background check-in. Signed-out users see each destination's existing state
   instead of having an account selected implicitly. These navigation-only
-  actions add no endpoint or weighted parity point and are not included in the
-  public `v0.62.3-alpha.1` IPA. The static menu is an OS registration for a
-  standalone SideStore installation. LiveContainer does not install a guest as
+  actions add no endpoint or weighted parity point. The static menu is an OS
+  registration for a standalone SideStore installation. LiveContainer does not
+  install a guest as
   its own SpringBoard app and instead recommends a separate Launch App Shortcut,
   so this project does not claim that the four guest manifest items appear on a
   LiveContainer-created Home Screen icon. Both standalone delivery and guest
@@ -501,7 +505,7 @@ and its verified metadata enters the public app source.
   pass. After the release asset is published and reverified, the release workflow
   derives its date, download URL, byte size, and SHA-256 and updates the source
   atomically; version or concurrent-source mismatches fail closed. The source
-  currently distributes the verified `v0.62.3-alpha.1` IPA (build 74).
+  currently distributes the verified `v0.63.0-alpha.1` IPA (build 75).
 - **Login hotfix:** `v0.54.0-alpha.1` can reach Tieba's account page without
   completing because its callback and Cookie matching are too strict.
   `v0.54.1-alpha.1` made that failure explicit and confirmed that iOS 18.7.2
@@ -520,7 +524,7 @@ and its verified metadata enters the public app source.
   setting that locally retains only threads whose stable forum ID occurs in the
   selected account persona's complete followed-forum index, or the active
   account's index when the persona is anonymous. These reads and the account-
-  persona dislike-feedback UI are included in the public `v0.62.3-alpha.1` IPA;
+  persona dislike-feedback UI are included in the public `v0.63.0-alpha.1` IPA;
   the write is offered only when a row carries valid server-provided reasons and
   still requires disposable-account and physical-device validation.
 - **Search:** Forum, thread, and user search are separated by category. Global
@@ -635,8 +639,6 @@ and its verified metadata enters the public app source.
   for expanded thread-list cards: a playable cover or no-cover placeholder
   allocates no player until the user taps Play, a cover-only fragment preserves
   the prior static preview, and compact-media mode remains a passive summary.
-  This list-card interaction is not yet present in the public
-  `v0.62.3-alpha.1` IPA.
 - **Links and sharing:** Supported Tieba links stay in the native router with
   post and reply context. Exact legacy `wapp.baidu.com` and `tiebac.baidu.com`
   forum/thread links, including `/mo/q/m`, are normalized into the same native
@@ -654,7 +656,6 @@ and its verified metadata enters the public app source.
   replacing, backgrounding, or externally rerouting the preview cancels it and
   generation checks reject an uncooperative late response. Opening remains
   available while enrichment fails, but requires a second explicit action.
-  This interaction is not present in the public `v0.62.3-alpha.1` IPA.
   The app-owned scheme also exposes strict navigation-only routes for a search
   landing with recent history, browsing history, account cloud favorites, the
   foreground one-click check-in page, and either inbox segment. The check-in
@@ -973,10 +974,10 @@ and its verified metadata enters the public app source.
   about 18–20%; its anonymous reading and media subtotal remains about 91–95%.
   This measures implemented end-to-end workflows with partial credit for
   device-validation gates; it is not a claim that every path is release-ready.
-  The public `v0.62.3-alpha.1` app-code snapshot matches the current 80–82%
-  estimate because it includes the static-image composer, recommendation-
-  feedback, and selectable recommendation-persona workflows; all retain their
-  documented device-validation gates.
+  The public `v0.63.0-alpha.1` app-code snapshot matches the current 80–82%
+  estimate because it includes the current navigation, media, local-setting,
+  private-read, and guarded server-write workflows; all experimental paths retain
+  their documented device-validation gates.
   The largest remaining gaps are
   rich-media creation, background unread handling, broader settings, remaining
   account/social actions, unresolvable cloud-favorite rows, and moderation.

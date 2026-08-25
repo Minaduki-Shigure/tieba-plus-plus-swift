@@ -14,14 +14,13 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-currently serves `v0.62.3-alpha.1` (build 74), whose app-code snapshot includes
-the image-composer, recommendation-feedback, selectable recommendation-persona,
-long-image reading fixes, and the complete nested-reply page's lazy vertical
-scroll. Paired profiles measured lower main-thread, layout, text, drawing, and
-long-frame costs for that container change. These corrections add no new
-weighted workflow, so the snapshot remains at the current 80–82% estimate.
-Later `main` work must still pass a tagged release before it becomes installable
-from that source.
+currently serves `v0.63.0-alpha.1` (build 75), whose app-code snapshot includes
+the current image, media, navigation, Home/account, settings, cloud-favorite,
+durable owner-deletion, legacy-link, and guarded official-wrapper workflows.
+Paired profiles continue to support the nested-reply lazy-scroll container.
+These additions improve existing credited areas without changing the current
+80–82% weighted estimate; experimental account writes retain their documented
+physical-device and disposable-account gates.
 
 | Capability area | Weight | Credited points | Current basis |
 | --- | ---: | ---: | --- |
@@ -39,7 +38,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.62.3-alpha.1` app-code snapshot is at 80–82%; all experimental
+The public `v0.63.0-alpha.1` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
@@ -126,8 +125,7 @@ source URL, and share-or-Files target; cancellation, replacement, duplicate or
 mismatched completion, and late non-cooperative preparation cannot publish a
 different presentation. The document picker copies rather than moves the source
 and adds no background queue, fixed download directory, persistent cache, new
-endpoint, or weighted point. The public `v0.62.3-alpha.1` IPA does not include
-this source-only interaction.
+endpoint, or weighted point.
 Reply-count navigation on shared thread cards closes another narrow TiebaLite
 reading interaction gap. It reuses the canonical thread route and initial-page
 response, adding no endpoint, data source, or weighted point. Its canonical link
@@ -143,8 +141,7 @@ and a strict round-trippable app URL built from a normalized forum name or
 positive public UID; invalid, filtered, disabled, and pinned cases retain their
 prior passive or compact presentation. The controls reuse existing Root routes,
 add no request, per-row model, or thread/nested-reply scroll work, and therefore
-remain inside the existing reading credit without adding a weighted point. The
-public `v0.62.3-alpha.1` IPA does not include this source-only interaction.
+remain inside the existing reading credit without adding a weighted point.
 Independent per-forum search navigation likewise closes a narrow TiebaLite
 reading gap inside the existing search credit. A matched result, its exact
 parent-floor context, and its owning-topic context are separate controls; the
@@ -165,26 +162,23 @@ The immutable parsed target, including only-author and post-anchor context,
 cannot be replaced by response metadata. Cancellation plus request generations
 discard stale responses, and locally filtered, server-hidden, mismatched, or
 failed responses remain generic but openable. This adds no content source or
-weighted point, and the public `v0.62.3-alpha.1` IPA does not include it.
+weighted point.
 The ordered iOS Home Screen quick actions expose the existing foreground batch-
 check-in page, Tieba cloud favorites, search, and replies inbox through the iOS
 16-and-later scene lifecycle. They add no endpoint, data source, background
-behavior, or weighted point. The public `v0.62.3-alpha.1` IPA does not include
-them.
+behavior, or weighted point.
 Public-reply cards now match TiebaLite's independent destination controls: the
 reply body retains its exact floor or nested-reply target, while the displayed
 topic title opens the origin thread without carrying that reply anchor. Unknown
 reply types still expose no guessed exact target, but may open a separately
 validated positive thread ID. This reuses existing anonymous readers and adds no
-request, data source, or weighted point. The public `v0.62.3-alpha.1` IPA does
-not include this interaction.
+request, data source, or weighted point.
 Standalone complete nested-reply pages now expose TiebaLite's owning-thread
 action after the parent floor has been validated. It opens the exact parent PID;
 the sheet already presented over a thread omits the redundant action. Route
 derivation performs no request and reuses the existing anonymous thread reader
 only after an explicit tap, so this closes a narrow navigation gap without a new
-endpoint, data source, or weighted point. The public `v0.62.3-alpha.1` IPA does
-not include this interaction.
+endpoint, data source, or weighted point.
 The configurable forum primary action likewise completes a narrow local habit
 setting by rearranging existing controls, so it remains inside the existing
 local-settings credit rather than adding a weighted point.
@@ -208,7 +202,7 @@ without a futile retry. Invalid, unchanged, or incomplete update metadata expose
 no action. This reuses the existing anonymous post reader, adds no account write
 or background request,
 and remains inside the existing private-read credit without adding a weighted
-point. The public `v0.62.3-alpha.1` IPA does not include this interaction.
+point.
 The followed-forum avatar and slogan presentation similarly preserves optional
 metadata that the existing authenticated response and Core decoder already
 carried. It adds neither a data source nor a workflow, so it adds no weighted point.
@@ -1242,9 +1236,8 @@ signed-out and incomplete-session states remain owned by the destination page.
 The check-in shortcut is navigation only. Opening the page may read the existing
 authoritative forum catalog, but no write is dispatched until the same in-page
 snapshot confirmation described below. It does not add background, scheduled,
-or automatic check-in. The four shortcuts reuse existing routes and services,
-add no endpoint or weighted parity point, and are not present in the public
-`v0.62.3-alpha.1` IPA.
+or automatic check-in. The four shortcuts reuse existing routes and services
+and add no endpoint or weighted parity point.
 The static menu is expected only when the IPA is installed as its own SideStore
 app. A LiveContainer guest is not independently registered with SpringBoard; its
 documented Home Screen entry is a LiveContainer Launch App Shortcut. Therefore
