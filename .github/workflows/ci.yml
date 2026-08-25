@@ -62,7 +62,9 @@ jobs:
       - name: Validate source metadata
         run: ruby Scripts/validate_sidestore_source.rb
       - name: Verify published IPA
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: >-
+          ${{ github.ref == 'refs/heads/main' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
         run: |
           set -euo pipefail
           download_url="$(ruby -rjson -e '

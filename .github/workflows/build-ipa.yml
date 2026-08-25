@@ -155,6 +155,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
+      actions: write
       contents: write
     env:
       RELEASE_TAG: ${{ github.event.workflow_run.head_branch }}
@@ -408,3 +409,11 @@ jobs:
             --release-sha "$RELEASE_SHA" \
             --release-tag "$RELEASE_TAG" \
             --attempts 3
+      - name: Dispatch final app source validation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh workflow run ci.yml
+          --repo "$GITHUB_REPOSITORY"
+          --ref main
+          --raw-field run_live_tests=false

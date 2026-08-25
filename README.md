@@ -558,8 +558,10 @@ and its verified metadata enters the public app source.
   pass. After the release asset is published and reverified, the release workflow
   derives its date, download URL, byte size, and SHA-256, commits the source on
   top of the tested tag, and fast-forwards `main` to both commits in one ref
-  update. The public source therefore never exposes the release-preparation
-  commit by itself; version, graph, or concurrent-source mismatches fail closed.
+  update. It then dispatches a final `main` validation that downloads the public
+  IPA and checks it against the published source. The public source therefore
+  never exposes the release-preparation commit by itself; version, graph, or
+  concurrent-source mismatches fail closed.
   The source currently distributes the verified `v0.64.0-alpha.4` IPA (build 79).
 - **Login hotfix:** `v0.54.0-alpha.1` can reach Tieba's account page without
   completing because its callback and Cookie matching are too strict.
@@ -1103,9 +1105,11 @@ rather than to `main` by itself. Release publication jobs are serialized against
 the single public source. After the verified asset is public, the workflow
 fast-forwards a local `main` checkout to that exact tag, adds only the generated
 source metadata, validates the final tree, and advances the remote `main` ref
-once. It never rebases or force-pushes; concurrent branch divergence leaves the
-old source intact and fails the release workflow. App Store distribution is not
-currently a project goal.
+once. It then dispatches CI against the final public `main` tree so the source
+validator downloads and verifies the released IPA independently. It never
+rebases or force-pushes; concurrent branch divergence leaves the old source
+intact and fails the release workflow. App Store distribution is not currently
+a project goal.
 
 ```text
 https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json
