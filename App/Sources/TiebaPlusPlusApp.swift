@@ -115,7 +115,10 @@ struct TiebaPlusPlusApp: App {
     self.composerImageAttachmentStore = composerImageAttachmentStore
     self.contentAgreementStore = ContentAgreementStore(access: accountAccess)
     self.threadCloudFavoriteStore = ThreadCloudFavoriteStore(access: accountAccess)
-    self.ownedContentDeletionStore = OwnedContentDeletionStore(access: accountAccess)
+    self.ownedContentDeletionStore = OwnedContentDeletionStore(
+      access: accountAccess,
+      ledger: FileOwnedContentDeletionLedger.live()
+    )
     self.textReplySubmissionStore = TextReplySubmissionStore(
       access: accountAccess,
       drafts: textReplyDraftStore,

@@ -53,6 +53,7 @@ final class ThreadViewModel: ObservableObject {
   private var agreementTargetsByPostID: [Int64: ContentAgreementTarget] = [:]
   private var postsByID: [Int64: BrowsePost] = [:]
   private var acceptedDeletionPostIDs = Set<Int64>()
+  private var stagedAcceptedDeletionTargets: [Int64: OwnedContentDeletionTarget] = [:]
   private(set) var scrollTargetsByPostID: [Int64: ThreadScrollTargetDescriptor] = [:]
   private(set) var resolvedThreadAuthorAvatarURL: URL?
   private(set) var firstDisplayableReplyPostID: Int64?
@@ -980,6 +981,41 @@ final class ThreadViewModel: ObservableObject {
   }
 
   @discardableResult
+  func stageAcceptedContentDeletion(
+    _ target: OwnedContentDeletionTarget,
+    allowsUnresolvedThreadIdentity: Bool = false
+  ) -> Bool {
+    let forumName = thread.forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    let hasMatchingResolvedIdentity = thread.localVisibility == .visible
+      && thread.forumID > 0
+      && !forumName.isEmpty
+      && target.forumID == thread.forumID
+      && target.forumName == forumName
+    let hasAllowedUnresolvedIdentity = allowsUnresolvedThreadIdentity
+      && thread.localVisibility == .visible
+      && thread.forumID == 0
+      && forumName.isEmpty
+      && thread.authorID == 0
+      && thread.firstPostID == 0
+    guard
+      state == .idle,
+      target.kind == .post,
+      target.threadID == thread.id,
+      target.objectID > 0,
+      target.floor > 1,
+      hasMatchingResolvedIdentity || hasAllowedUnresolvedIdentity,
+      thread.firstPostID <= 0 || target.objectID != thread.firstPostID,
+      !acceptedDeletionPostIDs.contains(target.objectID)
+    else { return false }
+    if let existing = stagedAcceptedDeletionTargets[target.objectID] {
+      return existing == target
+    }
+    stagedAcceptedDeletionTargets[target.objectID] = target
+    return true
+  }
+
+  @discardableResult
   func applyAcceptedContentDeletion(_ target: OwnedContentDeletionTarget) -> Bool {
     guard
       target.kind == .post,
@@ -1197,31 +1233,87 @@ final class ThreadViewModel: ObservableObject {
 
     let resolvedFirstPost = explicitFirstPost
       ?? (shouldExtractLegacyFirstPost ? firstPostCandidates.first : nil)
-    let replies: [BrowsePost]
+    let candidateReplies: [BrowsePost]
     if let resolvedFirstPost {
-      replies = page.posts.filter {
+      candidateReplies = page.posts.filter {
         $0.id != resolvedFirstPost.id
           && $0.floor != 1
-          && !acceptedDeletionPostIDs.contains($0.id)
       }
     } else {
-      replies = page.posts.filter { !acceptedDeletionPostIDs.contains($0.id) }
+      candidateReplies = page.posts
     }
 
-    guard replies.allSatisfy({ $0.id > 0 && $0.threadID == threadID }) else {
+    guard candidateReplies.allSatisfy({ $0.id > 0 && $0.threadID == threadID }) else {
       throw BrowseError.unavailable("贴吧返回的楼层标识或归属异常，未显示该响应。")
     }
     var seen = Set<Int64>()
+    let validatedReplies: [BrowsePost]
     if deduplicatingReplies {
-      return NormalizedPostPage(
-        firstPost: resolvedFirstPost,
-        replies: replies.filter { seen.insert($0.id).inserted }
+      validatedReplies = candidateReplies.filter { seen.insert($0.id).inserted }
+    } else {
+      guard candidateReplies.allSatisfy({ seen.insert($0.id).inserted }) else {
+        throw BrowseError.unavailable("贴吧返回的楼层标识或归属异常，未显示该响应。")
+      }
+      validatedReplies = candidateReplies
+    }
+    try activateStagedAcceptedContentDeletions(
+      responseThread: page.thread,
+      responseFirstPostID: resolvedFirstPost?.id ?? expectedFirstPostID,
+      responsePosts: validatedReplies
+    )
+    return NormalizedPostPage(
+      firstPost: resolvedFirstPost,
+      replies: validatedReplies.filter { !acceptedDeletionPostIDs.contains($0.id) }
+    )
+  }
+
+  private func activateStagedAcceptedContentDeletions(
+    responseThread: BrowseThread,
+    responseFirstPostID: Int64,
+    responsePosts: [BrowsePost]
+  ) throws {
+    guard !stagedAcceptedDeletionTargets.isEmpty else { return }
+    let responseForumName = responseThread.forumName
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    guard
+      responseThread.id > 0,
+      responseThread.forumID > 0,
+      !responseForumName.isEmpty,
+      responseFirstPostID > 0
+    else {
+      throw BrowseError.unavailable(
+        "贴吧返回的主题身份不足，无法安全恢复已删除楼层。"
       )
     }
-    guard replies.allSatisfy({ seen.insert($0.id).inserted }) else {
-      throw BrowseError.unavailable("贴吧返回的楼层标识或归属异常，未显示该响应。")
+    let responsePostsByID = Dictionary(
+      uniqueKeysWithValues: responsePosts.map { ($0.id, $0) }
+    )
+    var completedPostIDs: [Int64] = []
+    completedPostIDs.reserveCapacity(stagedAcceptedDeletionTargets.count)
+    for (postID, target) in stagedAcceptedDeletionTargets {
+      guard
+        target.threadID == responseThread.id,
+        target.forumID == responseThread.forumID,
+        target.forumName == responseForumName,
+        target.objectID != responseFirstPostID
+      else {
+        completedPostIDs.append(postID)
+        continue
+      }
+      guard let post = responsePostsByID[target.objectID] else { continue }
+      if
+        post.threadID == target.threadID,
+        post.floor == target.floor,
+        post.authorID == target.authorID
+      {
+        acceptedDeletionPostIDs.insert(target.objectID)
+      }
+      completedPostIDs.append(postID)
     }
-    return NormalizedPostPage(firstPost: resolvedFirstPost, replies: replies)
+    for postID in completedPostIDs {
+      stagedAcceptedDeletionTargets.removeValue(forKey: postID)
+    }
   }
 
   private func validateFirstPost(

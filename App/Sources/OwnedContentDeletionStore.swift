@@ -64,28 +64,58 @@ final class OwnedContentDeletionStore {
   }
 
   private enum Terminal {
+    case accepted(OwnedContentDeletionTarget)
+    case outcomeUnknown(OwnedContentDeletionTarget, String)
+
+    var target: OwnedContentDeletionTarget {
+      switch self {
+      case .accepted(let target), .outcomeUnknown(let target, _):
+        target
+      }
+    }
+  }
+
+  private enum PersistedDeletionOutcome: Sendable {
     case accepted(OwnedContentDeletionReceipt)
-    case outcomeUnknown(String)
+    case retryAllowed(OwnedContentDeletionError, refreshSession: Bool)
+    case outcomeUnknown
+
+    var refreshesSession: Bool {
+      if case .retryAllowed(_, refreshSession: true) = self { return true }
+      return false
+    }
   }
 
   private struct Flight {
     let id: UUID
-    let task: Task<OwnedContentDeletionReceipt, Error>
+    let lease: AccountSessionLease
+    let target: OwnedContentDeletionTarget
+    let finalizer: Task<PersistedDeletionOutcome, Never>
   }
 
   private let access: AccountAccess
+  private let ledger: any OwnedContentDeletionLedgerRepository
   private var entries: [OwnedContentDeletionTarget: OwnedContentDeletionEntry] = [:]
   private var currentSession: StoredAccountSession?
   private var hasResolvedSession = false
+  private var hasResolvedLedger = false
+  private var ledgerIsAvailable = false
+  private var ledgerLoadTask: Task<[OwnedContentDeletionLedgerRecord], Error>?
   private var sessionGeneration = 0
-  private var flights: [OperationKey: Flight] = [:]
-  // Keep irreversible terminal outcomes bound to content, not a replaceable session lease.
-  private var terminals: [OwnedContentDeletionTarget: Terminal] = [:]
+  private var flights: [OwnedContentDeletionLedgerKey: Flight] = [:]
+  // Keep irreversible terminal outcomes bound to stable content, not display metadata
+  // or a replaceable session lease.
+  private var terminals: [OwnedContentDeletionLedgerKey: Terminal] = [:]
   private var failures: [OperationKey: String] = [:]
   private var sessionChangeCancellable: AnyCancellable?
 
-  init(access: AccountAccess, observesAccountSessionChanges: Bool = true) {
+  init(
+    access: AccountAccess,
+    ledger: any OwnedContentDeletionLedgerRepository,
+    observesAccountSessionChanges: Bool = true
+  ) {
     self.access = access
+    self.ledger = ledger
     if observesAccountSessionChanges {
       sessionChangeCancellable = NotificationCenter.default.publisher(for: .accountSessionDidChange)
         .sink { [weak self] _ in
@@ -119,9 +149,9 @@ final class OwnedContentDeletionStore {
   }
 
   func outcomeUnknownTarget(threadID: Int64) -> OwnedContentDeletionTarget? {
-    terminals.compactMap { target, terminal in
-      guard target.threadID == threadID else { return nil }
-      if case .outcomeUnknown = terminal { return target }
+    terminals.values.compactMap { terminal in
+      guard terminal.target.threadID == threadID else { return nil }
+      if case .outcomeUnknown(let target, _) = terminal { return target }
       return nil
     }
     .sorted { lhs, rhs in
@@ -131,66 +161,91 @@ final class OwnedContentDeletionStore {
     .first
   }
 
+  func restoredTargets(
+    threadID: Int64
+  ) async -> (accepted: [OwnedContentDeletionTarget], outcomeUnknown: OwnedContentDeletionTarget?) {
+    await restoreLedgerIfNeeded()
+    guard ledgerIsAvailable else { return ([], nil) }
+    let accepted = terminals.values.compactMap { terminal -> OwnedContentDeletionTarget? in
+      guard terminal.target.threadID == threadID else { return nil }
+      if case .accepted(let target) = terminal { return target }
+      return nil
+    }
+    .sorted(by: Self.targetAppearsEarlier)
+    return (accepted, outcomeUnknownTarget(threadID: threadID))
+  }
+
   @discardableResult
   func delete(
     _ pending: PendingOwnedContentDeletion
   ) async throws -> OwnedContentDeletionReceipt {
-    guard pending.target.authorID == pending.lease.userID else {
-      throw OwnedContentDeletionError.unavailable("删除目标不属于当前账户。")
-    }
-    let key = OperationKey(lease: pending.lease, target: pending.target)
-    if let outcome = try await existingOutcome(for: key, pending: pending) {
-      return outcome
-    }
-
-    let session = try await access.vault.activeSession()
-    guard
-      let session,
-      pending.lease.matches(session),
-      session.credentials != nil
-    else {
-      await reloadActiveSession()
+    guard hasResolvedLedger, ledgerIsAvailable else {
       throw OwnedContentDeletionError.unavailable(
-        "当前账户已经变化，未发送删除请求。请重新确认后再试。"
+        "无法读取删除安全记录，未发送请求。请检查本机存储后再试。"
       )
     }
-
-    // The vault read suspends MainActor; another confirmation may have installed a flight.
-    if let outcome = try await existingOutcome(for: key, pending: pending) {
-      return outcome
+    guard
+      pending.target.authorID == pending.lease.userID,
+      let resourceKey = OwnedContentDeletionLedgerKey(
+        userID: pending.lease.userID,
+        target: pending.target
+      )
+    else {
+      throw OwnedContentDeletionError.unavailable("删除目标不属于当前账户。")
     }
-
-    failures.removeValue(forKey: key)
-    entry(for: pending.target).setState(.deleting(pending.lease))
-    let service = access.service
-    let operationID = UUID()
-    let task = Task.detached {
-      try await service.deleteOwnedContent(session: session, target: pending.target)
+    let operationKey = OperationKey(lease: pending.lease, target: pending.target)
+    if let terminal = terminals[resourceKey] {
+      return try terminalReceipt(terminal, for: pending)
     }
-    flights[key] = Flight(id: operationID, task: task)
-    defer {
-      if flights[key]?.id == operationID {
-        flights.removeValue(forKey: key)
+    if let flight = flights[resourceKey] {
+      guard flight.lease == pending.lease, flight.target == pending.target else {
+        throw OwnedContentDeletionError.unavailable(
+          "同一内容已有其他账户会话或元数据发起的删除操作。"
+        )
       }
+      return try await consume(flight)
     }
 
-    do {
-      let receipt = try await validatedReceipt(task: task, for: pending)
-      terminals[pending.target] = .accepted(receipt)
-      applyCurrentState(to: entry(for: pending.target))
-      return receipt
-    } catch OwnedContentDeletionError.outcomeUnknown {
-      recordOutcomeUnknown(for: pending)
-      throw OwnedContentDeletionError.outcomeUnknown
-    } catch {
-      let message = error.localizedDescription
-      failures[key] = message
-      applyCurrentState(to: entry(for: pending.target))
-      throw error
+    try Task.checkCancellation()
+    failures.removeValue(forKey: operationKey)
+    entry(for: pending.target).setState(.deleting(pending.lease))
+    let flightID = UUID()
+    let operationID = UUID()
+    let access = access
+    let ledger = ledger
+    // This task is owned by the Store rather than by any caller awaiting delete().
+    // It therefore publishes the durable outcome and clears the flight even when
+    // the initiating view task is cancelled or disappears.
+    let finalizer = Task.detached { [self] in
+      let outcome = await Self.performPersistedDeletion(
+        pending: pending,
+        resourceKey: resourceKey,
+        operationID: operationID,
+        access: access,
+        ledger: ledger
+      )
+      if outcome.refreshesSession {
+        await self.reloadActiveSession()
+      }
+      return await self.finalize(
+        outcome,
+        flightID: flightID,
+        resourceKey: resourceKey,
+        pending: pending
+      )
     }
+    let flight = Flight(
+      id: flightID,
+      lease: pending.lease,
+      target: pending.target,
+      finalizer: finalizer
+    )
+    flights[resourceKey] = flight
+    return try await consume(flight)
   }
 
   func reloadActiveSession() async {
+    await restoreLedgerIfNeeded()
     sessionGeneration &+= 1
     let generation = sessionGeneration
     do {
@@ -209,8 +264,12 @@ final class OwnedContentDeletionStore {
   }
 
   private func applyCurrentState(to entry: OwnedContentDeletionEntry) {
-    guard hasResolvedSession else {
+    guard hasResolvedSession, hasResolvedLedger else {
       entry.setState(.resolvingAccount)
+      return
+    }
+    guard ledgerIsAvailable else {
+      entry.setState(.unavailable)
       return
     }
     guard let session = currentSession else {
@@ -222,70 +281,440 @@ final class OwnedContentDeletionStore {
       entry.setState(.unavailable)
       return
     }
-    let key = OperationKey(lease: lease, target: entry.target)
-    if let terminal = terminals[entry.target] {
+    guard
+      let resourceKey = OwnedContentDeletionLedgerKey(
+        userID: session.id,
+        target: entry.target
+      )
+    else {
+      entry.setState(.unavailable)
+      return
+    }
+    let operationKey = OperationKey(lease: lease, target: entry.target)
+    if let terminal = terminals[resourceKey] {
+      guard terminal.target == entry.target else {
+        entry.setState(.unavailable)
+        return
+      }
       switch terminal {
-      case .accepted(let receipt):
-        entry.setState(.accepted(receipt))
-      case .outcomeUnknown(let message):
+      case .accepted(let target):
+        entry.setState(
+          .accepted(
+            OwnedContentDeletionReceipt(
+              accountID: lease.userID,
+              sessionRevision: lease.sessionRevision,
+              target: target
+            )
+          )
+        )
+      case .outcomeUnknown(_, let message):
         entry.setState(.outcomeUnknown(lease, message: message))
       }
-    } else if flights[key] != nil {
-      entry.setState(.deleting(lease))
-    } else if let message = failures[key] {
+    } else if let flight = flights[resourceKey] {
+      entry.setState(
+        flight.lease == lease && flight.target == entry.target ? .deleting(lease) : .unavailable
+      )
+    } else if let message = failures[operationKey] {
       entry.setState(.failed(lease, message: message))
     } else {
       entry.setState(.ready(lease))
     }
   }
 
-  private func validatedReceipt(
-    task: Task<OwnedContentDeletionReceipt, Error>,
-    for pending: PendingOwnedContentDeletion
+  private func restoreLedgerIfNeeded() async {
+    guard !hasResolvedLedger else { return }
+    let task: Task<[OwnedContentDeletionLedgerRecord], Error>
+    if let ledgerLoadTask {
+      task = ledgerLoadTask
+    } else {
+      let ledger = ledger
+      let created = Task.detached { try await ledger.records() }
+      ledgerLoadTask = created
+      task = created
+    }
+
+    do {
+      let records = try await task.value
+      guard !hasResolvedLedger else { return }
+      var restored: [OwnedContentDeletionLedgerKey: Terminal] = [:]
+      restored.reserveCapacity(records.count)
+      for record in records {
+        let target = try record.reconstructedTarget()
+        let terminal: Terminal = switch record.restoredTerminal {
+        case .accepted:
+          .accepted(target)
+        case .outcomeUnknown:
+          .outcomeUnknown(
+            target,
+            OwnedContentDeletionError.outcomeUnknown.localizedDescription
+          )
+        }
+        guard restored.updateValue(terminal, forKey: record.key) == nil else {
+          throw OwnedContentDeletionLedgerError.corruptedArchive
+        }
+      }
+      terminals = restored
+      ledgerIsAvailable = true
+    } catch {
+      terminals.removeAll(keepingCapacity: false)
+      ledgerIsAvailable = false
+    }
+    hasResolvedLedger = true
+    ledgerLoadTask = nil
+    for entry in entries.values {
+      applyCurrentState(to: entry)
+    }
+  }
+
+  private func consume(
+    _ flight: Flight
   ) async throws -> OwnedContentDeletionReceipt {
-    let receipt = try await task.value
-    guard
-      receipt.accountID == pending.lease.userID,
-      receipt.sessionRevision == pending.lease.sessionRevision,
-      receipt.target == pending.target
-    else {
+    try Task.checkCancellation()
+    switch await flight.finalizer.value {
+    case .accepted(let receipt):
+      return receipt
+    case .retryAllowed(let error, _):
+      throw error
+    case .outcomeUnknown:
       throw OwnedContentDeletionError.outcomeUnknown
     }
-    return receipt
   }
 
-  private func existingOutcome(
-    for key: OperationKey,
+  private func finalize(
+    _ outcome: PersistedDeletionOutcome,
+    flightID: UUID,
+    resourceKey: OwnedContentDeletionLedgerKey,
     pending: PendingOwnedContentDeletion
-  ) async throws -> OwnedContentDeletionReceipt? {
-    if let terminal = terminals[pending.target] {
-      switch terminal {
-      case .accepted(let receipt):
-        return receipt
-      case .outcomeUnknown:
-        throw OwnedContentDeletionError.outcomeUnknown
-      }
+  ) -> PersistedDeletionOutcome {
+    guard flights[resourceKey]?.id == flightID else {
+      return .outcomeUnknown
     }
-    if let flight = flights[key] {
-      do {
-        return try await validatedReceipt(task: flight.task, for: pending)
-      } catch OwnedContentDeletionError.outcomeUnknown {
-        recordOutcomeUnknown(for: pending)
-        throw OwnedContentDeletionError.outcomeUnknown
+
+    let finalized: PersistedDeletionOutcome
+    switch outcome {
+    case .accepted(let receipt):
+      guard
+        receipt.accountID == pending.lease.userID,
+        receipt.sessionRevision == pending.lease.sessionRevision,
+        receipt.target == pending.target
+      else {
+        terminals[resourceKey] = .outcomeUnknown(
+          pending.target,
+          OwnedContentDeletionError.outcomeUnknown.localizedDescription
+        )
+        finalized = .outcomeUnknown
+        break
       }
+      terminals[resourceKey] = .accepted(pending.target)
+      failures.removeValue(forKey: OperationKey(lease: pending.lease, target: pending.target))
+      finalized = .accepted(receipt)
+    case .retryAllowed(let error, let refreshSession):
+      failures[OperationKey(lease: pending.lease, target: pending.target)] =
+        error.localizedDescription
+      finalized = .retryAllowed(error, refreshSession: refreshSession)
+    case .outcomeUnknown:
+      terminals[resourceKey] = .outcomeUnknown(
+        pending.target,
+        OwnedContentDeletionError.outcomeUnknown.localizedDescription
+      )
+      finalized = .outcomeUnknown
     }
-    if flights.keys.contains(where: { $0.target == pending.target }) {
+
+    flights.removeValue(forKey: resourceKey)
+    applyCurrentStateToEntries(for: resourceKey)
+    return finalized
+  }
+
+  private func terminalReceipt(
+    _ terminal: Terminal,
+    for pending: PendingOwnedContentDeletion
+  ) throws -> OwnedContentDeletionReceipt {
+    guard terminal.target == pending.target else {
       throw OwnedContentDeletionError.unavailable(
-        "同一内容已有其他账户会话发起的删除操作。"
+        "删除目标的元数据与已有安全记录不一致，未发送请求。"
       )
     }
-    return nil
+    switch terminal {
+    case .accepted:
+      return OwnedContentDeletionReceipt(
+        accountID: pending.lease.userID,
+        sessionRevision: pending.lease.sessionRevision,
+        target: pending.target
+      )
+    case .outcomeUnknown:
+      throw OwnedContentDeletionError.outcomeUnknown
+    }
   }
 
-  private func recordOutcomeUnknown(for pending: PendingOwnedContentDeletion) {
-    let message = OwnedContentDeletionError.outcomeUnknown.localizedDescription
-    terminals[pending.target] = .outcomeUnknown(message)
-    applyCurrentState(to: entry(for: pending.target))
+  private func applyCurrentStateToEntries(for resourceKey: OwnedContentDeletionLedgerKey) {
+    for entry in entries.values {
+      guard
+        let entryKey = OwnedContentDeletionLedgerKey(
+          userID: resourceKey.userID,
+          target: entry.target
+        ),
+        entryKey == resourceKey
+      else { continue }
+      applyCurrentState(to: entry)
+    }
+  }
+
+  private nonisolated static func performPersistedDeletion(
+    pending: PendingOwnedContentDeletion,
+    resourceKey: OwnedContentDeletionLedgerKey,
+    operationID: UUID,
+    access: AccountAccess,
+    ledger: any OwnedContentDeletionLedgerRepository
+  ) async -> PersistedDeletionOutcome {
+    let session: StoredAccountSession
+    do {
+      guard
+        let activeSession = try await access.vault.activeSession(),
+        pending.lease.matches(activeSession),
+        activeSession.credentials != nil
+      else {
+        return .retryAllowed(
+          .unavailable("当前账户已经变化，未发送删除请求。请重新确认后再试。"),
+          refreshSession: true
+        )
+      }
+      session = activeSession
+    } catch {
+      return .retryAllowed(
+        .unavailable("无法验证当前账户，未发送删除请求。请重新加载后再试。"),
+        refreshSession: true
+      )
+    }
+
+    do {
+      _ = try await ledger.prepare(
+        target: pending.target,
+        accountID: session.id,
+        sessionRevision: session.sessionRevision,
+        operationID: operationID,
+        at: Date()
+      )
+    } catch {
+      return await outcomeAfterPrepareFailure(
+        pending: pending,
+        resourceKey: resourceKey,
+        operationID: operationID,
+        ledger: ledger
+      )
+    }
+
+    let dispatchSession: StoredAccountSession
+    do {
+      guard
+        let activeSession = try await access.vault.activeSession(),
+        pending.lease.matches(activeSession),
+        activeSession.credentials != nil
+      else {
+        return await removeMarkerAfterKnownNoDeletion(
+          resourceKey: resourceKey,
+          operationID: operationID,
+          ledger: ledger,
+          retryError: .unavailable(
+            "当前账户在发送前已经变化，未发送删除请求。请重新确认后再试。"
+          ),
+          refreshSession: true
+        )
+      }
+      dispatchSession = activeSession
+    } catch {
+      return await removeMarkerAfterKnownNoDeletion(
+        resourceKey: resourceKey,
+        operationID: operationID,
+        ledger: ledger,
+        retryError: .unavailable(
+          "发送前无法再次验证当前账户，未发送删除请求。请重新加载后再试。"
+        ),
+        refreshSession: true
+      )
+    }
+
+    do {
+      let receipt = try await access.service.deleteOwnedContent(
+        session: dispatchSession,
+        target: pending.target
+      )
+      guard
+        receipt.accountID == pending.lease.userID,
+        receipt.sessionRevision == pending.lease.sessionRevision,
+        receipt.target == pending.target
+      else {
+        await lockOutcomeUnknown(
+          resourceKey: resourceKey,
+          operationID: operationID,
+          ledger: ledger
+        )
+        return .outcomeUnknown
+      }
+      do {
+        _ = try await ledger.markAccepted(
+          for: resourceKey,
+          operationID: operationID
+        )
+        return .accepted(receipt)
+      } catch {
+        return await outcomeAfterAcceptedTransitionFailure(
+          receipt: receipt,
+          resourceKey: resourceKey,
+          operationID: operationID,
+          ledger: ledger
+        )
+      }
+    } catch OwnedContentDeletionError.outcomeUnknown {
+      await lockOutcomeUnknown(
+        resourceKey: resourceKey,
+        operationID: operationID,
+        ledger: ledger
+      )
+      return .outcomeUnknown
+    } catch let error as OwnedContentDeletionError {
+      switch error {
+      case .definitelyNotAccepted, .rejected:
+        return await removeMarkerAfterKnownNoDeletion(
+          resourceKey: resourceKey,
+          operationID: operationID,
+          ledger: ledger,
+          retryError: error,
+          refreshSession: false
+        )
+      case .unavailable, .outcomeUnknown:
+        await lockOutcomeUnknown(
+          resourceKey: resourceKey,
+          operationID: operationID,
+          ledger: ledger
+        )
+        return .outcomeUnknown
+      }
+    } catch {
+      await lockOutcomeUnknown(
+        resourceKey: resourceKey,
+        operationID: operationID,
+        ledger: ledger
+      )
+      return .outcomeUnknown
+    }
+  }
+
+  private nonisolated static func outcomeAfterPrepareFailure(
+    pending: PendingOwnedContentDeletion,
+    resourceKey: OwnedContentDeletionLedgerKey,
+    operationID: UUID,
+    ledger: any OwnedContentDeletionLedgerRepository
+  ) async -> PersistedDeletionOutcome {
+    do {
+      guard let record = try await ledger.record(for: resourceKey) else {
+        return .retryAllowed(
+          .unavailable("无法建立删除安全记录，未发送请求。请检查本机存储后再试。"),
+          refreshSession: false
+        )
+      }
+      if record.operationID == operationID {
+        if
+          record.phase == .accepted,
+          record.originSessionRevision == pending.lease.sessionRevision,
+          try record.reconstructedTarget() == pending.target
+        {
+          return .accepted(
+            OwnedContentDeletionReceipt(
+              accountID: pending.lease.userID,
+              sessionRevision: pending.lease.sessionRevision,
+              target: pending.target
+            )
+          )
+        }
+        await lockOutcomeUnknown(
+          resourceKey: resourceKey,
+          operationID: operationID,
+          ledger: ledger
+        )
+      }
+      return .outcomeUnknown
+    } catch {
+      // A failed read cannot prove that prepare did not durably publish its marker.
+      return .outcomeUnknown
+    }
+  }
+
+  private nonisolated static func removeMarkerAfterKnownNoDeletion(
+    resourceKey: OwnedContentDeletionLedgerKey,
+    operationID: UUID,
+    ledger: any OwnedContentDeletionLedgerRepository,
+    retryError: OwnedContentDeletionError,
+    refreshSession: Bool
+  ) async -> PersistedDeletionOutcome {
+    do {
+      try await ledger.removeAfterDefiniteFailure(
+        for: resourceKey,
+        operationID: operationID
+      )
+      return .retryAllowed(retryError, refreshSession: refreshSession)
+    } catch {
+      do {
+        guard let record = try await ledger.record(for: resourceKey) else {
+          return .retryAllowed(retryError, refreshSession: refreshSession)
+        }
+        if record.operationID == operationID {
+          await lockOutcomeUnknown(
+            resourceKey: resourceKey,
+            operationID: operationID,
+            ledger: ledger
+          )
+        }
+      } catch {
+        // Without a readable ledger, retain the in-memory fail-closed terminal.
+      }
+      return .outcomeUnknown
+    }
+  }
+
+  private nonisolated static func outcomeAfterAcceptedTransitionFailure(
+    receipt: OwnedContentDeletionReceipt,
+    resourceKey: OwnedContentDeletionLedgerKey,
+    operationID: UUID,
+    ledger: any OwnedContentDeletionLedgerRepository
+  ) async -> PersistedDeletionOutcome {
+    do {
+      if
+        let record = try await ledger.record(for: resourceKey),
+        record.operationID == operationID,
+        record.originSessionRevision == receipt.sessionRevision,
+        record.phase == .accepted,
+        try record.reconstructedTarget() == receipt.target
+      {
+        return .accepted(receipt)
+      }
+    } catch {
+      // The service write may have succeeded, so an unreadable ledger is unknown.
+    }
+    await lockOutcomeUnknown(
+      resourceKey: resourceKey,
+      operationID: operationID,
+      ledger: ledger
+    )
+    return .outcomeUnknown
+  }
+
+  private nonisolated static func lockOutcomeUnknown(
+    resourceKey: OwnedContentDeletionLedgerKey,
+    operationID: UUID,
+    ledger: any OwnedContentDeletionLedgerRepository
+  ) async {
+    _ = try? await ledger.markOutcomeUnknown(
+      for: resourceKey,
+      operationID: operationID
+    )
+  }
+
+  private nonisolated static func targetAppearsEarlier(
+    _ lhs: OwnedContentDeletionTarget,
+    _ rhs: OwnedContentDeletionTarget
+  ) -> Bool {
+    if lhs.floor != rhs.floor { return lhs.floor < rhs.floor }
+    return lhs.objectID < rhs.objectID
   }
 }
 

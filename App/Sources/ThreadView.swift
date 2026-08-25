@@ -31,8 +31,10 @@ struct ThreadView: View {
   @State private var cloudFavoriteErrorMessage: String?
   @State private var pendingOwnedContentDeletion: PendingOwnedContentDeletion?
   @State private var ownedContentDeletionInProgress: OwnedContentDeletionTarget?
+  @State private var ownedContentDeletionAcceptedTopic: OwnedContentDeletionTarget?
   @State private var ownedContentDeletionUnknownTarget: OwnedContentDeletionTarget?
   @State private var ownedContentDeletionErrorMessage: String?
+  @State private var deletionProjectionResolved = false
   @State private var replyComposerContext: TextReplyComposerContext?
   @State private var pendingInboxReplyIntent: InboxReplyIntent?
   @State private var isResolvingInboxReplyIntent = false
@@ -50,6 +52,7 @@ struct ThreadView: View {
   @Environment(\.contentReportCoordinator) private var contentReportCoordinator
   private let historySnapshot: ThreadHistorySnapshot?
   private let linkRoute: TiebaThreadRoute?
+  private let allowsLedgerIdentityForLinkPlaceholder: Bool
   private let onInboxReplyComposerPresented: ((InboxReplyIntent) -> Void)?
 
   init(
@@ -72,6 +75,9 @@ struct ThreadView: View {
     self.searchHistoryRepository = searchHistoryRepository
     self.historySnapshot = historySnapshot
     self.linkRoute = linkRoute
+    self.allowsLedgerIdentityForLinkPlaceholder = linkRoute.map {
+      thread == $0.placeholderThread
+    } ?? false
     self.onInboxReplyComposerPresented = onInboxReplyComposerPresented
     _pendingInboxReplyIntent = State(initialValue: replyIntent)
     _viewModel = StateObject(
@@ -89,7 +95,12 @@ struct ThreadView: View {
 
   var body: some View {
     Group {
-      if viewModel.firstPost == nil && viewModel.posts.isEmpty {
+      if !deletionProjectionResolved {
+        ProgressView()
+          .accessibilityLabel("正在恢复删除安全记录")
+      } else if let acceptedTopic = ownedContentDeletionAcceptedTopic {
+        ownedContentDeletionAcceptedTopicView(acceptedTopic)
+      } else if viewModel.firstPost == nil && viewModel.posts.isEmpty {
         switch viewModel.state {
         case .idle, .loading:
           ProgressView()
@@ -107,10 +118,16 @@ struct ThreadView: View {
     .navigationBarTitleDisplayMode(.inline)
     .safeAreaInset(edge: .top, spacing: 0) {
       VStack(spacing: 0) {
-        if !isPureReadingMode {
+        if
+          deletionProjectionResolved,
+          ownedContentDeletionAcceptedTopic == nil,
+          !isPureReadingMode
+        {
           optionsBar
         }
-        if let ownedContentDeletionInProgress {
+        if !deletionProjectionResolved || ownedContentDeletionAcceptedTopic != nil {
+          EmptyView()
+        } else if let ownedContentDeletionInProgress {
           ownedContentDeletionProgress(ownedContentDeletionInProgress)
         } else if let ownedContentDeletionUnknownTarget {
           ownedContentDeletionUnknown(ownedContentDeletionUnknownTarget)
@@ -118,7 +135,9 @@ struct ThreadView: View {
       }
     }
     .safeAreaInset(edge: .bottom, spacing: 0) {
-      threadBottomInset
+      if deletionProjectionResolved, ownedContentDeletionAcceptedTopic == nil {
+        threadBottomInset
+      }
     }
     .toolbar {
       ToolbarItem(placement: .principal) {
@@ -126,76 +145,78 @@ struct ThreadView: View {
       }
 
       ToolbarItemGroup(placement: .navigationBarTrailing) {
-        Menu {
-          ForEach(ThreadReadingMode.allCases) { mode in
-            Button {
-              selectReadingMode(mode)
-            } label: {
-              Label(
-                mode.title,
-                systemImage: readingMode == mode ? "checkmark" : mode.systemImage
+        if deletionProjectionResolved, ownedContentDeletionAcceptedTopic == nil {
+          Menu {
+            ForEach(ThreadReadingMode.allCases) { mode in
+              Button {
+                selectReadingMode(mode)
+              } label: {
+                Label(
+                  mode.title,
+                  systemImage: readingMode == mode ? "checkmark" : mode.systemImage
+                )
+              }
+              .accessibilityLabel(
+                readingMode == mode ? "\(mode.title)，当前" : mode.title
               )
             }
-            .accessibilityLabel(
-              readingMode == mode ? "\(mode.title)，当前" : mode.title
+          } label: {
+            Image(systemName: readingMode.systemImage)
+          }
+          .accessibilityLabel("阅读模式，当前为 \(readingMode.title)")
+          .accessibilityIdentifier("thread-reading-mode-menu")
+          .help("阅读模式：\(readingMode.title)")
+
+          if
+            let shareURL = TiebaLink.canonicalURL(
+              for: .thread(TiebaThreadRoute(threadID: viewModel.thread.id))
+            ),
+            let copyURL = TiebaLink.threadCopyURL(
+              threadID: viewModel.thread.id,
+              onlyThreadAuthor: viewModel.options.onlyThreadAuthor
+            )
+          {
+            TiebaShareMenu(
+              url: shareURL,
+              copyURL: copyURL,
+              title: viewModel.thread.title.isEmpty
+                ? "帖子 \(viewModel.thread.id)"
+                : viewModel.thread.title
             )
           }
-        } label: {
-          Image(systemName: readingMode.systemImage)
-        }
-        .accessibilityLabel("阅读模式，当前为 \(readingMode.title)")
-        .accessibilityIdentifier("thread-reading-mode-menu")
-        .help("阅读模式：\(readingMode.title)")
 
-        if
-          let shareURL = TiebaLink.canonicalURL(
-            for: .thread(TiebaThreadRoute(threadID: viewModel.thread.id))
-          ),
-          let copyURL = TiebaLink.threadCopyURL(
-            threadID: viewModel.thread.id,
-            onlyThreadAuthor: viewModel.options.onlyThreadAuthor
+          LocalFavoriteButton(target: favoriteTarget, repository: favoritesRepository)
+
+          ThreadCloudFavoriteControlSlot(
+            store: threadCloudFavoriteStore,
+            target: threadCloudFavoriteTarget,
+            currentPosition: currentCloudFavoritePosition,
+            requestAction: requestCloudFavoriteAction,
+            retry: retryCloudFavorite
           )
-        {
-          TiebaShareMenu(
-            url: shareURL,
-            copyURL: copyURL,
-            title: viewModel.thread.title.isEmpty
-              ? "帖子 \(viewModel.thread.id)"
-              : viewModel.thread.title
+
+          Button {
+            pageInput = viewModel.currentPage > 0 ? String(viewModel.currentPage) : ""
+            showsPageJump = true
+          } label: {
+            Image(systemName: "number.square")
+          }
+          .disabled(
+            viewModel.totalPages <= 1
+              || viewModel.isJumping
+              || viewModel.isCheckingLatestReplies
           )
-        }
+          .accessibilityLabel("跳转页码")
+          .help("跳转页码")
 
-        LocalFavoriteButton(target: favoriteTarget, repository: favoritesRepository)
-
-        ThreadCloudFavoriteControlSlot(
-          store: threadCloudFavoriteStore,
-          target: threadCloudFavoriteTarget,
-          currentPosition: currentCloudFavoritePosition,
-          requestAction: requestCloudFavoriteAction,
-          retry: retryCloudFavorite
-        )
-
-        Button {
-          pageInput = viewModel.currentPage > 0 ? String(viewModel.currentPage) : ""
-          showsPageJump = true
-        } label: {
-          Image(systemName: "number.square")
-        }
-        .disabled(
-          viewModel.totalPages <= 1
-            || viewModel.isJumping
-            || viewModel.isCheckingLatestReplies
-        )
-        .accessibilityLabel("跳转页码")
-        .help("跳转页码")
-
-        if !isPureReadingMode {
-          ThreadTopicActionsMenu(
-            reportTarget: topicReportTarget,
-            deletionStore: ownedContentDeletionStore,
-            deletionTarget: topicDeletionTarget,
-            requestDeletion: requestOwnedContentDeletion
-          )
+          if !isPureReadingMode {
+            ThreadTopicActionsMenu(
+              reportTarget: topicReportTarget,
+              deletionStore: ownedContentDeletionStore,
+              deletionTarget: topicDeletionTarget,
+              requestDeletion: requestOwnedContentDeletion
+            )
+          }
         }
       }
     }
@@ -310,31 +331,21 @@ struct ThreadView: View {
     ) { route in
       ThreadImageGalleryView(viewModel: route.viewModel)
     }
-    .task {
-      let snapshot: ThreadHistorySnapshot?
-      if linkRoute == nil {
-        snapshot = await resumeSnapshot()
-      } else {
-        snapshot = nil
-      }
-      guard !Task.isCancelled else { return }
-      restoredHistorySnapshot = snapshot
-      if let snapshot {
-        viewModel.prepareResume(
-          options: snapshot.browseOptions,
-          postID: snapshot.lastPostID
-        )
-      }
-      viewModel.loadIfNeeded()
-    }
+    .task { await bootstrapThread() }
     .task(
       id: ContentAgreementRegistrationTaskID(
         descriptorEpoch: viewModel.agreementDescriptorEpoch,
-        isEnabled: !isPureReadingMode
+        isEnabled: deletionProjectionResolved
+          && ownedContentDeletionAcceptedTopic == nil
+          && !isPureReadingMode
       )
     ) {
       guard let contentAgreementStore else { return }
-      guard !isPureReadingMode else {
+      guard
+        deletionProjectionResolved,
+        ownedContentDeletionAcceptedTopic == nil,
+        !isPureReadingMode
+      else {
         contentAgreementStore.removeScope(agreementScopeID)
         return
       }
@@ -359,15 +370,12 @@ struct ThreadView: View {
       await consumeInboxReplyIntentIfReady()
     }
     .task(id: viewModel.state) {
-      if viewModel.state == .loaded, let ownedContentDeletionStore {
-        ownedContentDeletionUnknownTarget = ownedContentDeletionStore.outcomeUnknownTarget(
-          threadID: viewModel.thread.id
-        )
-      }
       guard
+        deletionProjectionResolved,
         !hasRecordedHistoryVisit,
         !Task.isCancelled,
         viewModel.state == .loaded,
+        ownedContentDeletionAcceptedTopic == nil,
         !viewModel.thread.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       else { return }
       hasRecordedHistoryVisit = true
@@ -395,7 +403,12 @@ struct ThreadView: View {
         isRestoringPrependPosition: viewModel.isRestoringPrependPosition
       )
     ) {
-      guard let visiblePost, !viewModel.isRestoringPrependPosition else { return }
+      guard
+        deletionProjectionResolved,
+        ownedContentDeletionAcceptedTopic == nil,
+        let visiblePost,
+        !viewModel.isRestoringPrependPosition
+      else { return }
       try? await Task.sleep(nanoseconds: 600_000_000)
       guard !Task.isCancelled, !viewModel.isRestoringPrependPosition else { return }
       await persistProgress(visiblePost, options: viewModel.options)
@@ -416,10 +429,15 @@ struct ThreadView: View {
     }
     .onDisappear {
       scrollPositionCoalescer.cancelPendingPublication()
-      if let latestVisiblePost, !viewModel.isRestoringPrependPosition {
+      if
+        deletionProjectionResolved,
+        ownedContentDeletionAcceptedTopic == nil,
+        let latestVisiblePost,
+        !viewModel.isRestoringPrependPosition
+      {
         let options = viewModel.options
         Task { await persistProgress(latestVisiblePost, options: options) }
-      } else {
+      } else if deletionProjectionResolved, ownedContentDeletionAcceptedTopic == nil {
         persistBrowseOptions(viewModel.options)
       }
       cancelPictureGallery()
@@ -454,6 +472,9 @@ struct ThreadView: View {
       }
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
+      guard deletionProjectionResolved, ownedContentDeletionAcceptedTopic == nil else {
+        return
+      }
       cancelPictureGallery()
       contentReportCoordinator?.invalidate(scopeID: reportScopeID)
       pendingCloudFavoriteAction = nil
@@ -709,18 +730,56 @@ struct ThreadView: View {
     .accessibilityIdentifier("owned-content-deletion-unknown")
   }
 
+  private func ownedContentDeletionAcceptedTopicView(
+    _ target: OwnedContentDeletionTarget
+  ) -> some View {
+    VStack(spacing: 14) {
+      Image(systemName: "trash.circle.fill")
+        .font(.system(size: 42))
+        .foregroundStyle(.secondary)
+        .accessibilityHidden(true)
+      Text("主题已删除")
+        .font(.headline)
+      Text("贴吧此前已确认这个主题的删除请求，本机已保留安全记录。")
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+      Button("返回") { dismiss() }
+        .buttonStyle(.borderedProminent)
+    }
+    .padding(24)
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("owned-content-deletion-accepted-topic-\(target.objectID)")
+  }
+
   private var topicReportTarget: ContentReportTarget? {
-    guard let firstPost = viewModel.firstPost else { return nil }
+    guard
+      deletionProjectionResolved,
+      ownedContentDeletionAcceptedTopic == nil,
+      let firstPost = viewModel.firstPost
+    else {
+      return nil
+    }
     return ContentReportTarget(thread: viewModel.thread, post: firstPost)
   }
 
   private var topicDeletionTarget: OwnedContentDeletionTarget? {
-    guard let firstPost = viewModel.firstPost else { return nil }
+    guard
+      deletionProjectionResolved,
+      ownedContentDeletionAcceptedTopic == nil,
+      let firstPost = viewModel.firstPost
+    else {
+      return nil
+    }
     return OwnedContentDeletionTarget(thread: viewModel.thread, post: firstPost)
   }
 
   private var replyEntriesVisible: Bool {
-    ReplyEntryVisibilityPolicy(
+    guard deletionProjectionResolved, ownedContentDeletionAcceptedTopic == nil else {
+      return false
+    }
+    return ReplyEntryVisibilityPolicy(
       preferenceHidden: hidesReplyEntryPoints,
       pureReading: isPureReadingMode,
       contextAvailable: true
@@ -1303,7 +1362,11 @@ struct ThreadView: View {
 
   @ViewBuilder
   private var navigationPrincipal: some View {
-    if let forumName = forumNavigationName {
+    if
+      deletionProjectionResolved,
+      ownedContentDeletionAcceptedTopic == nil,
+      let forumName = forumNavigationName
+    {
       NavigationLink {
         ForumView(
           forumName: forumName,
@@ -1335,6 +1398,98 @@ struct ThreadView: View {
 
   private var threadNavigationTitle: String {
     viewModel.thread.title.isEmpty ? viewModel.thread.forumName : viewModel.thread.title
+  }
+
+  private func bootstrapThread() async {
+    if deletionProjectionResolved {
+      guard ownedContentDeletionAcceptedTopic == nil, !Task.isCancelled else { return }
+      viewModel.loadIfNeeded()
+      return
+    }
+
+    let restored: (
+      accepted: [OwnedContentDeletionTarget],
+      outcomeUnknown: OwnedContentDeletionTarget?
+    )
+    if let ownedContentDeletionStore {
+      restored = await ownedContentDeletionStore.restoredTargets(
+        threadID: viewModel.thread.id
+      )
+    } else {
+      restored = (accepted: [], outcomeUnknown: nil)
+    }
+    guard !Task.isCancelled else { return }
+
+    let acceptedTopic = restored.accepted.first(where: {
+      $0.kind == .topic && restoredDeletionTargetMatchesInitialThread($0)
+    })
+    ownedContentDeletionAcceptedTopic = acceptedTopic
+    if acceptedTopic == nil {
+      for target in restored.accepted where
+        target.kind == .post && restoredDeletionTargetMatchesInitialThread(target)
+      {
+        _ = viewModel.stageAcceptedContentDeletion(
+          target,
+          allowsUnresolvedThreadIdentity: allowsLedgerIdentityForLinkPlaceholder
+        )
+      }
+    }
+    ownedContentDeletionUnknownTarget = restored.outcomeUnknown.flatMap {
+      restoredDeletionTargetMatchesInitialThread($0) ? $0 : nil
+    }
+    if acceptedTopic != nil {
+      deletionProjectionResolved = true
+      return
+    }
+
+    let snapshot: ThreadHistorySnapshot?
+    if linkRoute == nil {
+      snapshot = await resumeSnapshot()
+    } else {
+      snapshot = nil
+    }
+    guard !Task.isCancelled else { return }
+    restoredHistorySnapshot = snapshot
+    if let snapshot {
+      viewModel.prepareResume(
+        options: snapshot.browseOptions,
+        postID: snapshot.lastPostID
+      )
+    }
+    deletionProjectionResolved = true
+    viewModel.loadIfNeeded()
+  }
+
+  private func restoredDeletionTargetMatchesInitialThread(
+    _ target: OwnedContentDeletionTarget
+  ) -> Bool {
+    guard target.threadID == viewModel.thread.id else { return false }
+    if allowsLedgerIdentityForLinkPlaceholder {
+      return true
+    }
+
+    let thread = viewModel.thread
+    let forumName = thread.forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    guard
+      thread.localVisibility == .visible,
+      thread.forumID > 0,
+      !forumName.isEmpty,
+      target.forumID == thread.forumID,
+      target.forumName == forumName
+    else { return false }
+
+    switch target.kind {
+    case .topic:
+      return thread.authorID > 0
+        && thread.firstPostID > 0
+        && target.floor == 1
+        && target.objectID == thread.firstPostID
+        && target.authorID == thread.authorID
+    case .post:
+      return target.floor > 1
+        && (thread.firstPostID <= 0 || target.objectID != thread.firstPostID)
+    }
   }
 
   private func resumeSnapshot() async -> ThreadHistorySnapshot? {
@@ -1562,7 +1717,10 @@ struct ThreadView: View {
   }
 
   private var threadCloudFavoriteTarget: ThreadCloudFavoriteTarget? {
-    ThreadCloudFavoriteTarget(
+    guard deletionProjectionResolved, ownedContentDeletionAcceptedTopic == nil else {
+      return nil
+    }
+    return ThreadCloudFavoriteTarget(
       forumID: viewModel.thread.forumID,
       forumName: viewModel.thread.forumName,
       threadID: viewModel.thread.id
@@ -1792,7 +1950,9 @@ struct ThreadView: View {
         }
         switch receipt.target.kind {
         case .topic:
+          ownedContentDeletionAcceptedTopic = receipt.target
           ownedContentDeletionUnknownTarget = nil
+          ownedContentDeletionErrorMessage = nil
           replyComposerContext = nil
           sheetRoute = nil
           dismiss()

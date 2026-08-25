@@ -60,6 +60,15 @@ and its verified metadata enters the public app source.
   thread, and fresh `tbs` immediately before one signed write. A clear zero-code
   server acknowledgement removes the accepted target locally; an uncertain
   response leaves it visible and locks that target against automatic resend.
+  Before the service call, the App durably records a signed, bounded
+  dispatch-pending marker keyed by the account and stable content identity.
+  Pending, accepted, and unknown outcomes survive relaunch, logout, account
+  removal, and same-UID credential rotation; accepted topics and floors are
+  projected before thread history or network content can expose them again.
+  Corrupt, unauthenticated, future-schema, unsafe, or full archives disable new
+  deletions instead of being overwritten or evicted. The archive is an
+  ordinary-crash recovery journal, not a monotonic rollback anchor against an
+  app reinstall or restored device backup.
   Nested-reply deletion is intentionally still unavailable because TiebaLite's
   current abstract and concrete `isfloor`/`src` calls disagree and no disposable-
   account capture has established the irreversible wire contract.
@@ -887,7 +896,8 @@ and its verified metadata enters the public app source.
   rows, bulk cloud/local synchronization, disagreement and other remaining
   reaction types, image creation for ordinary-floor and nested replies,
   voice and arbitrary rich-media topic/reply creation, profile editing, content
-  deletion, native or credential-injected reporting, background or automatic check-in, notification mark-read/unread
+  deletion beyond the active account's own loaded topic or ordinary floor,
+  native or credential-injected reporting, background or automatic check-in, notification mark-read/unread
   reconciliation, background notification polling, and moderation remain
   unavailable until their request contracts and recovery paths have been
   validated on a disposable account.

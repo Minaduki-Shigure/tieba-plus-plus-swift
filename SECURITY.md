@@ -1742,10 +1742,29 @@ HTTP, cancellation-after-dispatch, response-size, empty, or malformed outcomes
 become outcome-unknown, remain visible, and are locked against automatic resend.
 Nested-reply deletion remains disabled until a disposable-account capture
 resolves the conflicting `isfloor` and `src` contracts in the compared client.
-The current unknown-outcome lock is process-local; restarting the App is not
-evidence that the first request failed. Until a durable pending-operation ledger
-and an endpoint-specific authoritative absence proof exist, a user must verify
-the target through an official client before manually confirming another delete.
+
+Before any deletion service call, the App writes a `dispatchPending` record to a
+separate HMAC-authenticated archive. Its stable key is the deleting UID, forum
+ID, thread ID, target kind, and target object ID; canonical forum name, floor,
+author, originating session revision, and operation UUID remain strict audit
+metadata. The file is capped at 4,096 records and 4 MiB, never evicts a deletion
+record, serializes independent repository instances through a persistent
+same-directory lock, and uses staged write, file sync, atomic rename, and parent-
+directory sync. A write error after rename is treated as potentially published
+and resolved by operation-ID readback rather than assumed absent.
+
+On launch, `dispatchPending` restores as outcome-unknown; accepted and explicit
+unknown phases retain their terminal meaning. These records are not removed by
+logout, account removal, local reset, or same-UID credential rotation. An
+accepted topic prevents thread loading and history recording; an accepted floor
+is verified against the real forum, first post, author, and floor before the
+first returned page can display it. Corrupt, unauthenticated, future-schema,
+oversized, unsafe, or unavailable storage disables deletion and is not silently
+replaced. The HMAC detects archive modification but is not a monotonic rollback
+anchor: reinstalling the App or restoring an older device backup can remove or
+roll back local evidence. An endpoint-specific authoritative absence proof is
+still unavailable, so an unknown target must be checked through an official
+client rather than retried.
 
 Report security issues privately to the repository owner rather than opening a
 public issue.

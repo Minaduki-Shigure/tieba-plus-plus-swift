@@ -1719,7 +1719,7 @@ struct TiebaCoreAccountService: AccountService {
       session.id == target.authorID,
       let credentials = session.credentials
     else {
-      throw OwnedContentDeletionError.unavailable(
+      throw OwnedContentDeletionError.definitelyNotAccepted(
         "只有当前账户本人发布的内容可以删除；请重新登录或切换账户后再试。"
       )
     }
@@ -1752,30 +1752,26 @@ struct TiebaCoreAccountService: AccountService {
         target: target
       )
     } catch is CancellationError {
-      throw CancellationError()
+      throw OwnedContentDeletionError.outcomeUnknown
     } catch TiebaClientError.ownedContentDeletionOutcomeUnknown {
       throw OwnedContentDeletionError.outcomeUnknown
     } catch TiebaClientError.ownedContentDeletionWriteConflict {
-      throw OwnedContentDeletionError.unavailable("同一内容已有删除操作正在进行。")
+      throw OwnedContentDeletionError.outcomeUnknown
     } catch let error as TiebaClientError {
       switch error {
       case .server(let code, _):
-        throw OwnedContentDeletionError.unavailable(
-          "贴吧拒绝了删除请求（错误码 \(code)），请重新加载后再试。"
-        )
+        throw OwnedContentDeletionError.rejected(code: code)
       case .invalidArgument, .invalidAuthenticatedResponse:
-        throw OwnedContentDeletionError.unavailable(
+        throw OwnedContentDeletionError.definitelyNotAccepted(
           "删除目标或当前账户已经变化，请重新加载后再试。"
         )
       default:
-        throw OwnedContentDeletionError.unavailable(
-          Self.accountError(error).errorDescription ?? "无法删除内容，请稍后重试。"
-        )
+        throw OwnedContentDeletionError.outcomeUnknown
       }
     } catch let error as OwnedContentDeletionError {
       throw error
     } catch {
-      throw OwnedContentDeletionError.unavailable("无法删除内容，请稍后重试。")
+      throw OwnedContentDeletionError.outcomeUnknown
     }
   }
 

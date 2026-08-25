@@ -83,13 +83,17 @@ without claiming moderator authority. A public row can only make the control a
 candidate: the authenticated Core probe must independently bind the active UID,
 forum, thread, exact post, author, floor kind, and fresh `tbs` before a single
 write. Definite acknowledgement, definite rejection, and outcome-unknown remain
-separate; unknown targets are retained and cannot be automatically resent. This
-remains inside the existing server-write point until disposable-account testing
-validates the minimum field set. Nested-reply deletion remains unimplemented
-because the compared TiebaLite source contains contradictory concrete parameters
-for that irreversible request. Durable unknown-outcome persistence and an
-endpoint-specific authoritative absence proof also remain before this workflow
-can leave disposable-account validation.
+separate. A bounded, authenticated write-ahead journal records dispatch before
+the request and retains accepted or unknown terminal outcomes across process and
+account-session lifetimes without automatic eviction; unreadable, future, unsafe,
+or full storage fails closed. Restored accepted content is projected before the
+thread starts history or network loading, while unknown targets cannot be
+automatically resent. This remains inside the existing server-write point until
+disposable-account testing validates the minimum field set. Nested-reply deletion
+remains unimplemented because the compared TiebaLite source contains
+contradictory concrete parameters for that irreversible request. An endpoint-
+specific authoritative absence proof also remains before this workflow can
+leave disposable-account validation.
 The explicitly confirmed followed-list unfollow action closes a TiebaLite workflow
 gap while reusing the already credited forum-membership endpoint and shared list
 snapshot. It therefore adds no weighted point by itself.

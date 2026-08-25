@@ -581,11 +581,17 @@ struct OwnedContentDeletionReceipt: Hashable, Sendable {
 }
 
 enum OwnedContentDeletionError: LocalizedError, Equatable, Sendable {
+  case definitelyNotAccepted(String)
+  case rejected(code: Int32)
   case unavailable(String)
   case outcomeUnknown
 
   var errorDescription: String? {
     switch self {
+    case .definitelyNotAccepted(let message):
+      message
+    case .rejected(let code):
+      "贴吧拒绝了删除请求（错误码 \(code)），请重新加载后再试。"
     case .unavailable(let message):
       message
     case .outcomeUnknown:
@@ -897,7 +903,9 @@ extension AccountService {
     session: StoredAccountSession,
     target: OwnedContentDeletionTarget
   ) async throws -> OwnedContentDeletionReceipt {
-    throw OwnedContentDeletionError.unavailable("当前账户服务不支持删除内容。")
+    throw OwnedContentDeletionError.definitelyNotAccepted(
+      "当前账户服务不支持删除内容。"
+    )
   }
 
   nonisolated func prepareStaticImageUpload(

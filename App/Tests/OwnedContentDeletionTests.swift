@@ -113,6 +113,7 @@ final class OwnedContentDeletionStoreTests: XCTestCase {
         vault: OwnedContentDeletionVaultSpy(session: session),
         service: service
       ),
+      ledger: TransientOwnedContentDeletionLedger(),
       observesAccountSessionChanges: false
     )
 
@@ -137,6 +138,7 @@ final class OwnedContentDeletionStoreTests: XCTestCase {
         vault: OwnedContentDeletionVaultSpy(session: limitedSession),
         service: service
       ),
+      ledger: TransientOwnedContentDeletionLedger(),
       observesAccountSessionChanges: false
     )
     await limitedStore.reloadActiveSession()
@@ -152,6 +154,7 @@ final class OwnedContentDeletionStoreTests: XCTestCase {
     let service = OwnedContentDeletionServiceSpy()
     let store = OwnedContentDeletionStore(
       access: AccountAccess(vault: vault, service: service),
+      ledger: TransientOwnedContentDeletionLedger(),
       observesAccountSessionChanges: false
     )
     await store.reloadActiveSession()
@@ -185,6 +188,7 @@ final class OwnedContentDeletionStoreTests: XCTestCase {
         vault: vault,
         service: service
       ),
+      ledger: TransientOwnedContentDeletionLedger(),
       observesAccountSessionChanges: false
     )
     await store.reloadActiveSession()
@@ -232,6 +236,7 @@ final class OwnedContentDeletionStoreTests: XCTestCase {
         vault: OwnedContentDeletionVaultSpy(session: session),
         service: service
       ),
+      ledger: TransientOwnedContentDeletionLedger(),
       observesAccountSessionChanges: false
     )
     await store.reloadActiveSession()
@@ -265,6 +270,7 @@ final class OwnedContentDeletionStoreTests: XCTestCase {
         vault: OwnedContentDeletionVaultSpy(session: session),
         service: service
       ),
+      ledger: TransientOwnedContentDeletionLedger(),
       observesAccountSessionChanges: false
     )
     await store.reloadActiveSession()
@@ -286,6 +292,410 @@ final class OwnedContentDeletionStoreTests: XCTestCase {
     guard case .outcomeUnknown = store.entry(for: target).state else {
       return XCTFail("expected mismatched receipt to lock the target")
     }
+  }
+
+  func testCancellingCallerDoesNotCancelAcceptedFinalizerOrPermitAnotherWrite() async throws {
+    let session = deletionSession(revisionComponent: 7, userID: 7)
+    let target = deletionTarget(authorID: session.id)
+    let service = OwnedContentDeletionServiceSpy(behavior: .suspendedAccepted)
+    let vault = OwnedContentDeletionVaultSpy(session: session)
+    let ledger = TransientOwnedContentDeletionLedger()
+    let store = OwnedContentDeletionStore(
+      access: AccountAccess(vault: vault, service: service),
+      ledger: ledger,
+      observesAccountSessionChanges: false
+    )
+    await store.reloadActiveSession()
+    let request = try XCTUnwrap(store.pendingRequest(for: target))
+
+    let caller = Task { try await store.delete(request) }
+    try await waitForOwnedContentDeletionTest { await service.writeCount() == 1 }
+    caller.cancel()
+    XCTAssertTrue(caller.isCancelled)
+    await service.releaseWrites()
+    _ = await caller.result
+
+    try await waitForOwnedContentDeletionTest {
+      guard let records = try? await ledger.records() else { return false }
+      return records.count == 1 && records[0].phase == .accepted
+    }
+    guard case .accepted = store.entry(for: target).state else {
+      return XCTFail("the store-owned finalizer must publish accepted after caller cancellation")
+    }
+
+    let restored = OwnedContentDeletionStore(
+      access: AccountAccess(vault: vault, service: service),
+      ledger: ledger,
+      observesAccountSessionChanges: false
+    )
+    await restored.reloadActiveSession()
+    let restoredReceipt = try await restored.delete(request)
+
+    XCTAssertEqual(restoredReceipt.target, target)
+    let restoredWriteCount = await service.writeCount()
+    XCTAssertEqual(restoredWriteCount, 1)
+    XCTAssertNil(restored.pendingRequest(for: target))
+  }
+
+  func testPrepareThatPublishesThenThrowsIsReadBackAsUnknownWithoutServiceWrite() async throws {
+    let session = deletionSession(revisionComponent: 8, userID: 7)
+    let target = deletionTarget(authorID: session.id)
+    let service = OwnedContentDeletionServiceSpy()
+    let backing = TransientOwnedContentDeletionLedger()
+    let ledger = OwnedContentDeletionPublishedPrepareFailureLedger(backing: backing)
+    let store = OwnedContentDeletionStore(
+      access: AccountAccess(
+        vault: OwnedContentDeletionVaultSpy(session: session),
+        service: service
+      ),
+      ledger: ledger,
+      observesAccountSessionChanges: false
+    )
+    await store.reloadActiveSession()
+    let request = try XCTUnwrap(store.pendingRequest(for: target))
+
+    do {
+      _ = try await store.delete(request)
+      XCTFail("expected the published-but-reported-failed prepare to lock the target")
+    } catch let error as OwnedContentDeletionError {
+      XCTAssertEqual(error, .outcomeUnknown)
+    }
+
+    let records = try await backing.records()
+    XCTAssertEqual(records.count, 1)
+    XCTAssertEqual(records[0].phase, .outcomeUnknown)
+    let prepareFailureWriteCount = await service.writeCount()
+    XCTAssertEqual(prepareFailureWriteCount, 0)
+    XCTAssertNil(store.pendingRequest(for: target))
+    guard case .outcomeUnknown = store.entry(for: target).state else {
+      return XCTFail("a possibly durable prepare marker must fail closed")
+    }
+  }
+
+  func testAccountRotationAfterPrepareCleansMarkerBeforeDispatchAndAllowsReconfirmation()
+    async throws
+  {
+    let original = deletionSession(revisionComponent: 9, userID: 7)
+    let replacement = deletionSession(revisionComponent: 19, userID: original.id)
+    let target = deletionTarget(authorID: original.id)
+    let vault = OwnedContentDeletionVaultSpy(session: original)
+    let service = OwnedContentDeletionServiceSpy()
+    let backing = TransientOwnedContentDeletionLedger()
+    let ledger = OwnedContentDeletionPrepareGateLedger(backing: backing)
+    let store = OwnedContentDeletionStore(
+      access: AccountAccess(vault: vault, service: service),
+      ledger: ledger,
+      observesAccountSessionChanges: false
+    )
+    await store.reloadActiveSession()
+    let request = try XCTUnwrap(store.pendingRequest(for: target))
+
+    let deletion = Task { try await store.delete(request) }
+    try await waitForOwnedContentDeletionTest { await ledger.hasPublishedPrepare() }
+    await vault.replaceActive(with: replacement)
+    await ledger.releasePrepare()
+
+    guard case .failure(let failure) = await deletion.result else {
+      return XCTFail("the stale confirmed lease must not dispatch after account rotation")
+    }
+    guard
+      let deletionError = failure as? OwnedContentDeletionError,
+      case .unavailable = deletionError
+    else {
+      return XCTFail("unexpected error: \(failure)")
+    }
+
+    let staleLeaseWriteCount = await service.writeCount()
+    let retainedRecords = try await backing.records()
+    XCTAssertEqual(staleLeaseWriteCount, 0)
+    XCTAssertTrue(retainedRecords.isEmpty)
+    let refreshedRequest = try XCTUnwrap(store.pendingRequest(for: target))
+    XCTAssertEqual(refreshedRequest.lease, AccountSessionLease(replacement))
+    XCTAssertNotEqual(refreshedRequest.lease, request.lease)
+  }
+
+  func testAmbiguousServiceFailuresAfterPreparePersistOutcomeUnknown() async throws {
+    let behaviors: [OwnedContentDeletionServiceBehavior] = [
+      .unavailable,
+      .cancellation,
+    ]
+
+    for (index, behavior) in behaviors.enumerated() {
+      let session = deletionSession(revisionComponent: 20 + index, userID: 7)
+      let target = deletionTarget(authorID: session.id)
+      let service = OwnedContentDeletionServiceSpy(behavior: behavior)
+      let ledger = TransientOwnedContentDeletionLedger()
+      let store = OwnedContentDeletionStore(
+        access: AccountAccess(
+          vault: OwnedContentDeletionVaultSpy(session: session),
+          service: service
+        ),
+        ledger: ledger,
+        observesAccountSessionChanges: false
+      )
+      await store.reloadActiveSession()
+      let request = try XCTUnwrap(store.pendingRequest(for: target))
+
+      do {
+        _ = try await store.delete(request)
+        XCTFail("expected \(behavior) to become outcome unknown")
+      } catch let error as OwnedContentDeletionError {
+        XCTAssertEqual(error, .outcomeUnknown, "behavior: \(behavior)")
+      }
+
+      let records = try await ledger.records()
+      let writeCount = await service.writeCount()
+      XCTAssertEqual(records.count, 1, "behavior: \(behavior)")
+      XCTAssertEqual(records.first?.phase, .outcomeUnknown, "behavior: \(behavior)")
+      XCTAssertEqual(writeCount, 1, "behavior: \(behavior)")
+      XCTAssertNil(store.pendingRequest(for: target), "behavior: \(behavior)")
+    }
+  }
+
+  func testOutcomeUnknownRestoresAcrossStoreReconstructionWithoutAnotherWrite() async throws {
+    let session = deletionSession(revisionComponent: 30, userID: 7)
+    let target = deletionTarget(authorID: session.id)
+    let service = OwnedContentDeletionServiceSpy(behavior: .outcomeUnknown)
+    let vault = OwnedContentDeletionVaultSpy(session: session)
+    let ledger = TransientOwnedContentDeletionLedger()
+    var store: OwnedContentDeletionStore? = OwnedContentDeletionStore(
+      access: AccountAccess(vault: vault, service: service),
+      ledger: ledger,
+      observesAccountSessionChanges: false
+    )
+    await store?.reloadActiveSession()
+    let request = try XCTUnwrap(store?.pendingRequest(for: target))
+
+    do {
+      _ = try await store?.delete(request)
+      XCTFail("expected an unknown outcome")
+    } catch let error as OwnedContentDeletionError {
+      XCTAssertEqual(error, .outcomeUnknown)
+    }
+    store = nil
+
+    let restored = OwnedContentDeletionStore(
+      access: AccountAccess(vault: vault, service: service),
+      ledger: ledger,
+      observesAccountSessionChanges: false
+    )
+    await restored.reloadActiveSession()
+    guard case .outcomeUnknown = restored.entry(for: target).state else {
+      return XCTFail("expected the durable unknown terminal after reconstruction")
+    }
+    XCTAssertNil(restored.pendingRequest(for: target))
+    XCTAssertEqual(
+      restored.outcomeUnknownTarget(threadID: target.threadID),
+      target
+    )
+    let writeCount = await service.writeCount()
+    XCTAssertEqual(writeCount, 1)
+  }
+
+  func testAcceptedTerminalAndFloorTombstoneRestoreAcrossStoreReconstruction() async throws {
+    let original = deletionSession(revisionComponent: 31, userID: 7)
+    let rotated = deletionSession(revisionComponent: 41, userID: 7)
+    let target = deletionTarget(authorID: original.id)
+    let service = OwnedContentDeletionServiceSpy()
+    let vault = OwnedContentDeletionVaultSpy(session: original)
+    let ledger = TransientOwnedContentDeletionLedger()
+    var store: OwnedContentDeletionStore? = OwnedContentDeletionStore(
+      access: AccountAccess(vault: vault, service: service),
+      ledger: ledger,
+      observesAccountSessionChanges: false
+    )
+    await store?.reloadActiveSession()
+    let request = try XCTUnwrap(store?.pendingRequest(for: target))
+    _ = try await store?.delete(request)
+    store = nil
+
+    await vault.replaceActive(with: rotated)
+    let restored = OwnedContentDeletionStore(
+      access: AccountAccess(vault: vault, service: service),
+      ledger: ledger,
+      observesAccountSessionChanges: false
+    )
+    await restored.reloadActiveSession()
+    guard case .accepted(let receipt) = restored.entry(for: target).state else {
+      return XCTFail("expected the durable accepted terminal after reconstruction")
+    }
+    XCTAssertEqual(receipt.accountID, rotated.id)
+    XCTAssertEqual(receipt.sessionRevision, rotated.sessionRevision)
+    XCTAssertEqual(receipt.target, target)
+    let restoredTargets = await restored.restoredTargets(threadID: target.threadID)
+    XCTAssertEqual(restoredTargets.accepted, [target])
+    XCTAssertNil(restoredTargets.outcomeUnknown)
+
+    let thread = deletionThread()
+    let firstPost = deletionPost(id: 101, threadID: thread.id, floor: 1, authorID: 7)
+    let deletedPost = deletionPost(id: 102, threadID: thread.id, floor: 2, authorID: 7)
+    let stalePage = PostPageData(
+      thread: thread,
+      posts: [deletedPost],
+      currentPage: 1,
+      hasMore: false,
+      firstPost: firstPost
+    )
+    let viewModel = ThreadViewModel(
+      thread: thread,
+      service: OwnedContentDeletionBrowseService(pages: [stalePage, stalePage])
+    )
+    XCTAssertTrue(viewModel.stageAcceptedContentDeletion(restoredTargets.accepted[0]))
+    viewModel.loadIfNeeded()
+    await viewModel.waitForCurrentLoad()
+    XCTAssertNil(viewModel.post(withID: deletedPost.id))
+    viewModel.reload()
+    await viewModel.waitForCurrentLoad()
+    XCTAssertNil(viewModel.post(withID: deletedPost.id))
+    let writeCount = await service.writeCount()
+    XCTAssertEqual(writeCount, 1)
+  }
+
+  func testRecoveredDispatchPendingIsUnknownAndNeverCallsService() async throws {
+    let session = deletionSession(revisionComponent: 32, userID: 7)
+    let target = deletionTarget(authorID: session.id)
+    let service = OwnedContentDeletionServiceSpy()
+    let ledger = TransientOwnedContentDeletionLedger()
+    _ = try await ledger.prepare(
+      target: target,
+      accountID: session.id,
+      sessionRevision: session.sessionRevision,
+      operationID: UUID(),
+      at: Date(timeIntervalSince1970: 10)
+    )
+    let store = OwnedContentDeletionStore(
+      access: AccountAccess(
+        vault: OwnedContentDeletionVaultSpy(session: session),
+        service: service
+      ),
+      ledger: ledger,
+      observesAccountSessionChanges: false
+    )
+
+    await store.reloadActiveSession()
+
+    guard case .outcomeUnknown = store.entry(for: target).state else {
+      return XCTFail("a recovered dispatch marker must fail closed as unknown")
+    }
+    XCTAssertNil(store.pendingRequest(for: target))
+    let writeCount = await service.writeCount()
+    XCTAssertEqual(writeCount, 0)
+  }
+
+  func testLedgerCapacityFailureHappensBeforeDeletionService() async throws {
+    let session = deletionSession(revisionComponent: 33, userID: 7)
+    let target = deletionTarget(authorID: session.id)
+    let occupiedTarget = try XCTUnwrap(
+      OwnedContentDeletionTarget(
+        kind: .post,
+        forumID: 43,
+        forumName: "occupied",
+        threadID: 11,
+        objectID: 202,
+        authorID: session.id,
+        floor: 3
+      )
+    )
+    let ledger = TransientOwnedContentDeletionLedger(maximumRecords: 1)
+    _ = try await ledger.prepare(
+      target: occupiedTarget,
+      accountID: session.id,
+      sessionRevision: session.sessionRevision,
+      operationID: UUID(),
+      at: Date(timeIntervalSince1970: 10)
+    )
+    let service = OwnedContentDeletionServiceSpy()
+    let store = OwnedContentDeletionStore(
+      access: AccountAccess(
+        vault: OwnedContentDeletionVaultSpy(session: session),
+        service: service
+      ),
+      ledger: ledger,
+      observesAccountSessionChanges: false
+    )
+    await store.reloadActiveSession()
+    let request = try XCTUnwrap(store.pendingRequest(for: target))
+
+    do {
+      _ = try await store.delete(request)
+      XCTFail("expected the full ledger to reject the operation")
+    } catch let error as OwnedContentDeletionError {
+      guard case .unavailable = error else {
+        return XCTFail("unexpected error: \(error)")
+      }
+    }
+    let writeCount = await service.writeCount()
+    XCTAssertEqual(writeCount, 0)
+    let retainedCapacityRecords = try await ledger.records()
+    XCTAssertEqual(retainedCapacityRecords.count, 1)
+  }
+
+  func testDefiniteFailureRemovesDispatchMarkerAndAllowsFreshConfirmation() async throws {
+    let session = deletionSession(revisionComponent: 34, userID: 7)
+    let target = deletionTarget(authorID: session.id)
+    let service = OwnedContentDeletionServiceSpy(behavior: .definiteFailure)
+    let ledger = TransientOwnedContentDeletionLedger()
+    let store = OwnedContentDeletionStore(
+      access: AccountAccess(
+        vault: OwnedContentDeletionVaultSpy(session: session),
+        service: service
+      ),
+      ledger: ledger,
+      observesAccountSessionChanges: false
+    )
+    await store.reloadActiveSession()
+    let request = try XCTUnwrap(store.pendingRequest(for: target))
+
+    do {
+      _ = try await store.delete(request)
+      XCTFail("expected a definite rejection")
+    } catch let error as OwnedContentDeletionError {
+      guard case .rejected = error else {
+        return XCTFail("unexpected error: \(error)")
+      }
+    }
+
+    let retainedFailureRecords = try await ledger.records()
+    XCTAssertTrue(retainedFailureRecords.isEmpty)
+    XCTAssertNotNil(store.pendingRequest(for: target))
+    let writeCount = await service.writeCount()
+    XCTAssertEqual(writeCount, 1)
+  }
+
+  func testTerminalPersistenceFailureLeavesPendingMarkerAndPublishesUnknown() async throws {
+    let session = deletionSession(revisionComponent: 35, userID: 7)
+    let target = deletionTarget(authorID: session.id)
+    let service = OwnedContentDeletionServiceSpy()
+    let durableRecords = TransientOwnedContentDeletionLedger()
+    let failingLedger = OwnedContentDeletionTerminalFailureLedger(
+      backing: durableRecords
+    )
+    let store = OwnedContentDeletionStore(
+      access: AccountAccess(
+        vault: OwnedContentDeletionVaultSpy(session: session),
+        service: service
+      ),
+      ledger: failingLedger,
+      observesAccountSessionChanges: false
+    )
+    await store.reloadActiveSession()
+    let request = try XCTUnwrap(store.pendingRequest(for: target))
+
+    do {
+      _ = try await store.delete(request)
+      XCTFail("expected terminal persistence failure to become unknown")
+    } catch let error as OwnedContentDeletionError {
+      XCTAssertEqual(error, .outcomeUnknown)
+    }
+
+    let records = try await durableRecords.records()
+    XCTAssertEqual(records.count, 1)
+    XCTAssertEqual(records[0].phase, .dispatchPending)
+    guard case .outcomeUnknown = store.entry(for: target).state else {
+      return XCTFail("pending-on-disk must remain locked as unknown in memory")
+    }
+    let writeCount = await service.writeCount()
+    XCTAssertEqual(writeCount, 1)
   }
 }
 
@@ -447,6 +857,172 @@ final class OwnedContentDeletionThreadViewModelTests: XCTestCase {
     XCTAssertNil(viewModel.post(withID: reply.id))
     XCTAssertTrue(viewModel.posts.isEmpty)
   }
+
+  func testAcceptedPostStagedBeforeInitialLoadIsAbsentFromFirstLoadedSnapshot() async throws {
+    let thread = deletionThread()
+    let firstPost = deletionPost(id: 101, threadID: thread.id, floor: 1, authorID: 7)
+    let deletedPost = deletionPost(id: 102, threadID: thread.id, floor: 2, authorID: 7)
+    let retainedPost = deletionPost(id: 103, threadID: thread.id, floor: 3, authorID: 8)
+    let service = OwnedContentDeletionBrowseService(
+      page: PostPageData(
+        thread: thread,
+        posts: [deletedPost, retainedPost],
+        currentPage: 1,
+        hasMore: false,
+        firstPost: firstPost
+      )
+    )
+    let viewModel = ThreadViewModel(thread: thread, service: service)
+    let target = try XCTUnwrap(
+      OwnedContentDeletionTarget(thread: thread, post: deletedPost)
+    )
+
+    XCTAssertTrue(viewModel.stageAcceptedContentDeletion(target))
+    XCTAssertTrue(viewModel.posts.isEmpty)
+    viewModel.loadIfNeeded()
+    await viewModel.waitForCurrentLoad()
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.posts.map(\.id), [retainedPost.id])
+    XCTAssertNil(viewModel.post(withID: deletedPost.id))
+    XCTAssertEqual(viewModel.post(withID: retainedPost.id), retainedPost)
+  }
+
+  func testDeepLinkPlaceholderStagesAcceptedPostUntilResolvedIdentityIsValidated() async throws {
+    let resolvedThread = deletionThread()
+    let placeholder = TiebaThreadRoute(threadID: resolvedThread.id).placeholderThread
+    let firstPost = deletionPost(
+      id: resolvedThread.firstPostID,
+      threadID: resolvedThread.id,
+      floor: 1,
+      authorID: resolvedThread.authorID
+    )
+    let deletedPost = deletionPost(
+      id: 102,
+      threadID: resolvedThread.id,
+      floor: 2,
+      authorID: 7
+    )
+    let target = try XCTUnwrap(
+      OwnedContentDeletionTarget(thread: resolvedThread, post: deletedPost)
+    )
+    let viewModel = ThreadViewModel(
+      thread: placeholder,
+      service: OwnedContentDeletionBrowseService(
+        page: PostPageData(
+          thread: resolvedThread,
+          posts: [deletedPost],
+          currentPage: 1,
+          hasMore: false,
+          firstPost: firstPost
+        )
+      )
+    )
+
+    XCTAssertTrue(
+      viewModel.stageAcceptedContentDeletion(
+        target,
+        allowsUnresolvedThreadIdentity: true
+      )
+    )
+    viewModel.loadIfNeeded()
+    await viewModel.waitForCurrentLoad()
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.thread, resolvedThread)
+    XCTAssertNil(viewModel.post(withID: deletedPost.id))
+    XCTAssertTrue(viewModel.posts.isEmpty)
+  }
+
+  func testDeepLinkPlaceholderFailsClosedWhenResponseIdentityRemainsIncomplete() async throws {
+    let resolvedThread = deletionThread()
+    let placeholder = TiebaThreadRoute(threadID: resolvedThread.id).placeholderThread
+    let deletedPost = deletionPost(
+      id: 102,
+      threadID: resolvedThread.id,
+      floor: 2,
+      authorID: 7
+    )
+    let target = try XCTUnwrap(
+      OwnedContentDeletionTarget(thread: resolvedThread, post: deletedPost)
+    )
+    let viewModel = ThreadViewModel(
+      thread: placeholder,
+      service: OwnedContentDeletionBrowseService(
+        page: PostPageData(
+          thread: placeholder,
+          posts: [deletedPost],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+
+    XCTAssertTrue(
+      viewModel.stageAcceptedContentDeletion(
+        target,
+        allowsUnresolvedThreadIdentity: true
+      )
+    )
+    viewModel.loadIfNeeded()
+    await viewModel.waitForCurrentLoad()
+
+    XCTAssertEqual(
+      viewModel.state,
+      .failed("贴吧返回的主题身份不足，无法安全恢复已删除楼层。")
+    )
+    XCTAssertTrue(viewModel.posts.isEmpty)
+  }
+
+  func testDeepLinkPlaceholderStagedDeletionFailsClosedOnResolvedIdentityConflict()
+    async throws
+  {
+    let resolvedThread = deletionThread()
+    let placeholder = TiebaThreadRoute(threadID: resolvedThread.id).placeholderThread
+    let firstPost = deletionPost(
+      id: resolvedThread.firstPostID,
+      threadID: resolvedThread.id,
+      floor: 1,
+      authorID: resolvedThread.authorID
+    )
+    let reply = deletionPost(id: 102, threadID: resolvedThread.id, floor: 2, authorID: 7)
+    let conflictingTarget = try XCTUnwrap(
+      OwnedContentDeletionTarget(
+        kind: .post,
+        forumID: resolvedThread.forumID + 1,
+        forumName: resolvedThread.forumName,
+        threadID: resolvedThread.id,
+        objectID: reply.id,
+        authorID: reply.authorID,
+        floor: reply.floor
+      )
+    )
+    let viewModel = ThreadViewModel(
+      thread: placeholder,
+      service: OwnedContentDeletionBrowseService(
+        page: PostPageData(
+          thread: resolvedThread,
+          posts: [reply],
+          currentPage: 1,
+          hasMore: false,
+          firstPost: firstPost
+        )
+      )
+    )
+
+    XCTAssertTrue(
+      viewModel.stageAcceptedContentDeletion(
+        conflictingTarget,
+        allowsUnresolvedThreadIdentity: true
+      )
+    )
+    viewModel.loadIfNeeded()
+    await viewModel.waitForCurrentLoad()
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.post(withID: reply.id), reply)
+    XCTAssertEqual(viewModel.posts.map(\.id), [reply.id])
+  }
 }
 
 private enum OwnedContentDeletionTestError: LocalizedError, Sendable {
@@ -476,6 +1052,9 @@ private actor OwnedContentDeletionVaultSpy: AccountVault {
 
 private enum OwnedContentDeletionServiceBehavior: Equatable, Sendable {
   case accepted
+  case unavailable
+  case cancellation
+  case definiteFailure
   case outcomeUnknown
   case suspendedAccepted
   case suspendedMismatchedReceipt
@@ -575,6 +1154,12 @@ private actor OwnedContentDeletionServiceSpy: AccountService {
         sessionRevision: session.sessionRevision,
         target: target
       )
+    case .unavailable:
+      throw OwnedContentDeletionError.unavailable("temporary service failure")
+    case .cancellation:
+      throw CancellationError()
+    case .definiteFailure:
+      throw OwnedContentDeletionError.rejected(code: 123)
     case .outcomeUnknown:
       throw OwnedContentDeletionError.outcomeUnknown
     case .suspendedMismatchedReceipt:
@@ -594,6 +1179,188 @@ private actor OwnedContentDeletionServiceSpy: AccountService {
   }
 
   func writeCount() -> Int { requests.count }
+}
+
+private actor OwnedContentDeletionPublishedPrepareFailureLedger:
+  OwnedContentDeletionLedgerRepository
+{
+  private let backing: TransientOwnedContentDeletionLedger
+
+  init(backing: TransientOwnedContentDeletionLedger) {
+    self.backing = backing
+  }
+
+  func records() async throws -> [OwnedContentDeletionLedgerRecord] {
+    try await backing.records()
+  }
+
+  func record(
+    for key: OwnedContentDeletionLedgerKey
+  ) async throws -> OwnedContentDeletionLedgerRecord? {
+    try await backing.record(for: key)
+  }
+
+  func prepare(
+    target: OwnedContentDeletionTarget,
+    accountID: Int64,
+    sessionRevision: UUID,
+    operationID: UUID,
+    at date: Date
+  ) async throws -> OwnedContentDeletionLedgerRecord {
+    _ = try await backing.prepare(
+      target: target,
+      accountID: accountID,
+      sessionRevision: sessionRevision,
+      operationID: operationID,
+      at: date
+    )
+    throw OwnedContentDeletionLedgerError.writeFailed
+  }
+
+  func transition(
+    for key: OwnedContentDeletionLedgerKey,
+    operationID: UUID,
+    to phase: OwnedContentDeletionLedgerPhase,
+    at date: Date
+  ) async throws -> OwnedContentDeletionLedgerRecord {
+    try await backing.transition(
+      for: key,
+      operationID: operationID,
+      to: phase,
+      at: date
+    )
+  }
+
+  func removeDispatchPending(
+    for key: OwnedContentDeletionLedgerKey,
+    operationID: UUID
+  ) async throws {
+    try await backing.removeDispatchPending(for: key, operationID: operationID)
+  }
+}
+
+private actor OwnedContentDeletionPrepareGateLedger: OwnedContentDeletionLedgerRepository {
+  private let backing: TransientOwnedContentDeletionLedger
+  private var preparePublished = false
+  private var prepareReleased = false
+  private var prepareWaiters: [CheckedContinuation<Void, Never>] = []
+
+  init(backing: TransientOwnedContentDeletionLedger) {
+    self.backing = backing
+  }
+
+  func records() async throws -> [OwnedContentDeletionLedgerRecord] {
+    try await backing.records()
+  }
+
+  func record(
+    for key: OwnedContentDeletionLedgerKey
+  ) async throws -> OwnedContentDeletionLedgerRecord? {
+    try await backing.record(for: key)
+  }
+
+  func prepare(
+    target: OwnedContentDeletionTarget,
+    accountID: Int64,
+    sessionRevision: UUID,
+    operationID: UUID,
+    at date: Date
+  ) async throws -> OwnedContentDeletionLedgerRecord {
+    let record = try await backing.prepare(
+      target: target,
+      accountID: accountID,
+      sessionRevision: sessionRevision,
+      operationID: operationID,
+      at: date
+    )
+    preparePublished = true
+    if !prepareReleased {
+      await withCheckedContinuation { prepareWaiters.append($0) }
+    }
+    return record
+  }
+
+  func transition(
+    for key: OwnedContentDeletionLedgerKey,
+    operationID: UUID,
+    to phase: OwnedContentDeletionLedgerPhase,
+    at date: Date
+  ) async throws -> OwnedContentDeletionLedgerRecord {
+    try await backing.transition(
+      for: key,
+      operationID: operationID,
+      to: phase,
+      at: date
+    )
+  }
+
+  func removeDispatchPending(
+    for key: OwnedContentDeletionLedgerKey,
+    operationID: UUID
+  ) async throws {
+    try await backing.removeDispatchPending(for: key, operationID: operationID)
+  }
+
+  func hasPublishedPrepare() -> Bool { preparePublished }
+
+  func releasePrepare() {
+    prepareReleased = true
+    let waiters = prepareWaiters
+    prepareWaiters.removeAll()
+    waiters.forEach { $0.resume() }
+  }
+}
+
+private actor OwnedContentDeletionTerminalFailureLedger:
+  OwnedContentDeletionLedgerRepository
+{
+  private let backing: TransientOwnedContentDeletionLedger
+
+  init(backing: TransientOwnedContentDeletionLedger) {
+    self.backing = backing
+  }
+
+  func records() async throws -> [OwnedContentDeletionLedgerRecord] {
+    try await backing.records()
+  }
+
+  func record(
+    for key: OwnedContentDeletionLedgerKey
+  ) async throws -> OwnedContentDeletionLedgerRecord? {
+    try await backing.record(for: key)
+  }
+
+  func prepare(
+    target: OwnedContentDeletionTarget,
+    accountID: Int64,
+    sessionRevision: UUID,
+    operationID: UUID,
+    at date: Date
+  ) async throws -> OwnedContentDeletionLedgerRecord {
+    try await backing.prepare(
+      target: target,
+      accountID: accountID,
+      sessionRevision: sessionRevision,
+      operationID: operationID,
+      at: date
+    )
+  }
+
+  func transition(
+    for key: OwnedContentDeletionLedgerKey,
+    operationID: UUID,
+    to phase: OwnedContentDeletionLedgerPhase,
+    at date: Date
+  ) async throws -> OwnedContentDeletionLedgerRecord {
+    throw OwnedContentDeletionLedgerError.writeFailed
+  }
+
+  func removeDispatchPending(
+    for key: OwnedContentDeletionLedgerKey,
+    operationID: UUID
+  ) async throws {
+    try await backing.removeDispatchPending(for: key, operationID: operationID)
+  }
 }
 
 private actor OwnedContentDeletionBrowseService: BrowseService {
