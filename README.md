@@ -17,7 +17,7 @@ and its verified metadata enters the public app source.
 | Area | Current state |
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
-| Local features | Available for history, favorites, filtering, appearance, media preferences, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, a next-launch destination including the inbox, and ordered iOS Home Screen quick actions for existing destinations |
+| Local features | Available for history, favorites, filtering, appearance, media preferences, explicit standard/pure/only-author immersive thread-reading modes, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, a next-launch destination including the inbox, and ordered iOS Home Screen quick actions for existing destinations |
 | Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary, followed forums, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies; both newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
 | TiebaLite parity | Current `main` and public `v0.62.3-alpha.1`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
@@ -206,9 +206,10 @@ and its verified metadata enters the public app source.
   after explicit confirmation, add it at the last visible floor, update the saved
   floor, or remove it. A visible floor's context menu can perform the same exact
   add, move, or remove action, and the server-confirmed saved floor carries a
-  dedicated marker. Loading, failed, filtered, and pure-reading floor surfaces
-  never expose a mutation action. Every mutation is followed by a read-only reconciliation;
-  an uncertain write is never retried. The cloud-favorites list can also remove
+  dedicated marker. Loading, failed, filtered, pure-reading, and
+  immersive-reading floor surfaces never expose a mutation action. Every
+  mutation is followed by a read-only reconciliation; an uncertain write is
+  never retried. The cloud-favorites list can also remove
   one item after a separate destructive confirmation. It first resolves the raw
   anonymous PB thread/forum identity, then requires the existing authenticated
   UID/forum/thread preflight before the single write; an unresolvable deleted
@@ -470,9 +471,17 @@ and its verified metadata enters the public app source.
 
 - **Thread reading:** Ascending, descending, and hot order, only-author mode,
   page jumps, anchored opening, earlier-page loading, first-floor context, and
-  explicit latest-reply checks are implemented with cursor validation. On an
-  ordinary, locally visible shared list card, the reply counter is a separate
-  navigation target that opens the topic at its first locally displayable reply;
+  explicit latest-reply checks are implemented with cursor validation. The
+  toolbar keeps local-only pure reading separate from explicit immersive reading.
+  Pure reading changes presentation without a request or filter mutation.
+  Immersive reading reuses that presentation and only-author server pagination:
+  when the filter is off, a confirmation discloses the page-one reset and the
+  retained filter before one anonymous reload; when it is already on, entering
+  immersive reading sends no request and does not deliberately return to page
+  one. Exiting immersive reading leaves only-author enabled, where the normal
+  top control can disable it. On an ordinary, locally visible shared list card,
+  the reply counter is a separate navigation target that opens the topic at its
+  first locally displayable reply;
   when the initial response contains no such reply, the normal top-of-thread
   presentation remains. For a
   logged-in account with an authoritative cloud-favorite snapshot, a visible

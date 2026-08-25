@@ -203,6 +203,14 @@ final class ThreadViewModel: ObservableObject {
     reload()
   }
 
+  func enableOnlyThreadAuthorFromFirstPage() {
+    guard !options.onlyThreadAuthor else { return }
+    initialLocation = nil
+    pendingInitialFocus = nil
+    options.onlyThreadAuthor = true
+    reload(location: nil)
+  }
+
   func prepareResume(options: ThreadBrowseOptions, postID: Int64?) {
     guard state == .idle else { return }
     self.options = options

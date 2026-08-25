@@ -303,10 +303,10 @@ require the identical retained post ID and floor. The Store repeats this check
 after its asynchronous account-session preflight and rejects a competing
 mutation flight. A stale confirmation therefore performs no write and cannot
 remove or overwrite a marker changed by another surface. Loading, mutating,
-failed, signed-out, locally filtered, and pure-reading floor presentations offer
-no mutation action. The floor marker is read-only presentation derived from the
-authoritative or last confirmed snapshot; the requested write PID is never used
-optimistically.
+failed, signed-out, locally filtered, pure-reading, and immersive-reading floor
+presentations offer no mutation action. The floor marker is read-only
+presentation derived from the authoritative or last confirmed snapshot; the
+requested write PID is never used optimistically.
 
 Private ReplyMe and AtMe lists are foreground-only authenticated reads. ReplyMe
 must use `https://tiebac.baidu.com/c/u/feed/replyme?cmd=303007` with a Protobuf
@@ -813,10 +813,21 @@ collect votes, call a submission endpoint, or attach account credentials. Any
 interactive control must be backed by the separate authenticated state and vote
 contract above; the anonymous object can provide presentation fallback only and
 must never authorize or target the write.
-Pure-reading mode renders only that anonymous result snapshot: entering it
-cancels and clears the presentation's authenticated poll task, account changes
-cannot restart that task while the mode remains active, and leaving the mode is
-required before a fresh account-bound poll read can begin.
+Pure and immersive reading presentations render only the anonymous result
+snapshot: entering either cancels and clears the presentation's authenticated
+poll task, account changes cannot restart that task while either mode remains
+active, and leaving that presentation is required before a fresh account-bound
+poll read can begin. Pure reading starts no request and changes no browse option.
+Immersive reading may enable only-thread-author only after an exact immutable
+thread/options confirmation; a changed or invalid identity fails closed. The
+confirmed transition clears unresolved location and first-reply anchors, keeps
+the selected sort, cancels the prior anonymous request through the existing load
+generation, and starts exactly one credential-free page-one post request. A
+late prior response cannot publish. If only-thread-author is already enabled,
+entry starts no request. Exiting immersive presentation never disables the
+filter; only that existing nonsecret browse option may continue through the
+normal history and favorite persistence path, while the reading mode itself is
+never persisted.
 
 Post author levels, IP locations, and public net approval scores originate in the
 anonymous post response. An IP location is server-supplied public author context,

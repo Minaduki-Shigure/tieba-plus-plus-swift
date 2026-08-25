@@ -17,7 +17,9 @@ struct ThreadView: View {
   @State private var linkedTarget: TiebaLinkTarget?
   @State private var restoredHistorySnapshot: ThreadHistorySnapshot?
   @State private var hasRecordedHistoryVisit = false
-  @State private var isPureReadingMode = false
+  @State private var readingMode = ThreadReadingMode.standard
+  @State private var pendingImmersiveReadingConfirmation:
+    ThreadImmersiveReadingConfirmation?
   @State private var pictureGalleryRoute: ThreadImageGalleryRoute?
   @State private var pictureGalleryPolicyTask: Task<Void, Never>?
   @State private var agreementScopeID = UUID()
@@ -111,13 +113,26 @@ struct ThreadView: View {
       }
 
       ToolbarItemGroup(placement: .navigationBarTrailing) {
-        Button {
-          togglePureReadingMode()
+        Menu {
+          ForEach(ThreadReadingMode.allCases) { mode in
+            Button {
+              selectReadingMode(mode)
+            } label: {
+              Label(
+                mode.title,
+                systemImage: readingMode == mode ? "checkmark" : mode.systemImage
+              )
+            }
+            .accessibilityLabel(
+              readingMode == mode ? "\(mode.title)，当前" : mode.title
+            )
+          }
         } label: {
-          Image(systemName: isPureReadingMode ? "book.closed.fill" : "book.closed")
+          Image(systemName: readingMode.systemImage)
         }
-        .accessibilityLabel(isPureReadingMode ? "退出纯净阅读" : "纯净阅读")
-        .help(isPureReadingMode ? "退出纯净阅读" : "纯净阅读")
+        .accessibilityLabel("阅读模式，当前为 \(readingMode.title)")
+        .accessibilityIdentifier("thread-reading-mode-menu")
+        .help("阅读模式：\(readingMode.title)")
 
         if
           let shareURL = TiebaLink.canonicalURL(
@@ -177,6 +192,24 @@ struct ThreadView: View {
       if viewModel.totalPages > 0 {
         Text("当前第 \(max(viewModel.currentPage, 1)) 页，共 \(viewModel.totalPages) 页")
       }
+    }
+    .confirmationDialog(
+      "进入沉浸阅读？",
+      isPresented: immersiveReadingConfirmationIsPresented,
+      titleVisibility: .visible
+    ) {
+      if let pendingImmersiveReadingConfirmation {
+        Button("进入并回到第一页") {
+          confirmImmersiveReading(pendingImmersiveReadingConfirmation)
+        }
+      }
+      Button("取消", role: .cancel) {
+        pendingImmersiveReadingConfirmation = nil
+      }
+    } message: {
+      Text(
+        "将回到第 1 页并只加载楼主内容。退出沉浸阅读后仍会保持“只看楼主”，可在帖子顶部关闭。"
+      )
     }
     .confirmationDialog(
       pendingAgreementChange?.confirmationTitle ?? "更新点赞状态？",
@@ -326,6 +359,14 @@ struct ThreadView: View {
       await persistProgress(visiblePost, options: viewModel.options)
     }
     .onChange(of: viewModel.options) { options in
+      pendingImmersiveReadingConfirmation = nil
+      let normalizedMode = ThreadReadingModePolicy.normalized(
+        readingMode,
+        options: options
+      )
+      if normalizedMode != readingMode {
+        setReadingMode(normalizedMode)
+      }
       cancelPictureGallery()
       scrollPositionCoalescer.reset()
       scrollPosition = .empty
@@ -342,6 +383,7 @@ struct ThreadView: View {
       cancelPictureGallery()
       contentReportCoordinator?.invalidate(scopeID: reportScopeID)
       pendingAgreementChange = nil
+      pendingImmersiveReadingConfirmation = nil
       pendingCloudFavoriteAction = nil
       clearSelectableTextRoute()
       contentAgreementStore?.removeScope(agreementScopeID)
@@ -1497,16 +1539,65 @@ struct ThreadView: View {
     )
   }
 
-  private func togglePureReadingMode() {
+  private var immersiveReadingConfirmationIsPresented: Binding<Bool> {
+    Binding(
+      get: { pendingImmersiveReadingConfirmation != nil },
+      set: { isPresented in
+        if !isPresented { pendingImmersiveReadingConfirmation = nil }
+      }
+    )
+  }
+
+  private var isPureReadingMode: Bool { readingMode.usesPurePresentation }
+
+  private func selectReadingMode(_ requestedMode: ThreadReadingMode) {
+    switch ThreadReadingModePolicy.selection(
+      for: requestedMode,
+      threadID: viewModel.thread.id,
+      options: viewModel.options
+    ) {
+    case .apply(let mode):
+      pendingImmersiveReadingConfirmation = nil
+      setReadingMode(mode)
+    case .confirmImmersive(let confirmation):
+      pendingImmersiveReadingConfirmation = confirmation
+    case .ignore:
+      pendingImmersiveReadingConfirmation = nil
+    }
+  }
+
+  private func confirmImmersiveReading(
+    _ confirmation: ThreadImmersiveReadingConfirmation
+  ) {
+    guard
+      confirmation.matches(
+        threadID: viewModel.thread.id,
+        options: viewModel.options
+      )
+    else {
+      pendingImmersiveReadingConfirmation = nil
+      return
+    }
+    pendingImmersiveReadingConfirmation = nil
+    setReadingMode(.immersive)
+    viewModel.enableOnlyThreadAuthorFromFirstPage()
+  }
+
+  private func setReadingMode(_ mode: ThreadReadingMode) {
+    guard readingMode != mode else { return }
+    let wasPureReading = isPureReadingMode
+    let willUsePurePresentation = mode.usesPurePresentation
     pendingCloudFavoriteAction = nil
-    if !isPureReadingMode {
+    if !wasPureReading && willUsePurePresentation {
       pendingAgreementChange = nil
       agreementErrorMessage = nil
       contentAgreementStore?.removeScope(agreementScopeID)
     }
-    scrollPositionCoalescer.reset()
-    scrollPosition = .empty
-    withAnimation { isPureReadingMode.toggle() }
+    if wasPureReading != willUsePurePresentation {
+      scrollPositionCoalescer.reset()
+      scrollPosition = .empty
+    }
+    withAnimation { readingMode = mode }
   }
 
   private func requestAgreementChange(

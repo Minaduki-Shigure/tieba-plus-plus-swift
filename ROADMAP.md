@@ -268,9 +268,10 @@ the source metadata is updated to that tested IPA.
 - Persistent selection among five preset accents and one opaque custom sRGB
   accent, with adaptive light, dark, and high-contrast variants
 - Persistent six-position app text-size adjustment relative to iOS Dynamic Type
-- Transient pure-reading mode plus one shared text-selection panel for visible
-  topic and ordinary floors, inline nested-reply previews, and full-page parent
-  and child rows, with partial system selection and explicit whole-text copying
+- Transient pure-reading and explicit only-author immersive-reading modes, plus
+  one shared text-selection panel for visible topic and ordinary floors, inline
+  nested-reply previews, and full-page parent and child rows, with partial system
+  selection and explicit whole-text copying
 - Default-off local hiding of topic, floor, nested-reply, and inbox quick-reply
   entry points without removing reply content, drafts, or an open composer
 - Default-on, locally configurable entry-risk notice for editable reply and
@@ -1342,13 +1343,20 @@ user selects its explicit load-more control; card appearance and layout reflow
 never authorize account traffic.
 No-history mode updates the recording flag inside the existing versioned
 history archive, so it does not create a competing source of truth or delete
-favorites. Pure-reading mode is transient and removes author chrome, filter
-placeholders, and nested-reply entry points without changing post data or the
-persisted sort. This intentionally remains separate from TiebaLite's immersive
-command, which also reloads from page one with only-thread-author enabled and
-leaves that filter enabled after exit. Any future iOS equivalent must present
-that destructive position reset and persistent filter change explicitly rather
-than silently changing the existing local-only control. The independent
+favorites. The transient thread reading-mode menu keeps standard, pure, and
+immersive reading explicit. Pure reading removes author chrome, filter
+placeholders, and nested-reply entry points without changing post data, making a
+request, or changing the persisted sort and only-author options. Immersive
+reading deliberately composes that same presentation with TiebaLite's
+only-thread-author behavior. If the filter is off, an immutable thread/options
+confirmation first discloses that the command returns to page one and that the
+filter remains enabled after exit; only confirmation clears unresolved opening
+anchors and performs one existing anonymous page-one reload while preserving
+sort. If only-author is already enabled, entry is local-only, sends no request,
+and does not deliberately return to page one. Exiting changes only the transient
+presentation. The existing history/favorite option path persists only-author,
+but never the reading mode. An external filter disable downgrades a stale
+immersive presentation to pure rather than presenting a false state. The independent
 hide-reply-entry preference is persistent,
 defaults off, and removes the topic, floor, nested-reply, and inbox quick-reply
 controls while retaining reply content, ordinary notification navigation,
@@ -1678,9 +1686,9 @@ or malformed values collapse to a quiet empty state instead of creating a
 control. These values are public response snapshots. With a validated active
 account, the canonical first floor and ordinary floor headers can replace that
 snapshot with an authenticated approval control; a full nested-reply page does
-the same for its parent floor and each returned child. Signed-out and pure-reading
-presentations remain read only, and no approval control exposes moderation
-actions.
+the same for its parent floor and each returned child. Signed-out, pure-reading,
+and immersive-reading presentations remain read only, and no approval control
+exposes moderation actions.
 
 Nested replies preserve every server content fragment, including both direct
 leading mentions and the legacy `reply + mention + colon` form. Positive mention
@@ -1696,10 +1704,11 @@ floor. Preview rows do not fetch avatars or media and do not carry active links;
 images, video, and voice use fixed textual markers. Each child receives its own
 local-filter annotation without changing the parent floor, raw count, or post
 pagination. Fully hidden children disappear, but the full-reply entry remains
-available whenever the server declares replies. Pure-reading mode hides the
-entire preview surface without triggering another request. Inline preview
-children remain read only even for a signed-in account and are deliberately
-excluded from the active approval overlay; opening the full nested-reply page is
+available whenever the server declares replies. Pure-reading and
+immersive-reading modes hide the entire preview surface without triggering
+another request. Inline preview children remain read only even for a signed-in
+account and are deliberately excluded from the active approval overlay; opening
+the full nested-reply page is
 required before a child can expose an approval action.
 
 Opening a preview first uses the comment-anchor field so the matching reply can

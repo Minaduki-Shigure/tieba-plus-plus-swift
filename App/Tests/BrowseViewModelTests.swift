@@ -3632,6 +3632,193 @@ final class BrowseViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testImmersiveOnlyAuthorPreservesEverySortAndStartsAtFirstPage() async throws {
+    for (offset, sort) in ThreadPostSort.allCases.enumerated() {
+      let service = ScriptedBrowseService()
+      let thread = Fixtures.thread(id: Int64(5_310 + offset))
+      await service.enqueuePosts(
+        .value(
+          PostPageData(
+            thread: thread,
+            posts: [Fixtures.post(id: Int64(53_100 + offset), threadID: thread.id)],
+            currentPage: 1,
+            hasMore: false
+          )
+        )
+      )
+      let viewModel = ThreadViewModel(
+        thread: thread,
+        service: service,
+        options: ThreadBrowseOptions(sort: sort)
+      )
+
+      viewModel.enableOnlyThreadAuthorFromFirstPage()
+      await viewModel.waitForCurrentLoad()
+
+      XCTAssertEqual(viewModel.state, .loaded)
+      XCTAssertEqual(
+        viewModel.options,
+        ThreadBrowseOptions(sort: sort, onlyThreadAuthor: true)
+      )
+      let requests = await service.postRequestSnapshot()
+      XCTAssertEqual(
+        requests,
+        [
+          PostRequest(
+            threadID: thread.id,
+            page: 1,
+            pageSize: 30,
+            options: ThreadBrowseOptions(sort: sort, onlyThreadAuthor: true),
+            location: nil
+          )
+        ]
+      )
+    }
+  }
+
+  @MainActor
+  func testImmersiveOnlyAuthorRejectsStaleAnchorAndClearsInitialReplyFocus()
+    async throws
+  {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 5_320)
+    let staleLocation = ThreadPostLocation.postID(53_201)
+    let freshPost = Fixtures.post(id: 53_202, threadID: thread.id)
+    await service.enqueuePosts(.suspended(901))
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [freshPost],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(
+      thread: thread,
+      service: service,
+      options: ThreadBrowseOptions(sort: .descending),
+      initialLocation: staleLocation,
+      initialFocus: .firstReply
+    )
+
+    viewModel.loadIfNeeded()
+    try await waitUntil { await service.postRequestCount() == 1 }
+    viewModel.enableOnlyThreadAuthorFromFirstPage()
+    try await waitUntil { viewModel.posts == [freshPost] }
+
+    XCTAssertNil(viewModel.scrollTargetPostID)
+    XCTAssertEqual(
+      viewModel.options,
+      ThreadBrowseOptions(sort: .descending, onlyThreadAuthor: true)
+    )
+    let resumed = await service.resumePosts(
+      id: 901,
+      returning: PostPageData(
+        thread: thread,
+        posts: [Fixtures.post(id: 53_203, threadID: thread.id)],
+        currentPage: 7,
+        hasMore: false
+      )
+    )
+    XCTAssertTrue(resumed)
+    try await waitUntil { await service.completedPostRequestCount() == 2 }
+    await drainMainActor()
+
+    XCTAssertEqual(viewModel.posts, [freshPost])
+    XCTAssertNil(viewModel.scrollTargetPostID)
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(
+      requests,
+      [
+        PostRequest(
+          threadID: thread.id,
+          page: 1,
+          pageSize: 30,
+          options: ThreadBrowseOptions(sort: .descending),
+          location: staleLocation
+        ),
+        PostRequest(
+          threadID: thread.id,
+          page: 1,
+          pageSize: 30,
+          options: ThreadBrowseOptions(sort: .descending, onlyThreadAuthor: true),
+          location: nil
+        ),
+      ]
+    )
+  }
+
+  @MainActor
+  func testImmersiveOnlyAuthorIsStrictNoOpWhenFilterAlreadyEnabled() async {
+    let service = ScriptedBrowseService()
+    let viewModel = ThreadViewModel(
+      thread: Fixtures.thread(id: 5_330),
+      service: service,
+      options: ThreadBrowseOptions(sort: .hot, onlyThreadAuthor: true),
+      initialLocation: .postID(53_301),
+      initialFocus: .firstReply
+    )
+
+    viewModel.enableOnlyThreadAuthorFromFirstPage()
+
+    XCTAssertEqual(viewModel.state, .idle)
+    let requestCount = await service.postRequestCount()
+    XCTAssertEqual(requestCount, 0)
+    XCTAssertEqual(
+      viewModel.options,
+      ThreadBrowseOptions(sort: .hot, onlyThreadAuthor: true)
+    )
+  }
+
+  @MainActor
+  func testImmersiveOnlyAuthorFailureRetriesFromFirstPage() async throws {
+    let service = ScriptedBrowseService()
+    let thread = Fixtures.thread(id: 5_340)
+    let reply = Fixtures.post(id: 53_401, threadID: thread.id)
+    await service.enqueuePosts(.failure(StubFailure(message: "thread unavailable")))
+    await service.enqueuePosts(
+      .value(
+        PostPageData(
+          thread: thread,
+          posts: [reply],
+          currentPage: 1,
+          hasMore: false
+        )
+      )
+    )
+    let viewModel = ThreadViewModel(
+      thread: thread,
+      service: service,
+      initialLocation: .postID(53_499),
+      initialFocus: .firstReply
+    )
+
+    viewModel.enableOnlyThreadAuthorFromFirstPage()
+    try await waitUntil { viewModel.state == .failed("thread unavailable") }
+    viewModel.reload()
+    await viewModel.waitForCurrentLoad()
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.posts, [reply])
+    XCTAssertNil(viewModel.scrollTargetPostID)
+    XCTAssertEqual(
+      viewModel.options,
+      ThreadBrowseOptions(onlyThreadAuthor: true)
+    )
+    let requests = await service.postRequestSnapshot()
+    XCTAssertEqual(requests.count, 2)
+    XCTAssertTrue(
+      requests.allSatisfy {
+        $0.page == 1
+          && $0.location == nil
+          && $0.options == ThreadBrowseOptions(onlyThreadAuthor: true)
+      }
+    )
+  }
+
+  @MainActor
   func testThreadResumeForwardsPostIDAndRestoredOptions() async throws {
     let service = ScriptedBrowseService()
     let thread = Fixtures.thread(id: 54)
