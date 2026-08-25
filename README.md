@@ -589,6 +589,11 @@ and its verified metadata enters the public app source.
 
 ### Local data and controls
 
+- **Settings organization:** The settings root groups every existing control
+  into appearance and layout, reading and content, Home and recommendations,
+  favorites and history, check-in and posting, and storage and privacy pages.
+  This navigation-only reorganization keeps the existing storage keys, defaults,
+  account boundaries, and eager local history/cache reads unchanged.
 - **History:** Versioned browsing and search history support restoration,
   individual deletion, clearing, no-history mode, and corruption recovery.
   Recent forums are projected from the same browsing archive.

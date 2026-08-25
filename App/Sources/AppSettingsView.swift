@@ -1,5 +1,54 @@
 import SwiftUI
 
+enum AppSettingsCategory: String, CaseIterable, Hashable, Identifiable, Sendable {
+  case appearanceAndLayout = "appearance-and-layout"
+  case readingAndContent = "reading-and-content"
+  case homeAndRecommendations = "home-and-recommendations"
+  case favoritesAndHistory = "favorites-and-history"
+  case checkInAndPosting = "check-in-and-posting"
+  case storageAndPrivacy = "storage-and-privacy"
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .appearanceAndLayout:
+      "外观与布局"
+    case .readingAndContent:
+      "阅读与内容"
+    case .homeAndRecommendations:
+      "首页与推荐"
+    case .favoritesAndHistory:
+      "收藏与历史"
+    case .checkInAndPosting:
+      "签到与发布"
+    case .storageAndPrivacy:
+      "存储与隐私"
+    }
+  }
+
+  var systemImage: String {
+    switch self {
+    case .appearanceAndLayout:
+      "paintbrush"
+    case .readingAndContent:
+      "doc.text.image"
+    case .homeAndRecommendations:
+      "house"
+    case .favoritesAndHistory:
+      "bookmark"
+    case .checkInAndPosting:
+      "checkmark.seal"
+    case .storageAndPrivacy:
+      "internaldrive"
+    }
+  }
+
+  var accessibilityIdentifier: String {
+    "settings-category-\(rawValue)"
+  }
+}
+
 struct AppSettingsView: View {
   private struct ImageCacheNotice: Identifiable {
     let id = UUID()
@@ -93,6 +142,53 @@ struct AppSettingsView: View {
 
   var body: some View {
     List {
+      Section {
+        ForEach(AppSettingsCategory.allCases) { category in
+          NavigationLink {
+            settingsView(for: category)
+          } label: {
+            Label(category.title, systemImage: category.systemImage)
+          }
+          .accessibilityIdentifier(category.accessibilityIdentifier)
+        }
+      }
+
+      Section("应用") {
+        NavigationLink {
+          AppAboutView()
+        } label: {
+          Label("关于贴吧++", systemImage: "info.circle")
+        }
+        .accessibilityIdentifier("settings-about")
+      }
+    }
+    .listStyle(.insetGrouped)
+    .navigationTitle("设置")
+    .navigationBarTitleDisplayMode(.inline)
+    .task { await historyViewModel.refresh() }
+    .task { await refreshImageCacheUsage() }
+  }
+
+  @ViewBuilder
+  private func settingsView(for category: AppSettingsCategory) -> some View {
+    switch category {
+    case .appearanceAndLayout:
+      appearanceAndLayoutSettings
+    case .readingAndContent:
+      readingAndContentSettings
+    case .homeAndRecommendations:
+      homeAndRecommendationsSettings
+    case .favoritesAndHistory:
+      favoritesAndHistorySettings
+    case .checkInAndPosting:
+      checkInAndPostingSettings
+    case .storageAndPrivacy:
+      storageAndPrivacySettings
+    }
+  }
+
+  private var appearanceAndLayoutSettings: some View {
+    settingsPage(title: AppSettingsCategory.appearanceAndLayout.title) {
       Section("外观") {
         if AppDynamicTypeLayout.prefersMenuPickers(for: dynamicTypeSize) {
           appearancePicker
@@ -136,6 +232,18 @@ struct AppSettingsView: View {
         .pickerStyle(.menu)
       }
 
+      Section {
+        Toggle("同时显示用户名和昵称", isOn: $showsBothUsernameAndNickname)
+      } header: {
+        Text("名称显示")
+      } footer: {
+        Text("开启后，会在公开昵称后同时显示公开用户名；仅使用页面已经返回的公开资料，不会发起额外请求。")
+      }
+    }
+  }
+
+  private var readingAndContentSettings: some View {
+    settingsPage(title: AppSettingsCategory.readingAndContent.title) {
       Section("使用习惯") {
         if AppDynamicTypeLayout.prefersMenuPickers(for: dynamicTypeSize) {
           defaultForumSortPicker
@@ -152,179 +260,6 @@ struct AppSettingsView: View {
         }
         .pickerStyle(.menu)
         .accessibilityIdentifier("settings-forum-primary-action")
-
-        Toggle(
-          "不保存浏览记录",
-          isOn: Binding(
-            get: { !historyViewModel.recordingEnabled },
-            set: { historyViewModel.setRecordingEnabled(!$0) }
-          )
-        )
-        .disabled(historyViewModel.state != .loaded)
-
-        switch historyViewModel.state {
-        case .idle, .loading:
-          HStack {
-            Text("正在读取浏览记录设置")
-              .foregroundStyle(.secondary)
-            Spacer()
-            ProgressView()
-          }
-        case .failed(let message):
-          VStack(alignment: .leading, spacing: 8) {
-            Label(message, systemImage: "exclamationmark.triangle")
-              .foregroundStyle(.secondary)
-            Button {
-              historyViewModel.reload()
-            } label: {
-              Label("重试", systemImage: "arrow.clockwise")
-            }
-          }
-        case .loaded:
-          EmptyView()
-        }
-      }
-
-      Section {
-        Picker("单吧签到间隔", selection: forumBatchCheckInDelayModeSelection) {
-          ForEach(ForumBatchCheckInDelayMode.allCases) { mode in
-            Text(mode.displayName).tag(mode)
-          }
-        }
-        .pickerStyle(.menu)
-        .accessibilityIdentifier("settings-forum-batch-check-in-delay-mode")
-
-        Toggle("优先使用官方批签", isOn: $forumBatchCheckInUsesOfficialBatch)
-          .accessibilityIdentifier("settings-forum-batch-check-in-official-batch")
-
-        Toggle("单吧签到失败后停止", isOn: $forumBatchCheckInStopsAfterSingleFailure)
-          .accessibilityIdentifier("settings-forum-batch-check-in-stop-after-failure")
-      } header: {
-        Text("一键签到")
-      } footer: {
-        Text(
-          "这些设置只影响从一键签到页面主动开始的前台流程，不会创建后台或定时任务。"
-            + "关闭失败中止后，仅在单吧签到已明确失败时继续；账户变化、取消或结果未知时仍会停止。"
-        )
-      }
-
-      Section {
-        Picker("默认图片水印", selection: defaultImageWatermarkSelection) {
-          ForEach(ComposerImageWatermarkPreference.allCases) { watermark in
-            Text(watermark.title).tag(watermark)
-          }
-        }
-        .pickerStyle(.menu)
-        .accessibilityIdentifier("settings-default-image-watermark")
-
-        Toggle("隐藏回复入口", isOn: $hidesReplyEntryPoints)
-          .accessibilityIdentifier("settings-hide-reply-entry-points")
-
-        Toggle("发帖和回复风险提示", isOn: $showsPostAndReplyRiskNotice)
-          .accessibilityIdentifier("settings-post-reply-risk-notice")
-      } header: {
-        Text("阅读与回复")
-      } footer: {
-        Text(
-          "默认图片水印用于新建且尚未附图的发帖或回复草稿；已有图片的草稿保留其原水印。"
-            + "隐藏回复入口开启后，会隐藏主题、楼层、楼中楼和消息列表中的回复按钮；"
-            + "不会隐藏回复内容或删除草稿。风险提示默认开启，会在进入发帖或回复编辑器时显示；"
-            + "关闭后，实际发送或发布前仍需逐次确认。这些设置只保存在本机，切换时不会发起网络请求。"
-        )
-      }
-
-      Section {
-        Picker("启动首选页", selection: homeStartDestinationSelection) {
-          ForEach(AppStartDestination.allCases) { destination in
-            Text(destination.title).tag(destination)
-          }
-        }
-        .pickerStyle(.menu)
-
-        Toggle("显示发现区", isOn: $homeShowsDiscovery)
-
-        Toggle("显示最近访问的贴吧", isOn: $homeShowsRecentForums)
-
-        if AppDynamicTypeLayout.prefersMenuPickers(for: dynamicTypeSize) {
-          followedForumsLayoutPicker
-            .pickerStyle(.menu)
-        } else {
-          followedForumsLayoutPicker
-            .pickerStyle(.segmented)
-        }
-      } header: {
-        Text("首页")
-      } footer: {
-        Text("启动首选页会在下次启动应用时生效；辅助功能字号下，关注贴吧固定使用单列。")
-      }
-
-      Section {
-        Toggle("只推荐已关注的吧", isOn: $personalizedFollowedForumsOnly)
-      } header: {
-        Text("推荐")
-      } footer: {
-        Text(
-          "开启后，推荐页只显示已关注贴吧中的帖子；账号个性使用所选账号，"
-            + "匿名个性使用当前账号，且筛选仅在本机完成。"
-        )
-      }
-
-      Section {
-        Toggle("打开时只看楼主", isOn: $cloudFavoriteThreadsOpenOnlyAuthor)
-
-        Toggle("打开时使用倒序", isOn: $cloudFavoriteThreadsOpenDescending)
-      } header: {
-        Text("贴吧收藏")
-      } footer: {
-        Text(
-          "仅影响从当前登录账号的贴吧云收藏进入帖子；收藏楼层定位会同时保留。"
-            + "实际模式会按现有规则记录到浏览记录。"
-        )
-      }
-
-      Section {
-        Toggle("从收藏打开时只看楼主", isOn: $favoriteThreadsOpenOnlyAuthor)
-
-        Toggle("从收藏打开时使用倒序", isOn: $favoriteThreadsOpenDescending)
-      } header: {
-        Text("本地收藏")
-      } footer: {
-        Text(
-          "这些开关只在从本地收藏进入帖子时直接覆盖模式。打开后，实际模式会按现有规则"
-            + "成为该帖在收藏和浏览记录中的当前模式；关闭开关不会恢复此前值。"
-        )
-      }
-
-      Section {
-        Toggle("在线搜索联想", isOn: $searchSuggestionsEnabled)
-      } header: {
-        Text("搜索与隐私")
-      } footer: {
-        Text("开启后，会在您提交搜索前向百度发送输入关键词，以获取在线联想建议。")
-      }
-
-      Section {
-        Picker("外部 HTTPS 链接", selection: externalWebOpenModeSelection) {
-          ForEach(ExternalWebOpenMode.allCases) { mode in
-            Text(mode.title).tag(mode)
-          }
-        }
-        .pickerStyle(.menu)
-      } header: {
-        Text("链接")
-      } footer: {
-        Text(
-          "可识别的贴吧、帖子和用户链接始终优先在应用内打开。HTTP 链接始终交由系统处理；"
-            + "应用内 Safari 使用 Safari 网站会话打开其他 HTTPS 链接。"
-        )
-      }
-
-      Section {
-        Toggle("同时显示用户名和昵称", isOn: $showsBothUsernameAndNickname)
-      } header: {
-        Text("用户名称")
-      } footer: {
-        Text("开启后，会在公开昵称后同时显示公开用户名；仅使用页面已经返回的公开资料，不会发起额外请求。")
       }
 
       Section {
@@ -368,6 +303,200 @@ struct AppSettingsView: View {
             + "图库和加载占位不受影响。"
         )
       }
+    }
+  }
+
+  private var homeAndRecommendationsSettings: some View {
+    settingsPage(title: AppSettingsCategory.homeAndRecommendations.title) {
+      Section {
+        Picker("启动首选页", selection: homeStartDestinationSelection) {
+          ForEach(AppStartDestination.allCases) { destination in
+            Text(destination.title).tag(destination)
+          }
+        }
+        .pickerStyle(.menu)
+
+        Toggle("显示发现区", isOn: $homeShowsDiscovery)
+
+        Toggle("显示最近访问的贴吧", isOn: $homeShowsRecentForums)
+
+        if AppDynamicTypeLayout.prefersMenuPickers(for: dynamicTypeSize) {
+          followedForumsLayoutPicker
+            .pickerStyle(.menu)
+        } else {
+          followedForumsLayoutPicker
+            .pickerStyle(.segmented)
+        }
+      } header: {
+        Text("首页")
+      } footer: {
+        Text("启动首选页会在下次启动应用时生效；辅助功能字号下，关注贴吧固定使用单列。")
+      }
+
+      Section {
+        Toggle("只推荐已关注的吧", isOn: $personalizedFollowedForumsOnly)
+      } header: {
+        Text("推荐")
+      } footer: {
+        Text(
+          "开启后，推荐页只显示已关注贴吧中的帖子；账号个性使用所选账号，"
+            + "匿名个性使用当前账号，且筛选仅在本机完成。"
+        )
+      }
+    }
+  }
+
+  private var favoritesAndHistorySettings: some View {
+    settingsPage(title: AppSettingsCategory.favoritesAndHistory.title) {
+      Section("浏览记录") {
+        Toggle(
+          "不保存浏览记录",
+          isOn: Binding(
+            get: { !historyViewModel.recordingEnabled },
+            set: { historyViewModel.setRecordingEnabled(!$0) }
+          )
+        )
+        .disabled(historyViewModel.state != .loaded)
+
+        switch historyViewModel.state {
+        case .idle, .loading:
+          HStack {
+            Text("正在读取浏览记录设置")
+              .foregroundStyle(.secondary)
+            Spacer()
+            ProgressView()
+          }
+        case .failed(let message):
+          VStack(alignment: .leading, spacing: 8) {
+            Label(message, systemImage: "exclamationmark.triangle")
+              .foregroundStyle(.secondary)
+            Button {
+              historyViewModel.reload()
+            } label: {
+              Label("重试", systemImage: "arrow.clockwise")
+            }
+          }
+        case .loaded:
+          EmptyView()
+        }
+      }
+
+      Section {
+        Toggle("打开时只看楼主", isOn: $cloudFavoriteThreadsOpenOnlyAuthor)
+
+        Toggle("打开时使用倒序", isOn: $cloudFavoriteThreadsOpenDescending)
+      } header: {
+        Text("云收藏")
+      } footer: {
+        Text(
+          "仅影响从当前登录账号的贴吧云收藏进入帖子；收藏楼层定位会同时保留。"
+            + "实际模式会按现有规则记录到浏览记录。"
+        )
+      }
+
+      Section {
+        Toggle("从收藏打开时只看楼主", isOn: $favoriteThreadsOpenOnlyAuthor)
+
+        Toggle("从收藏打开时使用倒序", isOn: $favoriteThreadsOpenDescending)
+      } header: {
+        Text("本地收藏")
+      } footer: {
+        Text(
+          "这些开关只在从本地收藏进入帖子时直接覆盖模式。打开后，实际模式会按现有规则"
+            + "成为该帖在收藏和浏览记录中的当前模式；关闭开关不会恢复此前值。"
+        )
+      }
+    }
+    .alert(
+      "无法更新浏览记录设置",
+      isPresented: Binding(
+        get: { historyViewModel.operationError != nil },
+        set: { if !$0 { historyViewModel.dismissOperationError() } }
+      )
+    ) {
+      Button("好", action: historyViewModel.dismissOperationError)
+    } message: {
+      Text(historyViewModel.operationError ?? "未知错误")
+    }
+  }
+
+  private var checkInAndPostingSettings: some View {
+    settingsPage(title: AppSettingsCategory.checkInAndPosting.title) {
+      Section {
+        Picker("单吧签到间隔", selection: forumBatchCheckInDelayModeSelection) {
+          ForEach(ForumBatchCheckInDelayMode.allCases) { mode in
+            Text(mode.displayName).tag(mode)
+          }
+        }
+        .pickerStyle(.menu)
+        .accessibilityIdentifier("settings-forum-batch-check-in-delay-mode")
+
+        Toggle("优先使用官方批签", isOn: $forumBatchCheckInUsesOfficialBatch)
+          .accessibilityIdentifier("settings-forum-batch-check-in-official-batch")
+
+        Toggle("单吧签到失败后停止", isOn: $forumBatchCheckInStopsAfterSingleFailure)
+          .accessibilityIdentifier("settings-forum-batch-check-in-stop-after-failure")
+      } header: {
+        Text("一键签到")
+      } footer: {
+        Text(
+          "这些设置只影响从一键签到页面主动开始的前台流程，不会创建后台或定时任务。"
+            + "关闭失败中止后，仅在单吧签到已明确失败时继续；账户变化、取消或结果未知时仍会停止。"
+        )
+      }
+
+      Section {
+        Picker("默认图片水印", selection: defaultImageWatermarkSelection) {
+          ForEach(ComposerImageWatermarkPreference.allCases) { watermark in
+            Text(watermark.title).tag(watermark)
+          }
+        }
+        .pickerStyle(.menu)
+        .accessibilityIdentifier("settings-default-image-watermark")
+
+        Toggle("隐藏回复入口", isOn: $hidesReplyEntryPoints)
+          .accessibilityIdentifier("settings-hide-reply-entry-points")
+
+        Toggle("发帖和回复风险提示", isOn: $showsPostAndReplyRiskNotice)
+          .accessibilityIdentifier("settings-post-reply-risk-notice")
+      } header: {
+        Text("发布与回复")
+      } footer: {
+        Text(
+          "默认图片水印用于新建且尚未附图的发帖或回复草稿；已有图片的草稿保留其原水印。"
+            + "隐藏回复入口开启后，会隐藏主题、楼层、楼中楼和消息列表中的回复按钮；"
+            + "不会隐藏回复内容或删除草稿。风险提示默认开启，会在进入发帖或回复编辑器时显示；"
+            + "关闭后，实际发送或发布前仍需逐次确认。这些设置只保存在本机，切换时不会发起网络请求。"
+        )
+      }
+    }
+  }
+
+  private var storageAndPrivacySettings: some View {
+    settingsPage(title: AppSettingsCategory.storageAndPrivacy.title) {
+      Section {
+        Toggle("在线搜索联想", isOn: $searchSuggestionsEnabled)
+      } header: {
+        Text("搜索与隐私")
+      } footer: {
+        Text("开启后，会在您提交搜索前向百度发送输入关键词，以获取在线联想建议。")
+      }
+
+      Section {
+        Picker("外部 HTTPS 链接", selection: externalWebOpenModeSelection) {
+          ForEach(ExternalWebOpenMode.allCases) { mode in
+            Text(mode.title).tag(mode)
+          }
+        }
+        .pickerStyle(.menu)
+      } header: {
+        Text("链接")
+      } footer: {
+        Text(
+          "可识别的贴吧、帖子和用户链接始终优先在应用内打开。HTTP 链接始终交由系统处理；"
+            + "应用内 Safari 使用 Safari 网站会话打开其他 HTTPS 链接。"
+        )
+      }
 
       Section {
         LabeledContent {
@@ -408,31 +537,6 @@ struct AppSettingsView: View {
             + "物理空间。"
         )
       }
-
-      Section("应用") {
-        NavigationLink {
-          AppAboutView()
-        } label: {
-          Label("关于贴吧++", systemImage: "info.circle")
-        }
-        .accessibilityIdentifier("settings-about")
-      }
-    }
-    .listStyle(.insetGrouped)
-    .navigationTitle("设置")
-    .navigationBarTitleDisplayMode(.inline)
-    .task { await historyViewModel.refresh() }
-    .task { await refreshImageCacheUsage() }
-    .alert(
-      "无法更新浏览记录设置",
-      isPresented: Binding(
-        get: { historyViewModel.operationError != nil },
-        set: { if !$0 { historyViewModel.dismissOperationError() } }
-      )
-    ) {
-      Button("好", action: historyViewModel.dismissOperationError)
-    } message: {
-      Text(historyViewModel.operationError ?? "未知错误")
     }
     .alert(item: $imageCacheNotice) { notice in
       Alert(
@@ -441,6 +545,18 @@ struct AppSettingsView: View {
         dismissButton: .cancel(Text("好"))
       )
     }
+  }
+
+  private func settingsPage<Content: View>(
+    title: String,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    List {
+      content()
+    }
+    .listStyle(.insetGrouped)
+    .navigationTitle(title)
+    .navigationBarTitleDisplayMode(.inline)
   }
 
   @MainActor
