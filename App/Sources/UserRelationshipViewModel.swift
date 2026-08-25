@@ -249,7 +249,6 @@ final class UserRelationshipViewModel: ObservableObject {
   @discardableResult
   func invalidateForAccountSessionChange() -> Int {
     generation &+= 1
-    activeOperation = nil
     clearSnapshot()
     errorMessage = nil
     state = .idle
@@ -264,8 +263,8 @@ final class UserRelationshipViewModel: ObservableObject {
   @discardableResult
   func userRelationshipDidChange(_ change: UserRelationshipChange) -> Bool {
     guard
-      activeOperation == nil,
       let currentLease,
+      activeOperation?.lease != currentLease,
       change.accountID == currentLease.userID,
       change.sessionRevision == currentLease.sessionRevision,
       change.targetUserID == targetUserID

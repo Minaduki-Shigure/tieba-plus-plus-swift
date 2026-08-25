@@ -243,7 +243,7 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
             id: 9,
             username: "mutual-user",
             displayName: "被过滤的互关用户",
-            portrait: "portrait-token?t=1",
+            portrait: "portrait-token",
             introduction: "简介",
             concernState: .mutual
           )

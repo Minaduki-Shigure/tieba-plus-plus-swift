@@ -503,7 +503,18 @@ final class UserRelationshipViewModelTests: XCTestCase {
     let oldMutation = Task { await viewModel.setFollowed(true) }
     try await waitForRelationshipTest { await service.writeRequestCount() == 1 }
     await vault.replaceActive(with: newSession)
-    await viewModel.accountSessionDidChange()
+    let reloadToken = viewModel.invalidateForAccountSessionChange()
+    await viewModel.reloadAfterAccountSessionChange(ifCurrent: reloadToken)
+    XCTAssertTrue(
+      viewModel.userRelationshipDidChange(
+        UserRelationshipChange(
+          accountID: newSession.id,
+          sessionRevision: newSession.sessionRevision,
+          targetUserID: 99,
+          isFollowed: false
+        )
+      )
+    )
     await viewModel.setFollowed(true)
     let writesWhileOldRequestIsRunning = await service.writeRequestCount()
     XCTAssertEqual(writesWhileOldRequestIsRunning, 1)

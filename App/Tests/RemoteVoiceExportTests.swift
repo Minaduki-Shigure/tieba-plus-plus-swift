@@ -816,10 +816,9 @@ final class RemoteVoiceExportTests: XCTestCase {
     try await waitForRemoteVoiceExportTest {
       viewModel.presentation?.request == request
     }
-    let presentation = try XCTUnwrap(viewModel.presentation)
     viewModel.systemPresentationDidAppear(request: request)
     let coordinator = RemoteVoiceExportCompletionCoordinator(
-      presentation: presentation
+      presentation: try XCTUnwrap(viewModel.presentation)
     ) { completedRequest, outcome in
       viewModel.finish(request: completedRequest, outcome: outcome)
     }
