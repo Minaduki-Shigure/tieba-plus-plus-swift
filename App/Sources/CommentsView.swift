@@ -413,7 +413,6 @@ struct CommentsView: View {
           commentParentPost(parentPost)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .appSurfaceBackground(.floor)
             .id(CommentsListItemID.parentPost(parentPost.id))
           Divider()
         }
@@ -446,6 +445,7 @@ struct CommentsView: View {
 
         commentsScrollFooter
       }
+      .appSurfaceBackground(.floor)
     }
     .appScrollableSurface(.canvas)
     .accessibilityIdentifier("comments-scroll")
@@ -1195,7 +1195,6 @@ struct CommentsView: View {
       comment: comment
     )
     .background(commentHighlightColor(comment))
-    .appSurfaceBackground(.floor)
   }
 
   private func commentRowContent(_ comment: BrowseComment) -> some View {

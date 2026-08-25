@@ -1225,7 +1225,6 @@ struct ThreadView: View {
                   Divider()
                     .padding(.leading, isPureReadingMode ? 0 : 52)
                 }
-                .appSurfaceBackground(.floor)
               }
               .background {
                 if #available(iOS 18.0, *) {
@@ -1334,7 +1333,6 @@ struct ThreadView: View {
                   Divider()
                     .padding(.leading, isPureReadingMode ? 0 : 52)
                 }
-                .appSurfaceBackground(.floor)
               }
               .background {
                 if #available(iOS 18.0, *) {
@@ -1385,6 +1383,7 @@ struct ThreadView: View {
             }
           }
           .modifier(ThreadScrollTargetLayoutModifier())
+          .appSurfaceBackground(.floor)
         }
         .appScrollableSurface(.canvas)
         .coordinateSpace(name: "thread-scroll")
