@@ -137,6 +137,15 @@ routes close another narrow TiebaLite navigation gap. They expose only already
 credited destinations, add no endpoint or account choice, and keep app-only
 routes outside public rich content and clipboard parsing, so they add no weighted
 point.
+The explicit-paste preview closes a related narrow TiebaLite navigation habit
+without copying its automatic clipboard inspection. The existing system
+`PasteButton` remains the only read gate; a local card appears before one
+credential-free, minimum-page forum or thread request enriches display text.
+The immutable parsed target, including only-author and post-anchor context,
+cannot be replaced by response metadata. Cancellation plus request generations
+discard stale responses, and locally filtered, server-hidden, mismatched, or
+failed responses remain generic but openable. This adds no content source or
+weighted point, and the public `v0.62.3-alpha.1` IPA does not include it.
 The ordered iOS Home Screen quick actions expose the existing foreground batch-
 check-in page, Tieba cloud favorites, search, and replies inbox through the iOS
 16-and-later scene lifecycle. They add no endpoint, data source, background
@@ -1199,6 +1208,18 @@ expose its page, Cookie state, or navigation history to the app. The app does no
 register Baidu's official scheme, automatically inspect the clipboard, claim
 Universal Links without Baidu's AASA authorization, or fabricate a browsing-
 history snapshot before the linked thread has loaded successfully.
+The Home paste action accepts at most eight text values totaling 64 KiB through
+the system `PasteButton`; raw clipboard text is neither retained nor persisted.
+After that explicit action, a forum preview requests FRS page one with `rn=1`
+and a thread preview requests PB page one with `rn=2` and nested replies
+disabled. Those calls carry no account credentials or hardware identifier
+fields, touch no history or write service, and the UI deliberately avoids
+remote-avatar loading. Only sanitized, bounded display text crosses into the
+preview model.
+User app links remain local generic cards. A second explicit action consumes the
+original immutable target for navigation, while closing, replacement, scene
+inactivity, external URL routing, and Home Screen quick actions invalidate the
+pending generation so a late response cannot recreate or retarget the sheet.
 The About page reads only local display/version/build strings and exposes one
 exact, credential-free HTTPS source-repository URL after an explicit tap. That
 destination is code-defined rather than constructed from Bundle, account, or

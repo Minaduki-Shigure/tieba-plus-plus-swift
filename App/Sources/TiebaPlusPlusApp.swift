@@ -37,7 +37,7 @@ struct TiebaPlusPlusApp: App {
   private let service:
     any BrowseService & SearchService & ForumPostSearchService & HotTopicService & HotThreadService
       & PersonalizedFeedService & UserProfileService & ForumInformationService
-      & SearchSuggestionService
+      & SearchSuggestionService & TiebaLinkPreviewService
   private let contentFilterRepository: any ContentFilterRepository
   private let historyRepository: any BrowsingHistoryRepository = FileBrowsingHistoryStore.live()
   private let favoritesRepository: any LocalFavoritesRepository = FileLocalFavoritesStore.live()

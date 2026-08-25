@@ -1,21 +1,48 @@
 import Foundation
 import TiebaCore
 
+protocol TiebaLinkPreviewClient: Sendable {
+  func getThreads(
+    forumName: String,
+    page: Int,
+    pageSize: Int,
+    sort: TiebaThreadSort,
+    featuredOnly: Bool,
+    featuredClassificationID: Int?
+  ) async throws -> TiebaThreadPage
+  func getPosts(
+    threadID: Int64,
+    page: Int,
+    pageSize: Int,
+    sort: TiebaPostSort,
+    onlyThreadAuthor: Bool,
+    location: TiebaPostLocation?,
+    includeComments: Bool,
+    commentsSortedByAgree: Bool,
+    commentPageSize: Int
+  ) async throws -> TiebaPostPage
+}
+
+extension TiebaClient: TiebaLinkPreviewClient {}
+
 struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchService,
   SearchSuggestionService, HotTopicService, HotThreadService, UserProfileService,
   PersonalizedFeedService, ForumInformationService, ThreadPictureGalleryService,
-  ContentReportService
+  ContentReportService, TiebaLinkPreviewService
 {
   private let client: TiebaClient
+  private let linkPreviewClient: any TiebaLinkPreviewClient
   private let authenticatedClient: TiebaAuthenticatedClient?
   private let contentFilterRepository: any ContentFilterRepository
 
   init(
     client: TiebaClient = TiebaClient(),
+    linkPreviewClient: (any TiebaLinkPreviewClient)? = nil,
     authenticatedClient: TiebaAuthenticatedClient? = nil,
     contentFilterRepository: any ContentFilterRepository = EmptyContentFilterRepository()
   ) {
     self.client = client
+    self.linkPreviewClient = linkPreviewClient ?? client
     self.authenticatedClient = authenticatedClient
     self.contentFilterRepository = contentFilterRepository
   }
@@ -245,6 +272,62 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
         location: location
       )
     )
+  }
+
+  func preview(for target: TiebaLinkTarget) async throws -> TiebaLinkPreviewMetadata? {
+    do {
+      switch target {
+      case .forum(let requestedName):
+        let response = try await linkPreviewClient.getThreads(
+          forumName: requestedName,
+          page: 1,
+          pageSize: 1,
+          sort: .replyTime,
+          featuredOnly: false,
+          featuredClassificationID: nil
+        )
+        guard
+          response.pagination.currentPage == 1,
+          response.forum.id > 0,
+          Self.previewIdentity(response.forum.name) == Self.previewIdentity(requestedName)
+        else { return nil }
+        return Self.forumPreviewMetadata(response.forum, requestedName: requestedName)
+
+      case .thread(let route):
+        let response = try await linkPreviewClient.getPosts(
+          threadID: route.threadID,
+          page: 1,
+          pageSize: 2,
+          sort: .ascending,
+          onlyThreadAuthor: route.onlyThreadAuthor,
+          location: nil,
+          includeComments: false,
+          commentsSortedByAgree: true,
+          commentPageSize: 1
+        )
+        guard response.pagination.currentPage == 1, response.thread.id == route.threadID else {
+          return nil
+        }
+        let filter: ContentFilterSnapshot
+        do {
+          filter = try await contentFilterRepository.snapshot()
+        } catch is CancellationError {
+          throw CancellationError()
+        } catch {
+          return nil
+        }
+        let thread = Self.mapThread(response.thread, applying: filter)
+        guard thread.localVisibility == .visible, !thread.isServerHidden else { return nil }
+        return Self.threadPreviewMetadata(thread, route: route)
+
+      case .user:
+        return nil
+      }
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
   }
 
   func resolveThreadIdentity(
@@ -1604,6 +1687,109 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
 
   func contentFilterSnapshot() async -> ContentFilterSnapshot {
     (try? await contentFilterRepository.snapshot()) ?? .empty
+  }
+
+  static func forumPreviewMetadata(
+    _ forum: TiebaForum,
+    requestedName: String
+  ) -> TiebaLinkPreviewMetadata {
+    let slogan = previewText(forum.slogan, maximumCharacterCount: 160)
+    let subtitle: String
+    if !slogan.isEmpty {
+      subtitle = slogan
+    } else {
+      var parts: [String] = []
+      if forum.memberCount > 0 {
+        parts.append("\(forum.memberCount.formatted()) 位关注")
+      }
+      if forum.threadCount > 0 {
+        parts.append("\(forum.threadCount.formatted()) 个主题")
+      }
+      subtitle = parts.isEmpty ? "贴吧主页" : parts.joined(separator: " · ")
+    }
+    return TiebaLinkPreviewMetadata(
+      title: "\(requestedName)吧",
+      subtitle: subtitle
+    )
+  }
+
+  static func threadPreviewMetadata(
+    _ thread: BrowseThread,
+    route: TiebaThreadRoute
+  ) -> TiebaLinkPreviewMetadata {
+    let sanitizedTitle = previewText(thread.title, maximumCharacterCount: 120)
+    var parts: [String] = []
+    let forumName = previewText(thread.forumName, maximumCharacterCount: 100)
+    if !forumName.isEmpty {
+      parts.append("\(forumName)吧")
+    }
+    let authorName = previewText(thread.authorName, maximumCharacterCount: 80)
+    if !authorName.isEmpty {
+      parts.append("作者 \(authorName)")
+    }
+    if thread.replyCount >= 0 {
+      parts.append("\(thread.replyCount.formatted()) 条回复")
+    }
+    if route.onlyThreadAuthor {
+      parts.append("只看楼主")
+    }
+    if let postID = route.postID {
+      parts.append("定位到回复 \(postID)")
+    }
+    return TiebaLinkPreviewMetadata(
+      title: sanitizedTitle.isEmpty ? "帖子 \(route.threadID)" : sanitizedTitle,
+      subtitle: parts.isEmpty ? "贴吧帖子" : parts.joined(separator: " · ")
+    )
+  }
+
+  static func previewIdentity(_ value: String) -> String {
+    value
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+      .lowercased()
+  }
+
+  static func previewText(
+    _ value: String,
+    maximumCharacterCount: Int
+  ) -> String {
+    let characterLimit = max(maximumCharacterCount, 0)
+    guard characterLimit > 0 else { return "" }
+    let (calculatedByteLimit, overflow) = characterLimit.multipliedReportingOverflow(by: 4)
+    let byteLimit = overflow ? Int.max : calculatedByteLimit
+    let (calculatedInspectionLimit, inspectionOverflow) =
+      byteLimit.multipliedReportingOverflow(by: 4)
+    let inspectionLimit = inspectionOverflow ? 4_096 : min(calculatedInspectionLimit, 4_096)
+
+    var output = ""
+    output.reserveCapacity(min(byteLimit, 640))
+    var byteCount = 0
+    var inspectedScalarCount = 0
+    var pendingSpace = false
+
+    for scalar in value.unicodeScalars {
+      guard inspectedScalarCount < inspectionLimit else { break }
+      inspectedScalarCount += 1
+      if CharacterSet.whitespacesAndNewlines.contains(scalar)
+        || CharacterSet.controlCharacters.contains(scalar)
+      {
+        pendingSpace = !output.isEmpty
+        continue
+      }
+
+      let scalarText = String(scalar)
+      let scalarByteCount = scalarText.utf8.count
+      let spaceByteCount = pendingSpace ? 1 : 0
+      guard byteCount <= byteLimit - spaceByteCount - scalarByteCount else { break }
+      if pendingSpace {
+        output.append(" ")
+        byteCount += 1
+        pendingSpace = false
+      }
+      output.append(scalarText)
+      byteCount += scalarByteCount
+    }
+    return String(output.prefix(characterLimit))
   }
 
   private static func mapGender(_ gender: TiebaGender) -> BrowseGender {

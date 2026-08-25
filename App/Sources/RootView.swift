@@ -6,7 +6,7 @@ struct RootView: View {
   let service:
     any BrowseService & SearchService & ForumPostSearchService & HotTopicService & HotThreadService
       & PersonalizedFeedService & UserProfileService & ForumInformationService
-      & SearchSuggestionService
+      & SearchSuggestionService & TiebaLinkPreviewService
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
@@ -53,13 +53,14 @@ struct RootView: View {
   @StateObject private var searchSuggestionViewModel: SearchSuggestionViewModel
   @StateObject private var accountViewModel: AccountViewModel
   @StateObject private var unreadSummaryViewModel: InboxUnreadSummaryViewModel
+  @StateObject private var linkPreviewViewModel: TiebaLinkPreviewViewModel
   @StateObject private var threadSummaryImageGalleryCoordinator:
     ThreadSummaryImageGalleryCoordinator
 
   init(
     service: any BrowseService & SearchService & ForumPostSearchService & HotTopicService
       & HotThreadService & PersonalizedFeedService & UserProfileService & ForumInformationService
-      & SearchSuggestionService,
+      & SearchSuggestionService & TiebaLinkPreviewService,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository,
@@ -99,6 +100,9 @@ struct RootView: View {
     _unreadSummaryViewModel = StateObject(
       wrappedValue: InboxUnreadSummaryViewModel(service: accountService, vault: accountVault)
     )
+    _linkPreviewViewModel = StateObject(
+      wrappedValue: TiebaLinkPreviewViewModel(service: service)
+    )
     _threadSummaryImageGalleryCoordinator = StateObject(
       wrappedValue: ThreadSummaryImageGalleryCoordinator(
         remoteService: service as? any ThreadPictureGalleryService,
@@ -124,8 +128,8 @@ struct RootView: View {
               Label("打开贴吧链接", systemImage: "link")
               Spacer(minLength: 8)
               PasteButton(payloadType: String.self, onPaste: openPastedLinks)
-                .accessibilityLabel("粘贴并打开贴吧链接")
-                .help("粘贴并打开贴吧链接")
+                .accessibilityLabel("粘贴并预览贴吧链接")
+                .help("粘贴并预览贴吧链接")
             }
           }
         }
@@ -462,6 +466,18 @@ struct RootView: View {
         }
       }
     }
+    .sheet(
+      isPresented: Binding(
+        get: { linkPreviewViewModel.preview != nil },
+        set: { if !$0 { linkPreviewViewModel.dismiss() } }
+      )
+    ) {
+      TiebaLinkPreviewSheet(
+        viewModel: linkPreviewViewModel,
+        onClose: { linkPreviewViewModel.dismiss(expectedID: $0) },
+        onOpen: openLinkPreview
+      )
+    }
     .onAppear {
       favoritesViewModel.reload()
       recentForumsViewModel.reload()
@@ -470,6 +486,7 @@ struct RootView: View {
       }
       searchSuggestionViewModel.setEnabled(searchSuggestionsEnabled)
       mediaPlaybackCoordinator.setSceneActive(scenePhase == .active)
+      linkPreviewViewModel.sceneActivityDidChange(isActive: scenePhase == .active)
       unreadSummaryViewModel.sceneActivityDidChange(
         isActive: RootUnreadSummaryActivationPolicy.isActive(
           sceneIsActive: scenePhase == .active,
@@ -486,6 +503,7 @@ struct RootView: View {
     }
     .onChange(of: scenePhase) {
       mediaPlaybackCoordinator.setSceneActive($0 == .active)
+      linkPreviewViewModel.sceneActivityDidChange(isActive: $0 == .active)
       unreadSummaryViewModel.sceneActivityDidChange(
         isActive: RootUnreadSummaryActivationPolicy.isActive(
           sceneIsActive: $0 == .active,
@@ -512,7 +530,10 @@ struct RootView: View {
         )
       )
     }
-    .onDisappear { searchSuggestionViewModel.cancelAndClear() }
+    .onDisappear {
+      searchSuggestionViewModel.cancelAndClear()
+      linkPreviewViewModel.sceneActivityDidChange(isActive: false)
+    }
     .onReceive(NotificationCenter.default.publisher(for: .localFavoritesDidChange)) { _ in
       Task { @MainActor in favoritesViewModel.reload() }
     }
@@ -1093,15 +1114,17 @@ struct RootView: View {
   }
 
   private func openPastedLinks(_ values: [String]) {
-    let targets = Set(values.compactMap { TiebaLink.target(fromPastedText: $0) })
-    guard targets.count == 1, let target = targets.first else {
+    guard let target = PastedTiebaLinkPolicy.target(from: values) else {
+      linkPreviewViewModel.dismiss()
       linkErrorMessage = "请确保剪贴板中只有一个受支持的贴吧链接。"
       return
     }
-    openTiebaTarget(target)
+    linkErrorMessage = nil
+    linkPreviewViewModel.present(target: target)
   }
 
   private func openTiebaURL(_ url: URL) {
+    linkPreviewViewModel.dismiss()
     guard let routedPath = RootStartupNavigation.appending(url: url, to: path) else {
       linkErrorMessage = "该链接不是受支持的贴吧内容或应用链接。"
       return
@@ -1122,6 +1145,7 @@ struct RootView: View {
     showsQuickAccountLogin = false
     searchHistoryAction = nil
     linkErrorMessage = nil
+    linkPreviewViewModel.dismiss()
     pendingFollowedForumUnfollow = nil
     accountViewModel.clearError()
     favoritesViewModel.dismissOperationError()
@@ -1181,6 +1205,13 @@ struct RootView: View {
 
   private func openTiebaTarget(_ target: TiebaLinkTarget) {
     path = RootStartupNavigation.appending(target: target, to: path)
+  }
+
+  private func openLinkPreview(_ previewID: UUID) {
+    guard
+      let target = linkPreviewViewModel.consumeTargetForOpening(expectedID: previewID)
+    else { return }
+    openTiebaTarget(target)
   }
 
 }

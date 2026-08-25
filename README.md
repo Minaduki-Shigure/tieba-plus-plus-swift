@@ -596,6 +596,18 @@ and its verified metadata enters the public app source.
   targets; ambiguous identifiers and lookalike hosts are rejected. External
   HTTPS links use the selected system or Safari presentation, while forum and
   thread sharing emits canonical `https://tieba.baidu.com` links.
+  Current `main` changes the Home paste action from immediate navigation to an
+  explicit preview-and-confirm sheet. A generic card appears synchronously and
+  preserves the exact forum, thread, `see_lz`, post anchor, or app-user target;
+  a credential-free page-one request may then enrich only forum or thread text.
+  The forum request uses `rn=1`; the bounded thread request uses `rn=2` with
+  nested replies disabled,
+  loads no preview avatar, and falls back to the generic card after a failure,
+  identity mismatch, server-hidden topic, or local filter match. Closing,
+  replacing, backgrounding, or externally rerouting the preview cancels it and
+  generation checks reject an uncooperative late response. Opening remains
+  available while enrichment fails, but requires a second explicit action.
+  This interaction is not present in the public `v0.62.3-alpha.1` IPA.
   The app-owned scheme also exposes strict navigation-only routes for a search
   landing with recent history, browsing history, account cloud favorites, the
   foreground one-click check-in page, and either inbox segment. The check-in
