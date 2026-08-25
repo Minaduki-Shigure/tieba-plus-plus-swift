@@ -889,7 +889,9 @@ final class ForumCheckInViewModelTests: XCTestCase {
     )
     XCTAssertEqual(viewModel.state, .signedToday(consecutiveDays: 7, rank: 8))
     accountStateRequestCount = await service.accountStateRequestCount()
-    XCTAssertEqual(accountStateRequestCount, 2)
+    let checkInRequestCount = await service.checkInRequestCount()
+    XCTAssertEqual(accountStateRequestCount, 3)
+    XCTAssertEqual(checkInRequestCount, 0)
   }
 
   func testCheckInNotificationContainsOnlyCredentialFreeState() throws {
