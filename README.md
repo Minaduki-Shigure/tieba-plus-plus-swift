@@ -553,9 +553,11 @@ and its verified metadata enters the public app source.
   to LiveContainer 3.7.0 or newer, or to SideStore. Its latest IPA is published
   only after the tag's package, anonymous integration, and simulator tests all
   pass. After the release asset is published and reverified, the release workflow
-  derives its date, download URL, byte size, and SHA-256 and updates the source
-  atomically; version or concurrent-source mismatches fail closed. The source
-  currently distributes the verified `v0.64.0-alpha.3` IPA (build 78).
+  derives its date, download URL, byte size, and SHA-256, commits the source on
+  top of the tested tag, and fast-forwards `main` to both commits in one ref
+  update. The public source therefore never exposes the release-preparation
+  commit by itself; version, graph, or concurrent-source mismatches fail closed.
+  The source currently distributes the verified `v0.64.0-alpha.3` IPA (build 78).
 - **Login hotfix:** `v0.54.0-alpha.1` can reach Tieba's account page without
   completing because its callback and Cookie matching are too strict.
   `v0.54.1-alpha.1` made that failure explicit and confirmed that iOS 18.7.2
@@ -1092,8 +1094,15 @@ can be added directly to LiveContainer 3.7.0 or newer, or to SideStore. Each
 listed IPA is an unsigned GitHub Release asset that must be signed by the
 installer; its byte size and SHA-256 are checked against the source by CI. App
 source updates are generated only from the tested tag snapshot and the published
-IPA, then revalidated against `main` before an atomic commit. App Store
-distribution is not currently a project goal.
+IPA. A release-preparation commit increments `CURRENT_PROJECT_VERSION` while
+retaining `sidestore-source.json` byte-for-byte and is pushed through its tag
+rather than to `main` by itself. Release publication jobs are serialized against
+the single public source. After the verified asset is public, the workflow
+fast-forwards a local `main` checkout to that exact tag, adds only the generated
+source metadata, validates the final tree, and advances the remote `main` ref
+once. It never rebases or force-pushes; concurrent branch divergence leaves the
+old source intact and fails the release workflow. App Store distribution is not
+currently a project goal.
 
 ```text
 https://raw.githubusercontent.com/Minaduki-Shigure/tieba-plus-plus-swift/main/sidestore-source.json

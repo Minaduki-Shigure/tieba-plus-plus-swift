@@ -21,15 +21,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  source-validation:
-    name: App source validation
-    # Release assets do not exist until the tag's remaining CI jobs pass.
-    if: ${{ github.ref_type != 'tag' }}
+  source-publication-tooling:
+    name: App source publication tooling
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Validate source metadata
-        run: ruby Scripts/validate_sidestore_source.rb
       - name: Test source publication tooling
         id: source_tests
         continue-on-error: true
@@ -55,6 +51,16 @@ jobs:
       - name: Fail when source publication tests fail
         if: ${{ always() && steps.source_tests.outcome == 'failure' }}
         run: exit 1
+
+  source-validation:
+    name: App source validation
+    # A tag intentionally retains the previous source until its release asset exists.
+    if: ${{ github.ref_type != 'tag' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Validate source metadata
+        run: ruby Scripts/validate_sidestore_source.rb
       - name: Verify published IPA
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: |

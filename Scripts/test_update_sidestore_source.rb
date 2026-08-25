@@ -10,6 +10,7 @@ require "tmpdir"
 require "yaml"
 
 require_relative "update_sidestore_source"
+require_relative "test_release_source_handoff"
 
 class SideStoreSourceUpdaterTest < Minitest::Test
   REPOSITORY_ROOT = File.expand_path("..", __dir__)

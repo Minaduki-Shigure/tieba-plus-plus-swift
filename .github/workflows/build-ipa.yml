@@ -9,7 +9,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.event.workflow_run.head_branch }}
+  # workflow_run also fires for non-release CI; only tag pushes share the release queue.
+  group: >-
+    ${{ github.event.workflow_run.event == 'push' &&
+    startsWith(github.event.workflow_run.head_branch, 'v') && 'release-main' ||
+    format('release-skip-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
@@ -161,6 +165,24 @@ jobs:
         with:
           name: TiebaPlusPlus-SideStore-${{ env.RELEASE_TAG }}
           path: build
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ env.RELEASE_SHA }}
+          path: release-source
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          ref: main
+          path: source-update
+      - name: Prepare atomic source handoff
+        run: >-
+          ruby release-source/Scripts/release_source_handoff.rb
+          prepare
+          --repository source-update
+          --release-sha "$RELEASE_SHA"
+          --release-tag "$RELEASE_TAG"
       - name: Verify release target and asset
         env:
           GH_TOKEN: ${{ github.token }}
@@ -335,15 +357,6 @@ jobs:
             echo "- Size: \`$ipa_size\` bytes"
             echo "- SHA-256: \`$ipa_sha256\`"
           } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          persist-credentials: false
-          ref: ${{ env.RELEASE_SHA }}
-          path: release-source
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          ref: main
-          path: source-update
       - name: Publish app source metadata
         env:
           GH_TOKEN: ${{ github.token }}
@@ -358,14 +371,18 @@ jobs:
           fi
           description="Tieba++ $RELEASE_TAG 已通过核心测试、iOS 模拟器测试、匿名集成门禁和 IPA 完整性检查。此版本为无签名 IPA，供 SideStore 或 LiveContainer 自签名安装；详细功能与安全边界请参阅仓库文档。"
 
-          ruby source-update/Scripts/update_sidestore_source.rb \
+          ruby release-source/Scripts/update_sidestore_source.rb \
             --source source-update/sidestore-source.json \
             --project release-source/project.yml \
             --ipa "$IPA_PATH" \
             --tag "$RELEASE_TAG" \
             --date "$release_date" \
             --description "$description"
-          ruby source-update/Scripts/validate_sidestore_source.rb \
+          ruby release-source/Scripts/validate_sidestore_source.rb \
+            --source source-update/sidestore-source.json \
+            --project release-source/project.yml \
+            --ipa "$IPA_PATH"
+          ruby release-source/Scripts/validate_sidestore_source.rb \
             --source source-update/sidestore-source.json \
             --project source-update/project.yml \
             --ipa "$IPA_PATH"
@@ -375,25 +392,19 @@ jobs:
           git -C source-update add sidestore-source.json
           if git -C source-update diff --cached --quiet; then
             echo "App source already contains $RELEASE_TAG."
-            exit 0
-          fi
-          git -C source-update commit -m "chore: publish $RELEASE_TAG app source"
-
-          for attempt in 1 2 3; do
-            git -C source-update fetch origin main
-            if ! git -C source-update rebase origin/main; then
-              git -C source-update rebase --abort || true
-              echo "main changed the app source concurrently; refusing an automatic merge." >&2
+          else
+            staged_paths="$(git -C source-update diff --cached --name-only)"
+            if [ "$staged_paths" != "sidestore-source.json" ]; then
+              echo "Source publication unexpectedly staged: $staged_paths" >&2
               exit 1
             fi
-            ruby source-update/Scripts/validate_sidestore_source.rb \
-              --source source-update/sidestore-source.json \
-              --project source-update/project.yml \
-              --ipa "$IPA_PATH"
-            if git -C source-update push origin HEAD:main; then
-              exit 0
-            fi
-            echo "Source push attempt $attempt failed; refreshing main before retry." >&2
-          done
-          echo "Unable to publish app source after three attempts" >&2
-          exit 1
+            git -C source-update diff --cached --check
+            git -C source-update commit -m "chore: publish $RELEASE_TAG app source"
+          fi
+
+          ruby release-source/Scripts/release_source_handoff.rb \
+            publish \
+            --repository source-update \
+            --release-sha "$RELEASE_SHA" \
+            --release-tag "$RELEASE_TAG" \
+            --attempts 3
