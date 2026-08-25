@@ -735,9 +735,9 @@ private struct SafeContentFilterRegexProgram: Hashable, Sendable {
   ) -> Bool {
     switch assertion {
     case .start:
-      position == 0
+      return position == 0
     case .end:
-      position == scalars.count && followingScalar == nil
+      return position == scalars.count && followingScalar == nil
     case .wordBoundary, .nonWordBoundary:
       let previous = position > 0 ? scalars[position - 1] : nil
       let next = position < scalars.count ? scalars[position] : followingScalar
