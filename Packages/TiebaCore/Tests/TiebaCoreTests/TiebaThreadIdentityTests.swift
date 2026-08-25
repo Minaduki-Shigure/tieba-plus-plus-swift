@@ -36,18 +36,18 @@ final class TiebaThreadIdentityTests: XCTestCase {
   func testDecoderRejectsContradictoryThreadAndForumBindings() throws {
     var wrongThread = identityResponse(threadID: 41, forumID: 9, forumName: "swift")
     wrongThread.data.thread.id = 42
-    assertInvalid(wrongThread, threadID: 41, forumName: "swift")
+    assertConflict(wrongThread, threadID: 41, forumName: "swift")
 
     var wrongFID = identityResponse(threadID: 41, forumID: 9, forumName: "swift")
     wrongFID.data.thread.fid = 10
-    assertInvalid(wrongFID, threadID: 41, forumName: "swift")
+    assertConflict(wrongFID, threadID: 41, forumName: "swift")
 
     var wrongThreadName = identityResponse(threadID: 41, forumID: 9, forumName: "swift")
     wrongThreadName.data.thread.fname = "ios"
-    assertInvalid(wrongThreadName, threadID: 41, forumName: "swift")
+    assertConflict(wrongThreadName, threadID: 41, forumName: "swift")
 
     let expectedNameMismatch = identityResponse(threadID: 41, forumID: 9, forumName: "swift")
-    assertInvalid(expectedNameMismatch, threadID: 41, forumName: "ios")
+    assertConflict(expectedNameMismatch, threadID: 41, forumName: "ios")
   }
 
   func testDecoderRejectsMissingOrInvalidForumAndThreadData() throws {
@@ -106,6 +106,31 @@ final class TiebaThreadIdentityTests: XCTestCase {
       line: line
     ) { error in
       XCTAssertEqual(error as? TiebaClientError, .invalidProtobuf, file: file, line: line)
+    }
+  }
+
+  private func assertConflict(
+    _ response: PbPageResIdl,
+    threadID: Int64,
+    forumName: String,
+    file: StaticString = #filePath,
+    line: UInt = #line
+  ) {
+    XCTAssertThrowsError(
+      try TiebaThreadIdentityDecoder.identity(
+        from: response,
+        expectedThreadID: threadID,
+        expectedForumName: forumName
+      ),
+      file: file,
+      line: line
+    ) { error in
+      XCTAssertEqual(
+        error as? TiebaClientError,
+        .threadIdentityConflict,
+        file: file,
+        line: line
+      )
     }
   }
 }

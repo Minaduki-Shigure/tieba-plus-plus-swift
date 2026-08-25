@@ -1,4 +1,59 @@
+import Foundation
 import SwiftUI
+
+enum OfficialBaiduUsernameManagementHandoff {
+  static let absoluteString =
+    "https://wappass.baidu.com/static/manage-chunk/change-username.html#/showUsername"
+
+  static var validatedURL: URL? {
+    validatedURL(from: absoluteString)
+  }
+
+  static func validatedURL(from absoluteString: String) -> URL? {
+    guard
+      absoluteString == Self.absoluteString,
+      let components = URLComponents(string: absoluteString),
+      components.scheme == "https",
+      components.host == "wappass.baidu.com",
+      components.user == nil,
+      components.password == nil,
+      components.port == nil,
+      components.percentEncodedPath == "/static/manage-chunk/change-username.html",
+      components.query == nil,
+      components.fragment == "/showUsername",
+      components.percentEncodedFragment == "/showUsername",
+      let url = components.url,
+      url.absoluteString == absoluteString
+    else { return nil }
+    return url
+  }
+
+  static func disposition(mode: ExternalWebOpenMode) -> BrowseContentLinkDisposition {
+    guard let validatedURL else { return .rejected }
+    return BrowseContentLinkRouter.disposition(for: validatedURL, mode: mode)
+  }
+
+  @MainActor
+  @discardableResult
+  static func open(
+    mode: ExternalWebOpenMode,
+    inAppSafari: (URL) -> Bool,
+    systemBrowser: (URL) -> Void
+  ) -> Bool {
+    switch disposition(mode: mode) {
+    case .system(let validatedURL):
+      systemBrowser(validatedURL)
+      return true
+    case .inAppSafari(let validatedURL):
+      if !inAppSafari(validatedURL) {
+        systemBrowser(validatedURL)
+      }
+      return true
+    case .tieba, .rejected:
+      return false
+    }
+  }
+}
 
 struct AccountView: View {
   let browseService:
@@ -13,12 +68,16 @@ struct AccountView: View {
   @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
   @Environment(\.contentFilterRepository) private var contentFilterRepository
   @Environment(\.accountAccess) private var accountAccess
+  @Environment(\.externalWebOpenMode) private var externalWebOpenMode
+  @Environment(\.openExternalWeb) private var openExternalWeb
+  @Environment(\.openURL) private var openURL
   @StateObject private var viewModel: AccountViewModel
   @StateObject private var profileSummaryViewModel: ActiveAccountProfileSummaryViewModel
   @ObservedObject private var unreadSummaryViewModel: InboxUnreadSummaryViewModel
   @State private var showsLogin = false
   @State private var confirmsLogout = false
   @State private var confirmsReset = false
+  @State private var confirmsUsernameManagement = false
 
   init(
     browseService: any BrowseService & ForumPostSearchService & UserProfileService
@@ -92,6 +151,22 @@ struct AccountView: View {
           Task { await viewModel.reload() }
         }
       }
+    }
+    .confirmationDialog(
+      "前往百度管理用户名？",
+      isPresented: $confirmsUsernameManagement,
+      titleVisibility: .visible
+    ) {
+      Button("打开百度页面") {
+        guard usernameManagementIsAvailable else { return }
+        openUsernameManagement()
+      }
+      .disabled(!usernameManagementIsAvailable)
+      Button("取消", role: .cancel) {}
+    } message: {
+      Text(
+        "浏览器可能未登录，也可能已登录另一个百度账号；请先核对账号。App 不会读取、复制或注入本机保存的登录凭据。"
+      )
     }
     .confirmationDialog(
       "从本机移除当前账户？",
@@ -221,6 +296,14 @@ struct AccountView: View {
               }
             }
 
+            if activeAccount.hasFullCredentials {
+              Button { confirmsUsernameManagement = true } label: {
+                Label("修改用户名", systemImage: "person.text.rectangle")
+              }
+              .disabled(!usernameManagementIsAvailable)
+              .accessibilityIdentifier("account-manage-baidu-username")
+            }
+
             NavigationLink {
               FollowedForumsView(
                 browseService: browseService,
@@ -320,6 +403,20 @@ struct AccountView: View {
         .allSatisfy({ (0...Int(Int32.max)).contains($0) })
     else { return nil }
     return summary
+  }
+
+  private var usernameManagementIsAvailable: Bool {
+    viewModel.activeAccount?.hasFullCredentials == true
+      && !viewModel.isMutating
+      && OfficialBaiduUsernameManagementHandoff.validatedURL != nil
+  }
+
+  private func openUsernameManagement() {
+    OfficialBaiduUsernameManagementHandoff.open(
+      mode: externalWebOpenMode,
+      inAppSafari: { openExternalWeb($0) },
+      systemBrowser: { openURL($0) }
+    )
   }
 
   private var profileSummaryFailureMessage: String? {

@@ -392,6 +392,111 @@ final class CloudFavoritesViewModelTests: XCTestCase {
     XCTAssertNil(viewModel.removalFailure)
   }
 
+  func testConfirmedRemovalUsesExactForumFallbackBeforeAuthenticatedProbe() async throws {
+    let active = cloudSession(userID: 7, revision: cloudUUID(37))
+    let item = cloudItem(id: 111)
+    let target = ThreadCloudFavoriteTarget(
+      forumID: 42,
+      forumName: item.forumName,
+      threadID: item.id
+    )!
+    let vault = CloudFavoritesVaultSpy(session: active)
+    let service = CloudFavoritesServiceSpy(
+      scripts: [
+        .init(userID: 7, offset: 0): [
+          .page(cloudPage(userID: 7, items: [item], nextOffset: nil, hasMore: false)),
+          .page(cloudPage(userID: 7, items: [], nextOffset: nil, hasMore: false)),
+        ]
+      ],
+      threadReads: [
+        item.id: [.success(cloudFavoriteData(session: active, target: target, markedPostID: 111))]
+      ],
+      threadWrites: [
+        item.id: [.success(cloudFavoriteData(session: active, target: target, markedPostID: nil))]
+      ]
+    )
+    let browse = CloudFavoritesRemovalBrowseSpy(
+      result: .failure(CloudFavoritesTestFailure(message: "Anonymous thread unavailable")),
+      forumResult: .success(BrowseForumIdentity(forumID: 42, forumName: "swift"))
+    )
+    let store = ThreadCloudFavoriteStore(
+      access: AccountAccess(vault: vault, service: service),
+      observesAccountSessionChanges: false
+    )
+    let viewModel = CloudFavoritesViewModel(
+      service: service,
+      vault: vault,
+      browseService: browse,
+      cloudFavoriteStore: store
+    )
+
+    await viewModel.refresh()
+    viewModel.requestRemoval(of: item)
+    viewModel.confirmPendingRemoval()
+    try await waitForCloudFavoritesTest {
+      let requestCount = await service.requestCount()
+      return viewModel.removingThreadID == nil
+        && viewModel.state == .loaded
+        && viewModel.threads.isEmpty
+        && requestCount == 2
+    }
+
+    let targetRequests = await browse.requestSnapshot()
+    let forumRequests = await browse.forumRequestSnapshot()
+    let readCount = await service.threadReadCount()
+    let writeCount = await service.threadWriteCount()
+    XCTAssertEqual(targetRequests, [.init(threadID: item.id, expectedForumName: "swift")])
+    XCTAssertEqual(forumRequests, ["swift"])
+    XCTAssertEqual(readCount, 1)
+    XCTAssertEqual(writeCount, 1)
+    XCTAssertNil(viewModel.removalFailure)
+  }
+
+  func testSessionRotationWhileForumFallbackIsPendingSendsNoAuthenticatedRequest() async throws {
+    let active = cloudSession(userID: 7, revision: cloudUUID(38))
+    let rotated = cloudSession(userID: 7, revision: cloudUUID(39))
+    let item = cloudItem(id: 112)
+    let vault = CloudFavoritesVaultSpy(session: active)
+    let service = CloudFavoritesServiceSpy(
+      scripts: [
+        .init(userID: 7, offset: 0): [
+          .page(cloudPage(userID: 7, items: [item], nextOffset: nil, hasMore: false))
+        ]
+      ]
+    )
+    let forumGate = CloudFavoritesForumIdentityGate()
+    let browse = CloudFavoritesRemovalBrowseSpy(
+      result: .failure(CloudFavoritesTestFailure(message: "Anonymous thread unavailable")),
+      forumResult: .success(BrowseForumIdentity(forumID: 42, forumName: "swift")),
+      forumGate: forumGate
+    )
+    let store = ThreadCloudFavoriteStore(
+      access: AccountAccess(vault: vault, service: service),
+      observesAccountSessionChanges: false
+    )
+    let viewModel = CloudFavoritesViewModel(
+      service: service,
+      vault: vault,
+      browseService: browse,
+      cloudFavoriteStore: store
+    )
+
+    await viewModel.refresh()
+    viewModel.requestRemoval(of: item)
+    viewModel.confirmPendingRemoval()
+    await forumGate.waitUntilSuspended()
+    await vault.replaceActive(with: rotated)
+    await forumGate.resume()
+    try await waitForCloudFavoritesTest { viewModel.removingThreadID == nil }
+
+    let readCount = await service.threadReadCount()
+    let writeCount = await service.threadWriteCount()
+    XCTAssertEqual(viewModel.threads, [item])
+    XCTAssertNotNil(viewModel.removalFailure)
+    XCTAssertEqual(readCount, 0)
+    XCTAssertEqual(writeCount, 0)
+  }
+
   func testCancelConfirmationAndStaleLeaseSendNoResolverOrWriteRequests() async throws {
     let active = cloudSession(userID: 7, revision: cloudUUID(32))
     let rotated = cloudSession(userID: 7, revision: cloudUUID(33))
@@ -746,10 +851,21 @@ private struct CloudFavoritesRemovalTargetRequest: Equatable, Sendable {
 
 private actor CloudFavoritesRemovalBrowseSpy: BrowseService {
   private let result: Result<BrowseThreadIdentity, CloudFavoritesTestFailure>
+  private let forumResult: Result<BrowseForumIdentity, CloudFavoritesTestFailure>
+  private let forumGate: CloudFavoritesForumIdentityGate?
   private var requests: [CloudFavoritesRemovalTargetRequest] = []
+  private var forumRequests: [String] = []
 
-  init(result: Result<BrowseThreadIdentity, CloudFavoritesTestFailure>) {
+  init(
+    result: Result<BrowseThreadIdentity, CloudFavoritesTestFailure>,
+    forumResult: Result<BrowseForumIdentity, CloudFavoritesTestFailure> = .failure(
+      CloudFavoritesTestFailure(message: "Unexpected forum identity request")
+    ),
+    forumGate: CloudFavoritesForumIdentityGate? = nil
+  ) {
     self.result = result
+    self.forumResult = forumResult
+    self.forumGate = forumGate
   }
 
   func threads(
@@ -779,6 +895,12 @@ private actor CloudFavoritesRemovalBrowseSpy: BrowseService {
     return try result.get()
   }
 
+  func resolveForumIdentity(forumName: String) async throws -> BrowseForumIdentity {
+    forumRequests.append(forumName)
+    if let forumGate { await forumGate.suspend() }
+    return try forumResult.get()
+  }
+
   func comments(threadID: Int64, postID: Int64, page: Int) async throws -> CommentPageData {
     throw CloudFavoritesTestFailure(message: "Unexpected comment request")
   }
@@ -801,6 +923,35 @@ private actor CloudFavoritesRemovalBrowseSpy: BrowseService {
 
   func requestCount() -> Int { requests.count }
   func requestSnapshot() -> [CloudFavoritesRemovalTargetRequest] { requests }
+  func forumRequestSnapshot() -> [String] { forumRequests }
+}
+
+private actor CloudFavoritesForumIdentityGate {
+  private var didSuspend = false
+  private var suspensionWaiters: [CheckedContinuation<Void, Never>] = []
+  private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+  func suspend() async {
+    didSuspend = true
+    let waiters = suspensionWaiters
+    suspensionWaiters.removeAll()
+    for waiter in waiters { waiter.resume() }
+    await withCheckedContinuation { continuation in
+      releaseContinuation = continuation
+    }
+  }
+
+  func waitUntilSuspended() async {
+    guard !didSuspend else { return }
+    await withCheckedContinuation { continuation in
+      suspensionWaiters.append(continuation)
+    }
+  }
+
+  func resume() {
+    releaseContinuation?.resume()
+    releaseContinuation = nil
+  }
 }
 
 private actor CloudFavoritesVaultSpy: AccountVault {

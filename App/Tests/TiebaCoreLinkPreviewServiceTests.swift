@@ -244,6 +244,60 @@ final class TiebaCoreLinkPreviewServiceTests: XCTestCase {
 
     XCTAssertNil(metadata)
   }
+
+  func testForumIdentityUsesBoundedAnonymousPageAndRequiresExactServerName() async throws {
+    let client = TiebaLinkPreviewClientSpy(
+      forumPage: makeThreadPage(
+        forum: makeForum(id: 42, name: "Caf\u{00E9}")
+      )
+    )
+    let service = TiebaCoreBrowseService(linkPreviewClient: client)
+
+    let identity = try await service.resolveForumIdentity(forumName: "  Cafe\u{0301}  ")
+
+    XCTAssertEqual(identity, BrowseForumIdentity(forumID: 42, forumName: "Caf\u{00E9}"))
+    let snapshot = await client.snapshot()
+    XCTAssertEqual(
+      snapshot.forumRequests,
+      [
+        TiebaLinkPreviewForumRequest(
+          forumName: "Caf\u{00E9}",
+          page: 1,
+          pageSize: 1,
+          sort: .replyTime,
+          featuredOnly: false,
+          featuredClassificationID: nil
+        )
+      ]
+    )
+    XCTAssertTrue(snapshot.threadRequests.isEmpty)
+  }
+
+  func testForumIdentityNeverSubstitutesRequestedNameForInvalidServerIdentity() async {
+    let scenarios: [(label: String, forum: TiebaForum, currentPage: Int)] = [
+      ("missing server name", makeForum(id: 42, name: ""), 1),
+      ("mismatched server name", makeForum(id: 42, name: "ios"), 1),
+      ("control character server name", makeForum(id: 42, name: "\nswift"), 1),
+      ("invalid server id", makeForum(id: 0, name: "swift"), 1),
+      ("unexpected page", makeForum(id: 42, name: "swift"), 2),
+    ]
+
+    for scenario in scenarios {
+      let client = TiebaLinkPreviewClientSpy(
+        forumPage: makeThreadPage(
+          forum: scenario.forum,
+          currentPage: scenario.currentPage
+        )
+      )
+      let service = TiebaCoreBrowseService(linkPreviewClient: client)
+      do {
+        _ = try await service.resolveForumIdentity(forumName: "swift")
+        XCTFail("Expected identity resolution to fail: \(scenario.label)")
+      } catch {
+        XCTAssertTrue(error.localizedDescription.contains("可验证"), scenario.label)
+      }
+    }
+  }
 }
 
 private struct TiebaLinkPreviewForumRequest: Equatable, Sendable {

@@ -436,7 +436,10 @@ the source metadata is updated to that tested IPA.
 - Account-bound, memory-only self-profile summary with current avatar, display
   name, biography, following, follower, and reply counts, plus an explicit link to
   the existing credential-free public profile and its public topic, reply,
-  following, and follower views
+  following, and follower views. A separate confirmed handoff opens only Baidu's
+  fixed official HTTPS username-management page in the selected browser mode;
+  it never exports App credentials or treats the browser session as the active
+  App account
 - App-scoped, memory-only followed-forum state shared by a six-item logged-in
   home projection, the active account's complete paginated list, and a selected
   default-off followed-forum recommendation filter, with a local layout setting
@@ -450,7 +453,11 @@ the source metadata is updated to that tested IPA.
 - Separate Tieba cloud favorites with offset pagination, saved-post navigation,
   a dismissible saved-position-to-latest-update handoff for consistent metadata,
   deleted-thread state, account-lease isolation, and confirmed list deletion only
-  after raw thread/forum rebinding, plus confirmed thread-detail add, saved-floor
+  after raw thread/forum rebinding. If the anonymous thread identity is
+  unavailable, an exact retained forum name may obtain a positive forum ID from
+  one bounded anonymous FRS response, but the existing authenticated PB probe
+  must still bind that forum and thread before any write. Fully unresolvable rows
+  remain zero-write. Thread detail separately supports confirmed add, saved-floor
   update, and removal with read-only reconciliation. Exact visible floors expose
   the same snapshot-bound actions from their context menu, and the confirmed
   marker is shown only on its exact PID
@@ -758,9 +765,12 @@ application model. A thread-detail overlay separately binds the authenticated
 state to the exact UID, forum, thread, and positive saved post. Adding, updating,
 or removing that state requires explicit confirmation, at most one write, and a
 read-only reconciliation even after an apparently successful response. List
-removal additionally requires a raw PB thread/forum identity that survives the
-same authenticated preflight; no `fid=null` fallback is used. An
-uncertain write is never retried. Both surfaces remain separate from local
+removal normally requires a raw PB thread/forum identity. If that anonymous
+thread read fails, an exact nonempty retained forum name may use one bounded FRS
+read, but only an exact trim-and-NFC response name with a positive forum ID is
+accepted. The same authenticated PB preflight must still bind that candidate to
+the exact thread and account; no `fid=null`, fuzzy-name, or guessed-ID fallback
+is used. An uncertain write is never retried. Both surfaces remain separate from local
 favorites, and a `userID + sessionRevision` lease discards late pages and
 mutation results after account changes.
 

@@ -246,12 +246,17 @@ disabled.
 
 A list-removal intent captures the complete retained row and its exact
 `userID + sessionRevision` lease. Before any authenticated request, an anonymous
-PB Page response must contain the requested thread ID, a positive forum ID, a
-forum name without control characters, and a thread `fid` that is zero or exactly
-that forum ID. A nonempty list forum name must match after trim and NFC
-normalization. This produces only a candidate target: the authenticated PB state
-read below must still bind the same UID, forum ID, and thread ID before writing.
-If a deleted item can no longer provide this identity, the App sends no write; it
+PB Page response normally must contain the requested thread ID, a positive forum
+ID, a forum name without control characters, and a thread `fid` that is zero or
+exactly that forum ID. A nonempty list forum name must match after trim and NFC
+normalization. If that anonymous thread request fails rather than returning a
+contradictory identity, a nonempty retained forum name may issue one bounded
+anonymous FRS Page request. The fallback accepts only a positive forum ID and a
+raw response forum name that exactly matches the retained trim-and-NFC name; it
+never substitutes the request name for a missing response name. Either result is
+only a candidate target: the authenticated PB state below must still bind the
+same UID, forum ID, and thread ID before writing. If a deleted, renamed, or
+otherwise unavailable item cannot survive that probe, the App sends no write; it
 does not use TiebaLite's `fid=null` path, a cached login `tbs`, a fuzzy forum
 search, or a guessed identifier.
 
@@ -984,6 +989,17 @@ external-Web preference, and pass only the validated URL to either browser path.
 The destination must not be derived from Bundle metadata, account state, remote
 data, a deep link, or user input; opening the About page itself must not issue a
 request or read account storage.
+
+The account page's username-management handoff follows the same boundary. It is
+available only beside an active complete session, but the destination itself is
+the code-defined exact
+`https://wappass.baidu.com/static/manage-chunk/change-username.html#/showUsername`
+URL. The app validates its HTTPS scheme, host, path, fragment, absent credentials,
+port, and query before opening it through the selected external-Web mode. A
+confirmation states that the browser may be signed out or using another Baidu
+account. The handoff does not read, copy, inject, or derive the destination from
+BDUSS, STOKEN, Cookie state, Keychain data, remote data, or user input, and it
+does not infer that a profile change succeeded.
 
 Only the app-owned scheme is registered. The app must not claim Baidu's scheme
 or `tieba.baidu.com` Universal Links without domain authorization. It must not

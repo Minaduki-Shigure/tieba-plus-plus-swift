@@ -2688,6 +2688,8 @@ struct TiebaCoreAccountService: AccountService {
       message = "贴吧返回了无法识别的数据，接口可能已经更新。"
     case .invalidAuthenticatedResponse:
       message = "账户凭据与贴吧响应不一致，请重新登录后再试。"
+    case .threadIdentityConflict:
+      message = "贴吧返回了相互冲突的主题与贴吧身份。"
     case .forumNotFollowed:
       message = "请先关注该贴吧后再签到。"
     case .forumCheckInUnavailable:

@@ -18,7 +18,7 @@ and its verified metadata enters the public app source.
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, media preferences, explicit standard/pure/only-author immersive thread-reading modes, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, a next-launch destination including personalized discovery and the inbox, and ordered iOS Home Screen quick actions for existing destinations. The reply notice's system handoff attempt is implemented but remains pending physical-device validation |
-| Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary, followed forums with validated level-up progress where the server supplies it, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with a shared Home-toolbar/account-page message badge, separate optional fan-reminder badge, and authoritative reply actions, Tieba cloud favorites with a saved-position-to-latest-update handoff, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
+| Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary, a credential-free handoff to Baidu's fixed official username-management page, followed forums with validated level-up progress where the server supplies it, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with a shared Home-toolbar/account-page message badge, separate optional fan-reminder badge, and authoritative reply actions, Tieba cloud favorites with a saved-position-to-latest-update handoff, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies plus explicitly confirmed deletion of the active account's own topic or ordinary floor; these newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
 | TiebaLite parity | Current `main` and public `v0.64.0-alpha.2`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.64.0-alpha.2` (build 77) |
@@ -286,10 +286,12 @@ and its verified metadata enters the public app source.
   mutation is followed by a read-only reconciliation; an uncertain write is
   never retried. The cloud-favorites list can also remove
   one item after a separate destructive confirmation. It first resolves the raw
-  anonymous PB thread/forum identity, then requires the existing authenticated
-  UID/forum/thread preflight before the single write; an unresolvable deleted
-  item sends no write. Logged-in thread and full nested-reply
-  pages also expose experimental, draft-backed composers for replying to the
+  anonymous PB thread/forum identity. If that read is unavailable and the row
+  retains an exact nonempty forum name, a bounded anonymous FRS read may prove
+  only that exact canonical name and positive forum ID. Either candidate must
+  then pass the existing authenticated UID/forum/thread preflight before the
+  single write; an unresolvable deleted or renamed item sends no write. Logged-in
+  thread and full nested-reply pages also expose experimental, draft-backed composers for replying to the
   topic, an ordinary floor, or a specific nested reply. A visible inline
   nested-reply preview can open the same exact-target composer without first
   opening the full reply page. The body supports ordinary text plus a fixed,
@@ -890,10 +892,13 @@ and its verified metadata enters the public app source.
 - **Tieba cloud favorites:** The account page has a separate cloud favorites list
   with refresh, offset pagination, saved-post navigation, deleted-thread state,
   account-lease isolation, and explicitly confirmed single-item removal. Before a
-  list removal, a raw anonymous PB response must bind the thread to a positive
-  forum ID and canonical forum name; the authenticated PB preflight then binds
-  the same target to the exact account. A fully deleted item whose target can no
-  longer be resolved remains visible and sends no write. A logged-in thread separately reads
+  list removal, a raw anonymous PB response normally binds the thread to a
+  positive forum ID and canonical forum name. When that read fails, a retained
+  nonempty row name may use one bounded anonymous FRS identity fallback, but only
+  when the response returns that exact trim-and-NFC canonical name and a positive
+  forum ID. The authenticated PB preflight then binds either candidate to the
+  exact account and thread before writing. A fully deleted, renamed, or otherwise
+  unresolvable item remains visible and sends no write. A logged-in thread separately reads
   its exact cloud state and offers explicitly confirmed add, saved-floor update,
   and removal controls. These operations never upload, merge, or delete the
   independent local favorites archive. Successful authenticated reads and writes

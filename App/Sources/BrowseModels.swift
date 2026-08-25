@@ -69,6 +69,11 @@ struct BrowseThreadIdentity: Hashable, Sendable {
   let forumName: String
 }
 
+struct BrowseForumIdentity: Hashable, Sendable {
+  let forumID: Int64
+  let forumName: String
+}
+
 struct BrowseForumOverview: Hashable, Sendable {
   let forum: BrowseForum
   let introduction: String

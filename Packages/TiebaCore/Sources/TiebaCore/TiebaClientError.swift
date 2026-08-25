@@ -11,6 +11,7 @@ public enum TiebaClientError: Error, Sendable, Equatable {
   case invalidProtobuf
   case invalidJSON
   case invalidAuthenticatedResponse
+  case threadIdentityConflict
   case forumNotFollowed
   case forumCheckInUnavailable
   case officialBatchCheckInAuthorizationChanged
@@ -59,6 +60,8 @@ extension TiebaClientError: LocalizedError {
       "The Tieba server returned an unreadable JSON response."
     case .invalidAuthenticatedResponse:
       "Tieba returned account or forum data that did not match the authenticated request."
+    case .threadIdentityConflict:
+      "Tieba returned conflicting thread and forum identity data."
     case .forumNotFollowed:
       "The forum must be followed before checking in."
     case .forumCheckInUnavailable:

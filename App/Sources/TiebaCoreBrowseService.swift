@@ -342,6 +342,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       )
     } catch is CancellationError {
       throw CancellationError()
+    } catch let error as TiebaClientError where error == .threadIdentityConflict {
+      throw BrowseIdentityResolutionError.conflictingThreadIdentity
     } catch {
       throw Self.browseError(error)
     }
@@ -349,6 +351,66 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       threadID: response.threadID,
       forumID: response.forumID,
       forumName: response.forumName
+    )
+  }
+
+  func resolveForumIdentity(forumName: String) async throws -> BrowseForumIdentity {
+    let trimmedForumName = forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmedForumName.utf8.count <= 400 else {
+      throw BrowseError.invalidForumName
+    }
+    let expectedForumName = trimmedForumName
+      .precomposedStringWithCanonicalMapping
+    guard
+      !expectedForumName.isEmpty,
+      expectedForumName.count <= 100,
+      expectedForumName.utf8.count <= 400,
+      !expectedForumName.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    else {
+      throw BrowseError.invalidForumName
+    }
+
+    let response: TiebaThreadPage
+    do {
+      response = try await linkPreviewClient.getThreads(
+        forumName: expectedForumName,
+        page: 1,
+        pageSize: 1,
+        sort: .replyTime,
+        featuredOnly: false,
+        featuredClassificationID: nil
+      )
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw Self.browseError(error)
+    }
+
+    let rawResolvedForumName = response.forum.name
+    guard
+      rawResolvedForumName.utf8.count <= 400,
+      !rawResolvedForumName.unicodeScalars.contains(
+        where: CharacterSet.controlCharacters.contains
+      )
+    else {
+      throw BrowseError.unavailable("贴吧没有返回可验证的身份信息。")
+    }
+    let resolvedForumName = rawResolvedForumName
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    guard
+      response.pagination.currentPage == 1,
+      response.forum.id > 0,
+      !resolvedForumName.isEmpty,
+      resolvedForumName.count <= 100,
+      resolvedForumName.utf8.count <= 400,
+      resolvedForumName == expectedForumName
+    else {
+      throw BrowseError.unavailable("贴吧没有返回可验证的身份信息。")
+    }
+    return BrowseForumIdentity(
+      forumID: response.forum.id,
+      forumName: resolvedForumName
     )
   }
 
@@ -1940,6 +2002,8 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       message = "贴吧返回了无法识别的数据，接口可能已经更新。"
     case .invalidAuthenticatedResponse:
       message = "贴吧返回了不匹配的账户数据，请重新登录后再试。"
+    case .threadIdentityConflict:
+      message = "贴吧返回了相互冲突的主题与贴吧身份。"
     case .forumNotFollowed:
       message = "请先关注该贴吧后再试。"
     case .forumCheckInUnavailable:

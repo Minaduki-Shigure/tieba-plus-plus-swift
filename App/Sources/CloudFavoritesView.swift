@@ -28,6 +28,7 @@ struct CloudFavoriteTargetResolver: Sendable {
   let service: any BrowseService
 
   func resolve(_ favorite: CloudFavoriteThread) async throws -> ThreadCloudFavoriteTarget {
+    let expectedForumName = Self.canonicalForumName(favorite.forumName)
     let resolved: BrowseThreadIdentity
     do {
       resolved = try await service.resolveThreadIdentity(
@@ -36,13 +37,18 @@ struct CloudFavoriteTargetResolver: Sendable {
       )
     } catch is CancellationError {
       throw CancellationError()
-    } catch {
+    } catch BrowseIdentityResolutionError.conflictingThreadIdentity {
       throw BrowseError.unavailable(
-        "无法确认该主题所属的贴吧，因此没有发送删除请求。主题若已被彻底删除，暂时无法安全移除。"
+        "贴吧返回的主题与贴吧身份相互冲突，因此没有发送删除请求。"
+      )
+    } catch {
+      try Task.checkCancellation()
+      return try await resolveUsingExactForumIdentity(
+        favorite,
+        expectedForumName: expectedForumName
       )
     }
 
-    let expectedForumName = Self.canonicalForumName(favorite.forumName)
     let resolvedForumName = Self.canonicalForumName(resolved.forumName)
     guard
       resolved.threadID == favorite.id,
@@ -62,9 +68,55 @@ struct CloudFavoriteTargetResolver: Sendable {
     return target
   }
 
+  private func resolveUsingExactForumIdentity(
+    _ favorite: CloudFavoriteThread,
+    expectedForumName: String
+  ) async throws -> ThreadCloudFavoriteTarget {
+    guard
+      !expectedForumName.isEmpty,
+      favorite.id > 0,
+      expectedForumName.count <= 100,
+      expectedForumName.utf8.count <= 400,
+      !expectedForumName.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    else {
+      throw BrowseError.unavailable(
+        "无法确认该主题所属的贴吧，因此没有发送删除请求。主题若已被彻底删除，暂时无法安全移除。"
+      )
+    }
+
+    let resolved: BrowseForumIdentity
+    do {
+      resolved = try await service.resolveForumIdentity(forumName: expectedForumName)
+      try Task.checkCancellation()
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch {
+      throw BrowseError.unavailable(
+        "主题与贴吧身份均无法确认，因此没有发送删除请求。主题若已被彻底删除，暂时无法安全移除。"
+      )
+    }
+
+    let resolvedForumName = Self.canonicalForumName(resolved.forumName)
+    guard
+      resolved.forumID > 0,
+      resolvedForumName == expectedForumName,
+      let target = ThreadCloudFavoriteTarget(
+        forumID: resolved.forumID,
+        forumName: resolvedForumName,
+        threadID: favorite.id
+      )
+    else {
+      throw BrowseError.unavailable(
+        "无法验证收藏记录与所属贴吧的对应关系，因此没有发送删除请求。"
+      )
+    }
+    return target
+  }
+
   private static func canonicalForumName(_ value: String) -> String {
-    value.trimmingCharacters(in: .whitespacesAndNewlines)
-      .precomposedStringWithCanonicalMapping
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed.utf8.count <= 400 else { return "" }
+    return trimmed.precomposedStringWithCanonicalMapping
   }
 }
 

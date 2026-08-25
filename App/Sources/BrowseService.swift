@@ -107,6 +107,7 @@ protocol BrowseService: Sendable {
     threadID: Int64,
     expectedForumName: String
   ) async throws -> BrowseThreadIdentity
+  func resolveForumIdentity(forumName: String) async throws -> BrowseForumIdentity
   func comments(threadID: Int64, postID: Int64, page: Int) async throws -> CommentPageData
   func comments(
     threadID: Int64,
@@ -128,6 +129,10 @@ extension BrowseService {
     throw BrowseError.unavailable("当前浏览服务无法验证主题所属贴吧。")
   }
 
+  func resolveForumIdentity(forumName: String) async throws -> BrowseForumIdentity {
+    throw BrowseError.unavailable("当前浏览服务无法验证贴吧身份。")
+  }
+
   func forumChannelThreads(
     forumID: Int64,
     forumName: String,
@@ -138,6 +143,17 @@ extension BrowseService {
     lastThreadID: Int64?
   ) async throws -> ForumChannelPageData {
     throw BrowseError.unavailable("当前浏览服务不支持贴吧频道。")
+  }
+}
+
+enum BrowseIdentityResolutionError: LocalizedError, Sendable, Equatable {
+  case conflictingThreadIdentity
+
+  var errorDescription: String? {
+    switch self {
+    case .conflictingThreadIdentity:
+      "贴吧返回了相互冲突的主题与贴吧身份。"
+    }
   }
 }
 

@@ -27,9 +27,7 @@ enum TiebaThreadIdentityDecoder {
     let rawExpectedForumName = expectedForumName
     let expectedForumName = canonicalForumName(rawExpectedForumName)
     guard
-      thread.id == expectedThreadID,
       forum.id > 0,
-      thread.fid == 0 || thread.fid == forum.id,
       !forumName.isEmpty,
       forumName.count <= 100,
       !forum.name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
@@ -37,10 +35,14 @@ enum TiebaThreadIdentityDecoder {
       !thread.fname.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
       !rawExpectedForumName.unicodeScalars.contains(
         where: CharacterSet.controlCharacters.contains
-      ),
+      )
+    else { throw TiebaClientError.invalidProtobuf }
+    guard
+      thread.id == expectedThreadID,
+      thread.fid == 0 || thread.fid == forum.id,
       threadForumName.isEmpty || threadForumName == forumName,
       expectedForumName.isEmpty || expectedForumName == forumName
-    else { throw TiebaClientError.invalidProtobuf }
+    else { throw TiebaClientError.threadIdentityConflict }
 
     return TiebaThreadIdentity(
       threadID: expectedThreadID,
