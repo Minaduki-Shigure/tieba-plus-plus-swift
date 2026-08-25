@@ -127,14 +127,11 @@ struct UserLikedForumsView: View {
 private struct UserLikedForumRow: View {
   let forum: FollowedForumItem
 
-  private var slogan: String {
-    forum.slogan.trimmingCharacters(in: .whitespacesAndNewlines)
-  }
-
   var body: some View {
+    let presentation = FollowedForumCardPresentation(forum: forum)
     HStack(alignment: .center, spacing: 12) {
       AvatarView(
-        url: ForumAvatarDisplayPolicy.displayURL(forum.avatarURL),
+        url: presentation.avatarURL,
         name: forum.name,
         size: 44,
         urlPolicy: .forumAvatar
@@ -144,9 +141,18 @@ private struct UserLikedForumRow: View {
           .font(.headline)
           .foregroundStyle(.primary)
           .lineLimit(2)
-        if !slogan.isEmpty {
-          Text(slogan)
+        if !presentation.slogan.isEmpty {
+          Text(presentation.slogan)
             .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+        }
+        if let levelProgress = forum.levelProgress {
+          ForumLevelProgressView(progress: levelProgress)
+            .accessibilityHidden(true)
+        } else if !presentation.progressText.isEmpty {
+          Text(presentation.progressText)
+            .font(.caption2)
             .foregroundStyle(.secondary)
             .lineLimit(2)
         }
@@ -154,6 +160,8 @@ private struct UserLikedForumRow: View {
       .frame(maxWidth: .infinity, alignment: .leading)
     }
     .padding(.vertical, 4)
-    .accessibilityElement(children: .combine)
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("\(forum.name)吧")
+    .accessibilityValue(presentation.accessibilityValue)
   }
 }

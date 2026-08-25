@@ -62,8 +62,402 @@ final class ForumCheckInViewModelTests: XCTestCase {
       await viewModel.loadIfNeeded()
 
       XCTAssertEqual(viewModel.state, expectedState)
+      XCTAssertNil(viewModel.levelProgress)
       XCTAssertNil(viewModel.errorMessage)
     }
+  }
+
+  func testLoadsLevelProgressOnlyForFollowedForum() async {
+    let progress = levelProgress(level: 9, name: "倚楼听风", current: 345, target: 500)
+    let vault = ForumCheckInVaultSpy(session: session(userID: 1))
+    let service = ForumCheckInServiceSpy(
+      accountStates: [
+        1: [
+          .success(readyState(levelProgress: progress)),
+          .success(
+            accountState(
+              isFollowed: false,
+              checkIn: nil,
+              levelProgress: progress
+            )
+          ),
+        ]
+      ]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+
+    await viewModel.loadIfNeeded()
+    XCTAssertEqual(viewModel.levelProgress, progress)
+
+    await viewModel.reload()
+    XCTAssertEqual(viewModel.state, .requiresFollow)
+    XCTAssertNil(viewModel.levelProgress)
+  }
+
+  func testConfirmedCheckInRefreshesLevelProgressWithOneReadAndNoSecondWrite() async {
+    let before = levelProgress(level: 8, name: "初窥门径", current: 490, target: 500)
+    let after = levelProgress(level: 9, name: "略有小成", current: 7, target: 1_000)
+    let activeSession = session(userID: 1)
+    let vault = ForumCheckInVaultSpy(session: activeSession)
+    let service = ForumCheckInServiceSpy(
+      accountStates: [
+        1: [
+          .success(readyState(levelProgress: before)),
+          .success(signedState(days: 4, rank: 19, levelProgress: after)),
+        ]
+      ],
+      checkIns: [
+        1: .success(signedState(days: 3, rank: 20, levelProgress: before))
+      ]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+
+    await viewModel.checkIn()
+
+    XCTAssertEqual(viewModel.state, .signedToday(consecutiveDays: 4, rank: 19))
+    XCTAssertEqual(viewModel.levelProgress, after)
+    XCTAssertNil(viewModel.errorMessage)
+    await viewModel.forumCheckInDidChange(
+      ForumCheckInChange(
+        accountID: 1,
+        sessionRevision: activeSession.sessionRevision,
+        forumID: 100,
+        consecutiveDays: 3,
+        rank: 20
+      )
+    )
+    let accountStateRequestCount = await service.accountStateRequestCount()
+    let checkInRequestCount = await service.checkInRequestCount()
+    XCTAssertEqual(accountStateRequestCount, 2)
+    XCTAssertEqual(checkInRequestCount, 1)
+  }
+
+  func testLevelRefreshFailureRetainsConfirmedCheckInAndPreflightProgress() async {
+    let progress = levelProgress(level: 8, name: "初窥门径", current: 490, target: 500)
+    let vault = ForumCheckInVaultSpy(session: session(userID: 1))
+    let service = ForumCheckInServiceSpy(
+      accountStates: [
+        1: [
+          .success(readyState(levelProgress: progress)),
+          .failure(.init(message: "level refresh failed")),
+        ]
+      ],
+      checkIns: [
+        1: .success(signedState(days: 4, rank: 12, levelProgress: progress))
+      ]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+
+    await viewModel.checkIn()
+
+    XCTAssertEqual(viewModel.state, .signedToday(consecutiveDays: 4, rank: 12))
+    XCTAssertEqual(viewModel.levelProgress, progress)
+    XCTAssertNil(viewModel.errorMessage)
+    let accountStateRequestCount = await service.accountStateRequestCount()
+    let checkInRequestCount = await service.checkInRequestCount()
+    XCTAssertEqual(accountStateRequestCount, 2)
+    XCTAssertEqual(checkInRequestCount, 1)
+  }
+
+  func testUnreadableVaultDuringOptionalLevelRefreshRetainsConfirmedCheckIn() async {
+    let before = levelProgress(level: 8, name: "初窥门径", current: 490, target: 500)
+    let after = levelProgress(level: 9, name: "略有小成", current: 7, target: 1_000)
+    let vault = ForumCheckInVaultSpy(
+      session: session(userID: 1),
+      failingReadNumbers: [5]
+    )
+    let service = ForumCheckInServiceSpy(
+      accountStates: [
+        1: [
+          .success(readyState(levelProgress: before)),
+          .success(signedState(days: 4, rank: 12, levelProgress: after)),
+        ]
+      ],
+      checkIns: [
+        1: .success(signedState(days: 4, rank: 12, levelProgress: before))
+      ]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+
+    await viewModel.checkIn()
+
+    XCTAssertEqual(viewModel.state, .signedToday(consecutiveDays: 4, rank: 12))
+    XCTAssertEqual(viewModel.levelProgress, before)
+    XCTAssertNil(viewModel.errorMessage)
+    let accountStateRequestCount = await service.accountStateRequestCount()
+    let checkInRequestCount = await service.checkInRequestCount()
+    XCTAssertEqual(accountStateRequestCount, 2)
+    XCTAssertEqual(checkInRequestCount, 1)
+  }
+
+  func testDelayedOldAccountLoadCannotPublishLevelProgressAfterSwitch() async throws {
+    let oldProgress = levelProgress(level: 3, name: "旧账号", current: 20, target: 100)
+    let newProgress = levelProgress(level: 12, name: "新账号", current: 800, target: 900)
+    let firstSession = session(userID: 1)
+    let secondSession = session(userID: 2)
+    let vault = ForumCheckInVaultSpy(session: firstSession)
+    let service = ForumCheckInServiceSpy(
+      accountStates: [
+        1: [.success(readyState(userID: 1, levelProgress: oldProgress))],
+        2: [.success(readyState(userID: 2, levelProgress: newProgress))],
+      ],
+      accountStateDelays: [1: 180_000_000]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+
+    let oldLoad = Task { await viewModel.loadIfNeeded() }
+    try await waitForForumCheckInTest { await service.accountStateRequestCount() == 1 }
+    await vault.replaceActive(with: secondSession)
+    await viewModel.accountSessionDidChange()
+    await oldLoad.value
+
+    XCTAssertEqual(viewModel.state, .ready)
+    XCTAssertEqual(viewModel.levelProgress, newProgress)
+    let requestedUserIDs = await service.accountStateRequestsSnapshot().map(\.userID)
+    XCTAssertEqual(requestedUserIDs, [1, 2])
+  }
+
+  func testReloadSupersededDuringVaultReadCannotRestoreOldLeaseOrRequestOldAccount() async throws {
+    let oldProgress = levelProgress(level: 3, name: "旧账号", current: 20, target: 100)
+    let newProgress = levelProgress(level: 12, name: "新账号", current: 800, target: 900)
+    let firstSession = session(userID: 1)
+    let secondSession = session(userID: 2)
+    let vault = ForumCheckInVaultSpy(
+      session: firstSession,
+      suspendedReadNumbers: [1]
+    )
+    let service = ForumCheckInServiceSpy(
+      accountStates: [
+        1: [.success(readyState(userID: 1, levelProgress: oldProgress))],
+        2: [.success(readyState(userID: 2, levelProgress: newProgress))],
+      ]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+
+    let oldLoad = Task { await viewModel.loadIfNeeded() }
+    try await waitForForumCheckInTest { await vault.activeSessionReadCount() == 1 }
+    await vault.replaceActive(with: secondSession)
+    await viewModel.accountSessionDidChange()
+    await vault.resumeRead(1)
+    await oldLoad.value
+
+    XCTAssertEqual(viewModel.state, .ready)
+    XCTAssertEqual(viewModel.levelProgress, newProgress)
+    let requestedUserIDs = await service.accountStateRequestsSnapshot().map(\.userID)
+    XCTAssertEqual(requestedUserIDs, [2])
+  }
+
+  func testReloadCancellationDuringInitialVaultReadReturnsToIdleAndCanRetry() async throws {
+    let vault = ForumCheckInVaultSpy(
+      session: session(userID: 1),
+      suspendedReadNumbers: [1]
+    )
+    let service = ForumCheckInServiceSpy(
+      accountStates: [1: [.success(readyState())]]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+
+    let load = Task { await viewModel.loadIfNeeded() }
+    try await waitForForumCheckInTest { await vault.activeSessionReadCount() == 1 }
+    load.cancel()
+    await vault.resumeRead(1)
+    await load.value
+
+    XCTAssertEqual(viewModel.state, .idle)
+    XCTAssertNil(viewModel.levelProgress)
+    let accountStateRequestCount = await service.accountStateRequestCount()
+    XCTAssertEqual(accountStateRequestCount, 0)
+
+    await viewModel.loadIfNeeded()
+    XCTAssertEqual(viewModel.state, .ready)
+  }
+
+  func testReloadCancellationDuringFinalLeaseReadReturnsToIdleAndCanRetry() async throws {
+    let vault = ForumCheckInVaultSpy(
+      session: session(userID: 1),
+      suspendedReadNumbers: [2]
+    )
+    let service = ForumCheckInServiceSpy(
+      accountStates: [1: [.success(readyState())]]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+
+    let load = Task { await viewModel.loadIfNeeded() }
+    try await waitForForumCheckInTest { await vault.activeSessionReadCount() == 2 }
+    load.cancel()
+    await vault.resumeRead(2)
+    await load.value
+
+    XCTAssertEqual(viewModel.state, .idle)
+    XCTAssertNil(viewModel.levelProgress)
+
+    await viewModel.loadIfNeeded()
+    XCTAssertEqual(viewModel.state, .ready)
+  }
+
+  func testReloadCancellationWithNonCancellationVaultErrorStillReturnsToIdle() async throws {
+    let vault = ForumCheckInVaultSpy(
+      session: session(userID: 1),
+      suspendedReadNumbers: [1],
+      failingAfterSuspensionReadNumbers: [1]
+    )
+    let service = ForumCheckInServiceSpy()
+    let viewModel = makeViewModel(vault: vault, service: service)
+
+    let load = Task { await viewModel.loadIfNeeded() }
+    try await waitForForumCheckInTest { await vault.activeSessionReadCount() == 1 }
+    load.cancel()
+    await vault.resumeRead(1)
+    await load.value
+
+    XCTAssertEqual(viewModel.state, .idle)
+    XCTAssertNil(viewModel.levelProgress)
+    XCTAssertNil(viewModel.errorMessage)
+    let accountStateRequestCount = await service.accountStateRequestCount()
+    XCTAssertEqual(accountStateRequestCount, 0)
+  }
+
+  func testCheckInCancellationDuringPrewriteVaultReadNeverDispatchesWrite() async throws {
+    let vault = ForumCheckInVaultSpy(
+      session: session(userID: 1),
+      suspendedReadNumbers: [3]
+    )
+    let service = ForumCheckInServiceSpy(
+      accountStates: [1: [.success(readyState())]],
+      checkIns: [1: .success(signedState(days: 1, rank: 2))]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+
+    let checkIn = Task { await viewModel.checkIn() }
+    try await waitForForumCheckInTest { await vault.activeSessionReadCount() == 3 }
+    checkIn.cancel()
+    await vault.resumeRead(3)
+    await checkIn.value
+
+    XCTAssertEqual(viewModel.state, .ready)
+    let checkInRequestCount = await service.checkInRequestCount()
+    XCTAssertEqual(checkInRequestCount, 0)
+  }
+
+  func testExternalCheckInNotificationRefreshesPotentiallyStaleLevelProgress() async {
+    let activeSession = session(userID: 1)
+    let before = levelProgress(level: 8, name: "初窥门径", current: 490, target: 500)
+    let after = levelProgress(level: 9, name: "略有小成", current: 7, target: 1_000)
+    let vault = ForumCheckInVaultSpy(session: activeSession)
+    let service = ForumCheckInServiceSpy(
+      accountStates: [
+        1: [
+          .success(readyState(levelProgress: before)),
+          .success(signedState(days: 3, rank: 4, levelProgress: after)),
+        ]
+      ]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+    XCTAssertEqual(viewModel.levelProgress, before)
+
+    await viewModel.forumCheckInDidChange(
+      ForumCheckInChange(
+        accountID: 1,
+        sessionRevision: activeSession.sessionRevision,
+        forumID: 100,
+        consecutiveDays: 1,
+        rank: 2
+      )
+    )
+
+    XCTAssertEqual(viewModel.state, .signedToday(consecutiveDays: 3, rank: 4))
+    XCTAssertEqual(viewModel.levelProgress, after)
+    let accountStateRequestCount = await service.accountStateRequestCount()
+    let checkInRequestCount = await service.checkInRequestCount()
+    XCTAssertEqual(accountStateRequestCount, 2)
+    XCTAssertEqual(checkInRequestCount, 0)
+  }
+
+  func testExternalCheckInNotificationCannotOverwriteConcurrentAuthoritativeReload() async throws {
+    let activeSession = session(userID: 1)
+    let before = levelProgress(level: 8, name: "初窥门径", current: 490, target: 500)
+    let after = levelProgress(level: 9, name: "略有小成", current: 7, target: 1_000)
+    let vault = ForumCheckInVaultSpy(
+      session: activeSession,
+      suspendedReadNumbers: [3]
+    )
+    let service = ForumCheckInServiceSpy(
+      accountStates: [
+        1: [
+          .success(readyState(levelProgress: before)),
+          .success(signedState(days: 5, rank: 6, levelProgress: after)),
+        ]
+      ]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+
+    let notification = Task {
+      await viewModel.forumCheckInDidChange(
+        ForumCheckInChange(
+          accountID: 1,
+          sessionRevision: activeSession.sessionRevision,
+          forumID: 100,
+          consecutiveDays: 1,
+          rank: 2
+        )
+      )
+    }
+    try await waitForForumCheckInTest { await vault.activeSessionReadCount() == 3 }
+    await viewModel.reload()
+    await vault.resumeRead(3)
+    await notification.value
+
+    XCTAssertEqual(viewModel.state, .signedToday(consecutiveDays: 5, rank: 6))
+    XCTAssertEqual(viewModel.levelProgress, after)
+    let accountStateRequestCount = await service.accountStateRequestCount()
+    XCTAssertEqual(accountStateRequestCount, 2)
+  }
+
+  func testExternalProgressRefreshSupersededDuringVaultReadNeverRequestsOldAccount() async throws {
+    let oldSession = session(userID: 1)
+    let newSession = session(userID: 2)
+    let oldProgress = levelProgress(level: 8, name: "旧账号", current: 490, target: 500)
+    let newProgress = levelProgress(level: 9, name: "新账号", current: 7, target: 1_000)
+    let vault = ForumCheckInVaultSpy(
+      session: oldSession,
+      suspendedReadNumbers: [4]
+    )
+    let service = ForumCheckInServiceSpy(
+      accountStates: [
+        1: [.success(readyState(userID: 1, levelProgress: oldProgress))],
+        2: [.success(readyState(userID: 2, levelProgress: newProgress))],
+      ]
+    )
+    let viewModel = makeViewModel(vault: vault, service: service)
+    await viewModel.loadIfNeeded()
+
+    let notification = Task {
+      await viewModel.forumCheckInDidChange(
+        ForumCheckInChange(
+          accountID: 1,
+          sessionRevision: oldSession.sessionRevision,
+          forumID: 100,
+          consecutiveDays: 1,
+          rank: 2
+        )
+      )
+    }
+    try await waitForForumCheckInTest { await vault.activeSessionReadCount() == 4 }
+    await vault.replaceActive(with: newSession)
+    await viewModel.accountSessionDidChange()
+    await vault.resumeRead(4)
+    await notification.value
+
+    XCTAssertEqual(viewModel.state, .ready)
+    XCTAssertEqual(viewModel.levelProgress, newProgress)
+    let requestedUserIDs = await service.accountStateRequestsSnapshot().map(\.userID)
+    XCTAssertEqual(requestedUserIDs, [1, 2])
   }
 
   func testDuplicateCheckInTapProducesOneWrite() async throws {
@@ -598,7 +992,8 @@ final class ForumCheckInViewModelTests: XCTestCase {
   private func accountState(
     userID: Int64 = 1,
     isFollowed: Bool,
-    checkIn: ForumCheckInData?
+    checkIn: ForumCheckInData?,
+    levelProgress: ForumLevelProgressData? = nil
   ) -> ForumAccountStateData {
     ForumAccountStateData(
       membership: ForumMembershipData(
@@ -607,28 +1002,54 @@ final class ForumCheckInViewModelTests: XCTestCase {
         forumName: "Swift",
         isFollowed: isFollowed
       ),
-      checkIn: checkIn
+      checkIn: checkIn,
+      levelProgress: levelProgress
     )
   }
 
-  private func readyState(userID: Int64 = 1) -> ForumAccountStateData {
+  private func readyState(
+    userID: Int64 = 1,
+    levelProgress: ForumLevelProgressData? = nil
+  ) -> ForumAccountStateData {
     accountState(
       userID: userID,
       isFollowed: true,
-      checkIn: ForumCheckInData(isCheckedIn: false, consecutiveDays: 0, rank: 0)
+      checkIn: ForumCheckInData(isCheckedIn: false, consecutiveDays: 0, rank: 0),
+      levelProgress: levelProgress
     )
   }
 
   private func signedState(
     userID: Int64 = 1,
     days: Int,
-    rank: Int
+    rank: Int,
+    levelProgress: ForumLevelProgressData? = nil
   ) -> ForumAccountStateData {
     accountState(
       userID: userID,
       isFollowed: true,
-      checkIn: ForumCheckInData(isCheckedIn: true, consecutiveDays: days, rank: rank)
+      checkIn: ForumCheckInData(isCheckedIn: true, consecutiveDays: days, rank: rank),
+      levelProgress: levelProgress
     )
+  }
+
+  private func levelProgress(
+    level: Int,
+    name: String,
+    current: Int,
+    target: Int
+  ) -> ForumLevelProgressData {
+    guard
+      let progress = ForumLevelProgressData(
+        level: level,
+        levelName: name,
+        currentExperience: current,
+        targetExperience: target
+      )
+    else {
+      preconditionFailure("Invalid forum level test fixture")
+    }
+    return progress
   }
 }
 
@@ -899,24 +1320,41 @@ private actor ForumCheckInServiceSpy: AccountService {
 private actor ForumCheckInVaultSpy: AccountVault {
   private var session: StoredAccountSession?
   private let failingReadNumbers: Set<Int>
+  private let suspendedReadNumbers: Set<Int>
+  private let failingAfterSuspensionReadNumbers: Set<Int>
   private var activeReads = 0
+  private var suspendedReadWaiters: [Int: CheckedContinuation<Void, Never>] = [:]
 
   init(
     session: StoredAccountSession? = nil,
-    failingReadNumbers: Set<Int> = []
+    failingReadNumbers: Set<Int> = [],
+    suspendedReadNumbers: Set<Int> = [],
+    failingAfterSuspensionReadNumbers: Set<Int> = []
   ) {
     self.session = session
     self.failingReadNumbers = failingReadNumbers
+    self.suspendedReadNumbers = suspendedReadNumbers
+    self.failingAfterSuspensionReadNumbers = failingAfterSuspensionReadNumbers
   }
 
   func accountSummaries() async throws -> [AccountSummary] { [] }
 
   func activeSession() async throws -> StoredAccountSession? {
     activeReads += 1
-    if failingReadNumbers.contains(activeReads) {
+    let readNumber = activeReads
+    let sessionSnapshot = session
+    if failingReadNumbers.contains(readNumber) {
       throw ForumCheckInTestFailure(message: "vault unavailable")
     }
-    return session
+    if suspendedReadNumbers.contains(readNumber) {
+      await withCheckedContinuation { continuation in
+        suspendedReadWaiters[readNumber] = continuation
+      }
+    }
+    if failingAfterSuspensionReadNumbers.contains(readNumber) {
+      throw ForumCheckInTestFailure(message: "vault unavailable after suspension")
+    }
+    return sessionSnapshot
   }
 
   func upsert(_ session: StoredAccountSession) async throws { self.session = session }
@@ -926,6 +1364,10 @@ private actor ForumCheckInVaultSpy: AccountVault {
 
   func replaceActive(with session: StoredAccountSession?) {
     self.session = session
+  }
+
+  func resumeRead(_ readNumber: Int) {
+    suspendedReadWaiters.removeValue(forKey: readNumber)?.resume()
   }
 
   func activeSessionReadCount() -> Int { activeReads }

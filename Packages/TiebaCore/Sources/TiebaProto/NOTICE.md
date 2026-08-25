@@ -62,10 +62,13 @@ Device, advertising, account, write, and reaction fields outside the explicitly
 implemented contracts are intentionally omitted.
 
 The authenticated forum-membership probe fields
-`FrsPageResIdl.DataRes.user`, `forum.is_like`, and `anti.tbs` are adapted from
-TiebaLite commit `268f388c7824ae2c8f6ed549827a943ec8a7f352`. They are used only
-to bind a short-lived write request to the expected account and forum; `tbs` is
-not exposed by the public model or persisted.
+`FrsPageResIdl.DataRes.user`, `forum.is_like`, `forum.user_level`,
+`forum.level_name`, `forum.cur_score`, `forum.levelup_score`, and `anti.tbs` are
+adapted from TiebaLite commit `268f388c7824ae2c8f6ed549827a943ec8a7f352`.
+The membership fields bind the result to the expected account and forum; the
+level fields expose a validated, read-only level-up progress value. `tbs` is
+used only for a short-lived write request and is not exposed by the public
+model or persisted.
 The `ThreadInfo.collect_status` and `ThreadInfo.collect_mark_pid` fields used to
 read an account-scoped thread cloud-favorite marker, together with the
 `/c/c/post/addstore` and `/c/c/post/rmstore` form contracts used to add, update,

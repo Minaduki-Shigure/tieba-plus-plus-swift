@@ -18,6 +18,8 @@ currently serves `v0.63.0-alpha.1` (build 75), whose app-code snapshot includes
 the current image, media, navigation, Home/account, settings, cloud-favorite,
 durable owner-deletion, legacy-link, and guarded official-wrapper workflows.
 Paired profiles continue to support the nested-reply lazy-scroll container.
+The level-progress work described below follows the public tag and is currently
+available only in `main`.
 These additions improve existing credited areas without changing the current
 80–82% weighted estimate; experimental account writes retain their documented
 physical-device and disposable-account gates.
@@ -28,7 +30,7 @@ physical-device and disposable-account gates.
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, shared text selection/copying, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
 | Local data, settings, and customization | 10 | 7 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, hierarchical settings navigation, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, confirmation-frozen foreground check-in execution settings, a TiebaLite-compatible default image-watermark choice, reply-entry visibility, a default-on composer risk notice with an experimental reply-only system handoff attempt pending physical validation, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
-| Account, session, and private read flows | 15 | 9 | Login, Home-toolbar quick switching, a self-profile summary, an authenticated current-account following list with a guarded mutual filter, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
+| Account, session, and private read flows | 15 | 9 | Login, Home-toolbar quick switching, a self-profile summary, an authenticated current-account following list with a guarded mutual filter, followed and target-user liked forums with optional validated level-up progress, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 14 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, server-reason-bound personalized recommendation dislike feedback, three text/classic-emoticon reply targets, equivalent new-topic creation, bounded static-image new-topic/direct-topic-reply creation, owner-only topic/ordinary-floor deletion, direct inline-preview reply entry, and credential-free official reporting entry points have guarded implementations; real batch-check-in behavior, creation, deletion, poll and interaction-restriction success, broader uploaded media, unresolvable cloud rows, native reporting, and other reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
 | **Total** | **100** | **80–82** | Current full-product estimate; roughly 18–20% remains |
@@ -206,6 +208,14 @@ point.
 The followed-forum avatar and slogan presentation similarly preserves optional
 metadata that the existing authenticated response and Core decoder already
 carried. It adds neither a data source nor a workflow, so it adds no weighted point.
+Complete followed-forum level progress now retains the optional level name and
+upgrade target from the existing list response, and the loaded-forum surface
+reads the same four-field tuple from its existing account-state response. Invalid
+or incomplete metadata falls back to the earlier level/experience text or no
+progress without failing membership or check-in. A confirmed check-in may issue
+one read-only account-state refresh to update the score, but never another write.
+This closes a TiebaLite presentation gap inside the existing private-read credit
+and adds no endpoint, persistence, background behavior, or weighted point.
 The separate fan-reminder entry consumes the existing optional `fans` field and
 opens the already credited public follower list. It adds no endpoint, background
 work, persistence, or weighted point.
@@ -425,8 +435,10 @@ the source metadata is updated to that tested IPA.
   home projection, the active account's complete paginated list, and a selected
   default-off followed-forum recommendation filter, with a local layout setting
   that performs no explicit refresh or account mutation. Home and complete-list
-  cards preserve the existing response's optional avatar and slogan, with a
-  local fallback for absent or disallowed images. A separate account-isolated
+  cards preserve the existing response's optional avatar and slogan, and show
+  bounded level-name/current/upgrade progress when that complete tuple is valid,
+  with the earlier level/experience text as a local fallback. A separate account-
+  isolated
   local archive pins exact already-loaded rows across both list surfaces without
   adding a private request
 - Separate Tieba cloud favorites with offset pagination, saved-post navigation,
@@ -567,7 +579,9 @@ and effect on later recommendations.
 3. Real-device validation of the complete liked-forum list for the current and
    another public user, including page-one/page-two termination, privacy-empty
    results, expired credentials, same-UID credential rotation, account switching,
-   and confirmation that reading performs no follow, check-in, or other write
+   and confirmation that reading performs no follow, check-in, or other write.
+   Compare `level_name` and `levelup_score` availability for current-account and
+   target-user rows, including incomplete tuples and scores at or above the target
 4. Real-device validation of full-session binding and the minimal HTTPS cloud
    favorites list, including valid, random, cross-account, and expired STOKEN
    cases and whether reading the list has any server-side side effect
@@ -581,7 +595,9 @@ and effect on later recommendations.
    official-batch-disabled sequential execution, both pacing modes, definitive-
    failure continue/stop behavior, cancellation, and a second explicit run. Also
    cover mutual-follow value `2`,
-   the permission field-deletion matrix and `0`/`1` meaning, idempotence, rate
+   the per-forum level tuple before and after a confirmed check-in, ensuring its
+   one read-only refresh never resends the write. Also cover the permission
+   field-deletion matrix and `0`/`1` meaning, idempotence, rate
    limits, expired credentials, server errors, uncertain failures, mandatory
    read-only reconciliation, cross-operation exclusion, account switching, and
    same-UID credential rotation
@@ -1092,13 +1108,21 @@ preflight, sends at most one changed-state write, and performs at most one readb
 when the result is uncertain. It never retries the write or deletes only the local
 row. An authoritative change invalidates the entire old page cursor and complete
 forum-ID index, reloads from page one while an eligible surface is active, and
-removes only the matching account's pin. Inline check-in remains unavailable.
+removes only the matching account's pin. A row whose response contains a complete
+positive level, bounded nonempty level name, nonnegative current experience, and
+positive upgrade target shows that tuple with a progress value clamped to
+`0...1`; malformed or incomplete tuples retain the legacy level/experience text
+without failing the page. Inline check-in remains unavailable.
 The home toolbar and account page open the same separate foreground one-click
 flow, which consumes its own authoritative catalog and explicit confirmation
 snapshot. The home entry is shown only for an active account with complete
 credentials, and opening either entry performs no check-in write.
 Opening a forum continues to use the separate, explicitly confirmed
-per-forum membership and check-in workflow. Client-side lease checks prevent a
+per-forum membership and check-in workflow. Its same FRS response publishes the
+level tuple only for a followed forum. A successful check-in carries the
+preflight tuple until one explicit read-only refresh returns a newer value;
+transport failure keeps the confirmed check-in and never dispatches another
+write. Client-side lease checks prevent a
 late page from being published under another local session, but successful
 private-list retrieval and server-side account binding still require physical-
 device validation.

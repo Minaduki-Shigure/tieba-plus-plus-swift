@@ -185,8 +185,12 @@ the App layer before image creation becomes user-visible.
 `getForumMembership` remains available for callers that need only
 `TiebaForumMembership`. `getForumAccountState` returns that membership plus an
 optional `TiebaForumCheckIn` containing the server-authoritative sign state,
-consecutive-day count, and rank. A missing check-in value means the probe did
-not advertise a usable sign state; it is not permission to attempt a write.
+consecutive-day count, and rank, and an optional `TiebaForumLevelProgress`
+containing the validated level, level name, current experience, and upgrade
+target. A missing check-in value means the probe did not advertise a usable sign
+state; it is not permission to attempt a write. Missing or malformed level
+metadata independently degrades to no progress and does not invalidate
+membership or check-in.
 
 ## Wire assumptions
 
@@ -330,7 +334,10 @@ not advertise a usable sign state; it is not permission to attempt a write.
 - The authenticated FRS forum-state probe binds the returned user ID, forum ID,
   normalized forum name, follow state, optional sign-user ID, and 26-character
   lowercase hexadecimal `tbs` to the request. The `tbs` remains internal and is
-  never returned in a public model or retained by the client.
+  never returned in a public model or retained by the client. Level progress is
+  published only for a followed forum when the positive level, bounded nonempty
+  name, nonnegative current experience, and positive upgrade target form a
+  complete valid tuple.
 - Single-forum check-in first performs a fresh forum-state probe. It rejects an
   unfollowed forum or missing sign state and sends no write when the server
   already reports the account as checked in. Otherwise it sends one signed

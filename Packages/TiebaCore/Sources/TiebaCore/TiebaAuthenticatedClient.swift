@@ -3436,7 +3436,8 @@ public actor TiebaAuthenticatedClient {
     )
     return TiebaForumAccountState(
       membership: context.state.membership,
-      checkIn: checkIn
+      checkIn: checkIn,
+      levelProgress: context.state.levelProgress
     )
   }
 

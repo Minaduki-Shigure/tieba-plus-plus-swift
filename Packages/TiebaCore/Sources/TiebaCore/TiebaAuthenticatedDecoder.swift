@@ -458,7 +458,11 @@ enum TiebaAuthenticatedDecoder {
     )
 
     return TiebaForumMembershipContext(
-      state: TiebaForumAccountState(membership: membership, checkIn: nil),
+      state: TiebaForumAccountState(
+        membership: membership,
+        checkIn: nil,
+        levelProgress: nil
+      ),
       tbs: tbs
     )
   }
@@ -479,10 +483,19 @@ enum TiebaAuthenticatedDecoder {
       from: response,
       expectedUserID: expectedUserID
     )
+    let levelProgress = context.membership.isFollowed
+      ? TiebaForumLevelProgress(
+        level: Int(response.data.forum.userLevel),
+        levelName: response.data.forum.levelName,
+        currentExperience: Int(response.data.forum.curScore),
+        targetExperience: Int(response.data.forum.levelupScore)
+      )
+      : nil
     return TiebaForumMembershipContext(
       state: TiebaForumAccountState(
         membership: context.membership,
-        checkIn: checkIn
+        checkIn: checkIn,
+        levelProgress: levelProgress
       ),
       tbs: context.tbs
     )
@@ -1076,11 +1089,32 @@ enum TiebaAuthenticatedDecoder {
       maximumBytes: followedForumNameMaximumBytes
     )
     guard !name.isEmpty else { throw TiebaClientError.invalidJSON }
+    let rawLevel = int64(object["level_id"])
+    let rawExperience = int64(object["cur_score"])
+    let levelProgress: TiebaForumLevelProgress?
+    if
+      let rawLevel,
+      let level = Int(exactly: rawLevel),
+      let levelName = object["level_name"] as? String,
+      let rawExperience,
+      let currentExperience = Int(exactly: rawExperience),
+      let rawTargetExperience = int64(object["levelup_score"]),
+      let targetExperience = Int(exactly: rawTargetExperience)
+    {
+      levelProgress = TiebaForumLevelProgress(
+        level: level,
+        levelName: levelName,
+        currentExperience: currentExperience,
+        targetExperience: targetExperience
+      )
+    } else {
+      levelProgress = nil
+    }
     return TiebaFollowedForum(
       id: id,
       name: name,
-      level: max(Int(clamping: int64(object["level_id"]) ?? 0), 0),
-      experience: max(Int(clamping: int64(object["cur_score"]) ?? 0), 0),
+      level: max(Int(clamping: rawLevel ?? 0), 0),
+      experience: max(Int(clamping: rawExperience ?? 0), 0),
       avatar: normalizedForumMetadata(
         object["avatar"] as? String,
         maximumBytes: followedForumAvatarMaximumBytes
@@ -1088,7 +1122,8 @@ enum TiebaAuthenticatedDecoder {
       slogan: normalizedForumMetadata(
         object["slogan"] as? String,
         maximumBytes: followedForumSloganMaximumBytes
-      )
+      ),
+      levelProgress: levelProgress
     )
   }
 

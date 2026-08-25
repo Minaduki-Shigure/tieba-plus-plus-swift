@@ -16,6 +16,7 @@ enum ForumCheckInState: Equatable {
 @MainActor
 final class ForumCheckInViewModel: ObservableObject {
   @Published private(set) var state: ForumCheckInState = .idle
+  @Published private(set) var levelProgress: ForumLevelProgressData?
   @Published private(set) var errorMessage: String?
 
   let forumID: Int64
@@ -45,6 +46,7 @@ final class ForumCheckInViewModel: ObservableObject {
     generation &+= 1
     let requestGeneration = generation
     currentLease = nil
+    levelProgress = nil
     errorMessage = nil
 
     guard validForum else {
@@ -54,8 +56,10 @@ final class ForumCheckInViewModel: ObservableObject {
 
     state = .loading
     do {
-      guard let session = try await access.vault.activeSession() else {
-        guard requestGeneration == generation else { return }
+      let activeSession = try await access.vault.activeSession()
+      try Task.checkCancellation()
+      guard requestGeneration == generation else { return }
+      guard let session = activeSession else {
         state = .signedOut
         return
       }
@@ -70,11 +74,17 @@ final class ForumCheckInViewModel: ObservableObject {
       let resolvedState = try resolve(accountState, lease: lease)
       guard requestGeneration == generation else { return }
 
-      switch await sessionLeaseState(lease) {
+      let leaseState = await sessionLeaseState(lease)
+      try Task.checkCancellation()
+      guard requestGeneration == generation, currentLease == lease else { return }
+      switch leaseState {
       case .current:
         state = resolvedState
+        levelProgress = accountState.membership.isFollowed
+          ? accountState.levelProgress : nil
       case .changed:
         currentLease = nil
+        levelProgress = nil
         state = .idle
       case .unavailable:
         failForUnreadableAccount()
@@ -82,10 +92,16 @@ final class ForumCheckInViewModel: ObservableObject {
     } catch is CancellationError {
       guard requestGeneration == generation else { return }
       currentLease = nil
+      levelProgress = nil
       state = .idle
     } catch {
-      guard requestGeneration == generation, !Task.isCancelled else { return }
+      guard requestGeneration == generation else { return }
       currentLease = nil
+      levelProgress = nil
+      if Task.isCancelled {
+        state = .idle
+        return
+      }
       state = .failed
       errorMessage = error.localizedDescription
     }
@@ -113,8 +129,10 @@ final class ForumCheckInViewModel: ObservableObject {
 
     let session: StoredAccountSession
     do {
+      let activeSession = try await access.vault.activeSession()
+      try Task.checkCancellation()
       guard
-        let activeSession = try await access.vault.activeSession(),
+        let activeSession,
         ForumCheckInSessionLease(activeSession) == expectedLease
       else {
         guard requestGeneration == generation, activeOperation?.id == operation.id else {
@@ -158,9 +176,19 @@ final class ForumCheckInViewModel: ObservableObject {
       switch leaseState {
       case .current:
         state = resolvedState
+        levelProgress = accountState.levelProgress
         AccountChangeNotifications.postForumCheckInChange(change)
+        if accountState.levelProgress != nil {
+          await refreshLevelProgressAfterConfirmedCheckIn(
+            session: session,
+            operation: operation,
+            lease: expectedLease,
+            requestGeneration: requestGeneration
+          )
+        }
       case .changed:
         currentLease = nil
+        levelProgress = nil
         state = .idle
       case .unavailable:
         failForUnreadableAccount()
@@ -205,18 +233,26 @@ final class ForumCheckInViewModel: ObservableObject {
       change.consecutiveDays >= 0,
       change.rank >= 0
     else { return }
+    let observedGeneration = generation
     guard
       case .current = await sessionLeaseState(expectedLease),
+      observedGeneration == generation,
       currentLease == expectedLease
     else { return }
     let updatedState = ForumCheckInState.signedToday(
       consecutiveDays: change.consecutiveDays,
       rank: change.rank
     )
-    guard state != updatedState else { return }
+    if case .signedToday = state { return }
     generation &+= 1
+    let requestGeneration = generation
+    levelProgress = nil
     errorMessage = nil
     state = updatedState
+    await refreshLevelProgressAfterExternalCheckIn(
+      lease: expectedLease,
+      requestGeneration: requestGeneration
+    )
   }
 
   func dismissError() {
@@ -289,8 +325,112 @@ final class ForumCheckInViewModel: ObservableObject {
 
   private func failForUnreadableAccount() {
     currentLease = nil
+    levelProgress = nil
     state = .failed
     errorMessage = "无法读取当前账户，请稍后重试。"
+  }
+
+  private func refreshLevelProgressAfterConfirmedCheckIn(
+    session: StoredAccountSession,
+    operation: ForumCheckInOperation,
+    lease: ForumCheckInSessionLease,
+    requestGeneration: Int
+  ) async {
+    let accountState: ForumAccountStateData
+    do {
+      try Task.checkCancellation()
+      accountState = try await access.service.forumAccountState(
+        session: session,
+        forumID: forumID,
+        forumName: forumName
+      )
+      try Task.checkCancellation()
+    } catch {
+      return
+    }
+    guard
+      requestGeneration == generation,
+      activeOperation?.id == operation.id,
+      !Task.isCancelled
+    else { return }
+
+    let refreshedState: ForumCheckInState
+    do {
+      refreshedState = try resolve(accountState, lease: lease)
+      guard case .signedToday = refreshedState else { return }
+    } catch {
+      return
+    }
+
+    switch await sessionLeaseState(lease) {
+    case .current:
+      guard
+        requestGeneration == generation,
+        activeOperation?.id == operation.id,
+        currentLease == lease
+      else { return }
+      state = refreshedState
+      levelProgress = accountState.levelProgress
+    case .changed:
+      guard requestGeneration == generation, activeOperation?.id == operation.id else {
+        return
+      }
+      currentLease = nil
+      levelProgress = nil
+      state = .idle
+      errorMessage = nil
+    case .unavailable:
+      return
+    }
+  }
+
+  private func refreshLevelProgressAfterExternalCheckIn(
+    lease: ForumCheckInSessionLease,
+    requestGeneration: Int
+  ) async {
+    let session: StoredAccountSession
+    do {
+      guard
+        let activeSession = try await access.vault.activeSession(),
+        ForumCheckInSessionLease(activeSession) == lease
+      else {
+        guard requestGeneration == generation, currentLease == lease else { return }
+        currentLease = nil
+        levelProgress = nil
+        state = .idle
+        return
+      }
+      guard
+        requestGeneration == generation,
+        currentLease == lease,
+        !Task.isCancelled
+      else { return }
+      session = activeSession
+      let accountState = try await access.service.forumAccountState(
+        session: session,
+        forumID: forumID,
+        forumName: forumName
+      )
+      try Task.checkCancellation()
+      let refreshedState = try resolve(accountState, lease: lease)
+      guard case .signedToday = refreshedState else { return }
+      guard requestGeneration == generation, currentLease == lease else { return }
+      switch await sessionLeaseState(lease) {
+      case .current:
+        guard requestGeneration == generation, currentLease == lease else { return }
+        state = refreshedState
+        levelProgress = accountState.levelProgress
+      case .changed:
+        guard requestGeneration == generation, currentLease == lease else { return }
+        currentLease = nil
+        levelProgress = nil
+        state = .idle
+      case .unavailable:
+        return
+      }
+    } catch {
+      return
+    }
   }
 
   private func postIfLeaseCurrent(
@@ -364,6 +504,8 @@ final class ForumCheckInViewModel: ObservableObject {
         switch leaseState {
         case .current:
           state = resolvedState
+          levelProgress = accountState.membership.isFollowed
+            ? accountState.levelProgress : nil
           if case .signedToday = resolvedState {
             errorMessage = nil
             AccountChangeNotifications.postForumCheckInChange(
@@ -374,6 +516,7 @@ final class ForumCheckInViewModel: ObservableObject {
           }
         case .changed:
           currentLease = nil
+          levelProgress = nil
           state = .idle
           errorMessage = nil
         case .unavailable:
@@ -384,10 +527,12 @@ final class ForumCheckInViewModel: ObservableObject {
         guard requestGeneration == generation, activeOperation?.id == operation.id else { return }
         switch leaseState {
         case .current:
+          levelProgress = nil
           state = .failed
           errorMessage = message
         case .changed:
           currentLease = nil
+          levelProgress = nil
           state = .idle
           errorMessage = nil
         case .unavailable:
@@ -399,10 +544,12 @@ final class ForumCheckInViewModel: ObservableObject {
       guard requestGeneration == generation, activeOperation?.id == operation.id else { return }
       switch leaseState {
       case .current:
+        levelProgress = nil
         state = .failed
         errorMessage = message
       case .changed:
         currentLease = nil
+        levelProgress = nil
         state = .idle
         errorMessage = nil
       case .unavailable:

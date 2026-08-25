@@ -620,7 +620,7 @@ private struct ForumCheckInRow: View {
     case .idle, .signedOut:
       EmptyView()
     case .loading:
-      visibleRow {
+      accountRow {
         HStack(spacing: 10) {
           ProgressView()
             .controlSize(.small)
@@ -630,19 +630,19 @@ private struct ForumCheckInRow: View {
         .accessibilityElement(children: .combine)
       }
     case .requiresFollow:
-      visibleRow {
+      accountRow {
         Label("关注后可签到", systemImage: "person.badge.plus")
           .foregroundStyle(.secondary)
           .allowsHitTesting(false)
       }
     case .unavailable:
-      visibleRow {
+      accountRow {
         Label("当前无法签到", systemImage: "checkmark.seal")
           .foregroundStyle(.secondary)
           .allowsHitTesting(false)
       }
     case .ready:
-      visibleRow {
+      accountRow {
         Button {
           isConfirmationPresented = true
         } label: {
@@ -654,7 +654,7 @@ private struct ForumCheckInRow: View {
         .accessibilityIdentifier("forum-check-in-button")
       }
     case .signedToday(let consecutiveDays, let rank):
-      visibleRow {
+      accountRow {
         Label(
           ForumCheckInRowVisibility.signedStatus(
             consecutiveDays: consecutiveDays,
@@ -668,7 +668,7 @@ private struct ForumCheckInRow: View {
         .accessibilityIdentifier("forum-check-in-status")
       }
     case .checking:
-      visibleRow {
+      accountRow {
         HStack(spacing: 10) {
           ProgressView()
             .controlSize(.small)
@@ -678,7 +678,7 @@ private struct ForumCheckInRow: View {
         .accessibilityElement(children: .combine)
       }
     case .failed:
-      visibleRow {
+      accountRow {
         Button {
           Task { @MainActor in await viewModel.reload() }
         } label: {
@@ -688,6 +688,19 @@ private struct ForumCheckInRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("forum-check-in-retry")
+      }
+    }
+  }
+
+  private func accountRow<Content: View>(
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    visibleRow {
+      VStack(alignment: .leading, spacing: 10) {
+        if let levelProgress = viewModel.levelProgress {
+          ForumLevelProgressView(progress: levelProgress)
+        }
+        content()
       }
     }
   }

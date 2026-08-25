@@ -15,6 +15,44 @@ struct ValidatedAccount:
   }
 }
 
+struct ForumLevelProgressData: Hashable, Sendable {
+  static let levelNameMaximumCharacters = 64
+  static let levelNameMaximumUTF8Bytes = 256
+
+  let level: Int
+  let levelName: String
+  let currentExperience: Int
+  let targetExperience: Int
+
+  init?(
+    level: Int,
+    levelName: String,
+    currentExperience: Int,
+    targetExperience: Int
+  ) {
+    let levelName = levelName
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    guard
+      level > 0,
+      !levelName.isEmpty,
+      levelName.count <= Self.levelNameMaximumCharacters,
+      levelName.utf8.count <= Self.levelNameMaximumUTF8Bytes,
+      !levelName.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+      currentExperience >= 0,
+      targetExperience > 0
+    else { return nil }
+    self.level = level
+    self.levelName = levelName
+    self.currentExperience = currentExperience
+    self.targetExperience = targetExperience
+  }
+
+  var fractionCompleted: Double {
+    min(Double(currentExperience) / Double(targetExperience), 1)
+  }
+}
+
 struct FollowedForumItem: Identifiable, Hashable, Sendable {
   let id: Int64
   let name: String
@@ -22,6 +60,7 @@ struct FollowedForumItem: Identifiable, Hashable, Sendable {
   let experience: Int
   let avatarURL: URL?
   let slogan: String
+  let levelProgress: ForumLevelProgressData?
 
   init(
     id: Int64,
@@ -29,7 +68,8 @@ struct FollowedForumItem: Identifiable, Hashable, Sendable {
     level: Int,
     experience: Int,
     avatarURL: URL? = nil,
-    slogan: String = ""
+    slogan: String = "",
+    levelProgress: ForumLevelProgressData? = nil
   ) {
     self.id = id
     self.name = name
@@ -37,6 +77,7 @@ struct FollowedForumItem: Identifiable, Hashable, Sendable {
     self.experience = experience
     self.avatarURL = avatarURL
     self.slogan = slogan
+    self.levelProgress = levelProgress
   }
 }
 
@@ -419,6 +460,17 @@ struct ForumBatchCheckInData: Hashable, Sendable {
 struct ForumAccountStateData: Hashable, Sendable {
   let membership: ForumMembershipData
   let checkIn: ForumCheckInData?
+  let levelProgress: ForumLevelProgressData?
+
+  init(
+    membership: ForumMembershipData,
+    checkIn: ForumCheckInData?,
+    levelProgress: ForumLevelProgressData? = nil
+  ) {
+    self.membership = membership
+    self.checkIn = checkIn
+    self.levelProgress = levelProgress
+  }
 }
 
 struct ThreadAgreementData: Hashable, Sendable {

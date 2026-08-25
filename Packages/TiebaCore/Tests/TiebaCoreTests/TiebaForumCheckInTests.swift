@@ -299,7 +299,11 @@ final class TiebaForumCheckInTests: XCTestCase {
       isFollowed: true,
       isCheckedIn: false,
       consecutiveDays: 6,
-      rank: 43
+      rank: 43,
+      level: 12,
+      levelName: "\u{6d77}\u{7eb3}\u{767e}\u{5ddd}",
+      currentExperience: 345,
+      targetExperience: 500
     ).serializedData()
     let success = checkInJSON(consecutiveDays: 7, rank: 42)
     let transport = CheckInStubTransport(
@@ -318,6 +322,15 @@ final class TiebaForumCheckInTests: XCTestCase {
     XCTAssertEqual(
       state.checkIn,
       TiebaForumCheckIn(isCheckedIn: true, consecutiveDays: 7, rank: 42)
+    )
+    XCTAssertEqual(
+      state.levelProgress,
+      TiebaForumLevelProgress(
+        level: 12,
+        levelName: "\u{6d77}\u{7eb3}\u{767e}\u{5ddd}",
+        currentExperience: 345,
+        targetExperience: 500
+      )
     )
     let snapshot = await transport.snapshot()
     XCTAssertEqual(snapshot.requests.count, 2)
@@ -877,7 +890,11 @@ final class TiebaForumCheckInTests: XCTestCase {
     signUserID: Int64? = nil,
     rawIsCheckedIn: Int32? = nil,
     consecutiveDays: Int32 = 0,
-    rank: Int32 = 0
+    rank: Int32 = 0,
+    level: Int32 = 0,
+    levelName: String = "",
+    currentExperience: Int32 = 0,
+    targetExperience: Int32 = 0
   ) -> FrsPageResIdl {
     var user = User()
     user.id = userID
@@ -886,6 +903,10 @@ final class TiebaForumCheckInTests: XCTestCase {
     forum.id = forumID
     forum.name = forumName
     forum.isLike = isFollowed ? 1 : 0
+    forum.userLevel = level
+    forum.levelName = levelName
+    forum.curScore = currentExperience
+    forum.levelupScore = targetExperience
     if let isCheckedIn {
       var signUser = FrsPageResIdl.DataRes.ForumInfo.SignInfo.SignUser()
       signUser.userID = signUserID ?? userID

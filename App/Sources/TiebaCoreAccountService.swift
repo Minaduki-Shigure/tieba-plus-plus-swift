@@ -1090,7 +1090,8 @@ struct TiebaCoreAccountService: AccountService {
           level: $0.level,
           experience: $0.experience,
           avatarURL: SecureTiebaURL.media($0.avatar),
-          slogan: $0.slogan
+          slogan: $0.slogan,
+          levelProgress: Self.levelProgressData($0.levelProgress)
         )
       },
       currentPage: response.pagination.currentPage,
@@ -1137,7 +1138,8 @@ struct TiebaCoreAccountService: AccountService {
           level: $0.level,
           experience: $0.experience,
           avatarURL: SecureTiebaURL.media($0.avatar),
-          slogan: $0.slogan
+          slogan: $0.slogan,
+          levelProgress: Self.levelProgressData($0.levelProgress)
         )
       },
       currentPage: response.pagination.currentPage,
@@ -2377,7 +2379,20 @@ struct TiebaCoreAccountService: AccountService {
           consecutiveDays: $0.consecutiveDays,
           rank: $0.rank
         )
-      }
+      },
+      levelProgress: levelProgressData(state.levelProgress)
+    )
+  }
+
+  private static func levelProgressData(
+    _ progress: TiebaForumLevelProgress?
+  ) -> ForumLevelProgressData? {
+    guard let progress else { return nil }
+    return ForumLevelProgressData(
+      level: progress.level,
+      levelName: progress.levelName,
+      currentExperience: progress.currentExperience,
+      targetExperience: progress.targetExperience
     )
   }
 

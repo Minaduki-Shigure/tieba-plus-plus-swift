@@ -349,6 +349,14 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
   }
 
   func testLikedForumsMapsTargetContextAndForumPresentation() async throws {
+    let levelProgress = try XCTUnwrap(
+      TiebaForumLevelProgress(
+        level: 12,
+        levelName: " Member ",
+        currentExperience: 345,
+        targetExperience: 500
+      )
+    )
     let client = AccountClientSpy(
       likedForums: TiebaFollowedForumPage(
         accountUserID: 7,
@@ -360,7 +368,8 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
             level: 12,
             experience: 345,
             avatar: "https://example.com/forum-avatar.png",
-            slogan: "A forum slogan"
+            slogan: "A forum slogan",
+            levelProgress: levelProgress
           )
         ],
         pagination: TiebaPagination(
@@ -395,6 +404,15 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
       URL(string: "https://example.com/forum-avatar.png")
     )
     XCTAssertEqual(page.forums.first?.slogan, "A forum slogan")
+    XCTAssertEqual(
+      page.forums.first?.levelProgress,
+      ForumLevelProgressData(
+        level: 12,
+        levelName: "Member",
+        currentExperience: 345,
+        targetExperience: 500
+      )
+    )
     let snapshot = await client.snapshot()
     XCTAssertEqual(
       snapshot.likedForumRequests,
@@ -411,6 +429,14 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
   }
 
   func testFollowedForumsMapsForumPresentationMetadata() async throws {
+    let levelProgress = try XCTUnwrap(
+      TiebaForumLevelProgress(
+        level: 12,
+        levelName: "Member",
+        currentExperience: 345,
+        targetExperience: 500
+      )
+    )
     let response = TiebaFollowedForumPage(
       accountUserID: 7,
       targetUserID: 7,
@@ -421,7 +447,14 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
           level: 12,
           experience: 345,
           avatar: "http://imgsrc.baidu.com/forum/swift.png",
-          slogan: "Swift community"
+          slogan: "Swift community",
+          levelProgress: levelProgress
+        ),
+        TiebaFollowedForum(
+          id: 43,
+          name: "ios",
+          level: 8,
+          experience: 123
         )
       ],
       pagination: TiebaPagination(
@@ -445,12 +478,22 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
 
     XCTAssertEqual(page.currentPage, 2)
     XCTAssertFalse(page.hasMore)
-    XCTAssertEqual(page.forums.map(\.id), [42])
+    XCTAssertEqual(page.forums.map(\.id), [42, 43])
     XCTAssertEqual(
       page.forums.first?.avatarURL?.absoluteString,
       "https://imgsrc.baidu.com/forum/swift.png"
     )
     XCTAssertEqual(page.forums.first?.slogan, "Swift community")
+    XCTAssertEqual(
+      page.forums.first?.levelProgress,
+      ForumLevelProgressData(
+        level: 12,
+        levelName: "Member",
+        currentExperience: 345,
+        targetExperience: 500
+      )
+    )
+    XCTAssertNil(page.forums.last?.levelProgress)
   }
 
   func testLikedForumsRejectsMismatchedResponseContext() async throws {
@@ -805,8 +848,20 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
   }
 
   func testForumAccountStateMapsCheckInWithoutExposingCredentials() async throws {
+    let levelProgress = try XCTUnwrap(
+      TiebaForumLevelProgress(
+        level: 12,
+        levelName: "Member",
+        currentExperience: 650,
+        targetExperience: 500
+      )
+    )
     let client = AccountClientSpy(
-      accountState: signedCoreState(days: 6, rank: 12)
+      accountState: signedCoreState(
+        days: 6,
+        rank: 12,
+        levelProgress: levelProgress
+      )
     )
     let service = TiebaCoreAccountService(client: client)
 
@@ -822,8 +877,18 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     XCTAssertEqual(state.checkIn?.consecutiveDays, 6)
     XCTAssertEqual(state.checkIn?.rank, 12)
     XCTAssertEqual(
+      state.levelProgress,
+      ForumLevelProgressData(
+        level: 12,
+        levelName: "Member",
+        currentExperience: 650,
+        targetExperience: 500
+      )
+    )
+    XCTAssertEqual(state.levelProgress?.fractionCompleted, 1)
+    XCTAssertEqual(
       Set(Mirror(reflecting: state).children.compactMap(\.label)),
-      ["membership", "checkIn"]
+      ["membership", "checkIn", "levelProgress"]
     )
     let snapshot = await client.snapshot()
     XCTAssertEqual(snapshot.accountStateRequests.count, 1)
@@ -2191,7 +2256,11 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     )
   }
 
-  private func signedCoreState(days: Int, rank: Int) -> TiebaForumAccountState {
+  private func signedCoreState(
+    days: Int,
+    rank: Int,
+    levelProgress: TiebaForumLevelProgress? = nil
+  ) -> TiebaForumAccountState {
     TiebaForumAccountState(
       membership: TiebaForumMembership(
         userID: 7,
@@ -2203,7 +2272,8 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
         isCheckedIn: true,
         consecutiveDays: days,
         rank: rank
-      )
+      ),
+      levelProgress: levelProgress
     )
   }
 

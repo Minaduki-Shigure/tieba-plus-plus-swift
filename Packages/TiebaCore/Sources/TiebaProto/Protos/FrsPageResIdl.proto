@@ -86,6 +86,13 @@ message FrsPageResIdl {
             string first_class = 3;
             string second_class = 4;
             int32 is_like = 6;
+            int32 user_level = 7;
+            string level_name = 8;
+            int32 member_num = 9;
+            int32 thread_num = 10;
+            int32 post_num = 11;
+            int32 cur_score = 13;
+            int32 levelup_score = 14;
             message SignInfo {
                 message SignUser {
                     int64 user_id = 1;
@@ -96,9 +103,6 @@ message FrsPageResIdl {
                 SignUser user_info = 1;
             }
             SignInfo sign_in_info = 15;
-            int32 member_num = 9;
-            int32 thread_num = 10;
-            int32 post_num = 11;
             message Manager {}
             repeated Manager managers = 17;
             repeated Classify good_classify = 21;

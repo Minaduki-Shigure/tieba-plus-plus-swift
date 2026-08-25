@@ -179,6 +179,40 @@ public struct TiebaConcernPage: Sendable, Hashable {
   }
 }
 
+public struct TiebaForumLevelProgress: Sendable, Hashable {
+  public static let levelNameMaximumCharacters = 64
+  public static let levelNameMaximumUTF8Bytes = 256
+
+  public let level: Int
+  public let levelName: String
+  public let currentExperience: Int
+  public let targetExperience: Int
+
+  public init?(
+    level: Int,
+    levelName: String,
+    currentExperience: Int,
+    targetExperience: Int
+  ) {
+    let normalizedLevelName = levelName.trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    guard
+      level > 0,
+      !normalizedLevelName.isEmpty,
+      normalizedLevelName.count <= Self.levelNameMaximumCharacters,
+      normalizedLevelName.utf8.count <= Self.levelNameMaximumUTF8Bytes,
+      !normalizedLevelName.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+      currentExperience >= 0,
+      targetExperience > 0
+    else { return nil }
+
+    self.level = level
+    self.levelName = normalizedLevelName
+    self.currentExperience = currentExperience
+    self.targetExperience = targetExperience
+  }
+}
+
 public struct TiebaFollowedForum: Identifiable, Sendable, Hashable {
   public let id: Int64
   public let name: String
@@ -186,6 +220,7 @@ public struct TiebaFollowedForum: Identifiable, Sendable, Hashable {
   public let experience: Int
   public let avatar: String
   public let slogan: String
+  public let levelProgress: TiebaForumLevelProgress?
 
   public init(
     id: Int64,
@@ -193,7 +228,8 @@ public struct TiebaFollowedForum: Identifiable, Sendable, Hashable {
     level: Int,
     experience: Int,
     avatar: String = "",
-    slogan: String = ""
+    slogan: String = "",
+    levelProgress: TiebaForumLevelProgress? = nil
   ) {
     self.id = id
     self.name = name
@@ -201,6 +237,7 @@ public struct TiebaFollowedForum: Identifiable, Sendable, Hashable {
     self.experience = experience
     self.avatar = avatar
     self.slogan = slogan
+    self.levelProgress = levelProgress
   }
 }
 
@@ -502,10 +539,16 @@ public struct TiebaForumCheckIn: Sendable, Hashable {
 public struct TiebaForumAccountState: Sendable, Hashable {
   public let membership: TiebaForumMembership
   public let checkIn: TiebaForumCheckIn?
+  public let levelProgress: TiebaForumLevelProgress?
 
-  public init(membership: TiebaForumMembership, checkIn: TiebaForumCheckIn?) {
+  public init(
+    membership: TiebaForumMembership,
+    checkIn: TiebaForumCheckIn?,
+    levelProgress: TiebaForumLevelProgress? = nil
+  ) {
     self.membership = membership
     self.checkIn = checkIn
+    self.levelProgress = levelProgress
   }
 }
 

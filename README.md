@@ -18,7 +18,7 @@ and its verified metadata enters the public app source.
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, media preferences, explicit standard/pure/only-author immersive thread-reading modes, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, a next-launch destination including the inbox, and ordered iOS Home Screen quick actions for existing destinations. The reply notice's system handoff attempt is implemented but remains pending physical-device validation |
-| Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary, followed forums, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with a shared Home-toolbar/account-page message badge, separate optional fan-reminder badge, and authoritative reply actions, Tieba cloud favorites with a saved-position-to-latest-update handoff, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
+| Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary, followed forums with validated level-up progress where the server supplies it, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with a shared Home-toolbar/account-page message badge, separate optional fan-reminder badge, and authoritative reply actions, Tieba cloud favorites with a saved-position-to-latest-update handoff, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies plus explicitly confirmed deletion of the active account's own topic or ordinary floor; these newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
 | TiebaLite parity | Current `main` and public `v0.63.0-alpha.1`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.63.0-alpha.1` (build 75) |
@@ -59,6 +59,17 @@ and its verified metadata enters the public app source.
   followed-forum management, and guarded creation and social actions. Account
   reads and writes that are marked experimental still require disposable-account
   or physical-device validation.
+- **Current-main forum level progress:** The existing authenticated followed-
+  forum list and per-forum account-state response now retain a complete,
+  validated `level / level name / current experience / upgrade target` tuple.
+  Home and complete-list forum cards show a clamped progress bar when all four
+  fields are valid and retain the previous level/experience text otherwise. A
+  loaded forum reuses its existing account-state request to show the same
+  progress next to the check-in control. After a confirmed check-in, one
+  credential-bound read refreshes the score; failure retains the confirmed
+  check-in and never retries the write. Missing, malformed, unfollowed, stale-
+  session, and account-rotation results expose no progress. This main-only work
+  is not included in the current public `v0.63.0-alpha.1` IPA.
 - **`v0.63.0` owner deletion and cloud-favorite updates:** An active full-
   credential account can request deletion
   of its own loaded topic or ordinary floor after a separate destructive
@@ -203,8 +214,11 @@ and its verified metadata enters the public app source.
   followed-forum list and links to the complete paginated list. Both surfaces
   share one app-scoped, memory-only snapshot that is discarded when the account
   session or a forum relationship changes. Their cards preserve the bounded
-  server-supplied forum avatar and slogan; unavailable or disallowed images fall
-  back locally without another metadata request. An account-isolated local archive
+  server-supplied forum avatar and slogan. A complete, valid level name and
+  upgrade target add a bounded experience progress bar; incomplete metadata
+  falls back to the existing level/experience text. Unavailable or disallowed
+  images fall back locally without another metadata request. An account-isolated
+  local archive
   can pin exact, already loaded forums on both surfaces; pinned rows move to the
   front without loading another page. The same context menu can unpin, copy the
   public forum name, or request an explicitly confirmed server unfollow. That
@@ -764,8 +778,11 @@ and its verified metadata enters the public app source.
   confirmed change invalidates the old page cursor and complete recommendation
   index before loading page one again; a failed or unresolved action keeps the
   row. Inline check-in remains unavailable. A loaded forum separately reads
-  account-specific follow and check-in state and retains its explicitly confirmed
-  single-forum actions. The home toolbar and account page open the
+  account-specific follow, level-up progress, and check-in state and retains its
+  explicitly confirmed single-forum actions. A confirmed check-in performs one
+  read-only account-state refresh when the initial response contained complete
+  level metadata; that refresh cannot resend the write. The home toolbar and
+  account page open the
   same distinct, foreground-only one-click flow described below; neither adds
   an inline list write. Successful private-list
   retrieval still requires physical-device validation and is not asserted by CI

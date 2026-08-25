@@ -36,19 +36,30 @@ struct FollowedForumCardPresentation: Equatable, Sendable {
   let avatarURL: URL?
   let slogan: String
   let progressText: String
+  let levelProgress: ForumLevelProgressPresentation?
 
   init(forum: FollowedForumItem) {
     avatarURL = ForumAvatarDisplayPolicy.displayURL(forum.avatarURL)
     slogan = forum.slogan.trimmingCharacters(in: .whitespacesAndNewlines)
+    levelProgress = forum.levelProgress.map(ForumLevelProgressPresentation.init)
 
-    var details = [String]()
-    if forum.level > 0 { details.append("等级 \(forum.level)") }
-    if forum.experience > 0 { details.append("经验 \(forum.experience.formatted())") }
-    progressText = details.joined(separator: "，")
+    if levelProgress == nil {
+      var details = [String]()
+      if forum.level > 0 { details.append("等级 \(forum.level)") }
+      if forum.experience > 0 { details.append("经验 \(forum.experience.formatted())") }
+      progressText = details.joined(separator: "，")
+    } else {
+      progressText = ""
+    }
   }
 
   var accessibilityValue: String {
-    [slogan, progressText].filter { !$0.isEmpty }.joined(separator: "，")
+    [
+      slogan,
+      levelProgress?.accessibilityValue ?? progressText,
+    ]
+    .filter { !$0.isEmpty }
+    .joined(separator: "，")
   }
 }
 
@@ -90,15 +101,17 @@ struct FollowedForumCard: View {
             .lineLimit(1)
         }
 
-        if !presentation.progressText.isEmpty {
+        if let levelProgress = forum.levelProgress {
+          ForumLevelProgressView(progress: levelProgress)
+            .accessibilityHidden(true)
+        } else if !presentation.progressText.isEmpty {
           Text(presentation.progressText)
             .font(.caption2)
             .foregroundStyle(.secondary)
             .lineLimit(2)
         }
       }
-
-      Spacer(minLength: 0)
+      .frame(maxWidth: .infinity, alignment: .leading)
 
       ZStack {
         if isUnfollowing {
