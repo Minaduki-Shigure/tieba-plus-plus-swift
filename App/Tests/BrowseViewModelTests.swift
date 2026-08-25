@@ -677,7 +677,10 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(forumResult.matchedAuthorPortraitURL, matchedAuthorAvatarURL)
     XCTAssertEqual(forumResult.localVisibility, .hidden)
     XCTAssertEqual(forumResult.thread.localVisibility, .hidden)
-    XCTAssertEqual(forumResult.context?.localVisibility, .hidden)
+    XCTAssertEqual(
+      forumResult.contexts.map(\.summary.localVisibility),
+      [.hidden, .hidden]
+    )
     XCTAssertFalse(
       forumResult.matchedContents.contains { content in
         guard case .video = content else { return false }
@@ -773,7 +776,10 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertEqual(mappedForeignMainPost.thread.authorName, postInfo.authorName)
     XCTAssertEqual(mappedForeignMainPost.thread.authorUsername, postInfo.authorUsername)
     XCTAssertEqual(mappedForeignMainPost.thread.authorAvatarURL, contextAvatarURL)
-    XCTAssertEqual(mappedForeignMainPost.context?.authorID, postInfo.authorID)
+    XCTAssertEqual(
+      mappedForeignMainPost.contexts.map(\.summary.authorID),
+      [postInfo.authorID]
+    )
 
     let mappedWithoutContext = TiebaCoreBrowseService.mapForumPostSearchResult(
       result(mainPost: nil, postInfo: nil)
