@@ -101,7 +101,8 @@ final class OwnedContentDeletionStore {
   private var hasResolvedLedger = false
   private var ledgerIsAvailable = false
   private var ledgerLoadTask: Task<[OwnedContentDeletionLedgerRecord], Error>?
-  private var sessionGeneration = 0
+  private var sessionReloadTask: Task<Void, Never>?
+  private var sessionReloadRequested = false
   private var flights: [OwnedContentDeletionLedgerKey: Flight] = [:]
   // Keep irreversible terminal outcomes bound to stable content, not display metadata
   // or a replaceable session lease.
@@ -246,21 +247,37 @@ final class OwnedContentDeletionStore {
 
   func reloadActiveSession() async {
     await restoreLedgerIfNeeded()
-    sessionGeneration &+= 1
-    let generation = sessionGeneration
-    do {
-      let session = try await access.vault.activeSession()
-      guard generation == sessionGeneration else { return }
-      currentSession = session
-      hasResolvedSession = true
-    } catch {
-      guard generation == sessionGeneration else { return }
-      currentSession = nil
-      hasResolvedSession = true
+    sessionReloadRequested = true
+    if sessionReloadTask == nil {
+      let task = Task { @MainActor [weak self] in
+        guard let self else { return }
+        await self.drainSessionReloads()
+      }
+      sessionReloadTask = task
     }
-    for entry in entries.values {
-      applyCurrentState(to: entry)
+
+    while let sessionReloadTask {
+      await sessionReloadTask.value
     }
+  }
+
+  private func drainSessionReloads() async {
+    while sessionReloadRequested {
+      sessionReloadRequested = false
+      let resolvedSession: StoredAccountSession?
+      do {
+        resolvedSession = try await access.vault.activeSession()
+      } catch {
+        resolvedSession = nil
+      }
+      guard !sessionReloadRequested else { continue }
+      currentSession = resolvedSession
+      hasResolvedSession = true
+      for entry in entries.values {
+        applyCurrentState(to: entry)
+      }
+    }
+    sessionReloadTask = nil
   }
 
   private func applyCurrentState(to entry: OwnedContentDeletionEntry) {
