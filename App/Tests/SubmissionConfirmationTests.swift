@@ -40,9 +40,39 @@ final class SubmissionConfirmationTests: XCTestCase {
     XCTAssertTrue(gate.isResolved)
   }
 
+  func testExternalHandoffResolvesOnlyAPresentedEntryNotice() {
+    var gate = ComposerEntryRiskNoticeGate()
+
+    XCTAssertFalse(gate.resolveForExternalHandoff())
+    XCTAssertTrue(gate.composerBecameReady(showsNotice: true))
+    XCTAssertTrue(gate.resolveForExternalHandoff())
+    XCTAssertTrue(gate.isResolved)
+    XCTAssertFalse(gate.resolveForExternalHandoff())
+    gate.beginImplicitDismissal()
+    XCTAssertFalse(gate.implicitDismissalIsPending)
+    XCTAssertTrue(gate.isResolved)
+  }
+
+  func testExternalHandoffClaimsSetterFirstImplicitDismissal() {
+    var gate = ComposerEntryRiskNoticeGate()
+    XCTAssertTrue(gate.composerBecameReady(showsNotice: true))
+
+    gate.beginImplicitDismissal()
+
+    XCTAssertTrue(gate.implicitDismissalIsPending)
+    XCTAssertTrue(gate.resolveForExternalHandoff())
+    XCTAssertTrue(gate.isResolved)
+    XCTAssertFalse(gate.implicitDismissalIsPending)
+  }
+
   func testEntryNoticeCopyDoesNotReplaceFinalConfirmationCopy() {
     XCTAssertEqual(ComposerEntryRiskNoticeCopy.standard.continueTitle, "继续编辑")
     XCTAssertEqual(ComposerEntryRiskNoticeCopy.standard.leaveTitle, "返回")
+    XCTAssertEqual(
+      OfficialTiebaReplyHandoffCopy.actionTitle,
+      "尝试使用官方客户端回帖"
+    )
+    XCTAssertFalse(OfficialTiebaReplyHandoffCopy.unavailableMessage.isEmpty)
     XCTAssertEqual(SubmissionConfirmationCopy.reply.actionTitle, "发送")
     XCTAssertEqual(SubmissionConfirmationCopy.newThread.actionTitle, "发布")
     XCTAssertNotEqual(

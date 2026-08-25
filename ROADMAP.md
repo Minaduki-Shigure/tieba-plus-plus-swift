@@ -28,7 +28,7 @@ from that source.
 | Anonymous discovery, search, and forums | 20 | 18–19 | Core browsing, ranking, recommendations, categories, and search are implemented; a few niche discovery paths remain. Account-bound dislike feedback is credited under server writes, not anonymous reading |
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, shared text selection/copying, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
-| Local data, settings, and customization | 10 | 7 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, confirmation-frozen foreground check-in execution settings, a TiebaLite-compatible default image-watermark choice, reply-entry visibility, a default-on composer risk notice, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
+| Local data, settings, and customization | 10 | 7 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, confirmation-frozen foreground check-in execution settings, a TiebaLite-compatible default image-watermark choice, reply-entry visibility, a default-on composer risk notice with an experimental reply-only system handoff attempt pending physical validation, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, Home-toolbar quick switching, a self-profile summary, an authenticated current-account following list with a guarded mutual filter, followed and target-user liked forums, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 14 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, server-reason-bound personalized recommendation dislike feedback, three text/classic-emoticon reply targets, equivalent new-topic creation, bounded static-image new-topic/direct-topic-reply creation, direct inline-preview reply entry, and credential-free official reporting entry points have guarded implementations; real batch-check-in behavior, creation, poll and interaction-restriction success, broader uploaded media, unresolvable cloud rows, native reporting, and other reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
@@ -66,9 +66,10 @@ in the iOS home projection and complete list.
 It adds one local-settings point because persistence, exact loaded-row projection,
 context actions, account switching, unfollow cleanup, and failure recovery are
 covered together without adding an authenticated request.
-The composer-entry risk notice likewise completes one narrow TiebaLite habit
-setting and hardens an existing creation flow, but adds no new write target or
-workflow and therefore does not add a weighted point.
+The composer-entry risk notice and experimental reply-only official-client
+choice implement one narrow TiebaLite habit and harden an existing creation
+flow, but add no App write target or weighted workflow point. The handoff remains
+outside credited compatibility until its iOS device matrix passes.
 The default image-watermark preference likewise closes a narrow composer habit
 gap inside the existing local-settings credit. It adds no upload, write target,
 or weighted point.
@@ -275,7 +276,8 @@ the source metadata is updated to that tested IPA.
 - Default-off local hiding of topic, floor, nested-reply, and inbox quick-reply
   entry points without removing reply content, drafts, or an open composer
 - Default-on, locally configurable entry-risk notice for editable reply and
-  new-topic composers, separate from final submission confirmation
+  new-topic composers, separate from final submission confirmation, with a
+  reply-only credential-free official-client handoff pending physical validation
 - Home-screen recent-forum history, expanded by default and independently hideable
 - Canonical forum/thread sharing and browse-mode-aware thread-link copying
 - Strict internal routing for supported Tieba HTTPS, pasted official-scheme,
@@ -574,6 +576,14 @@ and effect on later recommendations.
    switching, same-UID credential rotation, and whether submission changes later
    recommendation pages. Confirm that unknown outcomes never trigger a retry and
    that a stale account lease cannot publish a completion.
+15. Real-device validation of the experimental official-client reply handoff
+   with the current iOS official client installed and absent, covering topic,
+   floor, and nested targets, a different official-client account, return-to-App
+   draft retention, unsupported or hijacked custom-scheme handlers, and both
+   SideStore and LiveContainer. Record whether each route reaches a reply editor,
+   its intended floor, or only the App home page. Compare the observed full
+   TiebaLite template with a minimal TID/PID field set before retaining opaque
+   Chrome, push, referrer, and sample-attribution constants.
 
 The foreground inbox deliberately does not copy TiebaLite's cleartext JSON
 transport or its Android hardware parameters. ReplyMe uses the current HTTPS
@@ -1375,10 +1385,25 @@ before the affected page reloads.
 The independent composer-risk preference is a default-on local Boolean. An
 editable reply or new-topic composer restores its draft before presenting the
 notice; continuing only unlocks editing, while returning preserves the draft.
-The notice is advisory and never authorizes a request. Final send or publish
-confirmation captures the exact target and text in an immutable, one-use
-snapshot; any edit, confirmation dismissal, account-session change, or page exit
-invalidates that pending snapshot.
+For replies only, the third choice reproduces the full undocumented
+`com.baidu.tieba` PB compatibility template observed in TiebaLite from the
+validated target. Topic replies carry the TID; floor replies carry the TID and
+floor PID; nested replies carry only the parent PID and explicitly require the
+user to reselect the child in the receiving app. The template also retains
+TiebaLite's opaque fixed `obj_source`, `obj_param2`, `wise_sample_id`, `refer`,
+and `fr` values; they are not credentials, but their iOS routing and telemetry
+meaning is unverified. It bypasses the internal content router by code
+definition, reads no account or draft data, starts no App network request, and
+has no automatic retry or Web fallback. The composer remains available with its
+stored draft for both accepted and rejected system dispatch. A public
+custom-scheme handler and its active account cannot be authenticated, so the
+system result is never proof of an official app, correct login, reply position,
+or submission. New-topic creation deliberately omits this reply-only route
+rather than reproducing an invalid `tid=0` behavior. The notice remains advisory
+and never authorizes a request. Final send or publish confirmation captures the
+exact target and text in an immutable, one-use snapshot; any edit, confirmation
+dismissal, account-session change, or page exit invalidates that pending
+snapshot.
 
 Local content filtering covers ordinary and channel forum thread lists, global
 and per-forum search results, public-profile activity, post floors, nested

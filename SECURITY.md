@@ -465,7 +465,9 @@ confirmation. For reply and new-topic creation, this confirmation must bind an
 immutable target-and-content snapshot immediately before dispatch. Editing,
 dismissing the confirmation, changing the account session, or leaving the page
 invalidates that snapshot. The configurable composer-entry risk notice is
-advisory and must never satisfy this confirmation requirement. The home and
+advisory and must never satisfy this confirmation requirement. Its reply-only
+official-client handoff is an external navigation action, not an App submission:
+it must not satisfy, prepare, or dispatch the authenticated write. The home and
 account-page one-click entries only read the authoritative catalog until the
 same foreground confirmation is accepted. Automatic, scheduled, and background
 check-in are deliberately unsupported. `disagree` or
@@ -1542,6 +1544,28 @@ preserve, rather than delete, the restored draft. Disabling or acknowledging the
 notice must not bypass, pre-authorize, or weaken the final immutable-snapshot
 confirmation, account and target rebinding, session-lease checks, or no-retry
 boundary.
+
+The reply warning's experimental official-client handoff is the sole
+code-defined outbound use of the Baidu-named, undocumented custom scheme and
+does not register or claim that scheme.
+It is constructed from an already validated `TextReplyTarget` using only fixed
+nonsecret fields plus the positive public thread ID and, for a floor, its public
+post ID. It retains opaque fixed routing or attribution values observed in
+TiebaLite, including Chrome, push, referrer, and sample labels. They are not
+credentials, but their current iOS meaning is not verified and physical testing
+must compare whether a smaller field set can remove them. A nested-reply target
+intentionally collapses to its parent post; its child ID, author, forum metadata,
+text, attachments, draft, account identifiers, BDUSS, STOKEN, TBS, cookies, and
+headers must never enter the URL. The handoff must not read the account vault,
+call an App transport, use the internal content router, retry, or fall back to
+HTTP(S). The system open callback reports only
+whether some installed handler accepted the URL; it cannot authenticate that
+handler as Baidu's client, inspect its active account or editor, or prove a
+submission. Both callback outcomes retain the composer and stored draft. A
+tokenized lifecycle permits one open attempt, rejects overlap, and invalidates
+late completion after page exit or account-session change; an unavailable result
+may show only a local recovery message. No equivalent handoff is exposed by the
+new-topic composer because a PB-reply route cannot validly represent creation.
 
 Home-entry preferences are also nonsecret UserDefaults values. The start target
 must resolve through the closed home, post-ranking, hot-topic, inbox, local-

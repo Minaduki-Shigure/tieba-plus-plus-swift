@@ -51,6 +51,7 @@ struct ReplyComposerView: View {
 
 private struct ReplyComposerContentView: View {
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.openURL) private var openURL
   @ObservedObject var entry: TextReplySubmissionEntry
 
   let context: TextReplyComposerContext
@@ -84,6 +85,7 @@ private struct ReplyComposerContentView: View {
   @State private var isEmoticonPickerPresented = false
   @State private var lifecycleGate = ReplyComposerLifecycleGate()
   @State private var entryRiskNoticeGate = ComposerEntryRiskNoticeGate()
+  @State private var officialHandoffOpenGate = OfficialTiebaReplyHandoffOpenGate()
   @State private var confirmationPreparationGate = SubmissionConfirmationPreparationGate()
   @AppStorage(AppPreferenceKey.showsPostAndReplyRiskNotice)
   private var showsPostAndReplyRiskNotice = AppPreferenceDefaults.showsPostAndReplyRiskNotice
@@ -261,6 +263,13 @@ private struct ReplyComposerContentView: View {
       isPresented: entryRiskNoticeIsPresented,
       titleVisibility: .visible
     ) {
+      if officialTiebaReplyHandoff != nil {
+        Button(OfficialTiebaReplyHandoffCopy.actionTitle) {
+          openOfficialTiebaClientFromEntryRiskNotice()
+        }
+        .disabled(officialHandoffOpenGate.isOpening)
+        .accessibilityIdentifier("reply-composer-official-handoff")
+      }
       Button(ComposerEntryRiskNoticeCopy.standard.continueTitle) {
         continueAfterEntryRiskNotice()
       }
@@ -268,7 +277,7 @@ private struct ReplyComposerContentView: View {
         leaveFromEntryRiskNotice()
       }
     } message: {
-      Text(ComposerEntryRiskNoticeCopy.standard.message)
+      Text(entryRiskNoticeMessage)
     }
     .confirmationDialog(
       submissionConfirmationCopy.title,
@@ -361,6 +370,7 @@ private struct ReplyComposerContentView: View {
       }
       if !presentation.allowsEditing {
         isEmoticonPickerPresented = false
+        officialHandoffOpenGate.cancel()
       }
       resolveEntryRiskNoticeIfNeeded()
     }
@@ -384,7 +394,9 @@ private struct ReplyComposerContentView: View {
         )
       }
       confirmationPreparationGate.cancel()
+      officialHandoffOpenGate.cancel()
       pendingSubmission = nil
+      errorMessage = nil
       isEmoticonPickerPresented = false
       didHydrateDraft = false
       attachmentOwnerUserID = nil
@@ -444,7 +456,7 @@ private struct ReplyComposerContentView: View {
     Button("重新核对", action: checkVisibility)
       .buttonStyle(.bordered)
       .controlSize(.small)
-      .disabled(isCheckingVisibility)
+      .disabled(isCheckingVisibility || officialHandoffOpenGate.isOpening)
   }
 
   private func imageRecoveryButton(
@@ -453,7 +465,12 @@ private struct ReplyComposerContentView: View {
     Button(action.title, action: resumeImageSubmission)
       .buttonStyle(.borderedProminent)
       .controlSize(.small)
-      .disabled(isLaunchingSubmission || isCheckingVisibility || isImportingImages)
+      .disabled(
+        isLaunchingSubmission
+          || isCheckingVisibility
+          || isImportingImages
+          || officialHandoffOpenGate.isOpening
+      )
       .accessibilityIdentifier("reply-composer-\(action.accessibilityIdentifier)")
   }
 
@@ -483,6 +500,7 @@ private struct ReplyComposerContentView: View {
       && !isLaunchingSubmission
       && !isCheckingVisibility
       && !isImportingImages
+      && !officialHandoffOpenGate.isOpening
   }
 
   private var canDiscardDraft: Bool {
@@ -495,6 +513,7 @@ private struct ReplyComposerContentView: View {
       && !isImportingImages
       && !confirmationPreparationGate.isPreparing
       && pendingSubmission == nil
+      && !officialHandoffOpenGate.isOpening
   }
 
   private var editorAllowsEditing: Bool {
@@ -503,6 +522,7 @@ private struct ReplyComposerContentView: View {
       && !confirmationPreparationGate.isPreparing
       && pendingSubmission == nil
       && !isImportingImages
+      && !officialHandoffOpenGate.isOpening
   }
 
   private var imageEditorAllowsEditing: Bool {
@@ -527,6 +547,19 @@ private struct ReplyComposerContentView: View {
 
   private var submissionConfirmationCopy: SubmissionConfirmationCopy {
     .reply
+  }
+
+  private var officialTiebaReplyHandoff: OfficialTiebaReplyHandoff? {
+    OfficialTiebaReplyHandoff(target: context.target)
+  }
+
+  private var entryRiskNoticeMessage: String {
+    guard let handoff = officialTiebaReplyHandoff else {
+      return ComposerEntryRiskNoticeCopy.standard.message
+    }
+    return ComposerEntryRiskNoticeCopy.standard.message
+      + "\n"
+      + OfficialTiebaReplyHandoffCopy.disclosureMessage(for: handoff)
   }
 
   private var entryRiskNoticeIsPresented: Binding<Bool> {
@@ -570,6 +603,7 @@ private struct ReplyComposerContentView: View {
         && !isLaunchingSubmission
         && !isCheckingVisibility
         && !isImportingImages
+        && !officialHandoffOpenGate.isOpening
     )
   }
 
@@ -728,6 +762,42 @@ private struct ReplyComposerContentView: View {
     entryRiskNoticeGate.resolve()
     editorIsFocused = false
     dismiss()
+  }
+
+  private func openOfficialTiebaClientFromEntryRiskNotice() {
+    guard
+      lifecycleGate.isActive,
+      let handoff = officialTiebaReplyHandoff
+    else { return }
+    guard entryRiskNoticeGate.resolveForExternalHandoff() else { return }
+    guard
+      let request = officialHandoffOpenGate.begin(
+        handoff: handoff,
+        lifecycleID: lifecycleGate.lifecycleID
+      )
+    else { return }
+    editorIsFocused = false
+    OfficialTiebaReplyHandoffSystemDispatch.open(
+      request,
+      using: openURL
+    ) { request, accepted in
+      completeOfficialTiebaReplyHandoff(request, accepted: accepted)
+    }
+  }
+
+  @MainActor
+  private func completeOfficialTiebaReplyHandoff(
+    _ request: OfficialTiebaReplyHandoffOpenRequest,
+    accepted: Bool
+  ) {
+    guard
+      lifecycleGate.isActive,
+      lifecycleGate.isCurrent(request.lifecycleID),
+      let outcome = officialHandoffOpenGate.complete(request, accepted: accepted)
+    else { return }
+    if outcome == .unavailable {
+      errorMessage = OfficialTiebaReplyHandoffCopy.unavailableMessage
+    }
   }
 
   private func deferImplicitEntryRiskNoticeDismissal() {
@@ -905,6 +975,7 @@ private struct ReplyComposerContentView: View {
   private func persistAndDeactivate() {
     guard let disappearingLifecycleID = lifecycleGate.scheduleDeactivation() else { return }
     imageImportCancellationController.cancel()
+    officialHandoffOpenGate.cancel()
     Task { @MainActor in
       await Task.yield()
       var completedPollCount = 0

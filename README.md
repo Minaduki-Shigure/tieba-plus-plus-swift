@@ -17,7 +17,7 @@ and its verified metadata enters the public app source.
 | Area | Current state |
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
-| Local features | Available for history, favorites, filtering, appearance, media preferences, explicit standard/pure/only-author immersive thread-reading modes, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, a next-launch destination including the inbox, and ordered iOS Home Screen quick actions for existing destinations |
+| Local features | Available for history, favorites, filtering, appearance, media preferences, explicit standard/pure/only-author immersive thread-reading modes, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, a next-launch destination including the inbox, and ordered iOS Home Screen quick actions for existing destinations. The reply notice's system handoff attempt is implemented but remains pending physical-device validation |
 | Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary, followed forums, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies; both newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
 | TiebaLite parity | Current `main` and public `v0.62.3-alpha.1`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
@@ -271,6 +271,21 @@ and its verified metadata enters the public app source.
   matches the active App account. The user must verify or complete browser login.
   All non-performance capabilities in this release-scope block remain included
   in the public `v0.62.3-alpha.1` IPA.
+- **Current-main experimental official-client reply handoff:** The default-on
+  entry warning for topic, floor, and nested replies now offers TiebaLite's
+  official-client choice beside continuing or returning. A dedicated builder
+  passes the full undocumented compatibility template observed in TiebaLite to
+  `com.baidu.tieba://unidispatch/pb`: topics use `pb_reply`, while floors use
+  their PID and nested replies deliberately use only their parent PID.
+  The latter limitation is disclosed before opening. The App sends no draft,
+  forum name, account identifier, credential, or network request, performs no
+  fallback or retry, and keeps the composer and stored draft after either system
+  result. Because iOS dispatches an undocumented custom scheme, acceptance proves only
+  that an installed app can receive it; users must verify the receiving app,
+  login, reply position, and actual submission. New-topic creation does not
+  expose this PB-reply handoff. Compatibility with the current iOS official
+  client and its actual landing positions remains unverified on both SideStore
+  and LiveContainer installations.
 - **Current-main default image watermark:** Settings can choose forum name,
   username, or no watermark as the default for a new image-capable composer.
   The local stored values match TiebaLite's stable `2`, `1`, and `0` contract,

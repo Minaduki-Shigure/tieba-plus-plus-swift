@@ -54,6 +54,15 @@ struct ComposerEntryRiskNoticeGate: Equatable, Sendable {
     state = .resolved
   }
 
+  @discardableResult
+  mutating func resolveForExternalHandoff() -> Bool {
+    guard state == .presenting || state == .implicitDismissalPending else {
+      return false
+    }
+    state = .resolved
+    return true
+  }
+
   mutating func beginImplicitDismissal() {
     guard state == .presenting else { return }
     state = .implicitDismissalPending
