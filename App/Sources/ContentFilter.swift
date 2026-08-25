@@ -38,8 +38,22 @@ enum ContentFilterRuleKind: String, CaseIterable, Codable, Hashable, Identifiabl
   }
 }
 
-enum ContentFilterKeywordMatchMode: String, Codable, Hashable, Sendable {
+enum ContentFilterKeywordMatchMode:
+  String, CaseIterable, Codable, Hashable, Identifiable, Sendable
+{
   case literal
+  case regularExpression = "regular-expression"
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .literal:
+      "普通关键词"
+    case .regularExpression:
+      "正则表达式"
+    }
+  }
 }
 
 enum ContentFilterDisplayMode: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
@@ -67,8 +81,20 @@ struct ContentFilterRule: Codable, Hashable, Identifiable, Sendable {
   let userID: Int64?
   let username: String
   let createdAt: Date
+  private let compiledRegularExpression: SafeContentFilterRegex?
 
-  init(
+  private enum CodingKeys: String, CodingKey {
+    case id
+    case list
+    case kind
+    case keyword
+    case keywordMatchMode
+    case userID
+    case username
+    case createdAt
+  }
+
+  private init(
     id: UUID = UUID(),
     list: ContentFilterList,
     kind: ContentFilterRuleKind,
@@ -76,7 +102,8 @@ struct ContentFilterRule: Codable, Hashable, Identifiable, Sendable {
     keywordMatchMode: ContentFilterKeywordMatchMode = .literal,
     userID: Int64? = nil,
     username: String = "",
-    createdAt: Date = Date()
+    createdAt: Date = Date(),
+    compiledRegularExpression: SafeContentFilterRegex? = nil
   ) {
     self.id = id
     self.list = list
@@ -86,6 +113,88 @@ struct ContentFilterRule: Codable, Hashable, Identifiable, Sendable {
     self.userID = userID
     self.username = username
     self.createdAt = createdAt
+    self.compiledRegularExpression = compiledRegularExpression
+  }
+
+  init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    let id = try container.decode(UUID.self, forKey: .id)
+    let list = try container.decode(ContentFilterList.self, forKey: .list)
+    let kind = try container.decode(ContentFilterRuleKind.self, forKey: .kind)
+    let keyword = try container.decode(String.self, forKey: .keyword)
+    let keywordMatchMode = try container.decode(
+      ContentFilterKeywordMatchMode.self,
+      forKey: .keywordMatchMode
+    )
+    let userID = try container.decodeIfPresent(Int64.self, forKey: .userID)
+    let username = try container.decode(String.self, forKey: .username)
+    let createdAt = try container.decode(Date.self, forKey: .createdAt)
+    let compiledRegularExpression: SafeContentFilterRegex?
+    switch (kind, keywordMatchMode) {
+    case (.keyword, .regularExpression):
+      do {
+        compiledRegularExpression = try SafeContentFilterRegex(keyword)
+      } catch {
+        throw DecodingError.dataCorruptedError(
+          forKey: .keyword,
+          in: container,
+          debugDescription: "The bounded regular expression is invalid."
+        )
+      }
+    case (.keyword, .literal), (.user, .literal):
+      compiledRegularExpression = nil
+    case (.user, .regularExpression):
+      throw DecodingError.dataCorruptedError(
+        forKey: .keywordMatchMode,
+        in: container,
+        debugDescription: "A user rule cannot use keyword matching."
+      )
+    }
+    self.init(
+      id: id,
+      list: list,
+      kind: kind,
+      keyword: keyword,
+      keywordMatchMode: keywordMatchMode,
+      userID: userID,
+      username: username,
+      createdAt: createdAt,
+      compiledRegularExpression: compiledRegularExpression
+    )
+  }
+
+  func encode(to encoder: any Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(id, forKey: .id)
+    try container.encode(list, forKey: .list)
+    try container.encode(kind, forKey: .kind)
+    try container.encode(keyword, forKey: .keyword)
+    try container.encode(keywordMatchMode, forKey: .keywordMatchMode)
+    try container.encodeIfPresent(userID, forKey: .userID)
+    try container.encode(username, forKey: .username)
+    try container.encode(createdAt, forKey: .createdAt)
+  }
+
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.id == rhs.id
+      && lhs.list == rhs.list
+      && lhs.kind == rhs.kind
+      && lhs.keyword == rhs.keyword
+      && lhs.keywordMatchMode == rhs.keywordMatchMode
+      && lhs.userID == rhs.userID
+      && lhs.username == rhs.username
+      && lhs.createdAt == rhs.createdAt
+  }
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine(id)
+    hasher.combine(list)
+    hasher.combine(kind)
+    hasher.combine(keyword)
+    hasher.combine(keywordMatchMode)
+    hasher.combine(userID)
+    hasher.combine(username)
+    hasher.combine(createdAt)
   }
 
   static func keyword(
@@ -101,6 +210,24 @@ struct ContentFilterRule: Codable, Hashable, Identifiable, Sendable {
       keyword: keyword,
       keywordMatchMode: .literal,
       createdAt: createdAt
+    )
+  }
+
+  static func regularExpression(
+    _ pattern: String,
+    list: ContentFilterList,
+    id: UUID = UUID(),
+    createdAt: Date = Date()
+  ) throws -> Self {
+    let compiled = try SafeContentFilterRegex(pattern)
+    return ContentFilterRule(
+      id: id,
+      list: list,
+      kind: .keyword,
+      keyword: pattern,
+      keywordMatchMode: .regularExpression,
+      createdAt: createdAt,
+      compiledRegularExpression: compiled
     )
   }
 
@@ -142,12 +269,100 @@ struct ContentFilterRule: Codable, Hashable, Identifiable, Sendable {
       "\(list.rawValue):user:\(userID.map { String($0) } ?? ""):\(username)"
     }
   }
+
+  fileprivate func matchesRegularExpression(
+    in input: SafeContentFilterRegex.Input,
+    workspace: inout SafeContentFilterRegex.Workspace,
+    remainingSteps: inout Int
+  ) -> SafeContentFilterRegex.MatchResult {
+    compiledRegularExpression?.match(
+      in: input,
+      workspace: &workspace,
+      remainingSteps: &remainingSteps
+    ) ?? .budgetExhausted
+  }
 }
 
 struct ContentFilterSnapshot: Codable, Hashable, Sendable {
   let displayMode: ContentFilterDisplayMode
   let blockVideos: Bool
   let rules: [ContentFilterRule]
+
+  private let literalKeywordAllowRules: [ContentFilterRule]
+  private let literalKeywordBlockRules: [ContentFilterRule]
+  private let regularExpressionAllowRules: [ContentFilterRule]
+  private let regularExpressionBlockRules: [ContentFilterRule]
+  private let allowedUserIDs: Set<Int64>
+  private let blockedUserIDs: Set<Int64>
+  private let allowedUsernames: Set<String>
+  private let blockedUsernames: Set<String>
+
+  private enum CodingKeys: String, CodingKey {
+    case displayMode
+    case blockVideos
+    case rules
+  }
+
+  init(
+    displayMode: ContentFilterDisplayMode,
+    blockVideos: Bool,
+    rules: [ContentFilterRule]
+  ) {
+    self.displayMode = displayMode
+    self.blockVideos = blockVideos
+    self.rules = rules
+    self.literalKeywordAllowRules = rules.filter {
+      $0.kind == .keyword && $0.list == .allow && $0.keywordMatchMode == .literal
+    }
+    self.literalKeywordBlockRules = rules.filter {
+      $0.kind == .keyword && $0.list == .block && $0.keywordMatchMode == .literal
+    }
+    self.regularExpressionAllowRules = rules.filter {
+      $0.kind == .keyword
+        && $0.list == .allow
+        && $0.keywordMatchMode == .regularExpression
+    }
+    self.regularExpressionBlockRules = rules.filter {
+      $0.kind == .keyword
+        && $0.list == .block
+        && $0.keywordMatchMode == .regularExpression
+    }
+
+    let allowedUsers = rules.filter { $0.kind == .user && $0.list == .allow }
+    let blockedUsers = rules.filter { $0.kind == .user && $0.list == .block }
+    self.allowedUserIDs = Set(allowedUsers.compactMap(\.userID))
+    self.blockedUserIDs = Set(blockedUsers.compactMap(\.userID))
+    self.allowedUsernames = Set(allowedUsers.map(\.username).filter { !$0.isEmpty })
+    self.blockedUsernames = Set(blockedUsers.map(\.username).filter { !$0.isEmpty })
+  }
+
+  init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.init(
+      displayMode: try container.decode(ContentFilterDisplayMode.self, forKey: .displayMode),
+      blockVideos: try container.decode(Bool.self, forKey: .blockVideos),
+      rules: try container.decode([ContentFilterRule].self, forKey: .rules)
+    )
+  }
+
+  func encode(to encoder: any Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(displayMode, forKey: .displayMode)
+    try container.encode(blockVideos, forKey: .blockVideos)
+    try container.encode(rules, forKey: .rules)
+  }
+
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.displayMode == rhs.displayMode
+      && lhs.blockVideos == rhs.blockVideos
+      && lhs.rules == rhs.rules
+  }
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine(displayMode)
+    hasher.combine(blockVideos)
+    hasher.combine(rules)
+  }
 
   static let empty = ContentFilterSnapshot(
     displayMode: .placeholder,
@@ -164,10 +379,77 @@ struct ContentFilterSnapshot: Codable, Hashable, Sendable {
   }
 }
 
+enum ContentFilterKeywordPatternError: LocalizedError, Equatable, Sendable {
+  case empty
+  case tooLong
+  case invalidRegularExpression(String)
+
+  var errorDescription: String? {
+    switch self {
+    case .empty:
+      "请输入匹配内容。"
+    case .tooLong:
+      "匹配内容不能超过 \(SafeContentFilterRegex.maximumPatternCharacters) 个字符。"
+    case .invalidRegularExpression(let message):
+      message
+    }
+  }
+}
+
+enum ContentFilterKeywordPatternPolicy {
+  static func validated(
+    _ value: String,
+    mode: ContentFilterKeywordMatchMode
+  ) throws -> String {
+    let normalized = normalized(value, mode: mode)
+    guard !normalized.isEmpty else { throw ContentFilterKeywordPatternError.empty }
+    guard normalized.count <= SafeContentFilterRegex.maximumPatternCharacters else {
+      throw ContentFilterKeywordPatternError.tooLong
+    }
+
+    if mode == .regularExpression {
+      do {
+        _ = try SafeContentFilterRegex(normalized)
+      } catch {
+        throw ContentFilterKeywordPatternError.invalidRegularExpression(
+          (error as? any LocalizedError)?.errorDescription ?? "正则表达式无效。"
+        )
+      }
+    }
+    return normalized
+  }
+
+  static func validationMessage(
+    for value: String,
+    mode: ContentFilterKeywordMatchMode
+  ) -> String? {
+    do {
+      _ = try validated(value, mode: mode)
+      return nil
+    } catch {
+      return (error as? any LocalizedError)?.errorDescription ?? "匹配内容无效。"
+    }
+  }
+
+  private static func normalized(
+    _ value: String,
+    mode: ContentFilterKeywordMatchMode
+  ) -> String {
+    let canonical = value.precomposedStringWithCanonicalMapping
+    switch mode {
+    case .literal:
+      return canonical.trimmingCharacters(in: .whitespacesAndNewlines)
+    case .regularExpression:
+      return canonical
+    }
+  }
+}
+
 enum ContentFilterStoreError: LocalizedError, Equatable, Sendable {
   case invalidRule
   case duplicateRule
   case tooManyRules
+  case tooManyRegularExpressions
   case archiveTooLarge
   case corruptedArchive
   case unsupportedSchemaVersion(Int)
@@ -183,6 +465,8 @@ enum ContentFilterStoreError: LocalizedError, Equatable, Sendable {
       "相同规则已存在。"
     case .tooManyRules:
       "本地规则数量已达到上限。"
+    case .tooManyRegularExpressions:
+      "正则表达式规则数量已达到安全上限。"
     case .archiveTooLarge:
       "本地屏蔽规则文件超过安全大小限制。"
     case .corruptedArchive:
@@ -239,8 +523,9 @@ struct EmptyContentFilterRepository: ContentFilterRepository {
 }
 
 actor FileContentFilterStore: ContentFilterRepository {
-  static let schemaVersion = 1
+  static let schemaVersion = 2
   static let defaultMaximumRules = 500
+  static let defaultMaximumRegularExpressionRules = 32
   static let defaultMaximumArchiveBytes = 512 * 1_024
 
   private struct Archive: Codable, Hashable, Sendable {
@@ -263,18 +548,59 @@ actor FileContentFilterStore: ContentFilterRepository {
     let schemaVersion: Int
   }
 
+  private struct LegacyArchiveV1: Decodable, Sendable {
+    let schemaVersion: Int
+    let displayMode: ContentFilterDisplayMode
+    let blockVideos: Bool
+    let rules: [LegacyRuleV1]
+  }
+
+  private struct LegacyRuleV1: Decodable, Sendable {
+    let id: UUID
+    let list: ContentFilterList
+    let kind: ContentFilterRuleKind
+    let keyword: String
+    let keywordMatchMode: ContentFilterKeywordMatchMode
+    let userID: Int64?
+    let username: String
+    let createdAt: Date
+
+    func migrated() throws -> ContentFilterRule {
+      guard keywordMatchMode == .literal else {
+        throw ContentFilterStoreError.invalidRule
+      }
+      switch kind {
+      case .keyword:
+        return .keyword(keyword, list: list, id: id, createdAt: createdAt)
+      case .user:
+        return .user(
+          id: userID,
+          name: username,
+          list: list,
+          ruleID: id,
+          createdAt: createdAt
+        )
+      }
+    }
+  }
+
   private let fileURL: URL
   private let maximumRules: Int
+  private let maximumRegularExpressionRules: Int
   private let maximumArchiveBytes: Int
+  private var cachedArchive: Archive?
+  private var cachedSnapshot: ContentFilterSnapshot?
   private var fileManager: FileManager { .default }
 
   init(
     fileURL: URL,
     maximumRules: Int = defaultMaximumRules,
+    maximumRegularExpressionRules: Int = defaultMaximumRegularExpressionRules,
     maximumArchiveBytes: Int = defaultMaximumArchiveBytes
   ) {
     self.fileURL = fileURL
     self.maximumRules = max(maximumRules, 1)
+    self.maximumRegularExpressionRules = max(maximumRegularExpressionRules, 1)
     self.maximumArchiveBytes = max(maximumArchiveBytes, 1_024)
   }
 
@@ -291,20 +617,31 @@ actor FileContentFilterStore: ContentFilterRepository {
   }
 
   func snapshot() async throws -> ContentFilterSnapshot {
+    if let cachedSnapshot { return cachedSnapshot }
     let archive = try loadArchive()
-    return ContentFilterSnapshot(
+    let snapshot = ContentFilterSnapshot(
       displayMode: archive.displayMode,
       blockVideos: archive.blockVideos,
       rules: archive.rules
     )
+    cachedSnapshot = snapshot
+    return snapshot
   }
 
   @discardableResult
   func add(_ rule: ContentFilterRule) async throws -> ContentFilterRule {
     let rule = try Self.normalizedRule(rule)
-    var candidate = try loadArchive()
+    var candidate = try loadArchiveForMutation()
     guard candidate.rules.count < maximumRules else {
       throw ContentFilterStoreError.tooManyRules
+    }
+    if rule.kind == .keyword && rule.keywordMatchMode == .regularExpression {
+      let regularExpressionCount = candidate.rules.lazy.filter {
+        $0.kind == .keyword && $0.keywordMatchMode == .regularExpression
+      }.count
+      guard regularExpressionCount < maximumRegularExpressionRules else {
+        throw ContentFilterStoreError.tooManyRegularExpressions
+      }
     }
     guard !candidate.rules.contains(where: { $0.identityKey == rule.identityKey }) else {
       throw ContentFilterStoreError.duplicateRule
@@ -317,7 +654,7 @@ actor FileContentFilterStore: ContentFilterRepository {
   }
 
   func delete(id: UUID) async throws {
-    var candidate = try loadArchive()
+    var candidate = try loadArchiveForMutation()
     let previousCount = candidate.rules.count
     candidate.rules.removeAll { $0.id == id }
     guard candidate.rules.count != previousCount else { return }
@@ -326,7 +663,7 @@ actor FileContentFilterStore: ContentFilterRepository {
   }
 
   func deleteAll(in list: ContentFilterList) async throws {
-    var candidate = try loadArchive()
+    var candidate = try loadArchiveForMutation()
     let previousCount = candidate.rules.count
     candidate.rules.removeAll { $0.list == list }
     guard candidate.rules.count != previousCount else { return }
@@ -335,7 +672,7 @@ actor FileContentFilterStore: ContentFilterRepository {
   }
 
   func setDisplayMode(_ mode: ContentFilterDisplayMode) async throws {
-    var candidate = try loadArchive()
+    var candidate = try loadArchiveForMutation()
     guard candidate.displayMode != mode else { return }
     candidate.displayMode = mode
     try commit(candidate)
@@ -343,7 +680,7 @@ actor FileContentFilterStore: ContentFilterRepository {
   }
 
   func setBlockVideos(_ blockVideos: Bool) async throws {
-    var candidate = try loadArchive()
+    var candidate = try loadArchiveForMutation()
     guard candidate.blockVideos != blockVideos else { return }
     candidate.blockVideos = blockVideos
     try commit(candidate)
@@ -351,19 +688,48 @@ actor FileContentFilterStore: ContentFilterRepository {
   }
 
   func reset() async throws {
-    guard fileManager.fileExists(atPath: fileURL.path) else { return }
+    guard fileManager.fileExists(atPath: fileURL.path) else {
+      cachedArchive = .empty
+      cachedSnapshot = .empty
+      return
+    }
     do {
       try fileManager.removeItem(at: fileURL)
     } catch {
       throw ContentFilterStoreError.writeFailed
     }
+    cachedArchive = .empty
+    cachedSnapshot = .empty
     notifyChange()
   }
 
   private func loadArchive() throws -> Archive {
-    guard fileManager.fileExists(atPath: fileURL.path) else { return .empty }
-    var archive = try decodedArchiveFromDisk()
-    archive.rules = normalizedRules(archive.rules)
+    if let cachedArchive { return cachedArchive }
+    guard fileManager.fileExists(atPath: fileURL.path) else {
+      let archive = Archive.empty
+      cachedArchive = archive
+      return archive
+    }
+    let archive = try decodedArchiveFromDisk()
+    cachedArchive = archive
+    return archive
+  }
+
+  private func loadArchiveForMutation() throws -> Archive {
+    cachedArchive = nil
+    cachedSnapshot = nil
+    guard fileManager.fileExists(atPath: fileURL.path) else {
+      let archive = Archive.empty
+      cachedArchive = archive
+      return archive
+    }
+    let archive = try decodedArchiveFromDisk()
+    cachedArchive = archive
+    cachedSnapshot = ContentFilterSnapshot(
+      displayMode: archive.displayMode,
+      blockVideos: archive.blockVideos,
+      rules: archive.rules
+    )
     return archive
   }
 
@@ -385,17 +751,37 @@ actor FileContentFilterStore: ContentFilterRepository {
     } catch {
       throw ContentFilterStoreError.corruptedArchive
     }
-    guard header.schemaVersion == Self.schemaVersion else {
-      throw ContentFilterStoreError.unsupportedSchemaVersion(header.schemaVersion)
-    }
-
     do {
-      let archive = try decoder.decode(Archive.self, from: data)
+      let archive: Archive
+      switch header.schemaVersion {
+      case 1:
+        let legacy = try decoder.decode(LegacyArchiveV1.self, from: data)
+        archive = Archive(
+          schemaVersion: Self.schemaVersion,
+          displayMode: legacy.displayMode,
+          blockVideos: legacy.blockVideos,
+          rules: try legacy.rules.map { try $0.migrated() }
+        )
+      case Self.schemaVersion:
+        archive = try decoder.decode(Archive.self, from: data)
+      default:
+        throw ContentFilterStoreError.unsupportedSchemaVersion(header.schemaVersion)
+      }
       guard archive.rules.count <= maximumRules else {
         throw ContentFilterStoreError.corruptedArchive
       }
-      _ = try archive.rules.map(Self.normalizedRule)
-      return archive
+      guard
+        archive.rules.lazy.filter({
+          $0.kind == .keyword && $0.keywordMatchMode == .regularExpression
+        }).count <= maximumRegularExpressionRules
+      else {
+        throw ContentFilterStoreError.corruptedArchive
+      }
+      var normalizedArchive = archive
+      normalizedArchive.rules = normalizedRules(
+        try archive.rules.map(Self.normalizedRule)
+      )
+      return normalizedArchive
     } catch let error as ContentFilterStoreError {
       if error == .invalidRule { throw ContentFilterStoreError.corruptedArchive }
       throw error
@@ -428,11 +814,17 @@ actor FileContentFilterStore: ContentFilterRepository {
     } catch {
       throw ContentFilterStoreError.writeFailed
     }
+    cachedArchive = candidate
+    cachedSnapshot = ContentFilterSnapshot(
+      displayMode: candidate.displayMode,
+      blockVideos: candidate.blockVideos,
+      rules: candidate.rules
+    )
   }
 
   private func normalizedRules(_ rules: [ContentFilterRule]) -> [ContentFilterRule] {
     var newestByIdentity: [String: ContentFilterRule] = [:]
-    for rule in rules.compactMap({ try? Self.normalizedRule($0) }) {
+    for rule in rules {
       if let current = newestByIdentity[rule.identityKey], current.createdAt >= rule.createdAt {
         continue
       }
@@ -445,7 +837,6 @@ actor FileContentFilterStore: ContentFilterRepository {
   }
 
   private static func normalizedRule(_ rule: ContentFilterRule) throws -> ContentFilterRule {
-    let keyword = normalizedText(rule.keyword)
     let username = normalizedText(rule.username)
     guard rule.createdAt.timeIntervalSinceReferenceDate.isFinite else {
       throw ContentFilterStoreError.invalidRule
@@ -453,17 +844,35 @@ actor FileContentFilterStore: ContentFilterRepository {
 
     switch rule.kind {
     case .keyword:
-      guard (1...128).contains(keyword.count) else {
+      let pattern: String
+      do {
+        pattern = try ContentFilterKeywordPatternPolicy.validated(
+          rule.keyword,
+          mode: rule.keywordMatchMode
+        )
+      } catch {
         throw ContentFilterStoreError.invalidRule
       }
-      return ContentFilterRule(
-        id: rule.id,
-        list: rule.list,
-        kind: .keyword,
-        keyword: keyword,
-        keywordMatchMode: .literal,
-        createdAt: rule.createdAt
-      )
+      switch rule.keywordMatchMode {
+      case .literal:
+        return .keyword(
+          pattern,
+          list: rule.list,
+          id: rule.id,
+          createdAt: rule.createdAt
+        )
+      case .regularExpression:
+        do {
+          return try .regularExpression(
+            pattern,
+            list: rule.list,
+            id: rule.id,
+            createdAt: rule.createdAt
+          )
+        } catch {
+          throw ContentFilterStoreError.invalidRule
+        }
+      }
     case .user:
       if let userID = rule.userID, userID <= 0 {
         throw ContentFilterStoreError.invalidRule
@@ -471,12 +880,11 @@ actor FileContentFilterStore: ContentFilterRepository {
       guard username.count <= 100, rule.userID != nil || !username.isEmpty else {
         throw ContentFilterStoreError.invalidRule
       }
-      return ContentFilterRule(
-        id: rule.id,
+      return .user(
+        id: rule.userID,
+        name: username,
         list: rule.list,
-        kind: .user,
-        userID: rule.userID,
-        username: username,
+        ruleID: rule.id,
         createdAt: rule.createdAt
       )
     }
@@ -507,6 +915,8 @@ actor FileContentFilterStore: ContentFilterRepository {
 }
 
 extension ContentFilterSnapshot {
+  static let regularExpressionStepBudgetPerField = 200_000
+
   func visibility(
     for thread: BrowseThread,
     hasKnownVideo: Bool = false
@@ -680,11 +1090,74 @@ extension ContentFilterSnapshot {
 
   private func blocksKeyword(_ text: String) -> Bool {
     guard !text.isEmpty else { return false }
-    let keywordRules = rules.filter { $0.kind == .keyword }
-    if keywordRules.contains(where: { $0.list == .allow && text.contains($0.keyword) }) {
+    if literalKeywordAllowRules.contains(where: { text.contains($0.keyword) }) {
       return false
     }
-    return keywordRules.contains { $0.list == .block && text.contains($0.keyword) }
+
+    if regularExpressionAllowRules.isEmpty {
+      if literalKeywordBlockRules.contains(where: { text.contains($0.keyword) }) {
+        return true
+      }
+      guard !regularExpressionBlockRules.isEmpty else { return false }
+
+      let input = SafeContentFilterRegex.Input(text)
+      var workspace = SafeContentFilterRegex.Workspace()
+      var remainingSteps = Self.regularExpressionStepBudgetPerField
+      return regularExpressionMatch(
+        in: regularExpressionBlockRules,
+        input: input,
+        workspace: &workspace,
+        remainingSteps: &remainingSteps
+      ) == .matched
+    }
+
+    let input = SafeContentFilterRegex.Input(text)
+    var workspace = SafeContentFilterRegex.Workspace()
+    var remainingSteps = Self.regularExpressionStepBudgetPerField
+    switch regularExpressionMatch(
+      in: regularExpressionAllowRules,
+      input: input,
+      workspace: &workspace,
+      remainingSteps: &remainingSteps
+    ) {
+    case .matched, .budgetExhausted:
+      return false
+    case .notMatched:
+      break
+    }
+
+    if literalKeywordBlockRules.contains(where: { text.contains($0.keyword) }) {
+      return true
+    }
+    return regularExpressionMatch(
+      in: regularExpressionBlockRules,
+      input: input,
+      workspace: &workspace,
+      remainingSteps: &remainingSteps
+    ) == .matched
+  }
+
+  private func regularExpressionMatch(
+    in rules: [ContentFilterRule],
+    input: SafeContentFilterRegex.Input,
+    workspace: inout SafeContentFilterRegex.Workspace,
+    remainingSteps: inout Int
+  ) -> SafeContentFilterRegex.MatchResult {
+    for rule in rules {
+      switch rule.matchesRegularExpression(
+        in: input,
+        workspace: &workspace,
+        remainingSteps: &remainingSteps
+      ) {
+      case .matched:
+        return .matched
+      case .notMatched:
+        continue
+      case .budgetExhausted:
+        return .budgetExhausted
+      }
+    }
+    return .notMatched
   }
 
   private func blocksUser(
@@ -692,26 +1165,33 @@ extension ContentFilterSnapshot {
     preferredName: String,
     username: String
   ) -> Bool {
-    let userRules = rules.filter { $0.kind == .user }
-    if userRules.contains(where: {
-      $0.list == .allow && Self.matchesUser($0, id, preferredName, username)
-    }) {
+    if Self.matchesUser(
+      id: id,
+      preferredName: preferredName,
+      username: username,
+      ids: allowedUserIDs,
+      names: allowedUsernames
+    ) {
       return false
     }
-    return userRules.contains {
-      $0.list == .block && Self.matchesUser($0, id, preferredName, username)
-    }
+    return Self.matchesUser(
+      id: id,
+      preferredName: preferredName,
+      username: username,
+      ids: blockedUserIDs,
+      names: blockedUsernames
+    )
   }
 
   private static func matchesUser(
-    _ rule: ContentFilterRule,
-    _ userID: Int64,
-    _ preferredName: String,
-    _ username: String
+    id userID: Int64,
+    preferredName: String,
+    username: String,
+    ids: Set<Int64>,
+    names: Set<String>
   ) -> Bool {
-    let matchesID = rule.userID.map { userID > 0 && $0 == userID } ?? false
-    let matchesName = !rule.username.isEmpty
-      && (rule.username == preferredName || rule.username == username)
+    let matchesID = userID > 0 && ids.contains(userID)
+    let matchesName = names.contains(preferredName) || names.contains(username)
     return matchesID || matchesName
   }
 

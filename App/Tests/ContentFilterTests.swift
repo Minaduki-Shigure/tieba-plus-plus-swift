@@ -59,6 +59,182 @@ final class ContentFilterTests: XCTestCase {
     )
   }
 
+  func testRegularExpressionRulesMatchTheSupportedUnicodeSubset() throws {
+    let snapshot = ContentFilterSnapshot(
+      displayMode: .placeholder,
+      blockVideos: false,
+      rules: [
+        try .regularExpression(
+          #"^(可信|普通)\s+广告\d{2,4}$"#,
+          list: .block
+        )
+      ]
+    )
+
+    XCTAssertEqual(
+      snapshot.visibility(for: thread(title: "可信 广告2026", excerpt: "ordinary")),
+      .placeholder
+    )
+    XCTAssertEqual(
+      snapshot.visibility(for: thread(title: "可信 广告20A6", excerpt: "ordinary")),
+      .visible
+    )
+    XCTAssertEqual(
+      snapshot.visibility(for: thread(title: "前缀 可信 广告2026", excerpt: "ordinary")),
+      .visible
+    )
+  }
+
+  func testRegularExpressionAllowListRemainsScopedToOneInspectedField() throws {
+    let snapshot = ContentFilterSnapshot(
+      displayMode: .hidden,
+      blockVideos: false,
+      rules: [
+        try .regularExpression(#"广告\d+"#, list: .block),
+        try .regularExpression(#"^可信广告\d+$"#, list: .allow),
+      ]
+    )
+
+    XCTAssertEqual(
+      snapshot.visibility(for: thread(title: "可信广告2026", excerpt: "ordinary")),
+      .visible
+    )
+    XCTAssertEqual(
+      snapshot.visibility(for: thread(title: "可信广告2026", excerpt: "另有广告7")),
+      .hidden
+    )
+  }
+
+  func testLiteralRuleStillTreatsRegularExpressionMetacharactersLiterally() {
+    let snapshot = ContentFilterSnapshot(
+      displayMode: .placeholder,
+      blockVideos: false,
+      rules: [.keyword("广告.*推广", list: .block)]
+    )
+
+    XCTAssertEqual(
+      snapshot.visibility(for: thread(title: "广告.*推广", excerpt: "ordinary")),
+      .placeholder
+    )
+    XCTAssertEqual(
+      snapshot.visibility(for: thread(title: "广告很多推广", excerpt: "ordinary")),
+      .visible
+    )
+  }
+
+  func testRegularExpressionValidationRejectsUnsupportedOrUnboundedSyntax() throws {
+    let invalidPatterns = [
+      #"(?=广告)"#,
+      #"(广告)\1"#,
+      #"广告+?"#,
+      #"[广告"#,
+      #"广告{257}"#,
+    ]
+
+    for pattern in invalidPatterns {
+      XCTAssertNotNil(
+        ContentFilterKeywordPatternPolicy.validationMessage(
+          for: pattern,
+          mode: .regularExpression
+        ),
+        "Expected pattern to be rejected: \(pattern)"
+      )
+    }
+
+    XCTAssertEqual(
+      try ContentFilterKeywordPatternPolicy.validated(
+        "  literal  ",
+        mode: .literal
+      ),
+      "literal"
+    )
+    XCTAssertEqual(
+      try ContentFilterKeywordPatternPolicy.validated(
+        "^ literal $",
+        mode: .regularExpression
+      ),
+      "^ literal $"
+    )
+  }
+
+  func testNestedQuantifiersHaveBoundedNonBacktrackingExecution() throws {
+    let expression = try SafeContentFilterRegex(#"^(a+)+$"#)
+    let adversarial = String(repeating: "a", count: 8_192) + "!"
+
+    XCTAssertFalse(expression.matches(in: adversarial))
+  }
+
+  func testRegularExpressionInputLimitDoesNotFabricateEndOrBoundary() throws {
+    let prefixMatch = try SafeContentFilterRegex("广告")
+    let endMatch = try SafeContentFilterRegex("广告$")
+    let boundaryMatch = try SafeContentFilterRegex(#"广告\b"#)
+    let longWord = String(repeating: "a", count: 8_190) + "广告" + "x"
+
+    XCTAssertTrue(prefixMatch.matches(in: longWord))
+    XCTAssertFalse(endMatch.matches(in: longWord))
+    XCTAssertFalse(boundaryMatch.matches(in: longWord))
+    XCTAssertTrue(boundaryMatch.matches(in: String(repeating: "a", count: 8_190) + "广告!"))
+  }
+
+  func testRegularExpressionBudgetExhaustionFailsOpenBeforeBlocking() throws {
+    let expensiveExpression = try SafeContentFilterRegex(#"(a?){126}z"#)
+    let input = SafeContentFilterRegex.Input(String(repeating: "a", count: 8_192))
+    var workspace = SafeContentFilterRegex.Workspace()
+    var budget = ContentFilterSnapshot.regularExpressionStepBudgetPerField
+    XCTAssertEqual(
+      expensiveExpression.match(
+        in: input,
+        workspace: &workspace,
+        remainingSteps: &budget
+      ),
+      .budgetExhausted
+    )
+
+    let snapshot = ContentFilterSnapshot(
+      displayMode: .hidden,
+      blockVideos: false,
+      rules: [
+        try .regularExpression(#"(a?){126}z"#, list: .allow),
+        .keyword("a", list: .block),
+      ]
+    )
+
+    XCTAssertEqual(
+      snapshot.visibility(
+        for: thread(
+          title: String(repeating: "a", count: 8_192),
+          excerpt: "ordinary"
+        )
+      ),
+      .visible
+    )
+  }
+
+  func testRegularExpressionWorkspaceCanBeReusedAfterBudgetExhaustion() throws {
+    let expression = try SafeContentFilterRegex("a+z")
+    var workspace = SafeContentFilterRegex.Workspace()
+    var exhaustedBudget = 1
+
+    XCTAssertEqual(
+      expression.match(
+        in: SafeContentFilterRegex.Input("aaaa"),
+        workspace: &workspace,
+        remainingSteps: &exhaustedBudget
+      ),
+      .budgetExhausted
+    )
+
+    var sufficientBudget = 1_000
+    XCTAssertEqual(
+      expression.match(
+        in: SafeContentFilterRegex.Input("aaaz"),
+        workspace: &workspace,
+        remainingSteps: &sufficientBudget
+      ),
+      .matched
+    )
+  }
+
   func testUserAllowListWinsForIdentityButDoesNotExemptBlockedText() {
     let snapshot = ContentFilterSnapshot(
       displayMode: .placeholder,
@@ -737,6 +913,10 @@ final class ContentFilterTests: XCTestCase {
     XCTAssertEqual(snapshot.displayMode, .hidden)
     XCTAssertTrue(snapshot.blockVideos)
     XCTAssertEqual(snapshot.rules, [saved])
+    let settingsReload = try await FileContentFilterStore(fileURL: fileURL).snapshot()
+    XCTAssertEqual(settingsReload.displayMode, .hidden)
+    XCTAssertTrue(settingsReload.blockVideos)
+    XCTAssertEqual(settingsReload.rules, [saved])
 
     do {
       _ = try await store.add(.keyword("广告", list: .block))
@@ -763,6 +943,112 @@ final class ContentFilterTests: XCTestCase {
     try await store.deleteAll(in: .allow)
     snapshot = try await store.snapshot()
     XCTAssertTrue(snapshot.rules.isEmpty)
+    let finalReload = try await FileContentFilterStore(fileURL: fileURL).snapshot()
+    XCTAssertTrue(finalReload.rules.isEmpty)
+    XCTAssertEqual(finalReload.displayMode, .hidden)
+    XCTAssertTrue(finalReload.blockVideos)
+  }
+
+  func testFileStorePersistsRegularExpressionsAndSeparatesMatchModeIdentity() async throws {
+    let fileURL = temporaryFileURL()
+    defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
+    let store = FileContentFilterStore(fileURL: fileURL)
+    let literal = try await store.add(
+      .keyword(
+        "广告.+",
+        list: .block,
+        createdAt: Date(timeIntervalSince1970: 1)
+      )
+    )
+    let expression = try await store.add(
+      try .regularExpression(
+        "广告.+",
+        list: .block,
+        createdAt: Date(timeIntervalSince1970: 2)
+      )
+    )
+
+    let reloadedStore = FileContentFilterStore(fileURL: fileURL)
+    let snapshot = try await reloadedStore.snapshot()
+    XCTAssertEqual(snapshot.rules.count, 2)
+    XCTAssertTrue(snapshot.rules.contains(literal))
+    XCTAssertTrue(snapshot.rules.contains(expression))
+    XCTAssertEqual(
+      snapshot.visibility(for: thread(title: "广告内容", excerpt: "ordinary")),
+      .placeholder
+    )
+
+    do {
+      _ = try await store.add(
+        try .regularExpression("广告.+", list: .block)
+      )
+      XCTFail("Expected duplicate regular expression to fail")
+    } catch let error as ContentFilterStoreError {
+      XCTAssertEqual(error, .duplicateRule)
+    }
+  }
+
+  func testFileStoreRejectsInvalidAndExcessRegularExpressions() async throws {
+    let fileURL = temporaryFileURL()
+    defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
+    let store = FileContentFilterStore(
+      fileURL: fileURL,
+      maximumRegularExpressionRules: 1
+    )
+
+    XCTAssertThrowsError(
+      try ContentFilterRule.regularExpression(#"(?=unsafe)"#, list: .block)
+    )
+
+    _ = try await store.add(try .regularExpression("first.+", list: .block))
+    do {
+      _ = try await store.add(try .regularExpression("second.+", list: .block))
+      XCTFail("Expected regular-expression limit to fail")
+    } catch let error as ContentFilterStoreError {
+      XCTAssertEqual(error, .tooManyRegularExpressions)
+    }
+  }
+
+  func testVersionOneArchiveMigratesWithoutLosingLiteralRules() async throws {
+    let fileURL = temporaryFileURL()
+    defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
+    try FileManager.default.createDirectory(
+      at: fileURL.deletingLastPathComponent(),
+      withIntermediateDirectories: true
+    )
+    let ruleID = UUID()
+    let legacyArchive: [String: Any] = [
+      "schemaVersion": 1,
+      "displayMode": "placeholder",
+      "blockVideos": false,
+      "rules": [
+        [
+          "id": ruleID.uuidString,
+          "list": "block",
+          "kind": "keyword",
+          "keyword": "广告",
+          "keywordMatchMode": "literal",
+          "username": "",
+          "createdAt": 1_000,
+        ]
+      ],
+    ]
+    try JSONSerialization.data(withJSONObject: legacyArchive).write(to: fileURL)
+    let store = FileContentFilterStore(fileURL: fileURL)
+
+    var snapshot = try await store.snapshot()
+    XCTAssertEqual(snapshot.rules.map(\.id), [ruleID])
+    XCTAssertEqual(snapshot.rules.map(\.keywordMatchMode), [.literal])
+
+    _ = try await store.add(
+      try .regularExpression("推广.+", list: .block)
+    )
+    snapshot = try await store.snapshot()
+    XCTAssertEqual(snapshot.rules.count, 2)
+    let persisted = try XCTUnwrap(
+      JSONSerialization.jsonObject(with: Data(contentsOf: fileURL)) as? [String: Any]
+    )
+    XCTAssertEqual(persisted["schemaVersion"] as? Int, 2)
   }
 
   func testCorruptedArchiveIsPreservedUntilExplicitReset() async throws {
@@ -794,6 +1080,32 @@ final class ContentFilterTests: XCTestCase {
     XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
     let resetSnapshot = try await store.snapshot()
     XCTAssertEqual(resetSnapshot, .empty)
+  }
+
+  func testMutationRevalidatesDiskInsteadOfOverwritingACachedSnapshot() async throws {
+    let fileURL = temporaryFileURL()
+    defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
+    let store = FileContentFilterStore(fileURL: fileURL)
+    _ = try await store.add(.keyword("first", list: .block))
+    let cachedSnapshot = try await store.snapshot()
+    XCTAssertEqual(cachedSnapshot.rules.map(\.keyword), ["first"])
+
+    let replacement = Data("not-json".utf8)
+    try replacement.write(to: fileURL)
+    do {
+      _ = try await store.add(.keyword("second", list: .block))
+      XCTFail("Expected the current disk archive to be revalidated")
+    } catch let error as ContentFilterStoreError {
+      XCTAssertEqual(error, .corruptedArchive)
+    }
+    XCTAssertEqual(try Data(contentsOf: fileURL), replacement)
+
+    do {
+      _ = try await store.snapshot()
+      XCTFail("Expected the failed mutation to invalidate the stale cache")
+    } catch let error as ContentFilterStoreError {
+      XCTAssertEqual(error, .corruptedArchive)
+    }
   }
 
   func testStoreRejectsEmptyInvalidAndExcessRules() async throws {
@@ -839,6 +1151,113 @@ final class ContentFilterTests: XCTestCase {
     } catch let error as ContentFilterStoreError {
       XCTAssertEqual(error, .unsupportedSchemaVersion(99))
     }
+  }
+
+  func testArchiveContainingAnInvalidRegularExpressionIsPreserved() async throws {
+    let fileURL = temporaryFileURL()
+    defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
+    try FileManager.default.createDirectory(
+      at: fileURL.deletingLastPathComponent(),
+      withIntermediateDirectories: true
+    )
+    let archive: [String: Any] = [
+      "schemaVersion": 2,
+      "displayMode": "placeholder",
+      "blockVideos": false,
+      "rules": [
+        [
+          "id": UUID().uuidString,
+          "list": "block",
+          "kind": "keyword",
+          "keyword": "(?=unsafe)",
+          "keywordMatchMode": "regular-expression",
+          "username": "",
+          "createdAt": 1_000,
+        ]
+      ],
+    ]
+    let original = try JSONSerialization.data(withJSONObject: archive, options: [.sortedKeys])
+    try original.write(to: fileURL)
+    let store = FileContentFilterStore(fileURL: fileURL)
+
+    do {
+      _ = try await store.snapshot()
+      XCTFail("Expected invalid regular expression archive to fail")
+    } catch let error as ContentFilterStoreError {
+      XCTAssertEqual(error, .corruptedArchive)
+    }
+    XCTAssertEqual(try Data(contentsOf: fileURL), original)
+  }
+
+  func testVersionTwoArchiveCannotSilentlyDowngradeAMissingMatchMode() async throws {
+    let fileURL = temporaryFileURL()
+    defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
+    try FileManager.default.createDirectory(
+      at: fileURL.deletingLastPathComponent(),
+      withIntermediateDirectories: true
+    )
+    let archive: [String: Any] = [
+      "schemaVersion": 2,
+      "displayMode": "placeholder",
+      "blockVideos": false,
+      "rules": [
+        [
+          "id": UUID().uuidString,
+          "list": "block",
+          "kind": "keyword",
+          "keyword": "广告.+",
+          "username": "",
+          "createdAt": 1_000,
+        ]
+      ],
+    ]
+    let original = try JSONSerialization.data(withJSONObject: archive, options: [.sortedKeys])
+    try original.write(to: fileURL)
+    let store = FileContentFilterStore(fileURL: fileURL)
+
+    do {
+      _ = try await store.snapshot()
+      XCTFail("Expected missing v2 match mode to fail")
+    } catch let error as ContentFilterStoreError {
+      XCTAssertEqual(error, .corruptedArchive)
+    }
+    XCTAssertEqual(try Data(contentsOf: fileURL), original)
+  }
+
+  func testVersionOneArchiveCannotSmuggleARegularExpression() async throws {
+    let fileURL = temporaryFileURL()
+    defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
+    try FileManager.default.createDirectory(
+      at: fileURL.deletingLastPathComponent(),
+      withIntermediateDirectories: true
+    )
+    let archive: [String: Any] = [
+      "schemaVersion": 1,
+      "displayMode": "placeholder",
+      "blockVideos": false,
+      "rules": [
+        [
+          "id": UUID().uuidString,
+          "list": "block",
+          "kind": "keyword",
+          "keyword": "广告.+",
+          "keywordMatchMode": "regular-expression",
+          "username": "",
+          "createdAt": 1_000,
+        ]
+      ],
+    ]
+    let original = try JSONSerialization.data(withJSONObject: archive, options: [.sortedKeys])
+    try original.write(to: fileURL)
+    let store = FileContentFilterStore(fileURL: fileURL)
+
+    do {
+      _ = try await store.snapshot()
+      XCTFail("Expected forged v1 regular expression to fail")
+    } catch let error as ContentFilterStoreError {
+      XCTAssertEqual(error, .corruptedArchive)
+    }
+    XCTAssertEqual(try Data(contentsOf: fileURL), original)
   }
 
   private func thread(

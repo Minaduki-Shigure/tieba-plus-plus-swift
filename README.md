@@ -698,9 +698,13 @@ and its verified metadata enters the public app source.
 - **Favorites:** Forums and threads use a separate local archive. Saved forums
   can be pinned as home shortcuts; saved threads retain position and browse mode
   and can apply explicit only-author or descending overrides.
-- **Filtering:** Local literal-keyword, exact user block/allow, and video-topic
-  filters cover list, profile, floor, nested-reply, shared-origin, and foreground
-  inbox surfaces without discarding their raw server pagination. A separate
+- **Filtering:** Local literal-keyword, bounded non-backtracking regular-expression,
+  exact user block/allow, and video-topic filters cover list, profile, floor,
+  nested-reply, shared-origin, and foreground inbox surfaces without discarding
+  their raw server pagination. Regular expressions use a documented safe subset,
+  are compiled once into an immutable cached rule snapshot, share one prepared
+  field input and bounded work budget, and never invoke ICU's backtracking
+  matcher. A separate
   default-off recommendation filter matches forums by stable ID using the selected
   account persona, or the active account when the persona is anonymous.
 - **Appearance:** System, light, and dark themes, five tested accent presets,

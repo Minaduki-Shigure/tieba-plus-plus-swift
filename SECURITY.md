@@ -1044,15 +1044,33 @@ user allow rules retaining precedence over user block rules only in that domain.
 
 Local content-filter rules use their own bounded, versioned JSON archive in
 Application Support with atomic writes and backup exclusion. It may contain
-only user-entered literal keywords, public UID/name identities, display mode,
-and the video-topic switch; it must never contain account credentials, cookies,
-private responses, or hidden-content copies. Malformed, oversized, or
-future-version archives must be preserved and must not be overwritten by
-ordinary rule changes. Browsing fails open when the archive cannot be read, so
-anonymous content remains available without loading credentials; deletion is
-allowed only through the explicit reset action. Keyword matching is currently
-case-sensitive and literal. Regular-expression rules must remain unsupported
-until their runtime can be bounded or a non-backtracking engine is adopted.
+only user-entered literal keywords or bounded regular-expression patterns,
+public UID/name identities, display mode, and the video-topic switch; it must
+never contain account credentials, cookies, private responses, or hidden-content
+copies. Schema v2 explicitly migrates v1 literal rules, while an older build sees
+v2 as unsupported instead of overwriting it. Malformed, oversized, or
+future-version archives must be preserved and must not be overwritten by ordinary
+rule changes. Browsing fails open when the archive cannot be read, so anonymous
+content remains available without loading credentials; deletion is allowed only
+through the explicit reset action.
+
+Keyword matching is case-sensitive. Regular-expression rules use an app-owned
+Thompson NFA with no captures, backreferences, lookaround, inline code, or ICU /
+Swift-regex backtracking execution. Invalid or unsupported syntax is rejected
+before persistence. The archive accepts at most 32 regex rules; each pattern is
+limited to 128 characters and 256 immutable states, and each field match consumes
+at most 8,192 Unicode scalars. All regex rules for one inspected field share one
+prepared scalar view, reusable NFA workspace, and a 200,000-work-unit aggregate
+budget that charges both NFA state visits and character-class member checks.
+Exhaustion fails open for that complete field, including when it occurs
+while evaluating allow rules; a truncated field cannot satisfy an end anchor.
+Compiled programs and allow/block/user lookup indexes are immutable snapshot-only
+derivations: they are not encoded, included in rule identity, mutated lazily, or
+shared across snapshot generations. A successfully decoded archive and snapshot
+remain actor-isolated in memory for read-only reuse. Every mutation invalidates
+that cache and revalidates the current disk bytes before constructing a candidate,
+so another store or host-side change cannot be overwritten from stale memory;
+failed reads and writes never publish a partial cache generation.
 Global thread-search, per-forum post-search, and public-profile thread responses
 apply that same fail-open snapshot only after the anonymous response has
 arrived. Filtering may annotate a result as visible, placeholder, or hidden,

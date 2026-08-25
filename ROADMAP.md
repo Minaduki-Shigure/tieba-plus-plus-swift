@@ -18,8 +18,8 @@ currently serves `v0.63.0-alpha.1` (build 75), whose app-code snapshot includes
 the current image, media, navigation, Home/account, settings, cloud-favorite,
 durable owner-deletion, legacy-link, and guarded official-wrapper workflows.
 Paired profiles continue to support the nested-reply lazy-scroll container.
-The level-progress work described below follows the public tag and is currently
-available only in `main`.
+The level-progress and bounded regular-expression filtering work described below
+follow the public tag and are currently available only in `main`.
 These additions improve existing credited areas without changing the current
 80–82% weighted estimate; experimental account writes retain their documented
 physical-device and disposable-account gates.
@@ -410,7 +410,8 @@ the source metadata is updated to that tested IPA.
   search for later visible mutual rows; incomplete metadata hides the filter instead of
   guessing
 - Default-off combined public nickname and username presentation
-- Local case-sensitive literal-keyword and exact UID/name user block/allow lists
+- Local case-sensitive literal-keyword, bounded non-backtracking regular-expression,
+  and exact UID/name user block/allow lists
 - Placeholder or fully hidden presentation for locally blocked content
 - Local video-topic blocking and user-profile block/allow shortcuts
 - Lazy, account-bound server interaction restrictions on another user's profile,
@@ -1531,12 +1532,15 @@ snapshot.
 
 Local content filtering covers ordinary and channel forum thread lists, global
 and per-forum search results, public-profile activity, post floors, nested
-replies, shared-thread origin cards, and the foreground inbox. Keyword rules
-use case-sensitive literal substring matching; user rules match an exact
-positive UID or exact name. An allow rule takes precedence only within the same
-matching domain and inspected field: a user allow rule does not override a
-blocked keyword, and a keyword allowed in one field does not override a blocked
-match in another.
+replies, shared-thread origin cards, and the foreground inbox. Keyword rules use
+case-sensitive literal substring matching or a bounded regular-expression
+subset compiled to a Thompson NFA. The latter supports grouping, alternation,
+character classes, anchors, bounded and unbounded quantifiers, and the documented
+character-class escapes without captures, backreferences, lookaround, inline
+code, or a backtracking engine. User rules match an exact positive UID or exact
+name. An allow rule takes precedence only within the same matching domain and
+inspected field: a user allow rule does not override a blocked keyword, and a
+keyword allowed in one field does not override a blocked match in another.
 Blocked content can remain as a placeholder or be fully hidden. In per-forum
 search, the matched entity and each displayed topic or parent-floor context are
 filtered independently. A blocked context can be replaced or omitted without
@@ -1551,8 +1555,17 @@ hidden. Inaccessible raw-tail sentinels can therefore advance through hidden
 global-search, per-forum-search, and public-profile pages without exposing their
 content. The private inbox uses the same raw-state rule but, after a filter
 change, replaces automatic continuation with an explicit user action and does
-not refetch loaded pages. Regular-expression rules are intentionally unsupported
-until a bounded or non-backtracking implementation is available.
+not refetch loaded pages. Regex rules are capped at 32, compile to at most 256
+immutable NFA states, and inspect at most the first 8,192 Unicode scalars of one
+field. All regex allow and block rules for that field share one prepared scalar
+view, one reusable workspace, and a 200,000-work-unit budget that charges both
+NFA state visits and character-class member checks. Budget exhaustion fails open
+for the entire field; truncation never fabricates an end anchor or
+bypasses raw pagination. A successfully decoded archive and its derived indexes
+are cached for read-only page requests, avoiding repeated page-by-page
+compilation. Every app-owned mutation first re-reads and validates the current
+disk bytes, so a stale cache cannot overwrite a malformed, future-version, or
+newer valid archive.
 
 Each authenticated milestone remains gated on protocol tests, credential
 isolation, and real-device validation. Forum follow/unfollow, check-in, and

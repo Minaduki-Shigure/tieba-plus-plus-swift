@@ -183,18 +183,33 @@ private struct ContentFilterRuleRow: View {
 
   var body: some View {
     HStack(spacing: 12) {
-      Image(systemName: rule.kind == .keyword ? "text.magnifyingglass" : "person")
+      Image(systemName: systemImage)
         .foregroundStyle(.tint)
         .frame(width: 24)
       VStack(alignment: .leading, spacing: 3) {
         Text(rule.displayValue)
           .lineLimit(2)
-        Text(rule.kind.title)
+        Text(ruleSubtitle)
           .font(.caption)
           .foregroundStyle(.secondary)
       }
     }
     .padding(.vertical, 2)
+  }
+
+  private var systemImage: String {
+    switch (rule.kind, rule.keywordMatchMode) {
+    case (.keyword, .regularExpression):
+      "curlybraces"
+    case (.keyword, .literal):
+      "text.magnifyingglass"
+    case (.user, _):
+      "person"
+    }
+  }
+
+  private var ruleSubtitle: String {
+    rule.kind == .keyword ? rule.keywordMatchMode.title : rule.kind.title
   }
 }
 
@@ -205,6 +220,7 @@ private struct AddContentFilterRuleView: View {
 
   @State private var kind = ContentFilterRuleKind.keyword
   @State private var keyword = ""
+  @State private var keywordMatchMode = ContentFilterKeywordMatchMode.literal
   @State private var userID = ""
   @State private var username = ""
 
@@ -221,10 +237,30 @@ private struct AddContentFilterRuleView: View {
 
       switch kind {
       case .keyword:
-        Section("关键词") {
-          TextField("关键词", text: $keyword)
+        Section {
+          Picker("匹配方式", selection: $keywordMatchMode) {
+            ForEach(ContentFilterKeywordMatchMode.allCases) { mode in
+              Text(mode.title).tag(mode)
+            }
+          }
+          .pickerStyle(.segmented)
+          .accessibilityIdentifier("content-filter-keyword-match-mode")
+
+          TextField(keywordMatchMode == .literal ? "关键词" : "正则表达式", text: $keyword)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
+            .accessibilityIdentifier("content-filter-keyword-pattern")
+        } footer: {
+          if
+            !keyword.isEmpty,
+            let validationMessage = ContentFilterKeywordPatternPolicy.validationMessage(
+              for: keyword,
+              mode: keywordMatchMode
+            )
+          {
+            Text(validationMessage)
+              .foregroundStyle(.red)
+          }
         }
       case .user:
         Section("用户") {
@@ -252,8 +288,10 @@ private struct AddContentFilterRuleView: View {
   private var isValid: Bool {
     switch kind {
     case .keyword:
-      let value = normalized(keyword)
-      return (1...128).contains(value.count)
+      return ContentFilterKeywordPatternPolicy.validationMessage(
+        for: keyword,
+        mode: keywordMatchMode
+      ) == nil
     case .user:
       let name = normalized(username)
       let idText = normalized(userID)
@@ -267,7 +305,21 @@ private struct AddContentFilterRuleView: View {
     guard isValid else { return }
     switch kind {
     case .keyword:
-      onSave(.keyword(normalized(keyword), list: list))
+      guard
+        let pattern = try? ContentFilterKeywordPatternPolicy.validated(
+          keyword,
+          mode: keywordMatchMode
+        )
+      else { return }
+      switch keywordMatchMode {
+      case .literal:
+        onSave(.keyword(pattern, list: list))
+      case .regularExpression:
+        guard let rule = try? ContentFilterRule.regularExpression(pattern, list: list) else {
+          return
+        }
+        onSave(rule)
+      }
     case .user:
       onSave(
         .user(
