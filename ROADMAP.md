@@ -404,10 +404,11 @@ the source metadata is updated to that tested IPA.
   the active account lease, and a local content/sender filter projection that
   preserves the raw message pages; a visible sender avatar or name opens that
   sender's credential-free public profile only for a strict positive UID
-- Foreground, memory-only reply, mention, and optional fan-reminder summary on
-  the account page, with separate message and fan badges, an existing public
-  follower-list destination, exact account-lease isolation, no local clearing,
-  a privacy-minimized signed HTTPS form, and no background polling
+- Foreground, memory-only reply, mention, and optional fan-reminder summary shared
+  by the Home account control and account page, with direct ReplyMe/AtMe Home-menu
+  routes, separate message and fan badges, an existing public follower-list
+  destination, exact account-lease isolation, five-minute eligible-surface freshness,
+  no local clearing, a privacy-minimized signed HTTPS form, and no background polling
 - Exact nested-notification positioning through the public child-only resolver,
   with parent locking, bidirectional pagination, history continuity, and an
   owning-thread fallback when the target is unavailable; a reply action opens the
@@ -652,14 +653,18 @@ cancellation, or session change opens no composer and sends no write; normal
 fallback navigation remains available. Once presented, the existing draft,
 explicit confirmation, authenticated target rebinding, and non-retry outcome
 rules apply unchanged. A separate `/c/s/msg` request reads bounded `replyme`,
-`atme`, and optional `fans` counts for the account page. Reply plus mention drives
-the message badge; the optional fan count drives a separate public-follower-list
-entry. Its form contains only BDUSS,
+`atme`, and optional `fans` counts into one root-owned foreground snapshot. Reply
+plus mention drives the Home-toolbar and account-page message badges; the Home
+account menu can route directly to either existing inbox. The optional fan count
+drives a separate public-follower-list entry. Its form contains only BDUSS,
 client version, `bookmark`, and signature; it sends no Cookie, STOKEN, UID
 header, or device identifier. The response does not prove a UID, so Core labels
 it with the requested UID and the App checks the exact
-`userID + sessionRevision` lease before and after the request. The inbox does not poll in
-the background, clear the badge locally, or send a mark-read request. Whether
+`userID + sessionRevision` lease before and after the request. An inactive scene
+or navigation away from Home/account cancels an in-flight summary request; an
+eligible foreground surface reuses an accepted snapshot for five minutes before
+refreshing it. The inbox does not poll in the background, clear either badge
+locally, or send a mark-read request. Whether
 summary or list retrieval has an implicit server-side read effect remains a
 physical-device validation item. The unread summary continues to use the raw
 server counts and is not changed by local inbox filtering. The App keeps a

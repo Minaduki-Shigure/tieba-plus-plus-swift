@@ -18,7 +18,7 @@ and its verified metadata enters the public app source.
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance, media preferences, explicit standard/pure/only-author immersive thread-reading modes, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, a next-launch destination including the inbox, and ordered iOS Home Screen quick actions for existing destinations. The reply notice's system handoff attempt is implemented but remains pending physical-device validation |
-| Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary, followed forums, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with separate message and optional fan-reminder badges plus authoritative reply actions, Tieba cloud favorites, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
+| Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary, followed forums, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with a shared Home-toolbar/account-page message badge, separate optional fan-reminder badge, and authoritative reply actions, Tieba cloud favorites, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies plus explicitly confirmed deletion of the active account's own topic or ordinary floor; these newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
 | TiebaLite parity | Current `main` and public `v0.62.3-alpha.1`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.62.3-alpha.1` (build 74) |
@@ -267,12 +267,15 @@ and its verified metadata enters the public app source.
   an uncertain outcome is never retried. The App accepts the result only while
   the initiating `userID + sessionRevision` lease remains current. Real-account
   success and failure behavior remains a disposable-account device-validation gate.
-  The account page also reads Tieba's reply, mention, and optional fan-reminder
-  summary on demand. Reply plus mention remains the message badge; a separate
-  fan-reminder entry shows the server count only when that field is present and
-  opens the existing credential-free public follower list. This summary is
-  memory-only, bound to the exact account lease, refreshed when the account page
-  returns, and never cleared locally when either entry opens.
+  The root view also reads Tieba's reply, mention, and optional fan-reminder
+  summary while the active App is showing Home or the account page. Reply plus
+  mention drives badges on both the Home account control and account-page
+  message entry; the Home control's
+  long-press menu opens either inbox directly. A separate fan-reminder entry
+  shows the server count only when that field is present and opens the existing
+  credential-free public follower list. This summary is memory-only, bound to
+  the exact account lease, reused for five minutes between eligible foreground
+  appearances, and never cleared locally when an entry opens.
   Visible topic and floor text, inline nested-reply previews, and parent and
   child rows on a full nested-reply page now open one shared transient selection
   panel from their context menus. It reuses the existing public-text projection,
@@ -764,16 +767,20 @@ and its verified metadata enters the public app source.
   pagination until the user explicitly continues. If the rule archive cannot be
   reread, the inbox retains its last successfully loaded snapshot; before the
   first successful read it uses an empty snapshot. This is a presentation
-  preference, not a confidentiality or access-control boundary. The account page
-  separately requests an unfiltered foreground unread summary and shows the sum of
-  `replyme + atme` beside the message entry. The optional `fans` field remains
+  preference, not a confidentiality or access-control boundary. The root view
+  separately requests one unfiltered foreground unread summary and shares the sum
+  of `replyme + atme` between the Home account control and account-page message
+  entry. Long-pressing the Home control can open ReplyMe or AtMe directly without
+  changing the snapshot. The optional `fans` field remains
   separate: when present, it drives a distinct fan-reminder entry that opens the
   existing credential-free public follower list; when absent, the App does not
   infer zero. Zero counts hide their badges and larger counts are capped visually
   while accessibility retains the exact value. Neither entry clears a count
-  locally when opened, and the whole snapshot is discarded on logout, account
-  switching, or same-UID credential rotation. No local baseline is used to infer
-  new or lost followers.
+  locally when opened. Moving inactive or leaving Home/account cancels an in-flight
+  summary request; returning to either eligible foreground surface refreshes only
+  when the last accepted snapshot is at least five minutes old. The whole snapshot
+  is discarded on logout, account switching, or same-UID credential rotation. No
+  local baseline is used to infer new or lost followers.
 - **Concern feed:** Logged-in Explore adds a foreground-only concern channel.
   Page-style preloading cannot start it: the request begins only after the user
   selects the channel. Refresh replaces the snapshot; load-more preserves the

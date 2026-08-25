@@ -3,43 +3,65 @@ import Foundation
 
 @MainActor
 final class InboxUnreadSummaryViewModel: ObservableObject {
+  nonisolated static let defaultRefreshInterval: TimeInterval = 5 * 60
+
   @Published private(set) var summary: InboxUnreadSummary?
   @Published private(set) var state: LoadState = .idle
 
   private let service: any AccountService
   private let vault: any AccountVault
+  private let refreshInterval: TimeInterval
+  private let now: @Sendable () -> Date
   private var loadedLease: InboxUnreadSummarySessionLease?
+  private var lastSuccessfulRefreshAt: Date?
+  private var acceptsAutomaticRefresh = false
   private var loadTask: Task<Void, Never>?
   private var epoch = 0
 
-  init(service: any AccountService, vault: any AccountVault) {
+  init(
+    service: any AccountService,
+    vault: any AccountVault,
+    refreshInterval: TimeInterval = InboxUnreadSummaryViewModel.defaultRefreshInterval,
+    now: @escaping @Sendable () -> Date = { Date() }
+  ) {
     self.service = service
     self.vault = vault
+    self.refreshInterval = max(0, refreshInterval)
+    self.now = now
   }
 
-  func loadIfNeeded() {
-    guard state == .idle else { return }
+  func refreshIfStale() {
+    guard acceptsAutomaticRefresh, loadTask == nil, !hasFreshSnapshot else { return }
     startLoad()
   }
 
-  func reload() {
-    startLoad()
+  func sceneActivityDidChange(isActive: Bool) {
+    acceptsAutomaticRefresh = isActive
+    if isActive {
+      refreshIfStale()
+    } else {
+      cancel()
+    }
   }
 
   func refresh() async {
+    guard acceptsAutomaticRefresh else { return }
     let task = startLoad()
     await task.value
   }
 
-  func accountSessionDidChange() {
+  func accountSessionDidChange(loadImmediately: Bool = true) {
     // Account notifications include credential rotation, so even an unchanged UID must clear.
     invalidateLoad()
     clearSnapshot()
     state = .idle
-    startLoad()
+    if loadImmediately && acceptsAutomaticRefresh {
+      startLoad()
+    }
   }
 
-  func cancel() {
+  private func cancel() {
+    guard loadTask != nil else { return }
     invalidateLoad()
     state = summary == nil ? .idle : .loaded
   }
@@ -106,6 +128,7 @@ final class InboxUnreadSummaryViewModel: ObservableObject {
             try Self.validate(response, lease: lease)
             loadedLease = lease
             summary = response
+            lastSuccessfulRefreshAt = now()
             state = .loaded
           } catch {
             state = .failed(error.localizedDescription)
@@ -152,7 +175,14 @@ final class InboxUnreadSummaryViewModel: ObservableObject {
 
   private func clearSnapshot() {
     loadedLease = nil
+    lastSuccessfulRefreshAt = nil
     summary = nil
+  }
+
+  private var hasFreshSnapshot: Bool {
+    guard summary != nil, let lastSuccessfulRefreshAt else { return false }
+    let age = now().timeIntervalSince(lastSuccessfulRefreshAt)
+    return age >= 0 && age < refreshInterval
   }
 
   private static func validate(

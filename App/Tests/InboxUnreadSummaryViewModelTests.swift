@@ -13,6 +13,7 @@ final class InboxUnreadSummaryViewModelTests: XCTestCase {
       active.sessionRevision: [.value(expected)]
     ])
     let viewModel = InboxUnreadSummaryViewModel(service: service, vault: vault)
+    viewModel.sceneActivityDidChange(isActive: true)
 
     await viewModel.refresh()
 
@@ -35,12 +36,11 @@ final class InboxUnreadSummaryViewModelTests: XCTestCase {
       active.sessionRevision: [.suspended(id: 1, value: expected)]
     ])
     let viewModel = InboxUnreadSummaryViewModel(service: service, vault: vault)
+    viewModel.sceneActivityDidChange(isActive: true)
 
     let first = Task { await viewModel.refresh() }
     try await waitForInboxUnreadSummaryTest { await service.requestCount() == 1 }
     let second = Task { await viewModel.refresh() }
-    viewModel.reload()
-    viewModel.loadIfNeeded()
     for _ in 0..<20 { await Task.yield() }
 
     let requestCount = await service.requestCount()
@@ -68,6 +68,7 @@ final class InboxUnreadSummaryViewModelTests: XCTestCase {
       newSession.sessionRevision: [.value(newSummary)],
     ])
     let viewModel = InboxUnreadSummaryViewModel(service: service, vault: vault)
+    viewModel.sceneActivityDidChange(isActive: true)
     await viewModel.refresh()
     XCTAssertEqual(viewModel.summary, oldSummary)
 
@@ -102,6 +103,7 @@ final class InboxUnreadSummaryViewModelTests: XCTestCase {
       newSession.sessionRevision: [.value(newSummary)],
     ])
     let viewModel = InboxUnreadSummaryViewModel(service: service, vault: vault)
+    viewModel.sceneActivityDidChange(isActive: true)
 
     let staleRefresh = Task { await viewModel.refresh() }
     try await waitForInboxUnreadSummaryTest { await service.requestCount() == 1 }
@@ -129,6 +131,7 @@ final class InboxUnreadSummaryViewModelTests: XCTestCase {
       active.sessionRevision: [.value(initial), .suspended(id: 1, value: stale)]
     ])
     let viewModel = InboxUnreadSummaryViewModel(service: service, vault: vault)
+    viewModel.sceneActivityDidChange(isActive: true)
     await viewModel.refresh()
 
     let staleRefresh = Task { await viewModel.refresh() }
@@ -157,6 +160,7 @@ final class InboxUnreadSummaryViewModelTests: XCTestCase {
       ]
     ])
     let viewModel = InboxUnreadSummaryViewModel(service: service, vault: vault)
+    viewModel.sceneActivityDidChange(isActive: true)
 
     await viewModel.refresh()
     XCTAssertEqual(viewModel.state, .failed("summary unavailable"))
@@ -193,11 +197,12 @@ final class InboxUnreadSummaryViewModelTests: XCTestCase {
       ]
     ])
     let viewModel = InboxUnreadSummaryViewModel(service: service, vault: vault)
+    viewModel.sceneActivityDidChange(isActive: true)
 
     await viewModel.refresh()
     let refresh = Task { await viewModel.refresh() }
     try await waitForInboxUnreadSummaryTest { await service.requestCount() == 2 }
-    viewModel.cancel()
+    viewModel.sceneActivityDidChange(isActive: false)
     XCTAssertEqual(viewModel.summary, initial)
     XCTAssertEqual(viewModel.state, .loaded)
 
@@ -207,7 +212,7 @@ final class InboxUnreadSummaryViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.state, .loaded)
   }
 
-  func testReloadAfterCancelRefreshesAuthoritativeFanReminderCount() async throws {
+  func testExplicitRefreshAfterReactivationReadsAuthoritativeFanCount() async throws {
     let active = session(userID: 7, revision: uuid(1))
     let initial = summary(userID: 7, replies: 2, mentions: 3, fans: 5)
     let refreshed = summary(userID: 7, replies: 2, mentions: 3, fans: 0)
@@ -216,20 +221,120 @@ final class InboxUnreadSummaryViewModelTests: XCTestCase {
       active.sessionRevision: [.value(initial), .value(refreshed)]
     ])
     let viewModel = InboxUnreadSummaryViewModel(service: service, vault: vault)
+    viewModel.sceneActivityDidChange(isActive: true)
 
     await viewModel.refresh()
     XCTAssertEqual(viewModel.summary?.fanCount, 5)
-    viewModel.cancel()
+    viewModel.sceneActivityDidChange(isActive: false)
+    viewModel.sceneActivityDidChange(isActive: true)
 
-    viewModel.reload()
+    let refresh = Task { await viewModel.refresh() }
     try await waitForInboxUnreadSummaryTest {
       await service.requestCount() == 2 && viewModel.summary?.fanCount == 0
     }
+    await refresh.value
 
     XCTAssertEqual(viewModel.summary?.fanCount, 0)
     XCTAssertEqual(viewModel.state, .loaded)
     let requests = await service.requestsSnapshot()
     XCTAssertEqual(requests.count, 2)
+  }
+
+  func testForegroundRefreshUsesFreshSnapshotUntilIntervalExpires() async throws {
+    let active = session(userID: 7, revision: uuid(1))
+    let initial = summary(userID: 7, replies: 2, mentions: 3)
+    let refreshed = summary(userID: 7, replies: 5, mentions: 8)
+    let afterClockRollback = summary(userID: 7, replies: 1, mentions: 1)
+    let vault = InboxUnreadSummaryVaultSpy(session: active)
+    let service = InboxUnreadSummaryServiceSpy(scripts: [
+      active.sessionRevision: [.value(initial), .value(refreshed), .value(afterClockRollback)]
+    ])
+    let clock = InboxUnreadSummaryTestClock(Date(timeIntervalSince1970: 1_000))
+    let viewModel = InboxUnreadSummaryViewModel(
+      service: service,
+      vault: vault,
+      refreshInterval: 300,
+      now: { clock.now() }
+    )
+
+    viewModel.sceneActivityDidChange(isActive: true)
+    await viewModel.refresh()
+    clock.advance(by: 299)
+    viewModel.refreshIfStale()
+    for _ in 0..<20 { await Task.yield() }
+
+    let freshRequestCount = await service.requestCount()
+    XCTAssertEqual(freshRequestCount, 1)
+    XCTAssertEqual(viewModel.summary, initial)
+
+    clock.advance(by: 1)
+    viewModel.refreshIfStale()
+    try await waitForInboxUnreadSummaryTest {
+      await service.requestCount() == 2 && viewModel.summary == refreshed
+    }
+
+    XCTAssertEqual(viewModel.state, .loaded)
+
+    clock.advance(by: -600)
+    viewModel.refreshIfStale()
+    try await waitForInboxUnreadSummaryTest {
+      await service.requestCount() == 3 && viewModel.summary == afterClockRollback
+    }
+
+    XCTAssertEqual(viewModel.state, .loaded)
+  }
+
+  func testAccountChangeWhileInactiveClearsWithoutLoadingUntilForeground() async throws {
+    let oldSession = session(userID: 7, revision: uuid(1))
+    let newSession = session(userID: 8, revision: uuid(2))
+    let oldSummary = summary(userID: 7, replies: 2, mentions: 3)
+    let newSummary = summary(userID: 8, replies: 4, mentions: 5)
+    let vault = InboxUnreadSummaryVaultSpy(session: oldSession)
+    let service = InboxUnreadSummaryServiceSpy(scripts: [
+      oldSession.sessionRevision: [.value(oldSummary)],
+      newSession.sessionRevision: [.value(newSummary)],
+    ])
+    let viewModel = InboxUnreadSummaryViewModel(service: service, vault: vault)
+    viewModel.sceneActivityDidChange(isActive: true)
+    await viewModel.refresh()
+
+    viewModel.sceneActivityDidChange(isActive: false)
+    await vault.replaceActive(with: newSession)
+    viewModel.accountSessionDidChange()
+    for _ in 0..<20 { await Task.yield() }
+
+    XCTAssertNil(viewModel.summary)
+    XCTAssertEqual(viewModel.state, .idle)
+    let inactiveRequestCount = await service.requestCount()
+    XCTAssertEqual(inactiveRequestCount, 1)
+
+    viewModel.refreshIfStale()
+    await viewModel.refresh()
+    for _ in 0..<20 { await Task.yield() }
+    let stillInactiveRequestCount = await service.requestCount()
+    XCTAssertEqual(stillInactiveRequestCount, 1)
+
+    viewModel.sceneActivityDidChange(isActive: true)
+    try await waitForInboxUnreadSummaryTest { viewModel.summary == newSummary }
+
+    XCTAssertEqual(viewModel.state, .loaded)
+    let requests = await service.requestsSnapshot()
+    XCTAssertEqual(requests.map(\.userID), [7, 8])
+  }
+
+  func testForegroundRefreshWithoutAccountDoesNotCallService() async throws {
+    let vault = InboxUnreadSummaryVaultSpy(session: nil)
+    let service = InboxUnreadSummaryServiceSpy(scripts: [:])
+    let viewModel = InboxUnreadSummaryViewModel(service: service, vault: vault)
+
+    viewModel.sceneActivityDidChange(isActive: true)
+    XCTAssertEqual(viewModel.state, .loading)
+    try await waitForInboxUnreadSummaryTest { viewModel.state == .idle }
+
+    XCTAssertNil(viewModel.summary)
+    XCTAssertEqual(viewModel.state, .idle)
+    let requestCount = await service.requestCount()
+    XCTAssertEqual(requestCount, 0)
   }
 
   private func session(
@@ -285,6 +390,25 @@ private enum InboxUnreadSummaryScript: Sendable {
 private struct InboxUnreadSummaryTestFailure: LocalizedError, Sendable {
   let message: String
   var errorDescription: String? { message }
+}
+
+private final class InboxUnreadSummaryTestClock: @unchecked Sendable {
+  private let lock = NSLock()
+  private var value: Date
+
+  init(_ value: Date) {
+    self.value = value
+  }
+
+  func now() -> Date {
+    lock.withLock { value }
+  }
+
+  func advance(by interval: TimeInterval) {
+    lock.withLock {
+      value = value.addingTimeInterval(interval)
+    }
+  }
 }
 
 private actor InboxUnreadSummaryServiceSpy: AccountService {

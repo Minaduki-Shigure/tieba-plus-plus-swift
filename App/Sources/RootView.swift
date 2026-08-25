@@ -24,6 +24,7 @@ struct RootView: View {
   @State private var searchHistoryAction: GlobalSearchHistoryAction?
   @State private var linkErrorMessage: String?
   @State private var pendingFollowedForumUnfollow: FollowedForumUnfollowPrompt?
+  @State private var accountSurfaceIsVisible = false
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @EnvironmentObject private var mediaPlaybackCoordinator: MediaPlaybackCoordinator
@@ -51,6 +52,7 @@ struct RootView: View {
   @StateObject private var recentForumsViewModel: BrowsingHistoryViewModel
   @StateObject private var searchSuggestionViewModel: SearchSuggestionViewModel
   @StateObject private var accountViewModel: AccountViewModel
+  @StateObject private var unreadSummaryViewModel: InboxUnreadSummaryViewModel
   @StateObject private var threadSummaryImageGalleryCoordinator:
     ThreadSummaryImageGalleryCoordinator
 
@@ -94,6 +96,9 @@ struct RootView: View {
       wrappedValue: SearchSuggestionViewModel(service: service)
     )
     _accountViewModel = StateObject(wrappedValue: AccountViewModel(vault: accountVault))
+    _unreadSummaryViewModel = StateObject(
+      wrappedValue: InboxUnreadSummaryViewModel(service: accountService, vault: accountVault)
+    )
     _threadSummaryImageGalleryCoordinator = StateObject(
       wrappedValue: ThreadSummaryImageGalleryCoordinator(
         remoteService: service as? any ThreadPictureGalleryService,
@@ -245,10 +250,8 @@ struct RootView: View {
             path.append(.account)
           }
           .disabled(accountViewModel.isMutating)
-          .accessibilityLabel(
-            accountViewModel.isMutating ? "正在切换账户" : "账户"
-          )
-          .accessibilityHint("轻点管理账户，长按快速切换")
+          .accessibilityLabel(accountToolbarAccessibilityLabel)
+          .accessibilityHint("轻点管理账户，长按查看消息或快速切换")
           .help("账户")
           .alert(
             "账户切换失败",
@@ -385,6 +388,8 @@ struct RootView: View {
             browseService: service,
             accountService: accountService,
             vault: accountVault,
+            unreadSummaryViewModel: unreadSummaryViewModel,
+            onVisibilityChanged: accountSurfaceVisibilityDidChange,
             historyRepository: historyRepository,
             favoritesRepository: favoritesRepository,
             searchHistoryRepository: searchHistoryRepository
@@ -465,6 +470,13 @@ struct RootView: View {
       }
       searchSuggestionViewModel.setEnabled(searchSuggestionsEnabled)
       mediaPlaybackCoordinator.setSceneActive(scenePhase == .active)
+      unreadSummaryViewModel.sceneActivityDidChange(
+        isActive: RootUnreadSummaryActivationPolicy.isActive(
+          sceneIsActive: scenePhase == .active,
+          path: path,
+          accountSurfaceIsVisible: accountSurfaceIsVisible
+        )
+      )
     }
     .task { await globalSearchHistoryViewModel.loadIfNeeded() }
     .task { await accountViewModel.loadIfNeeded() }
@@ -474,6 +486,13 @@ struct RootView: View {
     }
     .onChange(of: scenePhase) {
       mediaPlaybackCoordinator.setSceneActive($0 == .active)
+      unreadSummaryViewModel.sceneActivityDidChange(
+        isActive: RootUnreadSummaryActivationPolicy.isActive(
+          sceneIsActive: $0 == .active,
+          path: path,
+          accountSurfaceIsVisible: accountSurfaceIsVisible
+        )
+      )
       if $0 != .active {
         searchSuggestionViewModel.cancelAndClear()
       }
@@ -485,6 +504,13 @@ struct RootView: View {
       if RootFollowedForumsActivationPolicy.isActive(path: path) {
         followedForumsViewModel.loadIfNeeded()
       }
+      unreadSummaryViewModel.sceneActivityDidChange(
+        isActive: RootUnreadSummaryActivationPolicy.isActive(
+          sceneIsActive: scenePhase == .active,
+          path: path,
+          accountSurfaceIsVisible: accountSurfaceIsVisible
+        )
+      )
     }
     .onDisappear { searchSuggestionViewModel.cancelAndClear() }
     .onReceive(NotificationCenter.default.publisher(for: .localFavoritesDidChange)) { _ in
@@ -501,6 +527,13 @@ struct RootView: View {
       pendingFollowedForumUnfollow = nil
       accountViewModel.invalidateForAccountSessionChange()
       Task { @MainActor in await accountViewModel.loadIfNeeded() }
+      unreadSummaryViewModel.accountSessionDidChange(
+        loadImmediately: RootUnreadSummaryActivationPolicy.isActive(
+          sceneIsActive: scenePhase == .active,
+          path: path,
+          accountSurfaceIsVisible: accountSurfaceIsVisible
+        )
+      )
       let loadsImmediately = RootFollowedForumsActivationPolicy.isActive(path: path)
         || followedForumsViewModel.hasActiveFullListSurface
         || followedForumsViewModel.hasActiveCompleteIndexSurface
@@ -572,6 +605,21 @@ struct RootView: View {
 
   @ViewBuilder
   private var accountQuickSwitchMenu: some View {
+    if accountViewModel.activeAccount != nil {
+      Section("消息") {
+        ForEach(InboxKind.allCases) { kind in
+          Button {
+            path.append(.notifications(kind))
+          } label: {
+            Label(
+              inboxQuickActionTitle(for: kind),
+              systemImage: kind == .replies ? "arrowshape.turn.up.left" : "at"
+            )
+          }
+        }
+      }
+    }
+
     if case .loaded = accountViewModel.state, !accountViewModel.accounts.isEmpty {
       Section("切换账户") {
         ForEach(accountViewModel.accounts) { account in
@@ -622,20 +670,81 @@ struct RootView: View {
 
   @ViewBuilder
   private var accountToolbarLabel: some View {
-    Group {
-      if accountViewModel.isMutating {
-        ProgressView()
-          .controlSize(.small)
-      } else {
-        Image(
-          systemName: accountViewModel.activeAccount == nil
-            ? "person.crop.circle"
-            : "person.crop.circle.fill"
-        )
+    ZStack(alignment: .topTrailing) {
+      Group {
+        if accountViewModel.isMutating {
+          ProgressView()
+            .controlSize(.small)
+        } else {
+          Image(
+            systemName: accountViewModel.activeAccount == nil
+              ? "person.crop.circle"
+              : "person.crop.circle.fill"
+          )
+        }
+      }
+      .frame(width: 28, height: 28)
+
+      if !accountViewModel.isMutating,
+        let badgeText = homeUnreadBadgePresentation?.badgeText
+      {
+        Text(badgeText)
+          .font(.system(size: 9, weight: .bold))
+          .monospacedDigit()
+          .foregroundStyle(.white)
+          .lineLimit(1)
+          .minimumScaleFactor(0.8)
+          .padding(.horizontal, 4)
+          .frame(minWidth: 16, minHeight: 16)
+          .background(Color.red, in: Capsule())
+          .offset(x: 6, y: -5)
       }
     }
     .frame(width: 28, height: 28)
     .accessibilityHidden(true)
+  }
+
+  private var homeUnreadSummary: InboxUnreadSummary? {
+    guard
+      let activeUserID = accountViewModel.activeAccount?.id,
+      let summary = unreadSummaryViewModel.summary,
+      summary.userID == activeUserID
+    else { return nil }
+    return summary
+  }
+
+  private var homeUnreadBadgePresentation: InboxUnreadBadgePresentation? {
+    homeUnreadSummary.map { InboxUnreadBadgePresentation(summary: $0) }
+  }
+
+  private var accountToolbarAccessibilityLabel: String {
+    guard !accountViewModel.isMutating else { return "正在切换账户" }
+    guard let presentation = homeUnreadBadgePresentation else { return "账户" }
+    let refreshFailed: Bool
+    if case .failed = unreadSummaryViewModel.state {
+      refreshFailed = true
+    } else {
+      refreshFailed = false
+    }
+    return "账户，\(presentation.accessibilityValue(refreshFailed: refreshFailed))"
+  }
+
+  private func inboxQuickActionTitle(for kind: InboxKind) -> String {
+    guard let summary = homeUnreadSummary else { return kind.title }
+    let count = kind == .replies ? summary.replyCount : summary.mentionCount
+    guard count > 0 else { return kind.title }
+    return "\(kind.title)（\(count > 99 ? "99+" : String(count))）"
+  }
+
+  private func accountSurfaceVisibilityDidChange(_ isVisible: Bool) {
+    accountSurfaceIsVisible = isVisible
+    unreadSummaryViewModel.sceneActivityDidChange(
+      isActive: RootUnreadSummaryActivationPolicy.isActive(
+        sceneIsActive: scenePhase == .active,
+        path: path,
+        accountSurfaceIsVisible: isVisible
+      )
+    )
   }
 
   @ViewBuilder
@@ -1113,6 +1222,19 @@ enum RootAccountActionPolicy {
 enum RootFollowedForumsActivationPolicy {
   static func isActive(path: [RootDestination]) -> Bool {
     path.isEmpty
+  }
+}
+
+enum RootUnreadSummaryActivationPolicy {
+  static func isActive(
+    sceneIsActive: Bool,
+    path: [RootDestination],
+    accountSurfaceIsVisible: Bool
+  ) -> Bool {
+    guard sceneIsActive else { return false }
+    guard let destination = path.last else { return true }
+    if case .account = destination { return accountSurfaceIsVisible }
+    return false
   }
 }
 

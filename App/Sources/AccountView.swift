@@ -5,6 +5,7 @@ struct AccountView: View {
     any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let accountService: any AccountService
   let vault: any AccountVault
+  let onVisibilityChanged: (Bool) -> Void
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
@@ -14,7 +15,7 @@ struct AccountView: View {
   @Environment(\.accountAccess) private var accountAccess
   @StateObject private var viewModel: AccountViewModel
   @StateObject private var profileSummaryViewModel: ActiveAccountProfileSummaryViewModel
-  @StateObject private var unreadSummaryViewModel: InboxUnreadSummaryViewModel
+  @ObservedObject private var unreadSummaryViewModel: InboxUnreadSummaryViewModel
   @State private var showsLogin = false
   @State private var confirmsLogout = false
   @State private var confirmsReset = false
@@ -24,6 +25,8 @@ struct AccountView: View {
       & ForumInformationService,
     accountService: any AccountService,
     vault: any AccountVault,
+    unreadSummaryViewModel: InboxUnreadSummaryViewModel,
+    onVisibilityChanged: @escaping (Bool) -> Void,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository
@@ -31,6 +34,7 @@ struct AccountView: View {
     self.browseService = browseService
     self.accountService = accountService
     self.vault = vault
+    self.onVisibilityChanged = onVisibilityChanged
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
@@ -38,9 +42,7 @@ struct AccountView: View {
     _profileSummaryViewModel = StateObject(
       wrappedValue: ActiveAccountProfileSummaryViewModel(service: accountService, vault: vault)
     )
-    _unreadSummaryViewModel = StateObject(
-      wrappedValue: InboxUnreadSummaryViewModel(service: accountService, vault: vault)
-    )
+    _unreadSummaryViewModel = ObservedObject(wrappedValue: unreadSummaryViewModel)
   }
 
   var body: some View {
@@ -74,16 +76,15 @@ struct AccountView: View {
     }
     .task {
       profileSummaryViewModel.loadIfNeeded()
-      unreadSummaryViewModel.reload()
       await viewModel.loadIfNeeded()
     }
+    .onAppear { onVisibilityChanged(true) }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
       profileSummaryViewModel.accountSessionDidChange()
-      unreadSummaryViewModel.accountSessionDidChange()
     }
     .onDisappear {
       profileSummaryViewModel.cancel()
-      unreadSummaryViewModel.cancel()
+      onVisibilityChanged(false)
     }
     .sheet(isPresented: $showsLogin) {
       NavigationStack {

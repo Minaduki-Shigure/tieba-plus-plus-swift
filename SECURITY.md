@@ -357,10 +357,20 @@ when present. It is excluded from the message badge and may only drive a
 separate fan-reminder presentation for the same active account.
 Because the envelope does not independently identify the account, its UID is
 request context rather than server proof. The App checks the same
-`userID + sessionRevision` lease before and after the request and synchronously clears the
-snapshot on logout, switching, or same-UID credential rotation. The inbox
-performs no background polling, explicit mark-read request, or local badge
-clearing. The fan-reminder entry opens the existing credential-free public
+`userID + sessionRevision` lease before and after the request. One root-owned,
+memory-only snapshot supplies both the Home-toolbar and account-page message
+badges; the account page does not own or automatically start a second summary
+request. Its explicit pull to refresh reuses that same root-owned model. The App
+cancels an in-flight summary read whenever the scene becomes inactive or
+navigation leaves the Home/account surfaces. Returning to either eligible surface
+while active refreshes only when no accepted snapshot exists or the last one is
+at least five minutes old. That explicit refresh may bypass the age gate. Logout,
+switching, or same-UID credential rotation synchronously
+clears the snapshot, including its freshness timestamp, and starts no replacement
+request while inactive. The inbox performs no background polling, explicit
+mark-read request, or local badge clearing. Direct Home-menu navigation to either
+inbox likewise leaves the server counts untouched locally. The fan-reminder entry
+opens the existing credential-free public
 follower list, not an authenticated notification endpoint; opening it does not
 locally clear `fans`. No baseline is persisted or compared, and the App does not
 claim that a reminder count identifies new followers or that a profile-count

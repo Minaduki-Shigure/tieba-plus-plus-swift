@@ -242,6 +242,62 @@ final class RootStartupNavigationTests: XCTestCase {
     )
   }
 
+  func testUnreadSummaryActivationIsLimitedToVisibleHomeAndAccountSurfaces() {
+    XCTAssertTrue(
+      RootUnreadSummaryActivationPolicy.isActive(
+        sceneIsActive: true,
+        path: [],
+        accountSurfaceIsVisible: false
+      )
+    )
+    XCTAssertTrue(
+      RootUnreadSummaryActivationPolicy.isActive(
+        sceneIsActive: true,
+        path: [.history, .account],
+        accountSurfaceIsVisible: true
+      )
+    )
+
+    XCTAssertFalse(
+      RootUnreadSummaryActivationPolicy.isActive(
+        sceneIsActive: true,
+        path: [.account],
+        accountSurfaceIsVisible: false
+      )
+    )
+
+    let hiddenPaths: [[RootDestination]] = [
+      [.forum("swift")],
+      [.notifications(.replies)],
+      [.account, .notifications(.mentions)],
+      [.settings],
+    ]
+    for path in hiddenPaths {
+      XCTAssertFalse(
+        RootUnreadSummaryActivationPolicy.isActive(
+          sceneIsActive: true,
+          path: path,
+          accountSurfaceIsVisible: false
+        )
+      )
+    }
+
+    XCTAssertFalse(
+      RootUnreadSummaryActivationPolicy.isActive(
+        sceneIsActive: false,
+        path: [],
+        accountSurfaceIsVisible: false
+      )
+    )
+    XCTAssertFalse(
+      RootUnreadSummaryActivationPolicy.isActive(
+        sceneIsActive: false,
+        path: [.account],
+        accountSurfaceIsVisible: true
+      )
+    )
+  }
+
   func testHomeBatchCheckInShortcutRequiresActiveFullCredentials() {
     let updatedAt = Date(timeIntervalSince1970: 1_700_000_000)
     let account: (_ isActive: Bool, _ hasFullCredentials: Bool) -> AccountSummary = {
