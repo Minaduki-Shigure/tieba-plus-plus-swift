@@ -752,6 +752,10 @@ private struct SafeContentFilterRegexCompiler {
   let maximumStates: Int
   private var states = [SafeContentFilterRegexState]()
 
+  init(maximumStates: Int) {
+    self.maximumStates = maximumStates
+  }
+
   mutating func compile(
     _ expression: SafeContentFilterRegexExpression
   ) throws -> SafeContentFilterRegexProgram {
