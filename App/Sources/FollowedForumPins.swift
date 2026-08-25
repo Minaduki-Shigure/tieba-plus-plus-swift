@@ -67,8 +67,15 @@ struct FollowedForumPin: Codable, Equatable, Sendable {
   }
 
   static func normalizedForumName(_ forumName: String) -> String? {
-    let normalized = forumName
-      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let trimmed = forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard
+      !trimmed.isEmpty,
+      trimmed.count <= maximumForumNameCharacterCount,
+      trimmed.utf8.count <= maximumForumNameUTF8ByteCount,
+      !trimmed.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    else { return nil }
+
+    let normalized = trimmed
       .precomposedStringWithCanonicalMapping
       .lowercased(with: Locale(identifier: "en_US_POSIX"))
     guard

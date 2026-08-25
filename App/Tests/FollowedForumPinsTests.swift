@@ -3,6 +3,15 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class FollowedForumPinsTests: XCTestCase {
+  func testNameNormalizationRejectsControlsBeforeUnicodeMapping() {
+    XCTAssertNil(FollowedForumPin.normalizedForumName("bad\u{0000}name"))
+    XCTAssertNil(FollowedForumPin.normalizedForumName("bad\nname"))
+    XCTAssertEqual(
+      FollowedForumPin.normalizedForumName(" \n Cafe\u{301} \n "),
+      "caf\u{E9}"
+    )
+  }
+
   func testRoundTripNormalizesNamesIsolatesAccountsAndSetsStorageAttributes() async throws {
     let location = try FollowedForumPinsTestLocation()
     defer { location.remove() }
