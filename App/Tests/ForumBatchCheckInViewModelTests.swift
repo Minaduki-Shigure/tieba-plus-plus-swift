@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import TiebaPlusPlus
 
@@ -145,6 +146,19 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
       ]
     )
     let viewModel = makeViewModel(vault: vault, service: service)
+    let catalogChangeRecorder = ForumCheckInCatalogNotificationRecorder()
+    let catalogChangeToken = NotificationCenter.default.addObserver(
+      forName: .forumCheckInCatalogDidChange,
+      object: nil,
+      queue: nil
+    ) { notification in
+      if let change = ForumCheckInCatalogChange(notification),
+        change.sessionRevision == session.sessionRevision
+      {
+        catalogChangeRecorder.record(change)
+      }
+    }
+    defer { NotificationCenter.default.removeObserver(catalogChangeToken) }
     await viewModel.loadIfNeeded()
     viewModel.requestStartConfirmation()
 
@@ -185,6 +199,16 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
           stopped: 0
         )
       )
+    )
+    XCTAssertEqual(
+      catalogChangeRecorder.snapshot(),
+      [
+        ForumCheckInCatalogChange(
+          accountID: session.id,
+          sessionRevision: session.sessionRevision,
+          confirmedTargets: [ForumBatchCheckInTarget(forumID: 10, forumName: "a")]
+        )
+      ]
     )
   }
 
@@ -310,6 +334,19 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
       ]
     )
     let viewModel = makeViewModel(vault: vault, service: service)
+    let catalogChangeRecorder = ForumCheckInCatalogNotificationRecorder()
+    let catalogChangeToken = NotificationCenter.default.addObserver(
+      forName: .forumCheckInCatalogDidChange,
+      object: nil,
+      queue: nil
+    ) { notification in
+      if let change = ForumCheckInCatalogChange(notification),
+        change.sessionRevision == session.sessionRevision
+      {
+        catalogChangeRecorder.record(change)
+      }
+    }
+    defer { NotificationCenter.default.removeObserver(catalogChangeToken) }
     await viewModel.loadIfNeeded()
     viewModel.requestStartConfirmation()
 
@@ -318,6 +355,7 @@ final class ForumBatchCheckInViewModelTests: XCTestCase {
     let singleForumIDs = await service.singleForumIDs()
     XCTAssertEqual(singleForumIDs, [])
     XCTAssertEqual(viewModel.entries.map(\.outcome), [.failed(message: "busy"), .stopped])
+    XCTAssertTrue(catalogChangeRecorder.snapshot().isEmpty)
   }
 
   func testBatchResultForAuthorizedButNonOfficialTargetFailsClosed() async {
@@ -1351,6 +1389,19 @@ private func batchResult(id: Int64, name: String) -> ForumBatchCheckInResult {
     forumName: name,
     outcome: .confirmedSigned
   )
+}
+
+private final class ForumCheckInCatalogNotificationRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var changes = [ForumCheckInCatalogChange]()
+
+  func record(_ change: ForumCheckInCatalogChange) {
+    lock.withLock { changes.append(change) }
+  }
+
+  func snapshot() -> [ForumCheckInCatalogChange] {
+    lock.withLock { changes }
+  }
 }
 
 private func confirmedSingle(

@@ -89,7 +89,10 @@ enum ForumBatchCheckInState: Equatable, Sendable {
 }
 
 private enum ForumBatchResultApplication {
-  case accepted(hasRejection: Bool)
+  case accepted(
+    hasRejection: Bool,
+    confirmedTargets: [ForumBatchCheckInTarget]
+  )
   case invalid
 }
 
@@ -337,7 +340,16 @@ final class ForumBatchCheckInViewModel: ObservableObject {
           authorizedTargets: initialOfficialTargets,
           initialOfficialTargetIDs: initialOfficialTargetIDs
         ) {
-        case .accepted(let hasRejection):
+        case .accepted(let hasRejection, let confirmedTargets):
+          if !confirmedTargets.isEmpty {
+            AccountChangeNotifications.postForumCheckInCatalogChange(
+              ForumCheckInCatalogChange(
+                accountID: expectedLease.userID,
+                sessionRevision: expectedLease.sessionRevision,
+                confirmedTargets: confirmedTargets
+              )
+            )
+          }
           if hasRejection {
             markPendingStopped()
             errorMessage = "官方批量签到有目标未成功，已停止后续单吧签到且未自动重试。"
@@ -598,10 +610,17 @@ final class ForumBatchCheckInViewModel: ObservableObject {
     }
 
     var hasRejection = false
+    var confirmedTargets = [ForumBatchCheckInTarget]()
     for item in mapped {
       switch item.outcome {
       case .confirmedSigned:
         entries[item.index].outcome = .succeeded
+        confirmedTargets.append(
+          ForumBatchCheckInTarget(
+            forumID: entries[item.index].id,
+            forumName: entries[item.index].forumName
+          )
+        )
       case .rejected(let message):
         let message = message.trimmingCharacters(in: .whitespacesAndNewlines)
         entries[item.index].outcome = .failed(
@@ -614,7 +633,10 @@ final class ForumBatchCheckInViewModel: ObservableObject {
     where initialOfficialTargetIDs.contains(entries[index].id) && entries[index].outcome == .pending {
       entries[index].outcome = .stopped
     }
-    return .accepted(hasRejection: hasRejection)
+    return .accepted(
+      hasRejection: hasRejection,
+      confirmedTargets: confirmedTargets
+    )
   }
 
   private func confirmedSingleResult(

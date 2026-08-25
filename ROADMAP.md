@@ -38,7 +38,7 @@ customization credit without changing the current weighted estimate.
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, shared text selection/copying, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
 | Local data, settings, and customization | 10 | 7 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, hierarchical settings navigation, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, confirmation-frozen foreground check-in execution settings, a TiebaLite-compatible default image-watermark choice, reply-entry visibility, a default-on composer risk notice with an experimental reply-only system handoff attempt pending physical validation, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
-| Account, session, and private read flows | 15 | 9 | Login, Home-toolbar quick switching, a self-profile summary, an authenticated current-account following list with a guarded mutual filter, followed and target-user liked forums with optional validated level-up progress, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
+| Account, session, and private read flows | 15 | 9 | Login, Home-toolbar quick switching, a self-profile summary, an authenticated current-account following list with a guarded mutual filter, followed and target-user liked forums with optional validated level-up progress, account-bound followed-forum check-in marks, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 14 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, server-reason-bound personalized recommendation dislike feedback, three text/classic-emoticon reply targets, equivalent new-topic creation, bounded static-image new-topic/direct-topic-reply creation, owner-only topic/ordinary-floor deletion, direct inline-preview reply entry, and credential-free official reporting entry points have guarded implementations; real batch-check-in behavior, creation, deletion, poll and interaction-restriction success, broader uploaded media, unresolvable cloud rows, native reporting, and other reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
 | **Total** | **100** | **80–82** | Current full-product estimate; roughly 18–20% remains |
@@ -224,6 +224,22 @@ progress without failing membership or check-in. A confirmed check-in may issue
 one read-only account-state refresh to update the score, but never another write.
 This closes a TiebaLite presentation gap inside the existing private-read credit
 and adds no endpoint, persistence, background behavior, or weighted point.
+Current-main followed-forum cards also reuse one foreground official check-in
+catalog read to place TiebaLite's small signed mark beside level information.
+Only an exact checked-in result survives the sidecar's active-account UID,
+session-revision, forum-ID, normalized-name, and UTC+8 day checks. Pending,
+unknown, malformed, failed, stale, and incomplete-credential reads show no mark
+without failing the followed list; cards issue no request and expose no inline
+write. Confirmed single-forum events merge monotonically over an older in-flight
+catalog. Exact targets from a confirmed official batch update the sidecar
+immediately and remain monotonic over an older catalog response. Exact same-day
+checked catalog observations likewise cannot regress to stale pending data.
+Foreground resume reconciles server-side changes after a bounded freshness
+interval, and each pull-to-refresh performs one catalog request. A cancellable UTC+8 midnight
+task actively removes yesterday's marks. Other-user liked forums never consume
+this account-only state.
+This closes another presentation gap inside the existing private-read credit
+without adding an endpoint, background action, or weighted point.
 The separate fan-reminder entry consumes the existing optional `fans` field and
 opens the already credited public follower list. It adds no endpoint, background
 work, persistence, or weighted point.
@@ -1133,7 +1149,10 @@ removes only the matching account's pin. A row whose response contains a complet
 positive level, bounded nonempty level name, nonnegative current experience, and
 positive upgrade target shows that tuple with a progress value clamped to
 `0...1`; malformed or incomplete tuples retain the legacy level/experience text
-without failing the page. Inline check-in remains unavailable.
+without failing the page. The current account's Home and complete-list cards
+separately consume one lease-bound, foreground check-in-catalog sidecar and show
+only a small level-adjacent check for an exact signed result; other-user liked
+forums do not. Inline check-in remains unavailable.
 The home toolbar and account page open the same separate foreground one-click
 flow, which consumes its own authoritative catalog and explicit confirmation
 snapshot. The home entry is shown only for an active account with complete

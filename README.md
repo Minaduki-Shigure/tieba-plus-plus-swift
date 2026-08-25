@@ -18,13 +18,33 @@ and its verified metadata enters the public app source.
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available for history, favorites, filtering, appearance with an independent system/OLED dark-surface choice, media preferences, explicit standard/pure/only-author immersive thread-reading modes, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, a next-launch destination including personalized discovery and the inbox, and ordered iOS Home Screen quick actions for existing destinations. The reply notice's system handoff attempt is implemented but remains pending physical-device validation |
-| Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary, a credential-free handoff to Baidu's fixed official username-management page, followed forums with validated level-up progress where the server supplies it, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with a shared Home-toolbar/account-page message badge, separate optional fan-reminder badge, and authoritative reply actions, Tieba cloud favorites with a saved-position-to-latest-update handoff, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
+| Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary, a credential-free handoff to Baidu's fixed official username-management page, followed forums with validated level-up progress and account-bound today-check-in marks where the server supplies them, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with a shared Home-toolbar/account-page message badge, separate optional fan-reminder badge, and authoritative reply actions, Tieba cloud favorites with a saved-position-to-latest-update handoff, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies plus explicitly confirmed deletion of the active account's own topic or ordinary floor; these newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
 | TiebaLite parity | Current `main` and public `v0.64.0-alpha.4`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.64.0-alpha.4` (build 79) |
 
 ### Release and validation
 
+- **Current-main followed-forum check-in marks:** Home and the complete current-
+  account followed-forum list reuse one foreground official check-in catalog
+  read and show a small check beside level information only for an exact
+  `.checkedIn` result. The sidecar is bound to both `userID` and
+  `sessionRevision`, verifies forum ID plus normalized name, expires at Tieba's
+  UTC+8 day boundary, and never enters the shared model used for another user's
+  liked forums. Pending, unknown, malformed, stale, incomplete-credential, and
+  failed catalog results claim no status and do not fail the followed-forum
+  list. Cards perform no request and expose no inline sign action. A confirmed
+  single-forum event updates the current snapshot without allowing an older
+  catalog response to overwrite it; exact targets from a confirmed official
+  batch update the current snapshot immediately and remain monotonic over an
+  older in-flight catalog without fabricating streak or rank values. An exact
+  same-day `.checkedIn` observation likewise cannot regress to stale `pending`.
+  Each pull-to-refresh performs one catalog read alongside the followed-list
+  refresh;
+  foreground resume reconciles changes made elsewhere after a bounded freshness
+  interval, and a cancellable timer actively removes yesterday's marks at
+  Tieba's UTC+8 day boundary. Visible state also rechecks the same fail-closed
+  boundary after a significant system-time change.
 - **`v0.64.0` OLED dark surfaces:** Appearance and dark-surface selection are
   independent, so a saved OLED choice activates when either the forced-dark or
   follow-system appearance is actually dark and remains dormant in light mode.

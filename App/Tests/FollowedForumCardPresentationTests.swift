@@ -183,4 +183,43 @@ final class FollowedForumCardPresentationTests: XCTestCase {
     XCTAssertTrue(presentation.progressText.isEmpty)
     XCTAssertEqual(presentation.accessibilityValue, "Safe fallback")
   }
+
+  func testCheckedInMarkIsAnIndependentAccountScopedPresentationValue() {
+    let forum = FollowedForumItem(
+      id: 45,
+      name: "swift",
+      level: 8,
+      experience: 123,
+      slogan: "Swift community"
+    )
+
+    let ordinary = FollowedForumCardPresentation(forum: forum)
+    let checkedIn = FollowedForumCardPresentation(
+      forum: forum,
+      isCheckedInToday: true
+    )
+
+    XCTAssertFalse(ordinary.isCheckedInToday)
+    XCTAssertEqual(ordinary.accessibilityValue, "Swift community，等级 8，经验 123")
+    XCTAssertTrue(checkedIn.isCheckedInToday)
+    XCTAssertEqual(
+      checkedIn.accessibilityValue,
+      "Swift community，等级 8，经验 123，今日已签到"
+    )
+  }
+
+  func testCheckedInMarkRemainsAvailableWithoutLevelMetadata() {
+    let presentation = FollowedForumCardPresentation(
+      forum: FollowedForumItem(
+        id: 46,
+        name: "empty",
+        level: 0,
+        experience: 0
+      ),
+      isCheckedInToday: true
+    )
+
+    XCTAssertTrue(presentation.progressText.isEmpty)
+    XCTAssertEqual(presentation.accessibilityValue, "今日已签到")
+  }
 }

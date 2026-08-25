@@ -104,6 +104,10 @@ final class FollowedForumsViewModel: ObservableObject {
     !completeIndexSurfaceIDs.isEmpty
   }
 
+  var loadedSessionLease: FollowedForumsSessionLease? {
+    loadedLease
+  }
+
   var presentedOperationError: FollowedForumsOperationError? {
     if let unfollowOperationError {
       return FollowedForumsOperationError(

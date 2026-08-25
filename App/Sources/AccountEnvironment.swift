@@ -220,6 +220,62 @@ struct ForumCheckInChange: Equatable, Sendable {
   }
 }
 
+struct ForumCheckInCatalogChange: Equatable, Sendable {
+  static let maximumConfirmedTargetCount = 100
+
+  let accountID: Int64
+  let sessionRevision: UUID
+  let confirmedTargets: [ForumBatchCheckInTarget]
+
+  init(
+    accountID: Int64,
+    sessionRevision: UUID,
+    confirmedTargets: [ForumBatchCheckInTarget]
+  ) {
+    self.accountID = accountID
+    self.sessionRevision = sessionRevision
+    self.confirmedTargets = confirmedTargets
+  }
+
+  init?(_ notification: Notification) {
+    guard
+      let accountID = accountNotificationInt64(
+        notification.userInfo?[AccountNotificationKey.accountID]
+      ),
+      let sessionRevisionValue = notification.userInfo?[AccountNotificationKey.sessionRevision]
+        as? String,
+      let sessionRevision = UUID(uuidString: sessionRevisionValue),
+      let forumIDs = notification.userInfo?[AccountNotificationKey.confirmedForumIDs]
+        as? [NSNumber],
+      let forumNames = notification.userInfo?[AccountNotificationKey.confirmedForumNames]
+        as? [String],
+      accountID > 0,
+      forumIDs.count == forumNames.count,
+      (1...Self.maximumConfirmedTargetCount).contains(forumIDs.count)
+    else { return nil }
+
+    var seen = Set<Int64>()
+    var confirmedTargets = [ForumBatchCheckInTarget]()
+    confirmedTargets.reserveCapacity(forumIDs.count)
+    for (forumIDValue, forumNameValue) in zip(forumIDs, forumNames) {
+      guard
+        let forumID = accountNotificationInt64(forumIDValue),
+        forumID > 0,
+        seen.insert(forumID).inserted,
+        let forumName = FollowedForumPin.normalizedForumName(forumNameValue)
+      else { return nil }
+      confirmedTargets.append(
+        ForumBatchCheckInTarget(forumID: forumID, forumName: forumName)
+      )
+    }
+    self.init(
+      accountID: accountID,
+      sessionRevision: sessionRevision,
+      confirmedTargets: confirmedTargets
+    )
+  }
+}
+
 struct ThreadAgreementChange: Equatable, Sendable {
   let accountID: Int64
   let sessionRevision: UUID
@@ -371,6 +427,9 @@ extension Notification.Name {
   static let forumCheckInDidChange = Notification.Name(
     "TiebaPlusPlus.forumCheckInDidChange"
   )
+  static let forumCheckInCatalogDidChange = Notification.Name(
+    "TiebaPlusPlus.forumCheckInCatalogDidChange"
+  )
   static let threadAgreementDidChange = Notification.Name(
     "TiebaPlusPlus.threadAgreementDidChange"
   )
@@ -439,6 +498,21 @@ enum AccountChangeNotifications {
     )
   }
 
+  static func postForumCheckInCatalogChange(_ change: ForumCheckInCatalogChange) {
+    NotificationCenter.default.post(
+      name: .forumCheckInCatalogDidChange,
+      object: nil,
+      userInfo: [
+        AccountNotificationKey.accountID: NSNumber(value: change.accountID),
+        AccountNotificationKey.sessionRevision: change.sessionRevision.uuidString,
+        AccountNotificationKey.confirmedForumIDs: change.confirmedTargets.map {
+          NSNumber(value: $0.forumID)
+        },
+        AccountNotificationKey.confirmedForumNames: change.confirmedTargets.map(\.forumName),
+      ]
+    )
+  }
+
   static func postThreadAgreementChange(_ change: ThreadAgreementChange) {
     NotificationCenter.default.post(
       name: .threadAgreementDidChange,
@@ -491,6 +565,8 @@ private enum AccountNotificationKey {
   static let agreeScore = "agreeScore"
   static let isFavorited = "isFavorited"
   static let markedPostID = "markedPostID"
+  static let confirmedForumIDs = "confirmedForumIDs"
+  static let confirmedForumNames = "confirmedForumNames"
 }
 
 private func accountNotificationInt64(_ value: Any?) -> Int64? {

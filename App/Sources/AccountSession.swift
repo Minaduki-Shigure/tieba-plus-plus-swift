@@ -119,6 +119,11 @@ struct AccountSessionLease: Hashable, Sendable {
     sessionRevision = session.sessionRevision
   }
 
+  init(userID: Int64, sessionRevision: UUID) {
+    self.userID = userID
+    self.sessionRevision = sessionRevision
+  }
+
   func matches(_ session: StoredAccountSession) -> Bool {
     userID == session.id && sessionRevision == session.sessionRevision
   }

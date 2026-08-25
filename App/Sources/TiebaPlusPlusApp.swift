@@ -14,6 +14,7 @@ struct TiebaPlusPlusApp: App {
   @StateObject private var voicePlaybackController: VoicePlaybackController
   @StateObject private var videoPlaybackController: VideoPlaybackController
   @StateObject private var followedForumsViewModel: FollowedForumsViewModel
+  @StateObject private var followedForumCheckInStore: FollowedForumCheckInStore
   @AppStorage(AppPreferenceKey.appearance)
   private var appearance = AppAppearance.system.rawValue
   @AppStorage(AppPreferenceKey.darkSurfaceStyle)
@@ -93,6 +94,14 @@ struct TiebaPlusPlusApp: App {
         vault: accountVault,
         pinRepository: FileFollowedForumPinsStore.live(),
         forumMembershipMutator: forumMembershipMutator
+      )
+    )
+    _followedForumCheckInStore = StateObject(
+      wrappedValue: FollowedForumCheckInStore(
+        vault: accountVault,
+        catalogLoader: { session in
+          try await accountService.checkInCatalog(session: session)
+        }
       )
     )
     let composerImageAttachmentStore = ComposerImageAttachmentStore.live()
@@ -231,6 +240,7 @@ struct TiebaPlusPlusApp: App {
         .environmentObject(voicePlaybackController)
         .environmentObject(videoPlaybackController)
         .environmentObject(followedForumsViewModel)
+        .environmentObject(followedForumCheckInStore)
         .environmentObject(externalWebPresentation)
         .background {
           ExternalWebBrowserPresenter(page: externalWebPresentation.page) { pageID in
@@ -305,6 +315,7 @@ struct TiebaPlusPlusApp: App {
         .environmentObject(voicePlaybackController)
         .environmentObject(videoPlaybackController)
         .environmentObject(followedForumsViewModel)
+        .environmentObject(followedForumCheckInStore)
         .environmentObject(externalWebPresentation)
         .background {
           ExternalWebBrowserPresenter(page: externalWebPresentation.page) { pageID in

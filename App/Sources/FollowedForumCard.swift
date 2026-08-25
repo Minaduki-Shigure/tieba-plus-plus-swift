@@ -37,11 +37,13 @@ struct FollowedForumCardPresentation: Equatable, Sendable {
   let slogan: String
   let progressText: String
   let levelProgress: ForumLevelProgressPresentation?
+  let isCheckedInToday: Bool
 
-  init(forum: FollowedForumItem) {
+  init(forum: FollowedForumItem, isCheckedInToday: Bool = false) {
     avatarURL = ForumAvatarDisplayPolicy.displayURL(forum.avatarURL)
     slogan = forum.slogan.trimmingCharacters(in: .whitespacesAndNewlines)
     levelProgress = forum.levelProgress.map(ForumLevelProgressPresentation.init)
+    self.isCheckedInToday = isCheckedInToday
 
     if levelProgress == nil {
       var details = [String]()
@@ -57,6 +59,7 @@ struct FollowedForumCardPresentation: Equatable, Sendable {
     [
       slogan,
       levelProgress?.accessibilityValue ?? progressText,
+      isCheckedInToday ? "今日已签到" : "",
     ]
     .filter { !$0.isEmpty }
     .joined(separator: "，")
@@ -67,21 +70,27 @@ struct FollowedForumCard: View {
   let forum: FollowedForumItem
   let isPinned: Bool
   let isUnfollowing: Bool
+  let isCheckedInToday: Bool
   @Environment(\.appDarkSurfaceStyle) private var appDarkSurfaceStyle
   @Environment(\.colorScheme) private var colorScheme
 
   init(
     forum: FollowedForumItem,
     isPinned: Bool = false,
-    isUnfollowing: Bool = false
+    isUnfollowing: Bool = false,
+    isCheckedInToday: Bool = false
   ) {
     self.forum = forum
     self.isPinned = isPinned
     self.isUnfollowing = isUnfollowing
+    self.isCheckedInToday = isCheckedInToday
   }
 
   var body: some View {
-    let presentation = FollowedForumCardPresentation(forum: forum)
+    let presentation = FollowedForumCardPresentation(
+      forum: forum,
+      isCheckedInToday: isCheckedInToday
+    )
     HStack(alignment: .center, spacing: 10) {
       AvatarView(
         url: presentation.avatarURL,
@@ -104,13 +113,24 @@ struct FollowedForumCard: View {
         }
 
         if let levelProgress = forum.levelProgress {
-          ForumLevelProgressView(progress: levelProgress)
+          ForumLevelProgressView(
+            progress: levelProgress,
+            showsCheckedInMark: presentation.isCheckedInToday
+          )
             .accessibilityHidden(true)
-        } else if !presentation.progressText.isEmpty {
-          Text(presentation.progressText)
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .lineLimit(2)
+        } else if !presentation.progressText.isEmpty || presentation.isCheckedInToday {
+          HStack(spacing: 4) {
+            if !presentation.progressText.isEmpty {
+              Text(presentation.progressText)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            }
+            if presentation.isCheckedInToday {
+              ForumCheckedInMark()
+                .accessibilityHidden(true)
+            }
+          }
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)

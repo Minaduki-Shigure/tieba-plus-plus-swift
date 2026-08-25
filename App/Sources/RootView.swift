@@ -1,6 +1,7 @@
 import Combine
 import Foundation
 import SwiftUI
+import UIKit
 
 struct RootView: View {
   let service:
@@ -29,6 +30,7 @@ struct RootView: View {
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @EnvironmentObject private var mediaPlaybackCoordinator: MediaPlaybackCoordinator
   @EnvironmentObject private var followedForumsViewModel: FollowedForumsViewModel
+  @EnvironmentObject private var followedForumCheckInStore: FollowedForumCheckInStore
   @EnvironmentObject private var sceneDelegate: TiebaSceneDelegate
   @EnvironmentObject private var externalWebPresentation: ExternalWebPresentationModel
   @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
@@ -235,6 +237,7 @@ struct RootView: View {
       }
       .listStyle(.insetGrouped)
       .appScrollableSurface(.canvas)
+      .refreshable { await refreshHome() }
       .navigationTitle("贴吧++")
       .toolbar {
         if RootAccountActionPolicy.showsBatchCheckIn(
@@ -492,6 +495,9 @@ struct RootView: View {
       recentForumsViewModel.reload()
       if RootFollowedForumsActivationPolicy.isActive(path: path) {
         followedForumsViewModel.loadIfNeeded()
+        if scenePhase == .active {
+          followedForumCheckInStore.loadIfNeeded()
+        }
       }
       searchSuggestionViewModel.setEnabled(searchSuggestionsEnabled)
       mediaPlaybackCoordinator.setSceneActive(scenePhase == .active)
@@ -513,6 +519,11 @@ struct RootView: View {
     .onChange(of: scenePhase) {
       mediaPlaybackCoordinator.setSceneActive($0 == .active)
       linkPreviewViewModel.sceneActivityDidChange(isActive: $0 == .active)
+      followedForumCheckInStore.sceneActivityDidChange(
+        isActive: $0 == .active,
+        shouldLoad: RootFollowedForumsActivationPolicy.isActive(path: path)
+          || followedForumsViewModel.hasActiveFullListSurface
+      )
       unreadSummaryViewModel.sceneActivityDidChange(
         isActive: RootUnreadSummaryActivationPolicy.isActive(
           sceneIsActive: $0 == .active,
@@ -530,6 +541,9 @@ struct RootView: View {
       recentForumsViewModel.reload()
       if RootFollowedForumsActivationPolicy.isActive(path: path) {
         followedForumsViewModel.loadIfNeeded()
+        if scenePhase == .active {
+          followedForumCheckInStore.loadIfNeeded()
+        }
       }
       unreadSummaryViewModel.sceneActivityDidChange(
         isActive: RootUnreadSummaryActivationPolicy.isActive(
@@ -553,6 +567,14 @@ struct RootView: View {
       invocation in
       openHomeScreenQuickAction(invocation)
     }
+    .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) {
+      _ in
+      followedForumCheckInStore.significantTimeDidChange(
+        shouldLoad: scenePhase == .active
+          && (RootFollowedForumsActivationPolicy.isActive(path: path)
+            || followedForumsViewModel.hasActiveFullListSurface)
+      )
+    }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
       pendingFollowedForumUnfollow = nil
       accountViewModel.invalidateForAccountSessionChange()
@@ -568,6 +590,11 @@ struct RootView: View {
         || followedForumsViewModel.hasActiveFullListSurface
         || followedForumsViewModel.hasActiveCompleteIndexSurface
       followedForumsViewModel.accountSessionDidChange(loadImmediately: loadsImmediately)
+      followedForumCheckInStore.accountSessionDidChange(
+        loadImmediately: scenePhase == .active
+          && (RootFollowedForumsActivationPolicy.isActive(path: path)
+            || followedForumsViewModel.hasActiveFullListSurface)
+      )
     }
     .onReceive(NotificationCenter.default.publisher(for: .forumMembershipDidChange)) {
       notification in
@@ -578,6 +605,21 @@ struct RootView: View {
       followedForumsViewModel.forumMembershipDidChange(
         change,
         loadImmediately: loadsImmediately
+      )
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .forumCheckInDidChange)) {
+      notification in
+      guard let change = ForumCheckInChange(notification) else { return }
+      followedForumCheckInStore.forumCheckInDidChange(change)
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .forumCheckInCatalogDidChange)) {
+      notification in
+      guard let change = ForumCheckInCatalogChange(notification) else { return }
+      followedForumCheckInStore.forumCheckInCatalogDidChange(
+        change,
+        loadImmediately: scenePhase == .active
+          && (RootFollowedForumsActivationPolicy.isActive(path: path)
+            || followedForumsViewModel.hasActiveFullListSurface)
       )
     }
     .onChange(of: followedForumsViewModel.forums) { forums in
@@ -777,6 +819,15 @@ struct RootView: View {
     )
   }
 
+  @MainActor
+  private func refreshHome() async {
+    favoritesViewModel.reload()
+    recentForumsViewModel.reload()
+    async let forums: Void = followedForumsViewModel.refresh()
+    async let checkIns: Void = followedForumCheckInStore.refresh()
+    _ = await (forums, checkIns)
+  }
+
   @ViewBuilder
   private var followedForumsSection: some View {
     let forums = followedForumsViewModel.homeForums
@@ -799,7 +850,11 @@ struct RootView: View {
               FollowedForumCard(
                 forum: forum,
                 isPinned: isPinned,
-                isUnfollowing: unfollowState == .busy
+                isUnfollowing: unfollowState == .busy,
+                isCheckedInToday: followedForumCheckInStore.isCheckedInToday(
+                  forum,
+                  forumLease: followedForumsViewModel.loadedSessionLease
+                )
               )
             }
             .buttonStyle(.plain)

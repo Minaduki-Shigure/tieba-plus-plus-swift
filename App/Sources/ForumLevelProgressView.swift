@@ -22,18 +22,30 @@ struct ForumLevelProgressPresentation: Equatable, Sendable {
 
 struct ForumLevelProgressView: View {
   let presentation: ForumLevelProgressPresentation
+  let showsCheckedInMark: Bool
 
-  init(progress: ForumLevelProgressData) {
+  init(
+    progress: ForumLevelProgressData,
+    showsCheckedInMark: Bool = false
+  ) {
     presentation = ForumLevelProgressPresentation(progress: progress)
+    self.showsCheckedInMark = showsCheckedInMark
   }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 3) {
-      Text(presentation.levelTitle)
-        .font(.caption2.weight(.semibold))
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-        .truncationMode(.tail)
+      HStack(spacing: 4) {
+        Text(presentation.levelTitle)
+          .font(.caption2.weight(.semibold))
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .truncationMode(.tail)
+
+        if showsCheckedInMark {
+          ForumCheckedInMark()
+            .accessibilityHidden(true)
+        }
+      }
 
       HStack(spacing: 8) {
         Text(presentation.experienceText)
@@ -50,6 +62,20 @@ struct ForumLevelProgressView: View {
     .fixedSize(horizontal: false, vertical: true)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel("贴吧等级进度")
-    .accessibilityValue(presentation.accessibilityValue)
+    .accessibilityValue(
+      showsCheckedInMark
+        ? "\(presentation.accessibilityValue)，今日已签到"
+        : presentation.accessibilityValue
+    )
+  }
+}
+
+struct ForumCheckedInMark: View {
+  var body: some View {
+    Image(systemName: "checkmark")
+      .font(.system(size: 12, weight: .bold))
+      .foregroundStyle(.secondary)
+      .frame(width: 14, height: 14)
+      .accessibilityLabel("今日已签到")
   }
 }

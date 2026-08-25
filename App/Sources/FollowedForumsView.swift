@@ -11,6 +11,8 @@ struct FollowedForumsView: View {
   @State private var surfaceID = UUID()
   @State private var pendingUnfollow: FollowedForumUnfollowPrompt?
   @EnvironmentObject private var viewModel: FollowedForumsViewModel
+  @EnvironmentObject private var followedForumCheckInStore: FollowedForumCheckInStore
+  @Environment(\.scenePhase) private var scenePhase
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @AppStorage(AppPreferenceKey.followedForumsLayout)
   private var followedForumsLayout = FollowedForumsLayoutMode.defaultValue.rawValue
@@ -92,7 +94,12 @@ struct FollowedForumsView: View {
         }
       }
     }
-    .onAppear { viewModel.fullListSurfaceDidAppear(id: surfaceID) }
+    .onAppear {
+      viewModel.fullListSurfaceDidAppear(id: surfaceID)
+      if scenePhase == .active {
+        followedForumCheckInStore.loadIfNeeded()
+      }
+    }
     .onDisappear {
       pendingUnfollow = nil
       viewModel.fullListSurfaceDidDisappear(id: surfaceID)
@@ -151,7 +158,11 @@ struct FollowedForumsView: View {
       }
     }
     .background(Color(uiColor: .systemGroupedBackground))
-    .refreshable { await viewModel.refresh() }
+    .refreshable {
+      async let forums: Void = viewModel.refresh()
+      async let checkIns: Void = followedForumCheckInStore.refresh()
+      _ = await (forums, checkIns)
+    }
   }
 
   private func forumGrid(_ forums: [FollowedForumItem], isPinned: Bool) -> some View {
@@ -177,7 +188,11 @@ struct FollowedForumsView: View {
           FollowedForumCard(
             forum: forum,
             isPinned: isPinned,
-            isUnfollowing: unfollowState == .busy
+            isUnfollowing: unfollowState == .busy,
+            isCheckedInToday: followedForumCheckInStore.isCheckedInToday(
+              forum,
+              forumLease: viewModel.loadedSessionLease
+            )
           )
         }
         .buttonStyle(.plain)
