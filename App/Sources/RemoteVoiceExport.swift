@@ -285,9 +285,10 @@ enum RemoteVoiceFileValidator {
   }
 }
 
-final class RemoteVoiceShareItem: Identifiable, @unchecked Sendable {
+final class RemoteVoiceExportItem: Identifiable, @unchecked Sendable {
   let id = UUID()
   let fileURL: URL
+  let sourceURL: URL
   let validation: RemoteVoiceValidationResult
 
   private let lease: RemoteVoiceFileLease
@@ -298,6 +299,7 @@ final class RemoteVoiceShareItem: Identifiable, @unchecked Sendable {
     lease: RemoteVoiceFileLease
   ) {
     self.fileURL = fileURL
+    sourceURL = lease.sourceURL
     self.validation = validation
     self.lease = lease
   }
@@ -307,8 +309,43 @@ final class RemoteVoiceShareItem: Identifiable, @unchecked Sendable {
   }
 }
 
+enum RemoteVoiceExportIntent: Equatable, Sendable {
+  case share
+  case saveToFiles
+}
+
+struct RemoteVoiceExportRequest: Equatable, Sendable {
+  let id: UUID
+  let intent: RemoteVoiceExportIntent
+  let sourceURL: URL
+
+  init(
+    id: UUID = UUID(),
+    intent: RemoteVoiceExportIntent,
+    sourceURL: URL
+  ) {
+    self.id = id
+    self.intent = intent
+    self.sourceURL = sourceURL
+  }
+}
+
+enum RemoteVoiceExportOutcome: Equatable, Sendable {
+  case shared
+  case savedToFiles
+  case cancelled
+  case failed(String)
+}
+
+struct RemoteVoiceExportPresentation: Identifiable {
+  let request: RemoteVoiceExportRequest
+  let item: RemoteVoiceExportItem
+
+  var id: UUID { request.id }
+}
+
 protocol RemoteVoiceExporting: Sendable {
-  func prepareForSharing(from sourceURL: URL) async throws -> RemoteVoiceShareItem
+  func prepareForExport(from sourceURL: URL) async throws -> RemoteVoiceExportItem
 }
 
 struct RemoteVoiceExporter: RemoteVoiceExporting, Sendable {
@@ -325,7 +362,7 @@ struct RemoteVoiceExporter: RemoteVoiceExporting, Sendable {
     self.mediaInspector = mediaInspector
   }
 
-  func prepareForSharing(from sourceURL: URL) async throws -> RemoteVoiceShareItem {
+  func prepareForExport(from sourceURL: URL) async throws -> RemoteVoiceExportItem {
     guard VoicePlaybackURLPolicy.allows(sourceURL) else {
       throw RemoteVoiceDownloadError.invalidURL
     }
@@ -346,7 +383,7 @@ struct RemoteVoiceExporter: RemoteVoiceExporting, Sendable {
       validation: validation
     )
     try Task.checkCancellation()
-    return RemoteVoiceShareItem(
+    return RemoteVoiceExportItem(
       fileURL: fileURL,
       validation: validation,
       lease: lease
@@ -397,82 +434,347 @@ struct RemoteVoiceExporter: RemoteVoiceExporting, Sendable {
 final class RemoteVoiceExportViewModel: ObservableObject {
   enum State: Equatable {
     case idle
-    case preparingForSharing
-    case readyToShare
-    case shared
-    case failed(String)
+    case preparing(RemoteVoiceExportRequest)
+    case ready(RemoteVoiceExportRequest)
+    case shared(RemoteVoiceExportRequest)
+    case savedToFiles(RemoteVoiceExportRequest)
+    case failed(RemoteVoiceExportRequest, String)
+  }
+
+  enum Notice: Equatable {
+    case savedToFiles(RemoteVoiceExportRequest)
+    case failed(RemoteVoiceExportRequest, String)
   }
 
   @Published private(set) var state: State = .idle
-  @Published var shareItem: RemoteVoiceShareItem?
+  @Published private(set) var presentation: RemoteVoiceExportPresentation?
+  @Published private(set) var notice: Notice?
 
   private let exporter: any RemoteVoiceExporting
+  private var preparationTask: Task<Void, Never>?
+  private var awaitingPresentationDismissal: RemoteVoiceExportRequest?
+  private var retainedPresentation: RemoteVoiceExportPresentation?
+  private var didPresentSystemUI = false
+  private var completedPresentationDismissal: RemoteVoiceExportRequest?
 
   init(exporter: any RemoteVoiceExporting = RemoteVoiceExporter.shared) {
     self.exporter = exporter
   }
 
-  var isBusy: Bool { state == .preparingForSharing }
+  var isBusy: Bool {
+    if case .preparing = state { return true }
+    return false
+  }
+
+  var canStart: Bool {
+    guard
+      preparationTask == nil,
+      presentation == nil,
+      awaitingPresentationDismissal == nil
+    else { return false }
+    switch state {
+    case .idle, .shared, .savedToFiles, .failed:
+      return true
+    case .preparing, .ready:
+      return false
+    }
+  }
+
+  var preparingIntent: RemoteVoiceExportIntent? {
+    guard case .preparing(let request) = state else { return nil }
+    return request.intent
+  }
 
   var errorMessage: String? {
-    guard case .failed(let message) = state else { return nil }
+    guard case .failed(_, let message) = state else { return nil }
     return message
   }
 
-  func prepareForSharing(from sourceURL: URL) async {
-    guard !isBusy, shareItem == nil else { return }
-    state = .preparingForSharing
-    do {
-      let item = try await exporter.prepareForSharing(from: sourceURL)
-      try Task.checkCancellation()
-      shareItem = item
-      state = .readyToShare
-    } catch is CancellationError {
-      state = .idle
-    } catch {
-      state = .failed(error.localizedDescription)
+  var failedRequest: RemoteVoiceExportRequest? {
+    guard case .failed(let request, _) = state else { return nil }
+    return request
+  }
+
+  var savedToFilesRequest: RemoteVoiceExportRequest? {
+    guard case .savedToFiles(let request) = state else { return nil }
+    return request
+  }
+
+  var noticeRequest: RemoteVoiceExportRequest? {
+    switch notice {
+    case .savedToFiles(let request), .failed(let request, _):
+      request
+    case .none:
+      nil
     }
   }
 
-  func finishSharing(completed: Bool, errorMessage: String?) {
-    guard state == .readyToShare else { return }
-    shareItem?.holdLeaseThroughCompletion()
-    shareItem = nil
-    if let errorMessage, !errorMessage.isEmpty {
-      state = .failed(errorMessage)
-    } else {
-      state = completed ? .shared : .idle
+  var noticeErrorMessage: String? {
+    guard case .failed(_, let message) = notice else { return nil }
+    return message
+  }
+
+  @discardableResult
+  func start(
+    intent: RemoteVoiceExportIntent,
+    from sourceURL: URL
+  ) -> RemoteVoiceExportRequest? {
+    guard canStart else { return nil }
+    notice = nil
+    let request = RemoteVoiceExportRequest(intent: intent, sourceURL: sourceURL)
+    state = .preparing(request)
+    let exporter = self.exporter
+    preparationTask = Task { @MainActor [weak self, exporter] in
+      do {
+        let item = try await exporter.prepareForExport(from: sourceURL)
+        try Task.checkCancellation()
+        self?.acceptPreparedItem(item, for: request)
+      } catch is CancellationError {
+        self?.finishCancelledPreparation(for: request)
+      } catch {
+        self?.finishFailedPreparation(error, for: request)
+      }
     }
+    return request
+  }
+
+  func finish(
+    request: RemoteVoiceExportRequest,
+    outcome: RemoteVoiceExportOutcome
+  ) {
+    guard case .ready(let currentRequest) = state, currentRequest == request else {
+      return
+    }
+    switch outcome {
+    case .shared where request.intent != .share,
+         .savedToFiles where request.intent != .saveToFiles:
+      return
+    case .shared, .savedToFiles, .cancelled, .failed:
+      break
+    }
+
+    let didDismiss = completedPresentationDismissal == request
+    let heldItem = takePresentationItem(for: request)
+    switch outcome {
+    case .shared:
+      state = .shared(request)
+    case .savedToFiles:
+      state = .savedToFiles(request)
+    case .cancelled:
+      state = .idle
+    case .failed(let message):
+      state = .failed(request, Self.usableErrorMessage(message))
+    }
+    if didDismiss {
+      completeSystemPresentationDismissal(for: request)
+    }
+    heldItem?.holdLeaseThroughCompletion()
+  }
+
+  func cancel(request: RemoteVoiceExportRequest) {
+    switch state {
+    case .preparing(let currentRequest) where currentRequest == request:
+      preparationTask?.cancel()
+      preparationTask = nil
+      state = .idle
+    case .ready(let currentRequest) where currentRequest == request:
+      let didDismiss = completedPresentationDismissal == request
+      let heldItem = takePresentationItem(for: request)
+      state = .idle
+      if didDismiss {
+        completeSystemPresentationDismissal(for: request)
+      } else if !didPresentSystemUI, awaitingPresentationDismissal == request {
+        awaitingPresentationDismissal = nil
+        completedPresentationDismissal = nil
+      }
+      heldItem?.holdLeaseThroughCompletion()
+    case .idle, .preparing, .ready, .shared, .savedToFiles, .failed:
+      break
+    }
+  }
+
+  func cancelAll() {
+    preparationTask?.cancel()
+    preparationTask = nil
+    let heldItem = presentation?.item ?? retainedPresentation?.item
+    presentation = nil
+    retainedPresentation = nil
+    if completedPresentationDismissal != nil || !didPresentSystemUI {
+      awaitingPresentationDismissal = nil
+      completedPresentationDismissal = nil
+      didPresentSystemUI = false
+    }
+    notice = nil
+    state = .idle
+    heldItem?.holdLeaseThroughCompletion()
   }
 
   func resetTransientState() {
     switch state {
-    case .shared, .failed:
+    case .shared, .savedToFiles, .failed:
+      guard awaitingPresentationDismissal == nil else { return }
+      notice = nil
       state = .idle
-    case .idle, .preparingForSharing, .readyToShare:
+    case .idle, .preparing, .ready:
       break
     }
+  }
+
+  func systemPresentationDidAppear(request: RemoteVoiceExportRequest) {
+    guard
+      awaitingPresentationDismissal == request,
+      case .ready(let currentRequest) = state,
+      currentRequest == request
+    else { return }
+    didPresentSystemUI = true
+  }
+
+  func systemPresentationDidDismiss() {
+    guard let request = awaitingPresentationDismissal else { return }
+    retainPresentationForDismissal(request: request)
+    completedPresentationDismissal = request
+    switch state {
+    case .ready(let currentRequest)
+      where currentRequest == request && !didPresentSystemUI:
+      cancel(request: request)
+    case .shared(let currentRequest) where currentRequest == request:
+      completeSystemPresentationDismissal(for: request)
+    case .savedToFiles(let currentRequest) where currentRequest == request:
+      completeSystemPresentationDismissal(for: request)
+    case .failed(let currentRequest, _) where currentRequest == request:
+      completeSystemPresentationDismissal(for: request)
+    case .idle:
+      completeSystemPresentationDismissal(for: request)
+    case .preparing, .ready, .shared, .savedToFiles, .failed:
+      break
+    }
+  }
+
+  func systemPresentationDismissalStarted(request: RemoteVoiceExportRequest) {
+    guard awaitingPresentationDismissal == request else { return }
+    retainPresentationForDismissal(request: request)
+  }
+
+  private func acceptPreparedItem(
+    _ item: RemoteVoiceExportItem,
+    for request: RemoteVoiceExportRequest
+  ) {
+    guard case .preparing(let currentRequest) = state, currentRequest == request else {
+      return
+    }
+    preparationTask = nil
+    guard item.sourceURL == request.sourceURL else {
+      let message = "语音文件与当前请求不匹配。"
+      state = .failed(request, message)
+      notice = .failed(request, message)
+      return
+    }
+    state = .ready(request)
+    presentation = RemoteVoiceExportPresentation(request: request, item: item)
+    awaitingPresentationDismissal = request
+    retainedPresentation = nil
+    didPresentSystemUI = false
+    completedPresentationDismissal = nil
+  }
+
+  private func finishCancelledPreparation(for request: RemoteVoiceExportRequest) {
+    guard case .preparing(let currentRequest) = state, currentRequest == request else {
+      return
+    }
+    preparationTask = nil
+    state = .idle
+  }
+
+  private func finishFailedPreparation(
+    _ error: Error,
+    for request: RemoteVoiceExportRequest
+  ) {
+    guard case .preparing(let currentRequest) = state, currentRequest == request else {
+      return
+    }
+    preparationTask = nil
+    let message = Self.usableErrorMessage(error.localizedDescription)
+    state = .failed(request, message)
+    notice = .failed(request, message)
+  }
+
+  private static func usableErrorMessage(_ message: String) -> String {
+    let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? "无法准备语音文件。" : trimmed
+  }
+
+  private func completeSystemPresentationDismissal(
+    for request: RemoteVoiceExportRequest
+  ) {
+    guard awaitingPresentationDismissal == request else { return }
+    awaitingPresentationDismissal = nil
+    retainedPresentation = nil
+    didPresentSystemUI = false
+    completedPresentationDismissal = nil
+    switch state {
+    case .shared(let currentRequest) where currentRequest == request:
+      state = .idle
+    case .savedToFiles(let currentRequest) where currentRequest == request:
+      notice = .savedToFiles(request)
+    case .failed(let currentRequest, let message) where currentRequest == request:
+      notice = .failed(request, message)
+    case .idle:
+      state = .idle
+    case .preparing, .ready, .shared, .savedToFiles, .failed:
+      break
+    }
+  }
+
+  private func retainPresentationForDismissal(request: RemoteVoiceExportRequest) {
+    guard presentation?.request == request else { return }
+    retainedPresentation = presentation
+    presentation = nil
+  }
+
+  private func takePresentationItem(
+    for request: RemoteVoiceExportRequest
+  ) -> RemoteVoiceExportItem? {
+    let item: RemoteVoiceExportItem?
+    if presentation?.request == request {
+      item = presentation?.item
+      presentation = nil
+    } else if retainedPresentation?.request == request {
+      item = retainedPresentation?.item
+      retainedPresentation = nil
+    } else {
+      item = nil
+    }
+    return item
   }
 }
 
 struct RemoteVoiceActivitySheet: UIViewControllerRepresentable {
-  let item: RemoteVoiceShareItem
-  let onCompletion: @MainActor @Sendable (Bool, String?) -> Void
+  let presentation: RemoteVoiceExportPresentation
+  let onCompletion:
+    @MainActor @Sendable (RemoteVoiceExportRequest, RemoteVoiceExportOutcome) -> Void
 
-  func makeCoordinator() -> Coordinator {
-    Coordinator(item: item, onCompletion: onCompletion)
+  func makeCoordinator() -> RemoteVoiceExportCompletionCoordinator {
+    RemoteVoiceExportCompletionCoordinator(
+      presentation: presentation,
+      onCompletion: onCompletion
+    )
   }
 
   func makeUIViewController(context: Context) -> UIActivityViewController {
     let controller = UIActivityViewController(
-      activityItems: [item.fileURL],
+      activityItems: [presentation.item.fileURL],
       applicationActivities: nil
     )
     let coordinator = context.coordinator
     controller.completionWithItemsHandler = { _, completed, _, error in
-      let errorMessage = error?.localizedDescription
+      let outcome: RemoteVoiceExportOutcome
+      if let error {
+        outcome = .failed(error.localizedDescription)
+      } else {
+        outcome = completed ? .shared : .cancelled
+      }
       Task { @MainActor in
-        coordinator.finish(completed: completed, errorMessage: errorMessage)
+        coordinator.finish(outcome)
       }
     }
     return controller
@@ -482,28 +784,98 @@ struct RemoteVoiceActivitySheet: UIViewControllerRepresentable {
     _ uiViewController: UIActivityViewController,
     context: Context
   ) {}
+}
+
+@MainActor
+final class RemoteVoiceExportCompletionCoordinator {
+  private var presentation: RemoteVoiceExportPresentation?
+  private let onCompletion:
+    @MainActor @Sendable (RemoteVoiceExportRequest, RemoteVoiceExportOutcome) -> Void
+  private var didFinish = false
+
+  init(
+    presentation: RemoteVoiceExportPresentation,
+    onCompletion: @escaping
+      @MainActor @Sendable (RemoteVoiceExportRequest, RemoteVoiceExportOutcome) -> Void
+  ) {
+    self.presentation = presentation
+    self.onCompletion = onCompletion
+  }
+
+  func finish(_ outcome: RemoteVoiceExportOutcome) {
+    guard !didFinish, let presentation else { return }
+    didFinish = true
+    onCompletion(presentation.request, outcome)
+    presentation.item.holdLeaseThroughCompletion()
+    self.presentation = nil
+  }
+}
+
+struct RemoteVoiceDocumentPicker: UIViewControllerRepresentable {
+  let presentation: RemoteVoiceExportPresentation
+  let onCompletion:
+    @MainActor @Sendable (RemoteVoiceExportRequest, RemoteVoiceExportOutcome) -> Void
+
+  func makeCoordinator() -> Coordinator {
+    Coordinator(presentation: presentation, onCompletion: onCompletion)
+  }
+
+  func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+    let controller = UIDocumentPickerViewController(
+      forExporting: [presentation.item.fileURL],
+      asCopy: true
+    )
+    controller.delegate = context.coordinator
+    controller.allowsMultipleSelection = false
+    controller.shouldShowFileExtensions = true
+    return controller
+  }
+
+  func updateUIViewController(
+    _ uiViewController: UIDocumentPickerViewController,
+    context: Context
+  ) {}
+
+  static func dismantleUIViewController(
+    _ uiViewController: UIDocumentPickerViewController,
+    coordinator: Coordinator
+  ) {
+    uiViewController.delegate = nil
+    coordinator.finish(.cancelled)
+  }
 
   @MainActor
-  final class Coordinator {
-    private var item: RemoteVoiceShareItem?
-    private let onCompletion: @MainActor @Sendable (Bool, String?) -> Void
-    private var didFinish = false
+  final class Coordinator: NSObject, UIDocumentPickerDelegate {
+    private let completion: RemoteVoiceExportCompletionCoordinator
 
     init(
-      item: RemoteVoiceShareItem,
-      onCompletion: @escaping @MainActor @Sendable (Bool, String?) -> Void
+      presentation: RemoteVoiceExportPresentation,
+      onCompletion: @escaping
+        @MainActor @Sendable (RemoteVoiceExportRequest, RemoteVoiceExportOutcome) -> Void
     ) {
-      self.item = item
-      self.onCompletion = onCompletion
+      completion = RemoteVoiceExportCompletionCoordinator(
+        presentation: presentation,
+        onCompletion: onCompletion
+      )
     }
 
-    func finish(completed: Bool, errorMessage: String?) {
-      guard !didFinish else { return }
-      didFinish = true
-      let heldItem = item
-      onCompletion(completed, errorMessage)
-      heldItem?.holdLeaseThroughCompletion()
-      item = nil
+    func documentPicker(
+      _ controller: UIDocumentPickerViewController,
+      didPickDocumentsAt urls: [URL]
+    ) {
+      finish(RemoteVoiceDocumentPicker.outcome(forPickedDocuments: urls))
     }
+
+    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+      finish(.cancelled)
+    }
+
+    func finish(_ outcome: RemoteVoiceExportOutcome) {
+      completion.finish(outcome)
+    }
+  }
+
+  static func outcome(forPickedDocuments urls: [URL]) -> RemoteVoiceExportOutcome {
+    urls.isEmpty ? .cancelled : .savedToFiles
   }
 }

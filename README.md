@@ -344,6 +344,19 @@ and its verified metadata enters the public app source.
   existing label remains passive. Pinned rows retain their compact topic-only
   presentation. This adds no endpoint, per-row state, or thread/nested-reply
   scroll work and is not included in the public `v0.62.3-alpha.1` IPA.
+- **Current-main voice Files export:** Every voice control keeps the existing
+  explicit share action and adds a separate Files action. Both targets reuse one
+  credential-free, 16 MiB-bounded download and the same byte-format,
+  audio-only, duration, and AVFoundation validation before a canonical-extension
+  temporary copy is exposed. The Files picker copies rather than moves that
+  lease-owned source; the app reports preparation failure and explicit success,
+  while the system picker owns destination-copy errors and cancellation is silent.
+  A request ID binds the source URL and target,
+  prevents overlapping preparation, rejects mismatched or duplicate completion,
+  and discards late results after source replacement or view disappearance.
+  This is a foreground user-selected export, not a background download queue,
+  fixed media directory, or persistent app cache. It is not included in the
+  public `v0.62.3-alpha.1` IPA.
 - **Current-main Home one-click check-in entry:** For an active account with
   complete credentials, Home exposes a toolbar shortcut to the same foreground-
   only flow already available from Account. Opening it reads the authoritative
@@ -595,8 +608,9 @@ and its verified metadata enters the public app source.
 - **Playback:** Voice and native AVKit video share one application-wide playback
   coordinator. Starting new media pauses the prior item, inactive scenes pause
   playback, and playback never resumes implicitly. Voice files can be explicitly
-  downloaded, validated, and passed to the system share sheet; Picture in Picture
-  is off. If a server video fragment has no stream accepted by the HTTPS playback
+  downloaded and validated once, then passed either to the system share sheet or
+  to a separate Files destination picker; Picture in Picture is off. If a server
+  video fragment has no stream accepted by the HTTPS playback
   policy, a bounded credential-free HTTP(S) landing page can be opened only by
   an explicit tap. A valid stream remains primary and playback failure never
   redirects automatically. Current `main` also reuses that single lazy player

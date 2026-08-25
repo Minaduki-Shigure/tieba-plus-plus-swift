@@ -796,10 +796,10 @@ struct VoicePlaybackButton: View {
   let duration: Int
 
   @EnvironmentObject private var controller: VoicePlaybackController
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @StateObject private var exportViewModel: RemoteVoiceExportViewModel
   @State private var itemID = UUID()
   @State private var pendingSeek: TimeInterval?
-  @State private var exportTask: Task<Void, Never>?
 
   init(
     url: URL,
@@ -815,52 +815,7 @@ struct VoicePlaybackButton: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
-      HStack(spacing: 8) {
-        Button(action: togglePlayback) {
-          ZStack {
-            if isLoading {
-              ProgressView()
-                .controlSize(.small)
-            } else {
-              Image(systemName: playbackSymbol)
-                .frame(width: 18, height: 18)
-            }
-          }
-          .frame(width: 44, height: 44)
-          .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(playbackAccessibilityLabel)
-        .accessibilityValue(playbackAccessibilityValue)
-        .help(playbackAccessibilityLabel)
-
-        Text(statusText)
-          .font(.subheadline)
-          .monospacedDigit()
-          .foregroundStyle(hasFailed ? Color.red : Color.secondary)
-          .lineLimit(2)
-          .fixedSize(horizontal: false, vertical: true)
-
-        Spacer(minLength: 0)
-
-        Button(action: startSharing) {
-          ZStack {
-            if exportViewModel.isBusy {
-              ProgressView()
-                .controlSize(.small)
-            } else {
-              Image(systemName: "square.and.arrow.up")
-                .frame(width: 18, height: 18)
-            }
-          }
-          .frame(width: 44, height: 44)
-          .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(exportViewModel.isBusy || !VoicePlaybackURLPolicy.allows(url))
-        .accessibilityLabel(exportViewModel.isBusy ? "正在准备语音" : "分享语音")
-        .help(exportViewModel.isBusy ? "正在准备语音" : "分享语音")
-      }
+      voiceControlHeader
 
       Slider(
         value: seekBinding,
@@ -895,39 +850,173 @@ struct VoicePlaybackButton: View {
     .onChange(of: url) { _ in
       controller.stop(itemID: itemID)
       pendingSeek = nil
-      cancelExport()
+      exportViewModel.cancelAll()
     }
-    .sheet(item: $exportViewModel.shareItem, onDismiss: finishDismissedShare) { item in
-      RemoteVoiceActivitySheet(item: item) { completed, errorMessage in
-        exportViewModel.finishSharing(
-          completed: completed,
-          errorMessage: errorMessage
-        )
-      }
+    .sheet(
+      isPresented: exportSheetBinding(for: exportViewModel.presentation?.request),
+      onDismiss: exportViewModel.systemPresentationDidDismiss
+    ) {
+      exportSheet
     }
-    .alert("语音分享失败", isPresented: presentsExportError) {
+    .alert(exportNoticeTitle, isPresented: presentsExportNotice) {
       Button("好") {
         exportViewModel.resetTransientState()
       }
     } message: {
-      Text(exportViewModel.errorMessage ?? "无法完成语音分享。")
+      Text(exportNoticeMessage)
     }
     .onDisappear {
       controller.stop(itemID: itemID)
       pendingSeek = nil
-      cancelExport()
+      exportViewModel.cancelAll()
     }
   }
 
-  private var presentsExportError: Binding<Bool> {
+  @ViewBuilder
+  private var voiceControlHeader: some View {
+    if AppDynamicTypeLayout.prefersExpandedControls(for: dynamicTypeSize) {
+      VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 8) {
+          playbackControl
+          statusLabel
+          Spacer(minLength: 0)
+        }
+        exportActions
+          .frame(maxWidth: .infinity, alignment: .trailing)
+      }
+    } else {
+      HStack(spacing: 8) {
+        playbackControl
+        statusLabel
+        Spacer(minLength: 0)
+        exportActions
+      }
+    }
+  }
+
+  private var playbackControl: some View {
+    Button(action: togglePlayback) {
+      ZStack {
+        if isLoading {
+          ProgressView()
+            .controlSize(.small)
+        } else {
+          Image(systemName: playbackSymbol)
+            .frame(width: 18, height: 18)
+        }
+      }
+      .frame(width: 44, height: 44)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel(playbackAccessibilityLabel)
+    .accessibilityValue(playbackAccessibilityValue)
+    .help(playbackAccessibilityLabel)
+  }
+
+  private var statusLabel: some View {
+    Text(statusText)
+      .font(.subheadline)
+      .monospacedDigit()
+      .foregroundStyle(hasFailed ? Color.red : Color.secondary)
+      .lineLimit(2)
+      .fixedSize(horizontal: false, vertical: true)
+  }
+
+  private var exportActions: some View {
+    HStack(spacing: 4) {
+      exportActionButton(for: .saveToFiles)
+      exportActionButton(for: .share)
+    }
+  }
+
+  private func exportActionButton(for intent: RemoteVoiceExportIntent) -> some View {
+    let actionLabel = exportActionLabel(for: intent)
+    return Button {
+      exportViewModel.start(intent: intent, from: url)
+    } label: {
+      ZStack {
+        if exportViewModel.preparingIntent == intent {
+          ProgressView()
+            .controlSize(.small)
+        } else {
+          Image(systemName: intent.systemImage)
+            .frame(width: 18, height: 18)
+        }
+      }
+      .frame(width: 44, height: 44)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .disabled(!exportViewModel.canStart || !VoicePlaybackURLPolicy.allows(url))
+    .accessibilityLabel(actionLabel)
+    .help(actionLabel)
+  }
+
+  @ViewBuilder
+  private var exportSheet: some View {
+    if let presentation = exportViewModel.presentation {
+      switch presentation.request.intent {
+      case .share:
+        RemoteVoiceActivitySheet(presentation: presentation) { request, outcome in
+          exportViewModel.finish(request: request, outcome: outcome)
+        }
+        .onAppear {
+          exportViewModel.systemPresentationDidAppear(request: presentation.request)
+        }
+      case .saveToFiles:
+        RemoteVoiceDocumentPicker(presentation: presentation) { request, outcome in
+          exportViewModel.finish(request: request, outcome: outcome)
+        }
+        .onAppear {
+          exportViewModel.systemPresentationDidAppear(request: presentation.request)
+        }
+      }
+    }
+  }
+
+  private func exportSheetBinding(
+    for presentedRequest: RemoteVoiceExportRequest?
+  ) -> Binding<Bool> {
     Binding(
-      get: { exportViewModel.errorMessage != nil },
+      get: { exportViewModel.presentation != nil },
+      set: { isPresented in
+        guard !isPresented, let presentedRequest else { return }
+        exportViewModel.systemPresentationDismissalStarted(request: presentedRequest)
+      }
+    )
+  }
+
+  private var presentsExportNotice: Binding<Bool> {
+    Binding(
+      get: { exportViewModel.notice != nil },
       set: { isPresented in
         if !isPresented {
           exportViewModel.resetTransientState()
         }
       }
     )
+  }
+
+  private var exportNoticeTitle: String {
+    if let request = exportViewModel.noticeRequest,
+       exportViewModel.noticeErrorMessage != nil {
+      return request.intent.failureTitle
+    }
+    return "语音已存储"
+  }
+
+  private var exportNoticeMessage: String {
+    if let errorMessage = exportViewModel.noticeErrorMessage {
+      return errorMessage
+    }
+    return "语音文件已保存到您选择的位置。"
+  }
+
+  private func exportActionLabel(for intent: RemoteVoiceExportIntent) -> String {
+    exportViewModel.preparingIntent == intent
+      ? intent.preparingLabel
+      : intent.actionLabel
   }
 
   private var isActive: Bool {
@@ -1030,31 +1119,47 @@ struct VoicePlaybackButton: View {
     controller.toggle(itemID: itemID, url: url, declaredDuration: duration)
   }
 
-  private func startSharing() {
-    guard exportTask == nil else { return }
-    exportTask = Task { @MainActor in
-      await exportViewModel.prepareForSharing(from: url)
-      exportTask = nil
-    }
-  }
-
-  private func cancelExport() {
-    exportTask?.cancel()
-    exportTask = nil
-    if exportViewModel.state == .readyToShare {
-      exportViewModel.finishSharing(completed: false, errorMessage: nil)
-    }
-    exportViewModel.resetTransientState()
-  }
-
-  private func finishDismissedShare() {
-    guard exportViewModel.state == .readyToShare else { return }
-    exportViewModel.finishSharing(completed: false, errorMessage: nil)
-  }
-
   private func seekEditingChanged(_ isEditing: Bool) {
     guard !isEditing, let pendingSeek else { return }
     controller.seek(itemID: itemID, to: pendingSeek)
     self.pendingSeek = nil
+  }
+}
+
+private extension RemoteVoiceExportIntent {
+  var systemImage: String {
+    switch self {
+    case .share:
+      "square.and.arrow.up"
+    case .saveToFiles:
+      "square.and.arrow.down"
+    }
+  }
+
+  var actionLabel: String {
+    switch self {
+    case .share:
+      "分享语音"
+    case .saveToFiles:
+      "存储语音到文件"
+    }
+  }
+
+  var preparingLabel: String {
+    switch self {
+    case .share:
+      "正在准备分享语音"
+    case .saveToFiles:
+      "正在准备存储语音"
+    }
+  }
+
+  var failureTitle: String {
+    switch self {
+    case .share:
+      "语音分享失败"
+    case .saveToFiles:
+      "语音存储失败"
+    }
   }
 }

@@ -118,6 +118,16 @@ interaction gap inside the existing media credit. It reuses the one established
 lazy AVKit player, stream policy, landing-page router, and playback coordinator;
 it adds no endpoint, media source, or weighted point. Compact-media mode remains
 passive, and an expanded card allocates no player before an explicit Play tap.
+Explicit voice export to a user-selected Files destination closes TiebaLite's
+narrow independent-save interaction gap inside the existing media credit. It
+reuses the hardened voice download, byte/format/media validation, canonical
+extension, and temporary lease used by sharing. One exact request binds its UUID,
+source URL, and share-or-Files target; cancellation, replacement, duplicate or
+mismatched completion, and late non-cooperative preparation cannot publish a
+different presentation. The document picker copies rather than moves the source
+and adds no background queue, fixed download directory, persistent cache, new
+endpoint, or weighted point. The public `v0.62.3-alpha.1` IPA does not include
+this source-only interaction.
 Reply-count navigation on shared thread cards closes another narrow TiebaLite
 reading interaction gap. It reuses the canonical thread route and initial-page
 response, adding no endpoint, data source, or weighted point. Its canonical link
@@ -338,8 +348,9 @@ the source metadata is updated to that tested IPA.
   Picture in Picture disabled
 - Single-session voice playback with loading/failure state, elapsed progress,
   seeking, and audio-interruption handling
-- Explicit voice-file sharing through a credential-free, bounded downloader,
-  byte-level format checks, AVFoundation validation, and temporary-file leases
+- Explicit voice-file sharing and user-selected Files export through one
+  credential-free bounded downloader, byte-level format checks, AVFoundation
+  validation, and temporary-file leases
 - Responsive one-to-three-column masonry for consecutive post-body image runs
 - Persistent automatic, data-saving, or tap-to-load policy for content media
 - Persistent standard or high-definition quality selection for supported image previews
@@ -824,14 +835,20 @@ expose a separate explicit fallback but never opens it automatically. Supported
 Tieba links remain internal, external HTTPS follows the selected system/Safari
 preference, and HTTP remains system-owned.
 
-Voice sharing is an explicit, one-shot export. It uses a separate ephemeral
-credential-free HTTPS session, rejects redirects, non-200 and partial responses,
+Voice sharing and Files saving are explicit, one-shot exports. They use a
+separate ephemeral credential-free HTTPS session that rejects redirects,
+non-200 and partial responses,
 non-identity content encoding, and files over 16 MiB. Response MIME and filenames
 are ignored. Supported bytes must identify MP3, AMR, AMR-WB, or AAC; AMR storage
 frames are traversed to exact EOF and the canonical-extension copy must be
-playable, audio-only, and duration-bounded under AVFoundation before the system
-share sheet receives it. The temporary lease is deleted after completion,
-dismissal, cancellation, or failure and never becomes a persistent media cache.
+playable, audio-only, and duration-bounded under AVFoundation before either
+system surface receives it. One exact request owns preparation and presentation;
+the share sheet and copy-only Files picker cannot overlap, and stale source,
+target, ID, dismissal, or completion events cannot finish its successor. Files
+success receives an app acknowledgement, while cancellation is silent. The
+temporary lease is deleted after completion, dismissal, cancellation, source
+replacement, view disappearance, or failure and never becomes a persistent media
+cache. This is not a background download queue or a fixed public media directory.
 
 This milestone intentionally adds no background audio, lock-screen controls,
 automatic playback, automatic resume after scene activation, persistent media
