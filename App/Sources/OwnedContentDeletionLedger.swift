@@ -1036,7 +1036,7 @@ actor FileOwnedContentDeletionLedger: OwnedContentDeletionLedgerRepository {
     var didReportContention = false
     while true {
       try Task.checkCancellation()
-      if Darwin.flock(descriptor, LOCK_EX | LOCK_NB) == 0 { return }
+      if flock(descriptor, LOCK_EX | LOCK_NB) == 0 { return }
       let nonblockingError = errno
       guard
         nonblockingError == EINTR
@@ -1060,7 +1060,7 @@ actor FileOwnedContentDeletionLedger: OwnedContentDeletionLedgerRepository {
   private static func releaseExclusiveLock(descriptor: Int32) {
     guard descriptor >= 0 else { return }
     var remainingRetries = Self.exclusiveLockRetryCount
-    while Darwin.flock(descriptor, LOCK_UN) != 0 {
+    while flock(descriptor, LOCK_UN) != 0 {
       guard errno == EINTR, remainingRetries > 0 else { return }
       remainingRetries -= 1
     }

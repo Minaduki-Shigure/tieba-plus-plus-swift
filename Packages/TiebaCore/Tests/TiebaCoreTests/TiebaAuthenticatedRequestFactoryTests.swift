@@ -76,9 +76,9 @@ final class TiebaAuthenticatedRequestFactoryTests: XCTestCase {
 
     let customized = TiebaAuthenticatedRequestFactory(
       configuration: .init(
-        userAgent: "custom-agent",
         clientVersion: "99.99.99",
-        authenticatedClientVersion: "88.88.88"
+        authenticatedClientVersion: "88.88.88",
+        userAgent: "custom-agent"
       )
     )
     let customizedRequest = try customized.ownFollowing(

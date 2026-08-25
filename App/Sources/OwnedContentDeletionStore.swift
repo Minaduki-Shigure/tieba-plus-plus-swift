@@ -149,7 +149,7 @@ final class OwnedContentDeletionStore {
   }
 
   func outcomeUnknownTarget(threadID: Int64) -> OwnedContentDeletionTarget? {
-    terminals.values.compactMap { terminal in
+    terminals.values.compactMap { terminal -> OwnedContentDeletionTarget? in
       guard terminal.target.threadID == threadID else { return nil }
       if case .outcomeUnknown(let target, _) = terminal { return target }
       return nil
