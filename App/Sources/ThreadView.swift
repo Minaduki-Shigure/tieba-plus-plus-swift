@@ -97,6 +97,7 @@ struct ThreadView: View {
     threadRouting
   }
 
+  // Keep these opaque stages separate; the combined chain exceeds Release type-check limits.
   private var threadContent: some View {
     Group {
       if !deletionProjectionResolved {

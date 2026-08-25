@@ -690,9 +690,9 @@ final class UserRelationsViewModel: ObservableObject {
       guard let concernState = user.concernState else { return false }
       switch concernState {
       case .notFollowing, .following, .mutual:
-        true
+        return true
       case .unknown:
-        false
+        return false
       }
     }
     guard !concernMetadataIsComplete else { return }
