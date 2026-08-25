@@ -23,6 +23,9 @@ The published level-progress and bounded regular-expression filtering additions
 improve existing credited areas without changing the current
 80–82% weighted estimate; experimental account writes retain their documented
 physical-device and disposable-account gates.
+Current-main personalized-discovery startup routing and public-profile identity
+label preservation likewise improve existing local-settings and public-reading
+areas without adding a data source or weighted point.
 
 | Capability area | Weight | Credited points | Current basis |
 | --- | ---: | ---: | --- |
@@ -288,8 +291,9 @@ the source metadata is updated to that tested IPA.
 - Hot-topic details with related forums and cursor-aware thread pagination
 - Categorized anonymous forum, thread, and user search
 - Default-off anonymous online suggestions for the home search field
-- Local home-entry customization with a next-launch home, ranking, topic,
-  inbox, favorite, or history destination plus an optional discovery section
+- Local home-entry customization with a next-launch home, personalized discovery,
+  ranking, topic, inbox, favorite, or history destination plus an optional home
+  discovery section
 - Persistent adaptive-grid or single-column followed-forum layout shared by the
   six-item home projection and complete list, with an explicit switch on each
   surface at non-accessibility sizes, accessibility-size fallback, and explicit
@@ -393,7 +397,8 @@ the source metadata is updated to that tested IPA.
   multiple-choice voting with real option IDs, one minimum-field HTTPS write at
   most, mandatory readback, and exact account-lease isolation; real-account
   behavior remains a disposable-account validation gate
-- Read-only scores, author forum levels, bounded moderator roles, and IP locations
+- Read-only scores, author forum levels, bounded moderator roles, verified-creator
+  field labels, and IP locations
 - Lossless nested-reply context and public-profile links for user mentions
 - Public user profiles opened from post and nested-reply authors
 - Explicit profile-avatar viewing, sharing, and Photos saving
@@ -1204,13 +1209,15 @@ and history remains available without an account.
 
 Home-entry customization is a closed local preference, not a new feed. The
 default remains the ordinary home page, with optional starts limited to the
-existing post ranking, hot topics, local favorites, and browsing history. The
-choice is snapshotted once at process launch, so changing it cannot redirect an
-active session; unknown stored values fall back to home. A cold-start forum,
-thread, or user link is appended above that initial page and remains the visible
-destination. The independent discovery switch defaults on and removes only the
-home section containing ranking, topic, and explicit paste-link shortcuts. It
-does not disable those destinations, the strict URL router, or any network path.
+existing personalized discovery, post ranking, hot topics, inbox, local
+favorites, and browsing history. The choice is snapshotted once at process
+launch, so changing it cannot redirect an active session; unknown stored values
+fall back to home. A cold-start forum, thread, or user link is appended above
+that initial page and remains the visible destination. The independent discovery
+switch defaults on and removes only the home section containing ranking, topic,
+and explicit paste-link shortcuts. It does not disable direct personalized-
+discovery startup, those other destinations, the strict URL router, or any
+network path.
 
 Forum and thread share actions emit canonical `https://tieba.baidu.com` URLs
 through the system share sheet. Thread copying additionally carries an exact

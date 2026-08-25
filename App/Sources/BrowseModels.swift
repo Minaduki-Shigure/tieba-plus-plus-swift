@@ -489,10 +489,69 @@ struct BrowseUserProfile: Identifiable, Sendable, Hashable {
   let followedForumCount: Int
   let likedForums: [BrowseProfileForum]
   let totalAgreeCount: Int64
+  // Server-reported profile decoration; never use it for account authorization.
   let isModerator: Bool
+  let moderatorRole: BrowseModeratorRole?
   let isVIP: Bool
   let isVerifiedCreator: Bool
+  let verifiedCreatorField: String?
   let isBlocked: Bool
+
+  init(
+    id: Int64,
+    tiebaUID: Int64?,
+    username: String,
+    displayName: String,
+    portraitURL: URL?,
+    largePortraitURL: URL?,
+    growthLevel: Int,
+    gender: BrowseGender,
+    ipLocation: String,
+    badges: [String],
+    biography: String,
+    tiebaAge: String,
+    threadCount: Int,
+    postCount: Int,
+    followerCount: Int,
+    followingCount: Int,
+    followedForumCount: Int,
+    likedForums: [BrowseProfileForum],
+    totalAgreeCount: Int64,
+    isModerator: Bool,
+    moderatorRole: BrowseModeratorRole? = nil,
+    isVIP: Bool,
+    isVerifiedCreator: Bool,
+    verifiedCreatorField: String? = nil,
+    isBlocked: Bool
+  ) {
+    let normalizedModeratorRole: BrowseModeratorRole? =
+      isModerator ? (moderatorRole ?? .moderator) : nil
+    self.id = id
+    self.tiebaUID = tiebaUID
+    self.username = username
+    self.displayName = displayName
+    self.portraitURL = portraitURL
+    self.largePortraitURL = largePortraitURL
+    self.growthLevel = growthLevel
+    self.gender = gender
+    self.ipLocation = ipLocation
+    self.badges = badges
+    self.biography = biography
+    self.tiebaAge = tiebaAge
+    self.threadCount = threadCount
+    self.postCount = postCount
+    self.followerCount = followerCount
+    self.followingCount = followingCount
+    self.followedForumCount = followedForumCount
+    self.likedForums = likedForums
+    self.totalAgreeCount = totalAgreeCount
+    self.isModerator = normalizedModeratorRole != nil
+    self.moderatorRole = normalizedModeratorRole
+    self.isVIP = isVIP
+    self.isVerifiedCreator = isVerifiedCreator
+    self.verifiedCreatorField = isVerifiedCreator ? verifiedCreatorField : nil
+    self.isBlocked = isBlocked
+  }
 
   var preferredName: String {
     let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)

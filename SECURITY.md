@@ -630,6 +630,15 @@ or favorites response is not sufficient evidence for safe write behavior.
 Anonymous public-profile requests must use the protocol's guest target fields.
 They must not place the target user in the current-account field, attach account
 credentials, or attempt to bypass profile privacy settings.
+Creator-verification and moderator-role values from that response are untrusted
+display metadata, never an authorization decision. A creator field is retained
+only when the response also declares creator status, after a bounded early
+length check, Unicode normalization, a 32-character and 128-UTF-8-byte limit,
+and control-character rejection; an absent or rejected field falls back to a
+generic verification label. Moderator roles map only the known manager and
+assistant wire values, with other bounded values reduced to generic moderator.
+Neither label may expose a management control or replace the authenticated,
+target-bound preflight required by any account write.
 Liked forums embedded in that public response are a bounded preview only. The
 app must not infer hidden entries or describe an empty or partial preview as the
 user's complete forum list.

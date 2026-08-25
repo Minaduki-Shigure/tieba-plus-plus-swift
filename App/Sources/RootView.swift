@@ -1274,6 +1274,8 @@ enum RootStartupNavigation {
     switch startDestination {
     case .home:
       []
+    case .discovery:
+      [.explore(.personalized)]
     case .hotThreads:
       [.explore(.hot)]
     case .hotTopics:

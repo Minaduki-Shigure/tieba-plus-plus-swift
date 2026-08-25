@@ -510,6 +510,7 @@ final class TiebaClientTests: XCTestCase {
     XCTAssertEqual(profile.totalAgreeCount, 12_345)
     XCTAssertTrue(profile.user.isVIP)
     XCTAssertTrue(profile.user.isVerifiedCreator)
+    XCTAssertEqual(profile.user.verifiedCreatorField, "数码")
     XCTAssertTrue(profile.isBlocked)
   }
 

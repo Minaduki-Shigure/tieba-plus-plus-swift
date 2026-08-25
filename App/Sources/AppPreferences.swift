@@ -376,6 +376,7 @@ struct FavoriteThreadOpenOverrides: Equatable, Sendable {
 
 enum AppStartDestination: String, CaseIterable, Hashable, Identifiable, Sendable {
   case home
+  case discovery
   case hotThreads
   case hotTopics
   case notifications
@@ -390,6 +391,8 @@ enum AppStartDestination: String, CaseIterable, Hashable, Identifiable, Sendable
     switch self {
     case .home:
       "首页"
+    case .discovery:
+      "发现-推荐"
     case .hotThreads:
       "帖子热榜"
     case .hotTopics:

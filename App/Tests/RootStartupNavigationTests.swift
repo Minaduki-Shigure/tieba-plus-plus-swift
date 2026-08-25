@@ -24,6 +24,7 @@ final class RootStartupNavigationTests: XCTestCase {
   func testStartDestinationCreatesExpectedInitialPath() {
     let cases: [(destination: AppStartDestination, expected: [RootDestination])] = [
       (.home, []),
+      (.discovery, [.explore(.personalized)]),
       (.hotThreads, [.explore(.hot)]),
       (.hotTopics, [.hotTopics]),
       (.notifications, [.notifications(.replies)]),

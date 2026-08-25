@@ -718,8 +718,32 @@ enum TiebaProtoMapper {
       isModerator: moderatorRole != nil,
       isVIP: !proto.newTshowIcon.isEmpty || proto.vipInfo.vStatus != 0,
       isVerifiedCreator: proto.newGodData.status != 0,
+      verifiedCreatorField: verifiedCreatorField(
+        isVerifiedCreator: proto.newGodData.status != 0,
+        rawValue: proto.newGodData.fieldName
+      ),
       moderatorRole: moderatorRole
     )
+  }
+
+  static func verifiedCreatorField(
+    isVerifiedCreator: Bool,
+    rawValue: String
+  ) -> String? {
+    guard
+      isVerifiedCreator,
+      rawValue.utf8.prefix(129).count <= 128,
+      rawValue.prefix(33).count <= 32
+    else { return nil }
+    let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    guard
+      !value.isEmpty,
+      value.count <= 32,
+      value.utf8.count <= 128,
+      !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    else { return nil }
+    return value
   }
 
   static func moderatorRole(

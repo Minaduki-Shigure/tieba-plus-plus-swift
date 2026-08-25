@@ -361,6 +361,7 @@ enum ProtoFixtures {
     user.iconinfo = [User.Icon.with { $0.name = "fixture badge" }]
     user.newTshowIcon = [User.TshowInfo.with { $0.name = "vip" }]
     user.newGodData.status = 1
+    user.newGodData.fieldName = " 数码 "
     user.likeForum = [
       User.LikeForumInfo.with {
         $0.forumID = 42

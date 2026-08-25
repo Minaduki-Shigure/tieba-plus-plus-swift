@@ -58,6 +58,7 @@ public struct TiebaUser: Identifiable, Sendable, Hashable {
   public let moderatorRole: TiebaModeratorRole?
   public let isVIP: Bool
   public let isVerifiedCreator: Bool
+  public let verifiedCreatorField: String?
 
   public var isModerator: Bool { moderatorRole != nil }
 
@@ -74,6 +75,7 @@ public struct TiebaUser: Identifiable, Sendable, Hashable {
     isModerator: Bool,
     isVIP: Bool,
     isVerifiedCreator: Bool,
+    verifiedCreatorField: String? = nil,
     moderatorRole: TiebaModeratorRole? = nil
   ) {
     self.id = id
@@ -88,6 +90,7 @@ public struct TiebaUser: Identifiable, Sendable, Hashable {
     self.moderatorRole = isModerator ? (moderatorRole ?? .moderator) : nil
     self.isVIP = isVIP
     self.isVerifiedCreator = isVerifiedCreator
+    self.verifiedCreatorField = isVerifiedCreator ? verifiedCreatorField : nil
   }
 
   public var preferredName: String {

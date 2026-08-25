@@ -692,8 +692,10 @@ struct TiebaCoreBrowseService: BrowseService, SearchService, ForumPostSearchServ
       },
       totalAgreeCount: response.totalAgreeCount,
       isModerator: response.user.isModerator,
+      moderatorRole: mapModeratorRole(response.user.moderatorRole),
       isVIP: response.user.isVIP,
       isVerifiedCreator: response.user.isVerifiedCreator,
+      verifiedCreatorField: response.user.verifiedCreatorField,
       isBlocked: response.isBlocked
     )
   }

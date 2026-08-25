@@ -1,4 +1,5 @@
 import Combine
+import Foundation
 import SwiftUI
 import UIKit
 
@@ -20,6 +21,57 @@ struct UserProfilePortraitPresentation: Identifiable, Equatable, Sendable {
       largePortraitURL: profile.largePortraitURL,
       fallbackPortraitURL: profile.portraitURL
     )
+  }
+}
+
+struct UserProfileIdentityPresentation: Equatable, Sendable {
+  static let maximumCreatorFieldCharacters = 32
+  static let maximumCreatorFieldUTF8Bytes = 128
+
+  let verifiedCreatorLabel: String?
+  let moderatorLabel: String?
+
+  init(profile: BrowseUserProfile) {
+    self.init(
+      isVerifiedCreator: profile.isVerifiedCreator,
+      verifiedCreatorField: profile.verifiedCreatorField,
+      moderatorRole: profile.moderatorRole
+    )
+  }
+
+  init(
+    isVerifiedCreator: Bool,
+    verifiedCreatorField: String?,
+    moderatorRole: BrowseModeratorRole?
+  ) {
+    verifiedCreatorLabel = Self.verifiedCreatorLabel(
+      isVerifiedCreator: isVerifiedCreator,
+      field: verifiedCreatorField
+    )
+    moderatorLabel = moderatorRole?.title
+  }
+
+  static func verifiedCreatorLabel(
+    isVerifiedCreator: Bool,
+    field rawValue: String?
+  ) -> String? {
+    guard isVerifiedCreator else { return nil }
+    guard let rawValue else { return "创作者认证" }
+    guard
+      rawValue.utf8.prefix(maximumCreatorFieldUTF8Bytes + 1).count
+        <= maximumCreatorFieldUTF8Bytes,
+      rawValue.prefix(maximumCreatorFieldCharacters + 1).count
+        <= maximumCreatorFieldCharacters
+    else { return "创作者认证" }
+    let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    guard
+      !value.isEmpty,
+      value.count <= maximumCreatorFieldCharacters,
+      value.utf8.count <= maximumCreatorFieldUTF8Bytes,
+      !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    else { return "创作者认证" }
+    return "\(value)领域大神"
   }
 }
 
@@ -672,6 +724,10 @@ private struct UserProfileHeader: View {
     return username
   }
 
+  private var identityPresentation: UserProfileIdentityPresentation {
+    UserProfileIdentityPresentation(profile: profile)
+  }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack(alignment: .center, spacing: 14) {
@@ -684,11 +740,6 @@ private struct UserProfileHeader: View {
               .minimumScaleFactor(0.75)
               .layoutPriority(1)
               .accessibilityLabel(displayedName)
-            if profile.isVerifiedCreator {
-              Image(systemName: "checkmark.seal.fill")
-                .foregroundStyle(.tint)
-                .accessibilityLabel("创作者认证")
-            }
           }
           if let legacyUsername {
             Text(legacyUsername)
@@ -696,12 +747,22 @@ private struct UserProfileHeader: View {
               .foregroundStyle(.secondary)
               .lineLimit(1)
           }
+          if let creatorLabel = identityPresentation.verifiedCreatorLabel {
+            Label(creatorLabel, systemImage: "checkmark.seal.fill")
+              .font(.caption)
+              .foregroundStyle(.tint)
+              .lineLimit(2)
+              .minimumScaleFactor(0.75)
+              .fixedSize(horizontal: false, vertical: true)
+              .accessibilityLabel(creatorLabel)
+          }
           HStack(spacing: 8) {
             if profile.isVIP {
               Label("会员", systemImage: "crown.fill")
             }
-            if profile.isModerator {
-              Label("吧务", systemImage: "checkmark.shield")
+            if let moderatorLabel = identityPresentation.moderatorLabel {
+              Label(moderatorLabel, systemImage: "checkmark.shield")
+                .lineLimit(1)
             }
             if profile.isBlocked {
               Label("账号受限", systemImage: "exclamationmark.shield")

@@ -333,6 +333,59 @@ final class TiebaProtoMapperTests: XCTestCase {
     )
   }
 
+  func testVerifiedCreatorFieldRequiresStatusAndBoundedDisplayText() {
+    XCTAssertEqual(
+      TiebaProtoMapper.verifiedCreatorField(
+        isVerifiedCreator: true,
+        rawValue: " 数码\n"
+      ),
+      "数码"
+    )
+    XCTAssertNil(
+      TiebaProtoMapper.verifiedCreatorField(
+        isVerifiedCreator: false,
+        rawValue: "数码"
+      )
+    )
+    XCTAssertNil(
+      TiebaProtoMapper.verifiedCreatorField(
+        isVerifiedCreator: true,
+        rawValue: "   "
+      )
+    )
+    XCTAssertNil(
+      TiebaProtoMapper.verifiedCreatorField(
+        isVerifiedCreator: true,
+        rawValue: "数码\u{0000}达人"
+      )
+    )
+    XCTAssertNil(
+      TiebaProtoMapper.verifiedCreatorField(
+        isVerifiedCreator: true,
+        rawValue: String(repeating: "a", count: 33)
+      )
+    )
+    XCTAssertEqual(
+      TiebaProtoMapper.verifiedCreatorField(
+        isVerifiedCreator: true,
+        rawValue: String(repeating: "a", count: 32)
+      ),
+      String(repeating: "a", count: 32)
+    )
+    XCTAssertNil(
+      TiebaProtoMapper.verifiedCreatorField(
+        isVerifiedCreator: true,
+        rawValue: String(repeating: "😀", count: 33)
+      )
+    )
+    XCTAssertNil(
+      TiebaProtoMapper.verifiedCreatorField(
+        isVerifiedCreator: true,
+        rawValue: String(repeating: "👨‍👩‍👧‍👦", count: 6)
+      )
+    )
+  }
+
   func testLegacyModeratorInitializerMaintainsRoleInvariant() {
     let legacyModerator = TiebaUser(
       id: 1,

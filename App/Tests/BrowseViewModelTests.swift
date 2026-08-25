@@ -64,6 +64,87 @@ final class BrowseViewModelTests: XCTestCase {
     XCTAssertNil(untrustedQuery.largePortraitURL)
   }
 
+  func testUserProfileMappingPreservesReadOnlyIdentityMetadata() {
+    let user = TiebaUser(
+      id: 7,
+      username: "profile-user",
+      displayName: "Profile User",
+      portrait: "",
+      level: 0,
+      growthLevel: 0,
+      gender: .unknown,
+      ipLocation: "",
+      badges: [],
+      isModerator: true,
+      isVIP: false,
+      isVerifiedCreator: true,
+      verifiedCreatorField: "数码",
+      moderatorRole: .manager
+    )
+    let response = TiebaUserProfile(
+      user: user,
+      tiebaUID: nil,
+      biography: "",
+      tiebaAge: "",
+      threadCount: 0,
+      postCount: 0,
+      followerCount: 0,
+      followingCount: 0,
+      followedForumCount: 0,
+      totalAgreeCount: 0,
+      isBlocked: false
+    )
+
+    let profile = TiebaCoreBrowseService.mapUserProfile(response)
+
+    XCTAssertTrue(profile.isModerator)
+    XCTAssertEqual(profile.moderatorRole, .manager)
+    XCTAssertTrue(profile.isVerifiedCreator)
+    XCTAssertEqual(profile.verifiedCreatorField, "数码")
+  }
+
+  func testBrowseUserProfileMaintainsLegacyModeratorInvariant() {
+    func profile(
+      isModerator: Bool,
+      moderatorRole: BrowseModeratorRole?
+    ) -> BrowseUserProfile {
+      BrowseUserProfile(
+        id: 7,
+        tiebaUID: nil,
+        username: "profile-user",
+        displayName: "Profile User",
+        portraitURL: nil,
+        largePortraitURL: nil,
+        growthLevel: 0,
+        gender: .unknown,
+        ipLocation: "",
+        badges: [],
+        biography: "",
+        tiebaAge: "",
+        threadCount: 0,
+        postCount: 0,
+        followerCount: 0,
+        followingCount: 0,
+        followedForumCount: 0,
+        likedForums: [],
+        totalAgreeCount: 0,
+        isModerator: isModerator,
+        moderatorRole: moderatorRole,
+        isVIP: false,
+        isVerifiedCreator: false,
+        isBlocked: false
+      )
+    }
+
+    let legacyModerator = profile(isModerator: true, moderatorRole: nil)
+    let ordinaryUser = profile(isModerator: false, moderatorRole: .manager)
+
+    XCTAssertTrue(legacyModerator.isModerator)
+    XCTAssertEqual(legacyModerator.moderatorRole, .moderator)
+    XCTAssertFalse(ordinaryUser.isModerator)
+    XCTAssertNil(ordinaryUser.moderatorRole)
+  }
+
   func testForumChannelMappingPreservesServerSortMenuAndUnknownRawValue() {
     let mapped = TiebaCoreBrowseService.mapForumChannel(
       TiebaForumChannel(

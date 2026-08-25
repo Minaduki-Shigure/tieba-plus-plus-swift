@@ -601,15 +601,15 @@ final class AppPreferencesTests: XCTestCase {
   func testHomeStartDestinationUsesStableValuesTitlesAndOrdering() {
     XCTAssertEqual(
       AppStartDestination.allCases,
-      [.home, .hotThreads, .hotTopics, .notifications, .favorites, .history]
+      [.home, .discovery, .hotThreads, .hotTopics, .notifications, .favorites, .history]
     )
     XCTAssertEqual(
       AppStartDestination.allCases.map(\.rawValue),
-      ["home", "hotThreads", "hotTopics", "notifications", "favorites", "history"]
+      ["home", "discovery", "hotThreads", "hotTopics", "notifications", "favorites", "history"]
     )
     XCTAssertEqual(
       AppStartDestination.allCases.map(\.title),
-      ["首页", "帖子热榜", "热门话题", "消息", "本地收藏", "浏览记录"]
+      ["首页", "发现-推荐", "帖子热榜", "热门话题", "消息", "本地收藏", "浏览记录"]
     )
 
     for destination in AppStartDestination.allCases {

@@ -44,6 +44,77 @@ final class UserProfilePortraitPresentationTests: XCTestCase {
   }
 }
 
+final class UserProfileIdentityPresentationTests: XCTestCase {
+  func testVerifiedCreatorUsesBoundedNormalizedFieldLabel() {
+    let presentation = UserProfileIdentityPresentation(
+      isVerifiedCreator: true,
+      verifiedCreatorField: " 数码\n",
+      moderatorRole: .assistant
+    )
+
+    XCTAssertEqual(presentation.verifiedCreatorLabel, "数码领域大神")
+    XCTAssertEqual(presentation.moderatorLabel, "小吧主")
+  }
+
+  func testVerifiedCreatorFallsBackForMissingOrUntrustedField() {
+    let untrustedFields: [String?] = [
+      nil,
+      "   ",
+      "数码\u{0000}达人",
+      String(repeating: "a", count: 33),
+      String(repeating: "👨‍👩‍👧‍👦", count: 6),
+    ]
+    for field in untrustedFields {
+      XCTAssertEqual(
+        UserProfileIdentityPresentation(
+          isVerifiedCreator: true,
+          verifiedCreatorField: field,
+          moderatorRole: nil
+        ).verifiedCreatorLabel,
+        "创作者认证"
+      )
+    }
+  }
+
+  func testUnverifiedCreatorDoesNotDisplayServerField() {
+    let presentation = UserProfileIdentityPresentation(
+      isVerifiedCreator: false,
+      verifiedCreatorField: "数码",
+      moderatorRole: .moderator
+    )
+
+    XCTAssertNil(presentation.verifiedCreatorLabel)
+    XCTAssertEqual(presentation.moderatorLabel, "吧务")
+  }
+
+  func testModeratorLabelsPreserveEveryKnownReadOnlyRole() {
+    XCTAssertEqual(
+      UserProfileIdentityPresentation(
+        isVerifiedCreator: false,
+        verifiedCreatorField: nil,
+        moderatorRole: .manager
+      ).moderatorLabel,
+      "吧主"
+    )
+    XCTAssertEqual(
+      UserProfileIdentityPresentation(
+        isVerifiedCreator: false,
+        verifiedCreatorField: nil,
+        moderatorRole: .assistant
+      ).moderatorLabel,
+      "小吧主"
+    )
+    XCTAssertEqual(
+      UserProfileIdentityPresentation(
+        isVerifiedCreator: false,
+        verifiedCreatorField: nil,
+        moderatorRole: .moderator
+      ).moderatorLabel,
+      "吧务"
+    )
+  }
+}
+
 final class UserLikedForumsPreviewPresentationTests: XCTestCase {
   func testFullListEntryDoesNotDependOnPublicCountOrPreview() {
     let presentation = UserLikedForumsPreviewPresentation(
