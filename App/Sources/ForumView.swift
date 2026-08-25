@@ -65,6 +65,7 @@ struct ForumView: View {
           threadList
         }
       }
+      .appPageSurface(.canvas)
       .navigationTitle(viewModel.forumName)
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -322,7 +323,7 @@ struct ForumView: View {
         .font(.subheadline)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.regularMaterial)
+        .appRegularMaterialSurface()
       }
 
       if viewModel.selectedChannelID == nil {
@@ -343,7 +344,7 @@ struct ForumView: View {
         .font(.subheadline)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.regularMaterial)
+        .appRegularMaterialSurface()
       } else if viewModel.selectedChannelSortOptions.count > 1 {
         HStack(spacing: 10) {
           Label("频道排序", systemImage: "arrow.up.arrow.down")
@@ -365,7 +366,7 @@ struct ForumView: View {
         .font(.subheadline)
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
-        .background(.regularMaterial)
+        .appRegularMaterialSurface()
       }
 
       if viewModel.selectedChannelID == nil,
@@ -395,7 +396,7 @@ struct ForumView: View {
         .font(.subheadline)
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
-        .background(.regularMaterial)
+        .appRegularMaterialSurface()
       }
 
       Divider()
@@ -434,73 +435,77 @@ struct ForumView: View {
 
   private var threadList: some View {
     List {
-      NavigationLink {
-        ForumInformationView(
-          forum: viewModel.forum,
-          service: service,
-          historyRepository: historyRepository,
-          favoritesRepository: favoritesRepository,
-          searchHistoryRepository: searchHistoryRepository
-        )
-      } label: {
-        ForumHeaderView(forum: viewModel.forum)
-      }
-      .disabled(viewModel.forum.id <= 0)
-      .id(ForumScrollTarget.top)
-      .listRowSeparator(.hidden)
+      Group {
+        NavigationLink {
+          ForumInformationView(
+            forum: viewModel.forum,
+            service: service,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
+          )
+        } label: {
+          ForumHeaderView(forum: viewModel.forum)
+        }
+        .disabled(viewModel.forum.id <= 0)
+        .id(ForumScrollTarget.top)
+        .listRowSeparator(.hidden)
 
-      if let accountAccess, viewModel.forum.id > 0 {
-        ForumCheckInRow(
-          forumID: viewModel.forum.id,
-          forumName: membershipForumName,
-          access: accountAccess
-        )
-        .id(
-          ForumCheckInTarget(
+        if let accountAccess, viewModel.forum.id > 0 {
+          ForumCheckInRow(
             forumID: viewModel.forum.id,
-            forumName: membershipForumName
+            forumName: membershipForumName,
+            access: accountAccess
           )
-        )
-        .listRowSeparator(.hidden)
-      }
-
-      ForEach(viewModel.threads) { thread in
-        LocallyFilteredContent(
-          visibility: thread.localVisibility,
-          placeholder: "已屏蔽此主题"
-        ) {
-          ThreadSummaryRow(
-            thread: thread,
-            onNavigate: { navigationDestination = .thread($0) }
+          .id(
+            ForumCheckInTarget(
+              forumID: viewModel.forum.id,
+              forumName: membershipForumName
+            )
           )
-        }
-        .onAppear {
-          viewModel.loadMoreIfNeeded(current: thread)
-        }
-      }
-
-      if let lastThread = viewModel.threads.last {
-        Color.clear
-          .frame(height: 1)
-          .listRowInsets(EdgeInsets())
           .listRowSeparator(.hidden)
-          .accessibilityHidden(true)
-          .onAppear { viewModel.loadMoreIfNeeded(current: lastThread) }
-      }
-
-      if viewModel.isLoadingMore {
-        HStack {
-          Spacer()
-          ProgressView()
-          Spacer()
         }
-        .listRowSeparator(.hidden)
-      } else if let message = viewModel.loadMoreError {
-        LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
+
+        ForEach(viewModel.threads) { thread in
+          LocallyFilteredContent(
+            visibility: thread.localVisibility,
+            placeholder: "已屏蔽此主题"
+          ) {
+            ThreadSummaryRow(
+              thread: thread,
+              onNavigate: { navigationDestination = .thread($0) }
+            )
+          }
+          .onAppear {
+            viewModel.loadMoreIfNeeded(current: thread)
+          }
+        }
+
+        if let lastThread = viewModel.threads.last {
+          Color.clear
+            .frame(height: 1)
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .accessibilityHidden(true)
+            .onAppear { viewModel.loadMoreIfNeeded(current: lastThread) }
+        }
+
+        if viewModel.isLoadingMore {
+          HStack {
+            Spacer()
+            ProgressView()
+            Spacer()
+          }
           .listRowSeparator(.hidden)
+        } else if let message = viewModel.loadMoreError {
+          LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
+            .listRowSeparator(.hidden)
+        }
       }
+      .appListRowSurface(.content)
     }
     .listStyle(.plain)
+    .appScrollableSurface(.canvas)
     .refreshable { await viewModel.refresh() }
   }
 

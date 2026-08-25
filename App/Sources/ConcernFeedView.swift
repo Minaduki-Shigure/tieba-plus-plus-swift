@@ -103,44 +103,48 @@ struct ConcernFeedView: View {
 
   private var feedList: some View {
     List {
-      if viewModel.threads.isEmpty {
-        EmptyStateView(title: "暂无关注动态", systemImage: "person.2")
-          .frame(maxWidth: .infinity, minHeight: 240)
-          .listRowSeparator(.hidden)
-      } else {
-        ForEach(viewModel.threads) { thread in
-          LocallyFilteredContent(
-            visibility: thread.localVisibility,
-            placeholder: "已屏蔽此关注帖子"
-          ) {
-            ThreadSummaryRow(
-              thread: thread,
-              showsForum: true,
-              onNavigate: { threadNavigationRequest = $0 }
-            )
+      Group {
+        if viewModel.threads.isEmpty {
+          EmptyStateView(title: "暂无关注动态", systemImage: "person.2")
+            .frame(maxWidth: .infinity, minHeight: 240)
+            .listRowSeparator(.hidden)
+        } else {
+          ForEach(viewModel.threads) { thread in
+            LocallyFilteredContent(
+              visibility: thread.localVisibility,
+              placeholder: "已屏蔽此关注帖子"
+            ) {
+              ThreadSummaryRow(
+                thread: thread,
+                showsForum: true,
+                onNavigate: { threadNavigationRequest = $0 }
+              )
+            }
           }
         }
-      }
 
-      if viewModel.isLoadingMore {
-        HStack {
-          Spacer()
-          ProgressView()
-          Spacer()
+        if viewModel.isLoadingMore {
+          HStack {
+            Spacer()
+            ProgressView()
+            Spacer()
+          }
+          .listRowSeparator(.hidden)
+        } else if let loadMoreError = viewModel.loadMoreError {
+          LoadMoreErrorView(message: loadMoreError, retry: viewModel.retryLoadMore)
+            .listRowSeparator(.hidden)
+        } else if viewModel.hasMore, !viewModel.threads.isEmpty {
+          Color.clear
+            .frame(height: 1)
+            .listRowSeparator(.hidden)
+            .accessibilityHidden(true)
+            .onAppear(perform: viewModel.loadMore)
         }
-        .listRowSeparator(.hidden)
-      } else if let loadMoreError = viewModel.loadMoreError {
-        LoadMoreErrorView(message: loadMoreError, retry: viewModel.retryLoadMore)
-          .listRowSeparator(.hidden)
-      } else if viewModel.hasMore, !viewModel.threads.isEmpty {
-        Color.clear
-          .frame(height: 1)
-          .listRowSeparator(.hidden)
-          .accessibilityHidden(true)
-          .onAppear(perform: viewModel.loadMore)
       }
+      .appListRowSurface(.content)
     }
     .listStyle(.plain)
+    .appScrollableSurface(.canvas)
     .refreshable { await viewModel.refresh() }
   }
 

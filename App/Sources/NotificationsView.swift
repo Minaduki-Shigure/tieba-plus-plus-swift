@@ -170,6 +170,7 @@ struct NotificationsView: View {
       }
     }
     .listStyle(.plain)
+    .appScrollableSurface()
     .refreshable { await viewModel.refresh() }
   }
 
@@ -440,7 +441,7 @@ struct NotificationsView: View {
     }
     .padding(.horizontal, 14)
     .padding(.vertical, 10)
-    .background(.regularMaterial)
+    .appRegularMaterialSurface()
   }
 }
 

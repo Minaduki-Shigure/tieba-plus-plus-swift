@@ -33,6 +33,7 @@ struct AppAccentColorSettingsView: View {
       .accessibilityAddTraits(selection.customSeed != nil ? .isSelected : [])
       .accessibilityIdentifier("accent-color-option-custom")
     }
+    .appScrollableSurface()
     .navigationTitle("强调色")
     .navigationBarTitleDisplayMode(.inline)
     .sheet(item: $customEditorPresentation) { presentation in
@@ -139,6 +140,7 @@ private struct CustomAccentColorEditor: View {
         }
         .accessibilityIdentifier("custom-accent-color-picker")
       }
+      .appScrollableSurface()
       .navigationTitle("自定义强调色")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -169,6 +171,7 @@ private struct CustomAccentColorEditor: View {
       }
       .tint(AppAccentColor.defaultValue.color)
     }
+    .appNavigationSurface()
   }
 
   private var draftSeed: AppAccentColorSeed? {

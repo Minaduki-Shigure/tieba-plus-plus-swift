@@ -16,6 +16,8 @@ struct TiebaPlusPlusApp: App {
   @StateObject private var followedForumsViewModel: FollowedForumsViewModel
   @AppStorage(AppPreferenceKey.appearance)
   private var appearance = AppAppearance.system.rawValue
+  @AppStorage(AppPreferenceKey.darkSurfaceStyle)
+  private var darkSurfaceStyle = AppDarkSurfaceStyle.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.accentColor)
   private var accentColor = AppAccentColor.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.textSizeAdjustment)
@@ -165,6 +167,7 @@ struct TiebaPlusPlusApp: App {
 
   var body: some Scene {
     let resolvedAccentColor = AppAccentColorSelection.resolved(accentColor).style
+    let resolvedDarkSurfaceStyle = AppDarkSurfaceStyle.resolved(darkSurfaceStyle)
     let resolvedContentMediaLoadPolicy = ContentMediaLoadPolicy.resolved(contentMediaLoadPolicy)
     let contentMediaLoadBehavior = ContentMediaLoadBehavior.resolved(
       policy: resolvedContentMediaLoadPolicy,
@@ -193,6 +196,7 @@ struct TiebaPlusPlusApp: App {
         .environment(\.contentReportCoordinator, contentReportCoordinator)
         .appTextSizeAdjustment(AppTextSizeAdjustment.resolved(textSizeAdjustment))
         .environment(\.appAccentColor, resolvedAccentColor)
+        .environment(\.appDarkSurfaceStyle, resolvedDarkSurfaceStyle)
         .environment(\.contentFilterRepository, contentFilterRepository)
         .environment(
           \.contentMediaLoadPolicy,
@@ -266,6 +270,7 @@ struct TiebaPlusPlusApp: App {
         .environment(\.contentReportCoordinator, contentReportCoordinator)
         .appTextSizeAdjustment(AppTextSizeAdjustment.resolved(textSizeAdjustment))
         .environment(\.appAccentColor, resolvedAccentColor)
+        .environment(\.appDarkSurfaceStyle, resolvedDarkSurfaceStyle)
         .environment(\.contentFilterRepository, contentFilterRepository)
         .environment(
           \.contentMediaLoadPolicy,

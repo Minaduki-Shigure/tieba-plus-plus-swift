@@ -29,6 +29,8 @@ improve existing account and server-write areas without adding a native write,
 new data source, or weighted point. Current-main personalized-discovery startup
 routing and public-profile identity label preservation likewise improve existing
 local-settings and public-reading areas without adding a data source or weighted point.
+The independent OLED dark-surface choice improves the existing appearance and
+customization credit without changing the current weighted estimate.
 
 | Capability area | Weight | Credited points | Current basis |
 | --- | ---: | ---: | --- |
@@ -1416,6 +1418,17 @@ values and their exact four palettes remain unchanged. Custom editing stays in
 one transient draft; only Apply stores the canonical value and selects it, while
 Cancel, interactive dismissal, and restoring the opening color write nothing.
 Switching to a preset retains the last valid custom base for later editing.
+
+The same separation now applies to dark surfaces. A stable system/OLED choice
+is stored independently from forced or follow-system appearance, and the OLED
+palette activates only when the effective SwiftUI color scheme is dark. Its
+semantic hierarchy keeps the page and content canvas at black while retaining
+bounded near-black card, floor, control, divider, and enhanced-contrast layers.
+App-owned Lists, lazy thread/reply containers, structural chrome, composers, and
+settings use that hierarchy; the default path remains byte-for-byte compatible
+at the preference level and keeps the previous native surface modifiers. Theme
+selection is not part of content identity, pagination, media requests, decoding,
+or cache keys, and no per-row geometry or overlay measurement was introduced.
 
 Wallpaper and dynamic color extraction, translucent themes, Android toolbar
 backgrounds, and status-bar text controls are not imported. Root SwiftUI tint

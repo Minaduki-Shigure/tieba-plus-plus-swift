@@ -273,71 +273,75 @@ struct PersonalizedFeedView: View {
 
   private var feedList: some View {
     List {
-      if viewModel.items.isEmpty {
-        EmptyStateView(title: emptyTitle, systemImage: "sparkles")
-          .frame(maxWidth: .infinity, minHeight: 240)
-          .listRowSeparator(.hidden)
-        if viewModel.hasMore, viewModel.loadMoreError == nil {
-          Button {
-            guard isActive else { return }
-            viewModel.loadMore()
-          } label: {
-            Label("继续加载", systemImage: "arrow.down.circle")
-              .frame(maxWidth: .infinity)
-          }
-          .buttonStyle(.borderless)
-          .disabled(viewModel.isLoadingMore || viewModel.loadMoreError != nil)
-          .listRowSeparator(.hidden)
-        }
-      } else {
-        ForEach(viewModel.items) { item in
-          LocallyFilteredContent(
-            visibility: item.thread.localVisibility,
-            placeholder: "已屏蔽此推荐帖子"
-          ) {
-            HStack(spacing: 8) {
-              ThreadSummaryRow(
-                thread: item.thread,
-                showsForum: true,
-                onNavigate: { threadNavigationRequest = $0 }
-              )
-              .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-
-              if viewModel.usesAccountPersona, !item.feedbackReasons.isEmpty {
-                feedbackButton(for: item)
-              }
+      Group {
+        if viewModel.items.isEmpty {
+          EmptyStateView(title: emptyTitle, systemImage: "sparkles")
+            .frame(maxWidth: .infinity, minHeight: 240)
+            .listRowSeparator(.hidden)
+          if viewModel.hasMore, viewModel.loadMoreError == nil {
+            Button {
+              guard isActive else { return }
+              viewModel.loadMore()
+            } label: {
+              Label("继续加载", systemImage: "arrow.down.circle")
+                .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .buttonStyle(.borderless)
+            .disabled(viewModel.isLoadingMore || viewModel.loadMoreError != nil)
+            .listRowSeparator(.hidden)
           }
-          .onAppear {
-            guard isActive else { return }
-            viewModel.loadMoreIfNeeded(currentItemID: item.id)
-          }
-        }
-      }
+        } else {
+          ForEach(viewModel.items) { item in
+            LocallyFilteredContent(
+              visibility: item.thread.localVisibility,
+              placeholder: "已屏蔽此推荐帖子"
+            ) {
+              HStack(spacing: 8) {
+                ThreadSummaryRow(
+                  thread: item.thread,
+                  showsForum: true,
+                  onNavigate: { threadNavigationRequest = $0 }
+                )
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
 
-      if viewModel.isLoadingMore {
-        HStack {
-          Spacer()
-          ProgressView()
-          Spacer()
-        }
-        .listRowSeparator(.hidden)
-      } else if let loadMoreError = viewModel.loadMoreError {
-        LoadMoreErrorView(message: loadMoreError, retry: viewModel.retryLoadMore)
-          .listRowSeparator(.hidden)
-      } else if viewModel.hasMore, !viewModel.items.isEmpty {
-        Color.clear
-          .frame(height: 1)
-          .listRowSeparator(.hidden)
-          .accessibilityHidden(true)
-          .onAppear {
-            guard isActive else { return }
-            viewModel.loadMore()
+                if viewModel.usesAccountPersona, !item.feedbackReasons.isEmpty {
+                  feedbackButton(for: item)
+                }
+              }
+              .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .onAppear {
+              guard isActive else { return }
+              viewModel.loadMoreIfNeeded(currentItemID: item.id)
+            }
           }
+        }
+
+        if viewModel.isLoadingMore {
+          HStack {
+            Spacer()
+            ProgressView()
+            Spacer()
+          }
+          .listRowSeparator(.hidden)
+        } else if let loadMoreError = viewModel.loadMoreError {
+          LoadMoreErrorView(message: loadMoreError, retry: viewModel.retryLoadMore)
+            .listRowSeparator(.hidden)
+        } else if viewModel.hasMore, !viewModel.items.isEmpty {
+          Color.clear
+            .frame(height: 1)
+            .listRowSeparator(.hidden)
+            .accessibilityHidden(true)
+            .onAppear {
+              guard isActive else { return }
+              viewModel.loadMore()
+            }
+        }
       }
+      .appListRowSurface(.content)
     }
     .listStyle(.plain)
+    .appScrollableSurface(.canvas)
     .refreshable { await viewModel.refresh() }
     .alert(
       viewModel.feedbackFailure?.title ?? "反馈提交失败",
@@ -468,36 +472,40 @@ private struct PersonalizedFeedbackSelectionView: View {
   var body: some View {
     NavigationStack {
       List {
-        Section {
-          Text(prompt.threadTitle)
-            .font(.headline)
-            .fixedSize(horizontal: false, vertical: true)
-        }
+        Group {
+          Section {
+            Text(prompt.threadTitle)
+              .font(.headline)
+              .fixedSize(horizontal: false, vertical: true)
+          }
 
-        Section("原因") {
-          ForEach(prompt.reasons) { reason in
-            Button {
-              toggle(reason.id)
-            } label: {
-              HStack(spacing: 12) {
-                Text(reason.title.isEmpty ? "减少相似内容" : reason.title)
-                  .foregroundStyle(.primary)
-                  .frame(maxWidth: .infinity, alignment: .leading)
-                Image(
-                  systemName: selectedReasonIDs.contains(reason.id)
-                    ? "checkmark.circle.fill"
-                    : "circle"
-                )
-                .foregroundStyle(
-                  selectedReasonIDs.contains(reason.id) ? Color.accentColor : .secondary)
+          Section("原因") {
+            ForEach(prompt.reasons) { reason in
+              Button {
+                toggle(reason.id)
+              } label: {
+                HStack(spacing: 12) {
+                  Text(reason.title.isEmpty ? "减少相似内容" : reason.title)
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                  Image(
+                    systemName: selectedReasonIDs.contains(reason.id)
+                      ? "checkmark.circle.fill"
+                      : "circle"
+                  )
+                  .foregroundStyle(
+                    selectedReasonIDs.contains(reason.id) ? Color.accentColor : .secondary)
+                }
+                .contentShape(Rectangle())
               }
-              .contentShape(Rectangle())
+              .buttonStyle(.plain)
+              .accessibilityValue(selectedReasonIDs.contains(reason.id) ? "已选择" : "未选择")
             }
-            .buttonStyle(.plain)
-            .accessibilityValue(selectedReasonIDs.contains(reason.id) ? "已选择" : "未选择")
           }
         }
+        .appListRowSurface(.card)
       }
+      .appScrollableSurface(.canvas)
       .navigationTitle("减少此类推荐")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -514,6 +522,7 @@ private struct PersonalizedFeedbackSelectionView: View {
         }
       }
     }
+    .appNavigationSurface()
   }
 
   private func toggle(_ reasonID: UInt32) {

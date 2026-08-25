@@ -42,7 +42,7 @@ struct ForumInformationView: View {
       .pickerStyle(.segmented)
       .padding(.horizontal, 12)
       .padding(.vertical, 8)
-      .background(.regularMaterial)
+      .appRegularMaterialSurface()
 
       Divider()
       content
@@ -171,6 +171,7 @@ struct ForumInformationView: View {
       }
     }
     .listStyle(.insetGrouped)
+    .appScrollableSurface()
   }
 
   private func moderatorList(_ roles: [BrowseForumModeratorRole]) -> some View {
@@ -186,6 +187,7 @@ struct ForumInformationView: View {
       }
     }
     .listStyle(.insetGrouped)
+    .appScrollableSurface()
   }
 
   @ViewBuilder
@@ -309,6 +311,7 @@ private struct ForumOverviewList: View {
       }
     }
     .listStyle(.insetGrouped)
+    .appScrollableSurface()
   }
 }
 

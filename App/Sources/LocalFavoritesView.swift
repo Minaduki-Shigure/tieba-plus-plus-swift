@@ -206,7 +206,7 @@ struct LocalFavoritesView: View {
       .pickerStyle(.segmented)
       .padding(.horizontal, 16)
       .padding(.vertical, 8)
-      .background(.regularMaterial)
+      .appRegularMaterialSurface()
       .accessibilityIdentifier("favorite-kind-picker")
 
       Divider()
@@ -246,6 +246,7 @@ struct LocalFavoritesView: View {
       }
     }
     .listStyle(.insetGrouped)
+    .appScrollableSurface()
     .refreshable { await viewModel.refresh() }
   }
 }

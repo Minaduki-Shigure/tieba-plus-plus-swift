@@ -4,6 +4,7 @@ import TiebaCore
 
 enum AppPreferenceKey {
   static let appearance = "TiebaPlusPlus.appearance"
+  static let darkSurfaceStyle = "TiebaPlusPlus.darkSurfaceStyle"
   static let accentColor = "TiebaPlusPlus.accentColor"
   static let customAccentColorSeed = "TiebaPlusPlus.customAccentColorSeed"
   static let textSizeAdjustment = "TiebaPlusPlus.textSizeAdjustment"

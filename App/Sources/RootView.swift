@@ -132,6 +132,7 @@ struct RootView: View {
                 .help("粘贴并预览贴吧链接")
             }
           }
+          .appListRowSurface(.card)
         }
 
         Section {
@@ -159,10 +160,13 @@ struct RootView: View {
             .help("直接打开贴吧")
           }
         }
+        .appListRowSurface(.card)
 
         searchSuggestionSection
+          .appListRowSurface(.card)
 
         searchHistorySection
+          .appListRowSurface(.card)
 
         if let errorMessage = globalSearchHistoryViewModel.errorMessage {
           Section("搜索记录错误") {
@@ -179,11 +183,13 @@ struct RootView: View {
               Label("重置搜索记录", systemImage: "trash")
             }
           }
+          .appListRowSurface(.card)
         }
 
         followedForumsSection
 
         recentForumsSection
+          .appListRowSurface(.card)
 
         if !favoritesViewModel.favoriteForumEntries.isEmpty {
           Section("收藏的贴吧") {
@@ -223,10 +229,12 @@ struct RootView: View {
               }
             }
           }
+          .appListRowSurface(.card)
         }
 
       }
       .listStyle(.insetGrouped)
+      .appScrollableSurface(.canvas)
       .navigationTitle("贴吧++")
       .toolbar {
         if RootAccountActionPolicy.showsBatchCheckIn(
@@ -458,6 +466,7 @@ struct RootView: View {
         Text(followedForumsViewModel.presentedOperationError?.message ?? "未知错误")
       }
     }
+    .appNavigationSurface()
     .threadSummaryImageGallery(threadSummaryImageGalleryCoordinator)
     .sheet(isPresented: $showsQuickAccountLogin) {
       NavigationStack {
@@ -834,6 +843,7 @@ struct RootView: View {
         NavigationLink(value: RootDestination.followedForums) {
           Label("查看全部", systemImage: "list.bullet")
         }
+        .appListRowSurface(.card)
       } header: {
         HStack(spacing: 8) {
           Text("关注的贴吧")
@@ -861,6 +871,7 @@ struct RootView: View {
           Label("重试", systemImage: "arrow.clockwise")
         }
       }
+      .appListRowSurface(.card)
     }
   }
 

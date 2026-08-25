@@ -151,6 +151,7 @@ struct AccountView: View {
           Task { await viewModel.reload() }
         }
       }
+      .appNavigationSurface()
     }
     .confirmationDialog(
       "前往百度管理用户名？",
@@ -387,6 +388,7 @@ struct AccountView: View {
       }
     }
     .listStyle(.insetGrouped)
+    .appScrollableSurface()
     .refreshable {
       await viewModel.reload()
       await profileSummaryViewModel.refresh()

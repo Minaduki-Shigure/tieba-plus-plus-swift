@@ -120,6 +120,7 @@ struct HotTopicDetailView: View {
       }
     }
     .listStyle(.plain)
+    .appScrollableSurface()
     .refreshable { await viewModel.refresh() }
   }
 

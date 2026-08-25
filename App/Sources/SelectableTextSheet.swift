@@ -70,7 +70,7 @@ struct SelectableTextSheet: View {
           .padding(.horizontal, 16)
           .padding(.vertical, 10)
         }
-        .background(.bar)
+        .appBarMaterialSurface()
       }
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
@@ -83,6 +83,7 @@ struct SelectableTextSheet: View {
         }
       }
     }
+    .appNavigationSurface()
     .presentationDetents([.medium, .large])
     .presentationDragIndicator(.visible)
   }

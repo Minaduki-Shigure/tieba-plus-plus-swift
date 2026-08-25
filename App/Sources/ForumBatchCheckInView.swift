@@ -134,6 +134,7 @@ struct ForumBatchCheckInView: View {
       entrySection
     }
     .listStyle(.insetGrouped)
+    .appScrollableSurface()
     .refreshable {
       guard phase != .ready || viewModel.pendingConfirmation == nil else { return }
       await viewModel.reload()
@@ -210,6 +211,7 @@ struct ForumBatchCheckInView: View {
       entrySection
     }
     .listStyle(.insetGrouped)
+    .appScrollableSurface()
   }
 
   private func summaryHeader(

@@ -95,6 +95,7 @@ private struct ContentFilterSettingsContent: View {
       }
     }
     .listStyle(.insetGrouped)
+    .appScrollableSurface()
     .navigationTitle("内容屏蔽")
     .navigationBarTitleDisplayMode(.inline)
     .safeAreaInset(edge: .top, spacing: 0) {
@@ -107,7 +108,7 @@ private struct ContentFilterSettingsContent: View {
         .pickerStyle(.segmented)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(.regularMaterial)
+        .appRegularMaterialSurface()
         .accessibilityIdentifier("content-filter-list-picker")
         Divider()
       }
@@ -139,6 +140,7 @@ private struct ContentFilterSettingsContent: View {
           Task { await viewModel.add(rule) }
         }
       }
+      .appNavigationSurface()
     }
     .confirmationDialog(
       "清空\(viewModel.selectedList.title)？",

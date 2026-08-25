@@ -627,6 +627,50 @@ final class AppPreferencesTests: XCTestCase {
     XCTAssertEqual(AppAppearance.dark.colorScheme, .dark)
   }
 
+  func testDarkSurfaceStyleUsesStableValuesTitlesAndDefault() {
+    XCTAssertEqual(
+      AppPreferenceKey.darkSurfaceStyle,
+      "TiebaPlusPlus.darkSurfaceStyle"
+    )
+    XCTAssertEqual(AppDarkSurfaceStyle.allCases, [.standard, .oledBlack])
+    XCTAssertEqual(
+      AppDarkSurfaceStyle.allCases.map(\.rawValue),
+      ["standard", "oledBlack"]
+    )
+    XCTAssertEqual(
+      AppDarkSurfaceStyle.allCases.map(\.title),
+      ["系统深色", "纯黑 OLED"]
+    )
+    XCTAssertEqual(AppDarkSurfaceStyle.defaultValue, .standard)
+    XCTAssertEqual(AppDarkSurfaceStyle.resolved("standard"), .standard)
+    XCTAssertEqual(AppDarkSurfaceStyle.resolved("oledBlack"), .oledBlack)
+    XCTAssertEqual(AppDarkSurfaceStyle.resolved(""), .standard)
+    XCTAssertEqual(AppDarkSurfaceStyle.resolved("future-value"), .standard)
+  }
+
+  @MainActor
+  func testDarkSurfaceStyleAppStorageFailsClosedForWrongDefaultsTypes() throws {
+    let suiteName = "AppPreferencesTests.dark-surface-corruption.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let invalidObjects: [Any] = [
+      Data([0x12, 0x34]),
+      NSNumber(value: 42),
+      ["oledBlack"],
+      ["value": "oledBlack"],
+    ]
+
+    for invalidObject in invalidObjects {
+      defaults.set(invalidObject, forKey: AppPreferenceKey.darkSurfaceStyle)
+      let storage = AppStorage(
+        wrappedValue: AppDarkSurfaceStyle.defaultValue.rawValue,
+        AppPreferenceKey.darkSurfaceStyle,
+        store: defaults
+      )
+      XCTAssertEqual(AppDarkSurfaceStyle.resolved(storage.wrappedValue), .standard)
+    }
+  }
+
   @MainActor
   func testAccentColorUsesStableValuesTitlesAndDefault() {
     XCTAssertEqual(AppPreferenceKey.accentColor, "TiebaPlusPlus.accentColor")

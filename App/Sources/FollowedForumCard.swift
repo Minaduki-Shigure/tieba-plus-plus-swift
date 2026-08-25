@@ -67,6 +67,8 @@ struct FollowedForumCard: View {
   let forum: FollowedForumItem
   let isPinned: Bool
   let isUnfollowing: Bool
+  @Environment(\.appDarkSurfaceStyle) private var appDarkSurfaceStyle
+  @Environment(\.colorScheme) private var colorScheme
 
   init(
     forum: FollowedForumItem,
@@ -130,12 +132,12 @@ struct FollowedForumCard: View {
     .padding(10)
     .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
     .background(
-      Color(uiColor: .secondarySystemGroupedBackground),
+      cardSurfaceColor,
       in: RoundedRectangle(cornerRadius: 8)
     )
     .overlay {
       RoundedRectangle(cornerRadius: 8)
-        .stroke(Color(uiColor: .separator).opacity(0.35), lineWidth: 0.5)
+        .stroke(cardDividerColor, lineWidth: 0.5)
     }
     .contentShape(Rectangle())
     .accessibilityElement(children: .ignore)
@@ -149,6 +151,25 @@ struct FollowedForumCard: View {
         .filter { !$0.isEmpty }
         .joined(separator: "，")
     )
+  }
+
+  private var usesOLEDSurfaces: Bool {
+    AppSurfacePolicy.isOLEDActive(
+      style: appDarkSurfaceStyle,
+      colorScheme: colorScheme
+    )
+  }
+
+  private var cardSurfaceColor: Color {
+    usesOLEDSurfaces
+      ? appDarkSurfaceStyle.color(for: .card)
+      : Color(uiColor: .secondarySystemGroupedBackground)
+  }
+
+  private var cardDividerColor: Color {
+    usesOLEDSurfaces
+      ? appDarkSurfaceStyle.color(for: .divider)
+      : Color(uiColor: .separator).opacity(0.35)
   }
 }
 

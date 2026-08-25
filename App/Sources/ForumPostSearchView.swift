@@ -49,6 +49,7 @@ struct ForumPostSearchView: View {
       }
       content
     }
+    .appPageSurface()
     .navigationTitle("\(viewModel.forumName)吧内搜索")
     .navigationBarTitleDisplayMode(.inline)
     .searchable(text: $query, prompt: "在\(viewModel.forumName)吧内搜索")
@@ -179,7 +180,7 @@ struct ForumPostSearchView: View {
     }
     .padding(.horizontal, 12)
     .padding(.vertical, 8)
-    .background(.regularMaterial)
+    .appRegularMaterialSurface()
   }
 
   private var forumPostSearchSortPicker: some View {
@@ -283,6 +284,7 @@ struct ForumPostSearchView: View {
       }
     }
     .listStyle(.insetGrouped)
+    .appScrollableSurface()
     .overlay {
       if viewModel.history.isEmpty, viewModel.historyError == nil {
         if viewModel.isHistoryLoading {
@@ -365,12 +367,14 @@ struct ForumPostSearchView: View {
     }
     .environment(\.defaultMinListRowHeight, 1)
     .listStyle(.plain)
+    .appScrollableSurface()
     .refreshable { await viewModel.refresh() }
   }
 
   private var emptyResults: some View {
     List {}
       .listStyle(.plain)
+      .appScrollableSurface()
       .overlay {
         EmptyStateView(title: "没有找到相关内容", systemImage: "text.magnifyingglass")
       }
@@ -596,6 +600,7 @@ private struct ForumPostSearchContextRow: View {
     }
     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
     .padding(8)
+    .appSurfaceBackground(.card)
     .background(Color(uiColor: .secondarySystemBackground))
     .clipShape(RoundedRectangle(cornerRadius: 6))
   }

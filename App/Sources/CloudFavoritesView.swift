@@ -700,6 +700,7 @@ struct CloudFavoritesView: View {
       }
     }
     .listStyle(.plain)
+    .appScrollableSurface()
     .refreshable { await viewModel.refresh() }
   }
 

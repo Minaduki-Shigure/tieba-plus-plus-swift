@@ -157,6 +157,7 @@ struct AppAboutView: View {
       }
     }
     .listStyle(.insetGrouped)
+    .appScrollableSurface()
     .navigationTitle("关于")
     .navigationBarTitleDisplayMode(.inline)
   }

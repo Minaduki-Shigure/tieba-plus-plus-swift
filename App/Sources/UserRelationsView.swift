@@ -63,6 +63,7 @@ struct UserRelationsView: View {
     }
     .environment(\.defaultMinListRowHeight, 1)
     .listStyle(.plain)
+    .appScrollableSurface()
     .navigationTitle("关注与粉丝")
     .navigationBarTitleDisplayMode(.inline)
     .refreshable { await selectedViewModel.refresh() }

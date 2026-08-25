@@ -73,12 +73,14 @@ struct HotTopicListView: View {
       }
     }
     .listStyle(.plain)
+    .appScrollableSurface()
     .refreshable { await viewModel.refresh() }
   }
 
   private var emptyList: some View {
     List {}
       .listStyle(.plain)
+      .appScrollableSurface()
       .overlay {
         EmptyStateView(
           title: "\u{6682}\u{65e0}\u{70ed}\u{95e8}\u{8bdd}\u{9898}",

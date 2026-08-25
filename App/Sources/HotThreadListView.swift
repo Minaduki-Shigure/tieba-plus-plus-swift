@@ -39,6 +39,7 @@ struct HotThreadListView: View {
         initialState
       }
     }
+    .appPageSurface(.canvas)
     .modifier(HotThreadNavigationTitleModifier(isEnabled: showsNavigationTitle))
     .safeAreaInset(edge: .top, spacing: 0) {
       if viewModel.hasLoadedInitialSnapshot {
@@ -84,30 +85,34 @@ struct HotThreadListView: View {
 
   private var rankingList: some View {
     List {
-      if !viewModel.topics.isEmpty {
-        hotTopicRanking
-          .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
-      }
+      Group {
+        if !viewModel.topics.isEmpty {
+          hotTopicRanking
+            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+        }
 
-      if viewModel.items.isEmpty {
-        emptyContentRow
-      } else {
-        ForEach(viewModel.items) { item in
-          LocallyFilteredContent(
-            visibility: item.thread.localVisibility,
-            placeholder: "已屏蔽此热门帖子"
-          ) {
-            ThreadSummaryRow(
-              thread: item.thread,
-              showsForum: true,
-              header: { HotThreadRankHeader(item: item) },
-              onNavigate: { threadNavigationRequest = $0 }
-            )
+        if viewModel.items.isEmpty {
+          emptyContentRow
+        } else {
+          ForEach(viewModel.items) { item in
+            LocallyFilteredContent(
+              visibility: item.thread.localVisibility,
+              placeholder: "已屏蔽此热门帖子"
+            ) {
+              ThreadSummaryRow(
+                thread: item.thread,
+                showsForum: true,
+                header: { HotThreadRankHeader(item: item) },
+                onNavigate: { threadNavigationRequest = $0 }
+              )
+            }
           }
         }
       }
+      .appListRowSurface(.content)
     }
     .listStyle(.plain)
+    .appScrollableSurface(.canvas)
     .refreshable { await viewModel.refresh() }
   }
 
@@ -272,7 +277,7 @@ struct HotThreadListView: View {
       }
       .padding(.horizontal, 16)
     }
-    .background(.regularMaterial)
+    .appRegularMaterialSurface()
     .overlay(alignment: .bottom) { Divider() }
   }
 }

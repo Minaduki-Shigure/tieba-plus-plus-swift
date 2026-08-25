@@ -126,6 +126,7 @@ struct ThreadView: View {
         postList
       }
     }
+    .appPageSurface(.canvas)
   }
 
   private var threadChrome: some View {
@@ -748,7 +749,7 @@ struct ThreadView: View {
         .accessibilityIdentifier("thread-reply-topic")
       }
     }
-    .background(.regularMaterial)
+    .appRegularMaterialSurface()
   }
 
   private var topicReplyContext: TextReplyComposerContext? {
@@ -767,7 +768,7 @@ struct ThreadView: View {
     }
     .padding(.horizontal, 14)
     .frame(minHeight: 40)
-    .background(.regularMaterial)
+    .appRegularMaterialSurface()
     .accessibilityIdentifier("owned-content-deletion-progress")
   }
 
@@ -787,7 +788,7 @@ struct ThreadView: View {
     }
     .padding(.horizontal, 14)
     .frame(minHeight: 40)
-    .background(.regularMaterial)
+    .appRegularMaterialSurface()
     .accessibilityIdentifier("owned-content-deletion-unknown")
   }
 
@@ -1123,7 +1124,7 @@ struct ThreadView: View {
       .font(.subheadline)
       .padding(.horizontal, 12)
       .padding(.vertical, 8)
-      .background(.regularMaterial)
+      .appRegularMaterialSurface()
 
       Divider()
     }
@@ -1224,6 +1225,7 @@ struct ThreadView: View {
                   Divider()
                     .padding(.leading, isPureReadingMode ? 0 : 52)
                 }
+                .appSurfaceBackground(.floor)
               }
               .background {
                 if #available(iOS 18.0, *) {
@@ -1332,6 +1334,7 @@ struct ThreadView: View {
                   Divider()
                     .padding(.leading, isPureReadingMode ? 0 : 52)
                 }
+                .appSurfaceBackground(.floor)
               }
               .background {
                 if #available(iOS 18.0, *) {
@@ -1383,6 +1386,7 @@ struct ThreadView: View {
           }
           .modifier(ThreadScrollTargetLayoutModifier())
         }
+        .appScrollableSurface(.canvas)
         .coordinateSpace(name: "thread-scroll")
         .onPreferenceChange(ThreadScrollPositionPreferenceKey.self) { position in
           if #available(iOS 18.0, *) { return }
@@ -2133,6 +2137,7 @@ private struct ThreadCloudFavoriteUpdateBanner: View {
       .padding(.horizontal, 14)
       .padding(.vertical, 10)
     }
+    .appSurfaceBackground(.card)
     .background(Color(uiColor: .secondarySystemBackground))
     .accessibilityIdentifier("thread-cloud-favorite-update")
   }
@@ -3157,6 +3162,7 @@ private struct PollVoteControl: View {
       }
     }
     .padding(12)
+    .appSurfaceBackground(.card)
     .background(Color(uiColor: .secondarySystemGroupedBackground))
     .clipShape(RoundedRectangle(cornerRadius: 6))
     .overlay {
@@ -3466,6 +3472,7 @@ private struct PollResultsCard: View {
       }
     }
     .padding(12)
+    .appSurfaceBackground(.card)
     .background(Color(uiColor: .secondarySystemGroupedBackground))
     .clipShape(RoundedRectangle(cornerRadius: 6))
     .overlay {
@@ -3602,6 +3609,7 @@ private struct OriginThreadCard: View {
       }
     }
     .padding(12)
+    .appSurfaceBackground(.card)
     .background(Color(uiColor: .secondarySystemGroupedBackground))
     .clipShape(RoundedRectangle(cornerRadius: 6))
     .overlay {

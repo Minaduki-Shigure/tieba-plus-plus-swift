@@ -399,6 +399,7 @@ struct UserProfileView: View {
     }
     .environment(\.defaultMinListRowHeight, 1)
     .listStyle(.plain)
+    .appScrollableSurface()
     .refreshable { await refresh() }
   }
 
@@ -933,6 +934,7 @@ private struct UserInteractionRestrictionsSheet: View {
           restrictionsSection
         }
       }
+      .appScrollableSurface()
       .navigationTitle("互动权限")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -946,6 +948,7 @@ private struct UserInteractionRestrictionsSheet: View {
         }
       }
     }
+    .appNavigationSurface()
     .task { await viewModel.loadIfNeeded() }
     .interactiveDismissDisabled(viewModel.preventsInteractiveDismiss)
     .onDisappear { viewModel.presentationDidDisappear() }

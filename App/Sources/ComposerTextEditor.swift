@@ -240,6 +240,7 @@ struct ClassicEmoticonPicker: View {
         }
         .padding(12)
       }
+      .appPageSurface()
       .navigationTitle("经典表情")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -254,5 +255,6 @@ struct ClassicEmoticonPicker: View {
         }
       }
     }
+    .appNavigationSurface()
   }
 }

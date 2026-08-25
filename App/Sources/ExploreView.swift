@@ -102,6 +102,7 @@ struct ExploreView: View {
       .tag(ExploreSection.hot)
     }
     .tabViewStyle(.page(indexDisplayMode: .never))
+    .appPageSurface(.canvas)
     .navigationTitle("发现")
     .navigationBarTitleDisplayMode(.inline)
     .safeAreaInset(edge: .top, spacing: 0) {
@@ -113,7 +114,7 @@ struct ExploreView: View {
       .pickerStyle(.segmented)
       .padding(.horizontal, 16)
       .padding(.vertical, 8)
-      .background(.bar)
+      .appBarMaterialSurface()
     }
     .onAppear(perform: channelsViewModel.reload)
     .onDisappear(perform: channelsViewModel.cancel)

@@ -648,7 +648,7 @@ private struct ContentReportPresentationModifier: ViewModifier {
           }
           .padding(.horizontal, 14)
           .frame(minHeight: 44)
-          .background(.regularMaterial)
+          .appRegularMaterialSurface()
           .accessibilityElement(children: .ignore)
           .accessibilityLabel("正在打开\(target.kind.localizedObjectName)的官方举报页面")
         }

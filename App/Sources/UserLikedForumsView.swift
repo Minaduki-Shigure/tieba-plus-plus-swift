@@ -68,6 +68,7 @@ struct UserLikedForumsView: View {
           .listRowSeparator(.hidden)
       }
       .listStyle(.plain)
+      .appScrollableSurface()
       .refreshable { await viewModel.refresh() }
     }
   }
@@ -120,6 +121,7 @@ struct UserLikedForumsView: View {
       }
     }
     .listStyle(.plain)
+    .appScrollableSurface()
     .refreshable { await viewModel.refresh() }
   }
 }

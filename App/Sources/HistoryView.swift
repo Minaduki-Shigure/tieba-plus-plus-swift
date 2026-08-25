@@ -251,7 +251,7 @@ struct HistoryView: View {
       .pickerStyle(.segmented)
       .padding(.horizontal, 16)
       .padding(.vertical, 8)
-      .background(.regularMaterial)
+      .appRegularMaterialSurface()
       .accessibilityIdentifier("history-kind-picker")
 
       Divider()
@@ -283,6 +283,7 @@ struct HistoryView: View {
       }
     }
     .listStyle(.insetGrouped)
+    .appScrollableSurface()
     .refreshable { await viewModel.refresh() }
   }
 

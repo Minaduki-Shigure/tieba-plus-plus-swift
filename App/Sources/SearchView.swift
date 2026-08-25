@@ -56,7 +56,7 @@ struct SearchView: View {
         .pickerStyle(.segmented)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(.regularMaterial)
+        .appRegularMaterialSurface()
 
         Divider()
         if viewModel.selectedScope == .threads {
@@ -66,6 +66,7 @@ struct SearchView: View {
       }
       selectedResults
     }
+    .appPageSurface()
     .navigationTitle(viewModel.submittedQuery.isEmpty ? "搜索" : viewModel.submittedQuery)
     .navigationBarTitleDisplayMode(.inline)
     .searchable(text: $query, prompt: "搜索贴吧、帖子和用户")
@@ -142,7 +143,7 @@ struct SearchView: View {
     .frame(maxWidth: .infinity, minHeight: 32)
     .padding(.horizontal, 16)
     .padding(.vertical, 8)
-    .background(.regularMaterial)
+    .appRegularMaterialSurface()
     .accessibilityIdentifier("global-thread-search-sort-picker")
   }
 
@@ -243,6 +244,7 @@ struct SearchView: View {
         }
       }
       .listStyle(.insetGrouped)
+      .appScrollableSurface()
     }
   }
 
@@ -275,6 +277,7 @@ struct SearchView: View {
       }
     }
     .listStyle(.insetGrouped)
+    .appScrollableSurface()
     .refreshable { await viewModel.refresh() }
   }
 
@@ -335,6 +338,7 @@ struct SearchView: View {
     }
     .environment(\.defaultMinListRowHeight, 1)
     .listStyle(.insetGrouped)
+    .appScrollableSurface()
     .refreshable { await viewModel.refresh() }
   }
 
@@ -355,12 +359,14 @@ struct SearchView: View {
       }
     }
     .listStyle(.insetGrouped)
+    .appScrollableSurface()
     .refreshable { await viewModel.refresh() }
   }
 
   private var emptyResults: some View {
     List {}
       .listStyle(.insetGrouped)
+      .appScrollableSurface()
       .overlay {
         EmptyStateView(title: emptyTitle, systemImage: emptySystemImage)
       }

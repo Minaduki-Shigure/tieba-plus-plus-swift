@@ -287,6 +287,7 @@ struct TiebaLinkPreviewSheet: View {
           statusSection(preview: preview)
         }
       }
+      .appScrollableSurface()
       .navigationTitle("打开贴吧链接")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -310,6 +311,7 @@ struct TiebaLinkPreviewSheet: View {
         }
       }
     }
+    .appNavigationSurface()
     .presentationDetents([.medium, .large])
     .presentationDragIndicator(.visible)
   }

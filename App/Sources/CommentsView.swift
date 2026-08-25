@@ -219,9 +219,11 @@ struct CommentsView: View {
         }
       }
     }
+    .appPageSurface(.canvas)
     .navigationTitle(navigationTitle)
     .environment(\.contentReportScopeID, reportScopeID)
     .navigationBarTitleDisplayMode(.inline)
+    .appNavigationSurface()
     .confirmationDialog(
       pendingAgreementChange?.confirmationTitle ?? "更新点赞状态？",
       isPresented: agreementConfirmationIsPresented,
@@ -398,6 +400,7 @@ struct CommentsView: View {
         }
       }
       .listStyle(.plain)
+      .appScrollableSurface(.canvas)
     }
   #endif
 
@@ -410,6 +413,7 @@ struct CommentsView: View {
           commentParentPost(parentPost)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
+            .appSurfaceBackground(.floor)
             .id(CommentsListItemID.parentPost(parentPost.id))
           Divider()
         }
@@ -420,6 +424,7 @@ struct CommentsView: View {
           .frame(maxWidth: .infinity, alignment: .leading)
           .padding(.horizontal, 14)
           .padding(.vertical, 9)
+          .appSurfaceBackground(.card)
           .background(Color(uiColor: .secondarySystemBackground))
           .accessibilityAddTraits(.isHeader)
           .accessibilityIdentifier("comments-count-header")
@@ -442,6 +447,7 @@ struct CommentsView: View {
         commentsScrollFooter
       }
     }
+    .appScrollableSurface(.canvas)
     .accessibilityIdentifier("comments-scroll")
   }
 
@@ -982,7 +988,7 @@ struct CommentsView: View {
         .accessibilityIdentifier("comments-reply-parent")
       }
     }
-    .background(.regularMaterial)
+    .appRegularMaterialSurface()
   }
 
   private func verifyReplyVisibility(
@@ -1189,6 +1195,7 @@ struct CommentsView: View {
       comment: comment
     )
     .background(commentHighlightColor(comment))
+    .appSurfaceBackground(.floor)
   }
 
   private func commentRowContent(_ comment: BrowseComment) -> some View {

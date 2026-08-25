@@ -66,6 +66,8 @@ struct AppSettingsView: View {
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @AppStorage(AppPreferenceKey.appearance)
   private var appearance = AppAppearance.system.rawValue
+  @AppStorage(AppPreferenceKey.darkSurfaceStyle)
+  private var darkSurfaceStyle = AppDarkSurfaceStyle.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.accentColor)
   private var accentColor = AppAccentColor.defaultValue.rawValue
   @AppStorage(AppPreferenceKey.customAccentColorSeed)
@@ -163,6 +165,7 @@ struct AppSettingsView: View {
       }
     }
     .listStyle(.insetGrouped)
+    .appScrollableSurface()
     .navigationTitle("设置")
     .navigationBarTitleDisplayMode(.inline)
     .task { await historyViewModel.refresh() }
@@ -189,7 +192,7 @@ struct AppSettingsView: View {
 
   private var appearanceAndLayoutSettings: some View {
     settingsPage(title: AppSettingsCategory.appearanceAndLayout.title) {
-      Section("外观") {
+      Section {
         if AppDynamicTypeLayout.prefersMenuPickers(for: dynamicTypeSize) {
           appearancePicker
             .pickerStyle(.menu)
@@ -197,6 +200,14 @@ struct AppSettingsView: View {
           appearancePicker
             .pickerStyle(.segmented)
         }
+
+        Picker("深色表面", selection: darkSurfaceStyleSelection) {
+          ForEach(AppDarkSurfaceStyle.allCases) { style in
+            Label(style.title, systemImage: style.systemImage).tag(style)
+          }
+        }
+        .pickerStyle(.menu)
+        .accessibilityIdentifier("settings-dark-surface-style")
 
         NavigationLink {
           AppAccentColorSettingsView(
@@ -230,6 +241,10 @@ struct AppSettingsView: View {
           }
         }
         .pickerStyle(.menu)
+      } header: {
+        Text("外观")
+      } footer: {
+        Text("“纯黑 OLED”仅在应用处于深色外观时生效；浅色外观保持系统表面样式。")
       }
 
       Section {
@@ -555,6 +570,7 @@ struct AppSettingsView: View {
       content()
     }
     .listStyle(.insetGrouped)
+    .appScrollableSurface()
     .navigationTitle(title)
     .navigationBarTitleDisplayMode(.inline)
   }
@@ -618,6 +634,13 @@ struct AppSettingsView: View {
         Text(appearance.title).tag(appearance)
       }
     }
+  }
+
+  private var darkSurfaceStyleSelection: Binding<AppDarkSurfaceStyle> {
+    Binding(
+      get: { AppDarkSurfaceStyle.resolved(darkSurfaceStyle) },
+      set: { darkSurfaceStyle = $0.rawValue }
+    )
   }
 
   private var selectedAccentColor: AppAccentColorSelection {

@@ -125,6 +125,7 @@ struct InlineCommentPreviewCard: View {
       }
     }
     .padding(.horizontal, 12)
+    .appSurfaceBackground(.card)
     .background(Color(uiColor: .secondarySystemGroupedBackground))
     .clipShape(RoundedRectangle(cornerRadius: 6))
   }

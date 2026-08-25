@@ -283,7 +283,7 @@ private struct NewThreadComposerContentView: View {
         .padding(.vertical, 12)
       }
     }
-    .background(Color(uiColor: .systemBackground))
+    .appPageSurface()
     .toolbar {
       ToolbarItemGroup(placement: .navigationBarTrailing) {
         Button {
