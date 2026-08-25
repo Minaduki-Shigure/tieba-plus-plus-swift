@@ -20,15 +20,18 @@ and its verified metadata enters the public app source.
 | Local features | Available for history, favorites, filtering, appearance, media preferences, explicit standard/pure/only-author immersive thread-reading modes, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, a next-launch destination including the inbox, and ordered iOS Home Screen quick actions for existing destinations. The reply notice's system handoff attempt is implemented but remains pending physical-device validation |
 | Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary, followed forums with validated level-up progress where the server supplies it, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with a shared Home-toolbar/account-page message badge, separate optional fan-reminder badge, and authoritative reply actions, Tieba cloud favorites with a saved-position-to-latest-update handoff, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies plus explicitly confirmed deletion of the active account's own topic or ordinary floor; these newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
-| TiebaLite parity | Current `main` and public `v0.63.0-alpha.1`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
-| Distribution | The public SideStore/LiveContainer source currently serves `v0.63.0-alpha.1` (build 75) |
+| TiebaLite parity | Current `main` and public `v0.64.0-alpha.2`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
+| Distribution | The public SideStore/LiveContainer source currently serves `v0.64.0-alpha.2` (build 77) |
 
 ### Release and validation
 
-- **Current alpha:** `v0.63.0-alpha.1` publishes the current end-user app-code
-  scope. It adds the accumulated navigation, media-entry/export, Home/account,
-  settings, durable owner-deletion, cloud-favorite update, legacy-link, and
-  guarded official-wrapper routing work described below. Experimental account
+- **Current alpha:** `v0.64.0-alpha.2` publishes the current end-user app-code
+  scope. It adds structurally validated followed-forum and loaded-forum level
+  progress plus
+  bounded, non-backtracking regular-expression content filters described below.
+  It retains `v0.63.0-alpha.1`'s accumulated navigation, media-entry/export,
+  Home/account, settings, durable owner-deletion, cloud-favorite update,
+  legacy-link, and guarded official-wrapper routing work. Experimental account
   writes and custom-scheme handoff retain their documented physical-device and
   disposable-account gates. It retains `v0.62.3-alpha.1`'s full nested-reply
   reading, which uses `ScrollView` plus `LazyVStack` rather
@@ -59,7 +62,7 @@ and its verified metadata enters the public app source.
   followed-forum management, and guarded creation and social actions. Account
   reads and writes that are marked experimental still require disposable-account
   or physical-device validation.
-- **Current-main forum level progress:** The existing authenticated followed-
+- **`v0.64.0` forum level progress:** The existing authenticated followed-
   forum list and per-forum account-state response now retain a complete,
   validated `level / level name / current experience / upgrade target` tuple.
   Home and complete-list forum cards show a clamped progress bar when all four
@@ -68,8 +71,20 @@ and its verified metadata enters the public app source.
   progress next to the check-in control. After a confirmed check-in, one
   credential-bound read refreshes the score; failure retains the confirmed
   check-in and never retries the write. Missing, malformed, unfollowed, stale-
-  session, and account-rotation results expose no progress. This main-only work
-  is not included in the current public `v0.63.0-alpha.1` IPA.
+  session, and account-rotation results expose no progress. The progress
+  projection adds no account write; its post-check-in refresh is one read-only
+  request after the separately confirmed write has completed.
+- **`v0.64.0` bounded regular-expression filtering:** Keyword block and allow
+  rules can use a documented safe regular-expression subset compiled by an
+  app-owned Thompson NFA. Supported constructs include grouping, alternation,
+  character classes, anchors, and quantifiers without captures, backreferences,
+  lookaround, or a backtracking engine. Pattern, rule, state, input, and
+  aggregate per-field work
+  limits are enforced before and during matching. Budget exhaustion fails open
+  for that inspected field without bypassing independent fields or raw server
+  pagination. The versioned local archive migrates literal-only legacy rules,
+  rejects malformed or forged regex records, and preserves unreadable current
+  bytes rather than overwriting them.
 - **`v0.63.0` owner deletion and cloud-favorite updates:** An active full-
   credential account can request deletion
   of its own loaded topic or ordinary floor after a separate destructive
@@ -519,7 +534,7 @@ and its verified metadata enters the public app source.
   pass. After the release asset is published and reverified, the release workflow
   derives its date, download URL, byte size, and SHA-256 and updates the source
   atomically; version or concurrent-source mismatches fail closed. The source
-  currently distributes the verified `v0.63.0-alpha.1` IPA (build 75).
+  currently distributes the verified `v0.64.0-alpha.2` IPA (build 77).
 - **Login hotfix:** `v0.54.0-alpha.1` can reach Tieba's account page without
   completing because its callback and Cookie matching are too strict.
   `v0.54.1-alpha.1` made that failure explicit and confirmed that iOS 18.7.2
@@ -995,7 +1010,7 @@ and its verified metadata enters the public app source.
   about 18–20%; its anonymous reading and media subtotal remains about 91–95%.
   This measures implemented end-to-end workflows with partial credit for
   device-validation gates; it is not a claim that every path is release-ready.
-  The public `v0.63.0-alpha.1` app-code snapshot matches the current 80–82%
+  The public `v0.64.0-alpha.2` app-code snapshot matches the current 80–82%
   estimate because it includes the current navigation, media, local-setting,
   private-read, and guarded server-write workflows; all experimental paths retain
   their documented device-validation gates.
