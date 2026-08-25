@@ -469,6 +469,101 @@ final class ThreadSummaryRowTests: XCTestCase {
     XCTAssertEqual(replies.destinationID, "thread-summary:42:replies")
   }
 
+  func testThreadSummaryContextNavigationBuildsStrictForumAndAuthorAppURLs() throws {
+    let thread = makeThread(
+      contents: [.text("Text")],
+      forumName: "  Swift 语言  ",
+      authorID: 1_234
+    )
+
+    let forumURL = try XCTUnwrap(
+      ThreadSummaryContextNavigationPolicy.forumURL(for: thread, showsForum: true)
+    )
+    XCTAssertEqual(forumURL.scheme, TiebaLink.appScheme)
+    XCTAssertEqual(TiebaLink.target(from: forumURL), .forum("Swift 语言"))
+
+    let authorURL = try XCTUnwrap(
+      ThreadSummaryContextNavigationPolicy.authorURL(for: thread, showsAuthor: true)
+    )
+    XCTAssertEqual(authorURL.scheme, TiebaLink.appScheme)
+    XCTAssertEqual(TiebaLink.target(from: authorURL), .user(1_234))
+  }
+
+  func testThreadSummaryContextNavigationHonorsVisibilityAndDisplayOptions() {
+    let visible = makeThread(contents: [], authorID: 1_234)
+
+    XCTAssertNil(
+      ThreadSummaryContextNavigationPolicy.forumURL(for: visible, showsForum: false)
+    )
+    XCTAssertNil(
+      ThreadSummaryContextNavigationPolicy.authorURL(for: visible, showsAuthor: false)
+    )
+
+    for visibility in [LocalContentVisibility.placeholder, .hidden] {
+      let filtered = visible.withLocalVisibility(visibility)
+      XCTAssertNil(
+        ThreadSummaryContextNavigationPolicy.forumURL(for: filtered, showsForum: true)
+      )
+      XCTAssertNil(
+        ThreadSummaryContextNavigationPolicy.authorURL(for: filtered, showsAuthor: true)
+      )
+    }
+
+    let pinned = makeThread(contents: [], authorID: 1_234, isPinned: true)
+    XCTAssertNil(
+      ThreadSummaryContextNavigationPolicy.forumURL(for: pinned, showsForum: true)
+    )
+    XCTAssertNil(
+      ThreadSummaryContextNavigationPolicy.authorURL(for: pinned, showsAuthor: true)
+    )
+  }
+
+  func testThreadSummaryContextNavigationRejectsInvalidForumAndAuthorIdentity() {
+    for forumName in ["", "   ", "bad/name", String(repeating: "吧", count: 101)] {
+      XCTAssertNil(
+        ThreadSummaryContextNavigationPolicy.forumURL(
+          for: makeThread(contents: [], forumName: forumName, authorID: 1_234),
+          showsForum: true
+        ),
+        forumName
+      )
+    }
+
+    for authorID in [Int64.min, -1, 0] {
+      XCTAssertNil(
+        ThreadSummaryContextNavigationPolicy.authorURL(
+          for: makeThread(contents: [], authorID: authorID),
+          showsAuthor: true
+        ),
+        "authorID=\(authorID)"
+      )
+    }
+
+    XCTAssertNil(
+      ThreadSummaryContextNavigationPolicy.authorURL(
+        for: makeThread(
+          contents: [],
+          authorName: " \n ",
+          authorUsername: "\t",
+          authorID: 1_234
+        ),
+        showsAuthor: true
+      )
+    )
+
+    XCTAssertNotNil(
+      ThreadSummaryContextNavigationPolicy.authorURL(
+        for: makeThread(
+          contents: [],
+          authorName: "",
+          authorUsername: "public-name",
+          authorID: 1_234
+        ),
+        showsAuthor: true
+      )
+    )
+  }
+
   func testThreadSummaryReplyNavigationMatchesTiebaLiteForZeroCount() throws {
     let thread = makeThread(contents: [], replyCount: 0)
 
@@ -518,8 +613,10 @@ final class ThreadSummaryRowTests: XCTestCase {
   private func makeThread(
     contents: [BrowseContent],
     id: Int64 = 42,
+    forumName: String = "swift",
     authorName: String = "Author",
     authorUsername: String = "",
+    authorID: Int64 = 0,
     authorAvatarURL: URL? = nil,
     replyCount: Int = 3,
     isPinned: Bool = false
@@ -527,7 +624,7 @@ final class ThreadSummaryRowTests: XCTestCase {
     BrowseThread(
       id: id,
       forumID: 7,
-      forumName: "swift",
+      forumName: forumName,
       title: "Thread",
       excerpt: "Excerpt",
       authorName: authorName,
@@ -536,6 +633,7 @@ final class ThreadSummaryRowTests: XCTestCase {
       createdAt: nil,
       lastReplyAt: nil,
       contents: contents,
+      authorID: authorID,
       authorUsername: authorUsername,
       authorAvatarURL: authorAvatarURL,
       isPinned: isPinned

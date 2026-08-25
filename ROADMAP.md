@@ -125,6 +125,16 @@ route derives identity from the card's validated positive thread ID and pairs it
 with a typed first-reply intent. After existing response validation and local
 filtering, the first locally displayable reply becomes the initial scroll target,
 otherwise the thread opens normally.
+Independent forum and author controls on shared ordinary thread cards close the
+corresponding narrow TiebaLite context-navigation gap. The context line is a
+sibling of the whole-card topic button rather than a nested control. A forum or
+author route is emitted only for visible content, an enabled displayed label,
+and a strict round-trippable app URL built from a normalized forum name or
+positive public UID; invalid, filtered, disabled, and pinned cases retain their
+prior passive or compact presentation. The controls reuse existing Root routes,
+add no request, per-row model, or thread/nested-reply scroll work, and therefore
+remain inside the existing reading credit without adding a weighted point. The
+public `v0.62.3-alpha.1` IPA does not include this source-only interaction.
 Independent per-forum search navigation likewise closes a narrow TiebaLite
 reading gap inside the existing search credit. A matched result, its exact
 parent-floor context, and its owning-topic context are separate controls; the

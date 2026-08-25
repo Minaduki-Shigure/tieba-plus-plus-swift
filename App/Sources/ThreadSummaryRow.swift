@@ -130,6 +130,30 @@ enum ThreadSummaryNavigationPolicy {
   }
 }
 
+enum ThreadSummaryContextNavigationPolicy {
+  static func forumURL(for thread: BrowseThread, showsForum: Bool) -> URL? {
+    guard
+      showsForum,
+      !thread.isPinned,
+      thread.localVisibility == .visible
+    else { return nil }
+    return TiebaLink.appURL(for: .forum(thread.forumName))
+  }
+
+  static func authorURL(for thread: BrowseThread, showsAuthor: Bool) -> URL? {
+    let hasAuthorIdentity =
+      !thread.authorName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      || !thread.authorUsername.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    guard
+      showsAuthor,
+      !thread.isPinned,
+      thread.localVisibility == .visible,
+      hasAuthorIdentity
+    else { return nil }
+    return TiebaLink.appURL(for: .user(thread.authorID))
+  }
+}
+
 struct ThreadSummaryRow<Header: View>: View {
   let thread: BrowseThread
   let showsForum: Bool
@@ -226,11 +250,10 @@ struct ThreadSummaryRow<Header: View>: View {
               .lineLimit(3)
               .fixedSize(horizontal: false, vertical: true)
           }
-
-          contextLine
         }
       }
 
+      contextLine
       mediaPreview
       metricLine
     }
@@ -449,7 +472,7 @@ struct ThreadSummaryRow<Header: View>: View {
 
   @ViewBuilder
   private var contextLine: some View {
-    let hasForum = showsForum && !thread.forumName.isEmpty
+    let hasForum = showsForum && !displayedForumName.isEmpty
     let hasAuthor = showsAuthor && !displayedAuthorName.isEmpty
     let date = thread.lastReplyAt ?? thread.createdAt
     if hasForum || hasAuthor || date != nil {
@@ -498,27 +521,77 @@ struct ThreadSummaryRow<Header: View>: View {
   @ViewBuilder
   private func contextLabels(hasForum: Bool, hasAuthor: Bool) -> some View {
     if hasForum {
-      Label("\(thread.forumName)吧", systemImage: "text.bubble")
-        .lineLimit(1)
+      if let url = ThreadSummaryContextNavigationPolicy.forumURL(
+        for: thread,
+        showsForum: showsForum
+      ) {
+        Button {
+          openURL(url)
+        } label: {
+          forumContextLabel
+            .foregroundStyle(.tint)
+            .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("打开 \(displayedForumName)吧")
+        .accessibilityHint("查看贴吧")
+        .help("打开贴吧")
+      } else {
+        forumContextLabel
+      }
     }
     if hasAuthor {
-      HStack(spacing: 5) {
-        if let avatarURL = ThreadSummaryPresentation.authorAvatarURL(
-          for: thread,
-          showsAuthor: showsAuthor
-        ) {
-          AvatarView(url: avatarURL, name: displayedAuthorName, size: 24)
-        } else {
-          Image(systemName: "person")
-            .accessibilityHidden(true)
+      if let url = ThreadSummaryContextNavigationPolicy.authorURL(
+        for: thread,
+        showsAuthor: showsAuthor
+      ) {
+        Button {
+          openURL(url)
+        } label: {
+          authorContextLabel
+            .foregroundStyle(.tint)
+            .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
         }
-        Text(displayedAuthorName)
-          .lineLimit(showsBothNames ? 2 : 1)
-          .minimumScaleFactor(0.75)
+        .buttonStyle(.borderless)
+        .accessibilityLabel("打开作者 \(displayedAuthorName)")
+        .accessibilityHint("查看用户主页")
+        .help("打开作者主页")
+      } else {
+        authorContextLabel
       }
-      .accessibilityElement(children: .ignore)
-      .accessibilityLabel(displayedAuthorName)
     }
+  }
+
+  private var forumContextLabel: some View {
+    Label("\(displayedForumName)吧", systemImage: "text.bubble")
+      .lineLimit(1)
+  }
+
+  private var displayedForumName: String {
+    thread.forumName
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+  }
+
+  private var authorContextLabel: some View {
+    HStack(spacing: 5) {
+      if let avatarURL = ThreadSummaryPresentation.authorAvatarURL(
+        for: thread,
+        showsAuthor: showsAuthor
+      ) {
+        AvatarView(url: avatarURL, name: displayedAuthorName, size: 24)
+      } else {
+        Image(systemName: "person")
+          .accessibilityHidden(true)
+      }
+      Text(displayedAuthorName)
+        .lineLimit(showsBothNames ? 2 : 1)
+        .minimumScaleFactor(0.75)
+    }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(displayedAuthorName)
   }
 
   private var displayedAuthorName: String {

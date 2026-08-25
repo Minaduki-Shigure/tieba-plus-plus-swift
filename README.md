@@ -122,7 +122,12 @@ and its verified metadata enters the public app source.
   additionally receives an on-demand concern channel; it makes no request until selected,
   keeps the server snapshot timestamp in memory per exact account session, and
   rejects stale pages after logout, account switching, or credential rotation.
-  Both feeds preserve local filtering and media preferences. Public profiles
+  Both feeds preserve local filtering and media preferences. Shared ordinary
+  thread cards now keep their whole-card topic action while exposing an already
+  displayed forum name and author as separate native navigation controls. Those
+  controls use strict app-only forum and public-profile routes, issue no extra
+  request, and remain passive for filtered content, invalid identity, disabled
+  labels, or pinned rows. Public profiles
   also expose separate reply history plus following and follower lists. A
   public-reply card keeps its reply body bound to the exact floor or nested
   reply, while its topic title independently opens the origin thread. Their
@@ -329,6 +334,16 @@ and its verified metadata enters the public app source.
   comments, and active filters remain limited to the same card. This source-only
   workflow still needs iOS 18 device validation for touch routing inside a
   `NavigationLink` and is not included in the public `v0.62.3-alpha.1` IPA.
+- **Current-main list-card context navigation:** Ordinary shared thread cards in
+  recommendation, concern, hot, search, topic-detail, and profile lists keep the
+  existing primary topic and reply-count actions while making a displayed forum
+  name and author independently openable. The context line sits outside the
+  primary topic button, so no nested button competes for a tap. Forum and author
+  controls require a strict round-trippable app URL, visible content, an enabled
+  display option, and a valid forum name or positive public UID; otherwise the
+  existing label remains passive. Pinned rows retain their compact topic-only
+  presentation. This adds no endpoint, per-row state, or thread/nested-reply
+  scroll work and is not included in the public `v0.62.3-alpha.1` IPA.
 - **Current-main Home one-click check-in entry:** For an active account with
   complete credentials, Home exposes a toolbar shortcut to the same foreground-
   only flow already available from Account. Opening it reads the authoritative
