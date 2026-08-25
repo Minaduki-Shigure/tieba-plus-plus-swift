@@ -14,8 +14,9 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-currently serves `v0.64.0-alpha.5` (build 80), whose app-code snapshot includes
-the current image, media, navigation, Home/account, settings, cloud-favorite,
+currently serves `v0.64.0-alpha.6` (build 81), whose app-code snapshot includes
+the complete protobuf image-source fallbacks, current media, navigation,
+Home/account, settings, cloud-favorite,
 durable owner-deletion, legacy-link, guarded official-wrapper, level-progress,
 account-bound followed-forum check-in marks, bounded regular-expression
 filtering, fixed official username-management
@@ -32,7 +33,7 @@ routing and public-profile identity label preservation likewise improve existing
 local-settings and public-reading areas without adding a data source or weighted point.
 The independent OLED dark-surface choice improves the existing appearance and
 customization credit without changing the current weighted estimate.
-Current-main `PbContent` image mapping also closes a narrow compatibility gap by
+The published `PbContent` image mapping also closes a narrow compatibility gap by
 retaining `src`, `big_src`, and `cdn_src_active` fallback fields across ordinary
 floors and nested replies. It reuses the existing media pipeline and therefore
 does not add a data source or weighted point.
@@ -53,7 +54,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.64.0-alpha.5` app-code snapshot is at 80–82%; all experimental
+The public `v0.64.0-alpha.6` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
