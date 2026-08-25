@@ -299,9 +299,10 @@ the source metadata is updated to that tested IPA.
   reply-only credential-free official-client handoff pending physical validation
 - Home-screen recent-forum history, expanded by default and independently hideable
 - Canonical forum/thread sharing and browse-mode-aware thread-link copying
-- Strict internal routing for supported Tieba HTTPS, pasted official-scheme,
-  content links, and navigation-only app links matching TiebaLite's search,
-  history, account-favorite, and two inbox entry points
+- Strict internal routing for supported Tieba HTTPS, exact legacy
+  `wapp.baidu.com`/`tiebac.baidu.com` and `/mo/q/m` forum/thread links, pasted
+  official-scheme links, content links, and navigation-only app links matching
+  TiebaLite's search, history, account-favorite, and two inbox entry points
 - Default-system external HTTPS opening with an optional in-app Safari view
 - Local About page with bundle version/build information and an explicit fixed
   source-repository action using the selected external-Web policy
@@ -1129,9 +1130,13 @@ forum names.
 
 The content parser handles in-app rich links, explicit clipboard pastes, and the
 forum, thread, and user subset of the registered app-owned `tieba-plus-plus`
-scheme. It requires the exact Tieba host, standard ports, exact paths, nonempty
-bounded forum names, positive 64-bit IDs, and unambiguous supported state. Valid
-`see_lz` and post anchors are preserved when opening a thread. A separate strict
+scheme. It requires an exact allowlisted Tieba host, standard ports, exact paths,
+nonempty bounded forum names, positive 64-bit IDs, and unambiguous supported
+state. Legacy `wapp.baidu.com` and `tiebac.baidu.com` `/f`, `/p/<tid>`, and
+`/mo/q/m` routes accept exactly one forum (`kw` or `word`) or thread (`kz`)
+identity and normalize it to the same native target; mixed, duplicate, empty,
+or invalid identities fail closed. Valid `see_lz` and post anchors are preserved
+when opening a thread. A separate strict
 app-navigation parser accepts only canonical `tieba-plus-plus://search`,
 `tieba-plus-plus://history`, `tieba-plus-plus://favorite`,
 `tieba-plus-plus://check-in`, and `tieba-plus-plus://notifications/0|1` URLs. As

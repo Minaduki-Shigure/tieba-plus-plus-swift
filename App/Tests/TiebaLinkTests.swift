@@ -85,6 +85,73 @@ final class TiebaLinkTests: XCTestCase {
     XCTAssertEqual(TiebaLink.target(fromPastedText: rawURL), expected)
   }
 
+  func testOfficialLegacyHostsAndRoutesCanonicalizeToExistingTargets() throws {
+    let cases: [(String, TiebaLinkTarget, String)] = [
+      (
+        "https://tieba.baidu.com/f?word=Swift%20%E8%AF%AD%E8%A8%80&from=legacy",
+        .forum("Swift 语言"),
+        "https://tieba.baidu.com/f?kw=Swift%20%E8%AF%AD%E8%A8%80"
+      ),
+      (
+        "https://tiebac.baidu.com/mo/q/m?kw=C%2B%2B&from=legacy",
+        .forum("C++"),
+        "https://tieba.baidu.com/f?kw=C%2B%2B"
+      ),
+      (
+        "http://wapp.baidu.com:80/mo/q/m?kz=42&from=legacy",
+        .thread(TiebaThreadRoute(threadID: 42)),
+        "https://tieba.baidu.com/p/42"
+      ),
+      (
+        "https://TIEBAC.BAIDU.COM:443/p/42?see_lz=1&post_id=99#/",
+        .thread(TiebaThreadRoute(threadID: 42, onlyThreadAuthor: true, postID: 99)),
+        "https://tieba.baidu.com/p/42"
+      ),
+      (
+        "https://wapp.baidu.com/p/7?pid=8",
+        .thread(TiebaThreadRoute(threadID: 7, postID: 8)),
+        "https://tieba.baidu.com/p/7"
+      ),
+    ]
+
+    for (rawURL, expectedTarget, expectedCanonicalURL) in cases {
+      let target = try XCTUnwrap(TiebaLink.target(from: rawURL), rawURL)
+      XCTAssertEqual(target, expectedTarget, rawURL)
+      XCTAssertEqual(
+        try XCTUnwrap(TiebaLink.canonicalURL(for: target)).absoluteString,
+        expectedCanonicalURL,
+        rawURL
+      )
+    }
+  }
+
+  func testOfficialLegacyQueryRoutesRejectAmbiguousOrInvalidTargets() throws {
+    let invalidURLs = [
+      "https://tieba.baidu.com/f?kw=swift&word=swift",
+      "https://tieba.baidu.com/f?kw=swift&kz=42",
+      "https://tieba.baidu.com/f?word=swift&kz=42",
+      "https://tieba.baidu.com/f?kw=swift&kw=swift",
+      "https://tieba.baidu.com/f?word=swift&word=swift",
+      "https://tieba.baidu.com/f?kz=42&kz=42",
+      "https://tieba.baidu.com/f?kw=",
+      "https://tieba.baidu.com/f?word",
+      "https://tieba.baidu.com/f?kz=",
+      "https://tieba.baidu.com/f?kz=0",
+      "https://tieba.baidu.com/f?kz=-1",
+      "https://tieba.baidu.com/f?kz=not-a-number",
+      "https://tieba.baidu.com/f?kz=9223372036854775808",
+      "https://wapp.baidu.com/mo/q/m?kw=swift&kz=",
+      "https://tiebac.baidu.com/mo/q/m?word=&kz=42",
+      "https://tieba.baidu.com/mo/q/m",
+      "https://tieba.baidu.com/mo/q/m?from=legacy",
+      "https://tieba.baidu.com/mo/q/m?kw=swift#/",
+    ]
+
+    for rawURL in invalidURLs {
+      XCTAssertNil(TiebaLink.target(from: rawURL), rawURL)
+    }
+  }
+
   func testOfficialClientSchemeCanBePastedButUsesTheSameStrictTargets() throws {
     let forumURL = try XCTUnwrap(
       URL(string: "com.baidu.tieba://unidispatch/frs?kw=swift&source=official")
@@ -135,7 +202,14 @@ final class TiebaLinkTests: XCTestCase {
       "https://tieba.baidu.com.evil.example/f?kw=swift",
       "https://reader@tieba.baidu.com/f?kw=swift",
       "https://tieba.baidu.com:444/f?kw=swift",
+      "https://reader@tiebac.baidu.com/f?kw=swift",
+      "https://reader:secret@wapp.baidu.com/p/42",
+      "http://tiebac.baidu.com:443/f?kw=swift",
+      "https://wapp.baidu.com:80/p/42",
+      "https://tiebac.baidu.com.evil.example/mo/q/m?kz=42",
+      "https://mobile.tieba.baidu.com/f?kw=swift",
       "ftp://tieba.baidu.com/f?kw=swift",
+      "ftp://tiebac.baidu.com/p/42",
       "https://tieba.baidu.com/f",
       "https://tieba.baidu.com/f?kw=",
       "https://tieba.baidu.com/f?kw",

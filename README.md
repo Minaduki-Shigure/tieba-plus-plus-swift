@@ -579,8 +579,11 @@ and its verified metadata enters the public app source.
   This list-card interaction is not yet present in the public
   `v0.62.3-alpha.1` IPA.
 - **Links and sharing:** Supported Tieba links stay in the native router with
-  post and reply context. External HTTPS links use the selected system or Safari
-  presentation, while forum and thread sharing emits canonical HTTPS links.
+  post and reply context. Exact legacy `wapp.baidu.com` and `tiebac.baidu.com`
+  forum/thread links, including `/mo/q/m`, are normalized into the same native
+  targets; ambiguous identifiers and lookalike hosts are rejected. External
+  HTTPS links use the selected system or Safari presentation, while forum and
+  thread sharing emits canonical `https://tieba.baidu.com` links.
   The app-owned scheme also exposes strict navigation-only routes for a search
   landing with recent history, browsing history, account cloud favorites, the
   foreground one-click check-in page, and either inbox segment. The check-in

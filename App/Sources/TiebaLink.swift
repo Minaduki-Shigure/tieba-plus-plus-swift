@@ -47,6 +47,11 @@ enum TiebaLinkTarget: Hashable, Sendable {
 enum TiebaLink {
   static let appScheme = "tieba-plus-plus"
   static let officialHost = "tieba.baidu.com"
+  private static let officialHosts: Set<String> = [
+    officialHost,
+    "tiebac.baidu.com",
+    "wapp.baidu.com",
+  ]
 
   static func canonicalURL(for target: TiebaLinkTarget) -> URL? {
     var components = URLComponents()
@@ -133,21 +138,14 @@ enum TiebaLink {
   private static func officialTarget(from components: URLComponents) -> TiebaLinkTarget? {
     let standardPort = components.scheme?.lowercased() == "http" ? 80 : 443
     guard
-      components.host?.lowercased() == officialHost,
+      components.host.map({ officialHosts.contains($0.lowercased()) }) == true,
       components.port == nil || components.port == standardPort
     else { return nil }
 
-    if components.path.lowercased() == "/f" {
+    let lowercasePath = components.path.lowercased()
+    if lowercasePath == "/f" || lowercasePath == "/mo/q/m" {
       guard components.fragment == nil else { return nil }
-      let forumItems = (components.queryItems ?? []).filter { $0.name == "kw" }
-      guard
-        forumItems.count == 1,
-        let rawForumName = forumItems[0].value,
-        let forumName = normalizedForumName(rawForumName)
-      else {
-        return nil
-      }
-      return .forum(forumName)
+      return legacyQueryTarget(from: components.queryItems ?? [])
     }
 
     let path = components.path.split(separator: "/", omittingEmptySubsequences: false)
@@ -165,6 +163,32 @@ enum TiebaLink {
       allowsUnknownItems: true
     ) else { return nil }
     return .thread(route)
+  }
+
+  private static func legacyQueryTarget(
+    from queryItems: [URLQueryItem]
+  ) -> TiebaLinkTarget? {
+    let forumItems = queryItems.filter { $0.name == "kw" || $0.name == "word" }
+    let threadItems = queryItems.filter { $0.name == "kz" }
+
+    // These legacy routes can identify either one forum or one thread. Refuse
+    // duplicate and mixed identifiers instead of choosing one by precedence.
+    guard forumItems.count + threadItems.count == 1 else { return nil }
+
+    if let forumItem = forumItems.first {
+      guard
+        let rawForumName = forumItem.value,
+        let forumName = normalizedForumName(rawForumName)
+      else { return nil }
+      return .forum(forumName)
+    }
+
+    guard
+      let rawThreadID = threadItems[0].value,
+      let threadID = Int64(rawThreadID),
+      threadID > 0
+    else { return nil }
+    return .thread(TiebaThreadRoute(threadID: threadID))
   }
 
   private static func officialSchemeTarget(
