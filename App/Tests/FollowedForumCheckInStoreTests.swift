@@ -674,6 +674,7 @@ final class FollowedForumCheckInStoreTests: XCTestCase {
   }
 }
 
+@MainActor
 private func makeFollowedCheckInStore(
   vault: any AccountVault,
   loader: FollowedCheckInCatalogLoaderSpy,
