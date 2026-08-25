@@ -14,7 +14,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-currently serves `v0.64.0-alpha.3` (build 78), whose app-code snapshot includes
+currently serves `v0.64.0-alpha.4` (build 79), whose app-code snapshot includes
 the current image, media, navigation, Home/account, settings, cloud-favorite,
 durable owner-deletion, legacy-link, guarded official-wrapper, level-progress,
 bounded regular-expression filtering, fixed official username-management
@@ -48,7 +48,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.64.0-alpha.3` app-code snapshot is at 80–82%; all experimental
+The public `v0.64.0-alpha.4` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
