@@ -54,9 +54,55 @@ final class TiebaAuthenticatedClientTests: XCTestCase {
     XCTAssertEqual(summary.preferredName, "Profile User")
     XCTAssertEqual(summary.portrait, "profile-portrait")
     XCTAssertEqual(summary.biography, "Line one\nLine two")
+    XCTAssertEqual(summary.editableBiography, "Legacy introduction")
+    XCTAssertEqual(summary.sex, .female)
+    XCTAssertEqual(
+      summary.birthday,
+      TiebaSelfProfileBirthday(
+        timeMilliseconds: 946_684_800_000,
+        showsConstellationOnly: true
+      )
+    )
+    XCTAssertFalse(summary.isNicknameEditing)
+    XCTAssertNil(summary.editingNickname)
     XCTAssertEqual(summary.followingCount, 67)
     XCTAssertEqual(summary.followerCount, 345)
     XCTAssertEqual(summary.postCount, 890)
+  }
+
+  func testSelfProfileModelsRedactPrivateTextAndBirthdayFromDiagnostics() {
+    let privateBirthday = TiebaSelfProfileBirthday(
+      timeMilliseconds: 631_123_200_000,
+      showsConstellationOnly: true
+    )
+    let summary = TiebaSelfProfileSummary(
+      userID: 957_339_815,
+      username: "private-username-sentinel",
+      displayName: "private-display-name-sentinel",
+      portrait: "private-portrait-sentinel",
+      biography: "private-public-biography-sentinel",
+      followingCount: 1,
+      followerCount: 2,
+      postCount: 3,
+      sex: .female,
+      birthday: privateBirthday,
+      isNicknameEditing: true,
+      editingNickname: "private-pending-nickname-sentinel",
+      editableBiography: "private-editable-biography-sentinel"
+    )
+
+    let diagnosticValues = [String(describing: summary), String(reflecting: summary)]
+    for value in diagnosticValues {
+      XCTAssertFalse(value.contains("private-"))
+      XCTAssertFalse(value.contains("631123200000"))
+    }
+    let reflectedValues = summary.customMirror.children.map { String(reflecting: $0.value) }
+    let reflectedLabels = summary.customMirror.children.compactMap(\.label)
+    XCTAssertFalse(reflectedValues.contains { $0.contains("private-") })
+    XCTAssertFalse(reflectedValues.contains { $0.contains("631123200000") })
+    XCTAssertFalse(reflectedLabels.contains("sex"))
+    XCTAssertEqual(String(describing: privateBirthday), "TiebaSelfProfileBirthday(redacted)")
+    XCTAssertTrue(Array(privateBirthday.customMirror.children).isEmpty)
   }
 
   func testSelfProfileRejectsMismatchedMalformedAndOversizedPayloads() async throws {

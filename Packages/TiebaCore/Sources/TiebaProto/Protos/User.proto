@@ -1,6 +1,8 @@
 // tbclient.User
 syntax = "proto3";
 
+import "BirthdayInfo.proto";
+
 message User {
     int32 is_login = 1;
     int64 id = 2;
@@ -55,6 +57,7 @@ message User {
     repeated TshowInfo new_tshow_icon = 65;
     int32 thread_num = 87;
     int32 is_fans = 91;
+    BirthdayInfo birthday_info = 96;
     message NewGodInfo {
         int32 status = 1;
         uint32 field_id = 2;
@@ -65,6 +68,8 @@ message User {
     uint32 total_agree_num = 118;
     string tieba_uid = 120;
     string ip_address = 127;
+    int32 is_nickname_editing = 128;
+    string editing_nickname = 129;
     message UserGrowth {
         uint32 level_id = 1;
     }

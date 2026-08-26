@@ -9,6 +9,7 @@
         "AddPostResIdl.proto",
         "Agree.proto",
         "Anti.proto",
+        "BirthdayInfo.proto",
         "CommonReq.proto",
         "Error.proto",
         "ForumRuleDetailReqIdl.proto",

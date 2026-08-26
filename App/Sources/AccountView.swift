@@ -335,8 +335,28 @@ struct AccountView: View {
             }
 
             if activeAccount.hasFullCredentials {
+              if
+                profileSummaryViewModel.state == .loaded,
+                activeProfileSummary != nil
+              {
+                NavigationLink {
+                  AccountProfileEditView(
+                    userID: activeAccount.id,
+                    service: accountService,
+                    vault: vault
+                  ) { savedProfile in
+                    guard savedProfile.userID == activeAccount.id else { return }
+                    profileSummaryViewModel.reload()
+                  }
+                } label: {
+                  Label("编辑个人资料", systemImage: "square.and.pencil")
+                }
+                .disabled(viewModel.isMutating)
+                .accessibilityIdentifier("account-edit-profile")
+              }
+
               Button { confirmsUsernameManagement = true } label: {
-                Label("修改用户名", systemImage: "person.text.rectangle")
+                Label("百度用户名管理", systemImage: "person.text.rectangle")
               }
               .disabled(!usernameManagementIsAvailable)
               .accessibilityIdentifier("account-manage-baidu-username")

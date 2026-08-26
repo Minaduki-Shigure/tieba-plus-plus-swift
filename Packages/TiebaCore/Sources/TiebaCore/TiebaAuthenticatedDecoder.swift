@@ -109,6 +109,48 @@ enum TiebaAuthenticatedDecoder {
       biographySource,
       maximumBytes: selfProfileBiographyMaximumBytes
     )
+    let editableBiography = try boundedSelfProfileMultilineText(
+      user.intro,
+      maximumBytes: selfProfileBiographyMaximumBytes
+    )
+    guard let sex = TiebaSelfProfileSex(rawValue: user.sex) else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    let birthday: TiebaSelfProfileBirthday?
+    if user.hasBirthdayInfo {
+      let snapshot = user.birthdayInfo
+      guard
+        snapshot.birthdayTime >= 0,
+        snapshot.birthdayShowStatus == 0 || snapshot.birthdayShowStatus == 1
+      else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+      let (timeMilliseconds, overflow) = snapshot.birthdayTime.multipliedReportingOverflow(
+        by: 1_000
+      )
+      guard !overflow else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+      birthday = TiebaSelfProfileBirthday(
+        timeMilliseconds: timeMilliseconds,
+        showsConstellationOnly: snapshot.birthdayShowStatus == 1
+      )
+    } else {
+      birthday = nil
+    }
+    guard user.isNicknameEditing == 0 || user.isNicknameEditing == 1 else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    let pendingNickname: String?
+    if user.isNicknameEditing == 0 || user.editingNickname.isEmpty {
+      pendingNickname = nil
+    } else {
+      let candidate = try boundedSelfProfileSingleLineText(
+        user.editingNickname,
+        maximumBytes: selfProfileNameMaximumBytes
+      )
+      pendingNickname = candidate.isEmpty ? nil : candidate
+    }
     let counts = [user.concernNum, user.fansNum, user.postNum]
     guard counts.allSatisfy({ $0 >= 0 }) else {
       throw TiebaClientError.invalidAuthenticatedResponse
@@ -122,7 +164,12 @@ enum TiebaAuthenticatedDecoder {
       biography: biography,
       followingCount: Int(user.concernNum),
       followerCount: Int(user.fansNum),
-      postCount: Int(user.postNum)
+      postCount: Int(user.postNum),
+      sex: sex,
+      birthday: birthday,
+      isNicknameEditing: user.isNicknameEditing == 1,
+      editingNickname: user.isNicknameEditing == 1 ? pendingNickname : nil,
+      editableBiography: editableBiography
     )
   }
 
@@ -179,6 +226,7 @@ enum TiebaAuthenticatedDecoder {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
     return rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
   }
 
   private static func boundedSelfProfileMultilineText(
@@ -198,6 +246,7 @@ enum TiebaAuthenticatedDecoder {
       .replacingOccurrences(of: "\r\n", with: "\n")
       .replacingOccurrences(of: "\r", with: "\n")
       .trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
   }
 
   private static func normalizedSelfProfilePortrait(_ rawValue: String) throws -> String {
@@ -507,6 +556,11 @@ enum TiebaAuthenticatedDecoder {
   }
 
   static func checkUserFollowWriteResponse(_ body: Data) throws {
+    let object = try responseObject(from: body)
+    try checkServerError(object)
+  }
+
+  static func checkSelfProfileEditAcknowledgement(_ body: Data) throws {
     let object = try responseObject(from: body)
     try checkServerError(object)
   }

@@ -95,15 +95,201 @@ struct UserLikedForumPageData: Hashable, Sendable {
   let hasMore: Bool
 }
 
-struct AccountProfileSummary: Hashable, Sendable {
+enum AccountProfileSex: String, CaseIterable, Identifiable, Hashable, Sendable {
+  case unspecified
+  case male
+  case female
+
+  var id: Self { self }
+
+  static let userSelectableCases: [Self] = [.male, .female]
+
+  var title: String {
+    switch self {
+    case .unspecified: "未设置"
+    case .male: "男"
+    case .female: "女"
+    }
+  }
+}
+
+struct AccountProfileBirthday:
+  Hashable, Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let timeMilliseconds: Int64
+  let showsConstellationOnly: Bool
+
+  var description: String { "AccountProfileBirthday(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror { Mirror(self, children: [:], displayStyle: .struct) }
+}
+
+struct AccountProfileEditSubmission:
+  Hashable, Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let displayName: String
+  let biography: String
+  let sex: AccountProfileSex
+
+  var description: String { "AccountProfileEditSubmission(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(
+      self,
+      children: [
+        "displayNameUTF8ByteCount": displayName.utf8.count,
+        "biographyUTF8ByteCount": biography.utf8.count,
+      ],
+      displayStyle: .struct
+    )
+  }
+}
+
+enum AccountProfileEditValidationError: LocalizedError, Equatable, Sendable {
+  case displayNameRequired
+  case displayNameTooLong
+  case displayNameContainsControlCharacters
+  case biographyTooLong
+  case biographyPayloadTooLarge
+  case biographyContainsControlCharacters
+
+  var errorDescription: String? {
+    switch self {
+    case .displayNameRequired:
+      "昵称不能为空。"
+    case .displayNameTooLong:
+      "昵称过长，请缩短后再试。"
+    case .displayNameContainsControlCharacters:
+      "昵称包含不支持的控制字符。"
+    case .biographyTooLong:
+      "简介最多包含 500 个非空白字符。"
+    case .biographyPayloadTooLarge:
+      "简介内容过大，请减少空白或特殊字符。"
+    case .biographyContainsControlCharacters:
+      "简介包含不支持的控制字符。"
+    }
+  }
+}
+
+enum AccountProfileEditPolicy {
+  static let maximumDisplayNameCharacters = 64
+  static let maximumDisplayNameUTF8Bytes = 256
+  static let maximumBiographyNonWhitespaceCharacters = 500
+  static let maximumBiographyUTF8Bytes = 4_096
+
+  static func validatedSubmission(
+    displayName: String,
+    biography: String,
+    sex: AccountProfileSex
+  ) throws -> AccountProfileEditSubmission {
+    let displayName = displayName
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    guard !displayName.isEmpty else {
+      throw AccountProfileEditValidationError.displayNameRequired
+    }
+    guard
+      displayName.count <= maximumDisplayNameCharacters,
+      displayName.utf8.count <= maximumDisplayNameUTF8Bytes
+    else {
+      throw AccountProfileEditValidationError.displayNameTooLong
+    }
+    guard !containsUnsupportedDisplayNameCharacters(displayName) else {
+      throw AccountProfileEditValidationError.displayNameContainsControlCharacters
+    }
+
+    let biography = biography
+      .replacingOccurrences(of: "\r\n", with: "\n")
+      .replacingOccurrences(of: "\r", with: "\n")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    guard nonWhitespaceCharacterCount(in: biography) <= maximumBiographyNonWhitespaceCharacters
+    else {
+      throw AccountProfileEditValidationError.biographyTooLong
+    }
+    guard biography.utf8.count <= maximumBiographyUTF8Bytes else {
+      throw AccountProfileEditValidationError.biographyPayloadTooLarge
+    }
+    guard !containsUnsupportedBiographyControlCharacters(biography) else {
+      throw AccountProfileEditValidationError.biographyContainsControlCharacters
+    }
+
+    return AccountProfileEditSubmission(
+      displayName: displayName,
+      biography: biography,
+      sex: sex
+    )
+  }
+
+  static func nonWhitespaceCharacterCount(in value: String) -> Int {
+    value.reduce(into: 0) { count, character in
+      let isWhitespace = character.unicodeScalars.allSatisfy {
+        CharacterSet.whitespacesAndNewlines.contains($0)
+      }
+      if !isWhitespace { count += 1 }
+    }
+  }
+
+  private static func containsUnsupportedDisplayNameCharacters(_ value: String) -> Bool {
+    value.unicodeScalars.contains { scalar in
+      CharacterSet.controlCharacters.contains(scalar)
+        || CharacterSet.newlines.contains(scalar)
+    }
+  }
+
+  private static func containsUnsupportedBiographyControlCharacters(_ value: String) -> Bool {
+    value.unicodeScalars.contains { scalar in
+      scalar.value != 0x0A && CharacterSet.controlCharacters.contains(scalar)
+    }
+  }
+}
+
+struct AccountProfileSummary:
+  Hashable, Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
   let userID: Int64
   let username: String
   let displayName: String
   let portraitURL: URL?
   let biography: String
+  let editableBiography: String
   let followingCount: Int
   let followerCount: Int
   let postCount: Int
+  let sex: AccountProfileSex
+  let birthday: AccountProfileBirthday?
+  let isNicknameEditing: Bool
+  let editingNickname: String
+
+  init(
+    userID: Int64,
+    username: String,
+    displayName: String,
+    portraitURL: URL?,
+    biography: String,
+    followingCount: Int,
+    followerCount: Int,
+    postCount: Int,
+    editableBiography: String? = nil,
+    sex: AccountProfileSex = .unspecified,
+    birthday: AccountProfileBirthday? = nil,
+    isNicknameEditing: Bool = false,
+    editingNickname: String = ""
+  ) {
+    self.userID = userID
+    self.username = username
+    self.displayName = displayName
+    self.portraitURL = portraitURL
+    self.biography = biography
+    self.editableBiography = editableBiography ?? biography
+    self.followingCount = followingCount
+    self.followerCount = followerCount
+    self.postCount = postCount
+    self.sex = sex
+    self.birthday = birthday
+    self.isNicknameEditing = isNicknameEditing
+    self.editingNickname = editingNickname
+  }
 
   var preferredName: String {
     for candidate in [displayName, username] {
@@ -111,6 +297,26 @@ struct AccountProfileSummary: Hashable, Sendable {
       if !name.isEmpty { return name }
     }
     return "用户 \(userID)"
+  }
+
+  var description: String {
+    "AccountProfileSummary(userID: \(userID), redacted)"
+  }
+
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(
+      self,
+      children: [
+        "userID": userID,
+        "hasBirthday": birthday != nil,
+        "isNicknameEditing": isNicknameEditing,
+        "followingCount": followingCount,
+        "followerCount": followerCount,
+        "postCount": postCount,
+      ],
+      displayStyle: .struct
+    )
   }
 }
 
@@ -863,6 +1069,10 @@ protocol AccountService: Sendable {
   func selfProfile(
     session: StoredAccountSession
   ) async throws -> AccountProfileSummary
+  func updateSelfProfile(
+    session: StoredAccountSession,
+    edit: AccountProfileEditSubmission
+  ) async throws -> AccountProfileSummary
   func ownFollowing(
     session: StoredAccountSession,
     page: Int
@@ -1093,6 +1303,13 @@ extension AccountService {
     session: StoredAccountSession
   ) async throws -> AccountProfileSummary {
     throw BrowseError.unavailable("当前账户服务不支持读取本人资料。")
+  }
+
+  func updateSelfProfile(
+    session: StoredAccountSession,
+    edit: AccountProfileEditSubmission
+  ) async throws -> AccountProfileSummary {
+    throw BrowseError.unavailable("当前账户服务不支持修改本人资料。")
   }
 
   func ownFollowing(

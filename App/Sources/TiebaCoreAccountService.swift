@@ -13,6 +13,11 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
     credential: TiebaSessionCredential,
     expectedUserID: Int64
   ) async throws -> TiebaSelfProfileSummary
+  func updateSelfProfile(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    edit: TiebaSelfProfileEdit
+  ) async throws -> TiebaSelfProfileSummary
   func getOwnFollowing(
     credential: TiebaSessionCredential,
     expectedUserID: Int64,
@@ -262,6 +267,14 @@ extension TiebaAuthenticatedAccountClient {
   func getSelfProfile(
     credential: TiebaSessionCredential,
     expectedUserID: Int64
+  ) async throws -> TiebaSelfProfileSummary {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
+  func updateSelfProfile(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    edit: TiebaSelfProfileEdit
   ) async throws -> TiebaSelfProfileSummary {
     throw TiebaClientError.invalidAuthenticatedResponse
   }
@@ -589,22 +602,58 @@ struct TiebaCoreAccountService: AccountService {
     } catch {
       throw Self.accountError(error)
     }
-    guard
-      response.userID == session.id,
-      [response.followingCount, response.followerCount, response.postCount]
-        .allSatisfy({ (0...Int(Int32.max)).contains($0) })
-    else {
-      throw BrowseError.unavailable("贴吧返回了不匹配的本人资料，请重新加载后再试。")
+    return try Self.accountProfileSummary(response, expectedUserID: session.id)
+  }
+
+  func updateSelfProfile(
+    session: StoredAccountSession,
+    edit: AccountProfileEditSubmission
+  ) async throws -> AccountProfileSummary {
+    guard session.id > 0, let credentials = session.credentials else {
+      throw BrowseError.unavailable("此账户需要重新登录，才能安全修改本人资料。")
     }
-    return AccountProfileSummary(
-      userID: response.userID,
-      username: response.username,
-      displayName: response.displayName,
-      portraitURL: SecureTiebaURL.strictPortrait(response.portrait),
-      biography: response.biography,
-      followingCount: response.followingCount,
-      followerCount: response.followerCount,
-      postCount: response.postCount
+    guard
+      let validatedEdit = try? AccountProfileEditPolicy.validatedSubmission(
+        displayName: edit.displayName,
+        biography: edit.biography,
+        sex: edit.sex
+      ),
+      let coreEdit = Self.coreSelfProfileEdit(validatedEdit)
+    else {
+      throw BrowseError.unavailable("本人资料包含无效或过长的内容，请修改后再试。")
+    }
+
+    let response: TiebaSelfProfileSummary
+    do {
+      response = try await client.updateSelfProfile(
+        credential: Self.coreSessionCredential(credentials),
+        expectedUserID: session.id,
+        edit: coreEdit
+      )
+      try Task.checkCancellation()
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch let error as TiebaClientError {
+      switch error {
+      case .selfProfileEditWriteConflict:
+        throw BrowseError.unavailable(
+          "此账户已有另一项资料修改正在进行，请等待完成后重新读取。"
+        )
+      case .selfProfileEditOutcomeUnknown:
+        throw BrowseError.unavailable(
+          "贴吧尚未确认资料修改结果；请重新读取本人资料，应用不会自动重发请求。"
+        )
+      default:
+        throw Self.accountError(error)
+      }
+    } catch {
+      throw Self.accountError(error)
+    }
+
+    return try Self.accountProfileSummary(
+      response,
+      expectedUserID: session.id,
+      confirming: coreEdit
     )
   }
 
@@ -2014,6 +2063,114 @@ struct TiebaCoreAccountService: AccountService {
     return .unavailable(
       accountError(error).errorDescription ?? "账户请求失败，请稍后重试。"
     )
+  }
+
+  private static func accountProfileSummary(
+    _ response: TiebaSelfProfileSummary,
+    expectedUserID: Int64,
+    confirming expectedEdit: TiebaSelfProfileEdit? = nil
+  ) throws -> AccountProfileSummary {
+    guard
+      expectedUserID > 0,
+      response.userID == expectedUserID,
+      [response.followingCount, response.followerCount, response.postCount]
+        .allSatisfy({ (0...Int(Int32.max)).contains($0) })
+    else {
+      throw BrowseError.unavailable("贴吧返回了不匹配的本人资料，请重新加载后再试。")
+    }
+
+    let rawEditingNickname = response.editingNickname ?? ""
+    guard
+      rawEditingNickname.isEmpty
+        || TiebaSelfProfileEditPolicy.isValidDisplayName(rawEditingNickname)
+    else {
+      throw BrowseError.unavailable("贴吧返回了无效的本人资料，请重新加载后再试。")
+    }
+    let editingNickname = response.isNicknameEditing ? rawEditingNickname : ""
+
+    if let expectedEdit {
+      let nicknameMatches = response.displayName == expectedEdit.displayName
+        || (response.isNicknameEditing && editingNickname == expectedEdit.displayName)
+      guard
+        nicknameMatches,
+        response.editableBiography == expectedEdit.biography,
+        response.sex == expectedEdit.sex
+      else {
+        throw BrowseError.unavailable("贴吧没有确认新的本人资料，请重新读取后再试。")
+      }
+    }
+
+    let birthday: AccountProfileBirthday?
+    if let source = response.birthday {
+      guard
+        source.timeMilliseconds >= 0,
+        source.timeMilliseconds.isMultiple(of: 1_000)
+      else {
+        throw BrowseError.unavailable("贴吧返回了无效的本人资料，请重新加载后再试。")
+      }
+      birthday = AccountProfileBirthday(
+        timeMilliseconds: source.timeMilliseconds,
+        showsConstellationOnly: source.showsConstellationOnly
+      )
+    } else {
+      birthday = nil
+    }
+
+    return AccountProfileSummary(
+      userID: response.userID,
+      username: response.username,
+      displayName: response.displayName,
+      portraitURL: SecureTiebaURL.strictPortrait(response.portrait),
+      biography: response.biography,
+      followingCount: response.followingCount,
+      followerCount: response.followerCount,
+      postCount: response.postCount,
+      editableBiography: response.editableBiography,
+      sex: accountProfileSex(response.sex),
+      birthday: birthday,
+      isNicknameEditing: response.isNicknameEditing,
+      editingNickname: editingNickname
+    )
+  }
+
+  private static func coreSelfProfileEdit(
+    _ edit: AccountProfileEditSubmission
+  ) -> TiebaSelfProfileEdit? {
+    let displayName = edit.displayName
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    let biography = edit.biography
+      .replacingOccurrences(of: "\r\n", with: "\n")
+      .replacingOccurrences(of: "\r", with: "\n")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    let coreEdit = TiebaSelfProfileEdit(
+      displayName: displayName,
+      biography: biography,
+      sex: coreSelfProfileSex(edit.sex)
+    )
+    return TiebaSelfProfileEditPolicy.isValid(coreEdit) ? coreEdit : nil
+  }
+
+  private static func accountProfileSex(
+    _ sex: TiebaSelfProfileSex
+  ) -> AccountProfileSex {
+    switch sex {
+    case .unspecified: .unspecified
+    case .male: .male
+    case .female: .female
+    @unknown default: .unspecified
+    }
+  }
+
+  private static func coreSelfProfileSex(
+    _ sex: AccountProfileSex
+  ) -> TiebaSelfProfileSex {
+    switch sex {
+    case .unspecified: .unspecified
+    case .male: .male
+    case .female: .female
+    }
   }
 
   private static func coreSessionCredential(

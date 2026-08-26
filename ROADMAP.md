@@ -57,6 +57,14 @@ existing global search inside its own navigation stack. Typed destinations,
 stable presentation order, and origin-stack isolation have contract coverage.
 These changes improve reachability inside the existing navigation and local-
 settings credit without adding a request, preference, or weighted point.
+Current main additionally closes TiebaLite's nonmedia self-profile editing
+workflow for nickname, sex, and biography. It preserves the account's hidden
+birthday fields, distinguishes editable `intro` from rendered `display_intro`,
+accepts an explicitly pending requested nickname as an authoritative readback,
+and sends no second write after an uncertain result. This is a substantive
+guarded account action, but the coarse weighted estimate remains unchanged until
+the minimum field set, nickname-review behavior, and birthday preservation pass
+disposable-account device validation. Avatar upload remains a separate gap.
 
 | Capability area | Weight | Credited points | Current basis |
 | --- | ---: | ---: | --- |
@@ -64,8 +72,8 @@ settings credit without adding a request, preference, or weighted point.
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, shared text selection/copying, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
 | Local data, settings, and customization | 10 | 7 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, hierarchical settings navigation, an independent default-on Explore-tab visibility preference, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, confirmation-frozen foreground check-in execution settings, a TiebaLite-compatible default image-watermark choice, reply-entry visibility, a default-on composer risk notice with an experimental reply-only system handoff attempt pending physical validation, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
-| Account, session, and private read flows | 15 | 9 | Login, Home-toolbar quick switching, a self-profile summary, an authenticated current-account following list with a guarded mutual filter, followed and target-user liked forums with optional validated level-up progress, account-bound followed-forum check-in marks, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
-| Server writes, creation, and social actions | 15 | 14 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, server-reason-bound personalized recommendation dislike feedback, three text/classic-emoticon reply targets, equivalent new-topic creation, bounded static-image new-topic/direct-topic-reply creation, owner-only topic/ordinary-floor deletion, direct inline-preview reply entry, and credential-free official reporting entry points have guarded implementations; real batch-check-in behavior, creation, deletion, poll and interaction-restriction success, broader uploaded media, unresolvable cloud rows, native reporting, and other reactions remain unavailable or unvalidated |
+| Account, session, and private read flows | 15 | 9 | Login, Home-toolbar quick switching, a self-profile summary with editable wire fields and nickname-review state, an authenticated current-account following list with a guarded mutual filter, followed and target-user liked forums with optional validated level-up progress, account-bound followed-forum check-in marks, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
+| Server writes, creation, and social actions | 15 | 14 | Guarded nickname/sex/biography editing, forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, server-reason-bound personalized recommendation dislike feedback, three text/classic-emoticon reply targets, equivalent new-topic creation, bounded static-image new-topic/direct-topic-reply creation, owner-only topic/ordinary-floor deletion, direct inline-preview reply entry, and credential-free official reporting entry points have implementations; profile mutation, real batch-check-in behavior, creation, deletion, poll and interaction-restriction success, broader uploaded media, unresolvable cloud rows, native reporting, and other reactions remain unavailable or unvalidated on physical devices |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
 | **Total** | **100** | **80–82** | Current full-product estimate; roughly 18–20% remains |
 
@@ -505,7 +513,9 @@ the source metadata is updated to that tested IPA.
 - Same-snapshot BDUSS/STOKEN capture, independent same-UID session binding,
   device-only Keychain v3 storage, account switching, and local logout
 - Account-bound, memory-only self-profile summary with current avatar, display
-  name, biography, following, follower, and reply counts, plus an explicit link to
+  name, rendered and editable biography values, sex, birthday-preservation and
+  nickname-review state, following, follower, and reply counts, plus a guarded
+  nickname/sex/biography editor and an explicit link to
   the existing credential-free public profile and its public topic, reply,
   following, and follower views. A separate confirmed handoff opens only Baidu's
   fixed official HTTPS username-management page in the selected browser mode;
@@ -701,10 +711,16 @@ and effect on later recommendations.
    unread state,
    plus ordinary post and child-reply action relocation, unavailable targets,
    and account switching before composer presentation
-8. Real-device validation of the minimal authenticated self-profile request,
-   including successful V12 field deletion, absent `is_login`, empty biography,
-   expired and cross-account credentials, response UID binding, account switching,
-   and same-UID credential rotation
+8. Disposable-account and real-device validation of the minimal authenticated
+   self-profile read and `/c/c/profile/modify` write, including successful V12
+   field deletion, absent `is_login`, empty and multiline biography, `intro`
+   versus `display_intro`, all sex values, missing and malformed birthday data,
+   exact preservation of birthday time and visibility, active and pending
+   nickname readback, nickname rejection/rate limits, an already-matching
+   no-write result, known server rejection, post-dispatch transport loss,
+   mandatory readback with no retry, identical-flight sharing, conflicting edits,
+   pre-dispatch cancellation, expired and cross-account credentials, response UID
+   binding, account switching, and same-UID credential rotation
 9. Real-device validation of the account-bound concern request, including the
    signed-field deletion matrix, empty-account and expired-session envelopes,
    cursor replay, and whether list retrieval changes recommendation state
@@ -1101,6 +1117,39 @@ The summary does not expose private activity, and the public destination remains
 credential-free. Until successful real-device validation, this incremental
 enhancement stays within the existing account/private-read score and adds no
 weighted parity credit.
+
+The native self-profile editor reuses that exact account-bound V12 read before
+every mutation, after the App and Web session probes return the same UID and it
+equals the requested account. The protobuf projection retains `sex`,
+`birthday_info`, `is_nickname_editing`, and `editing_nickname`; editable text
+always comes from `intro`, while presentation prefers nonempty `display_intro`
+and falls back to `intro` only for legacy responses. The user can change only
+nickname, sex, and a biography with at most 500 non-whitespace characters. Birthday is not
+editable, but its timestamp and constellation-only visibility bit are frozen
+from the preflight and copied into the write. If that message is absent,
+malformed, or changes during readback, the App cannot claim success. An existing
+nickname review also blocks another write without hiding the readable summary.
+The endpoint provides no profile revision or compare-and-swap field, so this
+preservation is relative to the immediately preceding snapshot: a simultaneous
+birthday edit in another client can be overwritten and cannot be distinguished
+by an equal readback. Device validation must avoid that unsupported race.
+
+One account may have one profile-edit flight. Equivalent normalized edits with
+the same complete credential can share it; a different edit or rotated
+credential is rejected before another write. A changed state sends one signed
+HTTPS form to `/c/c/profile/modify` with fixed client compatibility fields,
+BDUSS/STOKEN, the three requested values, the frozen birthday values, and the
+documented empty camera fields. It carries only `Cookie: ka=open` and no CUID,
+IMEI, Android ID, advertising, model, screen, location, or persistent cookie-jar
+data. Every dispatched attempt receives exactly one same-credential V12
+readback, even after an acknowledgement or transport failure. The result is
+published only when biography and sex match, birthday remains equal, and the
+nickname is either active or the explicit pending-review value. Otherwise the
+result is rejected or marked outcome unknown; no write is retried. App
+publication additionally requires the initiating `userID + sessionRevision`.
+The refreshed profile remains memory only and does not rotate the Keychain
+session merely to update display metadata. Avatar upload uses another multipart
+endpoint and remains outside this workflow.
 
 Public following and follower lists are separate anonymous signed-form reads.
 Following uses `POST https://tiebac.baidu.com/c/u/follow/followList`; followers

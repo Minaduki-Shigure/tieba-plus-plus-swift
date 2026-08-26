@@ -24,6 +24,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let staticImageUploadClientVersion = "12.41.7.1"
   static let concernClientVersion = "11.10.8.6"
   static let selfProfileClientVersion = "12.52.1.0"
+  static let selfProfileEditClientVersion = "12.41.7.1"
   static let ownFollowingClientVersion = "12.41.7.1"
   static let userFollowClientVersion = "11.10.8.6"
   static let userInteractionPermissionsClientVersion = "12.41.7.1"
@@ -35,6 +36,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let selfProfileUserAgent =
     "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) "
     + "Version/4.0 Chrome/135.0.0.0 Mobile Safari/537.36 tieba/12.52.1.0"
+  static let selfProfileEditUserAgent = "bdtb for Android 12.41.7.1"
   static let pollReadUserAgent =
     "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) "
     + "Version/4.0 Chrome/135.0.0.0 Mobile Safari/537.36 tieba/12.52.1.0"
@@ -255,6 +257,47 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       fields: [("stoken", credential.stoken)],
       userAgent: Self.selfProfileUserAgent,
       clientUserToken: String(expectedUserID),
+      cookie: "ka=open"
+    )
+  }
+
+  func editSelfProfile(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    edit: TiebaSelfProfileEdit,
+    birthday: TiebaSelfProfileBirthday
+  ) throws -> URLRequest {
+    try validate(credential)
+    guard expectedUserID > 0 else {
+      throw TiebaClientError.invalidArgument("Expected user ID must be positive.")
+    }
+    guard let edit = TiebaSelfProfileEditPolicy.normalized(edit) else {
+      throw TiebaClientError.invalidArgument("The profile edit contains invalid text.")
+    }
+    guard
+      birthday.timeMilliseconds >= 0,
+      birthday.timeMilliseconds.isMultiple(of: 1_000)
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+
+    return try signedFormRequest(
+      path: "/c/c/profile/modify",
+      fields: [
+        ("BDUSS", credential.bduss),
+        ("_client_type", "2"),
+        ("_client_version", Self.selfProfileEditClientVersion),
+        ("birthday_show_status", birthday.showsConstellationOnly ? "1" : "0"),
+        ("birthday_time", String(birthday.timeMilliseconds / 1_000)),
+        ("intro", edit.biography),
+        ("sex", String(edit.sex.rawValue)),
+        ("nick_name", edit.displayName),
+        ("stoken", credential.stoken),
+        ("cam", ""),
+        ("need_cam_decrypt", "1"),
+        ("need_keep_nickname_flag", "0"),
+      ],
+      userAgent: Self.selfProfileEditUserAgent,
       cookie: "ka=open"
     )
   }

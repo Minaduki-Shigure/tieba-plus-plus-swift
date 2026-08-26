@@ -68,12 +68,144 @@ public struct TiebaAuthenticatedAccount:
   }
 }
 
-public struct TiebaSelfProfileSummary: Sendable, Hashable {
+public enum TiebaSelfProfileSex: Int32, Sendable, Hashable {
+  case unspecified = 0
+  case male = 1
+  case female = 2
+}
+
+public struct TiebaSelfProfileBirthday:
+  Sendable, Hashable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  public let timeMilliseconds: Int64
+  public let showsConstellationOnly: Bool
+
+  public init(timeMilliseconds: Int64, showsConstellationOnly: Bool) {
+    self.timeMilliseconds = timeMilliseconds
+    self.showsConstellationOnly = showsConstellationOnly
+  }
+
+  public var description: String { "TiebaSelfProfileBirthday(redacted)" }
+  public var debugDescription: String { description }
+  public var customMirror: Mirror { Mirror(self, children: [:], displayStyle: .struct) }
+}
+
+public struct TiebaSelfProfileEdit:
+  Sendable, Hashable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  public let displayName: String
+  public let biography: String
+  public let sex: TiebaSelfProfileSex
+
+  public init(
+    displayName: String,
+    biography: String,
+    sex: TiebaSelfProfileSex
+  ) {
+    self.displayName = displayName
+    self.biography = biography
+    self.sex = sex
+  }
+
+  public var description: String { "TiebaSelfProfileEdit(redacted)" }
+  public var debugDescription: String { description }
+  public var customMirror: Mirror {
+    Mirror(
+      self,
+      children: [
+        "displayNameUTF8ByteCount": displayName.utf8.count,
+        "biographyUTF8ByteCount": biography.utf8.count,
+      ],
+      displayStyle: .struct
+    )
+  }
+}
+
+public enum TiebaSelfProfileEditPolicy {
+  public static let maximumDisplayNameCharacterCount = 64
+  public static let maximumDisplayNameUTF8ByteCount = 256
+  public static let maximumBiographyNonWhitespaceCharacterCount = 500
+  public static let maximumBiographyUTF8ByteCount = 4_096
+
+  public static func isValidDisplayName(_ value: String) -> Bool {
+    normalizedDisplayName(value) != nil
+  }
+
+  public static func isValidBiography(_ value: String) -> Bool {
+    normalizedBiography(value) != nil
+  }
+
+  public static func isValid(_ edit: TiebaSelfProfileEdit) -> Bool {
+    normalized(edit) != nil
+  }
+
+  static func normalized(_ edit: TiebaSelfProfileEdit) -> TiebaSelfProfileEdit? {
+    guard
+      let displayName = normalizedDisplayName(edit.displayName),
+      let biography = normalizedBiography(edit.biography)
+    else { return nil }
+    return TiebaSelfProfileEdit(
+      displayName: displayName,
+      biography: biography,
+      sex: edit.sex
+    )
+  }
+
+  private static func normalizedDisplayName(_ value: String) -> String? {
+    let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    guard
+      !normalized.isEmpty,
+      normalized.count <= maximumDisplayNameCharacterCount,
+      normalized.utf8.count <= maximumDisplayNameUTF8ByteCount,
+      !normalized.unicodeScalars.contains(where: {
+        CharacterSet.controlCharacters.contains($0) || CharacterSet.newlines.contains($0)
+      })
+    else { return nil }
+    return normalized
+  }
+
+  private static func normalizedBiography(_ value: String) -> String? {
+    let normalized = value
+      .replacingOccurrences(of: "\r\n", with: "\n")
+      .replacingOccurrences(of: "\r", with: "\n")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .precomposedStringWithCanonicalMapping
+    let allowedControls = CharacterSet(charactersIn: "\n")
+    guard
+      normalized.utf8.count <= maximumBiographyUTF8ByteCount,
+      nonWhitespaceCharacterCount(in: normalized)
+        <= maximumBiographyNonWhitespaceCharacterCount,
+      !normalized.unicodeScalars.contains(where: {
+        CharacterSet.controlCharacters.contains($0) && !allowedControls.contains($0)
+      })
+    else { return nil }
+    return normalized
+  }
+
+  private static func nonWhitespaceCharacterCount(in value: String) -> Int {
+    value.reduce(into: 0) { count, character in
+      let isWhitespace = character.unicodeScalars.allSatisfy {
+        CharacterSet.whitespacesAndNewlines.contains($0)
+      }
+      if !isWhitespace { count += 1 }
+    }
+  }
+}
+
+public struct TiebaSelfProfileSummary:
+  Sendable, Hashable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
   public let userID: Int64
   public let username: String
   public let displayName: String
   public let portrait: String
   public let biography: String
+  public let editableBiography: String
+  public let sex: TiebaSelfProfileSex
+  public let birthday: TiebaSelfProfileBirthday?
+  public let isNicknameEditing: Bool
+  public let editingNickname: String?
   public let followingCount: Int
   public let followerCount: Int
   public let postCount: Int
@@ -86,13 +218,23 @@ public struct TiebaSelfProfileSummary: Sendable, Hashable {
     biography: String,
     followingCount: Int,
     followerCount: Int,
-    postCount: Int
+    postCount: Int,
+    sex: TiebaSelfProfileSex = .unspecified,
+    birthday: TiebaSelfProfileBirthday? = nil,
+    isNicknameEditing: Bool = false,
+    editingNickname: String? = nil,
+    editableBiography: String? = nil
   ) {
     self.userID = userID
     self.username = username
     self.displayName = displayName
     self.portrait = portrait
     self.biography = biography
+    self.editableBiography = editableBiography ?? biography
+    self.sex = sex
+    self.birthday = birthday
+    self.isNicknameEditing = isNicknameEditing
+    self.editingNickname = editingNickname
     self.followingCount = followingCount
     self.followerCount = followerCount
     self.postCount = postCount
@@ -100,6 +242,26 @@ public struct TiebaSelfProfileSummary: Sendable, Hashable {
 
   public var preferredName: String {
     displayName.isEmpty ? username : displayName
+  }
+
+  public var description: String {
+    "TiebaSelfProfileSummary(userID: \(userID), redacted)"
+  }
+
+  public var debugDescription: String { description }
+  public var customMirror: Mirror {
+    Mirror(
+      self,
+      children: [
+        "userID": userID,
+        "hasBirthday": birthday != nil,
+        "isNicknameEditing": isNicknameEditing,
+        "followingCount": followingCount,
+        "followerCount": followerCount,
+        "postCount": postCount,
+      ],
+      displayStyle: .struct
+    )
   }
 }
 

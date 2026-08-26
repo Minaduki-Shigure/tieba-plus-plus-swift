@@ -123,6 +123,16 @@ minimal `User` summary fields are adapted from `UserViewModel` and
 omits Android hardware, installation, advertising, location, screen, and CUID
 fields; it sends only the account-bound UID and credentials required by this
 read and never persists the returned summary.
+The response-only `BirthdayInfo` schema plus `User.birthday_info`,
+`User.is_nickname_editing`, and `User.editing_nickname` fields used to preserve
+hidden profile state and recognize nickname review are adapted from TiebaLite's
+`BirthdayInfo.proto`, `User.proto`, and `EditProfileViewModel` at commit
+`268f388c7824ae2c8f6ed549827a943ec8a7f352`. The corresponding
+`/c/c/profile/modify` field contract is adapted from `OfficialTiebaApi` and
+`MixedTiebaApiImpl` at that commit. Tieba++ exposes no birthday editor, copies
+only a validated preflight birthday snapshot into one explicit write, omits
+Android device and installation metadata, and requires one account-bound
+profile readback without automatically retrying the mutation.
 The authenticated target-profile polarity (`uid`, `friend_uid`, `is_guest = 1`),
 the response-only `User.has_concerned` and `anti.tbs` fields, and the explicit
 `/c/c/user/follow` and `/c/c/user/unfollow` form contracts are adapted from

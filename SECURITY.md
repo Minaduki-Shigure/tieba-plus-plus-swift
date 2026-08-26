@@ -111,6 +111,57 @@ switching, or same-UID credential rotation clears it synchronously. Successful
 minimal-field compatibility and server-side account binding remain physical-
 device validation questions; CI uses synthetic credentials and fixtures only.
 
+The current-main native self-profile editor is a separate experimental write
+boundary. It exposes only nickname, sex, and biography. Before a write, Core
+requires the App and Web session probes to return the same UID and that UID to
+equal the requested account, then performs the authenticated profile read above.
+It requires a bounded editable `intro`, a known sex value, no active
+nickname-review mutation, and a present
+`birthday_info` whose timestamp and visibility bit can be copied exactly from
+the immediately preceding preflight snapshot.
+Presentation prefers a nonempty public `display_intro` and uses `intro` only as
+a legacy fallback; mutation always uses the separately retained editable
+`intro`. The editor never invents a birthday default and never uses the stored
+account label as mutation input.
+
+A changed edit sends at most one signed HTTPS form to the exact
+`tiebac.baidu.com/c/c/profile/modify` path. Its bounded fields are BDUSS, STOKEN,
+fixed client type/version, nickname, editable biography, sex, the frozen birthday
+timestamp and visibility bit, and the endpoint's fixed empty camera options. It
+may carry `Cookie: ka=open`; it must not add CUID, IMEI, Android ID, IDFV,
+advertising, hardware, install, model, screen, location, Authorization, or a
+stored cookie jar. The response is limited to 64 KiB. An acknowledgement is not
+authoritative. Every dispatched attempt, including one followed by cancellation,
+transport failure, malformed JSON, or a server rejection, performs exactly one
+same-credential V12 profile readback and never retries the write. The requested
+nickname must be either active or explicitly pending review, editable biography
+and sex must match, and the birthday snapshot must remain equal. Otherwise Core
+returns the known rejection or an outcome-unknown error.
+
+The modify endpoint exposes no profile revision or compare-and-swap field. A
+birthday change made concurrently in another client between this preflight and
+the write may therefore be overwritten by the frozen snapshot, and an equal
+readback cannot distinguish that race. The implementation minimizes but cannot
+eliminate this interval; users and device validation must not edit birthday in
+another client while this experimental save is running.
+
+Profile edits serialize per account. Only an identical normalized edit and exact
+credential may share the active flight; a different edit or credential receives
+a write-conflict result and cannot dispatch. Cancellation may stop the sole
+flight before dispatch, while a dispatched flight finishes its mandatory
+readback. The App reads Keychain before and after load/save and publishes only
+for the initiating `userID + sessionRevision`; switching accounts or rotating
+same-UID credentials cancels pre-dispatch caller work and discards stale results.
+Successful presentation remains memory only. The App does not call vault upsert
+to copy a changed nickname, because rotating the session revision for display
+metadata would invalidate unrelated private work. Disposable-account validation
+must cover field deletion, nickname review and rate limits, birthday preservation,
+the documented no-external-birthday-edit condition, known rejection,
+post-dispatch loss, no-change idempotence, sharing/conflict, cancellation, logout,
+switching, and same-UID credential rotation before release.
+Avatar upload is a distinct multipart and media-sanitization workflow and remains
+unsupported by this editor.
+
 The current, not-yet-tagged `main` implementation of the home followed-forum
 projection and complete followed-forum list shares one application-scoped,
 memory-only state. The home projection exposes at most six rows. The complete

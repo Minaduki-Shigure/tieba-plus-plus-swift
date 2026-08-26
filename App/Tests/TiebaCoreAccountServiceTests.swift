@@ -139,7 +139,15 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
         biography: "Account biography",
         followingCount: 12,
         followerCount: 34,
-        postCount: 56
+        postCount: 56,
+        sex: .female,
+        birthday: TiebaSelfProfileBirthday(
+          timeMilliseconds: 946_684_800_000,
+          showsConstellationOnly: true
+        ),
+        isNicknameEditing: true,
+        editingNickname: "Pending Name",
+        editableBiography: "Editable biography"
       )
     )
     let service = TiebaCoreAccountService(client: client)
@@ -149,6 +157,17 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     XCTAssertEqual(profile.userID, 7)
     XCTAssertEqual(profile.preferredName, "Account Name")
     XCTAssertEqual(profile.biography, "Account biography")
+    XCTAssertEqual(profile.editableBiography, "Editable biography")
+    XCTAssertEqual(profile.sex, .female)
+    XCTAssertEqual(
+      profile.birthday,
+      AccountProfileBirthday(
+        timeMilliseconds: 946_684_800_000,
+        showsConstellationOnly: true
+      )
+    )
+    XCTAssertTrue(profile.isNicknameEditing)
+    XCTAssertEqual(profile.editingNickname, "Pending Name")
     XCTAssertEqual(profile.followingCount, 12)
     XCTAssertEqual(profile.followerCount, 34)
     XCTAssertEqual(profile.postCount, 56)
@@ -203,6 +222,28 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     XCTAssertTrue(snapshot.selfProfileRequests.isEmpty)
   }
 
+  func testSelfProfilePreservesGenericNicknameReviewStateWithoutPendingText() async throws {
+    let response = TiebaSelfProfileSummary(
+      userID: 7,
+      username: "account",
+      displayName: "Current Name",
+      portrait: "portrait-token",
+      biography: "Biography",
+      followingCount: 0,
+      followerCount: 0,
+      postCount: 0,
+      isNicknameEditing: true,
+      editingNickname: nil
+    )
+
+    let profile = try await TiebaCoreAccountService(
+      client: AccountClientSpy(selfProfile: response)
+    ).selfProfile(session: session())
+
+    XCTAssertTrue(profile.isNicknameEditing)
+    XCTAssertEqual(profile.editingNickname, "")
+  }
+
   func testSelfProfileRejectsMismatchedIdentityAndInvalidCounts() async {
     let invalidResponses = [
       TiebaSelfProfileSummary(
@@ -229,6 +270,237 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
           error.errorDescription,
           "贴吧返回了不匹配的本人资料，请重新加载后再试。"
         )
+      } catch {
+        XCTFail("Unexpected error: \(error)")
+      }
+    }
+  }
+
+  func testUpdateSelfProfileUsesFullSessionAndMapsConfirmedResult() async throws {
+    let client = AccountClientSpy(
+      selfProfileMutation: selfProfileSummary(
+        displayName: "New Name",
+        biography: "Public introduction",
+        editableBiography: "New biography",
+        sex: .female
+      )
+    )
+    let service = TiebaCoreAccountService(client: client)
+
+    let profile = try await service.updateSelfProfile(
+      session: session(),
+      edit: AccountProfileEditSubmission(
+        displayName: "  New Name  ",
+        biography: "  New biography  ",
+        sex: .female
+      )
+    )
+
+    XCTAssertEqual(profile.userID, 7)
+    XCTAssertEqual(profile.displayName, "New Name")
+    XCTAssertEqual(profile.biography, "Public introduction")
+    XCTAssertEqual(profile.editableBiography, "New biography")
+    XCTAssertEqual(profile.sex, .female)
+    XCTAssertEqual(
+      profile.birthday,
+      AccountProfileBirthday(
+        timeMilliseconds: 946_684_800_000,
+        showsConstellationOnly: false
+      )
+    )
+    let snapshot = await client.snapshot()
+    XCTAssertEqual(
+      snapshot.selfProfileMutationRequests,
+      [
+        SelfProfileEditClientRequest(
+          userID: 7,
+          edit: TiebaSelfProfileEdit(
+            displayName: "New Name",
+            biography: "New biography",
+            sex: .female
+          ),
+          bdussBytes: 192,
+          stokenBytes: 64,
+          cookieName: .bduss
+        )
+      ]
+    )
+  }
+
+  func testUpdateSelfProfileAcceptsAuthoritativePendingNickname() async throws {
+    let client = AccountClientSpy(
+      selfProfileMutation: selfProfileSummary(
+        displayName: "Current Name",
+        biography: "Rendered biography",
+        editableBiography: "Edited biography",
+        sex: .male,
+        isNicknameEditing: true,
+        editingNickname: "Requested Name"
+      )
+    )
+
+    let profile = try await TiebaCoreAccountService(client: client).updateSelfProfile(
+      session: session(),
+      edit: AccountProfileEditSubmission(
+        displayName: "Requested Name",
+        biography: "Edited biography",
+        sex: .male
+      )
+    )
+
+    XCTAssertEqual(profile.displayName, "Current Name")
+    XCTAssertTrue(profile.isNicknameEditing)
+    XCTAssertEqual(profile.editingNickname, "Requested Name")
+    XCTAssertEqual(profile.editableBiography, "Edited biography")
+  }
+
+  func testUpdateSelfProfileRejectsMissingCredentialsAndInvalidFieldsBeforeClientCall()
+    async
+  {
+    let client = AccountClientSpy()
+    let service = TiebaCoreAccountService(client: client)
+    let validEdit = AccountProfileEditSubmission(
+      displayName: "New Name",
+      biography: "Biography",
+      sex: .unspecified
+    )
+
+    do {
+      _ = try await service.updateSelfProfile(
+        session: session(stokenComponent: nil),
+        edit: validEdit
+      )
+      XCTFail("Expected complete credentials to be required")
+    } catch let error as BrowseError {
+      XCTAssertEqual(
+        error.errorDescription,
+        "此账户需要重新登录，才能安全修改本人资料。"
+      )
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+
+    for invalidEdit in [
+      AccountProfileEditSubmission(
+        displayName: "\n",
+        biography: "Biography",
+        sex: .unspecified
+      ),
+      AccountProfileEditSubmission(
+        displayName: "New Name",
+        biography: String(repeating: "字", count: 501),
+        sex: .female
+      ),
+    ] {
+      do {
+        _ = try await service.updateSelfProfile(session: session(), edit: invalidEdit)
+        XCTFail("Expected invalid profile edit to be rejected")
+      } catch let error as BrowseError {
+        XCTAssertEqual(
+          error.errorDescription,
+          "本人资料包含无效或过长的内容，请修改后再试。"
+        )
+      } catch {
+        XCTFail("Unexpected error: \(error)")
+      }
+    }
+
+    let snapshot = await client.snapshot()
+    XCTAssertTrue(snapshot.selfProfileMutationRequests.isEmpty)
+  }
+
+  func testUpdateSelfProfileRejectsMismatchedIdentityAndUnconfirmedFields() async {
+    let requestedEdit = AccountProfileEditSubmission(
+      displayName: "Requested Name",
+      biography: "Requested biography",
+      sex: .female
+    )
+    let responses = [
+      selfProfileSummary(
+        userID: 8,
+        displayName: "Requested Name",
+        editableBiography: "Requested biography",
+        sex: .female
+      ),
+      selfProfileSummary(
+        displayName: "Different Name",
+        editableBiography: "Requested biography",
+        sex: .female
+      ),
+      selfProfileSummary(
+        displayName: "Requested Name",
+        editableBiography: "Different biography",
+        sex: .female
+      ),
+      selfProfileSummary(
+        displayName: "Requested Name",
+        editableBiography: "Requested biography",
+        sex: .male
+      ),
+      selfProfileSummary(
+        displayName: "Current Name",
+        editableBiography: "Requested biography",
+        sex: .female,
+        isNicknameEditing: true,
+        editingNickname: "Different Pending Name"
+      ),
+      selfProfileSummary(
+        displayName: "Requested Name",
+        editableBiography: "Requested biography",
+        sex: .female,
+        birthday: TiebaSelfProfileBirthday(
+          timeMilliseconds: 1,
+          showsConstellationOnly: false
+        )
+      ),
+    ]
+
+    for response in responses {
+      do {
+        _ = try await TiebaCoreAccountService(
+          client: AccountClientSpy(selfProfileMutation: response)
+        ).updateSelfProfile(session: session(), edit: requestedEdit)
+        XCTFail("Expected mismatched profile edit result to be rejected")
+      } catch let error as BrowseError {
+        XCTAssertTrue(
+          [
+            "贴吧返回了不匹配的本人资料，请重新加载后再试。",
+            "贴吧返回了无效的本人资料，请重新加载后再试。",
+            "贴吧没有确认新的本人资料，请重新读取后再试。",
+          ].contains(error.errorDescription ?? "")
+        )
+      } catch {
+        XCTFail("Unexpected error: \(error)")
+      }
+    }
+  }
+
+  func testUpdateSelfProfileMapsWriteStateErrorsToSafeChinese() async {
+    let edit = AccountProfileEditSubmission(
+      displayName: "New Name",
+      biography: "Biography",
+      sex: .female
+    )
+    let cases: [(TiebaClientError, String)] = [
+      (
+        .selfProfileEditWriteConflict,
+        "此账户已有另一项资料修改正在进行，请等待完成后重新读取。"
+      ),
+      (
+        .selfProfileEditOutcomeUnknown,
+        "贴吧尚未确认资料修改结果；请重新读取本人资料，应用不会自动重发请求。"
+      ),
+    ]
+
+    for (source, expectedMessage) in cases {
+      do {
+        _ = try await TiebaCoreAccountService(
+          client: AccountClientSpy(selfProfileMutationError: source)
+        ).updateSelfProfile(session: session(), edit: edit)
+        XCTFail("Expected profile edit error to be mapped")
+      } catch let error as BrowseError {
+        XCTAssertEqual(error.errorDescription, expectedMessage)
+        XCTAssertFalse(error.errorDescription?.contains("profile") == true)
       } catch {
         XCTFail("Unexpected error: \(error)")
       }
@@ -2220,6 +2492,36 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     }
   }
 
+  private func selfProfileSummary(
+    userID: Int64 = 7,
+    displayName: String = "Current Name",
+    biography: String = "Rendered biography",
+    editableBiography: String = "Requested biography",
+    sex: TiebaSelfProfileSex = .female,
+    isNicknameEditing: Bool = false,
+    editingNickname: String? = nil,
+    birthday: TiebaSelfProfileBirthday? = TiebaSelfProfileBirthday(
+      timeMilliseconds: 946_684_800_000,
+      showsConstellationOnly: false
+    )
+  ) -> TiebaSelfProfileSummary {
+    TiebaSelfProfileSummary(
+      userID: userID,
+      username: "account",
+      displayName: displayName,
+      portrait: "portrait-token?t=123",
+      biography: biography,
+      followingCount: 12,
+      followerCount: 34,
+      postCount: 56,
+      sex: sex,
+      birthday: birthday,
+      isNicknameEditing: isNicknameEditing,
+      editingNickname: editingNickname,
+      editableBiography: editableBiography
+    )
+  }
+
   private func session(
     updatedAt: TimeInterval = 1,
     sessionRevision: UUID = UUID(),
@@ -2456,6 +2758,14 @@ private struct SelfProfileClientRequest: Equatable, Sendable {
   let cookieName: TiebaBDUSSCookieName
 }
 
+private struct SelfProfileEditClientRequest: Equatable, Sendable {
+  let userID: Int64
+  let edit: TiebaSelfProfileEdit
+  let bdussBytes: Int
+  let stokenBytes: Int
+  let cookieName: TiebaBDUSSCookieName
+}
+
 private struct OwnFollowingClientRequest: Equatable, Sendable {
   let userID: Int64
   let page: Int
@@ -2539,6 +2849,7 @@ private struct AccountClientSnapshot: Sendable {
   let validationCredentialByteCounts: [Int]
   let validationSessionShapes: [SessionCredentialShape]
   let selfProfileRequests: [SelfProfileClientRequest]
+  let selfProfileMutationRequests: [SelfProfileEditClientRequest]
   let ownFollowingRequests: [OwnFollowingClientRequest]
   let likedForumRequests: [LikedForumClientRequest]
   let cloudFavoriteRequests: [CloudFavoriteClientRequest]
@@ -2574,6 +2885,8 @@ private actor AccountServiceCompletionProbe {
 private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   private let validation: TiebaAuthenticatedAccount?
   private let selfProfile: TiebaSelfProfileSummary?
+  private let selfProfileMutation: TiebaSelfProfileSummary?
+  private let selfProfileMutationError: TiebaClientError?
   private let ownFollowing: TiebaUserRelationPage?
   private let likedForums: TiebaFollowedForumPage?
   private let cloudFavorites: TiebaCloudFavoritePage?
@@ -2598,6 +2911,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   private var validationCredentialByteCounts: [Int] = []
   private var validationSessionShapes: [SessionCredentialShape] = []
   private var selfProfileRequests: [SelfProfileClientRequest] = []
+  private var selfProfileMutationRequests: [SelfProfileEditClientRequest] = []
   private var ownFollowingRequests: [OwnFollowingClientRequest] = []
   private var likedForumRequests: [LikedForumClientRequest] = []
   private var cloudFavoriteRequests: [CloudFavoriteClientRequest] = []
@@ -2626,6 +2940,8 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   init(
     validation: TiebaAuthenticatedAccount? = nil,
     selfProfile: TiebaSelfProfileSummary? = nil,
+    selfProfileMutation: TiebaSelfProfileSummary? = nil,
+    selfProfileMutationError: TiebaClientError? = nil,
     ownFollowing: TiebaUserRelationPage? = nil,
     likedForums: TiebaFollowedForumPage? = nil,
     cloudFavorites: TiebaCloudFavoritePage? = nil,
@@ -2650,6 +2966,8 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   ) {
     self.validation = validation
     self.selfProfile = selfProfile
+    self.selfProfileMutation = selfProfileMutation
+    self.selfProfileMutationError = selfProfileMutationError
     self.ownFollowing = ownFollowing
     self.likedForums = likedForums
     self.cloudFavorites = cloudFavorites
@@ -2709,6 +3027,25 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     )
     guard let selfProfile else { throw AccountClientSpyError.unexpectedCall }
     return selfProfile
+  }
+
+  func updateSelfProfile(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    edit: TiebaSelfProfileEdit
+  ) async throws -> TiebaSelfProfileSummary {
+    selfProfileMutationRequests.append(
+      SelfProfileEditClientRequest(
+        userID: expectedUserID,
+        edit: edit,
+        bdussBytes: credential.bduss.utf8.count,
+        stokenBytes: credential.stoken.utf8.count,
+        cookieName: credential.bdussCookieName
+      )
+    )
+    if let selfProfileMutationError { throw selfProfileMutationError }
+    guard let selfProfileMutation else { throw AccountClientSpyError.unexpectedCall }
+    return selfProfileMutation
   }
 
   func getOwnFollowing(
@@ -3119,6 +3456,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
       validationCredentialByteCounts: validationCredentialByteCounts,
       validationSessionShapes: validationSessionShapes,
       selfProfileRequests: selfProfileRequests,
+      selfProfileMutationRequests: selfProfileMutationRequests,
       ownFollowingRequests: ownFollowingRequests,
       likedForumRequests: likedForumRequests,
       cloudFavoriteRequests: cloudFavoriteRequests,

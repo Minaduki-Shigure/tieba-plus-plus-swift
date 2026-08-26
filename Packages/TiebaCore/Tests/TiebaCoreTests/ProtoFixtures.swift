@@ -358,6 +358,10 @@ enum ProtoFixtures {
     user.tbAge = "14.2"
     user.tiebaUid = "123456789"
     user.ipAddress = "上海"
+    user.birthdayInfo = BirthdayInfo.with {
+      $0.birthdayTime = 946_684_800
+      $0.birthdayShowStatus = 1
+    }
     user.iconinfo = [User.Icon.with { $0.name = "fixture badge" }]
     user.newTshowIcon = [User.TshowInfo.with { $0.name = "vip" }]
     user.newGodData.status = 1

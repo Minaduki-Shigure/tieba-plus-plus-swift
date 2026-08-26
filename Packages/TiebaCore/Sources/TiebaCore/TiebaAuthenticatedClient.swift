@@ -57,6 +57,57 @@ private enum TiebaUserFollowWaitOutcome: Sendable, Equatable {
   case cancelled
 }
 
+private struct TiebaSelfProfileEditResourceKey: Hashable, Sendable {
+  let userID: Int64
+}
+
+private struct TiebaSelfProfileEditIdentity:
+  Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  private let bduss: String
+  private let stoken: String
+  private let cookieName: TiebaBDUSSCookieName
+  let edit: TiebaSelfProfileEdit
+
+  init(credential: TiebaSessionCredential, edit: TiebaSelfProfileEdit) {
+    bduss = credential.bduss
+    stoken = credential.stoken
+    cookieName = credential.bdussCookieName
+    self.edit = edit
+  }
+
+  var description: String { "TiebaSelfProfileEditIdentity(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror { Mirror(self, children: [:], displayStyle: .struct) }
+}
+
+private struct TiebaSelfProfileEditFlight:
+  Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let id: UUID
+  let identity: TiebaSelfProfileEditIdentity
+  let task: Task<TiebaSelfProfileSummary, Swift.Error>
+  var stage: TiebaSelfProfileEditFlightStage
+
+  var description: String { "TiebaSelfProfileEditFlight(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(self, children: ["id": id, "stage": stage], displayStyle: .struct)
+  }
+}
+
+private enum TiebaSelfProfileEditFlightStage: Sendable, Equatable {
+  case queued
+  case preflight
+  case writeDispatched
+  case completed
+}
+
+private enum TiebaSelfProfileEditWaitOutcome: Sendable, Equatable {
+  case completed
+  case cancelled
+}
+
 private struct TiebaUserInteractionPermissionsResourceKey: Hashable, Sendable {
   let userID: Int64
   let targetUserID: Int64
@@ -808,6 +859,7 @@ public actor TiebaAuthenticatedClient {
 
   static let accountResponseMaximumBytes = 512 * 1_024
   static let selfProfileResponseMaximumBytes = 2 * 1_024 * 1_024
+  static let selfProfileEditResponseMaximumBytes = 64 * 1_024
   static let ownFollowingResponseMaximumBytes = TiebaPublicSocialPolicy.maximumResponseBodyBytes
   static let userRelationshipResponseMaximumBytes = 2 * 1_024 * 1_024
   static let userFollowWriteResponseMaximumBytes = 64 * 1_024
@@ -847,6 +899,17 @@ public actor TiebaAuthenticatedClient {
   private let requestFactory: TiebaAuthenticatedRequestFactory
   private let transport: any TiebaTransport
   private let staticImageUploadLeaseAcquired: (@Sendable (UUID) async -> Void)?
+  private var selfProfileEditFlights = [
+    TiebaSelfProfileEditResourceKey: TiebaSelfProfileEditFlight
+  ]()
+  private var selfProfileEditWaiters = [
+    TiebaSelfProfileEditResourceKey: [
+      UUID: CheckedContinuation<TiebaSelfProfileEditWaitOutcome, Never>
+    ]
+  ]()
+  private var selfProfileEditSharedWaiterIDs = [
+    TiebaSelfProfileEditResourceKey: Set<UUID>
+  ]()
   private var userFollowFlights = [TiebaUserFollowResourceKey: TiebaUserFollowFlight]()
   private var userFollowWaiters = [
     TiebaUserFollowResourceKey: [UUID: CheckedContinuation<TiebaUserFollowWaitOutcome, Never>]
@@ -1278,6 +1341,65 @@ public actor TiebaAuthenticatedClient {
     return try TiebaAuthenticatedDecoder.selfProfile(
       from: response,
       expectedUserID: expectedUserID
+    )
+  }
+
+  public func updateSelfProfile(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    edit: TiebaSelfProfileEdit
+  ) async throws -> TiebaSelfProfileSummary {
+    try Task.checkCancellation()
+    guard let edit = TiebaSelfProfileEditPolicy.normalized(edit) else {
+      throw TiebaClientError.invalidArgument("The profile edit contains invalid text.")
+    }
+    // Build the bound read request now so malformed credentials and identities
+    // are rejected before they can participate in a shared mutation flight.
+    _ = try requestFactory.selfProfile(
+      credential: credential,
+      expectedUserID: expectedUserID
+    )
+
+    let resourceKey = TiebaSelfProfileEditResourceKey(userID: expectedUserID)
+    let identity = TiebaSelfProfileEditIdentity(credential: credential, edit: edit)
+    if let flight = selfProfileEditFlights[resourceKey] {
+      guard flight.identity == identity else {
+        throw TiebaClientError.selfProfileEditWriteConflict
+      }
+      return try await waitForSelfProfileEditFlight(
+        resourceKey: resourceKey,
+        flightID: flight.id,
+        task: flight.task
+      )
+    }
+
+    let flightID = UUID()
+    let task: Task<TiebaSelfProfileSummary, Swift.Error> = Task.detached { [self] in
+      try await performSelfProfileEdit(
+        resourceKey: resourceKey,
+        flightID: flightID,
+        credential: credential,
+        expectedUserID: expectedUserID,
+        edit: edit
+      )
+    }
+    selfProfileEditFlights[resourceKey] = TiebaSelfProfileEditFlight(
+      id: flightID,
+      identity: identity,
+      task: task,
+      stage: .queued
+    )
+    Task {
+      await finishSelfProfileEditFlight(
+        resourceKey: resourceKey,
+        flightID: flightID,
+        task: task
+      )
+    }
+    return try await waitForSelfProfileEditFlight(
+      resourceKey: resourceKey,
+      flightID: flightID,
+      task: task
     )
   }
 
@@ -2817,6 +2939,88 @@ public actor TiebaAuthenticatedClient {
     } catch {
       throw TiebaClientError.threadCloudFavoriteOutcomeUnknown
     }
+  }
+
+  private func performSelfProfileEdit(
+    resourceKey: TiebaSelfProfileEditResourceKey,
+    flightID: UUID,
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    edit: TiebaSelfProfileEdit
+  ) async throws -> TiebaSelfProfileSummary {
+    try beginSelfProfileEditPreflight(resourceKey: resourceKey, flightID: flightID)
+    let account = try await validateSession(credential: credential)
+    guard account.userID == expectedUserID else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    let current = try await getSelfProfile(
+      credential: credential,
+      expectedUserID: expectedUserID
+    )
+    if selfProfile(current, matches: edit) {
+      return current
+    }
+    guard !current.isNicknameEditing else {
+      throw TiebaClientError.invalidArgument(
+        "The profile nickname is already being reviewed."
+      )
+    }
+    guard let birthday = current.birthday else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+
+    let request = try requestFactory.editSelfProfile(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      edit: edit,
+      birthday: birthday
+    )
+    try beginSelfProfileEditWrite(resourceKey: resourceKey, flightID: flightID)
+
+    var serverRejection: TiebaClientError?
+    do {
+      let body = try await send(
+        request,
+        maximumBodyBytes: Self.selfProfileEditResponseMaximumBytes
+      )
+      try TiebaAuthenticatedDecoder.checkSelfProfileEditAcknowledgement(body)
+    } catch let error as TiebaClientError {
+      if case .server = error {
+        serverRejection = error
+      }
+      // A transport result or acknowledgement cannot establish the mutation
+      // outcome. Every dispatched request is reconciled exactly once below.
+    } catch {
+      // Cancellation after dispatch is also an uncertain write result. The
+      // detached flight remains responsible for the mandatory readback.
+    }
+
+    do {
+      let reconciled = try await getSelfProfile(
+        credential: credential,
+        expectedUserID: expectedUserID
+      )
+      if selfProfile(reconciled, matches: edit), reconciled.birthday == birthday {
+        return reconciled
+      }
+    } catch {
+      if let serverRejection { throw serverRejection }
+      throw TiebaClientError.selfProfileEditOutcomeUnknown
+    }
+    if let serverRejection { throw serverRejection }
+    throw TiebaClientError.selfProfileEditOutcomeUnknown
+  }
+
+  private func selfProfile(
+    _ profile: TiebaSelfProfileSummary,
+    matches edit: TiebaSelfProfileEdit
+  ) -> Bool {
+    let nicknameMatches = profile.isNicknameEditing
+      ? profile.editingNickname == edit.displayName
+      : profile.displayName == edit.displayName
+    return nicknameMatches
+      && profile.editableBiography == edit.biography
+      && profile.sex == edit.sex
   }
 
   private func performUserFollowWrite(
@@ -4620,6 +4824,181 @@ public actor TiebaAuthenticatedClient {
       expectedUserID: expectedUserID,
       targetUserID: targetUserID
     )
+  }
+
+  private func waitForSelfProfileEditFlight(
+    resourceKey: TiebaSelfProfileEditResourceKey,
+    flightID: UUID,
+    task: Task<TiebaSelfProfileSummary, Swift.Error>
+  ) async throws -> TiebaSelfProfileSummary {
+    if Task.isCancelled {
+      cancelUnregisteredSelfProfileEditWaiter(
+        resourceKey: resourceKey,
+        flightID: flightID
+      )
+      throw CancellationError()
+    }
+    guard selfProfileEditFlights[resourceKey]?.id == flightID else {
+      return try await task.value
+    }
+
+    let waiterID = UUID()
+    let outcome: TiebaSelfProfileEditWaitOutcome = await withTaskCancellationHandler {
+      await withCheckedContinuation {
+        (continuation: CheckedContinuation<TiebaSelfProfileEditWaitOutcome, Never>) in
+        guard
+          !Task.isCancelled,
+          selfProfileEditFlights[resourceKey]?.id == flightID
+        else {
+          if Task.isCancelled {
+            cancelUnregisteredSelfProfileEditWaiter(
+              resourceKey: resourceKey,
+              flightID: flightID
+            )
+          }
+          continuation.resume(returning: Task.isCancelled ? .cancelled : .completed)
+          return
+        }
+        selfProfileEditWaiters[resourceKey, default: [:]][waiterID] = continuation
+        selfProfileEditSharedWaiterIDs[resourceKey, default: []].insert(waiterID)
+      }
+    } onCancel: {
+      Task {
+        await self.cancelSelfProfileEditWaiter(
+          resourceKey: resourceKey,
+          flightID: flightID,
+          waiterID: waiterID
+        )
+      }
+    }
+    guard outcome == .completed else { throw CancellationError() }
+    try Task.checkCancellation()
+    return try await task.value
+  }
+
+  private func cancelSelfProfileEditWaiter(
+    resourceKey: TiebaSelfProfileEditResourceKey,
+    flightID: UUID,
+    waiterID: UUID
+  ) {
+    guard selfProfileEditFlights[resourceKey]?.id == flightID else { return }
+    guard var waiters = selfProfileEditWaiters[resourceKey] else {
+      cancelUnregisteredSelfProfileEditWaiter(
+        resourceKey: resourceKey,
+        flightID: flightID
+      )
+      return
+    }
+    let continuation = waiters.removeValue(forKey: waiterID)
+    if waiters.isEmpty {
+      selfProfileEditWaiters.removeValue(forKey: resourceKey)
+    } else {
+      selfProfileEditWaiters[resourceKey] = waiters
+    }
+    if var sharedWaiterIDs = selfProfileEditSharedWaiterIDs[resourceKey] {
+      sharedWaiterIDs.remove(waiterID)
+      if sharedWaiterIDs.isEmpty {
+        selfProfileEditSharedWaiterIDs.removeValue(forKey: resourceKey)
+      } else {
+        selfProfileEditSharedWaiterIDs[resourceKey] = sharedWaiterIDs
+      }
+    }
+    if
+      selfProfileEditSharedWaiterIDs[resourceKey]?.isEmpty != false,
+      let flight = selfProfileEditFlights[resourceKey],
+      flight.stage == .queued || flight.stage == .preflight
+    {
+      detachCancelledSelfProfileEditFlight(
+        resourceKey: resourceKey,
+        flightID: flightID
+      )
+    }
+    continuation?.resume(returning: .cancelled)
+  }
+
+  private func cancelUnregisteredSelfProfileEditWaiter(
+    resourceKey: TiebaSelfProfileEditResourceKey,
+    flightID: UUID
+  ) {
+    detachCancelledSelfProfileEditFlight(
+      resourceKey: resourceKey,
+      flightID: flightID
+    )
+  }
+
+  private func detachCancelledSelfProfileEditFlight(
+    resourceKey: TiebaSelfProfileEditResourceKey,
+    flightID: UUID
+  ) {
+    guard
+      selfProfileEditSharedWaiterIDs[resourceKey]?.isEmpty != false,
+      let flight = selfProfileEditFlights[resourceKey],
+      flight.id == flightID,
+      flight.stage == .queued || flight.stage == .preflight
+    else { return }
+
+    selfProfileEditFlights.removeValue(forKey: resourceKey)
+    let waiters = selfProfileEditWaiters.removeValue(forKey: resourceKey) ?? [:]
+    selfProfileEditSharedWaiterIDs.removeValue(forKey: resourceKey)
+    flight.task.cancel()
+    for continuation in waiters.values {
+      continuation.resume(returning: .cancelled)
+    }
+  }
+
+  private func finishSelfProfileEditFlight(
+    resourceKey: TiebaSelfProfileEditResourceKey,
+    flightID: UUID,
+    task: Task<TiebaSelfProfileSummary, Swift.Error>
+  ) async {
+    _ = await task.result
+    guard var flight = selfProfileEditFlights[resourceKey], flight.id == flightID else {
+      return
+    }
+    flight.stage = .completed
+    selfProfileEditFlights[resourceKey] = flight
+    selfProfileEditFlights.removeValue(forKey: resourceKey)
+    let waiters = selfProfileEditWaiters.removeValue(forKey: resourceKey) ?? [:]
+    selfProfileEditSharedWaiterIDs.removeValue(forKey: resourceKey)
+    for continuation in waiters.values {
+      continuation.resume(returning: .completed)
+    }
+  }
+
+  private func beginSelfProfileEditPreflight(
+    resourceKey: TiebaSelfProfileEditResourceKey,
+    flightID: UUID
+  ) throws {
+    try Task.checkCancellation()
+    guard
+      var flight = selfProfileEditFlights[resourceKey],
+      flight.id == flightID,
+      flight.stage == .queued
+    else { throw CancellationError() }
+    flight.stage = .preflight
+    selfProfileEditFlights[resourceKey] = flight
+  }
+
+  private func beginSelfProfileEditWrite(
+    resourceKey: TiebaSelfProfileEditResourceKey,
+    flightID: UUID
+  ) throws {
+    try Task.checkCancellation()
+    guard
+      var flight = selfProfileEditFlights[resourceKey],
+      flight.id == flightID,
+      flight.stage == .preflight
+    else { throw CancellationError() }
+    flight.stage = .writeDispatched
+    selfProfileEditFlights[resourceKey] = flight
+  }
+
+  func selfProfileEditWaiterCount(expectedUserID: Int64) -> Int {
+    selfProfileEditWaiters[TiebaSelfProfileEditResourceKey(userID: expectedUserID)]?.count ?? 0
+  }
+
+  func selfProfileEditFlightExists(expectedUserID: Int64) -> Bool {
+    selfProfileEditFlights[TiebaSelfProfileEditResourceKey(userID: expectedUserID)] != nil
   }
 
   private func waitForUserFollowFlight(
