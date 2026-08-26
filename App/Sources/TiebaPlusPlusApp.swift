@@ -37,6 +37,8 @@ struct TiebaPlusPlusApp: App {
   private var showsBothUsernameAndNickname = false
   @AppStorage(AppPreferenceKey.externalWebOpenMode)
   private var externalWebOpenMode = ExternalWebOpenMode.defaultValue.rawValue
+  @AppStorage(AppPreferenceKey.showsExploreTab)
+  private var showsExploreTab = AppPreferenceDefaults.showsExploreTab
   private let service:
     any BrowseService & SearchService & ForumPostSearchService & HotTopicService & HotThreadService
       & PersonalizedFeedService & UserProfileService & ForumInformationService
@@ -265,7 +267,8 @@ struct TiebaPlusPlusApp: App {
           accountService: accountService,
           personalizedFeedbackService: personalizedFeedbackService,
           contentFilterRepository: contentFilterRepository,
-          startDestination: startDestination
+          startDestination: startDestination,
+          showsExploreTab: showsExploreTab
         )
         .environment(
           \.accountAccess,
@@ -345,7 +348,8 @@ struct TiebaPlusPlusApp: App {
         accountService: accountService,
         personalizedFeedbackService: personalizedFeedbackService,
         contentFilterRepository: contentFilterRepository,
-        startDestination: startDestination
+        startDestination: startDestination,
+        showsExploreTab: showsExploreTab
       )
     }
   #endif

@@ -17,7 +17,7 @@ and its verified metadata enters the public app source.
 | Area | Current state |
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
-| Local features | Available with TiebaLite-aligned Home, Explore, Messages, and My primary tabs backed by independent system navigation stacks; My groups local favorites, history, an inline appearance choice, settings, and About, while Messages exposes global search in its own stack. History, favorites, filtering, appearance with an independent system/OLED dark-surface choice, media preferences, explicit standard/pure/only-author immersive thread-reading modes, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, a next-launch destination including personalized discovery and the inbox, and ordered iOS Home Screen quick actions for existing destinations are also available. The primary-tab shell and reply notice's system handoff attempt remain pending physical-device validation |
+| Local features | Available with TiebaLite-aligned Home, Explore, Messages, and My primary tabs backed by independent system navigation stacks; an independent default-on preference can remove only Explore from the tab bar without changing the Home discovery-section preference or saved startup destination. My groups local favorites, history, an inline appearance choice, settings, and About, while Messages exposes global search in its own stack. History, favorites, filtering, appearance with an independent system/OLED dark-surface choice, media preferences, explicit standard/pure/only-author immersive thread-reading modes, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, a next-launch destination including personalized discovery and the inbox, and ordered iOS Home Screen quick actions for existing destinations are also available. The primary-tab shell and reply notice's system handoff attempt remain pending physical-device validation |
 | Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary, a credential-free handoff to Baidu's fixed official username-management page, followed forums with validated level-up progress and account-bound today-check-in marks where the server supplies them, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with a shared Home-toolbar/account-page message badge, separate optional fan-reminder badge, and authoritative reply actions, Tieba cloud favorites with a saved-position-to-latest-update handoff, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies plus explicitly confirmed deletion of the active account's own topic or ordinary floor; these newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
 | TiebaLite parity | Current `main` and public `v0.64.0-alpha.6`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
@@ -26,15 +26,25 @@ and its verified metadata enters the public app source.
 ### Release and validation
 
 - **Current-main primary navigation:** The app now exposes Home, Explore,
-  Messages, and My as four ordered system tabs matching TiebaLite's reachable
-  primary destinations. Each tab owns an independent `NavigationStack`, so
+  Messages, and My as four ordered system tabs by default, matching TiebaLite's
+  reachable primary destinations. An independent default-on setting can hide
+  Explore, leaving Home, Messages, and My in order. It also hides Home's redundant
+  Explore shortcut; hot topics and explicit link pasting remain controlled by the
+  separate Home discovery-section preference. If Explore is active when hidden,
+  selection moves to Home without discarding Explore's private root path; the
+  hidden root is not constructed and cannot start requests. Re-enabling the
+  setting retains that path. With Explore hidden, personalized-discovery and hot-
+  thread startup choices open the corresponding Explore destination in Home's
+  stack, while hot topics opens directly there; the saved startup choice and the
+  independent Home discovery-section preference are not rewritten. Each visible
+  tab owns an independent `NavigationStack`, so
   switching tabs retains its system back path without adding a custom edge
   gesture or horizontal tab swipe. Existing next-launch choices map to the
   corresponding root and stack; content links append to the visible stack,
   while app-only inbox routes activate the exact message kind above a cleared
   message root. Home Screen search, cloud-favorite, and check-in actions retain
-  their unique-landing and active-check-in preservation rules. Hidden Explore,
-  Messages, and My roots cancel or defer their network work, account changes
+  their unique-landing and active-check-in preservation rules. Inactive visible
+  roots cancel or defer their network work, account changes
   clear private snapshots without an offscreen reload, and changing the main
   surface revokes active voice or video playback. The Messages tab reuses the
   authoritative active-account reply-plus-mention badge, excludes the separate
@@ -1122,8 +1132,9 @@ and its verified metadata enters the public app source.
   This measures implemented end-to-end workflows with partial credit for
   device-validation gates; it is not a claim that every path is release-ready.
   The public `v0.64.0-alpha.6` app-code snapshot has the same 80–82% weighted
-  estimate, but the current-main four-tab shell and My/Messages shortcut additions
-  are not yet distributed in that IPA. All experimental paths retain their
+  estimate, but the current-main configurable primary shell (four tabs by default,
+  or three with Explore hidden) and My/Messages shortcut additions are not yet
+  distributed in that IPA. All experimental paths retain their
   documented device-validation gates.
   The largest remaining gaps are
   rich-media creation, background unread handling, broader settings, remaining

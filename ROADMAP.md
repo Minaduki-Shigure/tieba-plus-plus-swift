@@ -15,12 +15,14 @@ implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
 currently serves `v0.64.0-alpha.6` (build 81), whose app-code snapshot includes
-the complete protobuf image-source fallbacks, current media, navigation,
+the complete protobuf image-source fallbacks, release-era media, navigation,
 Home/account, settings, cloud-favorite,
 durable owner-deletion, legacy-link, guarded official-wrapper, level-progress,
 account-bound followed-forum check-in marks, bounded regular-expression
 filtering, fixed official username-management
 handoff, and exact cloud-favorite forum-identity fallback workflows.
+It predates the current-main configurable primary shell and My/Messages
+shortcuts.
 Paired profiles continue to support the nested-reply lazy-scroll container.
 The published level-progress and bounded regular-expression filtering additions
 improve existing credited areas without changing the current
@@ -38,12 +40,17 @@ retaining `src`, `big_src`, and `cdn_src_active` fallback fields across ordinary
 floors and nested replies. It reuses the existing media pipeline and therefore
 does not add a data source or weighted point.
 Current-main primary navigation now exposes TiebaLite's four reachable Home,
-Explore, Messages, and My destinations through ordered system tabs with
-independent navigation stacks. Model and contract tests cover startup,
-content-link, app-route, quick-action, private-read activation, unread-badge,
-and media-revocation policies. This makes existing workflows persistently reachable without
-adding a data source or weighted point; iPhone and iPad interaction remain a
-physical-device validation gate.
+Explore, Messages, and My destinations through ordered system tabs by default,
+with an independent default-on preference that can remove only Explore while
+retaining Home, Messages, and My. The source conditionally omits the hidden root.
+Model and contract tests cover hidden-Explore startup routing, runtime selection
+reconciliation, retained private root paths, and activation, alongside the
+existing startup, content-link, app-route, quick-action, unread-badge, and media-
+revocation policies. Absence of hidden-root requests remains a physical-device
+validation item.
+This makes existing workflows persistently reachable without adding a data source
+or weighted point; iPhone and iPad interaction remain a physical-device
+validation gate.
 The My root now groups local favorites, history, a direct appearance menu,
 settings, and About beneath the existing account workflows. Messages exposes the
 existing global search inside its own navigation stack. Typed destinations,
@@ -56,7 +63,7 @@ settings credit without adding a request, preference, or weighted point.
 | Anonymous discovery, search, and forums | 20 | 18–19 | Core browsing, ranking, recommendations, categories, and search are implemented; a few niche discovery paths remain. Account-bound dislike feedback is credited under server writes, not anonymous reading |
 | Thread, reply, and public-profile reading | 20 | 18–19 | Main reading, pagination, nested replies, shared text selection/copying, navigation, profiles, and public relationship lists are implemented; uncommon content cards and edge routes remain |
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
-| Local data, settings, and customization | 10 | 7 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, hierarchical settings navigation, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, confirmation-frozen foreground check-in execution settings, a TiebaLite-compatible default image-watermark choice, reply-entry visibility, a default-on composer risk notice with an experimental reply-only system handoff attempt pending physical validation, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
+| Local data, settings, and customization | 10 | 7 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, hierarchical settings navigation, an independent default-on Explore-tab visibility preference, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, confirmation-frozen foreground check-in execution settings, a TiebaLite-compatible default image-watermark choice, reply-entry visibility, a default-on composer risk notice with an experimental reply-only system handoff attempt pending physical validation, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, Home-toolbar quick switching, a self-profile summary, an authenticated current-account following list with a guarded mutual filter, followed and target-user liked forums with optional validated level-up progress, account-bound followed-forum check-in marks, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 14 | Forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, server-reason-bound personalized recommendation dislike feedback, three text/classic-emoticon reply targets, equivalent new-topic creation, bounded static-image new-topic/direct-topic-reply creation, owner-only topic/ordinary-floor deletion, direct inline-preview reply entry, and credential-free official reporting entry points have guarded implementations; real batch-check-in behavior, creation, deletion, poll and interaction-restriction success, broader uploaded media, unresolvable cloud rows, native reporting, and other reactions remain unavailable or unvalidated |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
@@ -323,10 +330,13 @@ This section describes the current `main` source. A newly implemented item is
 not installable from the public app source until its tagged build passes CI and
 the source metadata is updated to that tested IPA.
 
-- Ordered Home, Explore, Messages, and My system tabs with independent
-  navigation stacks, active-stack content-link routing, exact startup and app-
-  route selection, a reply-plus-mention Messages badge, hidden-tab private-read
-  deferral, and active-media revocation when changing the primary surface; My
+- Ordered Home, Explore, Messages, and My system tabs by default, with an
+  independent default-on option to hide Explore while retaining Home, Messages,
+  and My; independent navigation stacks, hidden-Explore startup routing through
+  Home, runtime selection reconciliation with retained private root paths, active-
+  stack content-link routing, exact app-route selection, a reply-plus-mention
+  Messages badge, inactive-root private-read deferral, hidden-root non-
+  construction, and active-media revocation when changing the primary surface; My
   directly groups local favorites, history, appearance, settings, and About,
   while Messages opens global search without leaving its retained stack
 - Anonymous hot-thread ranking with an embedded hot-topic preview,
@@ -351,8 +361,8 @@ the source metadata is updated to that tested IPA.
 - Categorized anonymous forum, thread, and user search
 - Default-off anonymous online suggestions for the home search field
 - Local home-entry customization with a next-launch home, personalized discovery,
-  ranking, topic, inbox, favorite, or history destination plus an optional home
-  discovery section
+  ranking, topic, inbox, favorite, or history destination, an optional home
+  discovery section, and an independent default-on Explore-tab visibility choice
 - Persistent adaptive-grid or single-column followed-forum layout shared by the
   six-item home projection and complete list, with an explicit switch on each
   surface at non-accessibility sizes, accessibility-size fallback, and explicit
@@ -739,13 +749,16 @@ and effect on later recommendations.
    its intended floor, or only the App home page. Compare the observed full
    TiebaLite template with a minimal TID/PID field set before retaining opaque
    Chrome, push, referrer, and sample-attribution constants.
-16. Real-device validation of the four-tab primary shell on supported iPhone and
-   iPad sizes, including cold starts into every configured destination, retained
-   per-tab stacks, content and app links from each tab depth, repeated Home Screen
-   actions, reply/mention badge `99+` and VoiceOver output, account switching in
-   every tab, hidden-tab request cancellation, active voice/video revocation,
-   Dynamic Type and keyboard safe areas, and interactive-pop completion and
-   cancellation without corrupting another tab's stack.
+16. Real-device validation of the configurable primary shell on supported iPhone
+   and iPad sizes: four tabs by default, or three when Explore is hidden. Cover
+   cold starts into every configured destination in both states; disabling
+   Explore from a deep active path; Home fallback without path corruption;
+   re-enabling with the retained Explore path; absence of hidden-root requests;
+   retained per-tab stacks; content and app links from each tab depth; repeated
+   Home Screen actions; reply/mention badge `99+` and VoiceOver output; account
+   switching in every tab; inactive-root request cancellation; active voice/video
+   revocation; Dynamic Type and keyboard safe areas; and interactive-pop
+   completion and cancellation without corrupting another tab's stack.
 
 The foreground inbox deliberately does not copy TiebaLite's cleartext JSON
 transport or its Android hardware parameters. ReplyMe uses the current HTTPS
@@ -1312,6 +1325,18 @@ switch defaults on and removes only the home section containing ranking, topic,
 and explicit paste-link shortcuts. It does not disable direct personalized-
 discovery startup, those other destinations, the strict URL router, or any
 network path.
+
+Explore-tab visibility is a separate default-on local preference. It neither
+changes the saved startup destination nor controls the Home discovery section.
+When disabled, the Explore root and Home's redundant Explore shortcut are not
+constructed; hot topics and explicit link pasting remain governed by the separate
+Home discovery-section preference. Disabling the tab while Explore is selected
+moves selection to Home without clearing any private root path, section, or
+activation identity, and re-enabling it retains that state. Personalized-discovery
+and hot-thread cold starts instead present their corresponding Explore destination
+in Home's stack, while hot topics opens directly in Home's stack. Other startup
+destinations, content links, app links, and Home Screen quick actions keep their
+existing behavior.
 
 Forum and thread share actions emit canonical `https://tieba.baidu.com` URLs
 through the system share sheet. Thread copying additionally carries an exact

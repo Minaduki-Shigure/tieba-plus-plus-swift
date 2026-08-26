@@ -20,6 +20,112 @@ final class RootStartupNavigationTests: XCTestCase {
     )
   }
 
+  func testExploreTabVisibilityKeepsStableDefaultOrderAndHidesOnlyExplore() {
+    XCTAssertEqual(
+      RootMainTabVisibilityPolicy.visibleTabs(showsExploreTab: true),
+      [.home, .explore, .notifications, .account]
+    )
+    XCTAssertEqual(
+      RootMainTabVisibilityPolicy.visibleTabs(showsExploreTab: false),
+      [.home, .notifications, .account]
+    )
+    XCTAssertEqual(
+      RootMainTabVisibilityPolicy.resolvedSelection(.explore, showsExploreTab: false),
+      .home
+    )
+    for tab in [RootMainTab.home, .notifications, .account] {
+      XCTAssertEqual(
+        RootMainTabVisibilityPolicy.resolvedSelection(tab, showsExploreTab: false),
+        tab
+      )
+    }
+  }
+
+  func testHomeExploreEntryRequiresBothIndependentPreferences() {
+    for homeShowsDiscovery in [false, true] {
+      for showsExploreTab in [false, true] {
+        XCTAssertEqual(
+          RootMainTabVisibilityPolicy.showsHomeExploreEntry(
+            homeShowsDiscovery: homeShowsDiscovery,
+            showsExploreTab: showsExploreTab
+          ),
+          homeShowsDiscovery && showsExploreTab
+        )
+      }
+    }
+  }
+
+  func testHidingSelectedExploreReconcilesToHomeWithoutChangingPrivateState() {
+    let initial = RootMainNavigationState(
+      selectedTab: .explore,
+      exploreSection: .hot,
+      exploreActivationID: 7,
+      inboxKind: .mentions,
+      inboxActivationID: 9,
+      homePath: [.history],
+      explorePath: [.hotTopics, .forum("swift")],
+      notificationsPath: [.user(42)],
+      accountPath: [.settings]
+    )
+    var expected = initial
+    expected.selectedTab = .home
+
+    let hidden = RootMainTabVisibilityPolicy.reconciled(
+      initial,
+      showsExploreTab: false
+    )
+
+    XCTAssertEqual(hidden, expected)
+    XCTAssertEqual(
+      RootMainTabVisibilityPolicy.reconciled(hidden, showsExploreTab: false),
+      hidden
+    )
+    XCTAssertEqual(
+      RootMainTabVisibilityPolicy.reconciled(hidden, showsExploreTab: true),
+      hidden
+    )
+    XCTAssertFalse(
+      RootMainTabActivationPolicy.isActive(
+        sceneIsActive: true,
+        navigation: hidden,
+        tab: .explore
+      )
+    )
+    XCTAssertFalse(
+      RootMainTabActivationPolicy.isForeground(
+        sceneIsActive: true,
+        navigation: hidden,
+        tab: .explore
+      )
+    )
+  }
+
+  func testExploreVisibilityReconciliationLeavesEveryOtherSelectionUntouched() {
+    for tab in [RootMainTab.home, .notifications, .account] {
+      let navigation = RootMainNavigationState(
+        selectedTab: tab,
+        homePath: [.history],
+        explorePath: [.hotTopics],
+        notificationsPath: [.user(42)],
+        accountPath: [.settings]
+      )
+      XCTAssertEqual(
+        RootMainTabVisibilityPolicy.reconciled(
+          navigation,
+          showsExploreTab: false
+        ),
+        navigation
+      )
+      XCTAssertEqual(
+        RootMainTabVisibilityPolicy.reconciled(
+          navigation,
+          showsExploreTab: true
+        ),
+        navigation
+      )
+    }
+  }
+
   func testMainNavigationKeepsIndependentStacksAndRootSelectionClearsOnlyTarget() {
     var navigation = RootMainNavigationState(
       selectedTab: .home,
@@ -121,6 +227,64 @@ final class RootStartupNavigationTests: XCTestCase {
         testCase.expected
       )
     }
+  }
+
+  func testHiddenExploreStartDestinationsOpenInTheHomeStack() {
+    let cases: [(destination: AppStartDestination, expected: RootMainNavigationState)] = [
+      (.home, RootMainNavigationState(selectedTab: .home)),
+      (
+        .discovery,
+        RootMainNavigationState(
+          selectedTab: .home,
+          homePath: [.explore(.personalized)]
+        )
+      ),
+      (
+        .hotThreads,
+        RootMainNavigationState(selectedTab: .home, homePath: [.explore(.hot)])
+      ),
+      (
+        .hotTopics,
+        RootMainNavigationState(selectedTab: .home, homePath: [.hotTopics])
+      ),
+      (
+        .notifications,
+        RootMainNavigationState(selectedTab: .notifications, inboxKind: .replies)
+      ),
+      (.favorites, RootMainNavigationState(selectedTab: .home, homePath: [.favorites])),
+      (.history, RootMainNavigationState(selectedTab: .home, homePath: [.history])),
+    ]
+
+    for testCase in cases {
+      XCTAssertEqual(
+        RootStartupNavigation.initialState(
+          startDestination: testCase.destination,
+          showsExploreTab: false
+        ),
+        testCase.expected
+      )
+    }
+  }
+
+  func testContentRoutingAfterExploreIsHiddenUsesHomeAndRetainsExplorePath() {
+    let staleNavigation = RootMainNavigationState(
+      selectedTab: .explore,
+      homePath: [.history],
+      explorePath: [.hotTopics]
+    )
+    let effectiveNavigation = RootMainTabVisibilityPolicy.reconciled(
+      staleNavigation,
+      showsExploreTab: false
+    )
+
+    let result = RootStartupNavigation.appending(
+      target: .forum("swift"),
+      to: effectiveNavigation
+    )
+
+    XCTAssertEqual(result.selectedTab, .home)
+    XCTAssertEqual(result.path(for: .home), [.history, .forum("swift")])
+    XCTAssertEqual(result.path(for: .explore), [.hotTopics])
   }
 
   func testAppRoutesRemainTopmostForEveryStartDestination() {

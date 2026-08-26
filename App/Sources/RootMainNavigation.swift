@@ -35,6 +35,42 @@ enum RootMainTab: String, CaseIterable, Hashable, Identifiable, Sendable {
   }
 }
 
+enum RootMainTabVisibilityPolicy {
+  static func visibleTabs(showsExploreTab: Bool) -> [RootMainTab] {
+    showsExploreTab ? RootMainTab.allCases : [.home, .notifications, .account]
+  }
+
+  static func resolvedSelection(
+    _ selectedTab: RootMainTab,
+    showsExploreTab: Bool
+  ) -> RootMainTab {
+    visibleTabs(showsExploreTab: showsExploreTab).contains(selectedTab)
+      ? selectedTab
+      : .home
+  }
+
+  static func reconciled(
+    _ navigation: RootMainNavigationState,
+    showsExploreTab: Bool
+  ) -> RootMainNavigationState {
+    let selectedTab = resolvedSelection(
+      navigation.selectedTab,
+      showsExploreTab: showsExploreTab
+    )
+    guard selectedTab != navigation.selectedTab else { return navigation }
+    var result = navigation
+    result.selectedTab = selectedTab
+    return result
+  }
+
+  static func showsHomeExploreEntry(
+    homeShowsDiscovery: Bool,
+    showsExploreTab: Bool
+  ) -> Bool {
+    homeShowsDiscovery && showsExploreTab
+  }
+}
+
 struct RootMainNavigationState: Equatable {
   var selectedTab: RootMainTab
   var exploreSection: ExploreSection

@@ -88,6 +88,8 @@ struct AppSettingsView: View {
     AppPreferenceDefaults.forumBatchCheckInStopsAfterSingleFailure
   @AppStorage(AppPreferenceKey.homeStartDestination)
   private var homeStartDestination = AppStartDestination.defaultValue.rawValue
+  @AppStorage(AppPreferenceKey.showsExploreTab)
+  private var showsExploreTab = AppPreferenceDefaults.showsExploreTab
   @AppStorage(AppPreferenceKey.homeShowsDiscovery)
   private var homeShowsDiscovery = AppPreferenceDefaults.homeShowsDiscovery
   @AppStorage(AppPreferenceKey.homeShowsRecentForums)
@@ -331,6 +333,9 @@ struct AppSettingsView: View {
         }
         .pickerStyle(.menu)
 
+        Toggle("显示“发现”主标签", isOn: $showsExploreTab)
+          .accessibilityIdentifier("settings-show-explore-tab")
+
         Toggle("显示发现区", isOn: $homeShowsDiscovery)
 
         Toggle("显示最近访问的贴吧", isOn: $homeShowsRecentForums)
@@ -345,7 +350,10 @@ struct AppSettingsView: View {
       } header: {
         Text("首页")
       } footer: {
-        Text("启动首选页会在下次启动应用时生效；辅助功能字号下，关注贴吧固定使用单列。")
+        Text(
+          "启动首选页会在下次启动应用时生效。关闭“显示‘发现’主标签”时，发现相关启动页会在首页内打开，"
+            + "且不会修改保存的启动选择；辅助功能字号下，关注贴吧固定使用单列。"
+        )
       }
 
       Section {

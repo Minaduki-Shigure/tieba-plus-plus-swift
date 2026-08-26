@@ -240,13 +240,45 @@ final class AppPreferencesTests: XCTestCase {
       "TiebaPlusPlus.homeStartDestination"
     )
     XCTAssertEqual(
+      AppPreferenceKey.showsExploreTab,
+      "TiebaPlusPlus.showsExploreTab"
+    )
+    XCTAssertEqual(
       AppPreferenceKey.homeShowsDiscovery,
       "TiebaPlusPlus.homeShowsDiscovery"
     )
     XCTAssertEqual(AppStartDestination.defaultValue, .home)
+    XCTAssertTrue(AppPreferenceDefaults.showsExploreTab)
     XCTAssertTrue(AppPreferenceDefaults.homeShowsDiscovery)
+    XCTAssertNotEqual(
+      AppPreferenceKey.showsExploreTab,
+      AppPreferenceKey.homeShowsDiscovery
+    )
     XCTAssertEqual(AppStartDestination.resolved(""), .home)
     XCTAssertEqual(AppStartDestination.resolved("future-value"), .home)
+  }
+
+  @MainActor
+  func testExploreTabVisibilityAppStorageDefaultsOnAndReadsStoredOff() throws {
+    let suiteName = "AppPreferencesTests.explore-tab.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    XCTAssertNil(defaults.object(forKey: AppPreferenceKey.showsExploreTab))
+    let missingStorage = AppStorage(
+      wrappedValue: AppPreferenceDefaults.showsExploreTab,
+      AppPreferenceKey.showsExploreTab,
+      store: defaults
+    )
+    XCTAssertTrue(missingStorage.wrappedValue)
+
+    defaults.set(false, forKey: AppPreferenceKey.showsExploreTab)
+    let persistedStorage = AppStorage(
+      wrappedValue: AppPreferenceDefaults.showsExploreTab,
+      AppPreferenceKey.showsExploreTab,
+      store: defaults
+    )
+    XCTAssertFalse(persistedStorage.wrappedValue)
   }
 
   func testFollowedForumsLayoutUsesStableValuesAndDefaultsToAdaptive() {

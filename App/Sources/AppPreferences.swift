@@ -17,6 +17,7 @@ enum AppPreferenceKey {
   static let forumBatchCheckInStopsAfterSingleFailure =
     "TiebaPlusPlus.forumBatchCheckInStopsAfterSingleFailure"
   static let homeStartDestination = "TiebaPlusPlus.homeStartDestination"
+  static let showsExploreTab = "TiebaPlusPlus.showsExploreTab"
   static let homeShowsDiscovery = "TiebaPlusPlus.homeShowsDiscovery"
   static let homeShowsRecentForums = "TiebaPlusPlus.homeShowsRecentForums"
   static let followedForumsLayout = "TiebaPlusPlus.followedForumsLayout"
@@ -150,6 +151,7 @@ enum AppTextSizeAdjustment: Int, CaseIterable, Hashable, Identifiable, Sendable 
 }
 
 enum AppPreferenceDefaults {
+  static let showsExploreTab = true
   static let homeShowsDiscovery = true
   static let personalizedFollowedForumsOnly = false
   static let forumBatchCheckInUsesOfficialBatch = true

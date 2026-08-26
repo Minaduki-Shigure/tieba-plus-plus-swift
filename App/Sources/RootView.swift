@@ -16,6 +16,7 @@ struct RootView: View {
   let accountService: any AccountService
   let personalizedFeedbackService: any PersonalizedFeedbackService
   let contentFilterRepository: any ContentFilterRepository
+  let showsExploreTab: Bool
 
   @State private var query = ""
   @State private var navigation: RootMainNavigationState
@@ -72,7 +73,8 @@ struct RootView: View {
     accountService: any AccountService,
     personalizedFeedbackService: any PersonalizedFeedbackService,
     contentFilterRepository: any ContentFilterRepository,
-    startDestination: AppStartDestination
+    startDestination: AppStartDestination,
+    showsExploreTab: Bool
   ) {
     self.service = service
     self.historyRepository = historyRepository
@@ -83,8 +85,12 @@ struct RootView: View {
     self.accountService = accountService
     self.personalizedFeedbackService = personalizedFeedbackService
     self.contentFilterRepository = contentFilterRepository
+    self.showsExploreTab = showsExploreTab
     _navigation = State(
-      initialValue: RootStartupNavigation.initialState(startDestination: startDestination)
+      initialValue: RootStartupNavigation.initialState(
+        startDestination: startDestination,
+        showsExploreTab: showsExploreTab
+      )
     )
     _favoritesViewModel = StateObject(
       wrappedValue: LocalFavoritesViewModel(repository: favoritesRepository)
@@ -114,17 +120,22 @@ struct RootView: View {
   }
 
   var body: some View {
-    TabView(selection: $navigation.selectedTab) {
+    TabView(selection: rootTabSelection) {
       NavigationStack(path: rootPathBinding(for: .home)) {
         List {
         if homeShowsDiscovery {
           Section("\u{53d1}\u{73b0}") {
-            Button {
-              selectExplore(.personalized)
-            } label: {
-              Label("发现", systemImage: "sparkles")
+            if RootMainTabVisibilityPolicy.showsHomeExploreEntry(
+              homeShowsDiscovery: homeShowsDiscovery,
+              showsExploreTab: showsExploreTab
+            ) {
+              Button {
+                selectExplore(.personalized)
+              } label: {
+                Label("发现", systemImage: "sparkles")
+              }
+              .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
             NavigationLink(value: RootDestination.hotTopics) {
               Label("\u{70ed}\u{95e8}\u{8bdd}\u{9898}", systemImage: "flame.fill")
@@ -347,27 +358,29 @@ struct RootView: View {
         Label(RootMainTab.home.title, systemImage: RootMainTab.home.systemImage)
       }
 
-      NavigationStack(path: rootPathBinding(for: .explore)) {
-        ExploreView(
-          initialSection: navigation.exploreSection,
-          isActive: rootTabIsActive(.explore),
-          service: service,
-          historyRepository: historyRepository,
-          favoritesRepository: favoritesRepository,
-          searchHistoryRepository: searchHistoryRepository,
-          accountService: accountService,
-          feedbackService: personalizedFeedbackService,
-          accountVault: accountVault,
-          accountSessionLookup: accountSessionLookup
-        )
-        .id(navigation.exploreActivationID)
-        .navigationDestination(for: RootDestination.self) { destination in
-          rootDestination(destination, in: .explore)
+      if showsExploreTab {
+        NavigationStack(path: rootPathBinding(for: .explore)) {
+          ExploreView(
+            initialSection: navigation.exploreSection,
+            isActive: rootTabIsActive(.explore),
+            service: service,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository,
+            accountService: accountService,
+            feedbackService: personalizedFeedbackService,
+            accountVault: accountVault,
+            accountSessionLookup: accountSessionLookup
+          )
+          .id(navigation.exploreActivationID)
+          .navigationDestination(for: RootDestination.self) { destination in
+            rootDestination(destination, in: .explore)
+          }
         }
-      }
-      .tag(RootMainTab.explore)
-      .tabItem {
-        Label(RootMainTab.explore.title, systemImage: RootMainTab.explore.systemImage)
+        .tag(RootMainTab.explore)
+        .tabItem {
+          Label(RootMainTab.explore.title, systemImage: RootMainTab.explore.systemImage)
+        }
       }
 
       NavigationStack(path: rootPathBinding(for: .notifications)) {
@@ -464,6 +477,12 @@ struct RootView: View {
     .onChange(of: query) { searchSuggestionViewModel.inputChanged($0) }
     .onChange(of: searchSuggestionsEnabled) {
       searchSuggestionViewModel.setEnabled($0)
+    }
+    .onChange(of: showsExploreTab) {
+      navigation = RootMainTabVisibilityPolicy.reconciled(
+        navigation,
+        showsExploreTab: $0
+      )
     }
     .onChange(of: scenePhase) {
       mediaPlaybackCoordinator.setSceneActive($0 == .active)
@@ -638,10 +657,34 @@ struct RootView: View {
     )
   }
 
+  private var rootTabSelection: Binding<RootMainTab> {
+    Binding(
+      get: {
+        RootMainTabVisibilityPolicy.resolvedSelection(
+          navigation.selectedTab,
+          showsExploreTab: showsExploreTab
+        )
+      },
+      set: {
+        navigation.selectedTab = RootMainTabVisibilityPolicy.resolvedSelection(
+          $0,
+          showsExploreTab: showsExploreTab
+        )
+      }
+    )
+  }
+
+  private var effectiveNavigation: RootMainNavigationState {
+    RootMainTabVisibilityPolicy.reconciled(
+      navigation,
+      showsExploreTab: showsExploreTab
+    )
+  }
+
   private func rootTabIsActive(_ tab: RootMainTab) -> Bool {
     RootMainTabActivationPolicy.isActive(
       sceneIsActive: scenePhase == .active,
-      navigation: navigation,
+      navigation: effectiveNavigation,
       tab: tab
     )
   }
@@ -649,7 +692,7 @@ struct RootView: View {
   private func rootTabOwnsForeground(_ tab: RootMainTab) -> Bool {
     RootMainTabActivationPolicy.isForeground(
       sceneIsActive: scenePhase == .active,
-      navigation: navigation,
+      navigation: effectiveNavigation,
       tab: tab
     )
   }
@@ -705,6 +748,7 @@ struct RootView: View {
     case .explore(let section):
       ExploreView(
         initialSection: section,
+        isActive: rootTabOwnsForeground(tab),
         service: service,
         historyRepository: historyRepository,
         favoritesRepository: favoritesRepository,
@@ -1333,7 +1377,11 @@ struct RootView: View {
 
   private func openTiebaURL(_ url: URL) {
     linkPreviewViewModel.dismiss()
-    guard let routedNavigation = RootStartupNavigation.appending(url: url, to: navigation)
+    guard
+      let routedNavigation = RootStartupNavigation.appending(
+        url: url,
+        to: effectiveNavigation
+      )
     else {
       linkErrorMessage = "该链接不是受支持的贴吧内容或应用链接。"
       return
@@ -1415,7 +1463,10 @@ struct RootView: View {
   }
 
   private func openTiebaTarget(_ target: TiebaLinkTarget) {
-    navigation = RootStartupNavigation.appending(target: target, to: navigation)
+    navigation = RootStartupNavigation.appending(
+      target: target,
+      to: effectiveNavigation
+    )
   }
 
   private func openLinkPreview(_ previewID: UUID) {
@@ -1507,8 +1558,28 @@ enum RootUnreadSummaryActivationPolicy {
 
 enum RootStartupNavigation {
   static func initialState(
-    startDestination: AppStartDestination
+    startDestination: AppStartDestination,
+    showsExploreTab: Bool = AppPreferenceDefaults.showsExploreTab
   ) -> RootMainNavigationState {
+    if !showsExploreTab {
+      switch startDestination {
+      case .discovery:
+        return RootMainNavigationState(
+          selectedTab: .home,
+          homePath: [.explore(.personalized)]
+        )
+      case .hotThreads:
+        return RootMainNavigationState(
+          selectedTab: .home,
+          homePath: [.explore(.hot)]
+        )
+      case .hotTopics:
+        return RootMainNavigationState(selectedTab: .home, homePath: [.hotTopics])
+      case .home, .notifications, .favorites, .history:
+        break
+      }
+    }
+
     switch startDestination {
     case .home:
       RootMainNavigationState(selectedTab: .home)
