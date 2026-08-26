@@ -14,7 +14,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-currently serves `v0.65.0-alpha.5` (build 83), whose app-code snapshot includes
+currently serves `v0.65.0-alpha.6` (build 84), whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -51,10 +51,11 @@ validation item.
 This makes existing workflows persistently reachable without adding a data source
 or weighted point; iPhone and iPad interaction remain a physical-device
 validation gate.
-Published `v0.65.0-alpha.5` interaction polish expands Home's Explore shortcut
-to its full List row, bounds thread-thumbnail hit testing to the visible preview,
-restores the complete width of personalized recommendation cards, and moves
-account-bound dislike feedback to trailing swipe, context-menu, and accessibility actions.
+Published `v0.65.0-alpha.6` interaction polish expands Home's Explore shortcut
+to its full standard-height List row, makes Explore thread thumbnails display-only
+so they cannot intercept title or excerpt taps, restores the complete width of
+personalized recommendation cards, and presents account-bound dislike feedback
+as a visible lower-trailing button without a competing row swipe action.
 Recommended-card metadata stays on one truncating line at ordinary text sizes
 and retains an expanded Dynamic Type fallback. Full-screen galleries also close
 through their exact presentation owner and add a downward-dismiss gesture that
@@ -93,7 +94,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.65.0-alpha.5` app-code snapshot is at 80–82%; all experimental
+The public `v0.65.0-alpha.6` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
