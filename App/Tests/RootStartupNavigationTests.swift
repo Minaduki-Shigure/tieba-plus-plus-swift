@@ -469,6 +469,7 @@ final class RootStartupNavigationTests: XCTestCase {
       .homeScreenQuickAction(rootQuickActionInvocation(1, action: .search)),
       .account,
       .settings,
+      .about,
       .thread(thread),
       .linkedThread(route),
       .user(7),

@@ -44,6 +44,12 @@ content-link, app-route, quick-action, private-read activation, unread-badge,
 and media-revocation policies. This makes existing workflows persistently reachable without
 adding a data source or weighted point; iPhone and iPad interaction remain a
 physical-device validation gate.
+The My root now groups local favorites, history, a direct appearance menu,
+settings, and About beneath the existing account workflows. Messages exposes the
+existing global search inside its own navigation stack. Typed destinations,
+stable presentation order, and origin-stack isolation have contract coverage.
+These changes improve reachability inside the existing navigation and local-
+settings credit without adding a request, preference, or weighted point.
 
 | Capability area | Weight | Credited points | Current basis |
 | --- | ---: | ---: | --- |
@@ -307,7 +313,9 @@ the source metadata is updated to that tested IPA.
 - Ordered Home, Explore, Messages, and My system tabs with independent
   navigation stacks, active-stack content-link routing, exact startup and app-
   route selection, a reply-plus-mention Messages badge, hidden-tab private-read
-  deferral, and active-media revocation when changing the primary surface
+  deferral, and active-media revocation when changing the primary surface; My
+  directly groups local favorites, history, appearance, settings, and About,
+  while Messages opens global search without leaving its retained stack
 - Anonymous hot-thread ranking with an embedded hot-topic preview,
   server-defined categories, and snapshot refresh
 - Personalized thread feed as the default Explore channel, with a persistent

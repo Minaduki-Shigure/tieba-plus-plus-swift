@@ -65,6 +65,7 @@ struct AccountView: View {
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
   let isActive: Bool
+  let pageTitle: String
 
   @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
   @Environment(\.contentFilterRepository) private var contentFilterRepository
@@ -80,6 +81,8 @@ struct AccountView: View {
   @State private var confirmsReset = false
   @State private var confirmsUsernameManagement = false
   @State private var isPresented = false
+  @AppStorage(AppPreferenceKey.appearance)
+  private var appearance = AppAppearance.system.rawValue
 
   init(
     browseService: any BrowseService & ForumPostSearchService & UserProfileService
@@ -91,7 +94,8 @@ struct AccountView: View {
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository,
-    isActive: Bool = true
+    isActive: Bool = true,
+    pageTitle: String = "账户"
   ) {
     self.browseService = browseService
     self.accountService = accountService
@@ -101,6 +105,7 @@ struct AccountView: View {
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
     self.isActive = isActive
+    self.pageTitle = pageTitle
     _viewModel = StateObject(wrappedValue: AccountViewModel(vault: vault))
     _profileSummaryViewModel = StateObject(
       wrappedValue: ActiveAccountProfileSummaryViewModel(service: accountService, vault: vault)
@@ -109,23 +114,8 @@ struct AccountView: View {
   }
 
   var body: some View {
-    Group {
-      if case .failed(let message) = viewModel.state {
-        accountFailure(message: message)
-      } else if viewModel.accounts.isEmpty {
-        switch viewModel.state {
-        case .idle, .loading:
-          ProgressView()
-        case .failed:
-          EmptyView()
-        case .loaded:
-          accountList
-        }
-      } else {
-        accountList
-      }
-    }
-    .navigationTitle("账户")
+    accountList
+    .navigationTitle(pageTitle)
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
       ToolbarItem(placement: .navigationBarTrailing) {
@@ -250,10 +240,27 @@ struct AccountView: View {
 
   private var accountList: some View {
     List {
-      if viewModel.accounts.isEmpty {
+      if case .failed(let message) = viewModel.state {
+        Section("账户") {
+          accountFailure(message: message)
+        }
+      } else if viewModel.accounts.isEmpty {
         Section {
-          Button { showsLogin = true } label: {
-            Label("添加账户", systemImage: "person.badge.plus")
+          switch viewModel.state {
+          case .idle, .loading:
+            HStack {
+              Spacer()
+              ProgressView()
+              Spacer()
+            }
+            .frame(minHeight: 44)
+            .accessibilityLabel("正在读取账户")
+          case .failed:
+            EmptyView()
+          case .loaded:
+            Button { showsLogin = true } label: {
+              Label("添加账户", systemImage: "person.badge.plus")
+            }
           }
         }
       } else {
@@ -417,6 +424,12 @@ struct AccountView: View {
           }
         }
       }
+
+      Section("本机") {
+        ForEach(AccountHubItem.allCases) { item in
+          accountHubRow(for: item)
+        }
+      }
     }
     .listStyle(.insetGrouped)
     .appScrollableSurface()
@@ -425,6 +438,33 @@ struct AccountView: View {
       await profileSummaryViewModel.refresh()
       await unreadSummaryViewModel.refresh()
     }
+  }
+
+  @ViewBuilder
+  private func accountHubRow(for item: AccountHubItem) -> some View {
+    if item == .appearance {
+      Picker(selection: appearanceSelection) {
+        ForEach(AppAppearance.allCases) { appearance in
+          Text(appearance.title).tag(appearance)
+        }
+      } label: {
+        Label(item.title, systemImage: item.systemImage)
+      }
+      .pickerStyle(.menu)
+      .accessibilityIdentifier(item.accessibilityIdentifier)
+    } else if let destination = item.destination {
+      NavigationLink(value: destination) {
+        Label(item.title, systemImage: item.systemImage)
+      }
+      .accessibilityIdentifier(item.accessibilityIdentifier)
+    }
+  }
+
+  private var appearanceSelection: Binding<AppAppearance> {
+    Binding(
+      get: { AppAppearance.resolved(appearance) },
+      set: { appearance = $0.rawValue }
+    )
   }
 
   private var activeProfileSummary: AccountProfileSummary? {

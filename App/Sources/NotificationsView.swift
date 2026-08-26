@@ -1,5 +1,9 @@
 import SwiftUI
 
+enum NotificationsToolbarRoute {
+  static var searchDestination: RootDestination { .search("") }
+}
+
 struct NotificationsView: View {
   let browseService:
     any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
@@ -68,6 +72,15 @@ struct NotificationsView: View {
     }
     .navigationTitle("消息")
     .navigationBarTitleDisplayMode(.inline)
+    .toolbar {
+      ToolbarItem(placement: .navigationBarTrailing) {
+        NavigationLink(value: NotificationsToolbarRoute.searchDestination) {
+          Image(systemName: "magnifyingglass")
+        }
+        .accessibilityLabel("搜索")
+        .help("搜索")
+      }
+    }
     .safeAreaInset(edge: .bottom, spacing: 0) {
       if let replyNotice {
         replyNoticeBanner(replyNotice)

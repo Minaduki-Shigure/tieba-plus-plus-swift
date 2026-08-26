@@ -406,7 +406,8 @@ struct RootView: View {
           historyRepository: historyRepository,
           favoritesRepository: favoritesRepository,
           searchHistoryRepository: searchHistoryRepository,
-          isActive: rootTabIsActive(.account)
+          isActive: rootTabIsActive(.account),
+          pageTitle: "我的"
         )
         .navigationDestination(for: RootDestination.self) { destination in
           rootDestination(destination, in: .account)
@@ -785,6 +786,8 @@ struct RootView: View {
       )
     case .settings:
       AppSettingsView(historyRepository: historyRepository)
+    case .about:
+      AppAboutView()
     case .thread(let thread):
       ThreadView(
         thread: thread.browseThread,
@@ -1443,6 +1446,7 @@ enum RootDestination: Hashable {
   case homeScreenQuickAction(HomeScreenQuickActionInvocation)
   case account
   case settings
+  case about
   case thread(ThreadHistorySnapshot)
   case linkedThread(TiebaThreadRoute)
   case user(Int64)
