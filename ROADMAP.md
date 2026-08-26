@@ -184,6 +184,13 @@ two context identities survive local filtering independently. Explicit topic
 and floor routes bypass unrelated reading history, while a nested-reply match
 uses the existing comment-ID resolver instead of trusting a displayed parent
 PID. This reuses existing anonymous endpoints and adds no weighted point.
+Current-main global and per-forum post results also carry the submitted query
+into their visible title, excerpt, and same-thread context text, matching
+TiebaLite's search-result highlighting. The shared local projection splits only
+on whitespace, treats every token literally, folds case, width, and diacritics,
+merges overlapping ranges, and bounds query length, token count, scanned text,
+and emitted matches. It uses the existing accent selection and changes no raw
+result, filter, pagination, route, request, or weighted point.
 The app-owned search, history, cloud-favorite, foreground check-in-page, and inbox
 routes close another narrow TiebaLite navigation gap. They expose only already
 credited destinations, add no endpoint or account choice, and keep app-only
@@ -353,11 +360,13 @@ the source metadata is updated to that tested IPA.
 - Account-isolated local followed-forum pins shared by the home projection and
   complete list, with pin, unpin, and copy-name context actions; only exact loaded
   rows are reordered, so stale pins neither fabricate cards nor load another page
-- Global post search with newest, oldest, and relevance sorting
+- Global post search with newest, oldest, and relevance sorting plus bounded
+  literal-term highlighting in topic titles and excerpts
 - Local keyword, user, and video filtering for global and per-forum search results
 - Local filtering for paginated public-profile activity
 - Versioned local global-search history with recent/all, delete, and clear controls
-- Anonymous per-forum post search with newest/relevance sorting
+- Anonymous per-forum post search with newest/relevance sorting and the same
+  highlighting across matched content, parent-floor, and owning-topic context
 - Topic-only and topic-plus-reply search filters with separate matched-reply,
   exact-parent-floor, and owning-topic navigation
 - Versioned, per-forum local search history with delete and clear controls

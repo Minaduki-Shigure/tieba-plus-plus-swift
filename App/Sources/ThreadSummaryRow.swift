@@ -158,6 +158,7 @@ struct ThreadSummaryRow<Header: View>: View {
   let thread: BrowseThread
   let showsForum: Bool
   let showsAuthor: Bool
+  let searchQuery: String
   private let header: () -> Header
   private let onNavigate: (ThreadSummaryNavigationRequest) -> Void
 
@@ -174,12 +175,14 @@ struct ThreadSummaryRow<Header: View>: View {
     thread: BrowseThread,
     showsForum: Bool = false,
     showsAuthor: Bool = true,
+    searchQuery: String = "",
     onNavigate: @escaping (ThreadSummaryNavigationRequest) -> Void
   ) where Header == EmptyView {
     self.init(
       thread: thread,
       showsForum: showsForum,
       showsAuthor: showsAuthor,
+      searchQuery: searchQuery,
       header: { EmptyView() },
       onNavigate: onNavigate
     )
@@ -189,12 +192,14 @@ struct ThreadSummaryRow<Header: View>: View {
     thread: BrowseThread,
     showsForum: Bool = false,
     showsAuthor: Bool = true,
+    searchQuery: String = "",
     @ViewBuilder header: @escaping () -> Header,
     onNavigate: @escaping (ThreadSummaryNavigationRequest) -> Void
   ) {
     self.thread = thread
     self.showsForum = showsForum
     self.showsAuthor = showsAuthor
+    self.searchQuery = searchQuery
     self.header = header
     self.onNavigate = onNavigate
   }
@@ -218,7 +223,7 @@ struct ThreadSummaryRow<Header: View>: View {
         .font(.caption.weight(.semibold))
         .foregroundStyle(.tint)
         .fixedSize()
-      Text(displayTitle)
+      SearchHighlightedText(displayTitle, query: searchQuery)
         .font(.subheadline.weight(.semibold))
         .foregroundStyle(.primary)
         .lineLimit(1)
@@ -237,14 +242,14 @@ struct ThreadSummaryRow<Header: View>: View {
             badgeLine
           }
 
-          Text(displayTitle)
+          SearchHighlightedText(displayTitle, query: searchQuery)
             .font(.headline)
             .foregroundStyle(.primary)
             .lineLimit(3)
             .fixedSize(horizontal: false, vertical: true)
 
           if shouldShowExcerpt {
-            Text(thread.excerpt)
+            SearchHighlightedText(thread.excerpt, query: searchQuery)
               .font(.subheadline)
               .foregroundStyle(.secondary)
               .lineLimit(3)

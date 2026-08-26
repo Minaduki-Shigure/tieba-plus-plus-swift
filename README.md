@@ -652,7 +652,11 @@ and its verified metadata enters the public app source.
   and per-forum post search provide the supported sort and content filters,
   local history, optional credential-free suggestions, and independent opening
   of a matched reply, its exact parent floor, and the owning topic when those
-  same-thread targets are present and valid.
+  same-thread targets are present and valid. Current `main` also highlights the
+  submitted literal search terms in global topic titles and excerpts, and in
+  per-forum matched content plus its parent/topic context. Matching is bounded,
+  case/width/diacritic insensitive, uses the selected local accent color, and
+  never interprets user text as a regular expression.
 - **Forum browsing:** Forum and channel lists support pagination, refresh,
   reply-time or creation-time sorting, server-defined classifications, and
   bounded channel menus with independent cursors. The forum toolbar's primary

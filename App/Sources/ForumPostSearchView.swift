@@ -414,7 +414,10 @@ struct ForumPostSearchView: View {
         selectedDestination = destination
       } label: {
         HStack(spacing: 8) {
-          ForumPostSearchResultRow(result: result)
+          ForumPostSearchResultRow(
+            result: result,
+            searchQuery: viewModel.submittedQuery
+          )
             .frame(maxWidth: .infinity, alignment: .leading)
           Image(systemName: "chevron.right")
             .font(.caption.weight(.semibold))
@@ -427,7 +430,10 @@ struct ForumPostSearchView: View {
       .buttonStyle(.plain)
       .accessibilityHint("打开搜索命中内容")
     } else {
-      ForumPostSearchResultRow(result: result)
+      ForumPostSearchResultRow(
+        result: result,
+        searchQuery: viewModel.submittedQuery
+      )
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
     }
   }
@@ -451,7 +457,10 @@ struct ForumPostSearchView: View {
           selectedDestination = destination
         } label: {
           HStack(spacing: 8) {
-            ForumPostSearchContextRow(context: context)
+            ForumPostSearchContextRow(
+              context: context,
+              searchQuery: viewModel.submittedQuery
+            )
               .frame(maxWidth: .infinity, alignment: .leading)
             Image(systemName: "chevron.right")
               .font(.caption.weight(.semibold))
@@ -463,7 +472,10 @@ struct ForumPostSearchView: View {
         .buttonStyle(.plain)
         .accessibilityHint("打开\(context.target.title)")
       } else {
-        ForumPostSearchContextRow(context: context)
+        ForumPostSearchContextRow(
+          context: context,
+          searchQuery: viewModel.submittedQuery
+        )
       }
     }
   }
@@ -514,6 +526,7 @@ struct ForumPostSearchView: View {
 
 private struct ForumPostSearchResultRow: View {
   let result: ForumPostSearchItem
+  let searchQuery: String
 
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
 
@@ -540,14 +553,14 @@ private struct ForumPostSearchResultRow: View {
 
       let title = result.matchedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
       if !title.isEmpty {
-        Text(title)
+        SearchHighlightedText(title, query: searchQuery)
           .font(.headline)
           .lineLimit(3)
       }
 
       let excerpt = result.matchedExcerpt.trimmingCharacters(in: .whitespacesAndNewlines)
       if !excerpt.isEmpty, excerpt != title {
-        Text(excerpt)
+        SearchHighlightedText(excerpt, query: searchQuery)
           .font(.subheadline)
           .foregroundStyle(.secondary)
           .lineLimit(4)
@@ -578,6 +591,7 @@ private struct ForumPostSearchResultRow: View {
 
 private struct ForumPostSearchContextRow: View {
   let context: ForumPostSearchContext
+  let searchQuery: String
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
@@ -587,12 +601,12 @@ private struct ForumPostSearchContextRow: View {
       let title = context.summary.title.trimmingCharacters(in: .whitespacesAndNewlines)
       let excerpt = context.summary.excerpt.trimmingCharacters(in: .whitespacesAndNewlines)
       if !title.isEmpty {
-        Text(title)
+        SearchHighlightedText(title, query: searchQuery)
           .font(.subheadline.weight(.semibold))
           .lineLimit(2)
       }
       if !excerpt.isEmpty, excerpt != title {
-        Text(excerpt)
+        SearchHighlightedText(excerpt, query: searchQuery)
           .font(.caption)
           .foregroundStyle(.secondary)
           .lineLimit(2)

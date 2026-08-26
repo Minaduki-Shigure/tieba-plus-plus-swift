@@ -292,6 +292,7 @@ struct SearchView: View {
             ThreadSummaryRow(
               thread: thread,
               showsForum: true,
+              searchQuery: viewModel.submittedQuery,
               onNavigate: { threadNavigationRequest = $0 }
             )
           }
