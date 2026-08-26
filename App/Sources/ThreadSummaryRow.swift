@@ -24,12 +24,18 @@ enum ThreadSummaryMediaPresentation: Equatable, Sendable {
   case collapsed(ThreadSummaryMedia)
 }
 
-enum ThreadSummaryImageInteractionPolicy {
+enum ThreadSummaryMediaInteraction: Equatable, Sendable {
+  case gallery
+  case openThread
+  case disabled
+}
+
+enum ThreadSummaryMediaInteractionPolicy {
   static func permitsOpening(
-    isEnabled: Bool,
+    interaction: ThreadSummaryMediaInteraction,
     environmentActionAvailable: Bool
   ) -> Bool {
-    isEnabled && environmentActionAvailable
+    interaction == .gallery && environmentActionAvailable
   }
 }
 
@@ -168,6 +174,18 @@ enum ThreadSummaryContextLayoutMode: Equatable, Sendable {
   case compact
 }
 
+enum ThreadSummaryRowInteractionMode: Equatable, Sendable {
+  case contextual
+  case threadFocused
+}
+
+struct ThreadSummaryTrailingMetricAction: Equatable, Sendable {
+  let systemImage: String
+  let accessibilityLabel: String
+  let accessibilityIdentifier: String
+  let isEnabled: Bool
+}
+
 enum ThreadSummaryContextLayoutStrategy: Equatable, Sendable {
   case widthAdaptive
   case singleLine
@@ -192,8 +210,11 @@ struct ThreadSummaryRow<Header: View>: View {
   let showsAuthor: Bool
   let searchQuery: String
   let contextLayout: ThreadSummaryContextLayoutMode
-  let allowsImageOpening: Bool
+  let mediaInteraction: ThreadSummaryMediaInteraction
+  let interactionMode: ThreadSummaryRowInteractionMode
+  let trailingMetricAction: ThreadSummaryTrailingMetricAction?
   private let header: () -> Header
+  private let onTrailingMetricAction: () -> Void
   private let onNavigate: (ThreadSummaryNavigationRequest) -> Void
 
   @Environment(\.contentImagePreviewQuality) private var contentImagePreviewQuality
@@ -212,7 +233,10 @@ struct ThreadSummaryRow<Header: View>: View {
     showsAuthor: Bool = true,
     searchQuery: String = "",
     contextLayout: ThreadSummaryContextLayoutMode = .adaptive,
-    allowsImageOpening: Bool = true,
+    mediaInteraction: ThreadSummaryMediaInteraction = .openThread,
+    interactionMode: ThreadSummaryRowInteractionMode = .contextual,
+    trailingMetricAction: ThreadSummaryTrailingMetricAction? = nil,
+    onTrailingMetricAction: @escaping () -> Void = {},
     onNavigate: @escaping (ThreadSummaryNavigationRequest) -> Void
   ) where Header == EmptyView {
     self.init(
@@ -221,7 +245,10 @@ struct ThreadSummaryRow<Header: View>: View {
       showsAuthor: showsAuthor,
       searchQuery: searchQuery,
       contextLayout: contextLayout,
-      allowsImageOpening: allowsImageOpening,
+      mediaInteraction: mediaInteraction,
+      interactionMode: interactionMode,
+      trailingMetricAction: trailingMetricAction,
+      onTrailingMetricAction: onTrailingMetricAction,
       header: { EmptyView() },
       onNavigate: onNavigate
     )
@@ -233,7 +260,10 @@ struct ThreadSummaryRow<Header: View>: View {
     showsAuthor: Bool = true,
     searchQuery: String = "",
     contextLayout: ThreadSummaryContextLayoutMode = .adaptive,
-    allowsImageOpening: Bool = true,
+    mediaInteraction: ThreadSummaryMediaInteraction = .openThread,
+    interactionMode: ThreadSummaryRowInteractionMode = .contextual,
+    trailingMetricAction: ThreadSummaryTrailingMetricAction? = nil,
+    onTrailingMetricAction: @escaping () -> Void = {},
     @ViewBuilder header: @escaping () -> Header,
     onNavigate: @escaping (ThreadSummaryNavigationRequest) -> Void
   ) {
@@ -242,8 +272,11 @@ struct ThreadSummaryRow<Header: View>: View {
     self.showsAuthor = showsAuthor
     self.searchQuery = searchQuery
     self.contextLayout = contextLayout
-    self.allowsImageOpening = allowsImageOpening
+    self.mediaInteraction = mediaInteraction
+    self.interactionMode = interactionMode
+    self.trailingMetricAction = trailingMetricAction
     self.header = header
+    self.onTrailingMetricAction = onTrailingMetricAction
     self.onNavigate = onNavigate
   }
 
@@ -275,37 +308,88 @@ struct ThreadSummaryRow<Header: View>: View {
     .padding(.vertical, 2)
   }
 
+  @ViewBuilder
   private var regularRow: some View {
+    switch interactionMode {
+    case .contextual:
+      contextualRegularRow
+    case .threadFocused:
+      threadFocusedRegularRow
+    }
+  }
+
+  private var contextualRegularRow: some View {
     VStack(alignment: .leading, spacing: 8) {
       primaryNavigation {
-        VStack(alignment: .leading, spacing: 8) {
-          header()
+        titleSection
+      }
 
-          if !badges.isEmpty {
-            badgeLine
-          }
+      contextLine(allowsNavigation: true)
+      contextualMediaSurface
+      HStack(alignment: .center, spacing: 0) {
+        metricLine(allowsReplyNavigation: true)
+        trailingMetricActionButton
+      }
+    }
+    .padding(.vertical, 4)
+  }
 
-          SearchHighlightedText(displayTitle, query: searchQuery)
-            .font(.headline)
-            .foregroundStyle(.primary)
-            .lineLimit(3)
-            .fixedSize(horizontal: false, vertical: true)
+  private var threadFocusedRegularRow: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      primaryNavigation {
+        titleSection
+      }
 
-          if shouldShowExcerpt {
-            SearchHighlightedText(thread.excerpt, query: searchQuery)
-              .font(.subheadline)
-              .foregroundStyle(.secondary)
-              .lineLimit(3)
-              .fixedSize(horizontal: false, vertical: true)
-          }
+      if hasContextLine {
+        threadNavigationSurface(accessibilityLabel: "打开主题 \(displayTitle)") {
+          contextLine(allowsNavigation: false)
+            .frame(minHeight: 44, alignment: .leading)
+            .padding(.vertical, 4)
         }
       }
 
-      contextLine
-      mediaPreview
-      metricLine
+      if mediaPresentation != nil {
+        threadNavigationSurface(accessibilityLabel: "打开主题 \(displayTitle)") {
+          passiveMediaPreview
+            .padding(.vertical, 4)
+        }
+      }
+
+      HStack(alignment: .center, spacing: 0) {
+        threadNavigationSurface(accessibilityLabel: "打开主题 \(displayTitle)") {
+          metricLine(allowsReplyNavigation: false)
+            .frame(minHeight: 44, alignment: .leading)
+            .padding(.vertical, 4)
+        }
+        trailingMetricActionButton
+          .padding(.vertical, 4)
+      }
     }
     .padding(.vertical, 4)
+  }
+
+  private var titleSection: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      header()
+
+      if !badges.isEmpty {
+        badgeLine
+      }
+
+      SearchHighlightedText(displayTitle, query: searchQuery)
+        .font(.headline)
+        .foregroundStyle(.primary)
+        .lineLimit(3)
+        .fixedSize(horizontal: false, vertical: true)
+
+      if shouldShowExcerpt {
+        SearchHighlightedText(thread.excerpt, query: searchQuery)
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .lineLimit(3)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+    }
   }
 
   private func primaryNavigation<Label: View>(
@@ -342,6 +426,29 @@ struct ThreadSummaryRow<Header: View>: View {
     .contentShape(Rectangle())
   }
 
+  private func threadNavigationSurface<Label: View>(
+    accessibilityLabel: String,
+    @ViewBuilder label: () -> Label
+  ) -> some View {
+    Group {
+      if let request = ThreadSummaryNavigationPolicy.primaryRequest(for: thread) {
+        Button {
+          onNavigate(request)
+        } label: {
+          label()
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint("打开主题")
+      } else {
+        label()
+          .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+      }
+    }
+  }
+
   private var displayTitle: String {
     if !thread.title.isEmpty {
       return thread.title
@@ -356,13 +463,17 @@ struct ThreadSummaryRow<Header: View>: View {
     !thread.excerpt.isEmpty && thread.excerpt != thread.title
   }
 
-  @ViewBuilder
-  private var mediaPreview: some View {
-    switch ThreadSummaryPresentation.mediaPresentation(
+  private var mediaPresentation: ThreadSummaryMediaPresentation? {
+    ThreadSummaryPresentation.mediaPresentation(
       for: thread,
       hidesMedia: hidesThreadListMedia,
       quality: contentImagePreviewQuality
-    ) {
+    )
+  }
+
+  @ViewBuilder
+  private var mediaPreview: some View {
+    switch mediaPresentation {
     case .some(.collapsed(let media)):
       collapsedMediaPreview(media)
     case .some(.expanded(let media)):
@@ -370,6 +481,28 @@ struct ThreadSummaryRow<Header: View>: View {
     case .none:
       EmptyView()
     }
+  }
+
+  @ViewBuilder
+  private var contextualMediaSurface: some View {
+    switch mediaInteraction {
+    case .gallery:
+      mediaPreview
+    case .openThread:
+      if mediaPresentation != nil {
+        threadNavigationSurface(accessibilityLabel: "打开主题 \(displayTitle)") {
+          passiveMediaPreview
+        }
+      }
+    case .disabled:
+      passiveMediaPreview
+    }
+  }
+
+  private var passiveMediaPreview: some View {
+    mediaPreview
+      .allowsHitTesting(false)
+      .accessibilityHidden(true)
   }
 
   @ViewBuilder
@@ -501,8 +634,8 @@ struct ThreadSummaryRow<Header: View>: View {
   }
 
   private var canOpenImages: Bool {
-    ThreadSummaryImageInteractionPolicy.permitsOpening(
-      isEnabled: allowsImageOpening,
+    ThreadSummaryMediaInteractionPolicy.permitsOpening(
+      interaction: mediaInteraction,
       environmentActionAvailable: openThreadSummaryImage.isAvailable
     )
   }
@@ -526,8 +659,14 @@ struct ThreadSummaryRow<Header: View>: View {
     }
   }
 
+  private var hasContextLine: Bool {
+    let hasForum = showsForum && !displayedForumName.isEmpty
+    let hasAuthor = showsAuthor && !displayedAuthorName.isEmpty
+    return hasForum || hasAuthor || thread.lastReplyAt != nil || thread.createdAt != nil
+  }
+
   @ViewBuilder
-  private var contextLine: some View {
+  private func contextLine(allowsNavigation: Bool) -> some View {
     let hasForum = showsForum && !displayedForumName.isEmpty
     let hasAuthor = showsAuthor && !displayedAuthorName.isEmpty
     let date = thread.lastReplyAt ?? thread.createdAt
@@ -539,13 +678,33 @@ struct ThreadSummaryRow<Header: View>: View {
         ) {
         case .widthAdaptive:
           ViewThatFits(in: .horizontal) {
-            horizontalContextLine(hasForum: hasForum, hasAuthor: hasAuthor, date: date)
-            stackedContextLine(hasForum: hasForum, hasAuthor: hasAuthor, date: date)
+            horizontalContextLine(
+              hasForum: hasForum,
+              hasAuthor: hasAuthor,
+              date: date,
+              allowsNavigation: allowsNavigation
+            )
+            stackedContextLine(
+              hasForum: hasForum,
+              hasAuthor: hasAuthor,
+              date: date,
+              allowsNavigation: allowsNavigation
+            )
           }
         case .singleLine:
-          horizontalContextLine(hasForum: hasForum, hasAuthor: hasAuthor, date: date)
+          horizontalContextLine(
+            hasForum: hasForum,
+            hasAuthor: hasAuthor,
+            date: date,
+            allowsNavigation: allowsNavigation
+          )
         case .stacked:
-          stackedContextLine(hasForum: hasForum, hasAuthor: hasAuthor, date: date)
+          stackedContextLine(
+            hasForum: hasForum,
+            hasAuthor: hasAuthor,
+            date: date,
+            allowsNavigation: allowsNavigation
+          )
         }
       }
       .font(.caption)
@@ -556,10 +715,15 @@ struct ThreadSummaryRow<Header: View>: View {
   private func horizontalContextLine(
     hasForum: Bool,
     hasAuthor: Bool,
-    date: Date?
+    date: Date?,
+    allowsNavigation: Bool
   ) -> some View {
     HStack(spacing: 10) {
-      contextLabels(hasForum: hasForum, hasAuthor: hasAuthor)
+      contextLabels(
+        hasForum: hasForum,
+        hasAuthor: hasAuthor,
+        allowsNavigation: allowsNavigation
+      )
       Spacer(minLength: 4)
       dateLabel(date)
         .layoutPriority(2)
@@ -569,25 +733,30 @@ struct ThreadSummaryRow<Header: View>: View {
   private func stackedContextLine(
     hasForum: Bool,
     hasAuthor: Bool,
-    date: Date?
+    date: Date?,
+    allowsNavigation: Bool
   ) -> some View {
     VStack(alignment: .leading, spacing: 4) {
-      contextLabels(hasForum: hasForum, hasAuthor: hasAuthor)
+      contextLabels(
+        hasForum: hasForum,
+        hasAuthor: hasAuthor,
+        allowsNavigation: allowsNavigation
+      )
       dateLabel(date)
     }
   }
 
-  private var metricLine: some View {
+  private func metricLine(allowsReplyNavigation: Bool) -> some View {
     ViewThatFits(in: .horizontal) {
       HStack(spacing: 14) {
-        primaryMetrics
+        primaryMetrics(allowsReplyNavigation: allowsReplyNavigation)
         secondaryMetrics
         Spacer(minLength: 0)
       }
 
       VStack(alignment: .leading, spacing: 5) {
         HStack(spacing: 14) {
-          primaryMetrics
+          primaryMetrics(allowsReplyNavigation: allowsReplyNavigation)
           Spacer(minLength: 0)
         }
         if thread.agreeCount > 0 || thread.shareCount > 0 {
@@ -603,9 +772,13 @@ struct ThreadSummaryRow<Header: View>: View {
   }
 
   @ViewBuilder
-  private func contextLabels(hasForum: Bool, hasAuthor: Bool) -> some View {
+  private func contextLabels(
+    hasForum: Bool,
+    hasAuthor: Bool,
+    allowsNavigation: Bool
+  ) -> some View {
     if hasForum {
-      if let url = ThreadSummaryContextNavigationPolicy.forumURL(
+      if allowsNavigation, let url = ThreadSummaryContextNavigationPolicy.forumURL(
         for: thread,
         showsForum: showsForum
       ) {
@@ -626,7 +799,7 @@ struct ThreadSummaryRow<Header: View>: View {
       }
     }
     if hasAuthor {
-      if let url = ThreadSummaryContextNavigationPolicy.authorURL(
+      if allowsNavigation, let url = ThreadSummaryContextNavigationPolicy.authorURL(
         for: thread,
         showsAuthor: showsAuthor
       ) {
@@ -705,8 +878,10 @@ struct ThreadSummaryRow<Header: View>: View {
   }
 
   @ViewBuilder
-  private var primaryMetrics: some View {
-    if let request = ThreadSummaryNavigationPolicy.repliesRequest(for: thread) {
+  private func primaryMetrics(allowsReplyNavigation: Bool) -> some View {
+    if allowsReplyNavigation,
+      let request = ThreadSummaryNavigationPolicy.repliesRequest(for: thread)
+    {
       Button {
         onNavigate(request)
       } label: {
@@ -724,6 +899,16 @@ struct ThreadSummaryRow<Header: View>: View {
     }
     if thread.viewCount > 0 {
       ThreadMetric(systemImage: "eye", value: thread.viewCount, label: "浏览")
+    }
+  }
+
+  @ViewBuilder
+  private var trailingMetricActionButton: some View {
+    if let trailingMetricAction {
+      ThreadSummaryTrailingMetricActionButton(
+        action: trailingMetricAction,
+        perform: onTrailingMetricAction
+      )
     }
   }
 
@@ -944,6 +1129,29 @@ private struct ThreadMetric: View {
       .lineLimit(1)
       .fixedSize(horizontal: true, vertical: false)
       .accessibilityLabel("\(label) \(max(value, 0).formatted())")
+  }
+}
+
+struct ThreadSummaryTrailingMetricActionButton: View {
+  let action: ThreadSummaryTrailingMetricAction
+  let perform: () -> Void
+
+  var body: some View {
+    Button {
+      guard action.isEnabled else { return }
+      perform()
+    } label: {
+      Image(systemName: action.systemImage)
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
+        .accessibilityHidden(true)
+    }
+    .buttonStyle(.borderless)
+    .disabled(!action.isEnabled)
+    .foregroundStyle(.tint)
+    .accessibilityLabel(action.accessibilityLabel)
+    .accessibilityIdentifier(action.accessibilityIdentifier)
+    .help(action.accessibilityLabel)
   }
 }
 

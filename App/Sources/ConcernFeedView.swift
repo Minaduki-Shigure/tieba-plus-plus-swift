@@ -117,7 +117,8 @@ struct ConcernFeedView: View {
               ThreadSummaryRow(
                 thread: thread,
                 showsForum: true,
-                allowsImageOpening: false,
+                mediaInteraction: .openThread,
+                interactionMode: .threadFocused,
                 onNavigate: { threadNavigationRequest = $0 }
               )
             }

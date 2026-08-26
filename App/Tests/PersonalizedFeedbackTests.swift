@@ -39,7 +39,7 @@ final class PersonalizedFeedbackTests: XCTestCase {
       ),
     ] {
       XCTAssertEqual(unavailable, .unavailable)
-      XCTAssertNil(unavailable.presentation)
+      XCTAssertNil(unavailable.metricAction(threadID: 42))
     }
   }
 
@@ -58,41 +58,42 @@ final class PersonalizedFeedbackTests: XCTestCase {
     )
 
     XCTAssertEqual(
-      available.presentation,
-      PersonalizedFeedbackActionPresentation(
-        title: "不感兴趣",
+      available.metricAction(threadID: 42),
+      ThreadSummaryTrailingMetricAction(
         systemImage: "hand.thumbsdown",
         accessibilityLabel: "减少此类推荐",
+        accessibilityIdentifier: "personalized-feedback-action-42",
         isEnabled: true
       )
     )
     XCTAssertEqual(
-      submitting.presentation,
-      PersonalizedFeedbackActionPresentation(
-        title: "提交中",
-        systemImage: "hourglass",
+      submitting.metricAction(threadID: 42),
+      ThreadSummaryTrailingMetricAction(
+        systemImage: "hand.thumbsdown",
         accessibilityLabel: "正在提交推荐反馈",
+        accessibilityIdentifier: "personalized-feedback-action-42",
         isEnabled: false
       )
     )
   }
 
   @MainActor
-  func testFeedbackFooterStaysWithinTheRowWidth() {
-    let widths: [CGFloat] = [320, 390, 768]
-    for width in widths {
+  func testFeedbackMetricActionRemainsAnIconSizedControlInBothStates() throws {
+    for state in [
+      PersonalizedFeedbackActionAvailability.available,
+      .submitting,
+    ] {
       let host = UIHostingController(
-        rootView: PersonalizedFeedbackFooter(
-          threadID: 42,
-          state: .available,
-          action: {}
+        rootView: ThreadSummaryTrailingMetricActionButton(
+          action: try XCTUnwrap(state.metricAction(threadID: 42)),
+          perform: {}
         )
         .environment(\.dynamicTypeSize, .large)
       )
 
-      let size = host.sizeThatFits(in: CGSize(width: width, height: 1_000))
+      let size = host.sizeThatFits(in: CGSize(width: 390, height: 1_000))
 
-      XCTAssertLessThanOrEqual(size.width, width + 0.5)
+      XCTAssertEqual(size.width, 44, accuracy: 0.5)
       XCTAssertEqual(size.height, 44, accuracy: 0.5)
     }
   }

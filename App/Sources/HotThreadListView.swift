@@ -139,7 +139,8 @@ struct HotThreadListView: View {
               ThreadSummaryRow(
                 thread: item.thread,
                 showsForum: true,
-                allowsImageOpening: false,
+                mediaInteraction: .openThread,
+                interactionMode: .threadFocused,
                 header: { HotThreadRankHeader(item: item) },
                 onNavigate: { threadNavigationRequest = $0 }
               )

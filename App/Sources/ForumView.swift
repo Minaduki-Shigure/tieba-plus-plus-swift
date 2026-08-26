@@ -473,6 +473,8 @@ struct ForumView: View {
           ) {
             ThreadSummaryRow(
               thread: thread,
+              mediaInteraction: .openThread,
+              interactionMode: .threadFocused,
               onNavigate: { navigationDestination = .thread($0) }
             )
           }

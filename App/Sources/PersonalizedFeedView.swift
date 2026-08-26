@@ -302,22 +302,16 @@ struct PersonalizedFeedView: View {
               visibility: item.thread.localVisibility,
               placeholder: "已屏蔽此推荐帖子"
             ) {
-              VStack(alignment: .leading, spacing: 0) {
-                ThreadSummaryRow(
-                  thread: item.thread,
-                  showsForum: true,
-                  contextLayout: .compact,
-                  allowsImageOpening: false,
-                  onNavigate: { threadNavigationRequest = $0 }
-                )
-                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-
-                PersonalizedFeedbackFooter(
-                  threadID: item.id,
-                  state: feedbackState,
-                  action: { presentFeedback(for: item) }
-                )
-              }
+              ThreadSummaryRow(
+                thread: item.thread,
+                showsForum: true,
+                contextLayout: .compact,
+                mediaInteraction: .openThread,
+                interactionMode: .threadFocused,
+                trailingMetricAction: feedbackState.metricAction(threadID: item.id),
+                onTrailingMetricAction: { presentFeedback(for: item) },
+                onNavigate: { threadNavigationRequest = $0 }
+              )
               .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             }
             .onAppear {
@@ -451,60 +445,24 @@ enum PersonalizedFeedbackActionAvailability: Equatable, Sendable {
     self = isSubmitting ? .submitting : .available
   }
 
-  var presentation: PersonalizedFeedbackActionPresentation? {
+  func metricAction(threadID: Int64) -> ThreadSummaryTrailingMetricAction? {
     switch self {
     case .unavailable:
       nil
     case .available:
-      PersonalizedFeedbackActionPresentation(
-        title: "不感兴趣",
+      ThreadSummaryTrailingMetricAction(
         systemImage: "hand.thumbsdown",
         accessibilityLabel: "减少此类推荐",
+        accessibilityIdentifier: "personalized-feedback-action-\(threadID)",
         isEnabled: true
       )
     case .submitting:
-      PersonalizedFeedbackActionPresentation(
-        title: "提交中",
-        systemImage: "hourglass",
+      ThreadSummaryTrailingMetricAction(
+        systemImage: "hand.thumbsdown",
         accessibilityLabel: "正在提交推荐反馈",
+        accessibilityIdentifier: "personalized-feedback-action-\(threadID)",
         isEnabled: false
       )
-    }
-  }
-}
-
-struct PersonalizedFeedbackActionPresentation: Equatable, Sendable {
-  let title: String
-  let systemImage: String
-  let accessibilityLabel: String
-  let isEnabled: Bool
-}
-
-struct PersonalizedFeedbackFooter: View {
-  let threadID: Int64
-  let state: PersonalizedFeedbackActionAvailability
-  let action: () -> Void
-
-  @ViewBuilder
-  var body: some View {
-    if let presentation = state.presentation {
-      HStack(spacing: 0) {
-        Spacer(minLength: 0)
-        Button(action: action) {
-          Label(presentation.title, systemImage: presentation.systemImage)
-            .font(.caption)
-            .lineLimit(1)
-            .padding(.horizontal, 8)
-            .frame(minWidth: 44, minHeight: 44)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.borderless)
-        .disabled(!presentation.isEnabled)
-        .accessibilityLabel(presentation.accessibilityLabel)
-        .accessibilityIdentifier("personalized-feedback-action-\(threadID)")
-        .help(presentation.accessibilityLabel)
-      }
-      .frame(maxWidth: .infinity, alignment: .trailing)
     }
   }
 }

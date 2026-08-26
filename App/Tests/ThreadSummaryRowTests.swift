@@ -1,29 +1,79 @@
 import Foundation
 import SwiftUI
+import UIKit
 import XCTest
 
 @testable import TiebaPlusPlus
 
 final class ThreadSummaryRowTests: XCTestCase {
-  func testImageInteractionCanBeDisabledForAListSurface() {
+  func testMediaInteractionRequiresExplicitGalleryOptIn() {
     XCTAssertTrue(
-      ThreadSummaryImageInteractionPolicy.permitsOpening(
-        isEnabled: true,
+      ThreadSummaryMediaInteractionPolicy.permitsOpening(
+        interaction: .gallery,
         environmentActionAvailable: true
       )
     )
     XCTAssertFalse(
-      ThreadSummaryImageInteractionPolicy.permitsOpening(
-        isEnabled: false,
+      ThreadSummaryMediaInteractionPolicy.permitsOpening(
+        interaction: .openThread,
         environmentActionAvailable: true
       )
     )
     XCTAssertFalse(
-      ThreadSummaryImageInteractionPolicy.permitsOpening(
-        isEnabled: true,
+      ThreadSummaryMediaInteractionPolicy.permitsOpening(
+        interaction: .disabled,
+        environmentActionAvailable: true
+      )
+    )
+    XCTAssertFalse(
+      ThreadSummaryMediaInteractionPolicy.permitsOpening(
+        interaction: .gallery,
         environmentActionAvailable: false
       )
     )
+  }
+
+  @MainActor
+  func testThreadFocusedMetricActionDoesNotAddASeparateFooterRow() {
+    let thread = makeThread(contents: [])
+    let action = ThreadSummaryTrailingMetricAction(
+      systemImage: "hand.thumbsdown",
+      accessibilityLabel: "减少此类推荐",
+      accessibilityIdentifier: "personalized-feedback-action-42",
+      isEnabled: true
+    )
+    let width: CGFloat = 390
+
+    let withoutAction = UIHostingController(
+      rootView: ThreadSummaryRow(
+        thread: thread,
+        showsForum: true,
+        contextLayout: .compact,
+        interactionMode: .threadFocused,
+        onNavigate: { _ in }
+      )
+      .environment(\.dynamicTypeSize, .large)
+      .frame(width: width)
+    )
+    let withAction = UIHostingController(
+      rootView: ThreadSummaryRow(
+        thread: thread,
+        showsForum: true,
+        contextLayout: .compact,
+        interactionMode: .threadFocused,
+        trailingMetricAction: action,
+        onNavigate: { _ in }
+      )
+      .environment(\.dynamicTypeSize, .large)
+      .frame(width: width)
+    )
+    let proposal = CGSize(width: width, height: 1_000)
+    let withoutActionSize = withoutAction.sizeThatFits(in: proposal)
+    let withActionSize = withAction.sizeThatFits(in: proposal)
+
+    XCTAssertEqual(withoutActionSize.width, width, accuracy: 0.5)
+    XCTAssertEqual(withActionSize.width, width, accuracy: 0.5)
+    XCTAssertEqual(withActionSize.height, withoutActionSize.height, accuracy: 0.5)
   }
 
   func testAdaptiveContextMetadataRetainsWidthAwareFallback() {
