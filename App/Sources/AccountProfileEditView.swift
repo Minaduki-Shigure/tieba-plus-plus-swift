@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct AccountProfileEditView: View {
-  let onSaved: @MainActor @Sendable (AccountProfileSummary) -> Void
+  let onSaved: @MainActor (AccountProfileSummary) -> Void
 
   @Environment(\.dismiss) private var dismiss
   @StateObject private var viewModel: AccountProfileEditViewModel
@@ -14,7 +14,7 @@ struct AccountProfileEditView: View {
     userID: Int64,
     service: any AccountService,
     vault: any AccountVault,
-    onSaved: @escaping @MainActor @Sendable (AccountProfileSummary) -> Void
+    onSaved: @escaping @MainActor (AccountProfileSummary) -> Void
   ) {
     self.onSaved = onSaved
     _viewModel = StateObject(
