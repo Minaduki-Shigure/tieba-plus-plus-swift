@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct AccountProfileEditView: View {
-  private let onSaved: (AccountProfileSummary) -> Void
+  let onSaved: @MainActor @Sendable (AccountProfileSummary) -> Void
 
   @Environment(\.dismiss) private var dismiss
   @StateObject private var viewModel: AccountProfileEditViewModel
@@ -14,7 +14,7 @@ struct AccountProfileEditView: View {
     userID: Int64,
     service: any AccountService,
     vault: any AccountVault,
-    onSaved: @escaping (AccountProfileSummary) -> Void
+    onSaved: @escaping @MainActor @Sendable (AccountProfileSummary) -> Void
   ) {
     self.onSaved = onSaved
     _viewModel = StateObject(
@@ -74,6 +74,7 @@ struct AccountProfileEditView: View {
             if viewModel.isSaving {
               ProgressView()
                 .controlSize(.small)
+            }
           }
         }
         .frame(width: 32, height: 32)
