@@ -1580,7 +1580,7 @@ enum RootStartupNavigation {
       }
     }
 
-    switch startDestination {
+    return switch startDestination {
     case .home:
       RootMainNavigationState(selectedTab: .home)
     case .discovery:
