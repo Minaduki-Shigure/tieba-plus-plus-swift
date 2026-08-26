@@ -733,7 +733,7 @@ struct ImageViewer: View {
   var body: some View {
     ZStack {
       Color.black
-        .opacity(1 - interactiveDismissProgress * 0.45)
+        .opacity(1 - Double(interactiveDismissProgress) * 0.45)
         .ignoresSafeArea()
 
       ZStack {
