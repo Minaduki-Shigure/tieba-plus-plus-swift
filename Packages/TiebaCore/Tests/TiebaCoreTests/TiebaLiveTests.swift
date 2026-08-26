@@ -3,7 +3,63 @@ import XCTest
 
 @testable import TiebaCore
 
+private enum TiebaLiveSearchRetryPolicy {
+  static let delays: [Duration] = [.seconds(5), .seconds(15)]
+
+  static func delay(after error: Error, failedAttempt: Int) -> Duration? {
+    guard
+      failedAttempt > 0,
+      failedAttempt <= delays.count,
+      let clientError = error as? TiebaClientError,
+      case .server(let code, let message) = clientError,
+      code == 300_003,
+      message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        == "internal error"
+    else {
+      return nil
+    }
+    return delays[failedAttempt - 1]
+  }
+}
+
 final class TiebaLiveTests: XCTestCase {
+  func testLiveSearchRetryPolicyIsNarrowAndBounded() {
+    let transientError = TiebaClientError.server(
+      code: 300_003,
+      message: " Internal Error "
+    )
+
+    XCTAssertEqual(
+      TiebaLiveSearchRetryPolicy.delay(after: transientError, failedAttempt: 1),
+      .seconds(5)
+    )
+    XCTAssertEqual(
+      TiebaLiveSearchRetryPolicy.delay(after: transientError, failedAttempt: 2),
+      .seconds(15)
+    )
+    XCTAssertNil(
+      TiebaLiveSearchRetryPolicy.delay(after: transientError, failedAttempt: 3)
+    )
+    XCTAssertNil(
+      TiebaLiveSearchRetryPolicy.delay(
+        after: TiebaClientError.server(code: 300_003, message: "search unavailable"),
+        failedAttempt: 1
+      )
+    )
+    XCTAssertNil(
+      TiebaLiveSearchRetryPolicy.delay(
+        after: TiebaClientError.server(code: 300_004, message: "internal error"),
+        failedAttempt: 1
+      )
+    )
+    XCTAssertNil(
+      TiebaLiveSearchRetryPolicy.delay(
+        after: TiebaClientError.network(code: -1_001),
+        failedAttempt: 1
+      )
+    )
+  }
+
   func testAnonymousPersonalizedFeedUsesAppScopedUUIDAndPaginates() async throws {
     guard ProcessInfo.processInfo.environment["TIEBA_LIVE_TESTS"] == "1" else {
       throw XCTSkip("Set TIEBA_LIVE_TESTS=1 to exercise the unofficial live API.")
@@ -339,37 +395,49 @@ final class TiebaLiveTests: XCTestCase {
     let client = TiebaClient(
       configuration: .init(userAgent: "TiebaPlusPlus/0.56 integration-test")
     )
-    let forums = try await client.searchForums(query: "swift")
+    let forums = try await retryingTransientLiveSearch("forum search") {
+      try await client.searchForums(query: "swift")
+    }
     XCTAssertFalse(forums.isLoggedIn)
     XCTAssertTrue(forums.exactMatch != nil || !forums.fuzzyMatches.isEmpty)
 
     for sort in TiebaGlobalThreadSearchSort.allCases {
-      let threads = try await client.searchThreads(query: "swift", pageSize: 5, sort: sort)
+      let threads = try await retryingTransientLiveSearch(
+        "global thread search (\(sort))"
+      ) {
+        try await client.searchThreads(query: "swift", pageSize: 5, sort: sort)
+      }
       XCTAssertFalse(threads.isLoggedIn)
       XCTAssertFalse(threads.results.isEmpty, "Expected anonymous results for \(sort)")
       XCTAssertEqual(threads.pagination.currentPage, 1)
       XCTAssertTrue(threads.results.allSatisfy { $0.threadID > 0 })
     }
 
-    let scopedThreads = try await client.searchForumPosts(
-      query: "游戏",
-      forumName: "minecraft",
-      pageSize: 5,
-      sort: .relevance,
-      filter: .threadsOnly
-    )
+    let scopedThreads = try await retryingTransientLiveSearch("scoped thread search") {
+      try await client.searchForumPosts(
+        query: "游戏",
+        forumName: "minecraft",
+        pageSize: 5,
+        sort: .relevance,
+        filter: .threadsOnly
+      )
+    }
     XCTAssertFalse(scopedThreads.isLoggedIn)
     XCTAssertFalse(scopedThreads.results.isEmpty)
     XCTAssertEqual(scopedThreads.pagination.currentPage, 1)
     XCTAssertTrue(scopedThreads.results.allSatisfy { $0.target == .thread })
 
-    let scopedAllContent = try await client.searchForumPosts(
-      query: "游戏",
-      forumName: "minecraft",
-      pageSize: 20,
-      sort: .newest,
-      filter: .all
-    )
+    let scopedAllContent = try await retryingTransientLiveSearch(
+      "scoped all-content search"
+    ) {
+      try await client.searchForumPosts(
+        query: "游戏",
+        forumName: "minecraft",
+        pageSize: 20,
+        sort: .newest,
+        filter: .all
+      )
+    }
     XCTAssertFalse(scopedAllContent.results.isEmpty)
     let containsReply = scopedAllContent.results.contains(where: { result in
       if case .post = result.target { return true }
@@ -378,19 +446,25 @@ final class TiebaLiveTests: XCTestCase {
     XCTAssertTrue(containsReply)
 
     if scopedThreads.pagination.hasMore {
-      let nextScopedPage = try await client.searchForumPosts(
-        query: "游戏",
-        forumName: "minecraft",
-        page: 2,
-        pageSize: 5,
-        sort: .relevance,
-        filter: .threadsOnly
-      )
+      let nextScopedPage = try await retryingTransientLiveSearch(
+        "scoped thread search page 2"
+      ) {
+        try await client.searchForumPosts(
+          query: "游戏",
+          forumName: "minecraft",
+          page: 2,
+          pageSize: 5,
+          sort: .relevance,
+          filter: .threadsOnly
+        )
+      }
       XCTAssertEqual(nextScopedPage.pagination.currentPage, 2)
       XCTAssertFalse(nextScopedPage.results.isEmpty)
     }
 
-    let users = try await client.searchUsers(query: "swift")
+    let users = try await retryingTransientLiveSearch("user search") {
+      try await client.searchUsers(query: "swift")
+    }
     XCTAssertTrue(users.exactMatch != nil || !users.fuzzyMatches.isEmpty)
     XCTAssertTrue(users.fuzzyMatches.allSatisfy { $0.id > 0 && !$0.preferredName.isEmpty })
   }
@@ -787,5 +861,32 @@ final class TiebaLiveTests: XCTestCase {
     XCTAssertFalse(rules.title.isEmpty)
     XCTAssertFalse(rules.rules.isEmpty)
     XCTAssertTrue(rules.rules.contains { !$0.content.fragments.isEmpty })
+  }
+
+  private func retryingTransientLiveSearch<Value>(
+    _ operationName: String,
+    operation: () async throws -> Value
+  ) async throws -> Value {
+    var failedAttempt = 1
+    while true {
+      do {
+        return try await operation()
+      } catch {
+        guard
+          let delay = TiebaLiveSearchRetryPolicy.delay(
+            after: error,
+            failedAttempt: failedAttempt
+          )
+        else {
+          throw error
+        }
+        print(
+          "Retrying \(operationName) after transient Tieba search failure "
+            + "(failed attempt \(failedAttempt))."
+        )
+        try await Task.sleep(for: delay)
+        failedAttempt += 1
+      }
+    }
   }
 }
