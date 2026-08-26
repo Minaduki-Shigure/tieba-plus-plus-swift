@@ -288,6 +288,9 @@ final class TiebaSessionAndCloudFavoritesTests: XCTestCase {
     let favorite = try XCTUnwrap(page.favorites.first)
     XCTAssertEqual(favorite.forumName, "swift")
     XCTAssertEqual(favorite.author.userID, 123)
+    XCTAssertEqual(favorite.author.username, "author-name")
+    XCTAssertEqual(favorite.author.displayName, "Display Name")
+    XCTAssertEqual(favorite.author.portrait, "portrait-token")
     XCTAssertEqual(favorite.author.preferredName, "Display Name")
     XCTAssertFalse(favorite.isDeleted)
     XCTAssertEqual(favorite.lastTimestamp, 1_700_000_000)
@@ -354,6 +357,39 @@ final class TiebaSessionAndCloudFavoritesTests: XCTestCase {
     XCTAssertEqual(deletedPage.favorites.first?.title, "")
     XCTAssertEqual(deletedPage.favorites.first?.forumName, "")
     XCTAssertTrue(deletedPage.favorites.first?.isDeleted ?? false)
+    XCTAssertEqual(deletedPage.favorites.first?.author.userID, 123)
+    XCTAssertEqual(deletedPage.favorites.first?.author.username, "author-name")
+    XCTAssertEqual(deletedPage.favorites.first?.author.displayName, "Display Name")
+    XCTAssertEqual(deletedPage.favorites.first?.author.portrait, "portrait-token")
+
+    let routelessAuthors = [
+      favoriteObject(authorID: nil),
+      favoriteObject(authorID: NSNull()),
+      favoriteObject(authorID: ""),
+      favoriteObject(authorID: "0"),
+    ]
+    for object in routelessAuthors {
+      let page = try TiebaAuthenticatedDecoder.cloudFavorites(
+        from: cloudFavoritesBody(items: [object]),
+        expectedUserID: userID,
+        offset: 0,
+        pageSize: 20
+      )
+      XCTAssertNil(page.favorites.first?.author.userID)
+    }
+
+    for invalidAuthorID in ["-1", "not-a-user-id"] {
+      XCTAssertThrowsError(
+        try TiebaAuthenticatedDecoder.cloudFavorites(
+          from: cloudFavoritesBody(items: [favoriteObject(authorID: invalidAuthorID)]),
+          expectedUserID: userID,
+          offset: 0,
+          pageSize: 20
+        )
+      ) { error in
+        XCTAssertEqual(error as? TiebaClientError, .invalidJSON)
+      }
+    }
 
     var malformed = favoriteObject()
     malformed.removeValue(forKey: "mark_pid")
@@ -487,17 +523,23 @@ final class TiebaSessionAndCloudFavoritesTests: XCTestCase {
     Data("{\"no\":0,\"data\":{\"id\":\"\(userID)\"}}".utf8)
   }
 
-  private func favoriteObject(title: String = "Saved thread") -> [String: Any] {
-    [
+  private func favoriteObject(
+    title: String = "Saved thread",
+    authorID: Any? = "123"
+  ) -> [String: Any] {
+    var author: [String: Any] = [
+      "name": "author-name",
+      "name_show": "Display Name",
+      "user_portrait": "portrait-token",
+    ]
+    if let authorID {
+      author["lz_uid"] = authorID
+    }
+    return [
       "thread_id": "42",
       "title": title,
       "forum_name": "swift",
-      "author": [
-        "lz_uid": "123",
-        "name": "author-name",
-        "name_show": "Display Name",
-        "user_portrait": "portrait-token",
-      ],
+      "author": author,
       "is_deleted": "0",
       "last_time": "1700000000",
       "type": "1",

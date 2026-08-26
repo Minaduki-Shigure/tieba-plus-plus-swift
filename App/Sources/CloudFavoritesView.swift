@@ -579,6 +579,7 @@ struct CloudFavoritesView: View {
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
 
+  @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
   @AppStorage(AppPreferenceKey.cloudFavoriteThreadsOpenOnlyAuthor)
   private var cloudFavoriteThreadsOpenOnlyAuthor =
     AppPreferenceDefaults.cloudFavoriteThreadsOpenOnlyAuthor
@@ -706,36 +707,153 @@ struct CloudFavoritesView: View {
 
   @ViewBuilder
   private func favoriteRow(_ thread: CloudFavoriteThread) -> some View {
-    if thread.isDeleted {
-      CloudFavoriteThreadRow(
-        thread: thread,
-        isRemoving: viewModel.removingThreadID == thread.id
+    let interactions = CloudFavoriteRowInteractionPolicy(
+      thread: thread,
+      overrides: FavoriteThreadOpenOverrides(
+        onlyThreadAuthor: cloudFavoriteThreadsOpenOnlyAuthor,
+        descending: cloudFavoriteThreadsOpenDescending
       )
-    } else {
-      NavigationLink {
-        let navigation = thread.navigation(
-          applying: FavoriteThreadOpenOverrides(
-            onlyThreadAuthor: cloudFavoriteThreadsOpenOnlyAuthor,
-            descending: cloudFavoriteThreadsOpenDescending
+    )
+    let author = CloudFavoriteAuthorPresentation(
+      thread: thread,
+      showsBothNames: showsBothNames
+    )
+
+    VStack(alignment: .leading, spacing: 0) {
+      if author.isVisible {
+        favoriteAuthorRow(
+          author,
+          route: interactions.authorRoute,
+          threadID: thread.id
+        )
+        Divider()
+          .padding(.leading, 42)
+      }
+
+      if let navigation = interactions.threadNavigation {
+        NavigationLink {
+          favoriteThreadDestination(navigation)
+        } label: {
+          CloudFavoriteThreadRow(
+            thread: thread,
+            isRemoving: viewModel.removingThreadID == thread.id
           )
-        )
-        ThreadView(
-          thread: navigation.route.placeholderThread,
-          service: browseService,
-          historyRepository: historyRepository,
-          favoritesRepository: favoritesRepository,
-          searchHistoryRepository: searchHistoryRepository,
-          linkRoute: navigation.route,
-          initialBrowseOptions: navigation.options,
-          cloudFavoriteUpdate: navigation.update
-        )
-      } label: {
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(threadAccessibilityLabel(thread))
+        .accessibilityHint("打开收藏的主题")
+        .accessibilityIdentifier("cloud-favorite-thread-\(thread.id)")
+      } else {
         CloudFavoriteThreadRow(
           thread: thread,
           isRemoving: viewModel.removingThreadID == thread.id
         )
+        .accessibilityIdentifier("cloud-favorite-thread-deleted-\(thread.id)")
       }
     }
+  }
+
+  @ViewBuilder
+  private func favoriteAuthorRow(
+    _ presentation: CloudFavoriteAuthorPresentation,
+    route: CloudFavoriteAuthorProfileRoute?,
+    threadID: Int64
+  ) -> some View {
+    if let route {
+      NavigationLink {
+        UserProfileView(
+          userID: route.userID,
+          service: browseService,
+          historyRepository: historyRepository,
+          favoritesRepository: favoritesRepository,
+          searchHistoryRepository: searchHistoryRepository
+        )
+      } label: {
+        CloudFavoriteAuthorRow(presentation: presentation, isInteractive: true)
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel(presentation.profileAccessibilityLabel)
+      .accessibilityHint("打开作者主页")
+      .accessibilityIdentifier("cloud-favorite-author-\(threadID)")
+    } else {
+      CloudFavoriteAuthorRow(presentation: presentation, isInteractive: false)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("cloud-favorite-author-static-\(threadID)")
+    }
+  }
+
+  private func favoriteThreadDestination(
+    _ navigation: CloudFavoriteThreadNavigation
+  ) -> some View {
+    ThreadView(
+      thread: navigation.route.placeholderThread,
+      service: browseService,
+      historyRepository: historyRepository,
+      favoritesRepository: favoritesRepository,
+      searchHistoryRepository: searchHistoryRepository,
+      linkRoute: navigation.route,
+      initialBrowseOptions: navigation.options,
+      cloudFavoriteUpdate: navigation.update
+    )
+  }
+
+  private func threadAccessibilityLabel(_ thread: CloudFavoriteThread) -> String {
+    let title = thread.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    return title.isEmpty ? "打开帖子 \(thread.id)" : "打开主题：\(title)"
+  }
+}
+
+struct CloudFavoriteAuthorPresentation: Equatable, Sendable {
+  let displayName: String
+  let portraitURL: URL?
+  let isVisible: Bool
+
+  init(thread: CloudFavoriteThread, showsBothNames: Bool) {
+    portraitURL = thread.author.portraitURL
+    let formattedName = UserNameFormatter.displayName(
+      preferredName: thread.author.displayName,
+      username: thread.author.username,
+      showsBoth: showsBothNames
+    )
+    isVisible = !formattedName.isEmpty || portraitURL != nil || thread.authorProfileRoute != nil
+    displayName = formattedName.isEmpty ? "贴吧用户" : formattedName
+  }
+
+  var profileAccessibilityLabel: String {
+    "查看 \(displayName) 的主页"
+  }
+}
+
+private struct CloudFavoriteAuthorRow: View {
+  let presentation: CloudFavoriteAuthorPresentation
+  let isInteractive: Bool
+
+  var body: some View {
+    HStack(spacing: 10) {
+      AvatarView(
+        url: presentation.portraitURL,
+        name: presentation.displayName,
+        size: 32
+      )
+      VStack(alignment: .leading, spacing: 2) {
+        Text(presentation.displayName)
+          .font(.subheadline.weight(.medium))
+          .foregroundStyle(.primary)
+          .lineLimit(1)
+        Text("主题作者")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+      Spacer(minLength: 8)
+      if isInteractive {
+        Image(systemName: "chevron.right")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.tertiary)
+          .accessibilityHidden(true)
+      }
+    }
+    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+    .contentShape(Rectangle())
   }
 }
 
@@ -762,18 +880,11 @@ private struct CloudFavoriteThreadRow: View {
         }
       }
 
-      if !thread.forumName.isEmpty || !thread.authorName.isEmpty {
-        HStack(spacing: 8) {
-          if !thread.forumName.isEmpty {
-            Text("\(thread.forumName)吧")
-          }
-          if !thread.authorName.isEmpty {
-            Text(thread.authorName)
-          }
-        }
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
+      if !thread.forumName.isEmpty {
+        Text("\(thread.forumName)吧")
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
       }
 
       HStack(spacing: 12) {
@@ -790,7 +901,9 @@ private struct CloudFavoriteThreadRow: View {
       .font(.caption)
       .foregroundStyle(.secondary)
     }
+    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
     .padding(.vertical, 3)
+    .contentShape(Rectangle())
     .accessibilityElement(children: .combine)
   }
 

@@ -198,17 +198,63 @@ struct InboxUnreadSummary: Hashable, Sendable {
   }
 }
 
+struct CloudFavoriteAuthor: Hashable, Sendable {
+  let userID: Int64?
+  let username: String
+  let displayName: String
+  let portraitURL: URL?
+
+  init(
+    userID: Int64?,
+    username: String,
+    displayName: String,
+    portraitURL: URL?
+  ) {
+    self.userID = userID.flatMap { $0 > 0 ? $0 : nil }
+    self.username = username
+    self.displayName = displayName
+    self.portraitURL = portraitURL
+  }
+
+  var preferredName: String {
+    UserNameFormatter.displayName(
+      preferredName: displayName,
+      username: username,
+      showsBoth: false
+    )
+  }
+}
+
+struct CloudFavoriteAuthorProfileRoute: Hashable, Sendable {
+  let userID: Int64
+
+  init?(userID: Int64?) {
+    guard let userID, userID > 0 else { return nil }
+    self.userID = userID
+  }
+
+  init?(author: CloudFavoriteAuthor) {
+    self.init(userID: author.userID)
+  }
+}
+
 struct CloudFavoriteThread: Identifiable, Hashable, Sendable {
   let id: Int64
   let title: String
   let forumName: String
-  let authorName: String
+  let author: CloudFavoriteAuthor
   let markPostID: Int64?
   let latestPostID: Int64?
   let latestFloor: Int?
   let hasUpdates: Bool
   let isDeleted: Bool
   let updatedAt: Date?
+
+  var authorName: String { author.preferredName }
+
+  var authorProfileRoute: CloudFavoriteAuthorProfileRoute? {
+    CloudFavoriteAuthorProfileRoute(author: author)
+  }
 
   var threadRoute: TiebaThreadRoute {
     TiebaThreadRoute(threadID: id, postID: markPostID)
@@ -236,6 +282,19 @@ struct CloudFavoriteThreadNavigation: Hashable, Sendable {
   let route: TiebaThreadRoute
   let options: ThreadBrowseOptions
   let update: CloudFavoriteThreadUpdate?
+}
+
+struct CloudFavoriteRowInteractionPolicy: Equatable, Sendable {
+  let authorRoute: CloudFavoriteAuthorProfileRoute?
+  let threadNavigation: CloudFavoriteThreadNavigation?
+
+  init(
+    thread: CloudFavoriteThread,
+    overrides: FavoriteThreadOpenOverrides
+  ) {
+    authorRoute = thread.authorProfileRoute
+    threadNavigation = thread.isDeleted ? nil : thread.navigation(applying: overrides)
+  }
 }
 
 struct CloudFavoriteThreadUpdate: Hashable, Sendable {

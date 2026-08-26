@@ -23,6 +23,23 @@ final class CloudFavoriteTargetResolverTests: XCTestCase {
     XCTAssertTrue(forumRequests.isEmpty)
   }
 
+  func testAuthorIdentityNeverParticipatesInRemovalResolution() async throws {
+    let favorite = cloudFavoriteResolverItem(threadID: 53, forumName: "swift")
+    let authorID = try XCTUnwrap(favorite.author.userID)
+    XCTAssertNotEqual(authorID, favorite.id)
+
+    let service = CloudFavoriteTargetBrowseSpy(
+      result: .success(cloudFavoriteIdentity(threadID: 53, forumID: 9, forumName: "swift"))
+    )
+    let target = try await CloudFavoriteTargetResolver(service: service).resolve(favorite)
+
+    XCTAssertEqual(target.threadID, favorite.id)
+    XCTAssertEqual(target.forumID, 9)
+    XCTAssertEqual(target.forumName, "swift")
+    let requests = await service.requestSnapshot()
+    XCTAssertEqual(requests, [.init(threadID: favorite.id, expectedForumName: "swift")])
+  }
+
   func testDeletedItemWithEmptyListForumUsesAuthoritativeThreadForum() async throws {
     let service = CloudFavoriteTargetBrowseSpy(
       result: .success(cloudFavoriteIdentity(threadID: 42, forumID: 10, forumName: "ios"))
@@ -324,7 +341,12 @@ private func cloudFavoriteResolverItem(
     id: threadID,
     title: "Thread \(threadID)",
     forumName: forumName,
-    authorName: "author",
+    author: CloudFavoriteAuthor(
+      userID: threadID + 1_000,
+      username: "author-account",
+      displayName: "author",
+      portraitURL: nil
+    ),
     markPostID: threadID + 100,
     latestPostID: threadID + 200,
     latestFloor: 2,

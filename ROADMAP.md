@@ -129,6 +129,12 @@ Cloud favorites now consume independent only-thread-author and descending-order
 opening preferences while retaining the server-provided marked-post anchor. This
 closes another narrow TiebaLite habit gap without adding a request or weighted
 point, and leaves the established local-favorite defaults unchanged.
+Current-main cloud-favorite rows also retain the response's author UID, username,
+display name, and strictly validated portrait token. Separate sibling controls
+open the positive-UID public profile or the stored topic without nested gesture
+routing; deleted topics retain an independently valid author destination. This
+closes TiebaLite's reachable stored-thread author workflow without adding a
+request, credential, or weighted point.
 The local About destination closes another narrow settings gap but adds no data
 source or workflow, so it also remains inside the existing settings credit.
 The shared selectable-text panel closes one narrow TiebaLite interaction gap
@@ -498,8 +504,11 @@ the source metadata is updated to that tested IPA.
   adding a private request
 - Separate Tieba cloud favorites with offset pagination, saved-post navigation,
   a dismissible saved-position-to-latest-update handoff for consistent metadata,
-  deleted-thread state, account-lease isolation, and confirmed list deletion only
-  after raw thread/forum rebinding. If the anonymous thread identity is
+  deleted-thread state, account-lease isolation, a separate author header that
+  opens the credential-free public profile only for a positive server UID, and
+  confirmed list deletion only after raw thread/forum rebinding. Author username,
+  display name, and strict portrait URL remain presentation-only and never enter
+  the deletion target. If the anonymous thread identity is
   unavailable, an exact retained forum name may obtain a positive forum ID from
   one bounded anonymous FRS response, but the existing authenticated PB probe
   must still bind that forum and thread before any write. Fully unresolvable rows

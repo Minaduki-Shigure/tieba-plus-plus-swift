@@ -684,7 +684,7 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
         displayName: "Author",
         portrait: "portrait"
       ),
-      isDeleted: false,
+      isDeleted: true,
       lastTimestamp: 1_700_000_000,
       threadType: 0,
       status: 0,
@@ -719,6 +719,15 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     let item = try XCTUnwrap(page.items.first)
     XCTAssertEqual(item.id, 123)
     XCTAssertEqual(item.authorName, "Author")
+    XCTAssertEqual(item.author.userID, 8)
+    XCTAssertEqual(item.author.username, "author")
+    XCTAssertEqual(item.author.displayName, "Author")
+    XCTAssertEqual(
+      item.author.portraitURL,
+      URL(string: "https://himg.bdimg.com/sys/portraitn/item/portrait")
+    )
+    XCTAssertEqual(item.authorProfileRoute?.userID, 8)
+    XCTAssertTrue(item.isDeleted)
     XCTAssertEqual(item.markPostID, 456)
     XCTAssertEqual(item.latestPostID, 999)
     XCTAssertEqual(item.latestFloor, 88)

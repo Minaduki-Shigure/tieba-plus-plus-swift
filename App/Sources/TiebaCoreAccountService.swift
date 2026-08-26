@@ -686,7 +686,12 @@ struct TiebaCoreAccountService: AccountService {
           id: favorite.id,
           title: favorite.title,
           forumName: favorite.forumName,
-          authorName: favorite.author.preferredName,
+          author: CloudFavoriteAuthor(
+            userID: favorite.author.userID,
+            username: favorite.author.username,
+            displayName: favorite.author.displayName,
+            portraitURL: SecureTiebaURL.strictPortrait(favorite.author.portrait)
+          ),
           markPostID: favorite.markedPostID > 0 ? favorite.markedPostID : nil,
           latestPostID: favorite.maximumPostID > 0 ? favorite.maximumPostID : nil,
           latestFloor: favorite.postNumber > 0 ? favorite.postNumber : nil,

@@ -454,6 +454,14 @@ and its verified metadata enters the public app source.
   independent only-thread-author and descending-order defaults. Opening a cloud
   favorite applies those options without losing its saved post anchor; existing
   local-favorite preferences and their defaults remain unchanged.
+- **Current-main cloud-favorite author profiles:** Cloud-favorite rows now retain
+  the server-provided author UID, username, display name, and strictly validated
+  portrait token. The author header and stored topic are separate, nonnested
+  navigation targets, so selecting the author opens the credential-free public
+  profile without also opening the topic. Only a positive UID enables that
+  action; missing or invalid identity remains static, while a deleted topic can
+  still expose its independently valid author profile. No additional request is
+  made until the user explicitly opens the profile.
 - **`v0.63.0` list image galleries:** A loaded image thumbnail, or a collapsed
   image-count summary, opens the existing full-screen gallery directly instead
   of entering the thread first. The exact original content offset is retained,
@@ -979,8 +987,11 @@ and its verified metadata enters the public app source.
   exact minimum signed-field set still require physical-device validation.
 - **Tieba cloud favorites:** The account page has a separate cloud favorites list
   with refresh, offset pagination, saved-post navigation, deleted-thread state,
-  account-lease isolation, and explicitly confirmed single-item removal. Before a
-  list removal, a raw anonymous PB response normally binds the thread to a
+  account-lease isolation, independently openable positive-UID author profiles,
+  and explicitly confirmed single-item removal. Author and topic controls are
+  sibling navigation regions rather than nested actions; missing identity never
+  guesses from a name, portrait, or thread ID. Before a list removal, a raw
+  anonymous PB response normally binds the thread to a
   positive forum ID and canonical forum name. When that read fails, a retained
   nonempty row name may use one bounded anonymous FRS identity fallback, but only
   when the response returns that exact trim-and-NFC canonical name and a positive

@@ -10,7 +10,7 @@ final class CloudFavoritesViewModelTests: XCTestCase {
       id: 42,
       title: "A saved thread",
       forumName: "swift",
-      authorName: "author",
+      author: cloudFavoriteAuthor(userID: 7, displayName: "author"),
       markPostID: 99,
       latestPostID: 100,
       latestFloor: 8,
@@ -1015,7 +1015,11 @@ private func cloudItem(
     id: id,
     title: title ?? "Thread \(id)",
     forumName: "swift",
-    authorName: "author-\(id)",
+    author: cloudFavoriteAuthor(
+      userID: id + 100,
+      username: "author-account-\(id)",
+      displayName: "author-\(id)"
+    ),
     markPostID: 1_000 + id,
     latestPostID: 2_000 + id,
     latestFloor: latestFloor,
@@ -1037,13 +1041,27 @@ private func cloudUpdateItem(
     id: id,
     title: "Thread \(id)",
     forumName: "swift",
-    authorName: "author",
+    author: cloudFavoriteAuthor(userID: 7, displayName: "author"),
     markPostID: markPostID,
     latestPostID: latestPostID,
     latestFloor: latestFloor,
     hasUpdates: hasUpdates,
     isDeleted: isDeleted,
     updatedAt: Date(timeIntervalSince1970: 1)
+  )
+}
+
+private func cloudFavoriteAuthor(
+  userID: Int64?,
+  username: String = "author-account",
+  displayName: String = "author",
+  portraitURL: URL? = nil
+) -> CloudFavoriteAuthor {
+  CloudFavoriteAuthor(
+    userID: userID,
+    username: username,
+    displayName: displayName,
+    portraitURL: portraitURL
   )
 }
 
