@@ -1597,14 +1597,14 @@ final class ImageGalleryTests: XCTestCase {
       ImageGalleryZoomState(
         scale: 2,
         offset: .zero,
-        panLimits: ImageZoomPanLimits(horizontal: .infinity, vertical: 200),
+        panLimits: ImageZoomPanLimits(horizontal: CGFloat.infinity, vertical: 200),
         panLimitsViewportSize: viewport
       ).panLimits
     )
     XCTAssertEqual(
       ImageGalleryZoomState(
         scale: 2,
-        offset: CGSize(width: 0, height: .infinity),
+        offset: CGSize(width: 0, height: CGFloat.infinity),
         panLimits: limits,
         panLimitsViewportSize: viewport
       ).offset,
