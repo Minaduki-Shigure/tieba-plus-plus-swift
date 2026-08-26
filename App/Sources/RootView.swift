@@ -133,8 +133,11 @@ struct RootView: View {
                 selectExplore(.personalized)
               } label: {
                 Label("发现", systemImage: "sparkles")
+                  .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                  .contentShape(Rectangle())
               }
               .buttonStyle(.plain)
+              .accessibilityIdentifier("home-explore-entry")
             }
 
             NavigationLink(value: RootDestination.hotTopics) {

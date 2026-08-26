@@ -154,11 +154,35 @@ enum ThreadSummaryContextNavigationPolicy {
   }
 }
 
+enum ThreadSummaryContextLayoutMode: Equatable, Sendable {
+  case adaptive
+  case compact
+}
+
+enum ThreadSummaryContextLayoutStrategy: Equatable, Sendable {
+  case widthAdaptive
+  case singleLine
+  case stacked
+}
+
+enum ThreadSummaryContextLayoutPolicy {
+  static func strategy(
+    mode: ThreadSummaryContextLayoutMode,
+    dynamicTypeSize: DynamicTypeSize
+  ) -> ThreadSummaryContextLayoutStrategy {
+    guard mode == .compact else { return .widthAdaptive }
+    return AppDynamicTypeLayout.prefersExpandedControls(for: dynamicTypeSize)
+      ? .stacked
+      : .singleLine
+  }
+}
+
 struct ThreadSummaryRow<Header: View>: View {
   let thread: BrowseThread
   let showsForum: Bool
   let showsAuthor: Bool
   let searchQuery: String
+  let contextLayout: ThreadSummaryContextLayoutMode
   private let header: () -> Header
   private let onNavigate: (ThreadSummaryNavigationRequest) -> Void
 
@@ -170,12 +194,14 @@ struct ThreadSummaryRow<Header: View>: View {
   @Environment(\.externalWebOpenMode) private var externalWebOpenMode
   @Environment(\.openExternalWeb) private var openExternalWeb
   @Environment(\.openURL) private var openURL
+  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
   init(
     thread: BrowseThread,
     showsForum: Bool = false,
     showsAuthor: Bool = true,
     searchQuery: String = "",
+    contextLayout: ThreadSummaryContextLayoutMode = .adaptive,
     onNavigate: @escaping (ThreadSummaryNavigationRequest) -> Void
   ) where Header == EmptyView {
     self.init(
@@ -183,6 +209,7 @@ struct ThreadSummaryRow<Header: View>: View {
       showsForum: showsForum,
       showsAuthor: showsAuthor,
       searchQuery: searchQuery,
+      contextLayout: contextLayout,
       header: { EmptyView() },
       onNavigate: onNavigate
     )
@@ -193,6 +220,7 @@ struct ThreadSummaryRow<Header: View>: View {
     showsForum: Bool = false,
     showsAuthor: Bool = true,
     searchQuery: String = "",
+    contextLayout: ThreadSummaryContextLayoutMode = .adaptive,
     @ViewBuilder header: @escaping () -> Header,
     onNavigate: @escaping (ThreadSummaryNavigationRequest) -> Void
   ) {
@@ -200,6 +228,7 @@ struct ThreadSummaryRow<Header: View>: View {
     self.showsForum = showsForum
     self.showsAuthor = showsAuthor
     self.searchQuery = searchQuery
+    self.contextLayout = contextLayout
     self.header = header
     self.onNavigate = onNavigate
   }
@@ -481,20 +510,48 @@ struct ThreadSummaryRow<Header: View>: View {
     let hasAuthor = showsAuthor && !displayedAuthorName.isEmpty
     let date = thread.lastReplyAt ?? thread.createdAt
     if hasForum || hasAuthor || date != nil {
-      ViewThatFits(in: .horizontal) {
-        HStack(spacing: 12) {
-          contextLabels(hasForum: hasForum, hasAuthor: hasAuthor)
-          Spacer(minLength: 0)
-          dateLabel(date)
-        }
-
-        VStack(alignment: .leading, spacing: 4) {
-          contextLabels(hasForum: hasForum, hasAuthor: hasAuthor)
-          dateLabel(date)
+      Group {
+        switch ThreadSummaryContextLayoutPolicy.strategy(
+          mode: contextLayout,
+          dynamicTypeSize: dynamicTypeSize
+        ) {
+        case .widthAdaptive:
+          ViewThatFits(in: .horizontal) {
+            horizontalContextLine(hasForum: hasForum, hasAuthor: hasAuthor, date: date)
+            stackedContextLine(hasForum: hasForum, hasAuthor: hasAuthor, date: date)
+          }
+        case .singleLine:
+          horizontalContextLine(hasForum: hasForum, hasAuthor: hasAuthor, date: date)
+        case .stacked:
+          stackedContextLine(hasForum: hasForum, hasAuthor: hasAuthor, date: date)
         }
       }
       .font(.caption)
       .foregroundStyle(.secondary)
+    }
+  }
+
+  private func horizontalContextLine(
+    hasForum: Bool,
+    hasAuthor: Bool,
+    date: Date?
+  ) -> some View {
+    HStack(spacing: 10) {
+      contextLabels(hasForum: hasForum, hasAuthor: hasAuthor)
+      Spacer(minLength: 4)
+      dateLabel(date)
+        .layoutPriority(2)
+    }
+  }
+
+  private func stackedContextLine(
+    hasForum: Bool,
+    hasAuthor: Bool,
+    date: Date?
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      contextLabels(hasForum: hasForum, hasAuthor: hasAuthor)
+      dateLabel(date)
     }
   }
 
@@ -592,7 +649,7 @@ struct ThreadSummaryRow<Header: View>: View {
           .accessibilityHidden(true)
       }
       Text(displayedAuthorName)
-        .lineLimit(showsBothNames ? 2 : 1)
+        .lineLimit(authorNameLineLimit)
         .minimumScaleFactor(0.75)
     }
     .accessibilityElement(children: .ignore)
@@ -605,6 +662,15 @@ struct ThreadSummaryRow<Header: View>: View {
       username: thread.authorUsername,
       showsBoth: showsBothNames
     )
+  }
+
+  private var authorNameLineLimit: Int {
+    let usesCompactSingleLine = contextLayout == .compact
+      && ThreadSummaryContextLayoutPolicy.strategy(
+        mode: contextLayout,
+        dynamicTypeSize: dynamicTypeSize
+      ) == .singleLine
+    return usesCompactSingleLine ? 1 : (showsBothNames ? 2 : 1)
   }
 
   @ViewBuilder
@@ -811,9 +877,13 @@ private struct ThreadPreviewImage: View {
     if let onOpen {
       Button(action: onOpen) {
         renderedPreview(asset)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .clipped()
+          .contentShape(Rectangle())
           .accessibilityHidden(true)
       }
       .buttonStyle(.borderless)
+      .contentShape(Rectangle())
       .accessibilityLabel(openAccessibilityLabel ?? successAccessibilityLabel)
     } else {
       renderedPreview(asset)

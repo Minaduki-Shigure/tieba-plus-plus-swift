@@ -50,7 +50,8 @@ struct BrowseContentView: View {
         .fullScreenCover(item: $imageGalleryPresentation) { presentation in
           ImageViewer(
             items: presentation.items,
-            initialIndex: presentation.initialIndex
+            initialIndex: presentation.initialIndex,
+            onClose: { imageGalleryPresentation = nil }
           )
         }
     } else {

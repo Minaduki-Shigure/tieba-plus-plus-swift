@@ -287,7 +287,10 @@ struct UserProfileView: View {
       Text(contentFilterMessage ?? "")
     }
     .fullScreenCover(item: $portraitPresentation) { presentation in
-      ImageViewer(url: presentation.sourceURL)
+      ImageViewer(
+        url: presentation.sourceURL,
+        onClose: { portraitPresentation = nil }
+      )
     }
     .sheet(item: $interactionRestrictionsPresentation) { presentation in
       if let accountAccess {

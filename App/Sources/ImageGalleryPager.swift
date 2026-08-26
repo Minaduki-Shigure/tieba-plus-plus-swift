@@ -492,19 +492,25 @@ struct ImageGalleryZoomState: Equatable {
   let offset: CGSize
   let mode: ImageGalleryZoomMode
   let referenceViewportSize: CGSize?
+  let panLimits: ImageZoomPanLimits?
+  let panLimitsViewportSize: CGSize?
 
   init(
     scale: CGFloat,
     offset: CGSize,
     mode: ImageGalleryZoomMode? = nil,
-    referenceViewportSize: CGSize? = nil
+    referenceViewportSize: CGSize? = nil,
+    panLimits: ImageZoomPanLimits? = nil,
+    panLimitsViewportSize: CGSize? = nil
   ) {
     let scale = ImageZoomGeometry.clampedScale(
       scale,
       maximumScale: ImageZoomGeometry.absoluteMaximumScale
     )
     self.scale = scale
-    self.offset = ImageZoomGeometry.allowsPanning(at: scale) ? offset : .zero
+    self.offset = ImageZoomGeometry.allowsPanning(at: scale)
+      && offset.width.isFinite
+      && offset.height.isFinite ? offset : .zero
     let mode = mode ?? (ImageZoomGeometry.allowsPanning(at: scale) ? .custom : .fit)
     self.mode = mode
     if
@@ -518,6 +524,22 @@ struct ImageGalleryZoomState: Equatable {
       self.referenceViewportSize = referenceViewportSize
     } else {
       self.referenceViewportSize = nil
+    }
+    if
+      ImageZoomGeometry.allowsPanning(at: scale),
+      let panLimits,
+      panLimits.horizontal.isFinite,
+      panLimits.vertical.isFinite,
+      panLimits.horizontal >= 0,
+      panLimits.vertical >= 0,
+      let panLimitsViewportSize,
+      ImageZoomGeometry.isValidViewport(panLimitsViewportSize)
+    {
+      self.panLimits = panLimits
+      self.panLimitsViewportSize = panLimitsViewportSize
+    } else {
+      self.panLimits = nil
+      self.panLimitsViewportSize = nil
     }
   }
 }
@@ -604,6 +626,7 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
   let zoomStateStore: ImageGalleryZoomStateStore
   let idMigrations: [ImageGalleryItem.ID: ImageGalleryItem.ID]
   let accessibilityPageDescriptions: [ImageGalleryItem.ID: String]
+  let onInteractiveDismiss: (ImageViewerDismissGestureEvent) -> Void
 
   func makeCoordinator() -> Coordinator {
     Coordinator()
@@ -627,7 +650,8 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
         accessibilityPageDescriptions: accessibilityPageDescriptions
       ),
       zoomStateStore: zoomStateStore,
-      onSelectionChange: { selection.wrappedValue = $0 }
+      onSelectionChange: { selection.wrappedValue = $0 },
+      onInteractiveDismiss: onInteractiveDismiss
     )
     return viewController
   }
@@ -646,7 +670,8 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
         accessibilityPageDescriptions: accessibilityPageDescriptions
       ),
       zoomStateStore: zoomStateStore,
-      onSelectionChange: { selection.wrappedValue = $0 }
+      onSelectionChange: { selection.wrappedValue = $0 },
+      onInteractiveDismiss: onInteractiveDismiss
     )
   }
 
@@ -659,7 +684,7 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
 
   @MainActor
   final class Coordinator: NSObject, @preconcurrency UIPageViewControllerDataSource,
-    @preconcurrency UIPageViewControllerDelegate
+    @preconcurrency UIPageViewControllerDelegate, UIGestureRecognizerDelegate
   {
     private weak var pageViewController: ImageGalleryPageViewController?
     private var axis = ImageGalleryPagingAxis.horizontal
@@ -676,6 +701,19 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
     private var accessibilityPageDescriptions = [ImageGalleryItem.ID: String]()
     private var zoomStateStore: ImageGalleryZoomStateStore?
     private var onSelectionChange: (ImageGalleryItem.ID?) -> Void = { _ in }
+    private var onInteractiveDismiss: (ImageViewerDismissGestureEvent) -> Void = { _ in }
+
+    lazy var interactiveDismissPanGestureRecognizer: UIPanGestureRecognizer = {
+      let recognizer = UIPanGestureRecognizer(
+        target: self,
+        action: #selector(handleInteractiveDismissPan)
+      )
+      recognizer.minimumNumberOfTouches = 1
+      recognizer.maximumNumberOfTouches = 1
+      recognizer.cancelsTouchesInView = false
+      recognizer.delegate = self
+      return recognizer
+    }()
 
     var animationPlaybackOwnerID: ImageGalleryItem.ID? {
       animationPlaybackOwnership.ownerID
@@ -713,6 +751,7 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
         self?.handleAccessibilityScroll(direction) ?? false
       }
       configurePagingGesture()
+      configureInteractiveDismissGesture()
       reconcileAnimationPlaybackWithVisibleController()
     }
 
@@ -721,6 +760,9 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       pageViewController?.dataSource = nil
       pageViewController?.delegate = nil
       pageViewController?.onAccessibilityScroll = nil
+      interactiveDismissPanGestureRecognizer.view?.removeGestureRecognizer(
+        interactiveDismissPanGestureRecognizer
+      )
       pageViewController = nil
       pendingUpdate = nil
       isInteractiveTransition = false
@@ -734,15 +776,19 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       controllers.removeAll()
       transitioningIDs.removeAll()
       zoomStateStore = nil
+      onSelectionChange = { _ in }
+      onInteractiveDismiss = { _ in }
     }
 
     func receive(
       _ update: ImageGalleryPagerUpdate,
       zoomStateStore: ImageGalleryZoomStateStore,
-      onSelectionChange: @escaping (ImageGalleryItem.ID?) -> Void
+      onSelectionChange: @escaping (ImageGalleryItem.ID?) -> Void,
+      onInteractiveDismiss: @escaping (ImageViewerDismissGestureEvent) -> Void = { _ in }
     ) {
       self.zoomStateStore = zoomStateStore
       self.onSelectionChange = onSelectionChange
+      self.onInteractiveDismiss = onInteractiveDismiss
       guard !isInteractiveTransition, programmaticTargetID == nil else {
         if let pendingUpdate {
           self.pendingUpdate = pendingUpdate.merging(update)
@@ -1163,6 +1209,90 @@ struct ImageGalleryPager: UIViewControllerRepresentable {
       pagingScrollView.isScrollEnabled = true
       pagingScrollView.isDirectionalLockEnabled = true
       pagingScrollView.panGestureRecognizer.maximumNumberOfTouches = 1
+    }
+
+    private func configureInteractiveDismissGesture() {
+      guard let pageViewController else { return }
+      let recognizer = interactiveDismissPanGestureRecognizer
+      if recognizer.view !== pageViewController.view {
+        recognizer.view?.removeGestureRecognizer(recognizer)
+        pageViewController.view.addGestureRecognizer(recognizer)
+      }
+      pageViewController.pagingScrollView?.panGestureRecognizer.require(toFail: recognizer)
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+      guard
+        gestureRecognizer === interactiveDismissPanGestureRecognizer,
+        let view = gestureRecognizer.view
+      else { return true }
+      let velocity = interactiveDismissPanGestureRecognizer.velocity(in: view)
+      return shouldInteractiveDismissBegin(
+        velocity: CGSize(width: velocity.x, height: velocity.y)
+      )
+    }
+
+    func shouldInteractiveDismissBegin(velocity: CGSize) -> Bool {
+      guard
+        !isInteractiveTransition,
+        programmaticTargetID == nil,
+        let pageViewController,
+        let currentVisibleID
+      else { return false }
+      return ImageViewerDismissGesturePolicy.shouldBegin(
+        velocity: velocity,
+        axis: axis,
+        zoomState: zoomStateStore?.state(for: currentVisibleID) ?? .identity,
+        viewportSize: pageViewController.view.bounds.size
+      )
+    }
+
+    @objc private func handleInteractiveDismissPan(_ recognizer: UIPanGestureRecognizer) {
+      guard let view = recognizer.view else { return }
+      let translation = recognizer.translation(in: view)
+      let velocity = recognizer.velocity(in: view)
+      processInteractiveDismiss(
+        state: recognizer.state,
+        translation: CGSize(width: translation.x, height: translation.y),
+        velocity: CGSize(width: velocity.x, height: velocity.y),
+        viewportSize: view.bounds.size
+      )
+    }
+
+    func processInteractiveDismiss(
+      state: UIGestureRecognizer.State,
+      translation: CGSize,
+      velocity: CGSize,
+      viewportSize: CGSize
+    ) {
+      switch state {
+      case .began, .changed:
+        onInteractiveDismiss(
+          .changed(
+            translation: max(translation.height, 0),
+            progress: ImageViewerDismissGesturePolicy.progress(
+              translation: translation,
+              viewportSize: viewportSize
+            )
+          )
+        )
+      case .ended:
+        onInteractiveDismiss(
+          .ended(
+            shouldDismiss: ImageViewerDismissGesturePolicy.shouldDismiss(
+              translation: translation,
+              velocity: velocity,
+              viewportSize: viewportSize
+            )
+          )
+        )
+      case .cancelled, .failed:
+        onInteractiveDismiss(.cancelled)
+      case .possible:
+        break
+      @unknown default:
+        onInteractiveDismiss(.cancelled)
+      }
     }
 
     private func handleAccessibilityScroll(

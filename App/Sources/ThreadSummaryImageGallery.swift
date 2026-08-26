@@ -168,10 +168,14 @@ private struct ThreadSummaryImageGalleryModifier: ViewModifier {
         case .local(let presentation):
           ImageViewer(
             items: presentation.items,
-            initialIndex: presentation.initialIndex
+            initialIndex: presentation.initialIndex,
+            onClose: coordinator.dismiss
           )
         case .thread(let route):
-          ThreadImageGalleryView(viewModel: route.viewModel)
+          ThreadImageGalleryView(
+            viewModel: route.viewModel,
+            onClose: coordinator.dismiss
+          )
         }
       }
       .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in

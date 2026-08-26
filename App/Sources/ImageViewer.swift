@@ -80,6 +80,88 @@ struct ImageGalleryPresentation: Identifiable, Equatable, Sendable {
   }
 }
 
+enum ImageViewerDismissGestureEvent: Equatable, Sendable {
+  case changed(translation: CGFloat, progress: CGFloat)
+  case ended(shouldDismiss: Bool)
+  case cancelled
+}
+
+enum ImageViewerDismissGesturePolicy {
+  static let minimumFlickTranslation: CGFloat = 24
+  static let minimumFlickVelocity: CGFloat = 900
+
+  static func shouldBegin(
+    velocity: CGSize,
+    axis: ImageGalleryPagingAxis,
+    zoomState: ImageGalleryZoomState,
+    viewportSize: CGSize
+  ) -> Bool {
+    guard axis == .horizontal else { return false }
+    guard
+      velocity.width.isFinite,
+      velocity.height.isFinite,
+      velocity.height > 0,
+      velocity.height > abs(velocity.width) * 1.1
+    else { return false }
+    guard ImageZoomGeometry.isValidViewport(viewportSize) else { return false }
+
+    guard ImageZoomGeometry.allowsPanning(at: zoomState.scale) else { return true }
+    guard
+      let limits = zoomState.panLimits,
+      let limitsViewportSize = zoomState.panLimitsViewportSize,
+      limits.vertical.isFinite,
+      limits.vertical >= 0,
+      zoomState.offset.width.isFinite,
+      zoomState.offset.height.isFinite,
+      matchesViewport(limitsViewportSize, viewportSize)
+    else { return false }
+
+    let edgeTolerance = max(2, viewportSize.height * 0.003)
+    return zoomState.offset.height >= limits.vertical - edgeTolerance
+  }
+
+  static func matchesViewport(_ stored: CGSize, _ current: CGSize) -> Bool {
+    guard
+      ImageZoomGeometry.isValidViewport(stored),
+      ImageZoomGeometry.isValidViewport(current)
+    else { return false }
+    let tolerance: CGFloat = 1
+    return abs(stored.width - current.width) <= tolerance
+      && abs(stored.height - current.height) <= tolerance
+  }
+
+  static func progress(translation: CGSize, viewportSize: CGSize) -> CGFloat {
+    let threshold = dismissalDistance(viewportSize: viewportSize)
+    guard threshold > 0 else { return 0 }
+    return min(max(translation.height, 0) / threshold, 1)
+  }
+
+  static func shouldDismiss(
+    translation: CGSize,
+    velocity: CGSize,
+    viewportSize: CGSize
+  ) -> Bool {
+    guard
+      translation.width.isFinite,
+      translation.height.isFinite,
+      velocity.width.isFinite,
+      velocity.height.isFinite
+    else { return false }
+    let downwardTranslation = max(translation.height, 0)
+    if downwardTranslation >= dismissalDistance(viewportSize: viewportSize) {
+      return true
+    }
+    return downwardTranslation >= minimumFlickTranslation
+      && velocity.height >= minimumFlickVelocity
+      && velocity.height > abs(velocity.width)
+  }
+
+  static func dismissalDistance(viewportSize: CGSize) -> CGFloat {
+    guard viewportSize.height.isFinite, viewportSize.height > 0 else { return 120 }
+    return min(max(viewportSize.height * 0.18, 120), 180)
+  }
+}
+
 enum ImageZoomGeometry {
   static let defaultMaximumScale: CGFloat = 5
   static let absoluteMaximumScale: CGFloat = 256
@@ -537,9 +619,12 @@ struct ImageViewer: View {
   private let totalCountOverride: Int?
   private let onLoadIfNeeded: () -> Void
   private let idMigrations: [ImageGalleryItem.ID: ImageGalleryItem.ID]
+  private let onClose: (@MainActor () -> Void)?
 
   @State private var internalSelection: ImageGalleryItem.ID?
   @State private var pagingAxis = ImageGalleryPagingAxis.horizontal
+  @State private var interactiveDismissTranslation: CGFloat = 0
+  @State private var interactiveDismissProgress: CGFloat = 0
   @State private var exportTask: Task<Void, Never>?
   @StateObject private var zoomStateStore: ImageGalleryZoomStateStore
   @StateObject private var exportViewModel: RemoteImageExportViewModel
@@ -547,6 +632,7 @@ struct ImageViewer: View {
   init(
     items: [ImageGalleryItem],
     initialIndex: Int,
+    onClose: (@MainActor () -> Void)? = nil,
     exporter: any RemoteImageExporting = RemoteImageExporter.shared
   ) {
     self.items = items
@@ -556,6 +642,7 @@ struct ImageViewer: View {
     totalCountOverride = nil
     onLoadIfNeeded = {}
     idMigrations = [:]
+    self.onClose = onClose
     _internalSelection = State(
       initialValue: items.indices.contains(initialIndex) ? items[initialIndex].id : nil
     )
@@ -572,6 +659,7 @@ struct ImageViewer: View {
     totalCount: Int?,
     onLoadIfNeeded: @escaping () -> Void,
     idMigrations: [ImageGalleryItem.ID: ImageGalleryItem.ID] = [:],
+    onClose: (@MainActor () -> Void)? = nil,
     exporter: any RemoteImageExporting = RemoteImageExporter.shared
   ) {
     self.items = items
@@ -580,6 +668,7 @@ struct ImageViewer: View {
     totalCountOverride = totalCount
     self.onLoadIfNeeded = onLoadIfNeeded
     self.idMigrations = idMigrations
+    self.onClose = onClose
     _internalSelection = State(initialValue: nil)
     _zoomStateStore = StateObject(wrappedValue: ImageGalleryZoomStateStore())
     _exportViewModel = StateObject(
@@ -589,11 +678,13 @@ struct ImageViewer: View {
 
   init(
     url: URL,
+    onClose: (@MainActor () -> Void)? = nil,
     exporter: any RemoteImageExporting = RemoteImageExporter.shared
   ) {
     self.init(
       items: [ImageGalleryItem(contentOffset: 0, url: url)],
       initialIndex: 0,
+      onClose: onClose,
       exporter: exporter
     )
   }
@@ -641,116 +732,122 @@ struct ImageViewer: View {
 
   var body: some View {
     ZStack {
-      Color.black.ignoresSafeArea()
+      Color.black
+        .opacity(1 - interactiveDismissProgress * 0.45)
+        .ignoresSafeArea()
 
-      if items.isEmpty {
-        Image(systemName: "photo.badge.exclamationmark")
-          .font(.largeTitle)
+      ZStack {
+        if items.isEmpty {
+          Image(systemName: "photo.badge.exclamationmark")
+            .font(.largeTitle)
+            .foregroundStyle(.white)
+            .accessibilityLabel("没有可显示的图片")
+        } else {
+          ImageGalleryPager(
+            items: items,
+            selection: selection,
+            axis: pagingAxis,
+            zoomStateStore: zoomStateStore,
+            idMigrations: idMigrations,
+            accessibilityPageDescriptions: accessibilityPageDescriptions,
+            onInteractiveDismiss: handleInteractiveDismiss
+          )
+          .id(pagingAxis)
+        }
+
+        VStack {
+          HStack(spacing: 14) {
+            if let selectedURL {
+              Button {
+                startSharing(selectedURL)
+              } label: {
+                if exportViewModel.state == .preparingForSharing {
+                  ProgressView().tint(.white)
+                } else {
+                  Image(systemName: "square.and.arrow.up")
+                }
+              }
+              .accessibilityLabel("分享图片")
+              .disabled(exportViewModel.isBusy || exportViewModel.shareItem != nil)
+
+              Button {
+                startSaving(selectedURL)
+              } label: {
+                if exportViewModel.state == .savingToPhotos {
+                  ProgressView().tint(.white)
+                } else {
+                  Image(systemName: "square.and.arrow.down")
+                }
+              }
+              .accessibilityLabel("保存图片")
+              .disabled(exportViewModel.isBusy || exportViewModel.shareItem != nil)
+            }
+
+            if showsPagingControls {
+              Button(action: togglePagingAxis) {
+                Image(systemName: pagingAxis.toggled.systemImage)
+              }
+              .accessibilityLabel("切换为\(pagingAxis.toggled.title)")
+              .accessibilityValue(pagingAxis.title)
+              .help("切换为\(pagingAxis.toggled.title)")
+            }
+
+            Spacer()
+
+            Button(action: requestClose) {
+              Image(systemName: "xmark")
+            }
+            .accessibilityLabel("关闭")
+          }
+          .font(.headline)
           .foregroundStyle(.white)
-          .accessibilityLabel("没有可显示的图片")
-      } else {
-        ImageGalleryPager(
-          items: items,
-          selection: selection,
-          axis: pagingAxis,
-          zoomStateStore: zoomStateStore,
-          idMigrations: idMigrations,
-          accessibilityPageDescriptions: accessibilityPageDescriptions
-        )
-        .id(pagingAxis)
-      }
-
-      VStack {
-        HStack(spacing: 14) {
-          if let selectedURL {
-            Button {
-              startSharing(selectedURL)
-            } label: {
-              if exportViewModel.state == .preparingForSharing {
-                ProgressView().tint(.white)
-              } else {
-                Image(systemName: "square.and.arrow.up")
-              }
-            }
-            .accessibilityLabel("分享图片")
-            .disabled(exportViewModel.isBusy || exportViewModel.shareItem != nil)
-
-            Button {
-              startSaving(selectedURL)
-            } label: {
-              if exportViewModel.state == .savingToPhotos {
-                ProgressView().tint(.white)
-              } else {
-                Image(systemName: "square.and.arrow.down")
-              }
-            }
-            .accessibilityLabel("保存图片")
-            .disabled(exportViewModel.isBusy || exportViewModel.shareItem != nil)
-          }
-
-          if showsPagingControls {
-            Button(action: togglePagingAxis) {
-              Image(systemName: pagingAxis.toggled.systemImage)
-            }
-            .accessibilityLabel("切换为\(pagingAxis.toggled.title)")
-            .accessibilityValue(pagingAxis.title)
-            .help("切换为\(pagingAxis.toggled.title)")
-          }
+          .padding(.horizontal)
+          .padding(.top, 8)
 
           Spacer()
 
-          Button {
-            dismiss()
-          } label: {
-            Image(systemName: "xmark")
-          }
-          .accessibilityLabel("关闭")
-        }
-        .font(.headline)
-        .foregroundStyle(.white)
-        .padding(.horizontal)
-        .padding(.top, 8)
-
-        Spacer()
-
-        if showsPagingControls, let selectedIndex, let displayedIndex {
-          HStack(spacing: 10) {
-            Button {
-              selectImage(at: selectedIndex - 1)
-            } label: {
-              Image(systemName: pagingAxis.previousSystemImage)
-            }
-            .disabled(selectedIndex == items.startIndex)
-            .accessibilityLabel("上一张图片")
-
-            Text("\(displayedIndex) / \(displayedTotalCount)")
-              .font(.subheadline.monospacedDigit())
-              .foregroundStyle(.white)
-              .padding(.horizontal, 10)
-              .padding(.vertical, 6)
-              .background(.black.opacity(0.65), in: Capsule())
-              .accessibilityLabel("图片")
-              .accessibilityValue("第 \(displayedIndex) 张，共 \(displayedTotalCount) 张")
-              .accessibilityAdjustableAction { direction in
-                adjustSelection(direction)
+          if showsPagingControls, let selectedIndex, let displayedIndex {
+            HStack(spacing: 10) {
+              Button {
+                selectImage(at: selectedIndex - 1)
+              } label: {
+                Image(systemName: pagingAxis.previousSystemImage)
               }
+              .disabled(selectedIndex == items.startIndex)
+              .accessibilityLabel("上一张图片")
 
-            Button {
-              selectImage(at: selectedIndex + 1)
-            } label: {
-              Image(systemName: pagingAxis.nextSystemImage)
+              Text("\(displayedIndex) / \(displayedTotalCount)")
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(.black.opacity(0.65), in: Capsule())
+                .accessibilityLabel("图片")
+                .accessibilityValue("第 \(displayedIndex) 张，共 \(displayedTotalCount) 张")
+                .accessibilityAdjustableAction { direction in
+                  adjustSelection(direction)
+                }
+
+              Button {
+                selectImage(at: selectedIndex + 1)
+              } label: {
+                Image(systemName: pagingAxis.nextSystemImage)
+              }
+              .disabled(selectedIndex == items.index(before: items.endIndex))
+              .accessibilityLabel("下一张图片")
             }
-            .disabled(selectedIndex == items.index(before: items.endIndex))
-            .accessibilityLabel("下一张图片")
+            .padding(.bottom, 12)
           }
-          .padding(.bottom, 12)
         }
+        .tint(.white)
+        .buttonStyle(ImageViewerControlButtonStyle())
+        .zIndex(1)
       }
-      .tint(.white)
-      .buttonStyle(ImageViewerControlButtonStyle())
+      .scaleEffect(1 - interactiveDismissProgress * 0.04)
+      .offset(y: interactiveDismissTranslation)
     }
     .accessibilityAction(.escape) {
-      dismiss()
+      requestClose()
     }
     .sheet(item: $exportViewModel.shareItem, onDismiss: finishDismissedShare) { item in
       RemoteImageActivitySheet(item: item) { completed, errorMessage in
@@ -835,6 +932,41 @@ struct ImageViewer: View {
   private func finishDismissedShare() {
     guard exportViewModel.state == .readyToShare else { return }
     exportViewModel.finishSharing(completed: false, errorMessage: nil)
+  }
+
+  private func requestClose() {
+    if let onClose {
+      onClose()
+    } else {
+      dismiss()
+    }
+  }
+
+  private func handleInteractiveDismiss(_ event: ImageViewerDismissGestureEvent) {
+    switch event {
+    case .changed(let translation, let progress):
+      var transaction = Transaction()
+      transaction.disablesAnimations = true
+      withTransaction(transaction) {
+        interactiveDismissTranslation = max(translation, 0)
+        interactiveDismissProgress = min(max(progress, 0), 1)
+      }
+    case .ended(let shouldDismiss):
+      if shouldDismiss {
+        requestClose()
+      } else {
+        restoreAfterCancelledInteractiveDismiss()
+      }
+    case .cancelled:
+      restoreAfterCancelledInteractiveDismiss()
+    }
+  }
+
+  private func restoreAfterCancelledInteractiveDismiss() {
+    withAnimation(.interactiveSpring(response: 0.32, dampingFraction: 0.86)) {
+      interactiveDismissTranslation = 0
+      interactiveDismissProgress = 0
+    }
   }
 
   private func adjustSelection(_ direction: AccessibilityAdjustmentDirection) {
@@ -1026,12 +1158,12 @@ struct ZoomableRemoteImage: View {
             imagePixelSize: imagePixelSize
           )
         )
-        publishZoomState()
+        publishZoomState(viewportSize: viewportSize, imagePixelSize: imagePixelSize)
       }
       .onEnded { _ in
         committedScale = scale
         committedOffset = offset
-        publishZoomState()
+        publishZoomState(viewportSize: viewportSize, imagePixelSize: imagePixelSize)
       }
   }
 
@@ -1045,7 +1177,7 @@ struct ZoomableRemoteImage: View {
       viewportSize: viewportSize,
       imagePixelSize: imagePixelSize
     )
-    publishZoomState()
+    publishZoomState(viewportSize: viewportSize, imagePixelSize: imagePixelSize)
   }
 
   private func endPan(
@@ -1059,7 +1191,7 @@ struct ZoomableRemoteImage: View {
       imagePixelSize: imagePixelSize
     )
     committedOffset = offset
-    publishZoomState()
+    publishZoomState(viewportSize: viewportSize, imagePixelSize: imagePixelSize)
   }
 
   private func resolvedPanOffset(
@@ -1118,7 +1250,7 @@ struct ZoomableRemoteImage: View {
       }
       committedScale = scale
       committedOffset = offset
-      publishZoomState()
+      publishZoomState(viewportSize: viewportSize, imagePixelSize: imagePixelSize)
     }
   }
 
@@ -1148,7 +1280,11 @@ struct ZoomableRemoteImage: View {
     )
     guard ImageZoomGeometry.shouldStartInReadingMode(readingScale: readingPosition.scale) else {
       clampZoomState(viewportSize: viewportSize, imagePixelSize: imagePixelSize)
-      publishZoomState(force: true)
+      publishZoomState(
+        viewportSize: viewportSize,
+        imagePixelSize: imagePixelSize,
+        force: true
+      )
       return
     }
     scale = readingPosition.scale
@@ -1156,7 +1292,11 @@ struct ZoomableRemoteImage: View {
     committedScale = readingPosition.scale
     offset = readingPosition.offset
     committedOffset = readingPosition.offset
-    publishZoomState(force: true)
+    publishZoomState(
+      viewportSize: viewportSize,
+      imagePixelSize: imagePixelSize,
+      force: true
+    )
   }
 
   private func handleViewportChange(
@@ -1201,7 +1341,7 @@ struct ZoomableRemoteImage: View {
     )
     committedScale = scale
     committedOffset = offset
-    publishZoomState()
+    publishZoomState(viewportSize: viewportSize, imagePixelSize: imagePixelSize)
   }
 
   private func clampZoomState(viewportSize: CGSize, imagePixelSize: CGSize) {
@@ -1223,7 +1363,7 @@ struct ZoomableRemoteImage: View {
       )
     )
     committedOffset = offset
-    publishZoomState()
+    publishZoomState(viewportSize: viewportSize, imagePixelSize: imagePixelSize)
   }
 
   private func maximumZoomScale(
@@ -1242,12 +1382,26 @@ struct ZoomableRemoteImage: View {
     )
   }
 
-  private func publishZoomState(force: Bool = false) {
+  private func publishZoomState(
+    viewportSize: CGSize,
+    imagePixelSize: CGSize,
+    force: Bool = false
+  ) {
+    let fittedImageSize = fittedImageSize(
+      in: viewportSize,
+      imagePixelSize: imagePixelSize
+    )
     let state = ImageGalleryZoomState(
       scale: scale,
       offset: offset,
       mode: zoomMode,
-      referenceViewportSize: lastViewportSize
+      referenceViewportSize: lastViewportSize,
+      panLimits: ImageZoomGeometry.panLimits(
+        scale: scale,
+        viewportSize: viewportSize,
+        fittedImageSize: fittedImageSize
+      ),
+      panLimitsViewportSize: viewportSize
     )
     guard force || state != lastPublishedZoomState else { return }
     lastPublishedZoomState = state
@@ -1308,6 +1462,7 @@ private struct ImageViewerControlButtonStyle: ButtonStyle {
     configuration.label
       .frame(width: 44, height: 44)
       .background(.black.opacity(0.65), in: Circle())
+      .contentShape(Circle())
       .opacity(isEnabled ? (configuration.isPressed ? 0.65 : 1) : 0.45)
   }
 }

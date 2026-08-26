@@ -5,6 +5,53 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class PersonalizedFeedbackTests: XCTestCase {
+  func testFeedbackActionAvailabilityRequiresVisibleAccountContentWithReasons() {
+    XCTAssertEqual(
+      PersonalizedFeedbackActionAvailability(
+        isContentVisible: true,
+        usesAccountPersona: true,
+        feedbackReasonCount: 1,
+        isSubmitting: false
+      ),
+      .available
+    )
+
+    for unavailable in [
+      PersonalizedFeedbackActionAvailability(
+        isContentVisible: false,
+        usesAccountPersona: true,
+        feedbackReasonCount: 1,
+        isSubmitting: false
+      ),
+      PersonalizedFeedbackActionAvailability(
+        isContentVisible: true,
+        usesAccountPersona: false,
+        feedbackReasonCount: 1,
+        isSubmitting: false
+      ),
+      PersonalizedFeedbackActionAvailability(
+        isContentVisible: true,
+        usesAccountPersona: true,
+        feedbackReasonCount: 0,
+        isSubmitting: false
+      ),
+    ] {
+      XCTAssertEqual(unavailable, .unavailable)
+    }
+  }
+
+  func testFeedbackActionRemainsVisibleButDisabledWhileSubmitting() {
+    XCTAssertEqual(
+      PersonalizedFeedbackActionAvailability(
+        isContentVisible: true,
+        usesAccountPersona: true,
+        feedbackReasonCount: 2,
+        isSubmitting: true
+      ),
+      .submitting
+    )
+  }
+
   func testSubmissionBindsReasonsToTheCurrentThreadAndPreservesServerOrder() throws {
     let item = feedbackItem()
     let submission = try XCTUnwrap(

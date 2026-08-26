@@ -1,9 +1,43 @@
 import Foundation
+import SwiftUI
 import XCTest
 
 @testable import TiebaPlusPlus
 
 final class ThreadSummaryRowTests: XCTestCase {
+  func testAdaptiveContextMetadataRetainsWidthAwareFallback() {
+    for size in [DynamicTypeSize.xSmall, .large, .xxLarge, .accessibility5] {
+      XCTAssertEqual(
+        ThreadSummaryContextLayoutPolicy.strategy(
+          mode: .adaptive,
+          dynamicTypeSize: size
+        ),
+        .widthAdaptive
+      )
+    }
+  }
+
+  func testCompactContextMetadataStaysSingleLineUntilExpandedDynamicTypeSizes() {
+    for size in [DynamicTypeSize.xSmall, .large, .xLarge] {
+      XCTAssertEqual(
+        ThreadSummaryContextLayoutPolicy.strategy(
+          mode: .compact,
+          dynamicTypeSize: size
+        ),
+        .singleLine
+      )
+    }
+    for size in [DynamicTypeSize.xxLarge, .xxxLarge, .accessibility1, .accessibility5] {
+      XCTAssertEqual(
+        ThreadSummaryContextLayoutPolicy.strategy(
+          mode: .compact,
+          dynamicTypeSize: size
+        ),
+        .stacked
+      )
+    }
+  }
+
   func testFirstVideoTakesPriorityOverImagesAndPreservesItsContentOffset() throws {
     let imageURL = try XCTUnwrap(URL(string: "https://example.com/image.jpg"))
     let coverURL = try XCTUnwrap(URL(string: "https://example.com/video.jpg"))

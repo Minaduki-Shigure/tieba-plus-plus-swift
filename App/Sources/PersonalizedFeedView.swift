@@ -296,20 +296,25 @@ struct PersonalizedFeedView: View {
               visibility: item.thread.localVisibility,
               placeholder: "已屏蔽此推荐帖子"
             ) {
-              HStack(spacing: 8) {
-                ThreadSummaryRow(
-                  thread: item.thread,
-                  showsForum: true,
-                  onNavigate: { threadNavigationRequest = $0 }
-                )
-                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-
-                if viewModel.usesAccountPersona, !item.feedbackReasons.isEmpty {
-                  feedbackButton(for: item)
-                }
-              }
+              ThreadSummaryRow(
+                thread: item.thread,
+                showsForum: true,
+                contextLayout: .compact,
+                onNavigate: { threadNavigationRequest = $0 }
+              )
               .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .modifier(
+              PersonalizedFeedbackActionsModifier(
+                state: PersonalizedFeedbackActionAvailability(
+                  isContentVisible: item.thread.localVisibility == .visible,
+                  usesAccountPersona: viewModel.usesAccountPersona,
+                  feedbackReasonCount: item.feedbackReasons.count,
+                  isSubmitting: viewModel.feedbackSubmittingThreadIDs.contains(item.id)
+                ),
+                action: { presentFeedback(for: item) }
+              )
+            )
             .onAppear {
               guard isActive else { return }
               viewModel.loadMoreIfNeeded(currentItemID: item.id)
@@ -384,27 +389,14 @@ struct PersonalizedFeedView: View {
     .id(request.destinationID)
   }
 
-  private func feedbackButton(for item: PersonalizedFeedItem) -> some View {
-    let isSubmitting = viewModel.feedbackSubmittingThreadIDs.contains(item.id)
-    return Button {
-      guard !isSubmitting else { return }
-      feedbackPrompt = PersonalizedFeedbackPrompt(item: item)
-    } label: {
-      Group {
-        if isSubmitting {
-          ProgressView()
-            .controlSize(.small)
-        } else {
-          Image(systemName: "hand.thumbsdown")
-        }
-      }
-      .frame(width: 44, height: 44)
-      .contentShape(Rectangle())
-    }
-    .buttonStyle(.plain)
-    .disabled(isSubmitting)
-    .accessibilityLabel(isSubmitting ? "正在提交推荐反馈" : "减少此类推荐")
-    .help("减少此类推荐")
+  private func presentFeedback(for item: PersonalizedFeedItem) {
+    guard
+      item.thread.localVisibility == .visible,
+      viewModel.usesAccountPersona,
+      !item.feedbackReasons.isEmpty,
+      !viewModel.feedbackSubmittingThreadIDs.contains(item.id)
+    else { return }
+    feedbackPrompt = PersonalizedFeedbackPrompt(item: item)
   }
 
   private func synchronizeActivation() {
@@ -433,6 +425,71 @@ struct PersonalizedFeedView: View {
       scope = .waitingForFollowedForumIndex
     }
     viewModel.setScope(scope, loadIfNeeded: isVisible && isActive)
+  }
+}
+
+enum PersonalizedFeedbackActionAvailability: Equatable, Sendable {
+  case unavailable
+  case available
+  case submitting
+
+  init(
+    isContentVisible: Bool,
+    usesAccountPersona: Bool,
+    feedbackReasonCount: Int,
+    isSubmitting: Bool
+  ) {
+    guard isContentVisible, usesAccountPersona, feedbackReasonCount > 0 else {
+      self = .unavailable
+      return
+    }
+    self = isSubmitting ? .submitting : .available
+  }
+}
+
+private struct PersonalizedFeedbackActionsModifier: ViewModifier {
+  let state: PersonalizedFeedbackActionAvailability
+  let action: () -> Void
+
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    switch state {
+    case .unavailable:
+      content
+    case .available:
+      actionSurfaces(content: content, isEnabled: true)
+        .accessibilityAction(named: Text("减少此类推荐")) {
+          action()
+        }
+    case .submitting:
+      actionSurfaces(content: content, isEnabled: false)
+        .accessibilityValue("正在提交推荐反馈")
+    }
+  }
+
+  private func actionSurfaces<RowContent: View>(
+    content: RowContent,
+    isEnabled: Bool
+  ) -> some View {
+    content
+      .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+        feedbackButton(isEnabled: isEnabled)
+          .tint(.orange)
+      }
+      .contextMenu {
+        feedbackButton(isEnabled: isEnabled)
+      }
+  }
+
+  private func feedbackButton(isEnabled: Bool) -> some View {
+    Button(action: action) {
+      Label(
+        isEnabled ? "减少推荐" : "正在提交",
+        systemImage: isEnabled ? "hand.thumbsdown" : "hourglass"
+      )
+    }
+    .disabled(!isEnabled)
+    .accessibilityLabel(isEnabled ? "减少此类推荐" : "正在提交推荐反馈")
   }
 }
 

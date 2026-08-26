@@ -354,7 +354,10 @@ struct ThreadView: View {
         item: $pictureGalleryRoute,
         onDismiss: cancelPictureGallery
       ) { route in
-        ThreadImageGalleryView(viewModel: route.viewModel)
+        ThreadImageGalleryView(
+          viewModel: route.viewModel,
+          onClose: cancelPictureGallery
+        )
       }
   }
 

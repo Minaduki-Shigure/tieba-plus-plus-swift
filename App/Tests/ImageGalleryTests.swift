@@ -1221,7 +1221,12 @@ final class ImageGalleryTests: XCTestCase {
     let destination = try item(2)
     let other = try item(3)
     let newest = try item(4)
-    let sourceState = ImageGalleryZoomState(scale: 2, offset: .zero)
+    let sourceState = ImageGalleryZoomState(
+      scale: 2,
+      offset: .zero,
+      panLimits: ImageZoomPanLimits(horizontal: 100, vertical: 200),
+      panLimitsViewportSize: CGSize(width: 390, height: 844)
+    )
     let destinationState = ImageGalleryZoomState(scale: 3, offset: .zero)
     let otherState = ImageGalleryZoomState(scale: 4, offset: .zero)
     let migration = ImageGalleryItemIDMigration([source.id: destination.id])
@@ -1568,12 +1573,286 @@ final class ImageGalleryTests: XCTestCase {
     XCTAssertEqual(state, .identity)
   }
 
+  func testZoomStateRetainsOnlyValidPanGeometry() {
+    let limits = ImageZoomPanLimits(horizontal: 100, vertical: 200)
+    let viewport = CGSize(width: 390, height: 844)
+    let validState = ImageGalleryZoomState(
+      scale: 2,
+      offset: CGSize(width: 0, height: 200),
+      panLimits: limits,
+      panLimitsViewportSize: viewport
+    )
+
+    XCTAssertEqual(validState.panLimits, limits)
+    XCTAssertEqual(validState.panLimitsViewportSize, viewport)
+    XCTAssertNil(
+      ImageGalleryZoomState(
+        scale: 1,
+        offset: .zero,
+        panLimits: limits,
+        panLimitsViewportSize: viewport
+      ).panLimits
+    )
+    XCTAssertNil(
+      ImageGalleryZoomState(
+        scale: 2,
+        offset: .zero,
+        panLimits: ImageZoomPanLimits(horizontal: .infinity, vertical: 200),
+        panLimitsViewportSize: viewport
+      ).panLimits
+    )
+    XCTAssertEqual(
+      ImageGalleryZoomState(
+        scale: 2,
+        offset: CGSize(width: 0, height: .infinity),
+        panLimits: limits,
+        panLimitsViewportSize: viewport
+      ).offset,
+      .zero
+    )
+  }
+
   func testPagingControlsAppearOnlyForKnownMultiImageGallery() {
     XCTAssertFalse(ImageViewerControlPolicy.showsPagingControls(itemCount: 0, totalCount: nil))
     XCTAssertFalse(ImageViewerControlPolicy.showsPagingControls(itemCount: 1, totalCount: 1))
     XCTAssertTrue(ImageViewerControlPolicy.showsPagingControls(itemCount: 2, totalCount: nil))
     XCTAssertTrue(ImageViewerControlPolicy.showsPagingControls(itemCount: 1, totalCount: 10))
     XCTAssertFalse(ImageViewerControlPolicy.showsPagingControls(itemCount: -1, totalCount: -2))
+  }
+
+  func testDismissGestureBeginsOnlyForDominantDownwardHorizontalDragAtFit() {
+    let viewport = CGSize(width: 390, height: 844)
+
+    XCTAssertTrue(
+      ImageViewerDismissGesturePolicy.shouldBegin(
+        velocity: CGSize(width: 40, height: 600),
+        axis: .horizontal,
+        zoomState: .identity,
+        viewportSize: viewport
+      )
+    )
+    XCTAssertFalse(
+      ImageViewerDismissGesturePolicy.shouldBegin(
+        velocity: CGSize(width: 600, height: 400),
+        axis: .horizontal,
+        zoomState: .identity,
+        viewportSize: viewport
+      )
+    )
+    XCTAssertFalse(
+      ImageViewerDismissGesturePolicy.shouldBegin(
+        velocity: CGSize(width: 0, height: -600),
+        axis: .horizontal,
+        zoomState: .identity,
+        viewportSize: viewport
+      )
+    )
+    XCTAssertFalse(
+      ImageViewerDismissGesturePolicy.shouldBegin(
+        velocity: CGSize(width: 0, height: 600),
+        axis: .vertical,
+        zoomState: .identity,
+        viewportSize: viewport
+      )
+    )
+  }
+
+  func testDismissGestureRequiresZoomedImageToBeAtTopEdge() throws {
+    let decodedPixelSize = CGSize(width: 1_200, height: 8_000)
+    let viewport = CGSize(width: 390, height: 844)
+    let fittedSize = ImageZoomGeometry.fittedImageSize(
+      width: Int(decodedPixelSize.width),
+      height: Int(decodedPixelSize.height),
+      viewportSize: viewport
+    )
+    let limits = try XCTUnwrap(
+      ImageZoomGeometry.panLimits(
+        scale: 2,
+        viewportSize: viewport,
+        fittedImageSize: fittedSize
+      )
+    )
+    let velocity = CGSize(width: 0, height: 600)
+
+    XCTAssertTrue(
+      ImageViewerDismissGesturePolicy.shouldBegin(
+        velocity: velocity,
+        axis: .horizontal,
+        zoomState: ImageGalleryZoomState(
+          scale: 2,
+          offset: CGSize(width: 0, height: limits.vertical),
+          mode: .reading,
+          referenceViewportSize: viewport,
+          panLimits: limits,
+          panLimitsViewportSize: viewport
+        ),
+        viewportSize: viewport
+      )
+    )
+    XCTAssertFalse(
+      ImageViewerDismissGesturePolicy.shouldBegin(
+        velocity: velocity,
+        axis: .horizontal,
+        zoomState: ImageGalleryZoomState(
+          scale: 2,
+          offset: .zero,
+          mode: .reading,
+          referenceViewportSize: viewport,
+          panLimits: limits,
+          panLimitsViewportSize: viewport
+        ),
+        viewportSize: viewport
+      )
+    )
+
+    XCTAssertFalse(
+      ImageViewerDismissGesturePolicy.shouldBegin(
+        velocity: velocity,
+        axis: .horizontal,
+        zoomState: ImageGalleryZoomState(scale: 2, offset: .zero),
+        viewportSize: viewport
+      )
+    )
+    XCTAssertFalse(
+      ImageViewerDismissGesturePolicy.shouldBegin(
+        velocity: velocity,
+        axis: .horizontal,
+        zoomState: ImageGalleryZoomState(
+          scale: 2,
+          offset: CGSize(width: 0, height: limits.vertical),
+          panLimits: limits,
+          panLimitsViewportSize: viewport
+        ),
+        viewportSize: CGSize(width: viewport.height, height: viewport.width)
+      )
+    )
+  }
+
+  func testDismissGestureUsesDistanceOrIntentionalDownwardFlick() {
+    let viewport = CGSize(width: 390, height: 844)
+    XCTAssertEqual(
+      ImageViewerDismissGesturePolicy.dismissalDistance(viewportSize: viewport),
+      151.92,
+      accuracy: 0.001
+    )
+    XCTAssertEqual(
+      ImageViewerDismissGesturePolicy.progress(
+        translation: CGSize(width: 0, height: 75.96),
+        viewportSize: viewport
+      ),
+      0.5,
+      accuracy: 0.001
+    )
+    XCTAssertTrue(
+      ImageViewerDismissGesturePolicy.shouldDismiss(
+        translation: CGSize(width: 0, height: 152),
+        velocity: .zero,
+        viewportSize: viewport
+      )
+    )
+    XCTAssertTrue(
+      ImageViewerDismissGesturePolicy.shouldDismiss(
+        translation: CGSize(width: 0, height: 30),
+        velocity: CGSize(width: 100, height: 1_000),
+        viewportSize: viewport
+      )
+    )
+    XCTAssertFalse(
+      ImageViewerDismissGesturePolicy.shouldDismiss(
+        translation: CGSize(width: 0, height: 20),
+        velocity: CGSize(width: 0, height: 1_200),
+        viewportSize: viewport
+      )
+    )
+    XCTAssertFalse(
+      ImageViewerDismissGesturePolicy.shouldDismiss(
+        translation: CGSize(width: 0, height: 40),
+        velocity: CGSize(width: 1_200, height: 1_000),
+        viewportSize: viewport
+      )
+    )
+  }
+
+  @MainActor
+  func testPagerCoordinatorInstallsAndRoutesInteractiveDismissRecognizer() throws {
+    let item = ImageGalleryItem(
+      contentOffset: 0,
+      url: try url("https://example.com/coordinator-dismiss.jpg"),
+      width: 1_000,
+      height: 2_000
+    )
+    let pageViewController = ImageGalleryPageViewController(
+      transitionStyle: .scroll,
+      navigationOrientation: .horizontal,
+      options: nil
+    )
+    pageViewController.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+    let coordinator = ImageGalleryPager.Coordinator()
+    let store = ImageGalleryZoomStateStore()
+    var events = [ImageViewerDismissGestureEvent]()
+
+    coordinator.attach(to: pageViewController, axis: .horizontal)
+    coordinator.receive(
+      ImageGalleryPagerUpdate(
+        snapshot: ImageGalleryPagerSnapshot(
+          items: [item],
+          requestedSelection: item.id
+        ),
+        accessibilityPageDescriptions: [:]
+      ),
+      zoomStateStore: store,
+      onSelectionChange: { _ in },
+      onInteractiveDismiss: { events.append($0) }
+    )
+
+    let recognizer = coordinator.interactiveDismissPanGestureRecognizer
+    XCTAssertTrue(recognizer.view === pageViewController.view)
+    XCTAssertEqual(recognizer.minimumNumberOfTouches, 1)
+    XCTAssertEqual(recognizer.maximumNumberOfTouches, 1)
+    XCTAssertFalse(recognizer.cancelsTouchesInView)
+    XCTAssertTrue(
+      coordinator.shouldInteractiveDismissBegin(
+        velocity: CGSize(width: 20, height: 500)
+      )
+    )
+
+    coordinator.processInteractiveDismiss(
+      state: .changed,
+      translation: CGSize(width: 0, height: 75.96),
+      velocity: CGSize(width: 0, height: 300),
+      viewportSize: pageViewController.view.bounds.size
+    )
+    coordinator.processInteractiveDismiss(
+      state: .ended,
+      translation: CGSize(width: 0, height: 160),
+      velocity: .zero,
+      viewportSize: pageViewController.view.bounds.size
+    )
+    coordinator.processInteractiveDismiss(
+      state: .cancelled,
+      translation: .zero,
+      velocity: .zero,
+      viewportSize: pageViewController.view.bounds.size
+    )
+    XCTAssertEqual(events.count, 3)
+    if let firstEvent = events.first,
+      case .changed(let translation, let progress) = firstEvent
+    {
+      XCTAssertEqual(translation, 75.96, accuracy: 0.001)
+      XCTAssertEqual(progress, 0.5, accuracy: 0.001)
+    } else {
+      XCTFail("Expected an interactive-dismiss change event")
+    }
+    XCTAssertEqual(events.dropFirst().first, .ended(shouldDismiss: true))
+    XCTAssertEqual(events.last, .cancelled)
+
+    coordinator.detach()
+    XCTAssertNil(recognizer.view)
+    XCTAssertFalse(
+      coordinator.shouldInteractiveDismissBegin(
+        velocity: CGSize(width: 0, height: 500)
+      )
+    )
   }
 
   private func item(_ value: Int) throws -> ImageGalleryItem {

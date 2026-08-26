@@ -79,6 +79,15 @@ struct UnavailableThreadPictureGalleryService: ThreadPictureGalleryService {
 
 struct ThreadImageGalleryView: View {
   @ObservedObject var viewModel: ThreadImageGalleryViewModel
+  let onClose: (@MainActor () -> Void)?
+
+  init(
+    viewModel: ThreadImageGalleryViewModel,
+    onClose: (@MainActor () -> Void)? = nil
+  ) {
+    self.viewModel = viewModel
+    self.onClose = onClose
+  }
 
   var body: some View {
     ZStack(alignment: .bottom) {
@@ -88,7 +97,8 @@ struct ThreadImageGalleryView: View {
         displayIndex: viewModel.selectedDisplayIndex,
         totalCount: viewModel.totalCount,
         onLoadIfNeeded: viewModel.loadIfNeeded,
-        idMigrations: galleryIDMigrations
+        idMigrations: galleryIDMigrations,
+        onClose: onClose
       )
       .id(viewModel.galleryState.viewerContextRevision)
 

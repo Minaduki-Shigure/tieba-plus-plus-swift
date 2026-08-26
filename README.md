@@ -77,6 +77,22 @@ and its verified metadata enters the public app source.
   links remain in the My stack. Stable-order and route-isolation contract tests
   cover these additions. This shell remains an iPhone/iPad physical-device gate
   for tab retention, VoiceOver, and interactive-pop cancellation.
+- **Current-main list and gallery interaction:** Home's Explore shortcut now uses
+  the complete visible List row as its 44-point action surface, matching the
+  adjacent hot-topic link. Loaded thread-list image buttons clip both rendering
+  and hit testing to the visible thumbnail, so an aspect-fill image cannot
+  intercept title or surrounding-row taps. Personalized recommendation cards no
+  longer reserve a full-height side column for feedback: the row keeps its full
+  width, exposes the account-bound action through a trailing swipe, context menu,
+  and named accessibility action, and keeps forum, author, and time metadata on
+  one truncating line at ordinary text sizes while retaining a stacked layout at
+  expanded Dynamic Type sizes. Full-screen image viewers now route Close and the
+  accessibility escape action directly through the presentation owner. In
+  horizontal paging mode, a dominant one-finger downward drag dismisses from fit
+  scale or from the top edge of a zoomed long image; shorter drags spring back,
+  while vertical paging and mid-image reading retain their existing gestures.
+  Policy and UIKit-coordinator tests cover the boundaries, but continuous touch
+  arbitration and every presentation owner remain an iPhone/iPad device gate.
 - **`v0.64.0-alpha.6` image-source fallback:** Rich-content image decoding now retains
   Tieba's legacy `src` and `big_src` fields plus the active-CDN
   `cdn_src_active` field instead of treating those otherwise valid images as

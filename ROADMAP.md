@@ -51,6 +51,17 @@ validation item.
 This makes existing workflows persistently reachable without adding a data source
 or weighted point; iPhone and iPad interaction remain a physical-device
 validation gate.
+Current-main interaction polish expands Home's Explore shortcut to its full List
+row, bounds thread-thumbnail hit testing to the visible preview, restores the
+complete width of personalized recommendation cards, and moves account-bound
+dislike feedback to trailing swipe, context-menu, and accessibility actions.
+Recommended-card metadata stays on one truncating line at ordinary text sizes
+and retains an expanded Dynamic Type fallback. Full-screen galleries also close
+through their exact presentation owner and add a downward-dismiss gesture that
+is disabled for vertical paging and limited to fit scale or the top edge of a
+zoomed long image. These changes improve existing navigation and media credit
+without adding a data source or weighted point; combined UIKit paging, zooming,
+and dismissal remain a physical-device validation gate.
 The My root now groups local favorites, history, a direct appearance menu,
 settings, and About beneath the existing account workflows. Messages exposes the
 existing global search inside its own navigation stack. Typed destinations,
