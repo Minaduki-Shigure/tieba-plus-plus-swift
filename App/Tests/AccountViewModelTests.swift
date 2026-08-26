@@ -881,7 +881,9 @@ final class AccountViewModelTests: XCTestCase {
       pinRepository: pins
     )
     viewModel.loadIfNeeded()
-    try await waitForAccountState { viewModel.forumProjection.pinned.map(\.id) == [1] }
+    try await waitForAccountState(timeout: 5) {
+      viewModel.forumProjection.pinned.map(\.id) == [1]
+    }
 
     viewModel.forumMembershipDidChange(
       ForumMembershipChange(accountID: 7, forumID: 1, isFollowed: false)
@@ -891,7 +893,7 @@ final class AccountViewModelTests: XCTestCase {
     viewModel.accountSessionDidChange()
     let released = await pins.releaseFirstRemove()
     XCTAssertTrue(released)
-    try await waitForAccountState {
+    try await waitForAccountState(timeout: 5) {
       await service.followedRequestSnapshot().count == 2
         && viewModel.state == .loaded
         && viewModel.homeForums.map(\.id) == [2, 1]
