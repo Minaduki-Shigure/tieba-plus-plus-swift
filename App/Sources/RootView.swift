@@ -3,6 +3,17 @@ import Foundation
 import SwiftUI
 import UIKit
 
+struct HomeExploreEntryLabel: View {
+  var body: some View {
+    HStack(spacing: 0) {
+      Label("发现", systemImage: "sparkles")
+      Spacer(minLength: 0)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .contentShape(Rectangle())
+  }
+}
+
 struct RootView: View {
   let service:
     any BrowseService & SearchService & ForumPostSearchService & HotTopicService & HotThreadService
@@ -132,9 +143,7 @@ struct RootView: View {
               Button {
                 selectExplore(.personalized)
               } label: {
-                Label("发现", systemImage: "sparkles")
-                  .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                  .contentShape(Rectangle())
+                HomeExploreEntryLabel()
               }
               .buttonStyle(.plain)
               .accessibilityIdentifier("home-explore-entry")

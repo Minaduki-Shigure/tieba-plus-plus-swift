@@ -1,5 +1,7 @@
 import Foundation
+import SwiftUI
 import TiebaCore
+import UIKit
 import XCTest
 
 @testable import TiebaPlusPlus
@@ -37,19 +39,62 @@ final class PersonalizedFeedbackTests: XCTestCase {
       ),
     ] {
       XCTAssertEqual(unavailable, .unavailable)
+      XCTAssertNil(unavailable.presentation)
     }
   }
 
   func testFeedbackActionRemainsVisibleButDisabledWhileSubmitting() {
-    XCTAssertEqual(
-      PersonalizedFeedbackActionAvailability(
-        isContentVisible: true,
-        usesAccountPersona: true,
-        feedbackReasonCount: 2,
-        isSubmitting: true
-      ),
-      .submitting
+    let available = PersonalizedFeedbackActionAvailability(
+      isContentVisible: true,
+      usesAccountPersona: true,
+      feedbackReasonCount: 2,
+      isSubmitting: false
     )
+    let submitting = PersonalizedFeedbackActionAvailability(
+      isContentVisible: true,
+      usesAccountPersona: true,
+      feedbackReasonCount: 2,
+      isSubmitting: true
+    )
+
+    XCTAssertEqual(
+      available.presentation,
+      PersonalizedFeedbackActionPresentation(
+        title: "不感兴趣",
+        systemImage: "hand.thumbsdown",
+        accessibilityLabel: "减少此类推荐",
+        isEnabled: true
+      )
+    )
+    XCTAssertEqual(
+      submitting.presentation,
+      PersonalizedFeedbackActionPresentation(
+        title: "提交中",
+        systemImage: "hourglass",
+        accessibilityLabel: "正在提交推荐反馈",
+        isEnabled: false
+      )
+    )
+  }
+
+  @MainActor
+  func testFeedbackFooterStaysWithinTheRowWidth() {
+    let widths: [CGFloat] = [320, 390, 768]
+    for width in widths {
+      let host = UIHostingController(
+        rootView: PersonalizedFeedbackFooter(
+          threadID: 42,
+          state: .available,
+          action: {}
+        )
+        .environment(\.dynamicTypeSize, .large)
+      )
+
+      let size = host.sizeThatFits(in: CGSize(width: width, height: 1_000))
+
+      XCTAssertLessThanOrEqual(size.width, width + 0.5)
+      XCTAssertEqual(size.height, 44, accuracy: 0.5)
+    }
   }
 
   func testSubmissionBindsReasonsToTheCurrentThreadAndPreservesServerOrder() throws {

@@ -24,6 +24,15 @@ enum ThreadSummaryMediaPresentation: Equatable, Sendable {
   case collapsed(ThreadSummaryMedia)
 }
 
+enum ThreadSummaryImageInteractionPolicy {
+  static func permitsOpening(
+    isEnabled: Bool,
+    environmentActionAvailable: Bool
+  ) -> Bool {
+    isEnabled && environmentActionAvailable
+  }
+}
+
 enum ThreadSummaryPresentation {
   static func media(
     for thread: BrowseThread,
@@ -183,6 +192,7 @@ struct ThreadSummaryRow<Header: View>: View {
   let showsAuthor: Bool
   let searchQuery: String
   let contextLayout: ThreadSummaryContextLayoutMode
+  let allowsImageOpening: Bool
   private let header: () -> Header
   private let onNavigate: (ThreadSummaryNavigationRequest) -> Void
 
@@ -202,6 +212,7 @@ struct ThreadSummaryRow<Header: View>: View {
     showsAuthor: Bool = true,
     searchQuery: String = "",
     contextLayout: ThreadSummaryContextLayoutMode = .adaptive,
+    allowsImageOpening: Bool = true,
     onNavigate: @escaping (ThreadSummaryNavigationRequest) -> Void
   ) where Header == EmptyView {
     self.init(
@@ -210,6 +221,7 @@ struct ThreadSummaryRow<Header: View>: View {
       showsAuthor: showsAuthor,
       searchQuery: searchQuery,
       contextLayout: contextLayout,
+      allowsImageOpening: allowsImageOpening,
       header: { EmptyView() },
       onNavigate: onNavigate
     )
@@ -221,6 +233,7 @@ struct ThreadSummaryRow<Header: View>: View {
     showsAuthor: Bool = true,
     searchQuery: String = "",
     contextLayout: ThreadSummaryContextLayoutMode = .adaptive,
+    allowsImageOpening: Bool = true,
     @ViewBuilder header: @escaping () -> Header,
     onNavigate: @escaping (ThreadSummaryNavigationRequest) -> Void
   ) {
@@ -229,6 +242,7 @@ struct ThreadSummaryRow<Header: View>: View {
     self.showsAuthor = showsAuthor
     self.searchQuery = searchQuery
     self.contextLayout = contextLayout
+    self.allowsImageOpening = allowsImageOpening
     self.header = header
     self.onNavigate = onNavigate
   }
@@ -365,7 +379,7 @@ struct ThreadSummaryRow<Header: View>: View {
       CompactListMediaView(summary: .video)
     case .images(let images, let totalCount):
       let summary = ThreadListMediaSummary.images(count: totalCount)
-      if let firstImage = images.first, openThreadSummaryImage.isAvailable {
+      if let firstImage = images.first, canOpenImages {
         Button {
           openImage(firstImage)
         } label: {
@@ -474,14 +488,22 @@ struct ThreadSummaryRow<Header: View>: View {
   }
 
   private func imageOpenAction(for image: ThreadSummaryImagePreview) -> (() -> Void)? {
-    guard openThreadSummaryImage.isAvailable else { return nil }
+    guard canOpenImages else { return nil }
     return { openImage(image) }
   }
 
   private func openImage(_ image: ThreadSummaryImagePreview) {
+    guard canOpenImages else { return }
     _ = openThreadSummaryImage(
       thread: thread,
       contentOffset: image.contentOffset
+    )
+  }
+
+  private var canOpenImages: Bool {
+    ThreadSummaryImageInteractionPolicy.permitsOpening(
+      isEnabled: allowsImageOpening,
+      environmentActionAvailable: openThreadSummaryImage.isAvailable
     )
   }
 

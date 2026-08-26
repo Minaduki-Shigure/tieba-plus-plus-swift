@@ -5,6 +5,27 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class ThreadSummaryRowTests: XCTestCase {
+  func testImageInteractionCanBeDisabledForAListSurface() {
+    XCTAssertTrue(
+      ThreadSummaryImageInteractionPolicy.permitsOpening(
+        isEnabled: true,
+        environmentActionAvailable: true
+      )
+    )
+    XCTAssertFalse(
+      ThreadSummaryImageInteractionPolicy.permitsOpening(
+        isEnabled: false,
+        environmentActionAvailable: true
+      )
+    )
+    XCTAssertFalse(
+      ThreadSummaryImageInteractionPolicy.permitsOpening(
+        isEnabled: true,
+        environmentActionAvailable: false
+      )
+    )
+  }
+
   func testAdaptiveContextMetadataRetainsWidthAwareFallback() {
     for size in [DynamicTypeSize.xSmall, .large, .xxLarge, .accessibility5] {
       XCTAssertEqual(
