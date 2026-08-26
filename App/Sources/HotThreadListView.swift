@@ -2,6 +2,7 @@ import Combine
 import SwiftUI
 
 struct HotThreadListView: View {
+  let isActive: Bool
   let service:
     any BrowseService & ForumPostSearchService & HotTopicService & HotThreadService
       & UserProfileService & ForumInformationService
@@ -12,10 +13,13 @@ struct HotThreadListView: View {
 
   @StateObject private var viewModel: HotThreadListViewModel
   @State private var threadNavigationRequest: ThreadSummaryNavigationRequest?
+  @State private var needsContentFilterReload = false
+  @State private var isPresented = false
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Environment(\.appAccentColor) private var appAccentColor
 
   init(
+    isActive: Bool = true,
     service: any BrowseService & ForumPostSearchService & HotTopicService & HotThreadService
       & UserProfileService & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
@@ -23,6 +27,7 @@ struct HotThreadListView: View {
     searchHistoryRepository: any ForumSearchHistoryRepository,
     showsNavigationTitle: Bool = true
   ) {
+    self.isActive = isActive
     self.service = service
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
@@ -46,10 +51,21 @@ struct HotThreadListView: View {
         categoryTabs
       }
     }
-    .task { viewModel.loadIfNeeded() }
-    .onDisappear(perform: viewModel.cancel)
+    .onAppear {
+      isPresented = true
+      synchronizeActivation()
+    }
+    .onChange(of: isActive) { _ in synchronizeActivation() }
+    .onDisappear {
+      isPresented = false
+      viewModel.cancel()
+    }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
-      viewModel.reloadForContentFilterChange()
+      if acceptsAutomaticRequests {
+        viewModel.reloadForContentFilterChange()
+      } else {
+        needsContentFilterReload = true
+      }
     }
     .navigationDestination(isPresented: threadNavigationPresented) {
       if let request = threadNavigationRequest {
@@ -68,6 +84,27 @@ struct HotThreadListView: View {
       Button("好", role: .cancel) { viewModel.clearRefreshError() }
     } message: {
       Text(viewModel.refreshError ?? "无法刷新帖子热榜。")
+    }
+  }
+
+  private var acceptsAutomaticRequests: Bool {
+    isPresented && isActive
+  }
+
+  private func synchronizeActivation() {
+    guard acceptsAutomaticRequests else {
+      viewModel.cancel()
+      return
+    }
+    if needsContentFilterReload {
+      needsContentFilterReload = false
+      if viewModel.hasLoadedInitialSnapshot {
+        viewModel.reloadForContentFilterChange()
+      } else {
+        viewModel.loadIfNeeded()
+      }
+    } else {
+      viewModel.loadIfNeeded()
     }
   }
 

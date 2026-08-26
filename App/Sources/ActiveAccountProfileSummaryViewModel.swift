@@ -31,12 +31,12 @@ final class ActiveAccountProfileSummaryViewModel: ObservableObject {
     await task.value
   }
 
-  func accountSessionDidChange() {
+  func accountSessionDidChange(loadImmediately: Bool = true) {
     // A same-UID login rotates the revision, so old profile data is no longer attributable.
     invalidateLoad()
     clearSnapshot()
     state = .idle
-    startLoad()
+    if loadImmediately { startLoad() }
   }
 
   func cancel() {

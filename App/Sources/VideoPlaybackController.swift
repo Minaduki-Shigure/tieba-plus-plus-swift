@@ -249,7 +249,7 @@ final class VideoPlaybackController: ObservableObject, MediaPlaybackParticipant 
     switch reason {
     case .superseded:
       shouldDeactivateAudioSession = false
-    case .sceneInactive:
+    case .sceneInactive, .surfaceInactive:
       shouldDeactivateAudioSession = true
     }
     engine.pause(deactivateAudioSession: shouldDeactivateAudioSession)

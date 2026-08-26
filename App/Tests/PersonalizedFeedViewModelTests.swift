@@ -41,6 +41,33 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testHiddenContentFilterChangeDefersExactlyOneReloadUntilActivation() async throws {
+    let service = ScriptedPersonalizedFeedService()
+    await service.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [1], page: 1, hasMore: false))
+    )
+    await service.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [2], page: 1, hasMore: false))
+    )
+    let viewModel = PersonalizedFeedViewModel(service: service)
+    viewModel.loadIfNeeded()
+    try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [1] }
+
+    viewModel.contentFilterDidChange(reloadIfActive: false)
+    viewModel.contentFilterDidChange(reloadIfActive: false)
+    await personalizedFeedDrainMainActor()
+    var requests = await service.requestSnapshot()
+    XCTAssertEqual(requests, [1])
+
+    viewModel.reloadDeferredContentFilterIfNeeded()
+    try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [2] }
+    viewModel.reloadDeferredContentFilterIfNeeded()
+    await personalizedFeedDrainMainActor()
+    requests = await service.requestSnapshot()
+    XCTAssertEqual(requests, [1, 1])
+  }
+
+  @MainActor
   func testRowPrefetchStartsWithinLastThreeItemsOnly() async throws {
     let service = ScriptedPersonalizedFeedService()
     await service.enqueue(

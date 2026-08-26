@@ -246,6 +246,29 @@ final class MediaPlaybackCoordinatorTests: XCTestCase {
       [.init(lease: oldLease, reason: .sceneInactive)]
     )
   }
+
+  func testMainSurfaceChangeRevokesCurrentPlaybackWithoutDeactivatingScene() throws {
+    let coordinator = MediaPlaybackCoordinator()
+    let participant = MediaPlaybackParticipantSpy()
+    let oldLease = try XCTUnwrap(
+      coordinator.acquire(kind: .video, ownerID: UUID(), participant: participant)
+    )
+
+    coordinator.activeSurfaceDidChange()
+
+    XCTAssertFalse(coordinator.isCurrent(oldLease))
+    XCTAssertFalse(coordinator.hasCurrentLease)
+    XCTAssertTrue(coordinator.isSceneActive)
+    XCTAssertEqual(
+      participant.revocations,
+      [.init(lease: oldLease, reason: .surfaceInactive)]
+    )
+
+    let replacement = try XCTUnwrap(
+      coordinator.acquire(kind: .voice, ownerID: UUID(), participant: participant)
+    )
+    XCTAssertTrue(coordinator.isCurrent(replacement))
+  }
 }
 
 @MainActor

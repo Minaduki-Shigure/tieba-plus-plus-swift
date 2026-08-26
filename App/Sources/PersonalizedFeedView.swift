@@ -98,7 +98,7 @@ struct PersonalizedFeedView: View {
       viewModel.cancel()
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
-      if isVisible, isActive { viewModel.reloadForContentFilterChange() }
+      viewModel.contentFilterDidChange(reloadIfActive: isVisible && isActive)
     }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
       feedbackPrompt = nil
@@ -416,7 +416,11 @@ struct PersonalizedFeedView: View {
       loadIfNeeded: shouldLoad && followedForumsOnly
     )
     synchronizeScope()
-    if !shouldLoad { viewModel.cancel() }
+    if shouldLoad {
+      viewModel.reloadDeferredContentFilterIfNeeded()
+    } else {
+      viewModel.cancel()
+    }
   }
 
   private func synchronizeScope() {

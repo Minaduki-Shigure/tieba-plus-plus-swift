@@ -94,9 +94,9 @@ final class NotificationsViewModel: ObservableObject {
     await task?.value
   }
 
-  func accountSessionDidChange() {
+  func accountSessionDidChange(loadImmediately: Bool = true) {
     // Clear synchronously so data from the old account cannot remain visible for one frame.
-    beginNewEpoch(loadImmediately: true)
+    beginNewEpoch(loadImmediately: loadImmediately)
   }
 
   func contentFilterDidChange() {

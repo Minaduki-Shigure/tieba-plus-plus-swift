@@ -24,6 +24,7 @@ enum ExploreSection: String, CaseIterable, Hashable, Identifiable, Sendable {
 }
 
 struct ExploreView: View {
+  let isActive: Bool
   let service:
     any BrowseService & ForumPostSearchService & HotTopicService & HotThreadService
       & PersonalizedFeedService & UserProfileService & ForumInformationService
@@ -40,6 +41,7 @@ struct ExploreView: View {
 
   init(
     initialSection: ExploreSection = .personalized,
+    isActive: Bool = true,
     service: any BrowseService & ForumPostSearchService & HotTopicService & HotThreadService
       & PersonalizedFeedService & UserProfileService & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
@@ -50,6 +52,7 @@ struct ExploreView: View {
     accountVault: any AccountVault,
     accountSessionLookup: any AccountSessionLookup
   ) {
+    self.isActive = isActive
     self.service = service
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
@@ -68,7 +71,7 @@ struct ExploreView: View {
     TabView(selection: selectedSectionBinding) {
       if channelsViewModel.visibleSections.contains(.concern) {
         ConcernFeedView(
-          isActive: selectedSection == .concern,
+          isActive: isActive && selectedSection == .concern,
           browseService: service,
           accountService: accountService,
           vault: accountVault,
@@ -80,7 +83,7 @@ struct ExploreView: View {
       }
 
       PersonalizedFeedView(
-        isActive: selectedSection == .personalized,
+        isActive: isActive && selectedSection == .personalized,
         service: service,
         accountService: accountService,
         feedbackService: feedbackService,
@@ -93,6 +96,7 @@ struct ExploreView: View {
       .tag(ExploreSection.personalized)
 
       HotThreadListView(
+        isActive: isActive && selectedSection == .hot,
         service: service,
         historyRepository: historyRepository,
         favoritesRepository: favoritesRepository,
@@ -116,10 +120,23 @@ struct ExploreView: View {
       .padding(.vertical, 8)
       .appBarMaterialSurface()
     }
-    .onAppear(perform: channelsViewModel.reload)
+    .onAppear {
+      if isActive { channelsViewModel.reload() }
+    }
+    .onChange(of: isActive) { active in
+      if active {
+        channelsViewModel.reload()
+      } else {
+        channelsViewModel.cancel()
+      }
+    }
     .onDisappear(perform: channelsViewModel.cancel)
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
-      channelsViewModel.reload()
+      if isActive {
+        channelsViewModel.reload()
+      } else {
+        channelsViewModel.cancel()
+      }
     }
     .onChange(of: channelsViewModel.visibleSections) { sections in
       if !sections.contains(selectedSection) {

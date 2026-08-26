@@ -99,6 +99,37 @@ final class NotificationsViewModelTests: XCTestCase {
     viewModel.cancel()
   }
 
+  func testHiddenAccountChangeClearsSnapshotWithoutStartingPrivateRequest() async throws {
+    let oldSession = session(userID: 7, revision: uuid(7))
+    let newSession = session(userID: 8, revision: uuid(8))
+    let vault = NotificationsVaultSpy(session: oldSession)
+    let service = NotificationsServiceSpy(
+      scripts: [
+        .init(userID: 7, kind: .replies, requestedPage: 1): [
+          .init(page: page(userID: 7, kind: .replies, ids: [71], page: 1, hasMore: false))
+        ],
+        .init(userID: 8, kind: .replies, requestedPage: 1): [
+          .init(page: page(userID: 8, kind: .replies, ids: [81], page: 1, hasMore: false))
+        ],
+      ]
+    )
+    let viewModel = NotificationsViewModel(service: service, vault: vault)
+    await viewModel.refresh()
+
+    await vault.replaceActive(with: newSession)
+    viewModel.accountSessionDidChange(loadImmediately: false)
+
+    XCTAssertTrue(viewModel.messages.isEmpty)
+    XCTAssertEqual(viewModel.state, .idle)
+    let hiddenRequestCount = await service.requestCount()
+    XCTAssertEqual(hiddenRequestCount, 1)
+
+    viewModel.loadIfNeeded()
+    try await waitForNotificationsTest { viewModel.messages.map(\.id) == [81] }
+    let visibleRequestCount = await service.requestCount()
+    XCTAssertEqual(visibleRequestCount, 2)
+  }
+
   func testSelectingMentionsStartsIsolatedFirstPageLoad() async throws {
     let active = session(userID: 7)
     let vault = NotificationsVaultSpy(session: active)

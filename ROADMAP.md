@@ -37,6 +37,13 @@ The published `PbContent` image mapping also closes a narrow compatibility gap b
 retaining `src`, `big_src`, and `cdn_src_active` fallback fields across ordinary
 floors and nested replies. It reuses the existing media pipeline and therefore
 does not add a data source or weighted point.
+Current-main primary navigation now exposes TiebaLite's four reachable Home,
+Explore, Messages, and My destinations through ordered system tabs with
+independent navigation stacks. Model and contract tests cover startup,
+content-link, app-route, quick-action, private-read activation, unread-badge,
+and media-revocation policies. This makes existing workflows persistently reachable without
+adding a data source or weighted point; iPhone and iPad interaction remain a
+physical-device validation gate.
 
 | Capability area | Weight | Credited points | Current basis |
 | --- | ---: | ---: | --- |
@@ -297,6 +304,10 @@ This section describes the current `main` source. A newly implemented item is
 not installable from the public app source until its tagged build passes CI and
 the source metadata is updated to that tested IPA.
 
+- Ordered Home, Explore, Messages, and My system tabs with independent
+  navigation stacks, active-stack content-link routing, exact startup and app-
+  route selection, a reply-plus-mention Messages badge, hidden-tab private-read
+  deferral, and active-media revocation when changing the primary surface
 - Anonymous hot-thread ranking with an embedded hot-topic preview,
   server-defined categories, and snapshot refresh
 - Personalized thread feed as the default Explore channel, with a persistent
@@ -702,6 +713,13 @@ and effect on later recommendations.
    its intended floor, or only the App home page. Compare the observed full
    TiebaLite template with a minimal TID/PID field set before retaining opaque
    Chrome, push, referrer, and sample-attribution constants.
+16. Real-device validation of the four-tab primary shell on supported iPhone and
+   iPad sizes, including cold starts into every configured destination, retained
+   per-tab stacks, content and app links from each tab depth, repeated Home Screen
+   actions, reply/mention badge `99+` and VoiceOver output, account switching in
+   every tab, hidden-tab request cancellation, active voice/video revocation,
+   Dynamic Type and keyboard safe areas, and interactive-pop completion and
+   cancellation without corrupting another tab's stack.
 
 The foreground inbox deliberately does not copy TiebaLite's cleartext JSON
 transport or its Android hardware parameters. ReplyMe uses the current HTTPS

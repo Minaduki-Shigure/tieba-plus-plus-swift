@@ -18,7 +18,7 @@ struct RootView: View {
   let contentFilterRepository: any ContentFilterRepository
 
   @State private var query = ""
-  @State private var path: [RootDestination]
+  @State private var navigation: RootMainNavigationState
   @State private var showsAllSearchHistory = false
   @State private var showsRecentForums = true
   @State private var showsQuickAccountLogin = false
@@ -83,8 +83,8 @@ struct RootView: View {
     self.accountService = accountService
     self.personalizedFeedbackService = personalizedFeedbackService
     self.contentFilterRepository = contentFilterRepository
-    _path = State(
-      initialValue: RootStartupNavigation.initialPath(startDestination: startDestination)
+    _navigation = State(
+      initialValue: RootStartupNavigation.initialState(startDestination: startDestination)
     )
     _favoritesViewModel = StateObject(
       wrappedValue: LocalFavoritesViewModel(repository: favoritesRepository)
@@ -114,13 +114,17 @@ struct RootView: View {
   }
 
   var body: some View {
-    NavigationStack(path: $path) {
-      List {
+    TabView(selection: $navigation.selectedTab) {
+      NavigationStack(path: rootPathBinding(for: .home)) {
+        List {
         if homeShowsDiscovery {
           Section("\u{53d1}\u{73b0}") {
-            NavigationLink(value: RootDestination.explore(.personalized)) {
+            Button {
+              selectExplore(.personalized)
+            } label: {
               Label("发现", systemImage: "sparkles")
             }
+            .buttonStyle(.plain)
 
             NavigationLink(value: RootDestination.hotTopics) {
               Label("\u{70ed}\u{95e8}\u{8bdd}\u{9898}", systemImage: "flame.fill")
@@ -198,7 +202,7 @@ struct RootView: View {
             ForEach(Array(favoritesViewModel.favoriteForumEntries.prefix(6))) { entry in
               if case .forum(let forum) = entry.target {
                 Button {
-                  path.append(.forum(forum.name))
+                  append(.forum(forum.name), to: .home)
                 } label: {
                   HStack(spacing: 12) {
                     AvatarView(url: forum.avatarURL, name: forum.displayName, size: 36)
@@ -246,7 +250,7 @@ struct RootView: View {
         ) {
           ToolbarItem(placement: .navigationBarLeading) {
             Button {
-              path.append(.batchCheckIn)
+              append(.batchCheckIn, to: .home)
             } label: {
               Image(systemName: "checkmark.seal")
             }
@@ -262,7 +266,7 @@ struct RootView: View {
           } label: {
             accountToolbarLabel
           } primaryAction: {
-            path.append(.account)
+            selectRoot(.account)
           }
           .disabled(accountViewModel.isMutating)
           .accessibilityLabel(accountToolbarAccessibilityLabel)
@@ -281,7 +285,7 @@ struct RootView: View {
           }
 
           Button {
-            path.append(.settings)
+            append(.settings, to: .home)
           } label: {
             Image(systemName: "gearshape")
           }
@@ -289,7 +293,7 @@ struct RootView: View {
           .help("设置")
 
           Button {
-            path.append(.favorites)
+            append(.favorites, to: .home)
           } label: {
             Image(systemName: "bookmark")
           }
@@ -297,7 +301,7 @@ struct RootView: View {
           .help("本地收藏")
 
           Button {
-            path.append(.history)
+            append(.history, to: .home)
           } label: {
             Image(systemName: "clock.arrow.circlepath")
           }
@@ -306,138 +310,7 @@ struct RootView: View {
         }
       }
       .navigationDestination(for: RootDestination.self) { destination in
-        switch destination {
-        case .forum(let forumName):
-          ForumView(
-            forumName: forumName,
-            service: service,
-            historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository
-          )
-        case .search(let query):
-          SearchView(
-            query: query,
-            browseService: service,
-            searchService: service,
-            historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository,
-            globalSearchHistoryViewModel: globalSearchHistoryViewModel,
-            onSearchSubmitted: { globalSearchHistoryViewModel.record($0) }
-          )
-        case .hotTopics:
-          HotTopicListView(
-            service: service,
-            historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository
-          )
-        case .explore(let section):
-          ExploreView(
-            initialSection: section,
-            service: service,
-            historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository,
-            accountService: accountService,
-            feedbackService: personalizedFeedbackService,
-            accountVault: accountVault,
-            accountSessionLookup: accountSessionLookup
-          )
-        case .history:
-          HistoryView(repository: historyRepository) { target in
-            switch target {
-            case .forum(let forum):
-              path.append(.forum(forum.name))
-            case .thread(let thread):
-              path.append(.thread(thread))
-            }
-          }
-        case .favorites:
-          LocalFavoritesView(repository: favoritesRepository) { target in
-            let overrides = FavoriteThreadOpenOverrides(
-              onlyThreadAuthor: favoriteThreadsOpenOnlyAuthor,
-              descending: favoriteThreadsOpenDescending
-            )
-            path.append(
-              RootFavoriteNavigation.destination(for: target, overrides: overrides)
-            )
-          }
-        case .followedForums:
-          FollowedForumsView(
-            browseService: service,
-            historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository
-          )
-        case .batchCheckIn:
-          ForumBatchCheckInView(
-            access: AccountAccess(vault: accountVault, service: accountService)
-          )
-        case .notifications(let initialKind):
-          NotificationsView(
-            browseService: service,
-            accountService: accountService,
-            vault: accountVault,
-            contentFilterRepository: contentFilterRepository,
-            historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository,
-            initialKind: initialKind
-          )
-        case .cloudFavorites:
-          CloudFavoritesView(
-            browseService: service,
-            accountService: accountService,
-            vault: accountVault,
-            cloudFavoriteStore: threadCloudFavoriteStore,
-            historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository
-          )
-        case .homeScreenQuickAction(let invocation):
-          homeScreenQuickActionDestination(invocation)
-        case .account:
-          AccountView(
-            browseService: service,
-            accountService: accountService,
-            vault: accountVault,
-            unreadSummaryViewModel: unreadSummaryViewModel,
-            onVisibilityChanged: accountSurfaceVisibilityDidChange,
-            historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository
-          )
-        case .settings:
-          AppSettingsView(historyRepository: historyRepository)
-        case .thread(let thread):
-          ThreadView(
-            thread: thread.browseThread,
-            service: service,
-            historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository,
-            historySnapshot: thread
-          )
-        case .linkedThread(let route):
-          ThreadView(
-            thread: route.placeholderThread,
-            service: service,
-            historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository,
-            linkRoute: route
-          )
-        case .user(let userID):
-          UserProfileView(
-            userID: userID,
-            service: service,
-            historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository
-          )
-        }
+        rootDestination(destination, in: .home)
       }
       .alert(
         "无法更新本地收藏",
@@ -468,6 +341,81 @@ struct RootView: View {
       } message: {
         Text(followedForumsViewModel.presentedOperationError?.message ?? "未知错误")
       }
+      }
+      .tag(RootMainTab.home)
+      .tabItem {
+        Label(RootMainTab.home.title, systemImage: RootMainTab.home.systemImage)
+      }
+
+      NavigationStack(path: rootPathBinding(for: .explore)) {
+        ExploreView(
+          initialSection: navigation.exploreSection,
+          isActive: rootTabIsActive(.explore),
+          service: service,
+          historyRepository: historyRepository,
+          favoritesRepository: favoritesRepository,
+          searchHistoryRepository: searchHistoryRepository,
+          accountService: accountService,
+          feedbackService: personalizedFeedbackService,
+          accountVault: accountVault,
+          accountSessionLookup: accountSessionLookup
+        )
+        .id(navigation.exploreActivationID)
+        .navigationDestination(for: RootDestination.self) { destination in
+          rootDestination(destination, in: .explore)
+        }
+      }
+      .tag(RootMainTab.explore)
+      .tabItem {
+        Label(RootMainTab.explore.title, systemImage: RootMainTab.explore.systemImage)
+      }
+
+      NavigationStack(path: rootPathBinding(for: .notifications)) {
+        NotificationsView(
+          browseService: service,
+          accountService: accountService,
+          vault: accountVault,
+          contentFilterRepository: contentFilterRepository,
+          historyRepository: historyRepository,
+          favoritesRepository: favoritesRepository,
+          searchHistoryRepository: searchHistoryRepository,
+          initialKind: navigation.inboxKind,
+          isActive: rootTabIsActive(.notifications)
+        )
+        .id(navigation.inboxActivationID)
+        .navigationDestination(for: RootDestination.self) { destination in
+          rootDestination(destination, in: .notifications)
+        }
+      }
+      .tag(RootMainTab.notifications)
+      .tabItem {
+        Label(
+          RootMainTab.notifications.title,
+          systemImage: RootMainTab.notifications.systemImage
+        )
+      }
+      .badge(homeUnreadBadgePresentation?.count ?? 0)
+
+      NavigationStack(path: rootPathBinding(for: .account)) {
+        AccountView(
+          browseService: service,
+          accountService: accountService,
+          vault: accountVault,
+          unreadSummaryViewModel: unreadSummaryViewModel,
+          onVisibilityChanged: accountSurfaceVisibilityDidChange,
+          historyRepository: historyRepository,
+          favoritesRepository: favoritesRepository,
+          searchHistoryRepository: searchHistoryRepository,
+          isActive: rootTabIsActive(.account)
+        )
+        .navigationDestination(for: RootDestination.self) { destination in
+          rootDestination(destination, in: .account)
+        }
+      }
+      .tag(RootMainTab.account)
+      .tabItem {
+        Label(RootMainTab.account.title, systemImage: RootMainTab.account.systemImage)
+      }
     }
     .appNavigationSurface()
     .threadSummaryImageGallery(threadSummaryImageGalleryCoordinator)
@@ -493,7 +441,7 @@ struct RootView: View {
     .onAppear {
       favoritesViewModel.reload()
       recentForumsViewModel.reload()
-      if RootFollowedForumsActivationPolicy.isActive(path: path) {
+      if RootFollowedForumsActivationPolicy.isActive(navigation: navigation) {
         followedForumsViewModel.loadIfNeeded()
         if scenePhase == .active {
           followedForumCheckInStore.loadIfNeeded()
@@ -505,7 +453,7 @@ struct RootView: View {
       unreadSummaryViewModel.sceneActivityDidChange(
         isActive: RootUnreadSummaryActivationPolicy.isActive(
           sceneIsActive: scenePhase == .active,
-          path: path,
+          navigation: navigation,
           accountSurfaceIsVisible: accountSurfaceIsVisible
         )
       )
@@ -521,13 +469,13 @@ struct RootView: View {
       linkPreviewViewModel.sceneActivityDidChange(isActive: $0 == .active)
       followedForumCheckInStore.sceneActivityDidChange(
         isActive: $0 == .active,
-        shouldLoad: RootFollowedForumsActivationPolicy.isActive(path: path)
+        shouldLoad: RootFollowedForumsActivationPolicy.isActive(navigation: navigation)
           || followedForumsViewModel.hasActiveFullListSurface
       )
       unreadSummaryViewModel.sceneActivityDidChange(
         isActive: RootUnreadSummaryActivationPolicy.isActive(
           sceneIsActive: $0 == .active,
-          path: path,
+          navigation: navigation,
           accountSurfaceIsVisible: accountSurfaceIsVisible
         )
       )
@@ -535,11 +483,14 @@ struct RootView: View {
         searchSuggestionViewModel.cancelAndClear()
       }
     }
-    .onChange(of: path) { path in
+    .onChange(of: navigation.primarySurface) { _ in
+      mediaPlaybackCoordinator.activeSurfaceDidChange()
+    }
+    .onChange(of: navigation) { navigation in
       pendingFollowedForumUnfollow = nil
       searchSuggestionViewModel.cancelAndClear()
       recentForumsViewModel.reload()
-      if RootFollowedForumsActivationPolicy.isActive(path: path) {
+      if RootFollowedForumsActivationPolicy.isActive(navigation: navigation) {
         followedForumsViewModel.loadIfNeeded()
         if scenePhase == .active {
           followedForumCheckInStore.loadIfNeeded()
@@ -548,7 +499,7 @@ struct RootView: View {
       unreadSummaryViewModel.sceneActivityDidChange(
         isActive: RootUnreadSummaryActivationPolicy.isActive(
           sceneIsActive: scenePhase == .active,
-          path: path,
+          navigation: navigation,
           accountSurfaceIsVisible: accountSurfaceIsVisible
         )
       )
@@ -571,7 +522,7 @@ struct RootView: View {
       _ in
       followedForumCheckInStore.significantTimeDidChange(
         shouldLoad: scenePhase == .active
-          && (RootFollowedForumsActivationPolicy.isActive(path: path)
+          && (RootFollowedForumsActivationPolicy.isActive(navigation: navigation)
             || followedForumsViewModel.hasActiveFullListSurface)
       )
     }
@@ -582,24 +533,28 @@ struct RootView: View {
       unreadSummaryViewModel.accountSessionDidChange(
         loadImmediately: RootUnreadSummaryActivationPolicy.isActive(
           sceneIsActive: scenePhase == .active,
-          path: path,
+          navigation: navigation,
           accountSurfaceIsVisible: accountSurfaceIsVisible
         )
       )
-      let loadsImmediately = RootFollowedForumsActivationPolicy.isActive(path: path)
+      let loadsImmediately = RootFollowedForumsActivationPolicy.isActive(
+        navigation: navigation
+      )
         || followedForumsViewModel.hasActiveFullListSurface
         || followedForumsViewModel.hasActiveCompleteIndexSurface
       followedForumsViewModel.accountSessionDidChange(loadImmediately: loadsImmediately)
       followedForumCheckInStore.accountSessionDidChange(
         loadImmediately: scenePhase == .active
-          && (RootFollowedForumsActivationPolicy.isActive(path: path)
+          && (RootFollowedForumsActivationPolicy.isActive(navigation: navigation)
             || followedForumsViewModel.hasActiveFullListSurface)
       )
     }
     .onReceive(NotificationCenter.default.publisher(for: .forumMembershipDidChange)) {
       notification in
       guard let change = ForumMembershipChange(notification) else { return }
-      let loadsImmediately = RootFollowedForumsActivationPolicy.isActive(path: path)
+      let loadsImmediately = RootFollowedForumsActivationPolicy.isActive(
+        navigation: navigation
+      )
         || followedForumsViewModel.hasActiveFullListSurface
         || followedForumsViewModel.hasActiveCompleteIndexSurface
       followedForumsViewModel.forumMembershipDidChange(
@@ -618,7 +573,7 @@ struct RootView: View {
       followedForumCheckInStore.forumCheckInCatalogDidChange(
         change,
         loadImmediately: scenePhase == .active
-          && (RootFollowedForumsActivationPolicy.isActive(path: path)
+          && (RootFollowedForumsActivationPolicy.isActive(navigation: navigation)
             || followedForumsViewModel.hasActiveFullListSurface)
       )
     }
@@ -675,13 +630,197 @@ struct RootView: View {
     }
   }
 
+  private func rootPathBinding(for tab: RootMainTab) -> Binding<[RootDestination]> {
+    Binding(
+      get: { navigation.path(for: tab) },
+      set: { navigation.setPath($0, for: tab) }
+    )
+  }
+
+  private func rootTabIsActive(_ tab: RootMainTab) -> Bool {
+    RootMainTabActivationPolicy.isActive(
+      sceneIsActive: scenePhase == .active,
+      navigation: navigation,
+      tab: tab
+    )
+  }
+
+  private func rootTabOwnsForeground(_ tab: RootMainTab) -> Bool {
+    RootMainTabActivationPolicy.isForeground(
+      sceneIsActive: scenePhase == .active,
+      navigation: navigation,
+      tab: tab
+    )
+  }
+
+  private func append(_ destination: RootDestination, to tab: RootMainTab) {
+    navigation.append(destination, to: tab)
+  }
+
+  private func selectRoot(_ tab: RootMainTab) {
+    navigation.selectRoot(tab)
+  }
+
+  private func selectExplore(_ section: ExploreSection) {
+    navigation.activateExplore(section)
+  }
+
+  private func selectInbox(_ kind: InboxKind) {
+    navigation.activateInbox(kind)
+  }
+
+  @ViewBuilder
+  private func rootDestination(
+    _ destination: RootDestination,
+    in tab: RootMainTab
+  ) -> some View {
+    switch destination {
+    case .forum(let forumName):
+      ForumView(
+        forumName: forumName,
+        service: service,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository
+      )
+    case .search(let query):
+      SearchView(
+        query: query,
+        browseService: service,
+        searchService: service,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository,
+        globalSearchHistoryViewModel: globalSearchHistoryViewModel,
+        onSearchSubmitted: { globalSearchHistoryViewModel.record($0) }
+      )
+    case .hotTopics:
+      HotTopicListView(
+        service: service,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository
+      )
+    case .explore(let section):
+      ExploreView(
+        initialSection: section,
+        service: service,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository,
+        accountService: accountService,
+        feedbackService: personalizedFeedbackService,
+        accountVault: accountVault,
+        accountSessionLookup: accountSessionLookup
+      )
+    case .history:
+      HistoryView(repository: historyRepository) { target in
+        switch target {
+        case .forum(let forum):
+          append(.forum(forum.name), to: tab)
+        case .thread(let thread):
+          append(.thread(thread), to: tab)
+        }
+      }
+    case .favorites:
+      LocalFavoritesView(repository: favoritesRepository) { target in
+        let overrides = FavoriteThreadOpenOverrides(
+          onlyThreadAuthor: favoriteThreadsOpenOnlyAuthor,
+          descending: favoriteThreadsOpenDescending
+        )
+        append(
+          RootFavoriteNavigation.destination(for: target, overrides: overrides),
+          to: tab
+        )
+      }
+    case .followedForums:
+      FollowedForumsView(
+        browseService: service,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository
+      )
+    case .batchCheckIn:
+      ForumBatchCheckInView(
+        access: AccountAccess(vault: accountVault, service: accountService)
+      )
+    case .notifications(let initialKind):
+      NotificationsView(
+        browseService: service,
+        accountService: accountService,
+        vault: accountVault,
+        contentFilterRepository: contentFilterRepository,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository,
+        initialKind: initialKind,
+        isActive: rootTabOwnsForeground(tab)
+      )
+    case .cloudFavorites:
+      CloudFavoritesView(
+        browseService: service,
+        accountService: accountService,
+        vault: accountVault,
+        cloudFavoriteStore: threadCloudFavoriteStore,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository
+      )
+    case .homeScreenQuickAction(let invocation):
+      homeScreenQuickActionDestination(
+        invocation,
+        isActive: rootTabOwnsForeground(tab)
+      )
+    case .account:
+      AccountView(
+        browseService: service,
+        accountService: accountService,
+        vault: accountVault,
+        unreadSummaryViewModel: unreadSummaryViewModel,
+        onVisibilityChanged: accountSurfaceVisibilityDidChange,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository,
+        isActive: rootTabOwnsForeground(tab)
+      )
+    case .settings:
+      AppSettingsView(historyRepository: historyRepository)
+    case .thread(let thread):
+      ThreadView(
+        thread: thread.browseThread,
+        service: service,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository,
+        historySnapshot: thread
+      )
+    case .linkedThread(let route):
+      ThreadView(
+        thread: route.placeholderThread,
+        service: service,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository,
+        linkRoute: route
+      )
+    case .user(let userID):
+      UserProfileView(
+        userID: userID,
+        service: service,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository
+      )
+    }
+  }
+
   @ViewBuilder
   private var accountQuickSwitchMenu: some View {
     if accountViewModel.activeAccount != nil {
       Section("消息") {
         ForEach(InboxKind.allCases) { kind in
           Button {
-            path.append(.notifications(kind))
+            selectInbox(kind)
           } label: {
             Label(
               inboxQuickActionTitle(for: kind),
@@ -733,7 +872,7 @@ struct RootView: View {
       .disabled(accountViewModel.hasLoadFailure)
 
       Button {
-        path.append(.account)
+        selectRoot(.account)
       } label: {
         Label("账户管理", systemImage: "person.crop.circle")
       }
@@ -813,7 +952,7 @@ struct RootView: View {
     unreadSummaryViewModel.sceneActivityDidChange(
       isActive: RootUnreadSummaryActivationPolicy.isActive(
         sceneIsActive: scenePhase == .active,
-        path: path,
+        navigation: navigation,
         accountSurfaceIsVisible: isVisible
       )
     )
@@ -845,7 +984,7 @@ struct RootView: View {
             let isPinned = followedForumsViewModel.isPinned(forum)
             let unfollowState = followedForumsViewModel.unfollowControlState(for: forum)
             Button {
-              path.append(.forum(forum.name))
+              append(.forum(forum.name), to: .home)
             } label: {
               FollowedForumCard(
                 forum: forum,
@@ -1065,7 +1204,7 @@ struct RootView: View {
               ForEach(entries) { entry in
                 if case .forum(let forum) = entry.target {
                   Button {
-                    path.append(.forum(forum.name))
+                    append(.forum(forum.name), to: .home)
                   } label: {
                     HStack(spacing: 7) {
                       AvatarView(url: forum.avatarURL, name: forum.displayName, size: 28)
@@ -1168,7 +1307,7 @@ struct RootView: View {
     searchSuggestionViewModel.cancelAndClear()
     globalSearchHistoryViewModel.record(searchQuery)
     query = ""
-    path.append(.search(searchQuery))
+    append(.search(searchQuery), to: .home)
   }
 
   private func openForum(named rawName: String) {
@@ -1176,7 +1315,7 @@ struct RootView: View {
     guard !forumName.isEmpty else { return }
     searchSuggestionViewModel.cancelAndClear()
     query = ""
-    path.append(.forum(forumName))
+    append(.forum(forumName), to: .home)
   }
 
   private func openPastedLinks(_ values: [String]) {
@@ -1191,19 +1330,20 @@ struct RootView: View {
 
   private func openTiebaURL(_ url: URL) {
     linkPreviewViewModel.dismiss()
-    guard let routedPath = RootStartupNavigation.appending(url: url, to: path) else {
+    guard let routedNavigation = RootStartupNavigation.appending(url: url, to: navigation)
+    else {
       linkErrorMessage = "该链接不是受支持的贴吧内容或应用链接。"
       return
     }
-    path = routedPath
+    navigation = routedNavigation
   }
 
   private func openHomeScreenQuickAction(_ invocation: HomeScreenQuickActionInvocation) {
     guard sceneDelegate.consume(invocation) else { return }
     dismissRootPresentationsForHomeScreenQuickAction()
-    path = RootStartupNavigation.applyingQuickAction(
+    navigation = RootStartupNavigation.applyingQuickAction(
       invocation: invocation,
-      to: path
+      to: navigation
     )
   }
 
@@ -1227,7 +1367,8 @@ struct RootView: View {
 
   @ViewBuilder
   private func homeScreenQuickActionDestination(
-    _ invocation: HomeScreenQuickActionInvocation
+    _ invocation: HomeScreenQuickActionInvocation,
+    isActive: Bool
   ) -> some View {
     switch invocation.action {
     case .batchCheckIn:
@@ -1264,13 +1405,14 @@ struct RootView: View {
         historyRepository: historyRepository,
         favoritesRepository: favoritesRepository,
         searchHistoryRepository: searchHistoryRepository,
-        initialKind: .replies
+        initialKind: .replies,
+        isActive: isActive
       )
     }
   }
 
   private func openTiebaTarget(_ target: TiebaLinkTarget) {
-    path = RootStartupNavigation.appending(target: target, to: path)
+    navigation = RootStartupNavigation.appending(target: target, to: navigation)
   }
 
   private func openLinkPreview(_ previewID: UUID) {
@@ -1317,99 +1459,142 @@ enum RootAccountActionPolicy {
 }
 
 enum RootFollowedForumsActivationPolicy {
-  static func isActive(path: [RootDestination]) -> Bool {
-    path.isEmpty
+  static func isActive(navigation: RootMainNavigationState) -> Bool {
+    navigation.selectedTab == .home && navigation.path(for: .home).isEmpty
+  }
+}
+
+enum RootMainTabActivationPolicy {
+  static func isForeground(
+    sceneIsActive: Bool,
+    navigation: RootMainNavigationState,
+    tab: RootMainTab
+  ) -> Bool {
+    sceneIsActive && navigation.selectedTab == tab
+  }
+
+  static func isActive(
+    sceneIsActive: Bool,
+    navigation: RootMainNavigationState,
+    tab: RootMainTab
+  ) -> Bool {
+    isForeground(sceneIsActive: sceneIsActive, navigation: navigation, tab: tab)
+      && navigation.path(for: tab).isEmpty
   }
 }
 
 enum RootUnreadSummaryActivationPolicy {
   static func isActive(
     sceneIsActive: Bool,
-    path: [RootDestination],
+    navigation: RootMainNavigationState,
     accountSurfaceIsVisible: Bool
   ) -> Bool {
     guard sceneIsActive else { return false }
-    guard let destination = path.last else { return true }
-    if case .account = destination { return accountSurfaceIsVisible }
-    return false
+    switch navigation.selectedTab {
+    case .home:
+      return navigation.path(for: .home).isEmpty
+    case .account:
+      return accountSurfaceIsVisible && navigation.path(for: .account).isEmpty
+    case .explore, .notifications:
+      return false
+    }
   }
 }
 
 enum RootStartupNavigation {
-  static func initialPath(startDestination: AppStartDestination) -> [RootDestination] {
+  static func initialState(
+    startDestination: AppStartDestination
+  ) -> RootMainNavigationState {
     switch startDestination {
     case .home:
-      []
+      RootMainNavigationState(selectedTab: .home)
     case .discovery:
-      [.explore(.personalized)]
+      RootMainNavigationState(selectedTab: .explore, exploreSection: .personalized)
     case .hotThreads:
-      [.explore(.hot)]
+      RootMainNavigationState(selectedTab: .explore, exploreSection: .hot)
     case .hotTopics:
-      [.hotTopics]
+      RootMainNavigationState(selectedTab: .explore, explorePath: [.hotTopics])
     case .notifications:
-      [.notifications(.replies)]
+      RootMainNavigationState(selectedTab: .notifications, inboxKind: .replies)
     case .favorites:
-      [.favorites]
+      RootMainNavigationState(selectedTab: .home, homePath: [.favorites])
     case .history:
-      [.history]
+      RootMainNavigationState(selectedTab: .home, homePath: [.history])
     }
   }
 
   static func appending(
     target: TiebaLinkTarget,
-    to path: [RootDestination]
-  ) -> [RootDestination] {
-    var result = path
+    to navigation: RootMainNavigationState
+  ) -> RootMainNavigationState {
+    var result = navigation
+    let tab = result.selectedTab
     switch target {
     case .forum(let forumName):
-      result.append(.forum(forumName))
+      result.append(.forum(forumName), to: tab)
     case .thread(let route):
-      result.append(.linkedThread(route))
+      result.append(.linkedThread(route), to: tab)
     case .user(let userID):
-      result.append(.user(userID))
+      result.append(.user(userID), to: tab)
     }
     return result
   }
 
   static func appending(
     url: URL,
-    to path: [RootDestination]
-  ) -> [RootDestination]? {
+    to navigation: RootMainNavigationState
+  ) -> RootMainNavigationState? {
     if let target = TiebaLink.target(from: url) {
-      return appending(target: target, to: path)
+      return appending(target: target, to: navigation)
     }
     if let appRoute = TiebaAppLink.route(from: url) {
-      return appending(appRoute: appRoute, to: path)
+      return appending(appRoute: appRoute, to: navigation)
     }
     return nil
   }
 
   static func appending(
     appRoute: TiebaAppRoute,
-    to path: [RootDestination]
-  ) -> [RootDestination] {
-    var result = path
-    result.append(destination(for: appRoute))
+    to navigation: RootMainNavigationState
+  ) -> RootMainNavigationState {
+    var result = navigation
+    if case .notifications(let kind) = appRoute {
+      result.activateInbox(kind)
+      return result
+    }
+
+    result.selectedTab = .home
+    result.append(destination(for: appRoute), to: .home)
     return result
   }
 
   static func applyingQuickAction(
     invocation: HomeScreenQuickActionInvocation,
-    to path: [RootDestination]
-  ) -> [RootDestination] {
+    to navigation: RootMainNavigationState
+  ) -> RootMainNavigationState {
+    if invocation.action == .notificationReplies {
+      var result = navigation
+      result.activateInbox(.replies)
+      return result
+    }
+
     let route = invocation.appRoute
     // A check-in page owns foreground work that its disappearance intentionally
     // stops. Every other launch replaces the old navigation subtree with a
     // unique landing page so child routes, selections, and modals cannot hide it.
     if
       invocation.action == .batchCheckIn,
-      let current = path.last,
+      navigation.selectedTab == .home,
+      let current = navigation.path(for: .home).last,
       represents(route, destination: current)
     {
-      return path
+      return navigation
     }
 
-    return [.homeScreenQuickAction(invocation)]
+    var result = navigation
+    result.selectedTab = .home
+    result.setPath([.homeScreenQuickAction(invocation)], for: .home)
+    return result
   }
 
   private static func destination(for appRoute: TiebaAppRoute) -> RootDestination {

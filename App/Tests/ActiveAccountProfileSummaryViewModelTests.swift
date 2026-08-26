@@ -58,6 +58,33 @@ final class ActiveAccountProfileSummaryViewModelTests: XCTestCase {
     XCTAssertEqual(requestCount, 1)
   }
 
+  func testHiddenAccountChangeClearsSummaryWithoutStartingPrivateRequest() async throws {
+    let oldSession = session(userID: 7, revision: uuid(1))
+    let newSession = session(userID: 8, revision: uuid(2))
+    let oldSummary = summary(userID: 7, following: 1, followers: 2, posts: 3)
+    let newSummary = summary(userID: 8, following: 4, followers: 5, posts: 6)
+    let vault = ActiveProfileVaultSpy(session: oldSession)
+    let service = ActiveProfileServiceSpy(scripts: [
+      oldSession.sessionRevision: [.value(oldSummary)],
+      newSession.sessionRevision: [.value(newSummary)],
+    ])
+    let viewModel = ActiveAccountProfileSummaryViewModel(service: service, vault: vault)
+    await viewModel.refresh()
+
+    await vault.replaceActive(with: newSession)
+    viewModel.accountSessionDidChange(loadImmediately: false)
+
+    XCTAssertNil(viewModel.summary)
+    XCTAssertEqual(viewModel.state, .idle)
+    let hiddenRequestCount = await service.requestCount()
+    XCTAssertEqual(hiddenRequestCount, 1)
+
+    viewModel.loadIfNeeded()
+    try await waitForActiveProfileTest { viewModel.summary == newSummary }
+    let visibleRequestCount = await service.requestCount()
+    XCTAssertEqual(visibleRequestCount, 2)
+  }
+
   func testConcurrentRefreshesShareOneInFlightRequest() async throws {
     let active = session(userID: 7, revision: uuid(1))
     let expected = summary(userID: 7, following: 8, followers: 2, posts: 9)

@@ -76,6 +76,7 @@ final class PersonalizedFeedViewModel: ObservableObject {
   private var feedbackTasks = [Int64: Task<Void, Never>]()
   private var feedbackHiddenThreadIDs = Set<Int64>()
   private var loadedAccountLease: PersonalizedFeedbackSessionLease?
+  private var needsContentFilterReloadAfterActivation = false
 
   init(
     service: any PersonalizedFeedService,
@@ -152,6 +153,21 @@ final class PersonalizedFeedViewModel: ObservableObject {
   func reloadForContentFilterChange() {
     guard state == .loaded, scope.isReady, !scope.hasNoAllowedForums else { return }
     startRequest(.replacement)
+  }
+
+  func contentFilterDidChange(reloadIfActive: Bool) {
+    guard reloadIfActive else {
+      needsContentFilterReloadAfterActivation = true
+      return
+    }
+    needsContentFilterReloadAfterActivation = false
+    reloadForContentFilterChange()
+  }
+
+  func reloadDeferredContentFilterIfNeeded() {
+    guard needsContentFilterReloadAfterActivation else { return }
+    needsContentFilterReloadAfterActivation = false
+    reloadForContentFilterChange()
   }
 
   func loadMore() {

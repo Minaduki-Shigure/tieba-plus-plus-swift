@@ -8,11 +8,13 @@ struct NotificationsView: View {
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
+  let isActive: Bool
 
   @Environment(\.hidesReplyEntryPoints) private var hidesReplyEntryPoints
   @StateObject private var viewModel: NotificationsViewModel
   @State private var replyRouteState = NotificationsReplyRouteState()
   @State private var replyNotice: String?
+  @State private var isPresented = false
 
   init(
     browseService: any BrowseService & ForumPostSearchService & UserProfileService
@@ -23,7 +25,8 @@ struct NotificationsView: View {
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository,
-    initialKind: InboxKind = .replies
+    initialKind: InboxKind = .replies,
+    isActive: Bool = true
   ) {
     self.browseService = browseService
     self.accountService = accountService
@@ -31,6 +34,7 @@ struct NotificationsView: View {
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
+    self.isActive = isActive
     _viewModel = StateObject(
       wrappedValue: NotificationsViewModel(
         service: accountService,
@@ -74,19 +78,45 @@ struct NotificationsView: View {
         notificationReplyDestination(for: replyRoute)
       }
     }
-    .task { viewModel.loadIfNeeded() }
+    .onAppear {
+      isPresented = true
+      synchronizeActivation()
+    }
+    .onChange(of: isActive) { _ in synchronizeActivation() }
     .onChange(of: hidesReplyEntryPoints) { hidden in
       if hidden { invalidatePendingReplyRouteForHiddenPreference() }
     }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
       invalidatePendingReplyRouteForAccountChange()
-      viewModel.accountSessionDidChange()
+      viewModel.accountSessionDidChange(loadImmediately: acceptsAutomaticRequests)
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       invalidatePendingReplyRouteForContentFilterChange()
       viewModel.contentFilterDidChange()
     }
-    .onDisappear(perform: viewModel.cancel)
+    .onDisappear {
+      isPresented = false
+      invalidatePendingReplyRouteForInactiveTab()
+      viewModel.cancel()
+    }
+  }
+
+  private var acceptsAutomaticRequests: Bool {
+    isPresented && isActive
+  }
+
+  private func synchronizeActivation() {
+    if acceptsAutomaticRequests {
+      viewModel.loadIfNeeded()
+    } else {
+      invalidatePendingReplyRouteForInactiveTab()
+      viewModel.cancel()
+    }
+  }
+
+  private func invalidatePendingReplyRouteForInactiveTab() {
+    guard replyRouteState.cancelPending() else { return }
+    replyNotice = nil
   }
 
   @ViewBuilder

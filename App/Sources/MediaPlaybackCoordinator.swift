@@ -9,6 +9,7 @@ enum MediaPlaybackKind: Hashable, Sendable {
 enum MediaPlaybackRevocationReason: Hashable, Sendable {
   case superseded(by: MediaPlaybackKind)
   case sceneInactive
+  case surfaceInactive
 }
 
 struct MediaPlaybackLease: Hashable, Sendable {
@@ -97,5 +98,13 @@ final class MediaPlaybackCoordinator: ObservableObject {
     currentLease = nil
     currentParticipant = nil
     participant?.mediaPlaybackWasRevoked(lease: lease, reason: .sceneInactive)
+  }
+
+  func activeSurfaceDidChange() {
+    guard let lease = currentLease else { return }
+    let participant = currentParticipant
+    currentLease = nil
+    currentParticipant = nil
+    participant?.mediaPlaybackWasRevoked(lease: lease, reason: .surfaceInactive)
   }
 }

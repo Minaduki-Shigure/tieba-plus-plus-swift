@@ -64,6 +64,7 @@ struct AccountView: View {
   let historyRepository: any BrowsingHistoryRepository
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
+  let isActive: Bool
 
   @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
   @Environment(\.contentFilterRepository) private var contentFilterRepository
@@ -78,6 +79,7 @@ struct AccountView: View {
   @State private var confirmsLogout = false
   @State private var confirmsReset = false
   @State private var confirmsUsernameManagement = false
+  @State private var isPresented = false
 
   init(
     browseService: any BrowseService & ForumPostSearchService & UserProfileService
@@ -88,7 +90,8 @@ struct AccountView: View {
     onVisibilityChanged: @escaping (Bool) -> Void,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
-    searchHistoryRepository: any ForumSearchHistoryRepository
+    searchHistoryRepository: any ForumSearchHistoryRepository,
+    isActive: Bool = true
   ) {
     self.browseService = browseService
     self.accountService = accountService
@@ -97,6 +100,7 @@ struct AccountView: View {
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
+    self.isActive = isActive
     _viewModel = StateObject(wrappedValue: AccountViewModel(vault: vault))
     _profileSummaryViewModel = StateObject(
       wrappedValue: ActiveAccountProfileSummaryViewModel(service: accountService, vault: vault)
@@ -134,14 +138,29 @@ struct AccountView: View {
       }
     }
     .task {
-      profileSummaryViewModel.loadIfNeeded()
-      await viewModel.loadIfNeeded()
+      if isActive {
+        profileSummaryViewModel.loadIfNeeded()
+        await viewModel.loadIfNeeded()
+      }
     }
-    .onAppear { onVisibilityChanged(true) }
+    .onAppear {
+      isPresented = true
+      synchronizeActivation()
+    }
+    .onChange(of: isActive) { _ in
+      synchronizeActivation()
+    }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
-      profileSummaryViewModel.accountSessionDidChange()
+      viewModel.invalidateForAccountSessionChange()
+      profileSummaryViewModel.accountSessionDidChange(
+        loadImmediately: isPresented && isActive
+      )
+      if isPresented && isActive {
+        Task { await viewModel.loadIfNeeded() }
+      }
     }
     .onDisappear {
+      isPresented = false
       profileSummaryViewModel.cancel()
       onVisibilityChanged(false)
     }
@@ -203,6 +222,17 @@ struct AccountView: View {
       Button("好", role: .cancel) { viewModel.clearError() }
     } message: {
       Text(viewModel.errorMessage ?? "无法完成账户操作。")
+    }
+  }
+
+  private func synchronizeActivation() {
+    let active = isPresented && isActive
+    onVisibilityChanged(active)
+    if active {
+      profileSummaryViewModel.loadIfNeeded()
+      Task { await viewModel.loadIfNeeded() }
+    } else {
+      profileSummaryViewModel.cancel()
     }
   }
 
@@ -336,7 +366,8 @@ struct AccountView: View {
                 contentFilterRepository: contentFilterRepository,
                 historyRepository: historyRepository,
                 favoritesRepository: favoritesRepository,
-                searchHistoryRepository: searchHistoryRepository
+                searchHistoryRepository: searchHistoryRepository,
+                isActive: isActive
               )
             } label: {
               messageNavigationLabel
