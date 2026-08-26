@@ -14,15 +14,15 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-currently serves `v0.64.0-alpha.6` (build 81), whose app-code snapshot includes
-the complete protobuf image-source fallbacks, release-era media, navigation,
-Home/account, settings, cloud-favorite,
+currently serves `v0.65.0-alpha.1` (build 82), whose app-code snapshot includes
+the complete protobuf image-source fallbacks, release-era media, the configurable
+Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
+cloud-favorite author links, guarded native profile text editing, Home/account,
+settings, cloud-favorite,
 durable owner-deletion, legacy-link, guarded official-wrapper, level-progress,
 account-bound followed-forum check-in marks, bounded regular-expression
 filtering, fixed official username-management
 handoff, and exact cloud-favorite forum-identity fallback workflows.
-It predates the current-main configurable primary shell and My/Messages
-shortcuts.
 Paired profiles continue to support the nested-reply lazy-scroll container.
 The published level-progress and bounded regular-expression filtering additions
 improve existing credited areas without changing the current
@@ -39,7 +39,7 @@ The published `PbContent` image mapping also closes a narrow compatibility gap b
 retaining `src`, `big_src`, and `cdn_src_active` fallback fields across ordinary
 floors and nested replies. It reuses the existing media pipeline and therefore
 does not add a data source or weighted point.
-Current-main primary navigation now exposes TiebaLite's four reachable Home,
+The published primary navigation exposes TiebaLite's four reachable Home,
 Explore, Messages, and My destinations through ordered system tabs by default,
 with an independent default-on preference that can remove only Explore while
 retaining Home, Messages, and My. The source conditionally omits the hidden root.
@@ -57,7 +57,7 @@ existing global search inside its own navigation stack. Typed destinations,
 stable presentation order, and origin-stack isolation have contract coverage.
 These changes improve reachability inside the existing navigation and local-
 settings credit without adding a request, preference, or weighted point.
-Current main additionally closes TiebaLite's nonmedia self-profile editing
+The published native editor additionally closes TiebaLite's nonmedia self-profile editing
 workflow for nickname, sex, and biography. It preserves the account's hidden
 birthday fields, distinguishes editable `intro` from rendered `display_intro`,
 accepts an explicitly pending requested nickname as an authoritative readback,
@@ -82,7 +82,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.64.0-alpha.6` app-code snapshot is at 80–82%; all experimental
+The public `v0.65.0-alpha.1` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
@@ -144,7 +144,7 @@ Cloud favorites now consume independent only-thread-author and descending-order
 opening preferences while retaining the server-provided marked-post anchor. This
 closes another narrow TiebaLite habit gap without adding a request or weighted
 point, and leaves the established local-favorite defaults unchanged.
-Current-main cloud-favorite rows also retain the response's author UID, username,
+The published cloud-favorite rows also retain the response's author UID, username,
 display name, and strictly validated portrait token. Separate sibling controls
 open the positive-UID public profile or the stored topic without nested gesture
 routing; deleted topics retain an independently valid author destination. This
@@ -199,7 +199,7 @@ two context identities survive local filtering independently. Explicit topic
 and floor routes bypass unrelated reading history, while a nested-reply match
 uses the existing comment-ID resolver instead of trusting a displayed parent
 PID. This reuses existing anonymous endpoints and adds no weighted point.
-Current-main global and per-forum post results also carry the submitted query
+The published global and per-forum post results also carry the submitted query
 into their visible title, excerpt, and same-thread context text, matching
 TiebaLite's search-result highlighting. The shared local projection splits only
 on whitespace, treats every token literally, folds case, width, and diacritics,

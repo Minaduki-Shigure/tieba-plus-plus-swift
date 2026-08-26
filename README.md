@@ -20,12 +20,12 @@ and its verified metadata enters the public app source.
 | Local features | Available with TiebaLite-aligned Home, Explore, Messages, and My primary tabs backed by independent system navigation stacks; an independent default-on preference can remove only Explore from the tab bar without changing the Home discovery-section preference or saved startup destination. My groups local favorites, history, an inline appearance choice, settings, and About, while Messages exposes global search in its own stack. History, favorites, filtering, appearance with an independent system/OLED dark-surface choice, media preferences, explicit standard/pure/only-author immersive thread-reading modes, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, a next-launch destination including personalized discovery and the inbox, and ordered iOS Home Screen quick actions for existing destinations are also available. The primary-tab shell and reply notice's system handoff attempt remain pending physical-device validation |
 | Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary and guarded native nickname/sex/biography editor, a credential-free handoff to Baidu's fixed official username-management page, followed forums with validated level-up progress and account-bound today-check-in marks where the server supplies them, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with a shared Home-toolbar/account-page message badge, separate optional fan-reminder badge, and authoritative reply actions, Tieba cloud favorites with a saved-position-to-latest-update handoff, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded profile text edits, forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies plus explicitly confirmed deletion of the active account's own topic or ordinary floor; these newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
-| TiebaLite parity | Current `main` and public `v0.64.0-alpha.6`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
-| Distribution | The public SideStore/LiveContainer source currently serves `v0.64.0-alpha.6` (build 81) |
+| TiebaLite parity | Current `main` and public `v0.65.0-alpha.1`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
+| Distribution | The public SideStore/LiveContainer source currently serves `v0.65.0-alpha.1` (build 82) |
 
 ### Release and validation
 
-- **Current-main native profile text editing:** An active complete account can
+- **`v0.65.0-alpha.1` native profile text editing:** An active complete account can
   edit its Tieba nickname, sex, and biography inside the App. Opening the editor
   reads an account-bound V12 profile snapshot. Before each changed save, the App
   and Web session probes must agree on the expected account UID, after which
@@ -46,8 +46,9 @@ and its verified metadata enters the public app source.
   `userID + sessionRevision`, keeps the result in memory, and does not rewrite
   Keychain account metadata. Avatar upload is a separate multipart workflow and
   remains unavailable. This editor remains a disposable-account and physical-
-  device validation gate and is not present in the public alpha IPA.
-- **Current-main primary navigation:** The app now exposes Home, Explore,
+  device validation gate; test it with a nonimportant account before relying on
+  it for an established profile.
+- **`v0.65.0-alpha.1` primary navigation:** The app now exposes Home, Explore,
   Messages, and My as four ordered system tabs by default, matching TiebaLite's
   reachable primary destinations. An independent default-on setting can hide
   Explore, leaving Home, Messages, and My in order. It also hides Home's redundant
@@ -87,7 +88,7 @@ and its verified metadata enters the public app source.
   summaries, ordinary floors, full nested replies, parent-floor context, and
   shared origins without adding a request or credential, and it keeps the
   existing media URL authorization rules.
-- **Current-main followed-forum check-in marks:** Home and the complete current-
+- **`v0.64.0-alpha.5` followed-forum check-in marks:** Home and the complete current-
   account followed-forum list reuse one foreground official check-in catalog
   read and show a small check beside level information only for an exact
   `.checkedIn` result. The sidecar is bound to both `userID` and
@@ -119,10 +120,16 @@ and its verified metadata enters the public app source.
   default stays on the prior system surfaces, unknown stored values fail closed
   to that default, and no theme choice enters request, cache, pagination, or
   stable post/comment rendering identities.
-- **Current alpha:** `v0.64.0-alpha.6` publishes the complete protobuf image-
-  source fallback described above for thread summaries, ordinary floors, and
-  full nested replies, with one shared media URL authorization policy. It
-  retains `v0.64.0-alpha.5`'s account-bound followed-forum today-check-in marks,
+- **Current alpha:** `v0.65.0-alpha.1` publishes the four-root Home, Explore,
+  Messages, and My shell, including the independent option to hide Explore,
+  per-root navigation retention, My/Messages shortcuts, literal search-result
+  highlighting, and cloud-favorite author profile links. It also publishes the
+  guarded nickname, sex, and biography editor described above. The primary
+  shell and editor retain their documented physical-device and disposable-
+  account validation gates. This release retains `v0.64.0-alpha.6`'s complete
+  protobuf image-source fallback for thread summaries, ordinary floors, and
+  full nested replies, with one shared media URL authorization policy, and
+  `v0.64.0-alpha.5`'s account-bound followed-forum today-check-in marks,
   including monotonic same-day reconciliation, bounded foreground refresh,
   active UTC+8 expiry, and strict forum-identity validation. It retains
   `v0.64.0-alpha.4`'s independent OLED
@@ -486,7 +493,7 @@ and its verified metadata enters the public app source.
   independent only-thread-author and descending-order defaults. Opening a cloud
   favorite applies those options without losing its saved post anchor; existing
   local-favorite preferences and their defaults remain unchanged.
-- **Current-main cloud-favorite author profiles:** Cloud-favorite rows now retain
+- **`v0.65.0-alpha.1` cloud-favorite author profiles:** Cloud-favorite rows now retain
   the server-provided author UID, username, display name, and strictly validated
   portrait token. The author header and stored topic are separate, nonnested
   navigation targets, so selecting the author opens the credential-free public
@@ -658,7 +665,7 @@ and its verified metadata enters the public app source.
   IPA and checks it against the published source. The public source therefore
   never exposes the release-preparation commit by itself; version, graph, or
   concurrent-source mismatches fail closed.
-  The source currently distributes the verified `v0.64.0-alpha.6` IPA (build 81).
+  The source currently distributes the verified `v0.65.0-alpha.1` IPA (build 82).
 - **Login hotfix:** `v0.54.0-alpha.1` can reach Tieba's account page without
   completing because its callback and Cookie matching are too strict.
   `v0.54.1-alpha.1` made that failure explicit and confirmed that iOS 18.7.2
@@ -684,7 +691,7 @@ and its verified metadata enters the public app source.
   and per-forum post search provide the supported sort and content filters,
   local history, optional credential-free suggestions, and independent opening
   of a matched reply, its exact parent floor, and the owning topic when those
-  same-thread targets are present and valid. Current `main` also highlights the
+  same-thread targets are present and valid. `v0.65.0-alpha.1` also highlights the
   submitted literal search terms in global topic titles and excerpts, and in
   per-forum matched content plus its parent/topic context. Matching is bounded,
   case/width/diacritic insensitive, uses the selected local accent color, and
@@ -1153,11 +1160,11 @@ and its verified metadata enters the public app source.
   about 18–20%; its anonymous reading and media subtotal remains about 91–95%.
   This measures implemented end-to-end workflows with partial credit for
   device-validation gates; it is not a claim that every path is release-ready.
-  The public `v0.64.0-alpha.6` app-code snapshot has the same 80–82% weighted
-  estimate, but the current-main configurable primary shell (four tabs by default,
-  or three with Explore hidden) and My/Messages shortcut additions are not yet
-  distributed in that IPA. All experimental paths retain their
-  documented device-validation gates.
+  The public `v0.65.0-alpha.1` app-code snapshot has the same 80–82% weighted
+  estimate and includes the configurable primary shell, My/Messages shortcuts,
+  search highlighting, cloud-favorite author links, and guarded profile text
+  editing. All experimental paths retain their documented device-validation
+  gates.
   The largest remaining gaps are
   rich-media creation, background unread handling, broader settings, remaining
   account/social actions including avatar upload, unresolvable cloud-favorite
