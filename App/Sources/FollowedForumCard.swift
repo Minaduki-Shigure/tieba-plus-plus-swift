@@ -66,11 +66,17 @@ struct FollowedForumCardPresentation: Equatable, Sendable {
   }
 }
 
+enum FollowedForumCardLayout: Equatable, Sendable {
+  case grid
+  case list
+}
+
 struct FollowedForumCard: View {
   let forum: FollowedForumItem
   let isPinned: Bool
   let isUnfollowing: Bool
   let isCheckedInToday: Bool
+  let layout: FollowedForumCardLayout
   @Environment(\.appDarkSurfaceStyle) private var appDarkSurfaceStyle
   @Environment(\.colorScheme) private var colorScheme
 
@@ -78,12 +84,14 @@ struct FollowedForumCard: View {
     forum: FollowedForumItem,
     isPinned: Bool = false,
     isUnfollowing: Bool = false,
-    isCheckedInToday: Bool = false
+    isCheckedInToday: Bool = false,
+    layout: FollowedForumCardLayout = .list
   ) {
     self.forum = forum
     self.isPinned = isPinned
     self.isUnfollowing = isUnfollowing
     self.isCheckedInToday = isCheckedInToday
+    self.layout = layout
   }
 
   var body: some View {
@@ -91,6 +99,45 @@ struct FollowedForumCard: View {
       forum: forum,
       isCheckedInToday: isCheckedInToday
     )
+    Group {
+      switch layout {
+      case .grid:
+        gridContent(presentation: presentation)
+      case .list:
+        listContent(presentation: presentation)
+      }
+    }
+    .padding(10)
+    .frame(
+      maxWidth: .infinity,
+      minHeight: layout == .grid ? 116 : 68,
+      alignment: .leading
+    )
+    .background(
+      cardSurfaceColor,
+      in: RoundedRectangle(cornerRadius: 8)
+    )
+    .overlay {
+      RoundedRectangle(cornerRadius: 8)
+        .stroke(cardDividerColor, lineWidth: 0.5)
+    }
+    .contentShape(Rectangle())
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("\(forum.name)吧")
+    .accessibilityValue(
+      [
+        isPinned ? "已置顶" : "",
+        isUnfollowing ? "正在取消关注" : "",
+        presentation.accessibilityValue,
+      ]
+        .filter { !$0.isEmpty }
+        .joined(separator: "，")
+    )
+  }
+
+  private func listContent(
+    presentation: FollowedForumCardPresentation
+  ) -> some View {
     HStack(alignment: .center, spacing: 10) {
       AvatarView(
         url: presentation.avatarURL,
@@ -135,42 +182,78 @@ struct FollowedForumCard: View {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
 
-      ZStack {
-        if isUnfollowing {
-          ProgressView()
-            .controlSize(.small)
-            .accessibilityHidden(true)
-        } else if isPinned {
-          Image(systemName: "pin.fill")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.tint)
+      statusIndicator
+    }
+  }
+
+  private func gridContent(
+    presentation: FollowedForumCardPresentation
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      HStack(alignment: .top, spacing: 8) {
+        AvatarView(
+          url: presentation.avatarURL,
+          name: forum.name,
+          size: 40,
+          urlPolicy: .forumAvatar
+        )
+        Spacer(minLength: 0)
+        statusIndicator
+      }
+
+      Text("\(forum.name)吧")
+        .font(.headline)
+        .foregroundStyle(.primary)
+        .lineLimit(2)
+        .fixedSize(horizontal: false, vertical: true)
+
+      HStack(spacing: 4) {
+        compactProgressText(presentation: presentation)
+        if presentation.isCheckedInToday {
+          ForumCheckedInMark()
             .accessibilityHidden(true)
         }
       }
-      .frame(width: 20, height: 20)
+      .frame(minHeight: 14, alignment: .leading)
     }
-    .padding(10)
-    .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
-    .background(
-      cardSurfaceColor,
-      in: RoundedRectangle(cornerRadius: 8)
-    )
-    .overlay {
-      RoundedRectangle(cornerRadius: 8)
-        .stroke(cardDividerColor, lineWidth: 0.5)
+  }
+
+  @ViewBuilder
+  private func compactProgressText(
+    presentation: FollowedForumCardPresentation
+  ) -> some View {
+    if let levelProgress = presentation.levelProgress {
+      Text(levelProgress.levelTitle)
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+    } else if forum.level > 0 {
+      Text("LV\(forum.level)")
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+    } else {
+      Text("占位")
+        .font(.caption2)
+        .hidden()
+        .accessibilityHidden(true)
     }
-    .contentShape(Rectangle())
-    .accessibilityElement(children: .ignore)
-    .accessibilityLabel("\(forum.name)吧")
-    .accessibilityValue(
-      [
-        isPinned ? "已置顶" : "",
-        isUnfollowing ? "正在取消关注" : "",
-        presentation.accessibilityValue,
-      ]
-        .filter { !$0.isEmpty }
-        .joined(separator: "，")
-    )
+  }
+
+  private var statusIndicator: some View {
+    ZStack {
+      if isUnfollowing {
+        ProgressView()
+          .controlSize(.small)
+          .accessibilityHidden(true)
+      } else if isPinned {
+        Image(systemName: "pin.fill")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.tint)
+          .accessibilityHidden(true)
+      }
+    }
+    .frame(width: 20, height: 20)
   }
 
   private var usesOLEDSurfaces: Bool {

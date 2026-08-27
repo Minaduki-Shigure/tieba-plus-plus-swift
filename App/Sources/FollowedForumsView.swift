@@ -14,6 +14,7 @@ struct FollowedForumsView: View {
   @EnvironmentObject private var followedForumCheckInStore: FollowedForumCheckInStore
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   @AppStorage(AppPreferenceKey.followedForumsLayout)
   private var followedForumsLayout = FollowedForumsLayoutMode.defaultValue.rawValue
 
@@ -169,7 +170,8 @@ struct FollowedForumsView: View {
     LazyVGrid(
       columns: FollowedForumsLayoutPolicy.columns(
         preferred: preferredLayout,
-        dynamicTypeSize: dynamicTypeSize
+        dynamicTypeSize: dynamicTypeSize,
+        horizontalSizeClass: horizontalSizeClass
       ),
       alignment: .leading,
       spacing: FollowedForumsLayoutPolicy.spacing
@@ -192,7 +194,8 @@ struct FollowedForumsView: View {
             isCheckedInToday: followedForumCheckInStore.isCheckedInToday(
               forum,
               forumLease: viewModel.loadedSessionLease
-            )
+            ),
+            layout: cardLayout
           )
         }
         .buttonStyle(.plain)
@@ -220,6 +223,13 @@ struct FollowedForumsView: View {
 
   private var preferredLayout: FollowedForumsLayoutMode {
     FollowedForumsLayoutMode.resolved(followedForumsLayout)
+  }
+
+  private var cardLayout: FollowedForumCardLayout {
+    FollowedForumsLayoutPolicy.cardLayout(
+      preferred: preferredLayout,
+      dynamicTypeSize: dynamicTypeSize
+    )
   }
 
   private var layoutToggleAction: FollowedForumsLayoutToggleAction? {

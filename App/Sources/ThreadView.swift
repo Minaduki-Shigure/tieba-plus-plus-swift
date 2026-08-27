@@ -42,7 +42,9 @@ struct ThreadView: View {
   @State private var inboxReplyNotice: String?
   @State private var inboxReplyComposerIntent: InboxReplyIntent?
   @State private var dismissedCloudFavoriteUpdate: CloudFavoriteThreadUpdate?
+  @StateObject private var localFavoriteModel: LocalFavoriteControlModel
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   @Environment(\.dismiss) private var dismiss
   @Environment(\.hidesReplyEntryPoints) private var hidesReplyEntryPoints
   @Environment(\.accountAccess) private var accountAccess
@@ -98,6 +100,9 @@ struct ThreadView: View {
         },
         initialFocus: initialFocus
       )
+    )
+    _localFavoriteModel = StateObject(
+      wrappedValue: LocalFavoriteControlModel(repository: favoritesRepository)
     )
   }
 
@@ -158,58 +163,117 @@ struct ThreadView: View {
         }
       }
       .toolbar { threadToolbar }
+      .task(id: favoriteTarget.storageKey) {
+        await localFavoriteModel.reload(target: favoriteTarget)
+      }
+      .localFavoriteErrorAlert(model: localFavoriteModel)
   }
 
   @ToolbarContentBuilder
   private var threadToolbar: some ToolbarContent {
-    ToolbarItem(placement: .principal) {
-      navigationPrincipal
-    }
-
     ToolbarItemGroup(placement: .navigationBarTrailing) {
       if deletionProjectionResolved, ownedContentDeletionAcceptedTopic == nil {
+        if threadToolbarPrimaryActions.contains(.readingMode) {
+          threadReadingModeMenu
+        }
+        if threadToolbarPrimaryActions.contains(.share) {
+          threadShareMenu
+        }
+        if threadToolbarPrimaryActions.contains(.localFavorite) {
+          LocalFavoriteToolbarButton(
+            target: favoriteTarget,
+            model: localFavoriteModel
+          )
+        }
+        if threadToolbarPrimaryActions.contains(.cloudFavorite) {
+          ThreadCloudFavoriteControlSlot(
+            store: threadCloudFavoriteStore,
+            target: threadCloudFavoriteTarget,
+            currentPosition: currentCloudFavoritePosition,
+            requestAction: requestCloudFavoriteAction,
+            retry: retryCloudFavorite
+          )
+        }
+        if threadToolbarPrimaryActions.contains(.more) {
+          threadMoreMenu
+        }
+      }
+    }
+  }
+
+  private var threadToolbarLayoutMode: ThreadToolbarLayoutMode {
+    ThreadToolbarLayoutPolicy.mode(
+      horizontalSizeClass: horizontalSizeClass,
+      dynamicTypeSize: dynamicTypeSize
+    )
+  }
+
+  private var threadToolbarPrimaryActions: [ThreadToolbarPrimaryAction] {
+    ThreadToolbarLayoutPolicy.primaryActions(for: threadToolbarLayoutMode)
+  }
+
+  private var threadReadingModeMenu: some View {
+    Menu {
+      threadReadingModeItems
+    } label: {
+      Image(systemName: readingMode.systemImage)
+    }
+    .accessibilityLabel("阅读模式，当前为 \(readingMode.title)")
+    .accessibilityIdentifier("thread-reading-mode-menu")
+    .help("阅读模式：\(readingMode.title)")
+  }
+
+  @ViewBuilder
+  private var threadReadingModeItems: some View {
+    ForEach(ThreadReadingMode.allCases) { mode in
+      Button {
+        selectReadingMode(mode)
+      } label: {
+        Label(
+          mode.title,
+          systemImage: readingMode == mode ? "checkmark" : mode.systemImage
+        )
+      }
+      .accessibilityLabel(readingMode == mode ? "\(mode.title)，当前" : mode.title)
+    }
+  }
+
+  @ViewBuilder
+  private var threadShareMenu: some View {
+    if
+      let shareURL = TiebaLink.canonicalURL(
+        for: .thread(TiebaThreadRoute(threadID: viewModel.thread.id))
+      ),
+      let copyURL = TiebaLink.threadCopyURL(
+        threadID: viewModel.thread.id,
+        onlyThreadAuthor: viewModel.options.onlyThreadAuthor
+      )
+    {
+      TiebaShareMenu(
+        url: shareURL,
+        copyURL: copyURL,
+        title: viewModel.thread.title.isEmpty
+          ? "帖子 \(viewModel.thread.id)"
+          : viewModel.thread.title
+      )
+    }
+  }
+
+  private var threadMoreMenu: some View {
+    Menu {
+      if threadToolbarLayoutMode == .compact {
         Menu {
-          ForEach(ThreadReadingMode.allCases) { mode in
-            Button {
-              selectReadingMode(mode)
-            } label: {
-              Label(
-                mode.title,
-                systemImage: readingMode == mode ? "checkmark" : mode.systemImage
-              )
-            }
-            .accessibilityLabel(
-              readingMode == mode ? "\(mode.title)，当前" : mode.title
-            )
-          }
+          threadReadingModeItems
         } label: {
-          Image(systemName: readingMode.systemImage)
-        }
-        .accessibilityLabel("阅读模式，当前为 \(readingMode.title)")
-        .accessibilityIdentifier("thread-reading-mode-menu")
-        .help("阅读模式：\(readingMode.title)")
-
-        if
-          let shareURL = TiebaLink.canonicalURL(
-            for: .thread(TiebaThreadRoute(threadID: viewModel.thread.id))
-          ),
-          let copyURL = TiebaLink.threadCopyURL(
-            threadID: viewModel.thread.id,
-            onlyThreadAuthor: viewModel.options.onlyThreadAuthor
-          )
-        {
-          TiebaShareMenu(
-            url: shareURL,
-            copyURL: copyURL,
-            title: viewModel.thread.title.isEmpty
-              ? "帖子 \(viewModel.thread.id)"
-              : viewModel.thread.title
-          )
+          Label("阅读模式：\(readingMode.title)", systemImage: readingMode.systemImage)
         }
 
-        LocalFavoriteButton(target: favoriteTarget, repository: favoritesRepository)
+        LocalFavoriteMenuItem(
+          target: favoriteTarget,
+          model: localFavoriteModel
+        )
 
-        ThreadCloudFavoriteControlSlot(
+        ThreadCloudFavoriteMenuSlot(
           store: threadCloudFavoriteStore,
           target: threadCloudFavoriteTarget,
           currentPosition: currentCloudFavoritePosition,
@@ -217,30 +281,57 @@ struct ThreadView: View {
           retry: retryCloudFavorite
         )
 
-        Button {
-          pageInput = viewModel.currentPage > 0 ? String(viewModel.currentPage) : ""
-          showsPageJump = true
-        } label: {
-          Image(systemName: "number.square")
-        }
-        .disabled(
-          viewModel.totalPages <= 1
-            || viewModel.isJumping
-            || viewModel.isCheckingLatestReplies
-        )
-        .accessibilityLabel("跳转页码")
-        .help("跳转页码")
-
-        if !isPureReadingMode {
-          ThreadTopicActionsMenu(
-            reportTarget: topicReportTarget,
-            deletionStore: ownedContentDeletionStore,
-            deletionTarget: topicDeletionTarget,
-            requestDeletion: requestOwnedContentDeletion
-          )
-        }
+        Divider()
       }
+
+      Button {
+        pageInput = viewModel.currentPage > 0 ? String(viewModel.currentPage) : ""
+        showsPageJump = true
+      } label: {
+        Label("跳转页码", systemImage: "number.square")
+      }
+      .disabled(
+        viewModel.totalPages <= 1
+          || viewModel.isJumping
+          || viewModel.isCheckingLatestReplies
+      )
+      .accessibilityIdentifier("thread-page-jump")
+
+      if let forumName = forumNavigationName {
+        NavigationLink {
+          ForumView(
+            forumName: forumName,
+            service: service,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
+          )
+        } label: {
+          Label("进入\(forumName)吧", systemImage: "text.bubble")
+        }
+        .accessibilityIdentifier("thread-open-forum")
+      }
+
+      if !isPureReadingMode {
+        Divider()
+        ContentReportMenuItem(
+          target: topicReportTarget,
+          title: "举报主题",
+          accessibilityIdentifier: "thread-report-topic",
+          scopeID: reportScopeID
+        )
+        OwnedContentDeletionMenuSlot(
+          store: ownedContentDeletionStore,
+          target: topicDeletionTarget,
+          requestDeletion: requestOwnedContentDeletion
+        )
+      }
+    } label: {
+      Image(systemName: "ellipsis.circle")
     }
+    .accessibilityLabel("更多帖子操作")
+    .accessibilityIdentifier("thread-more-actions-menu")
+    .help("更多帖子操作")
   }
 
   private var threadDialogs: some View {
@@ -1424,35 +1515,6 @@ struct ThreadView: View {
         }
         .refreshable { await viewModel.refresh() }
       }
-    }
-  }
-
-  @ViewBuilder
-  private var navigationPrincipal: some View {
-    if
-      deletionProjectionResolved,
-      ownedContentDeletionAcceptedTopic == nil,
-      let forumName = forumNavigationName
-    {
-      NavigationLink {
-        ForumView(
-          forumName: forumName,
-          service: service,
-          historyRepository: historyRepository,
-          favoritesRepository: favoritesRepository,
-          searchHistoryRepository: searchHistoryRepository
-        )
-      } label: {
-        Label("\(forumName)吧", systemImage: "text.bubble")
-          .font(.headline)
-          .lineLimit(1)
-      }
-      .buttonStyle(.plain)
-      .accessibilityLabel("进入\(forumName)吧")
-    } else {
-      Text(threadNavigationTitle)
-        .font(.headline)
-        .lineLimit(1)
     }
   }
 

@@ -995,6 +995,125 @@ struct ThreadCloudFavoriteControlSlot: View {
   }
 }
 
+struct ThreadCloudFavoriteMenuSlot: View {
+  let store: ThreadCloudFavoriteStore?
+  let target: ThreadCloudFavoriteTarget?
+  let currentPosition: ThreadCloudFavoritePosition?
+  let requestAction: (ThreadCloudFavoritePendingAction) -> Void
+  let retry: (ThreadCloudFavoriteTarget) -> Void
+
+  @ViewBuilder
+  var body: some View {
+    if let store, let target {
+      ThreadCloudFavoriteMenu(
+        entry: store.entry(for: target),
+        currentPosition: currentPosition,
+        requestAction: requestAction,
+        retry: retry
+      )
+    }
+  }
+}
+
+private struct ThreadCloudFavoriteMenu: View {
+  @ObservedObject private var entry: ThreadCloudFavoriteEntry
+  let currentPosition: ThreadCloudFavoritePosition?
+  let requestAction: (ThreadCloudFavoritePendingAction) -> Void
+  let retry: (ThreadCloudFavoriteTarget) -> Void
+
+  init(
+    entry: ThreadCloudFavoriteEntry,
+    currentPosition: ThreadCloudFavoritePosition?,
+    requestAction: @escaping (ThreadCloudFavoritePendingAction) -> Void,
+    retry: @escaping (ThreadCloudFavoriteTarget) -> Void
+  ) {
+    _entry = ObservedObject(wrappedValue: entry)
+    self.currentPosition = currentPosition
+    self.requestAction = requestAction
+    self.retry = retry
+  }
+
+  @ViewBuilder
+  var body: some View {
+    switch entry.state {
+    case .unknown:
+      unavailableItem("贴吧云收藏不可用", systemImage: "star")
+    case .signedOut:
+      unavailableItem("登录后使用贴吧云收藏", systemImage: "person.crop.circle.badge.xmark")
+    case .loading(let previous):
+      unavailableItem(
+        "正在读取贴吧云收藏",
+        systemImage: previous?.isFavorited == true ? "star.fill" : "star"
+      )
+    case .ready(let snapshot):
+      readyItems(snapshot)
+    case .mutating(let previous, _):
+      unavailableItem(
+        "正在更新贴吧云收藏",
+        systemImage: previous.isFavorited ? "star.fill" : "star"
+      )
+    case .failed:
+      Button { retry(entry.target) } label: {
+        Label("重试读取贴吧云收藏", systemImage: "arrow.clockwise")
+      }
+      .accessibilityIdentifier("thread-cloud-favorite-menu-retry")
+    }
+  }
+
+  @ViewBuilder
+  private func readyItems(_ snapshot: ThreadCloudFavoriteSnapshot) -> some View {
+    if snapshot.isFavorited {
+      if let currentPosition {
+        Button {
+          requestAction(
+            .update(
+              target: entry.target,
+              position: currentPosition,
+              previous: snapshot
+            )
+          )
+        } label: {
+          Label("更新云收藏到第 \(currentPosition.floor) 楼", systemImage: "bookmark.circle")
+        }
+        .disabled(snapshot.markedPostID == currentPosition.postID)
+        .accessibilityIdentifier("thread-cloud-favorite-menu-update")
+      }
+
+      Button(role: .destructive) {
+        requestAction(.remove(target: entry.target, previous: snapshot))
+      } label: {
+        Label("移除贴吧云收藏", systemImage: "trash")
+      }
+      .accessibilityIdentifier("thread-cloud-favorite-menu-remove")
+    } else {
+      Button {
+        guard let currentPosition else { return }
+        requestAction(
+          .add(
+            target: entry.target,
+            position: currentPosition,
+            previous: snapshot
+          )
+        )
+      } label: {
+        Label(
+          currentPosition.map { "添加云收藏到第 \($0.floor) 楼" } ?? "添加贴吧云收藏",
+          systemImage: "star"
+        )
+      }
+      .disabled(currentPosition == nil)
+      .accessibilityIdentifier("thread-cloud-favorite-menu-add")
+    }
+  }
+
+  private func unavailableItem(_ title: String, systemImage: String) -> some View {
+    Button {} label: {
+      Label(title, systemImage: systemImage)
+    }
+    .disabled(true)
+  }
+}
+
 private struct ThreadCloudFavoriteControl: View {
   @ObservedObject private var entry: ThreadCloudFavoriteEntry
   let currentPosition: ThreadCloudFavoritePosition?

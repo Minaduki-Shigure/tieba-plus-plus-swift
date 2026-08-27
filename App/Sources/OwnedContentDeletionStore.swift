@@ -796,32 +796,3 @@ private struct OwnedContentDeletionObservedMenuItem: View {
     }
   }
 }
-
-struct ThreadTopicActionsMenu: View {
-  let reportTarget: ContentReportTarget?
-  let deletionStore: OwnedContentDeletionStore?
-  let deletionTarget: OwnedContentDeletionTarget?
-  let requestDeletion: (PendingOwnedContentDeletion) -> Void
-
-  @ViewBuilder
-  var body: some View {
-    if reportTarget != nil || deletionTarget != nil {
-      Menu {
-        ContentReportMenuItem(
-          target: reportTarget,
-          title: "举报主题",
-          accessibilityIdentifier: "thread-report-topic"
-        )
-        OwnedContentDeletionMenuSlot(
-          store: deletionStore,
-          target: deletionTarget,
-          requestDeletion: requestDeletion
-        )
-      } label: {
-        Image(systemName: "ellipsis.circle")
-      }
-      .accessibilityLabel("更多帖子操作")
-      .help("更多帖子操作")
-    }
-  }
-}

@@ -40,6 +40,7 @@ struct RootView: View {
   @State private var accountSurfaceIsVisible = false
   @Environment(\.scenePhase) private var scenePhase
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
   @EnvironmentObject private var mediaPlaybackCoordinator: MediaPlaybackCoordinator
   @EnvironmentObject private var followedForumsViewModel: FollowedForumsViewModel
   @EnvironmentObject private var followedForumCheckInStore: FollowedForumCheckInStore
@@ -1034,7 +1035,8 @@ struct RootView: View {
         LazyVGrid(
           columns: FollowedForumsLayoutPolicy.columns(
             preferred: preferredFollowedForumsLayout,
-            dynamicTypeSize: dynamicTypeSize
+            dynamicTypeSize: dynamicTypeSize,
+            horizontalSizeClass: horizontalSizeClass
           ),
           alignment: .leading,
           spacing: FollowedForumsLayoutPolicy.spacing
@@ -1052,7 +1054,8 @@ struct RootView: View {
                 isCheckedInToday: followedForumCheckInStore.isCheckedInToday(
                   forum,
                   forumLease: followedForumsViewModel.loadedSessionLease
-                )
+                ),
+                layout: followedForumCardLayout
               )
             }
             .buttonStyle(.plain)
@@ -1070,7 +1073,7 @@ struct RootView: View {
           }
         }
         .padding(.vertical, 2)
-        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
         .confirmationDialog(
@@ -1130,6 +1133,13 @@ struct RootView: View {
 
   private var preferredFollowedForumsLayout: FollowedForumsLayoutMode {
     FollowedForumsLayoutMode.resolved(followedForumsLayout)
+  }
+
+  private var followedForumCardLayout: FollowedForumCardLayout {
+    FollowedForumsLayoutPolicy.cardLayout(
+      preferred: preferredFollowedForumsLayout,
+      dynamicTypeSize: dynamicTypeSize
+    )
   }
 
   private var followedForumsLayoutToggleAction: FollowedForumsLayoutToggleAction? {

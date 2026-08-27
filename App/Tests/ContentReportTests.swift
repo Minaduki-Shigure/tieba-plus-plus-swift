@@ -5,6 +5,32 @@ import XCTest
 
 @MainActor
 final class ContentReportTests: XCTestCase {
+  func testExplicitToolbarScopeWinsAndEnvironmentRemainsFallback() {
+    let explicit = reportUUID(1)
+    let environment = reportUUID(2)
+
+    XCTAssertEqual(
+      ContentReportScopePolicy.resolved(
+        explicitScopeID: explicit,
+        environmentScopeID: environment
+      ),
+      explicit
+    )
+    XCTAssertEqual(
+      ContentReportScopePolicy.resolved(
+        explicitScopeID: nil,
+        environmentScopeID: environment
+      ),
+      environment
+    )
+    XCTAssertNil(
+      ContentReportScopePolicy.resolved(
+        explicitScopeID: nil,
+        environmentScopeID: nil
+      )
+    )
+  }
+
   func testTargetsBindVisibleTopicPostAndSubpostIdentity() throws {
     let thread = reportThread()
     let topic = reportPost(id: 101, floor: 1)

@@ -447,6 +447,8 @@ enum FollowedForumsLayoutMode: String, CaseIterable, Hashable, Identifiable, Sen
 
 enum FollowedForumsLayoutPolicy {
   static let spacing: CGFloat = 10
+  static let compactAdaptiveMinimumWidth: CGFloat = 136
+  static let compactAdaptiveMaximumWidth: CGFloat = 220
   static let adaptiveMinimumWidth: CGFloat = 180
   static let adaptiveMaximumWidth: CGFloat = 360
 
@@ -454,27 +456,55 @@ enum FollowedForumsLayoutPolicy {
     preferred: FollowedForumsLayoutMode,
     dynamicTypeSize: DynamicTypeSize
   ) -> FollowedForumsLayoutMode {
-    dynamicTypeSize.isAccessibilitySize ? .singleColumn : preferred
+    AppDynamicTypeLayout.prefersExpandedControls(for: dynamicTypeSize)
+      ? .singleColumn
+      : preferred
   }
 
   static func columns(
     preferred: FollowedForumsLayoutMode,
-    dynamicTypeSize: DynamicTypeSize
+    dynamicTypeSize: DynamicTypeSize,
+    horizontalSizeClass: UserInterfaceSizeClass?
   ) -> [GridItem] {
     switch effectiveMode(preferred: preferred, dynamicTypeSize: dynamicTypeSize) {
     case .adaptive:
-      [
-        GridItem(
-          .adaptive(
-            minimum: adaptiveMinimumWidth,
-            maximum: adaptiveMaximumWidth
-          ),
-          spacing: spacing,
-          alignment: .top
-        )
-      ]
+      if horizontalSizeClass == .regular {
+        [
+          GridItem(
+            .adaptive(
+              minimum: adaptiveMinimumWidth,
+              maximum: adaptiveMaximumWidth
+            ),
+            spacing: spacing,
+            alignment: .top
+          )
+        ]
+      } else {
+        [
+          GridItem(
+            .adaptive(
+              minimum: compactAdaptiveMinimumWidth,
+              maximum: compactAdaptiveMaximumWidth
+            ),
+            spacing: spacing,
+            alignment: .top
+          )
+        ]
+      }
     case .singleColumn:
       [GridItem(.flexible(), spacing: spacing, alignment: .top)]
+    }
+  }
+
+  static func cardLayout(
+    preferred: FollowedForumsLayoutMode,
+    dynamicTypeSize: DynamicTypeSize
+  ) -> FollowedForumCardLayout {
+    switch effectiveMode(preferred: preferred, dynamicTypeSize: dynamicTypeSize) {
+    case .adaptive:
+      .grid
+    case .singleColumn:
+      .list
     }
   }
 
@@ -482,7 +512,9 @@ enum FollowedForumsLayoutPolicy {
     preferred: FollowedForumsLayoutMode,
     dynamicTypeSize: DynamicTypeSize
   ) -> FollowedForumsLayoutToggleAction? {
-    guard !dynamicTypeSize.isAccessibilitySize else { return nil }
+    guard !AppDynamicTypeLayout.prefersExpandedControls(for: dynamicTypeSize) else {
+      return nil
+    }
     return FollowedForumsLayoutToggleAction(current: preferred)
   }
 

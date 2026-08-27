@@ -323,11 +323,11 @@ final class AppPreferencesTests: XCTestCase {
     )
   }
 
-  func testFollowedForumsLayoutForcesSingleColumnAtAccessibilitySizes() {
+  func testFollowedForumsLayoutForcesSingleColumnAtLargeTextSizes() {
     XCTAssertEqual(
       FollowedForumsLayoutPolicy.effectiveMode(
         preferred: .adaptive,
-        dynamicTypeSize: .xxxLarge
+        dynamicTypeSize: .xLarge
       ),
       .adaptive
     )
@@ -339,14 +339,16 @@ final class AppPreferencesTests: XCTestCase {
       .singleColumn
     )
 
-    let accessibilitySizes: [DynamicTypeSize] = [
+    let largeTextSizes: [DynamicTypeSize] = [
+      .xxLarge,
+      .xxxLarge,
       .accessibility1,
       .accessibility2,
       .accessibility3,
       .accessibility4,
       .accessibility5,
     ]
-    for size in accessibilitySizes {
+    for size in largeTextSizes {
       XCTAssertEqual(
         FollowedForumsLayoutPolicy.effectiveMode(
           preferred: .adaptive,
@@ -355,6 +357,82 @@ final class AppPreferencesTests: XCTestCase {
         .singleColumn
       )
     }
+  }
+
+  func testFollowedForumsGridAndListUseDistinctColumnPolicies() {
+    let compactGrid = FollowedForumsLayoutPolicy.columns(
+      preferred: .adaptive,
+      dynamicTypeSize: .large,
+      horizontalSizeClass: .compact
+    )
+    XCTAssertEqual(compactGrid.count, 1)
+    guard case .adaptive(let compactMinimum, let compactMaximum) = compactGrid[0].size
+    else {
+      return XCTFail("Expected a compact adaptive grid")
+    }
+    XCTAssertEqual(compactMinimum, FollowedForumsLayoutPolicy.compactAdaptiveMinimumWidth)
+    XCTAssertEqual(compactMaximum, FollowedForumsLayoutPolicy.compactAdaptiveMaximumWidth)
+    XCTAssertLessThanOrEqual(
+      compactMinimum * 2 + FollowedForumsLayoutPolicy.spacing,
+      288
+    )
+
+    let list = FollowedForumsLayoutPolicy.columns(
+      preferred: .singleColumn,
+      dynamicTypeSize: .large,
+      horizontalSizeClass: .compact
+    )
+    XCTAssertEqual(list.count, 1)
+    guard case .flexible = list[0].size else {
+      return XCTFail("Expected a flexible single column")
+    }
+
+    let regularGrid = FollowedForumsLayoutPolicy.columns(
+      preferred: .adaptive,
+      dynamicTypeSize: .large,
+      horizontalSizeClass: .regular
+    )
+    XCTAssertEqual(regularGrid.count, 1)
+    guard case .adaptive(let regularMinimum, let regularMaximum) = regularGrid[0].size
+    else {
+      return XCTFail("Expected a regular-width adaptive grid")
+    }
+    XCTAssertEqual(regularMinimum, FollowedForumsLayoutPolicy.adaptiveMinimumWidth)
+    XCTAssertEqual(regularMaximum, FollowedForumsLayoutPolicy.adaptiveMaximumWidth)
+
+    let largeTextGrid = FollowedForumsLayoutPolicy.columns(
+      preferred: .adaptive,
+      dynamicTypeSize: .xxLarge,
+      horizontalSizeClass: .compact
+    )
+    XCTAssertEqual(largeTextGrid.count, 1)
+    guard case .flexible = largeTextGrid[0].size else {
+      return XCTFail("Expected large text to use a single column")
+    }
+  }
+
+  func testFollowedForumsCardLayoutMatchesEffectiveMode() {
+    XCTAssertEqual(
+      FollowedForumsLayoutPolicy.cardLayout(
+        preferred: .adaptive,
+        dynamicTypeSize: .large
+      ),
+      .grid
+    )
+    XCTAssertEqual(
+      FollowedForumsLayoutPolicy.cardLayout(
+        preferred: .singleColumn,
+        dynamicTypeSize: .large
+      ),
+      .list
+    )
+    XCTAssertEqual(
+      FollowedForumsLayoutPolicy.cardLayout(
+        preferred: .adaptive,
+        dynamicTypeSize: .xxLarge
+      ),
+      .list
+    )
   }
 
   func testFollowedForumsLayoutToggleActionUsesStoredPreferenceAtStandardSizes() throws {
@@ -373,7 +451,7 @@ final class AppPreferencesTests: XCTestCase {
     let singleColumn = try XCTUnwrap(
       FollowedForumsLayoutPolicy.toggleAction(
         preferred: .singleColumn,
-        dynamicTypeSize: .xxxLarge
+        dynamicTypeSize: .xLarge
       )
     )
     XCTAssertEqual(singleColumn.current, .singleColumn)
@@ -383,13 +461,15 @@ final class AppPreferencesTests: XCTestCase {
     XCTAssertEqual(singleColumn.accessibilityValue, "当前为单列")
   }
 
-  func testFollowedForumsLayoutAccessibilityFallbackDoesNotOverwriteStoredPreference()
+  func testFollowedForumsLayoutLargeTextFallbackDoesNotOverwriteStoredPreference()
     throws
   {
-    let suiteName = "AppPreferencesTests.followed-forums-accessibility.\(UUID().uuidString)"
+    let suiteName = "AppPreferencesTests.followed-forums-large-text.\(UUID().uuidString)"
     let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
     defer { defaults.removePersistentDomain(forName: suiteName) }
-    let accessibilitySizes: [DynamicTypeSize] = [
+    let largeTextSizes: [DynamicTypeSize] = [
+      .xxLarge,
+      .xxxLarge,
       .accessibility1,
       .accessibility2,
       .accessibility3,
@@ -399,7 +479,7 @@ final class AppPreferencesTests: XCTestCase {
 
     for preferred in FollowedForumsLayoutMode.allCases {
       defaults.set(preferred.rawValue, forKey: AppPreferenceKey.followedForumsLayout)
-      for size in accessibilitySizes {
+      for size in largeTextSizes {
         XCTAssertEqual(
           FollowedForumsLayoutPolicy.effectiveMode(
             preferred: preferred,

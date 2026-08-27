@@ -516,10 +516,20 @@ extension EnvironmentValues {
   }
 }
 
+enum ContentReportScopePolicy {
+  static func resolved(
+    explicitScopeID: UUID?,
+    environmentScopeID: UUID?
+  ) -> UUID? {
+    explicitScopeID ?? environmentScopeID
+  }
+}
+
 struct ContentReportMenuItem: View {
   let target: ContentReportTarget?
   let title: String?
   let accessibilityIdentifier: String
+  let explicitScopeID: UUID?
 
   @Environment(\.contentReportCoordinator) private var coordinator
   @Environment(\.contentReportScopeID) private var scopeID
@@ -527,11 +537,13 @@ struct ContentReportMenuItem: View {
   init(
     target: ContentReportTarget?,
     title: String? = nil,
-    accessibilityIdentifier: String
+    accessibilityIdentifier: String,
+    scopeID: UUID? = nil
   ) {
     self.target = target
     self.title = title
     self.accessibilityIdentifier = accessibilityIdentifier
+    explicitScopeID = scopeID
   }
 
   var body: some View {
@@ -541,7 +553,10 @@ struct ContentReportMenuItem: View {
         target: target,
         title: title ?? target.actionTitle,
         accessibilityIdentifier: accessibilityIdentifier,
-        scopeID: scopeID
+        scopeID: ContentReportScopePolicy.resolved(
+          explicitScopeID: explicitScopeID,
+          environmentScopeID: scopeID
+        )
       )
     }
   }
