@@ -2505,6 +2505,7 @@ enum ContentAgreementControlPresentation: Equatable {
   case loading(score: Int)
   case ready(ContentAgreementSnapshot)
   case mutating(ContentAgreementSnapshot)
+  case reconciling(ContentAgreementSnapshot)
   case retry(score: Int)
 
   init(state: ContentAgreementEntryState, fallbackAgreeScore: Int) {
@@ -2518,6 +2519,8 @@ enum ContentAgreementControlPresentation: Equatable {
       self = .ready(snapshot)
     case .mutating(let previous, _):
       self = .mutating(previous)
+    case .reconciling(let snapshot):
+      self = .reconciling(snapshot)
     case .failed(let previous):
       self = .retry(score: previous?.agreeScore ?? fallbackAgreeScore)
     }
@@ -2945,6 +2948,16 @@ private struct ContentAgreementControl: View {
         .foregroundStyle(.secondary)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("正在更新\(entry.target.kind.localizedObjectName)点赞")
+    case .reconciling(let snapshot):
+      ContentAgreementFixedLabel(
+        score: snapshot.agreeScore,
+        icon: snapshot.isAgreed ? .thumbsUpFilled : .thumbsUp
+      )
+      .foregroundStyle(snapshot.isAgreed ? Color.accentColor : Color.secondary)
+      .opacity(0.78)
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel("正在确认\(entry.target.kind.localizedObjectName)点赞状态")
+      .accessibilityValue("净赞数 \(snapshot.agreeScore.formatted())")
     case .retry(let score):
       Button { retry(entry.target) } label: {
         ContentAgreementFixedLabel(score: score, icon: .retry)

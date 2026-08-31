@@ -284,6 +284,373 @@ final class ContentAgreementStoreTests: XCTestCase {
     XCTAssertEqual(writeCount, 1)
   }
 
+  func testReconciliationAppliesFirstMatchingReadAndStops() async throws {
+    let active = agreementSession(revisionComponent: 20)
+    let target = agreementTarget(objectID: 120)
+    let scope = UUID()
+    let optimistic = ContentAgreementSnapshot(isAgreed: true, agreeScore: 76)
+    let authoritative = ContentAgreementSnapshot(isAgreed: true, agreeScore: 83)
+    let service = ContentAgreementStoreServiceSpy(
+      batchPages: [
+        active.sessionRevision: agreementPage(
+          session: active,
+          target: target,
+          isAgreed: false,
+          score: 75
+        )
+      ],
+      singleReadSteps: [
+        active.sessionRevision: [
+          .success(
+            agreementData(
+              session: active,
+              target: target,
+              isAgreed: authoritative.isAgreed,
+              score: authoritative.agreeScore
+            )
+          )
+        ]
+      ],
+      writeResults: [
+        active.sessionRevision: agreementData(
+          session: active,
+          target: target,
+          isAgreed: optimistic.isAgreed,
+          score: optimistic.agreeScore
+        )
+      ]
+    )
+    let sleeper = ContentAgreementReconciliationSleeper()
+    let store = reconciliationStore(
+      active: active,
+      service: service,
+      sleeper: sleeper
+    )
+    let entry = store.entry(for: target)
+
+    await store.replaceDescriptors([agreementDescriptor(target: target)], for: scope)
+    try await waitForContentAgreementStoreTest {
+      entry.state == .ready(ContentAgreementSnapshot(isAgreed: false, agreeScore: 75))
+    }
+
+    let mutation = Task { try await store.setAgreed(true, for: target) }
+    try await waitForContentAgreementStoreTest { await sleeper.waiterCount() == 1 }
+    XCTAssertEqual(entry.state, .reconciling(optimistic))
+    let readsBeforeDelay = await service.singleReadCount()
+    XCTAssertEqual(readsBeforeDelay, 0)
+
+    await sleeper.advanceOne()
+    let written = try await mutation.value
+    try await waitForContentAgreementStoreTest {
+      entry.state == .ready(authoritative)
+    }
+
+    XCTAssertEqual(written, authoritative)
+    let finalReadCount = await service.singleReadCount()
+    let finalWaiterCount = await sleeper.waiterCount()
+    XCTAssertEqual(finalReadCount, 1)
+    XCTAssertEqual(finalWaiterCount, 0)
+  }
+
+  func testReconciliationRetriesOneStaleReadThenAppliesMatchingRead() async throws {
+    let active = agreementSession(revisionComponent: 21)
+    let target = agreementTarget(objectID: 121)
+    let scope = UUID()
+    let initial = ContentAgreementSnapshot(isAgreed: false, agreeScore: 75)
+    let optimistic = ContentAgreementSnapshot(isAgreed: true, agreeScore: 76)
+    let authoritative = ContentAgreementSnapshot(isAgreed: true, agreeScore: 84)
+    let service = ContentAgreementStoreServiceSpy(
+      batchPages: [
+        active.sessionRevision: agreementPage(
+          session: active,
+          target: target,
+          isAgreed: initial.isAgreed,
+          score: initial.agreeScore
+        )
+      ],
+      singleReadSteps: [
+        active.sessionRevision: [
+          .success(
+            agreementData(
+              session: active,
+              target: target,
+              isAgreed: initial.isAgreed,
+              score: initial.agreeScore
+            )
+          ),
+          .success(
+            agreementData(
+              session: active,
+              target: target,
+              isAgreed: authoritative.isAgreed,
+              score: authoritative.agreeScore
+            )
+          ),
+        ]
+      ],
+      writeResults: [
+        active.sessionRevision: agreementData(
+          session: active,
+          target: target,
+          isAgreed: optimistic.isAgreed,
+          score: optimistic.agreeScore
+        )
+      ]
+    )
+    let sleeper = ContentAgreementReconciliationSleeper()
+    let vault = ContentAgreementStoreVaultSpy(session: active)
+    let store = reconciliationStore(vault: vault, service: service, sleeper: sleeper)
+    let entry = store.entry(for: target)
+
+    await store.replaceDescriptors([agreementDescriptor(target: target)], for: scope)
+    try await waitForContentAgreementStoreTest { entry.state == .ready(initial) }
+    let mutation = Task { try await store.setAgreed(true, for: target) }
+    try await waitForContentAgreementStoreTest { await sleeper.waiterCount() == 1 }
+    XCTAssertEqual(entry.state, .reconciling(optimistic))
+
+    await sleeper.advanceOne()
+    try await waitForContentAgreementStoreTest {
+      let readCount = await service.singleReadCount()
+      let waiterCount = await sleeper.waiterCount()
+      return readCount == 1 && waiterCount == 1
+    }
+    XCTAssertEqual(entry.state, .reconciling(optimistic))
+
+    await sleeper.advanceOne()
+    let written = try await mutation.value
+    try await waitForContentAgreementStoreTest { entry.state == .ready(authoritative) }
+
+    XCTAssertEqual(written, authoritative)
+    let finalReadCount = await service.singleReadCount()
+    let finalWaiterCount = await sleeper.waiterCount()
+    XCTAssertEqual(finalReadCount, 2)
+    XCTAssertEqual(finalWaiterCount, 0)
+  }
+
+  func testReconciliationRollsBackAndThrowsAfterFinalMismatchingRead() async throws {
+    let active = agreementSession(revisionComponent: 22)
+    let target = agreementTarget(objectID: 122)
+    let scope = UUID()
+    let initial = ContentAgreementSnapshot(isAgreed: false, agreeScore: 75)
+    let optimistic = ContentAgreementSnapshot(isAgreed: true, agreeScore: 76)
+    let finalAuthoritative = ContentAgreementSnapshot(isAgreed: false, agreeScore: 74)
+    let service = ContentAgreementStoreServiceSpy(
+      batchPages: [
+        active.sessionRevision: agreementPage(
+          session: active,
+          target: target,
+          isAgreed: initial.isAgreed,
+          score: initial.agreeScore
+        )
+      ],
+      singleReadSteps: [
+        active.sessionRevision: [
+          .success(
+            agreementData(
+              session: active,
+              target: target,
+              isAgreed: initial.isAgreed,
+              score: initial.agreeScore
+            )
+          ),
+          .success(
+            agreementData(
+              session: active,
+              target: target,
+              isAgreed: finalAuthoritative.isAgreed,
+              score: finalAuthoritative.agreeScore
+            )
+          ),
+        ]
+      ],
+      writeResults: [
+        active.sessionRevision: agreementData(
+          session: active,
+          target: target,
+          isAgreed: optimistic.isAgreed,
+          score: optimistic.agreeScore
+        )
+      ]
+    )
+    let sleeper = ContentAgreementReconciliationSleeper()
+    let vault = ContentAgreementStoreVaultSpy(session: active)
+    let store = reconciliationStore(vault: vault, service: service, sleeper: sleeper)
+    let entry = store.entry(for: target)
+
+    await store.replaceDescriptors([agreementDescriptor(target: target)], for: scope)
+    try await waitForContentAgreementStoreTest { entry.state == .ready(initial) }
+    let mutation = Task { try await store.setAgreed(true, for: target) }
+    try await waitForContentAgreementStoreTest { await sleeper.waiterCount() == 1 }
+    XCTAssertEqual(entry.state, .reconciling(optimistic))
+
+    await sleeper.advanceOne()
+    try await waitForContentAgreementStoreTest {
+      let readCount = await service.singleReadCount()
+      let waiterCount = await sleeper.waiterCount()
+      return readCount == 1 && waiterCount == 1
+    }
+    XCTAssertEqual(entry.state, .reconciling(optimistic))
+
+    await sleeper.advanceOne()
+    try await waitForContentAgreementStoreTest {
+      entry.state == .ready(finalAuthoritative)
+    }
+    do {
+      _ = try await mutation.value
+      XCTFail("Expected a final reconciliation mismatch to throw")
+    } catch is CancellationError {
+      XCTFail("A stable-account mismatch must not be reported as cancellation")
+    } catch {}
+
+    let readCount = await service.singleReadCount()
+    XCTAssertEqual(readCount, 2)
+  }
+
+  func testReconciliationFailsAfterTwoReadErrorsAndThrowsUnableToConfirm() async throws {
+    let active = agreementSession(revisionComponent: 23)
+    let target = agreementTarget(objectID: 123)
+    let scope = UUID()
+    let initial = ContentAgreementSnapshot(isAgreed: false, agreeScore: 75)
+    let optimistic = ContentAgreementSnapshot(isAgreed: true, agreeScore: 76)
+    let service = ContentAgreementStoreServiceSpy(
+      batchPages: [
+        active.sessionRevision: agreementPage(
+          session: active,
+          target: target,
+          isAgreed: initial.isAgreed,
+          score: initial.agreeScore
+        )
+      ],
+      singleReadSteps: [
+        active.sessionRevision: [
+          .failure("first reconciliation read failed"),
+          .failure("second reconciliation read failed"),
+        ]
+      ],
+      writeResults: [
+        active.sessionRevision: agreementData(
+          session: active,
+          target: target,
+          isAgreed: optimistic.isAgreed,
+          score: optimistic.agreeScore
+        )
+      ]
+    )
+    let sleeper = ContentAgreementReconciliationSleeper()
+    let store = reconciliationStore(active: active, service: service, sleeper: sleeper)
+    let entry = store.entry(for: target)
+
+    await store.replaceDescriptors([agreementDescriptor(target: target)], for: scope)
+    try await waitForContentAgreementStoreTest { entry.state == .ready(initial) }
+    let mutation = Task { try await store.setAgreed(true, for: target) }
+    try await waitForContentAgreementStoreTest { await sleeper.waiterCount() == 1 }
+    XCTAssertEqual(entry.state, .reconciling(optimistic))
+
+    await sleeper.advanceOne()
+    try await waitForContentAgreementStoreTest {
+      let readCount = await service.singleReadCount()
+      let waiterCount = await sleeper.waiterCount()
+      return readCount == 1 && waiterCount == 1
+    }
+    XCTAssertEqual(entry.state, .reconciling(optimistic))
+
+    await sleeper.advanceOne()
+    try await waitForContentAgreementStoreTest {
+      entry.state == .failed(previous: optimistic)
+    }
+    do {
+      _ = try await mutation.value
+      XCTFail("Expected two reconciliation failures to throw")
+    } catch {
+      XCTAssertTrue(error.localizedDescription.contains("无法从服务器确认"))
+    }
+
+    let readCount = await service.singleReadCount()
+    XCTAssertEqual(readCount, 2)
+  }
+
+  func testOldReconciliationReadCannotOverwriteNewAccountState() async throws {
+    let active = agreementSession(revisionComponent: 24)
+    let replacement = agreementSession(revisionComponent: 25, userID: 8)
+    let target = agreementTarget(objectID: 124)
+    let scope = UUID()
+    let initial = ContentAgreementSnapshot(isAgreed: false, agreeScore: 75)
+    let optimistic = ContentAgreementSnapshot(isAgreed: true, agreeScore: 76)
+    let replacementSnapshot = ContentAgreementSnapshot(isAgreed: false, agreeScore: 40)
+    let service = ContentAgreementStoreServiceSpy(
+      batchPages: [
+        active.sessionRevision: agreementPage(
+          session: active,
+          target: target,
+          isAgreed: initial.isAgreed,
+          score: initial.agreeScore
+        ),
+        replacement.sessionRevision: agreementPage(
+          session: replacement,
+          target: target,
+          isAgreed: replacementSnapshot.isAgreed,
+          score: replacementSnapshot.agreeScore
+        )
+      ],
+      singleReadSteps: [
+        active.sessionRevision: [
+          .suspendedSuccess(
+            agreementData(
+              session: active,
+              target: target,
+              isAgreed: true,
+              score: 999
+            )
+          ),
+        ]
+      ],
+      writeResults: [
+        active.sessionRevision: agreementData(
+          session: active,
+          target: target,
+          isAgreed: optimistic.isAgreed,
+          score: optimistic.agreeScore
+        )
+      ],
+      suspendedBatchRevisions: [replacement.sessionRevision]
+    )
+    let sleeper = ContentAgreementReconciliationSleeper()
+    let vault = ContentAgreementStoreVaultSpy(session: active)
+    let store = reconciliationStore(vault: vault, service: service, sleeper: sleeper)
+    let entry = store.entry(for: target)
+
+    await store.replaceDescriptors([agreementDescriptor(target: target)], for: scope)
+    try await waitForContentAgreementStoreTest { entry.state == .ready(initial) }
+    let mutation = Task { try await store.setAgreed(true, for: target) }
+    try await waitForContentAgreementStoreTest { await sleeper.waiterCount() == 1 }
+    XCTAssertEqual(entry.state, .reconciling(optimistic))
+    await sleeper.advanceOne()
+    try await waitForContentAgreementStoreTest {
+      await service.suspendedSingleReadCount() == 1
+    }
+
+    await vault.replaceActive(with: replacement)
+    store.accountSessionDidChange()
+    try await waitForContentAgreementStoreTest {
+      await service.batchReadCount(for: replacement.sessionRevision) == 1
+    }
+    await service.releaseSuspendedSingleReads()
+    do {
+      _ = try await mutation.value
+      XCTFail("Expected the old-account reconciliation to be cancelled")
+    } catch {
+      XCTAssertTrue(error is CancellationError)
+    }
+    await service.releaseBatchReads()
+    try await waitForContentAgreementStoreTest { entry.state == .ready(replacementSnapshot) }
+
+    let writeCount = await service.writeCount()
+    let readCount = await service.singleReadCount()
+    XCTAssertEqual(writeCount, 1)
+    XCTAssertEqual(readCount, 1)
+    XCTAssertNotEqual(entry.state, .ready(ContentAgreementSnapshot(isAgreed: true, agreeScore: 999)))
+  }
+
   func testOppositeRequestWaitsThenPerformsOneReadOnlyRefreshWithoutSecondWrite() async throws {
     let active = agreementSession(revisionComponent: 3)
     let target = agreementTarget(objectID: 102)
@@ -631,6 +998,12 @@ final class ContentAgreementStoreTests: XCTestCase {
   }
 }
 
+private enum ContentAgreementSingleReadStep: Sendable {
+  case success(ContentAgreementData)
+  case failure(String)
+  case suspendedSuccess(ContentAgreementData)
+}
+
 private struct ContentAgreementStoreTestFailure: LocalizedError, Sendable {
   let message: String
   var errorDescription: String? { message }
@@ -684,8 +1057,14 @@ private actor ContentAgreementStoreServiceSpy: AccountService {
     let descriptor: ContentAgreementReadDescriptor
   }
 
+  private struct SuspendedSingleRead {
+    let result: ContentAgreementData
+    let continuation: CheckedContinuation<ContentAgreementData, Error>
+  }
+
   private let batchPages: [UUID: ContentAgreementPageData]
   private let singleReads: [UUID: ContentAgreementData]
+  private var singleReadSteps: [UUID: [ContentAgreementSingleReadStep]]
   private let writeResults: [UUID: ContentAgreementData]
   private let suspendedBatchRevisions: Set<UUID>
   private let suspendedWriteRevisions: Set<UUID>
@@ -695,17 +1074,20 @@ private actor ContentAgreementStoreServiceSpy: AccountService {
   private var writeWaiters: [UUID: [CheckedContinuation<Void, Never>]] = [:]
   private var batchRequests: [BatchRequest] = []
   private var singleReadRequests: [UUID] = []
+  private var suspendedSingleReads: [SuspendedSingleRead] = []
   private var writeRequests: [(UUID, Bool)] = []
 
   init(
     batchPages: [UUID: ContentAgreementPageData] = [:],
     singleReads: [UUID: ContentAgreementData] = [:],
+    singleReadSteps: [UUID: [ContentAgreementSingleReadStep]] = [:],
     writeResults: [UUID: ContentAgreementData] = [:],
     suspendedBatchRevisions: Set<UUID> = [],
     suspendedWriteRevisions: Set<UUID> = []
   ) {
     self.batchPages = batchPages
     self.singleReads = singleReads
+    self.singleReadSteps = singleReadSteps
     self.writeResults = writeResults
     self.suspendedBatchRevisions = suspendedBatchRevisions
     self.suspendedWriteRevisions = suspendedWriteRevisions
@@ -760,8 +1142,31 @@ private actor ContentAgreementStoreServiceSpy: AccountService {
     session: StoredAccountSession,
     target: ContentAgreementTarget
   ) async throws -> ContentAgreementData {
-    singleReadRequests.append(session.sessionRevision)
-    guard let result = singleReads[session.sessionRevision], result.target == target else {
+    let revision = session.sessionRevision
+    singleReadRequests.append(revision)
+    if var steps = singleReadSteps[revision], !steps.isEmpty {
+      let step = steps.removeFirst()
+      singleReadSteps[revision] = steps
+      switch step {
+      case .success(let result):
+        guard result.target == target else {
+          throw ContentAgreementStoreTestFailure(message: "mismatched single agreement read")
+        }
+        return result
+      case .failure(let message):
+        throw ContentAgreementStoreTestFailure(message: message)
+      case .suspendedSuccess(let result):
+        guard result.target == target else {
+          throw ContentAgreementStoreTestFailure(message: "mismatched single agreement read")
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+          suspendedSingleReads.append(
+            SuspendedSingleRead(result: result, continuation: continuation)
+          )
+        }
+      }
+    }
+    guard let result = singleReads[revision], result.target == target else {
       throw ContentAgreementStoreTestFailure(message: "unexpected single agreement read")
     }
     return result
@@ -814,6 +1219,14 @@ private actor ContentAgreementStoreServiceSpy: AccountService {
     waiters.forEach { $0.resume() }
   }
 
+  func suspendedSingleReadCount() -> Int { suspendedSingleReads.count }
+
+  func releaseSuspendedSingleReads() {
+    let reads = suspendedSingleReads
+    suspendedSingleReads.removeAll()
+    reads.forEach { $0.continuation.resume(returning: $0.result) }
+  }
+
   func batchReadCount() -> Int { batchRequests.count }
   func batchReadCount(for revision: UUID) -> Int {
     batchRequests.filter { $0.revision == revision }.count
@@ -826,6 +1239,60 @@ private actor ContentAgreementStoreServiceSpy: AccountService {
   }
   func singleReadCount() -> Int { singleReadRequests.count }
   func writeCount() -> Int { writeRequests.count }
+}
+
+private actor ContentAgreementReconciliationSleeper {
+  private struct Waiter {
+    let duration: Duration
+    let continuation: CheckedContinuation<Void, Error>
+  }
+
+  private var waiters: [Waiter] = []
+
+  func sleep(for duration: Duration) async throws {
+    try await withCheckedThrowingContinuation { continuation in
+      waiters.append(Waiter(duration: duration, continuation: continuation))
+    }
+  }
+
+  func waiterCount() -> Int { waiters.count }
+
+  func requestedDurations() -> [Duration] { waiters.map(\.duration) }
+
+  func advanceOne() {
+    guard !waiters.isEmpty else { return }
+    waiters.removeFirst().continuation.resume()
+  }
+}
+
+@MainActor
+private func reconciliationStore(
+  active: StoredAccountSession,
+  service: ContentAgreementStoreServiceSpy,
+  sleeper: ContentAgreementReconciliationSleeper
+) -> ContentAgreementStore {
+  reconciliationStore(
+    vault: ContentAgreementStoreVaultSpy(session: active),
+    service: service,
+    sleeper: sleeper
+  )
+}
+
+@MainActor
+private func reconciliationStore(
+  vault: ContentAgreementStoreVaultSpy,
+  service: ContentAgreementStoreServiceSpy,
+  sleeper: ContentAgreementReconciliationSleeper
+) -> ContentAgreementStore {
+  ContentAgreementStore(
+    access: AccountAccess(vault: vault, service: service),
+    capacity: 512,
+    observesAccountSessionChanges: false,
+    reconciliationDelays: [Duration.seconds(1), Duration.seconds(2)],
+    reconciliationSleep: { duration in
+      try await sleeper.sleep(for: duration)
+    }
+  )
 }
 
 private func agreementSession(

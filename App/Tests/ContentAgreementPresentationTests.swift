@@ -53,6 +53,13 @@ final class ContentAgreementPresentationTests: XCTestCase {
     )
     XCTAssertEqual(
       ContentAgreementControlPresentation(
+        state: .reconciling(previous),
+        fallbackAgreeScore: 8
+      ),
+      .reconciling(previous)
+    )
+    XCTAssertEqual(
+      ContentAgreementControlPresentation(
         state: .failed(previous: previous),
         fallbackAgreeScore: 8
       ),

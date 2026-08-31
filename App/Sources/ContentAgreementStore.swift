@@ -7,6 +7,7 @@ enum ContentAgreementEntryState: Equatable {
   case loading(previous: ContentAgreementSnapshot?)
   case ready(ContentAgreementSnapshot)
   case mutating(previous: ContentAgreementSnapshot, targetAgreed: Bool)
+  case reconciling(ContentAgreementSnapshot)
   case failed(previous: ContentAgreementSnapshot?)
 }
 
@@ -28,7 +29,7 @@ final class ContentAgreementEntry: ObservableObject {
     switch state {
     case .loading(let previous), .failed(let previous):
       previous
-    case .ready(let snapshot), .mutating(let snapshot, _):
+    case .ready(let snapshot), .mutating(let snapshot, _), .reconciling(let snapshot):
       snapshot
     case .unknown, .signedOut:
       nil
@@ -52,6 +53,8 @@ private struct ContentAgreementSessionLease: Hashable, Sendable {
 
 @MainActor
 final class ContentAgreementStore {
+  typealias ReconciliationSleep = @Sendable (Duration) async throws -> Void
+
   private struct DescriptorTaskKey: Hashable {
     let lease: ContentAgreementSessionLease
     let request: ContentAgreementReadRequest
@@ -82,8 +85,16 @@ final class ContentAgreementStore {
     case failed
   }
 
+  private enum ReconciliationOutcome {
+    case confirmed(ContentAgreementSnapshot)
+    case mismatched(ContentAgreementSnapshot)
+    case unavailable
+  }
+
   private let access: AccountAccess
   private let capacity: Int
+  private let reconciliationDelays: [Duration]
+  private let reconciliationSleep: ReconciliationSleep
   private var entries: [ContentAgreementTarget: ContentAgreementEntry] = [:]
   private var scopeDescriptors: [UUID: Set<ContentAgreementReadDescriptor>] = [:]
   private var activeTargetsCache: Set<ContentAgreementTarget> = []
@@ -102,16 +113,26 @@ final class ContentAgreementStore {
   init(access: AccountAccess, capacity: Int = 512) {
     self.access = access
     self.capacity = max(capacity, 1)
+    reconciliationDelays = [.milliseconds(500), .milliseconds(1_500)]
+    reconciliationSleep = { delay in
+      try await Task<Never, Never>.sleep(for: delay)
+    }
     observeAccountSessionChanges()
   }
 
   init(
     access: AccountAccess,
     capacity: Int = 512,
-    observesAccountSessionChanges: Bool
+    observesAccountSessionChanges: Bool,
+    reconciliationDelays: [Duration] = [],
+    reconciliationSleep: @escaping ReconciliationSleep = { delay in
+      try await Task<Never, Never>.sleep(for: delay)
+    }
   ) {
     self.access = access
     self.capacity = max(capacity, 1)
+    self.reconciliationDelays = reconciliationDelays
+    self.reconciliationSleep = reconciliationSleep
     if observesAccountSessionChanges {
       observeAccountSessionChanges()
     }
@@ -270,11 +291,14 @@ final class ContentAgreementStore {
       guard let self else { throw CancellationError() }
       var confirmedLeaseIsCurrent: Bool?
       var didStartWrite = false
+      let activeSession: StoredAccountSession
+      let optimisticSnapshot: ContentAgreementSnapshot
       do {
         guard let session = try await vault.activeSession() else {
           confirmedLeaseIsCurrent = false
           throw BrowseError.unavailable("当前账户已经变化，请重新读取点赞状态。")
         }
+        activeSession = session
         let sessionLeaseIsCurrent =
           ContentAgreementSessionLease(session) == expectedLease
           && generationMatches(lease: expectedLease)
@@ -299,6 +323,7 @@ final class ContentAgreementStore {
         guard snapshot.isAgreed == isAgreed else {
           throw BrowseError.unavailable("贴吧没有确认新的点赞状态，请重新加载后再试。")
         }
+        optimisticSnapshot = snapshot
         let leaseIsCurrent = try await leaseIsCurrent(expectedLease)
         confirmedLeaseIsCurrent = leaseIsCurrent
         guard
@@ -309,14 +334,7 @@ final class ContentAgreementStore {
         else {
           throw BrowseError.unavailable("点赞完成时当前账户已经变化，结果未应用。")
         }
-        entry.setState(.ready(snapshot))
-        finishMutationActivity(
-          entry: entry,
-          target: target,
-          operationID: operationID,
-          needsRefresh: false
-        )
-        return snapshot
+        entry.setState(.reconciling(snapshot))
       } catch {
         let resultWasDiscardedForNewLease =
           operationGeneration != generation
@@ -341,6 +359,75 @@ final class ContentAgreementStore {
         }
         throw error
       }
+
+      let outcome: ReconciliationOutcome
+      do {
+        outcome = try await reconcileMutation(
+          session: activeSession,
+          target: target,
+          expectedAgreed: isAgreed,
+          expectedLease: expectedLease,
+          operationGeneration: operationGeneration,
+          operationEpoch: operationEpoch,
+          entry: entry
+        )
+      } catch {
+        let resultWasDiscardedForNewLease =
+          operationGeneration != generation
+          || entry.lease != expectedLease
+          || !generationMatches(lease: expectedLease)
+        if
+          operationGeneration == generation,
+          entry.epoch == operationEpoch,
+          entry.lease == expectedLease
+        {
+          entry.setState(.failed(previous: optimisticSnapshot))
+        }
+        finishMutationActivity(
+          entry: entry,
+          target: target,
+          operationID: operationID,
+          needsRefresh: resultWasDiscardedForNewLease
+        )
+        if resultWasDiscardedForNewLease || error is CancellationError {
+          throw CancellationError()
+        }
+        throw error
+      }
+
+      switch outcome {
+      case .confirmed(let authoritative):
+        entry.setState(.ready(authoritative))
+        finishMutationActivity(
+          entry: entry,
+          target: target,
+          operationID: operationID,
+          needsRefresh: false
+        )
+        return authoritative
+      case .mismatched(let authoritative):
+        entry.setState(.ready(authoritative))
+        finishMutationActivity(
+          entry: entry,
+          target: target,
+          operationID: operationID,
+          needsRefresh: false
+        )
+        let action = isAgreed ? "点赞" : "取消点赞"
+        throw BrowseError.unavailable("贴吧最终未保留本次\(action)，已恢复服务器状态。")
+      case .unavailable:
+        entry.setState(.failed(previous: optimisticSnapshot))
+        finishMutationActivity(
+          entry: entry,
+          target: target,
+          operationID: operationID,
+          needsRefresh: false
+        )
+        let action = isAgreed ? "点赞" : "取消点赞"
+        throw BrowseError.unavailable(
+          "\(action)请求已发送，但暂时无法从服务器确认最终状态。请点按点赞区域重新读取。"
+        )
+      }
     }
     mutationFlights[target] = MutationFlight(
       id: operationID,
@@ -351,9 +438,87 @@ final class ContentAgreementStore {
     return try await task.value
   }
 
+  private func reconcileMutation(
+    session: StoredAccountSession,
+    target: ContentAgreementTarget,
+    expectedAgreed: Bool,
+    expectedLease: ContentAgreementSessionLease,
+    operationGeneration: UInt64,
+    operationEpoch: UInt64,
+    entry: ContentAgreementEntry
+  ) async throws -> ReconciliationOutcome {
+    guard !reconciliationDelays.isEmpty else {
+      guard case .reconciling(let snapshot) = entry.state else {
+        throw CancellationError()
+      }
+      return .confirmed(snapshot)
+    }
+
+    for (index, delay) in reconciliationDelays.enumerated() {
+      try await reconciliationSleep(delay)
+      try Task.checkCancellation()
+      try await validateReconciliationContext(
+        expectedLease: expectedLease,
+        operationGeneration: operationGeneration,
+        operationEpoch: operationEpoch,
+        entry: entry
+      )
+
+      do {
+        let agreement = try await access.service.contentAgreement(
+          session: session,
+          target: target
+        )
+        try Task.checkCancellation()
+        try await validateReconciliationContext(
+          expectedLease: expectedLease,
+          operationGeneration: operationGeneration,
+          operationEpoch: operationEpoch,
+          entry: entry
+        )
+        let snapshot = try validatedSnapshot(
+          agreement,
+          expectedLease: expectedLease,
+          expectedTarget: target
+        )
+        if snapshot.isAgreed == expectedAgreed {
+          return .confirmed(snapshot)
+        }
+        if index == reconciliationDelays.count - 1 {
+          return .mismatched(snapshot)
+        }
+      } catch is CancellationError {
+        throw CancellationError()
+      } catch {
+        if index == reconciliationDelays.count - 1 {
+          return .unavailable
+        }
+      }
+    }
+    return .unavailable
+  }
+
+  private func validateReconciliationContext(
+    expectedLease: ContentAgreementSessionLease,
+    operationGeneration: UInt64,
+    operationEpoch: UInt64,
+    entry: ContentAgreementEntry
+  ) async throws {
+    guard
+      operationGeneration == generation,
+      entry.epoch == operationEpoch,
+      entry.lease == expectedLease,
+      generationMatches(lease: expectedLease),
+      try await leaseIsCurrent(expectedLease)
+    else {
+      throw CancellationError()
+    }
+  }
+
   func accountSessionDidChange() {
     generation &+= 1
     sessionResolution = .unknown
+    cancelReconciliationStageMutations()
     sessionReadFlight?.task.cancel()
     sessionReadFlight = nil
     for task in descriptorTasks.values {
@@ -555,6 +720,7 @@ final class ContentAgreementStore {
     if case .active(let current) = sessionResolution, current == lease { return }
     generation &+= 1
     sessionResolution = .active(lease)
+    cancelReconciliationStageMutations()
     for task in descriptorTasks.values {
       task.task.cancel()
     }
@@ -615,6 +781,7 @@ final class ContentAgreementStore {
       generation &+= 1
     }
     sessionResolution = .signedOut
+    cancelReconciliationStageMutations()
     for task in descriptorTasks.values {
       task.task.cancel()
     }
@@ -661,6 +828,13 @@ final class ContentAgreementStore {
   private func clearDescriptorTask(key: DescriptorTaskKey, id: UUID) {
     guard descriptorTasks[key]?.id == id else { return }
     descriptorTasks.removeValue(forKey: key)
+  }
+
+  private func cancelReconciliationStageMutations() {
+    for (target, flight) in mutationFlights {
+      guard let entry = entries[target], case .reconciling = entry.state else { continue }
+      flight.task.cancel()
+    }
   }
 
   private func finishMutationActivity(
