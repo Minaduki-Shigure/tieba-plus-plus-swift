@@ -875,22 +875,9 @@ enum TiebaAuthenticatedDecoder {
     )
   }
 
-  static func agreementWriteScore(from body: Data) throws -> Int? {
+  static func checkAgreementWriteAcknowledgement(from body: Data) throws {
     let object = try responseObject(from: body)
     try checkServerError(object)
-    guard
-      let data = object["data"] as? [String: Any],
-      let agree = data["agree"] as? [String: Any],
-      agree["score"] != nil
-    else { return nil }
-    guard let score = int64(agree["score"]) else {
-      throw TiebaClientError.invalidJSON
-    }
-    return Int(clamping: score)
-  }
-
-  static func threadAgreementWriteScore(from body: Data) throws -> Int? {
-    try agreementWriteScore(from: body)
   }
 
   static func checkOwnedContentDeletionAcknowledgement(from body: Data) throws {

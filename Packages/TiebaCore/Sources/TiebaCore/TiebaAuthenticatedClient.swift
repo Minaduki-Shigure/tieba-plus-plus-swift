@@ -2786,15 +2786,15 @@ public actor TiebaAuthenticatedClient {
         request,
         maximumBodyBytes: Self.threadAgreementWriteResponseMaximumBytes
       )
-      let responseScore = try TiebaAuthenticatedDecoder.agreementWriteScore(from: body)
+      try TiebaAuthenticatedDecoder.checkAgreementWriteAcknowledgement(from: body)
       return TiebaAgreementState(
         userID: expectedUserID,
         forumID: forumID,
         threadID: threadID,
         target: target,
         isAgreed: isAgreed,
-        agreeScore: responseScore
-          ?? adjustedAgreementScore(current.agreeScore, isAgreed: isAgreed)
+        // opAgree's score is not the target's aggregate net score.
+        agreeScore: adjustedAgreementScore(current.agreeScore, isAgreed: isAgreed)
       )
     } catch {
       guard isUncertainAgreementWriteError(error) else { throw error }

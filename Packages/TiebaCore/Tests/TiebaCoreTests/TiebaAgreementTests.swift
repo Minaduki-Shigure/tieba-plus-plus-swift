@@ -800,7 +800,7 @@ final class TiebaAgreementTests: XCTestCase, @unchecked Sendable {
       .response(try membershipResponse(
         userID: userID, forumID: forumID, forumName: forumName, tbs: tbs
       ).serializedData()),
-      .response(Data(#"{"error_code":"0","data":{"agree":{"score":"10"}}}"#.utf8)),
+      .response(Data(#"{"error_code":"0","data":{"agree":{"score":"0"}}}"#.utf8)),
     ])
     let writeClient = TiebaAuthenticatedClient(transport: writeTransport)
     let written = try await writeClient.setThreadAgreementState(
@@ -816,6 +816,72 @@ final class TiebaAgreementTests: XCTestCase, @unchecked Sendable {
     XCTAssertEqual(written.agreeScore, 10)
     let paths = await writeTransport.paths()
     XCTAssertEqual(paths, ["/c/f/pb/page", "/c/f/frs/page", "/c/c/agree/opAgree"])
+  }
+
+  func testSuccessfulWriteProjectsScoreFromPreWritePageInsteadOfResponseScore() async throws {
+    let transport = AgreementQueueTransport(steps: [
+      .response(try pageResponse(
+        userID: userID,
+        forumID: forumID,
+        threadID: threadID,
+        firstPostID: firstPostID,
+        postID: postID,
+        postAgreement: false,
+        postScore: 75
+      ).serializedData()),
+      .response(try membershipResponse(
+        userID: userID, forumID: forumID, forumName: forumName, tbs: tbs
+      ).serializedData()),
+      .response(Data(#"{"error_code":"0","data":{"agree":{"score":"0"}}}"#.utf8)),
+    ])
+    let client = TiebaAuthenticatedClient(transport: transport)
+
+    let written = try await client.setAgreementState(
+      credential: credential(),
+      expectedUserID: userID,
+      forumID: forumID,
+      forumName: forumName,
+      threadID: threadID,
+      target: .post(postID: postID),
+      isAgreed: true
+    )
+
+    XCTAssertTrue(written.isAgreed)
+    XCTAssertEqual(written.agreeScore, 76)
+    let paths = await transport.paths()
+    XCTAssertEqual(paths, ["/c/f/pb/page", "/c/f/frs/page", "/c/c/agree/opAgree"])
+  }
+
+  func testSuccessfulWithdrawalProjectsScoreFromPreWritePageInsteadOfResponseScore() async throws {
+    let transport = AgreementQueueTransport(steps: [
+      .response(try pageResponse(
+        userID: userID,
+        forumID: forumID,
+        threadID: threadID,
+        firstPostID: firstPostID,
+        postID: postID,
+        postAgreement: true,
+        postScore: 8
+      ).serializedData()),
+      .response(try membershipResponse(
+        userID: userID, forumID: forumID, forumName: forumName, tbs: tbs
+      ).serializedData()),
+      .response(Data(#"{"error_code":"0","data":{"agree":{"score":0}}}"#.utf8)),
+    ])
+    let client = TiebaAuthenticatedClient(transport: transport)
+
+    let written = try await client.setAgreementState(
+      credential: credential(),
+      expectedUserID: userID,
+      forumID: forumID,
+      forumName: forumName,
+      threadID: threadID,
+      target: .post(postID: postID),
+      isAgreed: false
+    )
+
+    XCTAssertFalse(written.isAgreed)
+    XCTAssertEqual(written.agreeScore, 7)
   }
 
   func testUncertainWriteReadsBackExactlyOnceWithoutRetryingWrite() async throws {
@@ -955,17 +1021,22 @@ final class TiebaAgreementTests: XCTestCase, @unchecked Sendable {
     XCTAssertEqual(paths, ["/c/f/pb/page"])
   }
 
-  func testWriteScoreDecoderAcceptsMissingButRejectsMalformedScore() throws {
-    XCTAssertNil(
-      try TiebaAuthenticatedDecoder.threadAgreementWriteScore(
+  func testWriteAcknowledgementIgnoresOptionalPayloadFields() throws {
+    XCTAssertNoThrow(
+      try TiebaAuthenticatedDecoder.checkAgreementWriteAcknowledgement(
         from: Data(#"{"error_code":"0"}"#.utf8)
       )
     )
-    XCTAssertThrowsError(
-      try TiebaAuthenticatedDecoder.threadAgreementWriteScore(
+    XCTAssertNoThrow(
+      try TiebaAuthenticatedDecoder.checkAgreementWriteAcknowledgement(
         from: Data(#"{"error_code":"0","data":{"agree":{"score":true}}}"#.utf8)
       )
-    ) { XCTAssertEqual($0 as? TiebaClientError, .invalidJSON) }
+    )
+    XCTAssertThrowsError(
+      try TiebaAuthenticatedDecoder.checkAgreementWriteAcknowledgement(
+        from: Data(#"{"error_code":"123","error_msg":"denied"}"#.utf8)
+      )
+    ) { XCTAssertEqual($0 as? TiebaClientError, .server(code: 123, message: "denied")) }
   }
 
   func testSameTargetSharesOneWriteAndOppositeTargetOnlyReadsBack() async throws {
@@ -1397,6 +1468,7 @@ private func pageResponse(
   topicAgreement: Bool = false,
   postID: Int64,
   postAgreement: Bool? = false,
+  postScore: Int64? = nil,
   inlineSubpostID: Int64? = nil,
   subpostAgreement: Bool? = false
 ) -> PbPageResIdl {
@@ -1424,7 +1496,7 @@ private func pageResponse(
   post.floor = 2
   post.tid = threadID
   if let postAgreement {
-    post.agree = agree(postAgreement, score: postAgreement ? 4 : 3)
+    post.agree = agree(postAgreement, score: postScore ?? (postAgreement ? 4 : 3))
   }
   if let inlineSubpostID {
     var subpost = SubPostList()

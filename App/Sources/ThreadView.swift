@@ -24,8 +24,8 @@ struct ThreadView: View {
   @State private var pictureGalleryPolicyTask: Task<Void, Never>?
   @State private var agreementScopeID = UUID()
   @State private var reportScopeID = UUID()
-  @State private var pendingAgreementChange: PendingContentAgreementChange?
   @State private var agreementErrorMessage: String?
+  @State private var agreementContextGeneration: UInt64 = 0
   @State private var cloudFavoriteScopeID = UUID()
   @State private var pendingCloudFavoriteAction: ThreadCloudFavoritePendingAction?
   @State private var cloudFavoriteErrorMessage: String?
@@ -367,26 +367,6 @@ struct ThreadView: View {
         )
       }
       .confirmationDialog(
-        pendingAgreementChange?.confirmationTitle ?? "更新点赞状态？",
-        isPresented: agreementConfirmationIsPresented,
-        titleVisibility: .visible
-      ) {
-        if let pendingAgreementChange {
-          if pendingAgreementChange.targetAgreed {
-            Button(pendingAgreementChange.actionTitle) {
-              confirmAgreementChange(pendingAgreementChange)
-            }
-          } else {
-            Button(pendingAgreementChange.actionTitle, role: .destructive) {
-              confirmAgreementChange(pendingAgreementChange)
-            }
-          }
-        }
-        Button("取消", role: .cancel) { pendingAgreementChange = nil }
-      } message: {
-        Text(pendingAgreementChange?.confirmationMessage ?? "")
-      }
-      .confirmationDialog(
         pendingCloudFavoriteAction?.title ?? "更新贴吧云收藏？",
         isPresented: cloudFavoriteConfirmationIsPresented,
         titleVisibility: .visible
@@ -569,7 +549,7 @@ struct ThreadView: View {
         }
         cancelPictureGallery()
         contentReportCoordinator?.invalidate(scopeID: reportScopeID)
-        pendingAgreementChange = nil
+        invalidateAgreementRequests()
         pendingImmersiveReadingConfirmation = nil
         pendingCloudFavoriteAction = nil
         pendingOwnedContentDeletion = nil
@@ -581,8 +561,7 @@ struct ThreadView: View {
       }
       .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
         invalidateInboxReplyIntentForAccountChange()
-        pendingAgreementChange = nil
-        agreementErrorMessage = nil
+        invalidateAgreementRequests()
         pendingCloudFavoriteAction = nil
         cloudFavoriteErrorMessage = nil
         pendingOwnedContentDeletion = nil
@@ -1882,15 +1861,6 @@ struct ThreadView: View {
     viewModel.resolvedThreadAuthorAvatarURL
   }
 
-  private var agreementConfirmationIsPresented: Binding<Bool> {
-    Binding(
-      get: { pendingAgreementChange != nil },
-      set: { isPresented in
-        if !isPresented { pendingAgreementChange = nil }
-      }
-    )
-  }
-
   private var agreementErrorIsPresented: Binding<Bool> {
     Binding(
       get: { agreementErrorMessage != nil },
@@ -1986,8 +1956,7 @@ struct ThreadView: View {
     let willUsePurePresentation = mode.usesPurePresentation
     pendingCloudFavoriteAction = nil
     if !wasPureReading && willUsePurePresentation {
-      pendingAgreementChange = nil
-      agreementErrorMessage = nil
+      invalidateAgreementRequests()
       contentAgreementStore?.removeScope(agreementScopeID)
     }
     if wasPureReading != willUsePurePresentation {
@@ -2004,24 +1973,18 @@ struct ThreadView: View {
     guard !isPureReadingMode else { return }
     pendingCloudFavoriteAction = nil
     pendingOwnedContentDeletion = nil
-    pendingAgreementChange = PendingContentAgreementChange(
-      target: target,
-      targetAgreed: targetAgreed
-    )
-  }
-
-  private func confirmAgreementChange(_ change: PendingContentAgreementChange) {
-    pendingAgreementChange = nil
-    guard !isPureReadingMode, let contentAgreementStore else { return }
+    guard let contentAgreementStore else { return }
+    let contextGeneration = beginAgreementRequest()
     Task { @MainActor in
       do {
         try await contentAgreementStore.setAgreed(
-          change.targetAgreed,
-          for: change.target
+          targetAgreed,
+          for: target
         )
       } catch is CancellationError {
         return
       } catch {
+        guard agreementContextGeneration == contextGeneration, !isPureReadingMode else { return }
         agreementErrorMessage = error.localizedDescription
       }
     }
@@ -2029,20 +1992,31 @@ struct ThreadView: View {
 
   private func retryAgreement(_ target: ContentAgreementTarget) {
     guard !isPureReadingMode, let contentAgreementStore else { return }
+    let contextGeneration = beginAgreementRequest()
     Task { @MainActor in
       do {
         try await contentAgreementStore.reload(target)
       } catch is CancellationError {
         return
       } catch {
+        guard agreementContextGeneration == contextGeneration, !isPureReadingMode else { return }
         agreementErrorMessage = error.localizedDescription
       }
     }
   }
 
+  private func beginAgreementRequest() -> UInt64 {
+    agreementErrorMessage = nil
+    return agreementContextGeneration
+  }
+
+  private func invalidateAgreementRequests() {
+    agreementContextGeneration &+= 1
+    agreementErrorMessage = nil
+  }
+
   private func requestCloudFavoriteAction(_ action: ThreadCloudFavoritePendingAction) {
     guard cloudFavoriteActionIsCurrent(action) else { return }
-    pendingAgreementChange = nil
     pendingOwnedContentDeletion = nil
     pendingCloudFavoriteAction = action
   }
@@ -2053,7 +2027,6 @@ struct ThreadView: View {
       ownedContentDeletionErrorMessage = "当前已有删除操作正在进行，请等待结果。"
       return
     }
-    pendingAgreementChange = nil
     pendingCloudFavoriteAction = nil
     pendingOwnedContentDeletion = pending
   }
@@ -2512,25 +2485,6 @@ private struct ThreadProgressTaskID: Hashable {
 private struct ContentAgreementRegistrationTaskID: Hashable {
   let descriptorEpoch: Int
   let isEnabled: Bool
-}
-
-struct PendingContentAgreementChange: Equatable {
-  let target: ContentAgreementTarget
-  let targetAgreed: Bool
-
-  var confirmationTitle: String {
-    targetAgreed
-      ? "点赞这个\(target.kind.localizedObjectName)？"
-      : "取消点赞这个\(target.kind.localizedObjectName)？"
-  }
-
-  var actionTitle: String {
-    targetAgreed ? "点赞" : "取消点赞"
-  }
-
-  var confirmationMessage: String {
-    "这会使用当前贴吧账户更新\(target.kind.localizedObjectName)的点赞状态。"
-  }
 }
 
 extension ContentAgreementKind {

@@ -996,8 +996,9 @@ and its verified metadata enters the public app source.
   disposable-account validation feature.
 - **Content approval state:** The canonical first floor, ordinary floors, and
   parent and child rows on a full nested-reply page independently read the active
-  account's approval state and expose confirmed approve/cancel actions. Anonymous
-  content and inline nested-reply previews remain separate read-only snapshots.
+  account's approval state and expose direct approve/cancel actions backed by
+  server-acknowledged writes. Anonymous content and inline nested-reply previews
+  remain separate read-only snapshots.
 - **Private inbox:** The account page opens foreground-only ReplyMe and AtMe
   lists with refresh and bounded page-number pagination. Ordinary notifications
   can reopen the exact post. A visible sender avatar or name separately opens

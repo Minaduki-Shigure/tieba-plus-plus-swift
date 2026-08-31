@@ -223,6 +223,67 @@ final class ContentAgreementStoreTests: XCTestCase {
     XCTAssertEqual(writeCount, 1)
   }
 
+  func testSameTargetRequestsShareFlightBeforeActiveSessionReadCompletes() async throws {
+    let active = agreementSession(revisionComponent: 14)
+    let target = agreementTarget(objectID: 114)
+    let service = ContentAgreementStoreServiceSpy(
+      batchPages: [
+        active.sessionRevision: agreementPage(
+          session: active,
+          target: target,
+          isAgreed: false,
+          score: 75
+        )
+      ],
+      writeResults: [
+        active.sessionRevision: agreementData(
+          session: active,
+          target: target,
+          isAgreed: true,
+          score: 76
+        )
+      ]
+    )
+    let vault = ContentAgreementStoreVaultSpy(session: active)
+    let store = ContentAgreementStore(
+      access: AccountAccess(vault: vault, service: service),
+      observesAccountSessionChanges: false
+    )
+    let entry = store.entry(for: target)
+    await store.replaceDescriptors([agreementDescriptor(target: target)], for: UUID())
+    try await waitForContentAgreementStoreTest {
+      entry.state == .ready(ContentAgreementSnapshot(isAgreed: false, agreeScore: 75))
+    }
+    await vault.suspendActiveSessionReads()
+
+    let first = Task { try await store.setAgreed(true, for: target) }
+    try await waitForContentAgreementStoreTest {
+      await vault.activeSessionWaiterCount() == 1
+    }
+    let second = Task { try await store.setAgreed(true, for: target) }
+    try await Task.sleep(nanoseconds: 30_000_000)
+
+    let activeSessionWaiterCount = await vault.activeSessionWaiterCount()
+    XCTAssertEqual(activeSessionWaiterCount, 1)
+    XCTAssertEqual(
+      entry.state,
+      .mutating(
+        previous: ContentAgreementSnapshot(isAgreed: false, agreeScore: 75),
+        targetAgreed: true
+      )
+    )
+
+    await vault.releaseActiveSessionReads()
+    let firstResult = try await first.value
+    let secondResult = try await second.value
+
+    XCTAssertEqual(firstResult, ContentAgreementSnapshot(isAgreed: true, agreeScore: 76))
+    XCTAssertEqual(secondResult, firstResult)
+    XCTAssertEqual(entry.state, .ready(firstResult))
+    let writeCount = await service.writeCount()
+    XCTAssertEqual(writeCount, 1)
+  }
+
   func testOppositeRequestWaitsThenPerformsOneReadOnlyRefreshWithoutSecondWrite() async throws {
     let active = agreementSession(revisionComponent: 3)
     let target = agreementTarget(objectID: 102)
@@ -332,7 +393,12 @@ final class ContentAgreementStoreTests: XCTestCase {
     }
 
     await service.releaseWrites()
-    _ = await oldWrite.result
+    do {
+      _ = try await oldWrite.value
+      XCTFail("Expected the old-account write result to be discarded")
+    } catch {
+      XCTAssertTrue(error is CancellationError)
+    }
     try await waitForContentAgreementStoreTest {
       await service.batchReadCount(for: newSession.sessionRevision) >= 2
     }
@@ -572,13 +638,20 @@ private struct ContentAgreementStoreTestFailure: LocalizedError, Sendable {
 
 private actor ContentAgreementStoreVaultSpy: AccountVault {
   private var session: StoredAccountSession?
+  private var suspendsActiveSessionReads = false
+  private var activeSessionWaiters: [CheckedContinuation<Void, Never>] = []
 
   init(session: StoredAccountSession? = nil) {
     self.session = session
   }
 
   func accountSummaries() async throws -> [AccountSummary] { [] }
-  func activeSession() async throws -> StoredAccountSession? { session }
+  func activeSession() async throws -> StoredAccountSession? {
+    if suspendsActiveSessionReads {
+      await withCheckedContinuation { activeSessionWaiters.append($0) }
+    }
+    return session
+  }
   func upsert(_ session: StoredAccountSession) async throws { self.session = session }
   func switchActive(to userID: Int64) async throws {}
   func remove(userID: Int64) async throws { session = nil }
@@ -586,6 +659,21 @@ private actor ContentAgreementStoreVaultSpy: AccountVault {
 
   func replaceActive(with session: StoredAccountSession?) {
     self.session = session
+  }
+
+  func suspendActiveSessionReads() {
+    suspendsActiveSessionReads = true
+  }
+
+  func activeSessionWaiterCount() -> Int {
+    activeSessionWaiters.count
+  }
+
+  func releaseActiveSessionReads() {
+    suspendsActiveSessionReads = false
+    let waiters = activeSessionWaiters
+    activeSessionWaiters.removeAll()
+    waiters.forEach { $0.resume() }
   }
 }
 

@@ -258,26 +258,34 @@ final class ContentAgreementStore {
     }
     guard previous.isAgreed != isAgreed else { return previous }
 
-    let session = try await access.vault.activeSession()
-    guard
-      let session,
-      ContentAgreementSessionLease(session) == expectedLease,
-      generationMatches(lease: expectedLease)
-    else {
-      throw BrowseError.unavailable("当前账户已经变化，请重新读取点赞状态。")
-    }
-
     let operationEpoch = nextEpoch()
     entry.epoch = operationEpoch
     entry.activeWriteCount += 1
     entry.setState(.mutating(previous: previous, targetAgreed: isAgreed))
     let operationGeneration = generation
+    let vault = access.vault
     let service = access.service
     let operationID = UUID()
     let task: Task<ContentAgreementSnapshot, Error> = Task { @MainActor [weak self] in
       guard let self else { throw CancellationError() }
       var confirmedLeaseIsCurrent: Bool?
+      var didStartWrite = false
       do {
+        guard let session = try await vault.activeSession() else {
+          confirmedLeaseIsCurrent = false
+          throw BrowseError.unavailable("当前账户已经变化，请重新读取点赞状态。")
+        }
+        let sessionLeaseIsCurrent =
+          ContentAgreementSessionLease(session) == expectedLease
+          && generationMatches(lease: expectedLease)
+          && operationGeneration == generation
+          && entry.epoch == operationEpoch
+          && entry.lease == expectedLease
+        confirmedLeaseIsCurrent = sessionLeaseIsCurrent
+        guard sessionLeaseIsCurrent else {
+          throw BrowseError.unavailable("当前账户已经变化，请重新读取点赞状态。")
+        }
+        didStartWrite = true
         let agreement = try await service.setContentAgreed(
           session: session,
           target: target,
@@ -320,7 +328,7 @@ final class ContentAgreementStore {
           entry.epoch == operationEpoch,
           entry.lease == expectedLease
         {
-          entry.setState(.failed(previous: previous))
+          entry.setState(didStartWrite ? .failed(previous: previous) : .ready(previous))
         }
         finishMutationActivity(
           entry: entry,
@@ -328,6 +336,9 @@ final class ContentAgreementStore {
           operationID: operationID,
           needsRefresh: resultWasDiscardedForNewLease
         )
+        if resultWasDiscardedForNewLease {
+          throw CancellationError()
+        }
         throw error
       }
     }

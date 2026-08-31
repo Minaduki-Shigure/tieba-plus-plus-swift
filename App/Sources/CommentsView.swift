@@ -73,8 +73,8 @@ struct CommentsView: View {
   @State private var highlightedComment: CommentHighlightToken?
   @State private var agreementScopeID = UUID()
   @State private var reportScopeID = UUID()
-  @State private var pendingAgreementChange: PendingContentAgreementChange?
   @State private var agreementErrorMessage: String?
+  @State private var agreementContextGeneration: UInt64 = 0
   @State private var hasRecordedDirectVisit = false
   @State private var replyComposerContext: TextReplyComposerContext?
   @State private var pendingConfirmedThreadRoute: TiebaThreadRoute?
@@ -224,26 +224,6 @@ struct CommentsView: View {
     .environment(\.contentReportScopeID, reportScopeID)
     .navigationBarTitleDisplayMode(.inline)
     .appNavigationSurface()
-    .confirmationDialog(
-      pendingAgreementChange?.confirmationTitle ?? "更新点赞状态？",
-      isPresented: agreementConfirmationIsPresented,
-      titleVisibility: .visible
-    ) {
-      if let pendingAgreementChange {
-        if pendingAgreementChange.targetAgreed {
-          Button(pendingAgreementChange.actionTitle) {
-            confirmAgreementChange(pendingAgreementChange)
-          }
-        } else {
-          Button(pendingAgreementChange.actionTitle, role: .destructive) {
-            confirmAgreementChange(pendingAgreementChange)
-          }
-        }
-      }
-      Button("取消", role: .cancel) { pendingAgreementChange = nil }
-    } message: {
-      Text(pendingAgreementChange?.confirmationMessage ?? "")
-    }
     .alert("无法更新点赞状态", isPresented: agreementErrorIsPresented) {
       Button("好", role: .cancel) { agreementErrorMessage = nil }
     } message: {
@@ -320,15 +300,14 @@ struct CommentsView: View {
     }
     .onDisappear {
       contentReportCoordinator?.invalidate(scopeID: reportScopeID)
-      pendingAgreementChange = nil
+      invalidateAgreementRequests()
       selectableTextPresentation = nil
       contentAgreementStore?.removeScope(agreementScopeID)
       viewModel.cancel()
     }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
       invalidateInboxReplyIntentForAccountChange()
-      pendingAgreementChange = nil
-      agreementErrorMessage = nil
+      invalidateAgreementRequests()
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       selectableTextPresentation = nil
@@ -1098,15 +1077,6 @@ struct CommentsView: View {
     }
   }
 
-  private var agreementConfirmationIsPresented: Binding<Bool> {
-    Binding(
-      get: { pendingAgreementChange != nil },
-      set: { isPresented in
-        if !isPresented { pendingAgreementChange = nil }
-      }
-    )
-  }
-
   private var agreementErrorIsPresented: Binding<Bool> {
     Binding(
       get: { agreementErrorMessage != nil },
@@ -1129,24 +1099,18 @@ struct CommentsView: View {
     _ target: ContentAgreementTarget,
     targetAgreed: Bool
   ) {
-    pendingAgreementChange = PendingContentAgreementChange(
-      target: target,
-      targetAgreed: targetAgreed
-    )
-  }
-
-  private func confirmAgreementChange(_ change: PendingContentAgreementChange) {
-    pendingAgreementChange = nil
     guard let contentAgreementStore else { return }
+    let contextGeneration = beginAgreementRequest()
     Task { @MainActor in
       do {
         try await contentAgreementStore.setAgreed(
-          change.targetAgreed,
-          for: change.target
+          targetAgreed,
+          for: target
         )
       } catch is CancellationError {
         return
       } catch {
+        guard agreementContextGeneration == contextGeneration else { return }
         agreementErrorMessage = error.localizedDescription
       }
     }
@@ -1154,15 +1118,27 @@ struct CommentsView: View {
 
   private func retryAgreement(_ target: ContentAgreementTarget) {
     guard let contentAgreementStore else { return }
+    let contextGeneration = beginAgreementRequest()
     Task { @MainActor in
       do {
         try await contentAgreementStore.reload(target)
       } catch is CancellationError {
         return
       } catch {
+        guard agreementContextGeneration == contextGeneration else { return }
         agreementErrorMessage = error.localizedDescription
       }
     }
+  }
+
+  private func beginAgreementRequest() -> UInt64 {
+    agreementErrorMessage = nil
+    return agreementContextGeneration
+  }
+
+  private func invalidateAgreementRequests() {
+    agreementContextGeneration &+= 1
+    agreementErrorMessage = nil
   }
 
   #if PERFORMANCE_HARNESS
