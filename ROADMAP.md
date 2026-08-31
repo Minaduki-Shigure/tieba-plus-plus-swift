@@ -14,7 +14,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-currently serves `v0.65.0-alpha.8` (build 86), whose app-code snapshot includes
+currently serves `v0.65.0-alpha.9` (build 87), whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -51,17 +51,15 @@ validation item.
 This makes existing workflows persistently reachable without adding a data source
 or weighted point; iPhone and iPad interaction remain a physical-device
 validation gate.
-Published `v0.65.0-alpha.8` interaction polish aligns Home's followed-forum cards
-with neighboring sections and makes the stored layout control visibly switch
-between an adaptive compact grid and a detailed full-width list. Large text falls
-back to the detailed list. Thread detail restores the actual system inline thread
-title and limits compact navigation bars to Share plus a unified More menu. Reading
-mode, local and cloud favorites, page jump, forum navigation, report, and eligible
-owned-content deletion remain reachable from that menu; report presentation uses
-an explicit scope and the ellipsis can no longer resolve to an empty menu. These
-changes improve existing navigation and local-feature usability credit
-without adding a data source or weighted point; combined UIKit paging, zooming,
-and dismissal remain a physical-device validation gate.
+Published `v0.65.0-alpha.9` keeps the responsive Home and thread-navigation work
+while hardening topic, floor, and nested-reply approval. The write acknowledgement's
+optional `score` is no longer treated as the aggregate net count; successful writes
+project one step from the authenticated pre-write value, and uncertain outcomes keep
+their authoritative readback. Direct approve/cancel actions share a mutation flight
+before the first account-vault suspension, while account and reading-context changes
+suppress stale results and alerts. These changes improve the existing server-write
+and interaction credit without adding a data source or weighted point; real endpoint
+behavior remains a disposable-account physical-device validation gate.
 The My root now groups local favorites, history, a direct appearance menu,
 settings, and About beneath the existing account workflows. Messages exposes the
 existing global search inside its own navigation stack. Typed destinations,
@@ -93,7 +91,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.65.0-alpha.8` app-code snapshot is at 80–82%; all experimental
+The public `v0.65.0-alpha.9` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
