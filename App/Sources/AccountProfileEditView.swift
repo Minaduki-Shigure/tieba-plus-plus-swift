@@ -40,6 +40,7 @@ struct AccountProfileEditView: View {
   @State private var saveTaskID: UUID?
   @State private var avatarImportTaskID: UUID?
   @State private var avatarUploadTaskID: UUID?
+  @State private var showsAvatarPicker = false
   @State private var avatarPickerSelection: PhotosPickerItem?
   @State private var avatarCropSource: ProfileAvatarCropSource?
   @State private var activeAvatarImportFile: SecurePickedImageFile?
@@ -197,11 +198,7 @@ struct AccountProfileEditView: View {
   private func profileSections(summary: AccountProfileSummary) -> some View {
     Section("账户") {
       HStack(spacing: 14) {
-        PhotosPicker(
-          selection: $avatarPickerSelection,
-          matching: .images,
-          preferredItemEncoding: .current
-        ) {
+        Button { showsAvatarPicker = true } label: {
           ZStack(alignment: .bottomTrailing) {
             AvatarView(url: summary.portraitURL, name: summary.preferredName, size: 64)
             avatarPickerBadge(canModifyAvatar: summary.canModifyAvatar)
@@ -210,6 +207,12 @@ struct AccountProfileEditView: View {
           .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .photosPicker(
+          isPresented: $showsAvatarPicker,
+          selection: $avatarPickerSelection,
+          matching: .images,
+          preferredItemEncoding: .current
+        )
         .disabled(!avatarPickerIsEnabled)
         .accessibilityLabel(
           avatarPickerAccessibilityLabel(canModifyAvatar: summary.canModifyAvatar)
@@ -506,6 +509,7 @@ struct AccountProfileEditView: View {
   private func cancelAvatarImport() {
     let activeTask = avatarImportTask
     let activeFile = activeAvatarImportFile
+    showsAvatarPicker = false
     avatarPickerSelection = nil
     avatarImportTaskID = nil
     avatarImportTask = nil
