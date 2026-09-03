@@ -173,7 +173,7 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     XCTAssertEqual(profile.postCount, 56)
     XCTAssertEqual(
       profile.portraitURL,
-      URL(string: "https://himg.bdimg.com/sys/portraitn/item/portrait-token")
+      URL(string: "https://himg.bdimg.com/sys/portraitn/item/portrait-token?t=123")
     )
     let snapshot = await client.snapshot()
     XCTAssertEqual(
@@ -503,6 +503,130 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
         XCTAssertFalse(error.errorDescription?.contains("profile") == true)
       } catch {
         XCTFail("Unexpected error: \(error)")
+      }
+    }
+  }
+
+  func testUploadSelfProfileAvatarUsesFullSessionAndMapsAuthoritativeResult() async throws {
+    let uploadID = UUID(uuidString: "01234567-89AB-CDEF-0123-456789ABCDEF")!
+    let jpegData = accountAvatarJPEG(size: 256)
+    let latestProfile = TiebaSelfProfileSummary(
+      userID: 7,
+      username: "account",
+      displayName: "Account",
+      portrait: "new-portrait",
+      biography: "Biography",
+      followingCount: 12,
+      followerCount: 34,
+      postCount: 56,
+      portraitSource: "new-portrait?t=2",
+      avatarModificationPermission: .allowed
+    )
+    let client = AccountClientSpy(
+      selfProfileAvatarMutation: TiebaSelfProfileAvatarUploadResult(
+        latestProfile: latestProfile,
+        disposition: .confirmed
+      )
+    )
+    let service = TiebaCoreAccountService(client: client)
+    let upload = try XCTUnwrap(
+      AccountProfileAvatarUpload(
+        uploadID: uploadID,
+        jpegData: jpegData,
+        pixelSize: 256
+      )
+    )
+
+    let result = try await service.uploadSelfProfileAvatar(
+      session: session(),
+      upload: upload
+    )
+
+    XCTAssertEqual(result.disposition, .confirmed)
+    XCTAssertEqual(result.profile.userID, 7)
+    XCTAssertTrue(result.profile.canModifyAvatar)
+    XCTAssertEqual(
+      result.profile.portraitURL?.absoluteString,
+      "https://himg.bdimg.com/sys/portraitn/item/new-portrait?t=2"
+    )
+    let snapshot = await client.snapshot()
+    XCTAssertEqual(
+      snapshot.selfProfileAvatarMutationRequests,
+      [
+        SelfProfileAvatarClientRequest(
+          userID: 7,
+          uploadID: uploadID,
+          byteCount: jpegData.count,
+          squarePixelSize: 256,
+          bdussBytes: 192,
+          stokenBytes: 64,
+          cookieName: .bduss
+        )
+      ]
+    )
+  }
+
+  func testUploadSelfProfileAvatarRejectsMissingCredentialsAndMismatchedJPEGDimensions()
+    async throws
+  {
+    let client = AccountClientSpy()
+    let service = TiebaCoreAccountService(client: client)
+    let validUpload = try XCTUnwrap(
+      AccountProfileAvatarUpload(jpegData: accountAvatarJPEG(size: 256), pixelSize: 256)
+    )
+
+    do {
+      _ = try await service.uploadSelfProfileAvatar(
+        session: session(stokenComponent: nil),
+        upload: validUpload
+      )
+      XCTFail("Expected complete credentials to be required")
+    } catch let error as BrowseError {
+      XCTAssertEqual(error.errorDescription, "此账户需要重新登录，才能安全修改头像。")
+    }
+
+    let mismatched = try XCTUnwrap(
+      AccountProfileAvatarUpload(jpegData: accountAvatarJPEG(size: 128), pixelSize: 256)
+    )
+    do {
+      _ = try await service.uploadSelfProfileAvatar(session: session(), upload: mismatched)
+      XCTFail("Expected mismatched JPEG dimensions to be rejected")
+    } catch let error as BrowseError {
+      XCTAssertEqual(error.errorDescription, "头像图片无法通过上传前校验，请重新选择。")
+    }
+
+    let snapshot = await client.snapshot()
+    XCTAssertTrue(snapshot.selfProfileAvatarMutationRequests.isEmpty)
+  }
+
+  func testUploadSelfProfileAvatarMapsMutationErrorsToSafeChinese() async throws {
+    let upload = try XCTUnwrap(
+      AccountProfileAvatarUpload(jpegData: accountAvatarJPEG(size: 256), pixelSize: 256)
+    )
+    let cases: [(TiebaClientError, String)] = [
+      (
+        .selfProfileAvatarModificationUnavailable(message: "本月修改次数已用尽"),
+        "本月修改次数已用尽"
+      ),
+      (
+        .selfProfileAvatarWriteConflict,
+        "此账户已有另一项资料修改正在进行，请等待完成后重试。"
+      ),
+      (
+        .selfProfileAvatarOutcomeUnknown,
+        "头像请求已经发出，但贴吧尚未确认结果；请重新读取本人资料，应用不会自动重发请求。"
+      ),
+    ]
+
+    for (source, expectedMessage) in cases {
+      let service = TiebaCoreAccountService(
+        client: AccountClientSpy(selfProfileAvatarMutationError: source)
+      )
+      do {
+        _ = try await service.uploadSelfProfileAvatar(session: session(), upload: upload)
+        XCTFail("Expected avatar mutation error to be mapped")
+      } catch let error as BrowseError {
+        XCTAssertEqual(error.errorDescription, expectedMessage)
       }
     }
   }
@@ -2831,6 +2955,16 @@ private struct SelfProfileEditClientRequest: Equatable, Sendable {
   let cookieName: TiebaBDUSSCookieName
 }
 
+private struct SelfProfileAvatarClientRequest: Equatable, Sendable {
+  let userID: Int64
+  let uploadID: UUID
+  let byteCount: Int
+  let squarePixelSize: Int
+  let bdussBytes: Int
+  let stokenBytes: Int
+  let cookieName: TiebaBDUSSCookieName
+}
+
 private struct OwnFollowingClientRequest: Equatable, Sendable {
   let userID: Int64
   let page: Int
@@ -2915,6 +3049,7 @@ private struct AccountClientSnapshot: Sendable {
   let validationSessionShapes: [SessionCredentialShape]
   let selfProfileRequests: [SelfProfileClientRequest]
   let selfProfileMutationRequests: [SelfProfileEditClientRequest]
+  let selfProfileAvatarMutationRequests: [SelfProfileAvatarClientRequest]
   let ownFollowingRequests: [OwnFollowingClientRequest]
   let likedForumRequests: [LikedForumClientRequest]
   let cloudFavoriteRequests: [CloudFavoriteClientRequest]
@@ -2952,6 +3087,8 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   private let selfProfile: TiebaSelfProfileSummary?
   private let selfProfileMutation: TiebaSelfProfileSummary?
   private let selfProfileMutationError: TiebaClientError?
+  private let selfProfileAvatarMutation: TiebaSelfProfileAvatarUploadResult?
+  private let selfProfileAvatarMutationError: TiebaClientError?
   private let ownFollowing: TiebaUserRelationPage?
   private let likedForums: TiebaFollowedForumPage?
   private let cloudFavorites: TiebaCloudFavoritePage?
@@ -2978,6 +3115,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   private var validationSessionShapes: [SessionCredentialShape] = []
   private var selfProfileRequests: [SelfProfileClientRequest] = []
   private var selfProfileMutationRequests: [SelfProfileEditClientRequest] = []
+  private var selfProfileAvatarMutationRequests: [SelfProfileAvatarClientRequest] = []
   private var ownFollowingRequests: [OwnFollowingClientRequest] = []
   private var likedForumRequests: [LikedForumClientRequest] = []
   private var cloudFavoriteRequests: [CloudFavoriteClientRequest] = []
@@ -3008,6 +3146,8 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     selfProfile: TiebaSelfProfileSummary? = nil,
     selfProfileMutation: TiebaSelfProfileSummary? = nil,
     selfProfileMutationError: TiebaClientError? = nil,
+    selfProfileAvatarMutation: TiebaSelfProfileAvatarUploadResult? = nil,
+    selfProfileAvatarMutationError: TiebaClientError? = nil,
     ownFollowing: TiebaUserRelationPage? = nil,
     likedForums: TiebaFollowedForumPage? = nil,
     cloudFavorites: TiebaCloudFavoritePage? = nil,
@@ -3035,6 +3175,8 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     self.selfProfile = selfProfile
     self.selfProfileMutation = selfProfileMutation
     self.selfProfileMutationError = selfProfileMutationError
+    self.selfProfileAvatarMutation = selfProfileAvatarMutation
+    self.selfProfileAvatarMutationError = selfProfileAvatarMutationError
     self.ownFollowing = ownFollowing
     self.likedForums = likedForums
     self.cloudFavorites = cloudFavorites
@@ -3114,6 +3256,27 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     if let selfProfileMutationError { throw selfProfileMutationError }
     guard let selfProfileMutation else { throw AccountClientSpyError.unexpectedCall }
     return selfProfileMutation
+  }
+
+  func uploadSelfProfileAvatar(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    upload: TiebaSelfProfileAvatarUpload
+  ) async throws -> TiebaSelfProfileAvatarUploadResult {
+    selfProfileAvatarMutationRequests.append(
+      SelfProfileAvatarClientRequest(
+        userID: expectedUserID,
+        uploadID: upload.uploadID,
+        byteCount: upload.jpegData.count,
+        squarePixelSize: upload.squarePixelSize,
+        bdussBytes: credential.bduss.utf8.count,
+        stokenBytes: credential.stoken.utf8.count,
+        cookieName: credential.bdussCookieName
+      )
+    )
+    if let selfProfileAvatarMutationError { throw selfProfileAvatarMutationError }
+    guard let selfProfileAvatarMutation else { throw AccountClientSpyError.unexpectedCall }
+    return selfProfileAvatarMutation
   }
 
   func getOwnFollowing(
@@ -3526,6 +3689,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
       validationSessionShapes: validationSessionShapes,
       selfProfileRequests: selfProfileRequests,
       selfProfileMutationRequests: selfProfileMutationRequests,
+      selfProfileAvatarMutationRequests: selfProfileAvatarMutationRequests,
       ownFollowingRequests: ownFollowingRequests,
       likedForumRequests: likedForumRequests,
       cloudFavoriteRequests: cloudFavoriteRequests,
@@ -3575,4 +3739,20 @@ private func waitForAccountServiceTest(
     guard Date() < deadline else { throw AccountClientSpyError.unexpectedCall }
     try await Task.sleep(nanoseconds: 10_000_000)
   }
+}
+
+private func accountAvatarJPEG(size: Int) -> Data {
+  let dimension = UInt16(clamping: size)
+  return Data([
+    0xFF, 0xD8,
+    0xFF, 0xE0, 0x00, 0x10,
+    0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00,
+    0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+    0xFF, 0xC0, 0x00, 0x11, 0x08,
+    UInt8(dimension >> 8), UInt8(dimension & 0xFF),
+    UInt8(dimension >> 8), UInt8(dimension & 0xFF),
+    0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00,
+    0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00,
+    0x00, 0xFF, 0xD9,
+  ])
 }

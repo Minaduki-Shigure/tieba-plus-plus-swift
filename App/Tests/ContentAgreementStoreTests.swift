@@ -284,11 +284,10 @@ final class ContentAgreementStoreTests: XCTestCase {
     XCTAssertEqual(writeCount, 1)
   }
 
-  func testReconciliationAppliesFirstMatchingReadAndStops() async throws {
+  func testAuthoritativeWriteResultCompletesWithoutDelayedServerRead() async throws {
     let active = agreementSession(revisionComponent: 20)
     let target = agreementTarget(objectID: 120)
     let scope = UUID()
-    let optimistic = ContentAgreementSnapshot(isAgreed: true, agreeScore: 76)
     let authoritative = ContentAgreementSnapshot(isAgreed: true, agreeScore: 83)
     let service = ContentAgreementStoreServiceSpy(
       batchPages: [
@@ -299,24 +298,12 @@ final class ContentAgreementStoreTests: XCTestCase {
           score: 75
         )
       ],
-      singleReadSteps: [
-        active.sessionRevision: [
-          .success(
-            agreementData(
-              session: active,
-              target: target,
-              isAgreed: authoritative.isAgreed,
-              score: authoritative.agreeScore
-            )
-          )
-        ]
-      ],
       writeResults: [
         active.sessionRevision: agreementData(
           session: active,
           target: target,
-          isAgreed: optimistic.isAgreed,
-          score: optimistic.agreeScore
+          isAgreed: authoritative.isAgreed,
+          score: authoritative.agreeScore
         )
       ]
     )
@@ -333,22 +320,13 @@ final class ContentAgreementStoreTests: XCTestCase {
       entry.state == .ready(ContentAgreementSnapshot(isAgreed: false, agreeScore: 75))
     }
 
-    let mutation = Task { try await store.setAgreed(true, for: target) }
-    try await waitForContentAgreementStoreTest { await sleeper.waiterCount() == 1 }
-    XCTAssertEqual(entry.state, .reconciling(optimistic))
-    let readsBeforeDelay = await service.singleReadCount()
-    XCTAssertEqual(readsBeforeDelay, 0)
-
-    await sleeper.advanceOne()
-    let written = try await mutation.value
-    try await waitForContentAgreementStoreTest {
-      entry.state == .ready(authoritative)
-    }
+    let written = try await store.setAgreed(true, for: target)
 
     XCTAssertEqual(written, authoritative)
+    XCTAssertEqual(entry.state, .ready(authoritative))
     let finalReadCount = await service.singleReadCount()
     let finalWaiterCount = await sleeper.waiterCount()
-    XCTAssertEqual(finalReadCount, 1)
+    XCTAssertEqual(finalReadCount, 0)
     XCTAssertEqual(finalWaiterCount, 0)
   }
 
@@ -357,7 +335,6 @@ final class ContentAgreementStoreTests: XCTestCase {
     let target = agreementTarget(objectID: 121)
     let scope = UUID()
     let initial = ContentAgreementSnapshot(isAgreed: false, agreeScore: 75)
-    let optimistic = ContentAgreementSnapshot(isAgreed: true, agreeScore: 76)
     let authoritative = ContentAgreementSnapshot(isAgreed: true, agreeScore: 84)
     let service = ContentAgreementStoreServiceSpy(
       batchPages: [
@@ -388,14 +365,7 @@ final class ContentAgreementStoreTests: XCTestCase {
           ),
         ]
       ],
-      writeResults: [
-        active.sessionRevision: agreementData(
-          session: active,
-          target: target,
-          isAgreed: optimistic.isAgreed,
-          score: optimistic.agreeScore
-        )
-      ]
+      writeSteps: [active.sessionRevision: [.outcomeUnknown]]
     )
     let sleeper = ContentAgreementReconciliationSleeper()
     let vault = ContentAgreementStoreVaultSpy(session: active)
@@ -406,7 +376,7 @@ final class ContentAgreementStoreTests: XCTestCase {
     try await waitForContentAgreementStoreTest { entry.state == .ready(initial) }
     let mutation = Task { try await store.setAgreed(true, for: target) }
     try await waitForContentAgreementStoreTest { await sleeper.waiterCount() == 1 }
-    XCTAssertEqual(entry.state, .reconciling(optimistic))
+    XCTAssertEqual(entry.state, .reconciling(initial))
 
     await sleeper.advanceOne()
     try await waitForContentAgreementStoreTest {
@@ -414,7 +384,7 @@ final class ContentAgreementStoreTests: XCTestCase {
       let waiterCount = await sleeper.waiterCount()
       return readCount == 1 && waiterCount == 1
     }
-    XCTAssertEqual(entry.state, .reconciling(optimistic))
+    XCTAssertEqual(entry.state, .reconciling(initial))
 
     await sleeper.advanceOne()
     let written = try await mutation.value
@@ -432,7 +402,6 @@ final class ContentAgreementStoreTests: XCTestCase {
     let target = agreementTarget(objectID: 122)
     let scope = UUID()
     let initial = ContentAgreementSnapshot(isAgreed: false, agreeScore: 75)
-    let optimistic = ContentAgreementSnapshot(isAgreed: true, agreeScore: 76)
     let finalAuthoritative = ContentAgreementSnapshot(isAgreed: false, agreeScore: 74)
     let service = ContentAgreementStoreServiceSpy(
       batchPages: [
@@ -463,14 +432,7 @@ final class ContentAgreementStoreTests: XCTestCase {
           ),
         ]
       ],
-      writeResults: [
-        active.sessionRevision: agreementData(
-          session: active,
-          target: target,
-          isAgreed: optimistic.isAgreed,
-          score: optimistic.agreeScore
-        )
-      ]
+      writeSteps: [active.sessionRevision: [.outcomeUnknown]]
     )
     let sleeper = ContentAgreementReconciliationSleeper()
     let vault = ContentAgreementStoreVaultSpy(session: active)
@@ -481,7 +443,7 @@ final class ContentAgreementStoreTests: XCTestCase {
     try await waitForContentAgreementStoreTest { entry.state == .ready(initial) }
     let mutation = Task { try await store.setAgreed(true, for: target) }
     try await waitForContentAgreementStoreTest { await sleeper.waiterCount() == 1 }
-    XCTAssertEqual(entry.state, .reconciling(optimistic))
+    XCTAssertEqual(entry.state, .reconciling(initial))
 
     await sleeper.advanceOne()
     try await waitForContentAgreementStoreTest {
@@ -489,7 +451,7 @@ final class ContentAgreementStoreTests: XCTestCase {
       let waiterCount = await sleeper.waiterCount()
       return readCount == 1 && waiterCount == 1
     }
-    XCTAssertEqual(entry.state, .reconciling(optimistic))
+    XCTAssertEqual(entry.state, .reconciling(initial))
 
     await sleeper.advanceOne()
     try await waitForContentAgreementStoreTest {
@@ -511,7 +473,6 @@ final class ContentAgreementStoreTests: XCTestCase {
     let target = agreementTarget(objectID: 123)
     let scope = UUID()
     let initial = ContentAgreementSnapshot(isAgreed: false, agreeScore: 75)
-    let optimistic = ContentAgreementSnapshot(isAgreed: true, agreeScore: 76)
     let service = ContentAgreementStoreServiceSpy(
       batchPages: [
         active.sessionRevision: agreementPage(
@@ -527,14 +488,7 @@ final class ContentAgreementStoreTests: XCTestCase {
           .failure("second reconciliation read failed"),
         ]
       ],
-      writeResults: [
-        active.sessionRevision: agreementData(
-          session: active,
-          target: target,
-          isAgreed: optimistic.isAgreed,
-          score: optimistic.agreeScore
-        )
-      ]
+      writeSteps: [active.sessionRevision: [.outcomeUnknown]]
     )
     let sleeper = ContentAgreementReconciliationSleeper()
     let store = reconciliationStore(active: active, service: service, sleeper: sleeper)
@@ -544,7 +498,7 @@ final class ContentAgreementStoreTests: XCTestCase {
     try await waitForContentAgreementStoreTest { entry.state == .ready(initial) }
     let mutation = Task { try await store.setAgreed(true, for: target) }
     try await waitForContentAgreementStoreTest { await sleeper.waiterCount() == 1 }
-    XCTAssertEqual(entry.state, .reconciling(optimistic))
+    XCTAssertEqual(entry.state, .reconciling(initial))
 
     await sleeper.advanceOne()
     try await waitForContentAgreementStoreTest {
@@ -552,11 +506,11 @@ final class ContentAgreementStoreTests: XCTestCase {
       let waiterCount = await sleeper.waiterCount()
       return readCount == 1 && waiterCount == 1
     }
-    XCTAssertEqual(entry.state, .reconciling(optimistic))
+    XCTAssertEqual(entry.state, .reconciling(initial))
 
     await sleeper.advanceOne()
     try await waitForContentAgreementStoreTest {
-      entry.state == .failed(previous: optimistic)
+      entry.state == .failed(previous: initial)
     }
     do {
       _ = try await mutation.value
@@ -877,7 +831,6 @@ final class ContentAgreementStoreTests: XCTestCase {
     let target = agreementTarget(objectID: 124)
     let scope = UUID()
     let initial = ContentAgreementSnapshot(isAgreed: false, agreeScore: 75)
-    let optimistic = ContentAgreementSnapshot(isAgreed: true, agreeScore: 76)
     let replacementSnapshot = ContentAgreementSnapshot(isAgreed: false, agreeScore: 40)
     let service = ContentAgreementStoreServiceSpy(
       batchPages: [
@@ -906,14 +859,7 @@ final class ContentAgreementStoreTests: XCTestCase {
           ),
         ]
       ],
-      writeResults: [
-        active.sessionRevision: agreementData(
-          session: active,
-          target: target,
-          isAgreed: optimistic.isAgreed,
-          score: optimistic.agreeScore
-        )
-      ],
+      writeSteps: [active.sessionRevision: [.outcomeUnknown]],
       suspendedBatchRevisions: [replacement.sessionRevision]
     )
     let sleeper = ContentAgreementReconciliationSleeper()
@@ -925,7 +871,7 @@ final class ContentAgreementStoreTests: XCTestCase {
     try await waitForContentAgreementStoreTest { entry.state == .ready(initial) }
     let mutation = Task { try await store.setAgreed(true, for: target) }
     try await waitForContentAgreementStoreTest { await sleeper.waiterCount() == 1 }
-    XCTAssertEqual(entry.state, .reconciling(optimistic))
+    XCTAssertEqual(entry.state, .reconciling(initial))
     await sleeper.advanceOne()
     try await waitForContentAgreementStoreTest {
       await service.suspendedSingleReadCount() == 1

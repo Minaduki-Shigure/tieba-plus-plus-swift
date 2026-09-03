@@ -18,13 +18,36 @@ and its verified metadata enters the public app source.
 | --- | --- |
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available with TiebaLite-aligned Home, Explore, Messages, and My primary tabs backed by independent system navigation stacks; an independent default-on preference can remove only Explore from the tab bar without changing the Home discovery-section preference or saved startup destination. My groups local favorites, history, an inline appearance choice, settings, and About, while Messages exposes global search in its own stack. History, favorites, filtering, appearance with an independent system/OLED dark-surface choice, media preferences, explicit standard/pure/only-author immersive thread-reading modes, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, a next-launch destination including personalized discovery and the inbox, and ordered iOS Home Screen quick actions for existing destinations are also available. The primary-tab shell and reply notice's system handoff attempt remain pending physical-device validation |
-| Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary and guarded native nickname/sex/biography editor, a credential-free handoff to Baidu's fixed official username-management page, followed forums with validated level-up progress and account-bound today-check-in marks where the server supplies them, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with a shared Home-toolbar/account-page message badge, separate optional fan-reminder badge, and authoritative reply actions, Tieba cloud favorites with a saved-position-to-latest-update handoff, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
-| Server-side writes | Guarded profile text edits, forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies plus explicitly confirmed deletion of the active account's own topic or ordinary floor; these newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
+| Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary and guarded native nickname/sex/biography/avatar editor, a credential-free handoff to Baidu's fixed official username-management page, followed forums with validated level-up progress and account-bound today-check-in marks where the server supplies them, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with a shared Home-toolbar/account-page message badge, separate optional fan-reminder badge, and authoritative reply actions, Tieba cloud favorites with a saved-position-to-latest-update handoff, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
+| Server-side writes | Guarded profile text and avatar edits, forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies plus explicitly confirmed deletion of the active account's own topic or ordinary floor; these newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
 | TiebaLite parity | Current `main` and public `v0.65.0-alpha.12`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
 | Distribution | The public SideStore/LiveContainer source currently serves `v0.65.0-alpha.12` (build 90) |
 
 ### Release and validation
 
+- **Current-main native avatar editing:** The profile editor can select one image
+  through the privacy-preserving system picker, normalize its orientation, remove
+  metadata, crop it to a user-controlled square, and produce a bounded 960 x 960
+  JPEG. App and Core independently enforce a 2 MiB limit and validate the JPEG's
+  declared square dimensions; Core also rejects metadata/comment segments and
+  JPEG frame forms outside the controlled processor's supported subset before one
+  signed multipart upload. The request uses
+  the minimum observed fields and no fabricated hardware, advertising, location,
+  screen, or installation identifiers. A fresh account-bound profile read checks
+  the server's avatar permission before dispatch, and one same-credential readback
+  follows every dispatched upload. Bare and approved-host URL portrait forms are
+  reduced to the same strict token plus canonical numeric `t` version before
+  comparison. A parsed acceptance plus a changed portrait confirms the update;
+  an accepted but unchanged portrait remains pending instead of being
+  reported as complete. Equivalent uploads share one
+  flight, profile text and avatar mutations exclude each other, and an uncertain
+  result never retries the upload. Selection, crop, upload, and publication stay
+  bound to the initiating `userID + sessionRevision`; private picker copies are
+  limited to 32 MiB before and during copying, use complete file protection, are
+  removed after processing, and cancellation propagates into detached decode/encode work. The verified profile
+  snapshot is published directly instead of being replaced by an immediate
+  potentially stale reread. This workflow remains a disposable-account and
+  physical-device validation gate.
 - **`v0.65.0-alpha.2` native profile text editing:** An active complete account can
   edit its Tieba nickname, sex, and biography inside the App. Opening the editor
   reads an account-bound V12 profile snapshot. Before each changed save, the App
@@ -44,8 +67,8 @@ and its verified metadata enters the public app source.
   concurrent submissions may share one flight; conflicting submissions fail
   before another write. The App binds load and save publication to the exact
   `userID + sessionRevision`, keeps the result in memory, and does not rewrite
-  Keychain account metadata. Avatar upload is a separate multipart workflow and
-  remains unavailable. This editor remains a disposable-account and physical-
+  Keychain account metadata. Avatar upload is an independent, mutually exclusive
+  multipart workflow. This editor remains a disposable-account and physical-
   device validation gate; test it with a nonimportant account before relying on
   it for an established profile.
 - **`v0.65.0-alpha.2` primary navigation:** The app now exposes Home, Explore,
@@ -77,21 +100,22 @@ and its verified metadata enters the public app source.
   links remain in the My stack. Stable-order and route-isolation contract tests
   cover these additions. This shell remains an iPhone/iPad physical-device gate
   for tab retention, VoiceOver, and interactive-pop cancellation.
-- **`v0.65.0-alpha.12` authoritative content-approval recovery:** The direct
+- **Current-main authoritative content-approval readback:** The direct
   topic, floor, and nested-reply approval flow retains the acknowledgement-only
-  treatment of `/c/c/agree/opAgree`, then silently re-reads the target after 500 ms.
-  A still-stale state receives one final delayed read. A matching result replaces the
-  local projection with the server's authoritative net count; a final state mismatch
-  restores the server snapshot and reports the correction, while two unavailable
-  reads expose an explicit retry state instead of presenting an estimate as confirmed.
-  If a dispatched write loses its acknowledgement and Core's immediate readback is
-  still stale or unavailable, the uncertainty now remains typed across the service
-  boundary and enters the same delayed read-only reconciliation instead of stopping
-  early. This recovery never resends the approval write and keeps the last authoritative
-  snapshot visible until an exact-target read resolves the state.
-  The optimistic icon and count appear after the write acknowledgement, with only
-  that control held during reconciliation to avoid unsafe immediate reversal against
-  Tieba's pre-write state check. Lease, generation, and entry-epoch validation prevent
+  treatment of `/c/c/agree/opAgree`. After every accepted write, Core immediately
+  re-reads the exact target and returns only the server's authoritative state and
+  net count; the optional write-response score is never displayed or locally
+  projected. A matching result completes immediately. If that read is stale or
+  unavailable, Core returns a typed uncertain outcome and the App keeps the
+  pre-write snapshot visible while performing a 500 ms exact-target read. A
+  failed or still-stale verification receives one final delayed read. A matching
+  result installs the server count; a final state mismatch restores the server
+  snapshot and reports the correction, while two unavailable reads expose an
+  explicit retry state instead of presenting an estimate as confirmed.
+  The same uncertainty path covers a lost acknowledgement. This recovery never
+  resends the approval write. Only that control is held
+  during reconciliation to avoid unsafe immediate reversal against Tieba's
+  pre-write state check. Lease, generation, and entry-epoch validation prevent
   old-account or stale-page reads from overwriting current state. App tests cover both
   acknowledgement and uncertain-outcome reconciliation, authoritative counts, rollback,
   unavailable reads, single-write guarantees, and account switches with in-flight old
@@ -1170,7 +1194,7 @@ and its verified metadata enters the public app source.
 - **Unsupported operations:** Guess-based removal of unresolvable cloud-favorite
   rows, bulk cloud/local synchronization, disagreement and other remaining
   reaction types, image creation for ordinary-floor and nested replies,
-  voice and arbitrary rich-media topic/reply creation, native avatar editing, content
+  voice and arbitrary rich-media topic/reply creation, content
   deletion beyond the active account's own loaded topic or ordinary floor,
   native or credential-injected reporting, background or automatic check-in, notification mark-read/unread
   reconciliation, background notification polling, and moderation remain
@@ -1189,7 +1213,7 @@ and its verified metadata enters the public app source.
   gates.
   The largest remaining gaps are
   rich-media creation, background unread handling, broader settings, remaining
-  account/social actions including avatar upload, unresolvable cloud-favorite
+  remaining account/social actions, unresolvable cloud-favorite
   rows, and moderation.
 
 ## Architecture

@@ -51,18 +51,21 @@ validation item.
 This makes existing workflows persistently reachable without adding a data source
 or weighted point; iPhone and iPad interaction remain a physical-device
 validation gate.
-Published `v0.65.0-alpha.12` keeps the acknowledgement-only treatment of content-
-approval writes and adds delayed authoritative reconciliation for topics, floors, and
-nested replies. The control presents the acknowledged projection immediately, then a
-500 ms read either installs the server count or schedules one final delayed read. A
-final state mismatch restores the server snapshot; unavailable reads expose retry
-instead of a falsely confirmed estimate. Account lease, store generation, and entry
-epoch checks reject stale responses, and only the approval control is held during the
-short reconciliation window so no reverse operation is submitted while Tieba's own
-pre-write read may still be stale. A possibly dispatched write whose acknowledgement
-or immediate Core readback fails now carries a typed uncertain outcome into that same
-delayed read-only path. It never resends the write, keeps the prior authoritative state
-visible while checking, and adopts only an exact-target server response. These changes
+Current `main` keeps the acknowledgement-only treatment of content-approval
+writes and now requires an immediate exact-target server readback after every
+accepted write for topics, floors, and nested replies. The write response's optional
+score is never treated as the aggregate count and no local projection is published.
+A matching Core read completes immediately, while a stale or unavailable read
+becomes a typed uncertain outcome and keeps the prior authoritative state. Only
+that uncertain path performs a 500 ms exact-target App read, and a failed or
+still-stale read schedules one final delayed read. A final state mismatch restores
+the server snapshot; unavailable reads expose retry instead of a falsely confirmed
+estimate. Account lease, store generation, and
+entry epoch checks reject stale responses, and only the approval control is held during
+the short reconciliation window so no reverse operation is submitted while Tieba's own
+pre-write read may still be stale. The uncertain path also covers a lost
+acknowledgement. It never resends the write and adopts only an exact-target server
+response. These changes
 improve the existing server-write and interaction credit without adding a data source or weighted point;
 real endpoint behavior remains a disposable-account physical-device validation gate.
 The My root now groups local favorites, history, a direct appearance menu,
@@ -76,9 +79,12 @@ workflow for nickname, sex, and biography. It preserves the account's hidden
 birthday fields, distinguishes editable `intro` from rendered `display_intro`,
 accepts an explicitly pending requested nickname as an authoritative readback,
 and sends no second write after an uncertain result. This is a substantive
-guarded account action, but the coarse weighted estimate remains unchanged until
-the minimum field set, nickname-review behavior, and birthday preservation pass
-disposable-account device validation. Avatar upload remains a separate gap.
+guarded account action. Current `main` also adds a separate native avatar picker,
+square crop, sanitized 960 x 960 JPEG pipeline, server permission preflight, minimal
+multipart upload, and mandatory profile readback. Both profile mutation paths are
+mutually exclusive. The coarse weighted estimate remains unchanged until the minimum
+field sets, review behavior, birthday preservation, picker lifecycle, and avatar
+acceptance pass disposable-account device validation.
 
 | Capability area | Weight | Credited points | Current basis |
 | --- | ---: | ---: | --- |
@@ -87,7 +93,7 @@ disposable-account device validation. Avatar upload remains a separate gap.
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
 | Local data, settings, and customization | 10 | 7 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, hierarchical settings navigation, an independent default-on Explore-tab visibility preference, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, confirmation-frozen foreground check-in execution settings, a TiebaLite-compatible default image-watermark choice, reply-entry visibility, a default-on composer risk notice with an experimental reply-only system handoff attempt pending physical validation, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, Home-toolbar quick switching, a self-profile summary with editable wire fields and nickname-review state, an authenticated current-account following list with a guarded mutual filter, followed and target-user liked forums with optional validated level-up progress, account-bound followed-forum check-in marks, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
-| Server writes, creation, and social actions | 15 | 14 | Guarded nickname/sex/biography editing, forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, server-reason-bound personalized recommendation dislike feedback, three text/classic-emoticon reply targets, equivalent new-topic creation, bounded static-image new-topic/direct-topic-reply creation, owner-only topic/ordinary-floor deletion, direct inline-preview reply entry, and credential-free official reporting entry points have implementations; profile mutation, real batch-check-in behavior, creation, deletion, poll and interaction-restriction success, broader uploaded media, unresolvable cloud rows, native reporting, and other reactions remain unavailable or unvalidated on physical devices |
+| Server writes, creation, and social actions | 15 | 14 | Guarded nickname/sex/biography/avatar editing, forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, server-reason-bound personalized recommendation dislike feedback, three text/classic-emoticon reply targets, equivalent new-topic creation, bounded static-image new-topic/direct-topic-reply creation, owner-only topic/ordinary-floor deletion, direct inline-preview reply entry, and credential-free official reporting entry points have implementations; real profile mutation, batch-check-in, creation, deletion, poll and interaction-restriction success, broader uploaded media, unresolvable cloud rows, native reporting, and other reactions remain unavailable or unvalidated on physical devices |
 | Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
 | **Total** | **100** | **80–82** | Current full-product estimate; roughly 18–20% remains |
 
@@ -529,7 +535,8 @@ the source metadata is updated to that tested IPA.
 - Account-bound, memory-only self-profile summary with current avatar, display
   name, rendered and editable biography values, sex, birthday-preservation and
   nickname-review state, following, follower, and reply counts, plus a guarded
-  nickname/sex/biography editor and an explicit link to
+  nickname/sex/biography editor and an independent guarded native avatar picker,
+  square crop, sanitized bounded JPEG upload, and server readback, plus an explicit link to
   the existing credential-free public profile and its public topic, reply,
   following, and follower views. A separate confirmed handoff opens only Baidu's
   fixed official HTTPS username-management page in the selected browser mode;
@@ -672,6 +679,22 @@ disposable-account and physical-device
 validation of the endpoint's minimum fields, reason encoding, acknowledgement,
 and effect on later recommendations.
 
+Current `main` also exposes native avatar editing from the account-bound profile
+editor. The system picker imports one 32 MiB bounded private copy, the shared
+image processor normalizes orientation and removes metadata, and a full-screen crop produces a
+960 x 960 JPEG no larger than 2 MiB. Core verifies the JPEG marker subset and SOF
+dimensions while rejecting metadata and comment segments,
+checks the server's `can_modify_avatar` permission, and sends at most one signed
+multipart request. One same-credential profile readback follows every dispatched
+write; bare and approved-host URL forms are canonicalized to one strict portrait
+token and numeric cache version before comparison. Only a parsed acceptance plus
+a changed identity confirms the new avatar, while an accepted unchanged value
+remains pending. Without a parseable acknowledgement, even a changed readback is
+unknown because another client could have changed the avatar. The upload never
+fabricates Android hardware identifiers and never retries. Real picker behavior,
+permission values, endpoint acceptance, review delay, and cache refresh remain
+disposable-account and physical-device validation gates.
+
 ## Next milestones
 
 1. Real-device validation of multi-frame GIF, WebP, and HEIC/HEIF sequences in
@@ -726,7 +749,8 @@ and effect on later recommendations.
    plus ordinary post and child-reply action relocation, unavailable targets,
    and account switching before composer presentation
 8. Disposable-account and real-device validation of the minimal authenticated
-   self-profile read and `/c/c/profile/modify` write, including successful V12
+   self-profile read, `/c/c/profile/modify` text write, and `/c/c/img/portrait`
+   avatar write, including successful V12
    field deletion, absent `is_login`, empty and multiline biography, `intro`
    versus `display_intro`, all sex values, missing and malformed birthday data,
    exact preservation of birthday time and visibility, active and pending
@@ -734,7 +758,11 @@ and effect on later recommendations.
    no-write result, known server rejection, post-dispatch transport loss,
    mandatory readback with no retry, identical-flight sharing, conflicting edits,
    pre-dispatch cancellation, expired and cross-account credentials, response UID
-   binding, account switching, and same-UID credential rotation
+   binding, account switching, and same-UID credential rotation. For avatars,
+   additionally cover picker cancellation, crop and orientation, metadata removal,
+   large and malformed images, `can_modify_avatar` and its denial text, response
+   codes `0` and `300003`, delayed portrait-version changes, cache refresh, upload
+   cancellation before and after dispatch, and mutual exclusion with text edits
 9. Real-device validation of the account-bound concern request, including the
    signed-field deletion matrix, empty-account and expired-session envelopes,
    cursor replay, and whether list retrieval changes recommendation state
@@ -1162,8 +1190,32 @@ nickname is either active or the explicit pending-review value. Otherwise the
 result is rejected or marked outcome unknown; no write is retried. App
 publication additionally requires the initiating `userID + sessionRevision`.
 The refreshed profile remains memory only and does not rotate the Keychain
-session merely to update display metadata. Avatar upload uses another multipart
-endpoint and remains outside this workflow.
+session merely to update display metadata.
+
+Avatar editing is a separate mutation over the same account resource. The App
+accepts one system-picker image, creates a 32 MiB bounded private temporary copy, decodes it
+through the shared bounded image pipeline, strips source metadata, and exposes a
+square crop with bounded pan and zoom. The final opaque sRGB JPEG is exactly
+960 x 960 and no larger than 2 MiB. App and Core validate its JPEG markers,
+declared dimensions, and upload identity independently before dispatch.
+
+Core first repeats the exact full-session and self-profile binding and requires
+`can_modify_avatar=1`. It then sends one signed multipart POST to
+`https://tiebac.baidu.com/c/c/img/portrait` with only BDUSS, client type,
+client version, signature, and the `pic` file part, plus `Cookie: ka=open`.
+STOKEN, TBS, CUID, IMEI, Android ID, OAID, model, screen, location, and other
+fabricated Android fields are omitted. The endpoint response is only an
+acknowledgement: one same-credential profile readback follows every dispatched
+attempt, including transport loss or cancellation. A parsed code `0` or `300003`
+plus a changed strictly validated portrait token or `t=digits` version confirms
+the upload. An accepted unchanged portrait remains accepted-pending-review;
+an unavailable readback or missing acknowledgement is outcome unknown. The upload
+is never retried. Equivalent uploads may
+share one flight, while a different avatar, credential, or simultaneous text
+profile edit is rejected before another profile write. App publication remains
+bound to the initiating `userID + sessionRevision`, and a validated numeric
+portrait version is retained in the normalized URL so image caches cannot hide
+a confirmed server change.
 
 Public following and follower lists are separate anonymous signed-form reads.
 Following uses `POST https://tiebac.baidu.com/c/u/follow/followList`; followers

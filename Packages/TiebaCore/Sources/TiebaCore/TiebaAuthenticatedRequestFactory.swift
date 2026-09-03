@@ -25,6 +25,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let concernClientVersion = "11.10.8.6"
   static let selfProfileClientVersion = "12.52.1.0"
   static let selfProfileEditClientVersion = "12.41.7.1"
+  static let selfProfileAvatarUploadClientVersion = "12.52.1.0"
   static let ownFollowingClientVersion = "12.41.7.1"
   static let userFollowClientVersion = "11.10.8.6"
   static let userInteractionPermissionsClientVersion = "12.41.7.1"
@@ -37,6 +38,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) "
     + "Version/4.0 Chrome/135.0.0.0 Mobile Safari/537.36 tieba/12.52.1.0"
   static let selfProfileEditUserAgent = "bdtb for Android 12.41.7.1"
+  static let selfProfileAvatarUploadUserAgent = "bdtb for Android 12.52.1.0"
   static let pollReadUserAgent =
     "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) "
     + "Version/4.0 Chrome/135.0.0.0 Mobile Safari/537.36 tieba/12.52.1.0"
@@ -300,6 +302,105 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       userAgent: Self.selfProfileEditUserAgent,
       cookie: "ka=open"
     )
+  }
+
+  func validatedSelfProfileAvatarUpload(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    upload: TiebaSelfProfileAvatarUpload
+  ) throws -> TiebaSelfProfileAvatarUploadPlan {
+    try validate(credential)
+    guard expectedUserID > 0 else {
+      throw TiebaClientError.invalidArgument("Expected user ID must be positive.")
+    }
+    guard TiebaSelfProfileAvatarUploadPolicy.isValid(upload) else {
+      throw TiebaClientError.invalidArgument(
+        "The avatar must be a valid JPEG within the size and dimension limits."
+      )
+    }
+    return TiebaSelfProfileAvatarUploadPlan(
+      upload: upload,
+      contentSHA256: TiebaSelfProfileAvatarUploadPolicy.contentSHA256(of: upload)
+    )
+  }
+
+  func uploadSelfProfileAvatar(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    upload: TiebaSelfProfileAvatarUpload
+  ) throws -> URLRequest {
+    try uploadSelfProfileAvatar(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      plan: validatedSelfProfileAvatarUpload(
+        credential: credential,
+        expectedUserID: expectedUserID,
+        upload: upload
+      )
+    )
+  }
+
+  func uploadSelfProfileAvatar(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    plan: TiebaSelfProfileAvatarUploadPlan
+  ) throws -> URLRequest {
+    try validate(credential)
+    guard expectedUserID > 0 else {
+      throw TiebaClientError.invalidArgument("Expected user ID must be positive.")
+    }
+    guard
+      TiebaSelfProfileAvatarUploadPolicy.isValid(plan.upload),
+      plan.contentSHA256
+        == TiebaSelfProfileAvatarUploadPolicy.contentSHA256(of: plan.upload)
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    try validateConfiguration()
+
+    let fields = [
+      ("BDUSS", credential.bduss),
+      ("_client_type", "2"),
+      ("_client_version", Self.selfProfileAvatarUploadClientVersion),
+    ]
+    let signedFields =
+      fields.sorted {
+        $0.0 == $1.0 ? $0.1 < $1.1 : $0.0 < $1.0
+      } + [("sign", Self.signature(for: fields))]
+    let boundary = Self.selfProfileAvatarMultipartBoundary(
+      fields: signedFields,
+      jpegData: plan.upload.jpegData
+    )
+
+    var components = URLComponents()
+    components.scheme = "https"
+    components.host = TiebaSelfProfileAvatarUploadEndpointPolicy.host
+    components.path = TiebaSelfProfileAvatarUploadEndpointPolicy.path
+    guard let url = components.url, TiebaSelfProfileAvatarUploadEndpointPolicy.allows(url) else {
+      throw TiebaClientError.invalidEndpoint
+    }
+
+    var request = URLRequest(
+      url: url,
+      cachePolicy: .reloadIgnoringLocalCacheData,
+      timeoutInterval: configuration.requestTimeout
+    )
+    request.httpMethod = "POST"
+    request.httpShouldHandleCookies = false
+    request.httpBody = Self.selfProfileAvatarMultipartBody(
+      fields: signedFields,
+      jpegData: plan.upload.jpegData,
+      boundary: boundary
+    )
+    request.setValue(Self.selfProfileAvatarUploadUserAgent, forHTTPHeaderField: "User-Agent")
+    request.setValue("ka=open", forHTTPHeaderField: "Cookie")
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    request.setValue("gzip", forHTTPHeaderField: "Accept-Encoding")
+    request.setValue(
+      "multipart/form-data; boundary=\(boundary)",
+      forHTTPHeaderField: "Content-Type"
+    )
+    return request
   }
 
   func ownFollowing(
@@ -1925,6 +2026,44 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       guard
         !fields.contains(where: { $0.1.contains(candidate) }),
         chunk.range(of: candidateBytes) == nil
+      else { continue }
+      return candidate
+    }
+  }
+
+  private static func selfProfileAvatarMultipartBody(
+    fields: [(String, String)],
+    jpegData: Data,
+    boundary: String
+  ) -> Data {
+    var body = Data()
+    for (name, value) in fields {
+      body.append(Data("--\(boundary)\r\n".utf8))
+      body.append(
+        Data("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".utf8)
+      )
+      body.append(Data(value.utf8))
+      body.append(Data("\r\n".utf8))
+    }
+    body.append(Data("--\(boundary)\r\n".utf8))
+    body.append(
+      Data("Content-Disposition: form-data; name=\"pic\"; filename=\"file\"\r\n\r\n".utf8)
+    )
+    body.append(jpegData)
+    body.append(Data("\r\n--\(boundary)--\r\n".utf8))
+    return body
+  }
+
+  private static func selfProfileAvatarMultipartBoundary(
+    fields: [(String, String)],
+    jpegData: Data
+  ) -> String {
+    while true {
+      let candidate = "TiebaPlusPlusAvatarBoundary-\(UUID().uuidString.lowercased())"
+      let candidateBytes = Data(candidate.utf8)
+      guard
+        !fields.contains(where: { $0.1.contains(candidate) }),
+        jpegData.range(of: candidateBytes) == nil
       else { continue }
       return candidate
     }

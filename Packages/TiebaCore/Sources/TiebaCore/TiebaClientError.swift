@@ -25,6 +25,9 @@ public enum TiebaClientError: Error, Sendable, Equatable {
   case userInteractionPermissionsOutcomeUnknown
   case selfProfileEditWriteConflict
   case selfProfileEditOutcomeUnknown
+  case selfProfileAvatarModificationUnavailable(message: String)
+  case selfProfileAvatarWriteConflict
+  case selfProfileAvatarOutcomeUnknown
   case personalizedFeedbackWriteConflict
   case personalizedFeedbackOutcomeUnknown
   case ownedContentDeletionWriteConflict
@@ -87,6 +90,14 @@ extension TiebaClientError: LocalizedError {
       "A different profile edit is already running for this account."
     case .selfProfileEditOutcomeUnknown:
       "The profile edit was sent, but Tieba did not return a verifiable final state."
+    case .selfProfileAvatarModificationUnavailable(let message):
+      message.isEmpty
+        ? "Tieba does not currently allow this account to change its avatar."
+        : message
+    case .selfProfileAvatarWriteConflict:
+      "A different profile mutation is already running for this account."
+    case .selfProfileAvatarOutcomeUnknown:
+      "The avatar upload was sent, but Tieba did not return a verifiable final state."
     case .personalizedFeedbackWriteConflict:
       "A different recommendation-feedback operation is already running for this thread."
     case .personalizedFeedbackOutcomeUnknown:

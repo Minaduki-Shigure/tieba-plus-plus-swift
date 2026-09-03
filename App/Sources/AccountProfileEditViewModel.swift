@@ -9,6 +9,13 @@ enum AccountProfileEditState: Equatable {
   case failed
 }
 
+enum AccountProfileAvatarState: Equatable {
+  case idle
+  case uploading
+  case confirmed
+  case acceptedPendingReview(String)
+}
+
 struct AccountProfileEditDraft:
   Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
 {
@@ -41,6 +48,7 @@ final class AccountProfileEditViewModel: ObservableObject {
   @Published private(set) var state: AccountProfileEditState = .idle
   @Published private(set) var summary: AccountProfileSummary?
   @Published private(set) var draft = AccountProfileEditDraft()
+  @Published private(set) var avatarState: AccountProfileAvatarState = .idle
   @Published private(set) var errorMessage: String?
   @Published private(set) var showsDiscardConfirmation = false
 
@@ -63,12 +71,15 @@ final class AccountProfileEditViewModel: ObservableObject {
 
   var isSaving: Bool { state == .saving }
 
+  var isUploadingAvatar: Bool { avatarState == .uploading }
+
   var requiresNavigationInterception: Bool {
-    isSaving || hasUnsavedChanges
+    isSaving || isUploadingAvatar || hasUnsavedChanges
   }
 
   var isEditingEnabled: Bool {
     state == .ready
+      && !isUploadingAvatar
       && lease != nil
       && summary?.birthday != nil
       && summary?.isNicknameEditing == false
@@ -104,7 +115,7 @@ final class AccountProfileEditViewModel: ObservableObject {
   }
 
   var canSave: Bool {
-    guard isEditingEnabled, hasUnsavedChanges else { return false }
+    guard isEditingEnabled, !isUploadingAvatar, hasUnsavedChanges else { return false }
     guard
       let baseline = summary.map(Self.draft(for:)),
       let requested = try? validatedDraft()
@@ -112,6 +123,32 @@ final class AccountProfileEditViewModel: ObservableObject {
     return requested.displayName != baseline.displayName
       || requested.biography != baseline.biography
       || requested.sex != baseline.sex
+  }
+
+  var canUploadAvatar: Bool {
+    state == .ready
+      && !isSaving
+      && !isUploadingAvatar
+      && lease != nil
+      && summary?.canModifyAvatar == true
+  }
+
+  var avatarStatusMessage: String? {
+    switch avatarState {
+    case .idle:
+      guard summary?.canModifyAvatar == false else { return nil }
+      let reason = summary?.avatarModificationDescription
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      return reason.isEmpty ? "当前账户暂不能修改头像。" : reason
+    case .uploading:
+      return "正在上传头像，请保持此页面打开。"
+    case .confirmed:
+      return "贴吧已确认头像更新。"
+    case .acceptedPendingReview(let message):
+      return message.isEmpty
+        ? "贴吧已受理头像，可能需要审核或等待缓存刷新。"
+        : message
+    }
   }
 
   func setDisplayName(_ value: String) {
@@ -290,8 +327,100 @@ final class AccountProfileEditViewModel: ObservableObject {
     }
   }
 
+  func uploadAvatar(_ upload: AccountProfileAvatarUpload) async
+    -> AccountProfileAvatarUploadResult?
+  {
+    guard
+      state == .ready,
+      canUploadAvatar,
+      let baseline = summary,
+      let operationLease = lease
+    else { return nil }
+
+    generation &+= 1
+    let requestGeneration = generation
+    avatarState = .uploading
+    errorMessage = nil
+    let draftWasModified = draft != Self.draft(for: baseline)
+
+    let session: StoredAccountSession
+    do {
+      guard let activeSession = try await vault.activeSession() else {
+        discardForChangedSession()
+        return nil
+      }
+      guard requestGeneration == generation else { return nil }
+      guard operationLease.matches(activeSession), activeSession.credentials != nil else {
+        discardForChangedSession()
+        return nil
+      }
+      try Task.checkCancellation()
+      session = activeSession
+    } catch is CancellationError {
+      guard requestGeneration == generation else { return nil }
+      avatarState = .idle
+      errorMessage = "头像上传尚未开始；请明确重新选择并上传。"
+      return nil
+    } catch {
+      guard requestGeneration == generation else { return nil }
+      avatarState = .idle
+      errorMessage = "无法读取当前账户，头像上传尚未开始。"
+      return nil
+    }
+
+    let outcome: AccountProfileAvatarRequestOutcome
+    do {
+      outcome = .success(
+        try await service.uploadSelfProfileAvatar(session: session, upload: upload)
+      )
+    } catch {
+      outcome = .failure(error.localizedDescription)
+    }
+
+    let sessionAfterRequest: StoredAccountSession?
+    do {
+      sessionAfterRequest = try await vault.activeSession()
+    } catch {
+      guard requestGeneration == generation else { return nil }
+      avatarState = .idle
+      errorMessage =
+        "无法确认头像上传属于当前账户；请重新读取本人资料，应用不会自动重发请求。"
+      return nil
+    }
+    guard requestGeneration == generation else { return nil }
+    guard let sessionAfterRequest, operationLease.matches(sessionAfterRequest) else {
+      discardForChangedSession()
+      return nil
+    }
+
+    switch outcome {
+    case .success(let result):
+      guard result.profile.userID == expectedUserID else {
+        avatarState = .idle
+        errorMessage = "贴吧返回了不匹配的本人资料，请重新加载后再试。"
+        return nil
+      }
+      lease = operationLease
+      summary = result.profile
+      if !draftWasModified {
+        draft = Self.draft(for: result.profile)
+      }
+      switch result.disposition {
+      case .confirmed:
+        avatarState = .confirmed
+      case .acceptedPendingReview(let message):
+        avatarState = .acceptedPendingReview(message)
+      }
+      return result
+    case .failure(let message):
+      avatarState = .idle
+      errorMessage = message
+      return nil
+    }
+  }
+
   func requestClose() -> Bool {
-    guard !isSaving else { return false }
+    guard !isSaving, !isUploadingAvatar else { return false }
     guard hasUnsavedChanges else { return true }
     showsDiscardConfirmation = true
     return false
@@ -302,7 +431,7 @@ final class AccountProfileEditViewModel: ObservableObject {
   }
 
   func confirmDiscard() -> Bool {
-    guard !isSaving else { return false }
+    guard !isSaving, !isUploadingAvatar else { return false }
     showsDiscardConfirmation = false
     if let summary { draft = Self.draft(for: summary) }
     return true
@@ -342,6 +471,7 @@ final class AccountProfileEditViewModel: ObservableObject {
     lease = nil
     summary = nil
     draft = AccountProfileEditDraft()
+    avatarState = .idle
     errorMessage = nil
     showsDiscardConfirmation = false
   }
@@ -415,5 +545,10 @@ private struct AccountProfileEditSessionLease: Equatable, Sendable {
 
 private enum AccountProfileEditRequestOutcome: Sendable {
   case success(AccountProfileSummary)
+  case failure(String)
+}
+
+private enum AccountProfileAvatarRequestOutcome: Sendable {
+  case success(AccountProfileAvatarUploadResult)
   case failure(String)
 }

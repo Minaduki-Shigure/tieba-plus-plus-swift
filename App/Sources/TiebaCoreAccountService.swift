@@ -18,6 +18,11 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
     expectedUserID: Int64,
     edit: TiebaSelfProfileEdit
   ) async throws -> TiebaSelfProfileSummary
+  func uploadSelfProfileAvatar(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    upload: TiebaSelfProfileAvatarUpload
+  ) async throws -> TiebaSelfProfileAvatarUploadResult
   func getOwnFollowing(
     credential: TiebaSessionCredential,
     expectedUserID: Int64,
@@ -276,6 +281,14 @@ extension TiebaAuthenticatedAccountClient {
     expectedUserID: Int64,
     edit: TiebaSelfProfileEdit
   ) async throws -> TiebaSelfProfileSummary {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
+  func uploadSelfProfileAvatar(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    upload: TiebaSelfProfileAvatarUpload
+  ) async throws -> TiebaSelfProfileAvatarUploadResult {
     throw TiebaClientError.invalidAuthenticatedResponse
   }
 
@@ -655,6 +668,74 @@ struct TiebaCoreAccountService: AccountService {
       expectedUserID: session.id,
       confirming: coreEdit
     )
+  }
+
+  func uploadSelfProfileAvatar(
+    session: StoredAccountSession,
+    upload: AccountProfileAvatarUpload
+  ) async throws -> AccountProfileAvatarUploadResult {
+    guard session.id > 0, let credentials = session.credentials else {
+      throw BrowseError.unavailable("此账户需要重新登录，才能安全修改头像。")
+    }
+    guard
+      let validatedUpload = AccountProfileAvatarUpload(
+        uploadID: upload.uploadID,
+        jpegData: upload.jpegData,
+        pixelSize: upload.pixelSize
+      )
+    else {
+      throw BrowseError.unavailable("头像图片无效或超过安全大小限制，请重新选择。")
+    }
+    let coreUpload = TiebaSelfProfileAvatarUpload(
+      uploadID: validatedUpload.uploadID,
+      jpegData: validatedUpload.jpegData,
+      squarePixelSize: validatedUpload.pixelSize
+    )
+    guard TiebaSelfProfileAvatarUploadPolicy.isValid(coreUpload) else {
+      throw BrowseError.unavailable("头像图片无法通过上传前校验，请重新选择。")
+    }
+
+    let response: TiebaSelfProfileAvatarUploadResult
+    do {
+      response = try await client.uploadSelfProfileAvatar(
+        credential: Self.coreSessionCredential(credentials),
+        expectedUserID: session.id,
+        upload: coreUpload
+      )
+      try Task.checkCancellation()
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch let error as TiebaClientError {
+      switch error {
+      case .selfProfileAvatarModificationUnavailable(let message):
+        throw BrowseError.unavailable(
+          message.isEmpty ? "当前账户暂不能修改头像。" : message
+        )
+      case .selfProfileAvatarWriteConflict:
+        throw BrowseError.unavailable("此账户已有另一项资料修改正在进行，请等待完成后重试。")
+      case .selfProfileAvatarOutcomeUnknown:
+        throw BrowseError.unavailable(
+          "头像请求已经发出，但贴吧尚未确认结果；请重新读取本人资料，应用不会自动重发请求。"
+        )
+      default:
+        throw Self.accountError(error)
+      }
+    } catch {
+      throw Self.accountError(error)
+    }
+
+    let profile = try Self.accountProfileSummary(
+      response.latestProfile,
+      expectedUserID: session.id
+    )
+    let disposition: AccountProfileAvatarUploadDisposition =
+      switch response.disposition {
+      case .confirmed:
+        .confirmed
+      case .acceptedPendingReview(let message):
+        .acceptedPendingReview(message: message)
+      }
+    return AccountProfileAvatarUploadResult(profile: profile, disposition: disposition)
   }
 
   func ownFollowing(
@@ -2118,11 +2199,19 @@ struct TiebaCoreAccountService: AccountService {
       birthday = nil
     }
 
+    let avatarPermission: (canModify: Bool, description: String) =
+      switch response.avatarModificationPermission {
+      case .allowed:
+        (true, "")
+      case .denied(let message):
+        (false, message)
+      }
+
     return AccountProfileSummary(
       userID: response.userID,
       username: response.username,
       displayName: response.displayName,
-      portraitURL: SecureTiebaURL.strictPortrait(response.portrait),
+      portraitURL: SecureTiebaURL.strictPortrait(response.portraitSource),
       biography: response.biography,
       followingCount: response.followingCount,
       followerCount: response.followerCount,
@@ -2131,7 +2220,9 @@ struct TiebaCoreAccountService: AccountService {
       sex: accountProfileSex(response.sex),
       birthday: birthday,
       isNicknameEditing: response.isNicknameEditing,
-      editingNickname: editingNickname
+      editingNickname: editingNickname,
+      canModifyAvatar: avatarPermission.canModify,
+      avatarModificationDescription: avatarPermission.description
     )
   }
 

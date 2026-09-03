@@ -801,6 +801,14 @@ final class TiebaAgreementTests: XCTestCase, @unchecked Sendable {
         userID: userID, forumID: forumID, forumName: forumName, tbs: tbs
       ).serializedData()),
       .response(Data(#"{"error_code":"0","data":{"agree":{"score":"0"}}}"#.utf8)),
+      .response(try pageResponse(
+        userID: userID,
+        forumID: forumID,
+        threadID: threadID,
+        firstPostID: firstPostID,
+        topicAgreement: true,
+        postID: postID
+      ).serializedData()),
     ])
     let writeClient = TiebaAuthenticatedClient(transport: writeTransport)
     let written = try await writeClient.setThreadAgreementState(
@@ -815,10 +823,13 @@ final class TiebaAgreementTests: XCTestCase, @unchecked Sendable {
     XCTAssertTrue(written.isAgreed)
     XCTAssertEqual(written.agreeScore, 10)
     let paths = await writeTransport.paths()
-    XCTAssertEqual(paths, ["/c/f/pb/page", "/c/f/frs/page", "/c/c/agree/opAgree"])
+    XCTAssertEqual(
+      paths,
+      ["/c/f/pb/page", "/c/f/frs/page", "/c/c/agree/opAgree", "/c/f/pb/page"]
+    )
   }
 
-  func testSuccessfulWriteProjectsScoreFromPreWritePageInsteadOfResponseScore() async throws {
+  func testSuccessfulWriteUsesExactTargetReadbackInsteadOfResponseScore() async throws {
     let transport = AgreementQueueTransport(steps: [
       .response(try pageResponse(
         userID: userID,
@@ -833,6 +844,15 @@ final class TiebaAgreementTests: XCTestCase, @unchecked Sendable {
         userID: userID, forumID: forumID, forumName: forumName, tbs: tbs
       ).serializedData()),
       .response(Data(#"{"error_code":"0","data":{"agree":{"score":"0"}}}"#.utf8)),
+      .response(try pageResponse(
+        userID: userID,
+        forumID: forumID,
+        threadID: threadID,
+        firstPostID: firstPostID,
+        postID: postID,
+        postAgreement: true,
+        postScore: 83
+      ).serializedData()),
     ])
     let client = TiebaAuthenticatedClient(transport: transport)
 
@@ -847,12 +867,15 @@ final class TiebaAgreementTests: XCTestCase, @unchecked Sendable {
     )
 
     XCTAssertTrue(written.isAgreed)
-    XCTAssertEqual(written.agreeScore, 76)
+    XCTAssertEqual(written.agreeScore, 83)
     let paths = await transport.paths()
-    XCTAssertEqual(paths, ["/c/f/pb/page", "/c/f/frs/page", "/c/c/agree/opAgree"])
+    XCTAssertEqual(
+      paths,
+      ["/c/f/pb/page", "/c/f/frs/page", "/c/c/agree/opAgree", "/c/f/pb/page"]
+    )
   }
 
-  func testSuccessfulWithdrawalProjectsScoreFromPreWritePageInsteadOfResponseScore() async throws {
+  func testSuccessfulWithdrawalUsesExactTargetReadback() async throws {
     let transport = AgreementQueueTransport(steps: [
       .response(try pageResponse(
         userID: userID,
@@ -867,6 +890,15 @@ final class TiebaAgreementTests: XCTestCase, @unchecked Sendable {
         userID: userID, forumID: forumID, forumName: forumName, tbs: tbs
       ).serializedData()),
       .response(Data(#"{"error_code":"0","data":{"agree":{"score":0}}}"#.utf8)),
+      .response(try pageResponse(
+        userID: userID,
+        forumID: forumID,
+        threadID: threadID,
+        firstPostID: firstPostID,
+        postID: postID,
+        postAgreement: false,
+        postScore: 3
+      ).serializedData()),
     ])
     let client = TiebaAuthenticatedClient(transport: transport)
 
@@ -881,7 +913,228 @@ final class TiebaAgreementTests: XCTestCase, @unchecked Sendable {
     )
 
     XCTAssertFalse(written.isAgreed)
-    XCTAssertEqual(written.agreeScore, 7)
+    XCTAssertEqual(written.agreeScore, 3)
+  }
+
+  func testSuccessfulWriteAcceptsLegitimateZeroFromAuthoritativeReadback() async throws {
+    let transport = AgreementQueueTransport(steps: [
+      .response(try pageResponse(
+        userID: userID,
+        forumID: forumID,
+        threadID: threadID,
+        firstPostID: firstPostID,
+        postID: postID,
+        postAgreement: false,
+        postScore: 4
+      ).serializedData()),
+      .response(try membershipResponse(
+        userID: userID, forumID: forumID, forumName: forumName, tbs: tbs
+      ).serializedData()),
+      .response(Data(#"{"error_code":"0","data":{"agree":{"score":999}}}"#.utf8)),
+      .response(try pageResponse(
+        userID: userID,
+        forumID: forumID,
+        threadID: threadID,
+        firstPostID: firstPostID,
+        postID: postID,
+        postAgreement: true,
+        postScore: 0
+      ).serializedData()),
+    ])
+    let client = TiebaAuthenticatedClient(transport: transport)
+
+    let written = try await client.setAgreementState(
+      credential: credential(),
+      expectedUserID: userID,
+      forumID: forumID,
+      forumName: forumName,
+      threadID: threadID,
+      target: .post(postID: postID),
+      isAgreed: true
+    )
+
+    XCTAssertTrue(written.isAgreed)
+    XCTAssertEqual(written.agreeScore, 0)
+  }
+
+  func testSuccessfulSubpostWriteUsesExactFloorReadback() async throws {
+    let parentProbe = pageResponse(
+      userID: userID,
+      forumID: forumID,
+      threadID: threadID,
+      firstPostID: firstPostID,
+      postID: postID
+    )
+    let oldFloor = floorResponse(
+      forumID: forumID,
+      threadID: threadID,
+      firstPostID: firstPostID,
+      parentPostID: postID,
+      parentFloor: 2,
+      parentAgreement: false,
+      subpostID: subpostID,
+      subpostAgreement: false,
+      subpostScore: 31
+    )
+    let updatedFloor = floorResponse(
+      forumID: forumID,
+      threadID: threadID,
+      firstPostID: firstPostID,
+      parentPostID: postID,
+      parentFloor: 2,
+      parentAgreement: false,
+      subpostID: subpostID,
+      subpostAgreement: true,
+      subpostScore: 47
+    )
+    let transport = AgreementQueueTransport(steps: [
+      .response(try parentProbe.serializedData()),
+      .response(try oldFloor.serializedData()),
+      .response(try membershipResponse(
+        userID: userID, forumID: forumID, forumName: forumName, tbs: tbs
+      ).serializedData()),
+      .response(Data(#"{"error_code":"0","data":{"agree":{"score":999}}}"#.utf8)),
+      .response(try parentProbe.serializedData()),
+      .response(try updatedFloor.serializedData()),
+    ])
+    let client = TiebaAuthenticatedClient(transport: transport)
+
+    let written = try await client.setAgreementState(
+      credential: credential(),
+      expectedUserID: userID,
+      forumID: forumID,
+      forumName: forumName,
+      threadID: threadID,
+      target: .subpost(parentPostID: postID, subpostID: subpostID),
+      isAgreed: true
+    )
+
+    XCTAssertEqual(written.target, .subpost(parentPostID: postID, subpostID: subpostID))
+    XCTAssertTrue(written.isAgreed)
+    XCTAssertEqual(written.agreeScore, 47)
+    let paths = await transport.paths()
+    XCTAssertEqual(
+      paths,
+      [
+        "/c/f/pb/page", "/c/f/pb/floor", "/c/f/frs/page", "/c/c/agree/opAgree",
+        "/c/f/pb/page", "/c/f/pb/floor",
+      ]
+    )
+    XCTAssertEqual(paths.filter { $0 == "/c/c/agree/opAgree" }.count, 1)
+    XCTAssertEqual(paths.filter { $0 == "/c/f/pb/page" }.count, 2)
+    XCTAssertEqual(paths.filter { $0 == "/c/f/pb/floor" }.count, 2)
+  }
+
+  func testSuccessfulSubpostAcknowledgementWithOldFloorReadbackIsOutcomeUnknown() async throws {
+    let parentProbe = pageResponse(
+      userID: userID,
+      forumID: forumID,
+      threadID: threadID,
+      firstPostID: firstPostID,
+      postID: postID
+    )
+    let oldFloor = floorResponse(
+      forumID: forumID,
+      threadID: threadID,
+      firstPostID: firstPostID,
+      parentPostID: postID,
+      parentFloor: 2,
+      parentAgreement: false,
+      subpostID: subpostID,
+      subpostAgreement: false,
+      subpostScore: 31
+    )
+    let transport = AgreementQueueTransport(steps: [
+      .response(try parentProbe.serializedData()),
+      .response(try oldFloor.serializedData()),
+      .response(try membershipResponse(
+        userID: userID, forumID: forumID, forumName: forumName, tbs: tbs
+      ).serializedData()),
+      .response(Data(#"{"error_code":"0"}"#.utf8)),
+      .response(try parentProbe.serializedData()),
+      .response(try oldFloor.serializedData()),
+    ])
+    let client = TiebaAuthenticatedClient(transport: transport)
+
+    await assertError(.contentAgreementOutcomeUnknown) {
+      _ = try await client.setAgreementState(
+        credential: credential(),
+        expectedUserID: userID,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        target: .subpost(parentPostID: postID, subpostID: subpostID),
+        isAgreed: true
+      )
+    }
+
+    let paths = await transport.paths()
+    XCTAssertEqual(
+      paths,
+      [
+        "/c/f/pb/page", "/c/f/pb/floor", "/c/f/frs/page", "/c/c/agree/opAgree",
+        "/c/f/pb/page", "/c/f/pb/floor",
+      ]
+    )
+    XCTAssertEqual(paths.filter { $0 == "/c/c/agree/opAgree" }.count, 1)
+    XCTAssertEqual(paths.filter { $0 == "/c/f/pb/page" }.count, 2)
+    XCTAssertEqual(paths.filter { $0 == "/c/f/pb/floor" }.count, 2)
+  }
+
+  func testSuccessfulAcknowledgementWithOldReadbackIsOutcomeUnknown() async throws {
+    let transport = AgreementQueueTransport(steps: [
+      .response(try targetPage(isAgreed: false).serializedData()),
+      .response(try membershipResponse(
+        userID: userID, forumID: forumID, forumName: forumName, tbs: tbs
+      ).serializedData()),
+      .response(Data(#"{"error_code":"0"}"#.utf8)),
+      .response(try targetPage(isAgreed: false).serializedData()),
+    ])
+    let client = TiebaAuthenticatedClient(transport: transport)
+
+    await assertError(.contentAgreementOutcomeUnknown) {
+      _ = try await client.setAgreementState(
+        credential: credential(),
+        expectedUserID: userID,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        target: .post(postID: postID),
+        isAgreed: true
+      )
+    }
+
+    let paths = await transport.paths()
+    XCTAssertEqual(paths.filter { $0 == "/c/c/agree/opAgree" }.count, 1)
+    XCTAssertEqual(paths.filter { $0 == "/c/f/pb/page" }.count, 2)
+  }
+
+  func testSuccessfulAcknowledgementWithFailedReadbackIsOutcomeUnknown() async throws {
+    let transport = AgreementQueueTransport(steps: [
+      .response(try targetPage(isAgreed: false).serializedData()),
+      .response(try membershipResponse(
+        userID: userID, forumID: forumID, forumName: forumName, tbs: tbs
+      ).serializedData()),
+      .response(Data(#"{"error_code":"0"}"#.utf8)),
+      .failure(.network(code: -1_002)),
+    ])
+    let client = TiebaAuthenticatedClient(transport: transport)
+
+    await assertError(.contentAgreementOutcomeUnknown) {
+      _ = try await client.setAgreementState(
+        credential: credential(),
+        expectedUserID: userID,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        target: .post(postID: postID),
+        isAgreed: true
+      )
+    }
+
+    let paths = await transport.paths()
+    XCTAssertEqual(paths.filter { $0 == "/c/c/agree/opAgree" }.count, 1)
+    XCTAssertEqual(paths.filter { $0 == "/c/f/pb/page" }.count, 2)
   }
 
   func testUncertainWriteReadsBackExactlyOnceWithoutRetryingWrite() async throws {
@@ -1135,7 +1388,7 @@ final class TiebaAgreementTests: XCTestCase, @unchecked Sendable {
     XCTAssertTrue(oppositeState.isAgreed)
     let snapshot = await transport.snapshot()
     XCTAssertEqual(snapshot.writeCount, 1)
-    XCTAssertEqual(snapshot.pageReadCount, 2)
+    XCTAssertEqual(snapshot.pageReadCount, 3)
   }
 
   func testRotatedCredentialWaitsThenReadsBackWithoutSecondWrite() async throws {
@@ -1180,7 +1433,7 @@ final class TiebaAgreementTests: XCTestCase, @unchecked Sendable {
     XCTAssertTrue(rotatedState.isAgreed)
     let snapshot = await transport.snapshot()
     XCTAssertEqual(snapshot.writeCount, 1)
-    XCTAssertEqual(snapshot.pageReadCount, 2)
+    XCTAssertEqual(snapshot.pageReadCount, 3)
   }
 
   func testSameAccountSerializesDifferentTargetsButDifferentAccountsRunInParallel() async throws {
@@ -1591,7 +1844,8 @@ private func floorResponse(
   parentFloor: UInt32,
   parentAgreement: Bool?,
   subpostID: Int64,
-  subpostAgreement: Bool?
+  subpostAgreement: Bool?,
+  subpostScore: Int64? = nil
 ) -> PbFloorResIdl {
   var forum = SimpleForum()
   forum.id = forumID
@@ -1612,7 +1866,10 @@ private func floorResponse(
   subpost.id = subpostID
   subpost.floor = 1
   if let subpostAgreement {
-    subpost.agree = agree(subpostAgreement, score: subpostAgreement ? 2 : 1)
+    subpost.agree = agree(
+      subpostAgreement,
+      score: subpostScore ?? (subpostAgreement ? 2 : 1)
+    )
   }
   var page = Page()
   page.pageSize = 20

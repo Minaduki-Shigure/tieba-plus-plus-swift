@@ -159,8 +159,49 @@ must cover field deletion, nickname review and rate limits, birthday preservatio
 the documented no-external-birthday-edit condition, known rejection,
 post-dispatch loss, no-change idempotence, sharing/conflict, cancellation, logout,
 switching, and same-UID credential rotation before release.
-Avatar upload is a distinct multipart and media-sanitization workflow and remains
-unsupported by this editor.
+
+Avatar upload is a distinct multipart and media-sanitization boundary in the
+same editor. Selection uses the system Photos picker and a private, randomly
+named temporary directory assigned complete file protection before the photo is
+copied. The source must be a regular file no larger than 32 MiB, and a bounded
+chunked copy enforces that limit again while writing to close file-growth races;
+the copy is removed after import. Cancellation propagates into detached
+decode and encode work. The shared image pipeline
+rejects oversized or malformed inputs, normalizes orientation, strips source
+metadata, decodes within bounded memory, and renders only the selected square
+crop into an opaque sRGB 960 x 960 JPEG. App and Core independently cap that
+JPEG at 2 MiB. Core parses the controlled JPEG marker subset, rejects APP1 through
+APP15 and comment metadata, requires an 8-bit three-component frame plus a valid
+scan boundary, verifies the declared square dimensions, and binds its digest and
+random upload ID before a request exists.
+
+Core repeats the full-session and exact-UID profile checks and requires the
+server's `can_modify_avatar=1` permission before dispatch. It may send at most
+one HTTPS multipart POST to the exact
+`tiebac.baidu.com/c/c/img/portrait` endpoint. The signed scalar fields are only
+BDUSS, client type, client version, and sign; the binary part is only `pic`.
+The request carries `Cookie: ka=open` but no STOKEN, TBS, CUID, IMEI, Android ID,
+OAID, IDFV, advertising, model, screen, location, installation, Authorization,
+or persistent cookie-jar data. Redirects remain rejected and the response is
+limited to 64 KiB.
+
+Codes zero and `300003` are acknowledgements, not proof that a new avatar is
+visible. Every dispatched attempt receives exactly one same-credential profile
+readback without retrying the upload. Core canonicalizes equivalent bare and
+approved-host URL forms to a strict portrait token plus normalized `t=digits`
+version before comparison. A parsed acceptance plus a changed identity confirms
+the mutation; an accepted but unchanged portrait
+is reported as pending review, while an unavailable readback is outcome unknown.
+Without a parseable acknowledgement, even a changed readback remains outcome
+unknown because another client could have changed the avatar concurrently.
+Validated numeric cache versions remain in the normalized HTTPS portrait URL so
+a confirmed server change cannot be hidden behind the old cache key. Equivalent
+uploads may share one flight. Different uploads, rotated credentials, and text
+profile edits conflict before another write. The App publishes the already verified
+profile directly only for the initiating `userID + sessionRevision`, preserves an independent unsaved text
+draft, and never places image bytes in logs or mirrors. Disposable-account tests
+must still validate permission values, minimum-field acceptance, review delays,
+picker/crop behavior, cancellation, cache refresh, and LiveContainer lifecycle.
 
 The current, not-yet-tagged `main` implementation of the home followed-forum
 projection and complete followed-forum list shares one application-scoped,
@@ -501,14 +542,23 @@ PB Page and PB Floor reads. `op_type=0` approves and `op_type=1` cancels approva
 The mandatory `cuid` is generated once per authenticated client as a random
 uppercase Galaxy2 identifier (`32HEX|V` plus an 8-character Helios checksum),
 reused only for that client lifetime, never derived from hardware or IDFV, and
-never persisted. A write response is limited to 64 KiB and succeeds only when
-its error code is zero; its optional score is not a substitute for that code.
+never persisted. A write response is limited to 64 KiB and is accepted only when
+its error code is zero; its optional score is not the target's aggregate count
+and must never reach presentation state.
 
-An uncertain transport or response failure after the write must trigger exactly
-one read-only target readback operation. That operation must repeat the same
-account, forum, thread, parent, and child binding and can confirm success only
-when the returned state equals the requested state. It must never retry, replay,
-or redirect the write; an unconfirmed readback preserves the original failure.
+Every accepted write, and every uncertain transport or response failure after
+dispatch, must trigger exactly one immediate read-only target readback operation
+inside Core. That operation repeats the same account, forum, thread, parent, and
+child binding and returns only when the server state equals the requested state;
+its returned net count is the sole immediate successful result. A stale or
+unavailable readback becomes typed outcome-unknown. A matching immediate read
+completes without further requests. Only an outcome-unknown result enters the App's
+delayed reconciliation: an exact-target read after 500 ms, followed by one final
+delayed read after a failure or stale result. It must never retry, replay, or
+redirect the write. A matching delayed read installs the server count and a final
+mismatch restores the server state. If both delayed reads are unavailable, the App
+retains the pre-write snapshot and exposes an explicit retry state rather than a
+local estimate.
 
 The authenticated Core client single-flights an identical approval operation for
 one exact target and credential. All approval writes for the same UID, including

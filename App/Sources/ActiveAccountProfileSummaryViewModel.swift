@@ -45,6 +45,33 @@ final class ActiveAccountProfileSummaryViewModel: ObservableObject {
     state = .idle
   }
 
+  func suspend() {
+    invalidateLoad()
+    state = summary == nil ? .idle : .loaded
+  }
+
+  @discardableResult
+  func publishVerifiedSummary(_ candidate: AccountProfileSummary) async -> Bool {
+    guard let expectedLease = loadedLease else { return false }
+    let requestEpoch = epoch
+    do {
+      let activeSession = try await vault.activeSession()
+      guard requestEpoch == epoch, loadedLease == expectedLease else { return false }
+      guard let activeSession, expectedLease.matches(activeSession) else {
+        accountSessionDidChange(loadImmediately: false)
+        return false
+      }
+      try Self.validate(candidate, lease: expectedLease)
+      invalidateLoad()
+      loadedLease = expectedLease
+      summary = candidate
+      state = .loaded
+      return true
+    } catch {
+      return false
+    }
+  }
+
   @discardableResult
   private func startLoad() -> Task<Void, Never> {
     if let loadTask { return loadTask }

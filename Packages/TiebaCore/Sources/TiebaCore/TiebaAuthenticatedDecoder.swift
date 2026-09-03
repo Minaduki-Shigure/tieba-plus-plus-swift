@@ -44,10 +44,16 @@ struct TiebaUserRelationshipContext:
   }
 }
 
+enum TiebaSelfProfileAvatarUploadAcknowledgement: Sendable, Equatable {
+  case accepted(message: String)
+  case acceptedPendingReview(message: String)
+}
+
 enum TiebaAuthenticatedDecoder {
   static let selfProfileNameMaximumBytes = 1_024
   static let selfProfilePortraitMaximumBytes = 4_096
   static let selfProfileBiographyMaximumBytes = 16 * 1_024
+  static let selfProfileAvatarModificationDescriptionMaximumBytes = 4_096
   static let followedForumNameMaximumBytes = 1_024
   static let followedForumAvatarMaximumBytes = 4_096
   static let followedForumSloganMaximumBytes = 4_096
@@ -155,12 +161,25 @@ enum TiebaAuthenticatedDecoder {
     guard counts.allSatisfy({ $0 >= 0 }) else {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
+    let avatarModificationDescription = try boundedSelfProfileMultilineText(
+      user.modifyAvatarDesc,
+      maximumBytes: selfProfileAvatarModificationDescriptionMaximumBytes
+    )
+    let avatarModificationPermission: TiebaSelfProfileAvatarModificationPermission
+    switch user.canModifyAvatar {
+    case 0:
+      avatarModificationPermission = .denied(message: avatarModificationDescription)
+    case 1:
+      avatarModificationPermission = .allowed
+    default:
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
 
     return TiebaSelfProfileSummary(
       userID: expectedUserID,
       username: username,
       displayName: displayName,
-      portrait: portrait,
+      portrait: portrait.token,
       biography: biography,
       followingCount: Int(user.concernNum),
       followerCount: Int(user.fansNum),
@@ -169,7 +188,9 @@ enum TiebaAuthenticatedDecoder {
       birthday: birthday,
       isNicknameEditing: user.isNicknameEditing == 1,
       editingNickname: user.isNicknameEditing == 1 ? pendingNickname : nil,
-      editableBiography: editableBiography
+      editableBiography: editableBiography,
+      portraitSource: portrait.source,
+      avatarModificationPermission: avatarModificationPermission
     )
   }
 
@@ -200,7 +221,7 @@ enum TiebaAuthenticatedDecoder {
     guard (0...2).contains(rawFollowed) else {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
-    let portrait = try normalizedSelfProfilePortrait(response.data.user.portrait)
+    let portrait = try normalizedSelfProfilePortrait(response.data.user.portrait).token
     guard !portrait.isEmpty else {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
@@ -249,36 +270,128 @@ enum TiebaAuthenticatedDecoder {
       .precomposedStringWithCanonicalMapping
   }
 
-  private static func normalizedSelfProfilePortrait(_ rawValue: String) throws -> String {
+  private static func normalizedSelfProfilePortrait(
+    _ rawValue: String
+  ) throws -> (token: String, source: String) {
     let source = try boundedSelfProfileSingleLineText(
       rawValue,
       maximumBytes: selfProfilePortraitMaximumBytes
     )
-    guard !source.isEmpty else { return "" }
-    guard !source.contains("#") else {
+    guard !source.isEmpty else { return ("", "") }
+    let identity = source.hasPrefix("//") || source.contains("://")
+      ? try normalizedAbsoluteSelfProfilePortrait(source)
+      : try normalizedBareSelfProfilePortrait(source)
+    let canonicalSource = identity.cacheVersion.map { "\(identity.token)?t=\($0)" }
+      ?? identity.token
+    return (identity.token, canonicalSource)
+  }
+
+  private static func normalizedAbsoluteSelfProfilePortrait(
+    _ source: String
+  ) throws -> (token: String, cacheVersion: String?) {
+    let absoluteValue = source.hasPrefix("//") ? "https:\(source)" : source
+    guard
+      let components = URLComponents(string: absoluteValue),
+      let scheme = components.scheme?.lowercased(),
+      scheme == "http" || scheme == "https",
+      components.user == nil,
+      components.password == nil,
+      components.port == nil,
+      components.percentEncodedFragment == nil,
+      let host = components.host?.lowercased(),
+      host == "tb.himg.baidu.com" || host == "himg.bdimg.com",
+      strictSelfProfilePortraitAuthority(from: absoluteValue)?.lowercased() == host
+    else {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
 
+    let prefixes = [
+      "/sys/portrait/item/",
+      "/sys/portraitn/item/",
+      "/sys/portraith/item/",
+    ]
+    let encodedPath = components.percentEncodedPath
+    guard
+      let prefix = prefixes.first(where: { encodedPath.hasPrefix($0) }),
+      let token = String(encodedPath.dropFirst(prefix.count)).removingPercentEncoding,
+      isStrictSelfProfilePortraitToken(token)
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    return (
+      token,
+      try normalizedSelfProfilePortraitCacheVersion(components.percentEncodedQuery)
+    )
+  }
+
+  private static func normalizedBareSelfProfilePortrait(
+    _ source: String
+  ) throws -> (token: String, cacheVersion: String?) {
+    guard !source.contains("#") else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
     let parts = source.split(
       separator: "?",
       maxSplits: 1,
       omittingEmptySubsequences: false
     )
-    guard let token = parts.first, !token.isEmpty else {
+    guard
+      let tokenPart = parts.first,
+      isStrictSelfProfilePortraitToken(String(tokenPart)),
+      parts.count == 1 || parts.count == 2
+    else {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
-    if parts.count == 2 {
-      let query = parts[1]
-      guard query.hasPrefix("t=") else {
-        throw TiebaClientError.invalidAuthenticatedResponse
-      }
-      let digits = query.utf8.dropFirst(2)
-      guard (1...20).contains(digits.count), digits.allSatisfy({ (48...57).contains($0) })
-      else {
-        throw TiebaClientError.invalidAuthenticatedResponse
-      }
+    return (
+      String(tokenPart),
+      try normalizedSelfProfilePortraitCacheVersion(
+        parts.count == 2 ? String(parts[1]) : nil
+      )
+    )
+  }
+
+  private static func normalizedSelfProfilePortraitCacheVersion(
+    _ query: String?
+  ) throws -> String? {
+    guard let query else { return nil }
+    guard query.hasPrefix("t=") else {
+      throw TiebaClientError.invalidAuthenticatedResponse
     }
-    return String(token)
+    let digits = query.utf8.dropFirst(2)
+    guard
+      (1...20).contains(digits.count),
+      digits.allSatisfy({ (48...57).contains($0) })
+    else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    let canonicalDigits = digits.drop(while: { $0 == 48 })
+    return canonicalDigits.isEmpty
+      ? "0"
+      : String(decoding: canonicalDigits, as: UTF8.self)
+  }
+
+  private static func strictSelfProfilePortraitAuthority(
+    from absoluteValue: String
+  ) -> Substring? {
+    guard let separator = absoluteValue.range(of: "://") else { return nil }
+    let remainder = absoluteValue[separator.upperBound...]
+    let authorityEnd = remainder.firstIndex { character in
+      character == "/" || character == "?" || character == "#"
+    } ?? remainder.endIndex
+    return remainder[..<authorityEnd]
+  }
+
+  private static func isStrictSelfProfilePortraitToken(_ token: String) -> Bool {
+    guard
+      !token.isEmpty,
+      token.utf8.count <= 512,
+      token != ".",
+      token != ".."
+    else { return false }
+    let allowedCharacters = CharacterSet(
+      charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~-"
+    )
+    return token.unicodeScalars.allSatisfy { allowedCharacters.contains($0) }
   }
 
   static func webAccountID(from body: Data) throws -> Int64 {
@@ -563,6 +676,41 @@ enum TiebaAuthenticatedDecoder {
   static func checkSelfProfileEditAcknowledgement(_ body: Data) throws {
     let object = try responseObject(from: body)
     try checkServerError(object)
+  }
+
+  static func selfProfileAvatarUploadAcknowledgement(
+    from body: Data
+  ) throws -> TiebaSelfProfileAvatarUploadAcknowledgement {
+    let object = try responseObject(from: body)
+    let nestedError = object["error"] as? [String: Any]
+    var codes = [Int64]()
+    for key in ["error_code", "errno", "no"] where object[key] != nil {
+      guard let code = int64(object[key]) else {
+        throw TiebaClientError.invalidJSON
+      }
+      codes.append(code)
+    }
+    if let nestedError, nestedError["errno"] != nil {
+      guard let code = int64(nestedError["errno"]) else {
+        throw TiebaClientError.invalidJSON
+      }
+      codes.append(code)
+    }
+    guard let code = codes.first, Set(codes).count == 1 else {
+      throw TiebaClientError.invalidJSON
+    }
+    let message = try boundedSelfProfileMultilineText(
+      errorMessage(object, nestedError: nestedError),
+      maximumBytes: selfProfileAvatarModificationDescriptionMaximumBytes
+    )
+    switch code {
+    case 0:
+      return .accepted(message: message)
+    case 300_003:
+      return .acceptedPendingReview(message: message)
+    default:
+      throw TiebaClientError.server(code: Int32(clamping: code), message: message)
+    }
   }
 
   static func checkPersonalizedFeedbackResponse(_ body: Data) throws {

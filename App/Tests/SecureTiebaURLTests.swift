@@ -26,13 +26,13 @@ final class SecureTiebaURLTests: XCTestCase {
   func testStrictPortraitAcceptsOnlyCanonicalTokenAndCacheBuster() {
     XCTAssertEqual(
       SecureTiebaURL.strictPortrait("portrait-token?t=123")?.absoluteString,
-      "https://himg.bdimg.com/sys/portraitn/item/portrait-token"
+      "https://himg.bdimg.com/sys/portraitn/item/portrait-token?t=123"
     )
     XCTAssertEqual(
       SecureTiebaURL.strictPortrait(
         "https://tb.himg.baidu.com/sys/portrait/item/portrait-token?t=12345678901234567890"
       )?.absoluteString,
-      "https://himg.bdimg.com/sys/portraitn/item/portrait-token"
+      "https://himg.bdimg.com/sys/portraitn/item/portrait-token?t=12345678901234567890"
     )
     XCTAssertNil(
       SecureTiebaURL.strictPortrait(
@@ -59,11 +59,11 @@ final class SecureTiebaURLTests: XCTestCase {
     )
     XCTAssertEqual(
       SecureTiebaURL.largePortrait("AbC012._~-?t=12345678901234567890")?.absoluteString,
-      url.absoluteString
+      url.absoluteString + "?t=12345678901234567890"
     )
     XCTAssertEqual(
       SecureTiebaURL.largePortrait("AbC012._~-?t=1")?.absoluteString,
-      url.absoluteString
+      url.absoluteString + "?t=1"
     )
   }
 
@@ -75,13 +75,18 @@ final class SecureTiebaURLTests: XCTestCase {
       "https://himg.bdimg.com/sys/portraitn/item/token-1",
       "HTTPS://HIMG.BDIMG.COM/sys/portraith/item/token-1",
       "//tb.himg.baidu.com/sys/portraith/item/token-1",
-      "https://himg.bdimg.com/sys/portrait/item/token-1?t=1234567890",
     ] {
       XCTAssertEqual(
         SecureTiebaURL.largePortrait(rawValue)?.absoluteString,
         "https://himg.bdimg.com/sys/portraith/item/token-1"
       )
     }
+    XCTAssertEqual(
+      SecureTiebaURL.largePortrait(
+        "https://himg.bdimg.com/sys/portrait/item/token-1?t=1234567890"
+      )?.absoluteString,
+      "https://himg.bdimg.com/sys/portraith/item/token-1?t=1234567890"
+    )
   }
 
   func testLargePortraitDecodesURLTokenExactlyOnce() {

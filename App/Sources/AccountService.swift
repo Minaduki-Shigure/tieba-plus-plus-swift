@@ -145,6 +145,58 @@ struct AccountProfileEditSubmission:
   }
 }
 
+struct AccountProfileAvatarUpload:
+  Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  static let minimumPixelSize = 64
+  static let maximumPixelSize = 1_024
+  static let maximumByteCount = 2 * 1_024 * 1_024
+
+  let uploadID: UUID
+  let jpegData: Data
+  let pixelSize: Int
+
+  init?(uploadID: UUID = UUID(), jpegData: Data, pixelSize: Int) {
+    guard
+      !jpegData.isEmpty,
+      jpegData.count <= Self.maximumByteCount,
+      (Self.minimumPixelSize...Self.maximumPixelSize).contains(pixelSize),
+      jpegData.count >= 4,
+      jpegData.starts(with: [0xFF, 0xD8]),
+      jpegData.suffix(2).elementsEqual([0xFF, 0xD9])
+    else { return nil }
+    self.uploadID = uploadID
+    self.jpegData = jpegData
+    self.pixelSize = pixelSize
+  }
+
+  var description: String {
+    "AccountProfileAvatarUpload(id: \(uploadID), bytes: \(jpegData.count), pixels: \(pixelSize), data: redacted)"
+  }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(
+      self,
+      children: [
+        "uploadID": uploadID,
+        "byteCount": jpegData.count,
+        "pixelSize": pixelSize,
+      ],
+      displayStyle: .struct
+    )
+  }
+}
+
+enum AccountProfileAvatarUploadDisposition: Equatable, Sendable {
+  case confirmed
+  case acceptedPendingReview(message: String)
+}
+
+struct AccountProfileAvatarUploadResult: Sendable {
+  let profile: AccountProfileSummary
+  let disposition: AccountProfileAvatarUploadDisposition
+}
+
 enum AccountProfileEditValidationError: LocalizedError, Equatable, Sendable {
   case displayNameRequired
   case displayNameTooLong
@@ -260,6 +312,8 @@ struct AccountProfileSummary:
   let birthday: AccountProfileBirthday?
   let isNicknameEditing: Bool
   let editingNickname: String
+  let canModifyAvatar: Bool
+  let avatarModificationDescription: String
 
   init(
     userID: Int64,
@@ -274,7 +328,9 @@ struct AccountProfileSummary:
     sex: AccountProfileSex = .unspecified,
     birthday: AccountProfileBirthday? = nil,
     isNicknameEditing: Bool = false,
-    editingNickname: String = ""
+    editingNickname: String = "",
+    canModifyAvatar: Bool = false,
+    avatarModificationDescription: String = ""
   ) {
     self.userID = userID
     self.username = username
@@ -289,6 +345,8 @@ struct AccountProfileSummary:
     self.birthday = birthday
     self.isNicknameEditing = isNicknameEditing
     self.editingNickname = editingNickname
+    self.canModifyAvatar = canModifyAvatar
+    self.avatarModificationDescription = avatarModificationDescription
   }
 
   var preferredName: String {
@@ -311,6 +369,7 @@ struct AccountProfileSummary:
         "userID": userID,
         "hasBirthday": birthday != nil,
         "isNicknameEditing": isNicknameEditing,
+        "canModifyAvatar": canModifyAvatar,
         "followingCount": followingCount,
         "followerCount": followerCount,
         "postCount": postCount,
@@ -1084,6 +1143,10 @@ protocol AccountService: Sendable {
     session: StoredAccountSession,
     edit: AccountProfileEditSubmission
   ) async throws -> AccountProfileSummary
+  func uploadSelfProfileAvatar(
+    session: StoredAccountSession,
+    upload: AccountProfileAvatarUpload
+  ) async throws -> AccountProfileAvatarUploadResult
   func ownFollowing(
     session: StoredAccountSession,
     page: Int
@@ -1321,6 +1384,13 @@ extension AccountService {
     edit: AccountProfileEditSubmission
   ) async throws -> AccountProfileSummary {
     throw BrowseError.unavailable("当前账户服务不支持修改本人资料。")
+  }
+
+  func uploadSelfProfileAvatar(
+    session: StoredAccountSession,
+    upload: AccountProfileAvatarUpload
+  ) async throws -> AccountProfileAvatarUploadResult {
+    throw BrowseError.unavailable("当前账户服务不支持修改头像。")
   }
 
   func ownFollowing(

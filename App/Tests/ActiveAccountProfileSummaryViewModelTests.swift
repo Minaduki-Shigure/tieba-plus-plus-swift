@@ -26,6 +26,89 @@ final class ActiveAccountProfileSummaryViewModelTests: XCTestCase {
     XCTAssertEqual(requests.first?.stokenByteCount, 64)
   }
 
+  func testVerifiedEditorResultPublishesWithoutASecondServerRead() async {
+    let active = session(userID: 7, revision: uuid(31))
+    let initial = summary(userID: 7, following: 3, followers: 4, posts: 5)
+    let edited = summary(userID: 7, following: 6, followers: 7, posts: 8)
+    let vault = ActiveProfileVaultSpy(session: active)
+    let service = ActiveProfileServiceSpy(scripts: [
+      active.sessionRevision: [.value(initial)]
+    ])
+    let viewModel = ActiveAccountProfileSummaryViewModel(service: service, vault: vault)
+    await viewModel.refresh()
+
+    let published = await viewModel.publishVerifiedSummary(edited)
+
+    XCTAssertTrue(published)
+    XCTAssertEqual(viewModel.summary, edited)
+    XCTAssertEqual(viewModel.state, .loaded)
+    let requestCount = await service.requestCount()
+    XCTAssertEqual(requestCount, 1)
+  }
+
+  func testSuspendedSummaryRetainsLeaseForVerifiedEditorPublication() async {
+    let active = session(userID: 7, revision: uuid(35))
+    let initial = summary(userID: 7, following: 3, followers: 4, posts: 5)
+    let edited = summary(userID: 7, following: 6, followers: 7, posts: 8)
+    let vault = ActiveProfileVaultSpy(session: active)
+    let service = ActiveProfileServiceSpy(scripts: [
+      active.sessionRevision: [.value(initial)]
+    ])
+    let viewModel = ActiveAccountProfileSummaryViewModel(service: service, vault: vault)
+    await viewModel.refresh()
+
+    viewModel.suspend()
+    let published = await viewModel.publishVerifiedSummary(edited)
+
+    XCTAssertTrue(published)
+    XCTAssertEqual(viewModel.summary, edited)
+    XCTAssertEqual(viewModel.state, .loaded)
+    let requestCount = await service.requestCount()
+    XCTAssertEqual(requestCount, 1)
+  }
+
+  func testVerifiedEditorResultCannotCrossRotatedSessionLease() async {
+    let original = session(userID: 7, revision: uuid(32))
+    let initial = summary(userID: 7, following: 3, followers: 4, posts: 5)
+    let edited = summary(userID: 7, following: 6, followers: 7, posts: 8)
+    let vault = ActiveProfileVaultSpy(session: original)
+    let service = ActiveProfileServiceSpy(scripts: [
+      original.sessionRevision: [.value(initial)]
+    ])
+    let viewModel = ActiveAccountProfileSummaryViewModel(service: service, vault: vault)
+    await viewModel.refresh()
+    await vault.replaceActive(with: session(userID: 7, revision: uuid(33)))
+
+    let published = await viewModel.publishVerifiedSummary(edited)
+
+    XCTAssertFalse(published)
+    XCTAssertNil(viewModel.summary)
+    XCTAssertEqual(viewModel.state, .idle)
+  }
+
+  func testCancelledVerifiedPublicationCannotRestoreClearedSnapshot() async throws {
+    let active = session(userID: 7, revision: uuid(34))
+    let initial = summary(userID: 7, following: 3, followers: 4, posts: 5)
+    let edited = summary(userID: 7, following: 6, followers: 7, posts: 8)
+    let vault = ActiveProfileVaultSpy(session: active)
+    let service = ActiveProfileServiceSpy(scripts: [
+      active.sessionRevision: [.value(initial)]
+    ])
+    let viewModel = ActiveAccountProfileSummaryViewModel(service: service, vault: vault)
+    await viewModel.refresh()
+    await vault.suspendActiveSessionReads()
+
+    let publication = Task { await viewModel.publishVerifiedSummary(edited) }
+    try await waitForActiveProfileTest { await vault.activeSessionWaiterCount() == 1 }
+    viewModel.cancel()
+    await vault.releaseActiveSessionReads()
+
+    let published = await publication.value
+    XCTAssertFalse(published)
+    XCTAssertNil(viewModel.summary)
+    XCTAssertEqual(viewModel.state, .idle)
+  }
+
   func testMissingFullCredentialsFailsBeforeServiceRequest() async {
     let legacy = session(userID: 7, revision: uuid(1), stoken: nil)
     let vault = ActiveProfileVaultSpy(session: legacy)
@@ -478,6 +561,8 @@ private actor ActiveProfileVaultSpy: AccountVault {
   private var session: StoredAccountSession?
   private var activeReads = 0
   private var failingRead: Int?
+  private var suspendsActiveReads = false
+  private var activeReadWaiters: [CheckedContinuation<Void, Never>] = []
 
   init(session: StoredAccountSession?) {
     self.session = session
@@ -491,8 +576,26 @@ private actor ActiveProfileVaultSpy: AccountVault {
     failingRead = number
   }
 
+  func suspendActiveSessionReads() {
+    suspendsActiveReads = true
+  }
+
+  func activeSessionWaiterCount() -> Int {
+    activeReadWaiters.count
+  }
+
+  func releaseActiveSessionReads() {
+    suspendsActiveReads = false
+    let waiters = activeReadWaiters
+    activeReadWaiters.removeAll()
+    waiters.forEach { $0.resume() }
+  }
+
   func activeSession() async throws -> StoredAccountSession? {
     activeReads += 1
+    if suspendsActiveReads {
+      await withCheckedContinuation { activeReadWaiters.append($0) }
+    }
     if activeReads == failingRead {
       throw ActiveProfileTestFailure(message: "vault unavailable")
     }

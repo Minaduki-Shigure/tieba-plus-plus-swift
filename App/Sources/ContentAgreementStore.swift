@@ -292,8 +292,7 @@ final class ContentAgreementStore {
       var confirmedLeaseIsCurrent: Bool?
       var didStartWrite = false
       let activeSession: StoredAccountSession
-      var reconciliationSnapshot = previous
-      var requiresAuthoritativeReadback = false
+      var authoritativeSnapshot: ContentAgreementSnapshot?
       do {
         guard let session = try await vault.activeSession() else {
           confirmedLeaseIsCurrent = false
@@ -325,11 +324,10 @@ final class ContentAgreementStore {
           guard snapshot.isAgreed == isAgreed else {
             throw BrowseError.unavailable("贴吧没有确认新的点赞状态，请重新加载后再试。")
           }
-          reconciliationSnapshot = snapshot
+          authoritativeSnapshot = snapshot
         } catch ContentAgreementMutationError.outcomeUnknown {
           // The write may have reached Tieba. Keep the last authoritative
           // snapshot visible until an exact-target read determines the result.
-          requiresAuthoritativeReadback = true
         }
         let leaseIsCurrent = try await leaseIsCurrent(expectedLease)
         confirmedLeaseIsCurrent = leaseIsCurrent
@@ -341,7 +339,17 @@ final class ContentAgreementStore {
         else {
           throw BrowseError.unavailable("点赞完成时当前账户已经变化，结果未应用。")
         }
-        entry.setState(.reconciling(reconciliationSnapshot))
+        if let authoritativeSnapshot {
+          entry.setState(.ready(authoritativeSnapshot))
+          finishMutationActivity(
+            entry: entry,
+            target: target,
+            operationID: operationID,
+            needsRefresh: false
+          )
+          return authoritativeSnapshot
+        }
+        entry.setState(.reconciling(previous))
       } catch {
         let resultWasDiscardedForNewLease =
           operationGeneration != generation
@@ -377,8 +385,7 @@ final class ContentAgreementStore {
           operationGeneration: operationGeneration,
           operationEpoch: operationEpoch,
           entry: entry,
-          fallbackSnapshot: reconciliationSnapshot,
-          requiresAuthoritativeReadback: requiresAuthoritativeReadback
+          fallbackSnapshot: previous
         )
       } catch {
         let resultWasDiscardedForNewLease =
@@ -390,7 +397,7 @@ final class ContentAgreementStore {
           entry.epoch == operationEpoch,
           entry.lease == expectedLease
         {
-          entry.setState(.failed(previous: reconciliationSnapshot))
+          entry.setState(.failed(previous: authoritativeSnapshot ?? previous))
         }
         finishMutationActivity(
           entry: entry,
@@ -455,14 +462,13 @@ final class ContentAgreementStore {
     operationGeneration: UInt64,
     operationEpoch: UInt64,
     entry: ContentAgreementEntry,
-    fallbackSnapshot: ContentAgreementSnapshot,
-    requiresAuthoritativeReadback: Bool
+    fallbackSnapshot: ContentAgreementSnapshot
   ) async throws -> ReconciliationOutcome {
     guard !reconciliationDelays.isEmpty else {
       guard case .reconciling(let snapshot) = entry.state else {
         throw CancellationError()
       }
-      return requiresAuthoritativeReadback ? .unavailable(snapshot) : .confirmed(snapshot)
+      return .unavailable(snapshot)
     }
 
     var bestAvailableSnapshot = fallbackSnapshot

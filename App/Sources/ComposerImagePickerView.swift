@@ -1,11 +1,9 @@
 import CoreGraphics
-import CoreTransferable
 import Foundation
 import ImageIO
 import PhotosUI
 import SwiftUI
 import TiebaCore
-import UniformTypeIdentifiers
 
 enum ComposerImagePickerPolicy {
   static let thumbnailSideLength: CGFloat = 76
@@ -496,9 +494,7 @@ struct ComposerImagePickerView: View {
 
       do {
         guard
-          let importedFile = try await item.loadTransferable(
-            type: ComposerImagePickerImportedFile.self
-          )
+          let importedFile = try await item.loadTransferable(type: SecurePickedImageFile.self)
         else { throw ComposerImagePickerError.unavailableTransfer }
         defer { importedFile.removeTemporaryCopy() }
 
@@ -687,55 +683,6 @@ private enum ComposerImagePickerError: Error, LocalizedError {
       !description.isEmpty
     else { return "无法安全导入选择的图片。" }
     return description
-  }
-}
-
-private struct ComposerImagePickerImportedFile: Transferable, Sendable {
-  let fileURL: URL
-  let temporaryDirectoryURL: URL
-
-  static var transferRepresentation: some TransferRepresentation {
-    FileRepresentation(
-      importedContentType: .image,
-      shouldAttemptToOpenInPlace: false
-    ) { receivedFile in
-      let fileManager = FileManager.default
-      _ = ComposerImageTemporaryDirectoryCleaner(
-        rootURL: fileManager.temporaryDirectory
-      ).cleanup()
-      let temporaryDirectoryURL = fileManager.temporaryDirectory.appendingPathComponent(
-        "tieba-composer-image-\(UUID().uuidString.lowercased())",
-        isDirectory: true
-      )
-      let fileURL = temporaryDirectoryURL.appendingPathComponent(
-        "selected-image",
-        isDirectory: false
-      )
-      do {
-        try fileManager.createDirectory(
-          at: temporaryDirectoryURL,
-          withIntermediateDirectories: false
-        )
-        try fileManager.copyItem(at: receivedFile.file, to: fileURL)
-        #if os(iOS)
-          try fileManager.setAttributes(
-            [.protectionKey: FileProtectionType.complete],
-            ofItemAtPath: fileURL.path
-          )
-        #endif
-        return Self(
-          fileURL: fileURL,
-          temporaryDirectoryURL: temporaryDirectoryURL
-        )
-      } catch {
-        try? fileManager.removeItem(at: temporaryDirectoryURL)
-        throw error
-      }
-    }
-  }
-
-  func removeTemporaryCopy() {
-    try? FileManager.default.removeItem(at: temporaryDirectoryURL)
   }
 }
 

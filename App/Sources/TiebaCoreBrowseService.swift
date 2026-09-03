@@ -2138,26 +2138,35 @@ enum SecureTiebaURL {
   }
 
   static func strictPortrait(_ rawValue: String?) -> URL? {
-    guard let token = validatedStrictPortraitToken(rawValue) else { return nil }
+    guard let identity = validatedStrictPortraitIdentity(rawValue) else { return nil }
 
     var components = URLComponents()
     components.scheme = "https"
     components.host = "himg.bdimg.com"
-    components.path = "/sys/portraitn/item/\(token)"
+    components.path = "/sys/portraitn/item/\(identity.token)"
+    components.percentEncodedQuery = identity.cacheBuster
     return components.url
   }
 
   static func largePortrait(_ rawValue: String?) -> URL? {
-    guard let token = validatedStrictPortraitToken(rawValue) else { return nil }
+    guard let identity = validatedStrictPortraitIdentity(rawValue) else { return nil }
 
     var components = URLComponents()
     components.scheme = "https"
     components.host = "himg.bdimg.com"
-    components.path = "/sys/portraith/item/\(token)"
+    components.path = "/sys/portraith/item/\(identity.token)"
+    components.percentEncodedQuery = identity.cacheBuster
     return components.url
   }
 
-  private static func validatedStrictPortraitToken(_ rawValue: String?) -> String? {
+  private struct StrictPortraitIdentity {
+    let token: String
+    let cacheBuster: String?
+  }
+
+  private static func validatedStrictPortraitIdentity(
+    _ rawValue: String?
+  ) -> StrictPortraitIdentity? {
     guard let rawValue, rawValue.utf8.count <= 4_096 else { return nil }
     let portrait = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !portrait.isEmpty else { return nil }
@@ -2168,7 +2177,7 @@ enum SecureTiebaURL {
     return strictBarePortraitToken(from: portrait)
   }
 
-  private static func strictPortraitToken(from rawValue: String) -> String? {
+  private static func strictPortraitToken(from rawValue: String) -> StrictPortraitIdentity? {
     let absoluteValue = rawValue.hasPrefix("//") ? "https:\(rawValue)" : rawValue
     guard
       let components = URLComponents(string: absoluteValue),
@@ -2197,10 +2206,10 @@ enum SecureTiebaURL {
       let token = encodedToken.removingPercentEncoding,
       isStrictPortraitToken(token)
     else { return nil }
-    return token
+    return StrictPortraitIdentity(token: token, cacheBuster: components.percentEncodedQuery)
   }
 
-  private static func strictBarePortraitToken(from source: String) -> String? {
+  private static func strictBarePortraitToken(from source: String) -> StrictPortraitIdentity? {
     guard !source.contains("#") else { return nil }
     let parts = source.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
     guard
@@ -2208,7 +2217,11 @@ enum SecureTiebaURL {
       let tokenPart = parts.first
     else { return nil }
     let token = String(tokenPart)
-    return isStrictPortraitToken(token) ? token : nil
+    guard isStrictPortraitToken(token) else { return nil }
+    return StrictPortraitIdentity(
+      token: token,
+      cacheBuster: parts.count == 2 ? String(parts[1]) : nil
+    )
   }
 
   private static func isAllowedPortraitCacheBuster(_ query: String?) -> Bool {

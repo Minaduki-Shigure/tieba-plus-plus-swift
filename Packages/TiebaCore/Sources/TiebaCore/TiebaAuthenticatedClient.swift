@@ -108,6 +108,64 @@ private enum TiebaSelfProfileEditWaitOutcome: Sendable, Equatable {
   case cancelled
 }
 
+private struct TiebaSelfProfileAvatarUploadResourceKey: Hashable, Sendable {
+  let userID: Int64
+}
+
+private struct TiebaSelfProfileAvatarUploadIdentity:
+  Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  private let bduss: String
+  private let stoken: String
+  private let cookieName: TiebaBDUSSCookieName
+  let uploadID: UUID
+  let contentSHA256: String
+
+  init(
+    credential: TiebaSessionCredential,
+    plan: TiebaSelfProfileAvatarUploadPlan
+  ) {
+    bduss = credential.bduss
+    stoken = credential.stoken
+    cookieName = credential.bdussCookieName
+    uploadID = plan.upload.uploadID
+    contentSHA256 = plan.contentSHA256
+  }
+
+  var description: String { "TiebaSelfProfileAvatarUploadIdentity(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(self, children: ["uploadID": uploadID], displayStyle: .struct)
+  }
+}
+
+private struct TiebaSelfProfileAvatarUploadFlight:
+  Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
+{
+  let id: UUID
+  let identity: TiebaSelfProfileAvatarUploadIdentity
+  let task: Task<TiebaSelfProfileAvatarUploadResult, Swift.Error>
+  var stage: TiebaSelfProfileAvatarUploadFlightStage
+
+  var description: String { "TiebaSelfProfileAvatarUploadFlight(redacted)" }
+  var debugDescription: String { description }
+  var customMirror: Mirror {
+    Mirror(self, children: ["id": id, "stage": stage], displayStyle: .struct)
+  }
+}
+
+private enum TiebaSelfProfileAvatarUploadFlightStage: Sendable, Equatable {
+  case queued
+  case preflight
+  case writeDispatched
+  case completed
+}
+
+private enum TiebaSelfProfileAvatarUploadWaitOutcome: Sendable, Equatable {
+  case completed
+  case cancelled
+}
+
 private struct TiebaUserInteractionPermissionsResourceKey: Hashable, Sendable {
   let userID: Int64
   let targetUserID: Int64
@@ -860,6 +918,7 @@ public actor TiebaAuthenticatedClient {
   static let accountResponseMaximumBytes = 512 * 1_024
   static let selfProfileResponseMaximumBytes = 2 * 1_024 * 1_024
   static let selfProfileEditResponseMaximumBytes = 64 * 1_024
+  static let selfProfileAvatarUploadResponseMaximumBytes = 64 * 1_024
   static let ownFollowingResponseMaximumBytes = TiebaPublicSocialPolicy.maximumResponseBodyBytes
   static let userRelationshipResponseMaximumBytes = 2 * 1_024 * 1_024
   static let userFollowWriteResponseMaximumBytes = 64 * 1_024
@@ -909,6 +968,17 @@ public actor TiebaAuthenticatedClient {
   ]()
   private var selfProfileEditSharedWaiterIDs = [
     TiebaSelfProfileEditResourceKey: Set<UUID>
+  ]()
+  private var selfProfileAvatarUploadFlights = [
+    TiebaSelfProfileAvatarUploadResourceKey: TiebaSelfProfileAvatarUploadFlight
+  ]()
+  private var selfProfileAvatarUploadWaiters = [
+    TiebaSelfProfileAvatarUploadResourceKey: [
+      UUID: CheckedContinuation<TiebaSelfProfileAvatarUploadWaitOutcome, Never>
+    ]
+  ]()
+  private var selfProfileAvatarUploadSharedWaiterIDs = [
+    TiebaSelfProfileAvatarUploadResourceKey: Set<UUID>
   ]()
   private var userFollowFlights = [TiebaUserFollowResourceKey: TiebaUserFollowFlight]()
   private var userFollowWaiters = [
@@ -1361,6 +1431,13 @@ public actor TiebaAuthenticatedClient {
     )
 
     let resourceKey = TiebaSelfProfileEditResourceKey(userID: expectedUserID)
+    guard
+      selfProfileAvatarUploadFlights[
+        TiebaSelfProfileAvatarUploadResourceKey(userID: expectedUserID)
+      ] == nil
+    else {
+      throw TiebaClientError.selfProfileEditWriteConflict
+    }
     let identity = TiebaSelfProfileEditIdentity(credential: credential, edit: edit)
     if let flight = selfProfileEditFlights[resourceKey] {
       guard flight.identity == identity else {
@@ -1397,6 +1474,70 @@ public actor TiebaAuthenticatedClient {
       )
     }
     return try await waitForSelfProfileEditFlight(
+      resourceKey: resourceKey,
+      flightID: flightID,
+      task: task
+    )
+  }
+
+  public func uploadSelfProfileAvatar(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    upload: TiebaSelfProfileAvatarUpload
+  ) async throws -> TiebaSelfProfileAvatarUploadResult {
+    try Task.checkCancellation()
+    let plan = try requestFactory.validatedSelfProfileAvatarUpload(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      upload: upload
+    )
+    // Reject malformed bound reads before they can join a mutation flight.
+    _ = try requestFactory.selfProfile(
+      credential: credential,
+      expectedUserID: expectedUserID
+    )
+
+    let resourceKey = TiebaSelfProfileAvatarUploadResourceKey(userID: expectedUserID)
+    guard selfProfileEditFlights[TiebaSelfProfileEditResourceKey(userID: expectedUserID)] == nil
+    else {
+      throw TiebaClientError.selfProfileAvatarWriteConflict
+    }
+    let identity = TiebaSelfProfileAvatarUploadIdentity(credential: credential, plan: plan)
+    if let flight = selfProfileAvatarUploadFlights[resourceKey] {
+      guard flight.identity == identity else {
+        throw TiebaClientError.selfProfileAvatarWriteConflict
+      }
+      return try await waitForSelfProfileAvatarUploadFlight(
+        resourceKey: resourceKey,
+        flightID: flight.id,
+        task: flight.task
+      )
+    }
+
+    let flightID = UUID()
+    let task: Task<TiebaSelfProfileAvatarUploadResult, Swift.Error> = Task.detached { [self] in
+      try await performSelfProfileAvatarUpload(
+        resourceKey: resourceKey,
+        flightID: flightID,
+        credential: credential,
+        expectedUserID: expectedUserID,
+        plan: plan
+      )
+    }
+    selfProfileAvatarUploadFlights[resourceKey] = TiebaSelfProfileAvatarUploadFlight(
+      id: flightID,
+      identity: identity,
+      task: task,
+      stage: .queued
+    )
+    Task {
+      await finishSelfProfileAvatarUploadFlight(
+        resourceKey: resourceKey,
+        flightID: flightID,
+        task: task
+      )
+    }
+    return try await waitForSelfProfileAvatarUploadFlight(
       resourceKey: resourceKey,
       flightID: flightID,
       task: task
@@ -2787,28 +2928,22 @@ public actor TiebaAuthenticatedClient {
         maximumBodyBytes: Self.threadAgreementWriteResponseMaximumBytes
       )
       try TiebaAuthenticatedDecoder.checkAgreementWriteAcknowledgement(from: body)
-      return TiebaAgreementState(
-        userID: expectedUserID,
-        forumID: forumID,
-        threadID: threadID,
-        target: target,
-        isAgreed: isAgreed,
-        // opAgree's score is not the target's aggregate net score.
-        agreeScore: adjustedAgreementScore(current.agreeScore, isAgreed: isAgreed)
-      )
     } catch {
       guard isUncertainAgreementWriteError(error) else { throw error }
-      if let reconciled = try? await getAgreement(
-        credential: credential,
-        expectedUserID: expectedUserID,
-        forumID: forumID,
-        threadID: threadID,
-        target: target
-      ), reconciled.isAgreed == isAgreed {
-        return reconciled
-      }
-      throw TiebaClientError.contentAgreementOutcomeUnknown
     }
+
+    // opAgree only acknowledges the mutation. Its optional score is not the
+    // target's aggregate score, so an exact-target readback is mandatory.
+    if let reconciled = try? await getAgreement(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      forumID: forumID,
+      threadID: threadID,
+      target: target
+    ), reconciled.isAgreed == isAgreed {
+      return reconciled
+    }
+    throw TiebaClientError.contentAgreementOutcomeUnknown
   }
 
   private func performOwnedContentDeletion(
@@ -3009,6 +3144,95 @@ public actor TiebaAuthenticatedClient {
     }
     if let serverRejection { throw serverRejection }
     throw TiebaClientError.selfProfileEditOutcomeUnknown
+  }
+
+  private func performSelfProfileAvatarUpload(
+    resourceKey: TiebaSelfProfileAvatarUploadResourceKey,
+    flightID: UUID,
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    plan: TiebaSelfProfileAvatarUploadPlan
+  ) async throws -> TiebaSelfProfileAvatarUploadResult {
+    try beginSelfProfileAvatarUploadPreflight(resourceKey: resourceKey, flightID: flightID)
+    let account = try await validateSession(credential: credential)
+    guard account.userID == expectedUserID else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    let current = try await getSelfProfile(
+      credential: credential,
+      expectedUserID: expectedUserID
+    )
+    guard case .allowed = current.avatarModificationPermission else {
+      let message: String
+      if case .denied(let denialMessage) = current.avatarModificationPermission {
+        message = denialMessage
+      } else {
+        message = ""
+      }
+      throw TiebaClientError.selfProfileAvatarModificationUnavailable(message: message)
+    }
+
+    let request = try requestFactory.uploadSelfProfileAvatar(
+      credential: credential,
+      expectedUserID: expectedUserID,
+      plan: plan
+    )
+    try beginSelfProfileAvatarUploadWrite(resourceKey: resourceKey, flightID: flightID)
+
+    var acknowledgement: TiebaSelfProfileAvatarUploadAcknowledgement?
+    var serverRejection: TiebaClientError?
+    do {
+      let body = try await send(
+        request,
+        maximumBodyBytes: Self.selfProfileAvatarUploadResponseMaximumBytes
+      )
+      acknowledgement = try TiebaAuthenticatedDecoder.selfProfileAvatarUploadAcknowledgement(
+        from: body
+      )
+    } catch let error as TiebaClientError {
+      if case .server = error {
+        serverRejection = error
+      }
+      // Once dispatched, the result is established only by the mandatory readback below.
+    } catch {
+      // Cancellation and transport failures after dispatch also require reconciliation.
+    }
+
+    do {
+      let latest = try await getSelfProfile(
+        credential: credential,
+        expectedUserID: expectedUserID
+      )
+      if let serverRejection { throw serverRejection }
+      guard let acknowledgement else {
+        // A concurrent avatar change is not proof that this unacknowledged
+        // upload was accepted, because Tieba exposes no content-bound receipt.
+        throw TiebaClientError.selfProfileAvatarOutcomeUnknown
+      }
+      if latest.portraitSource != current.portraitSource {
+        return TiebaSelfProfileAvatarUploadResult(
+          latestProfile: latest,
+          disposition: .confirmed
+        )
+      }
+      let message: String
+      switch acknowledgement {
+      case .accepted(let acknowledgementMessage),
+        .acceptedPendingReview(let acknowledgementMessage):
+        message = acknowledgementMessage
+      }
+      return TiebaSelfProfileAvatarUploadResult(
+        latestProfile: latest,
+        disposition: .acceptedPendingReview(message: message)
+      )
+    } catch let error as TiebaClientError {
+      if error == .selfProfileAvatarOutcomeUnknown { throw error }
+      if let serverRejection { throw serverRejection }
+      throw TiebaClientError.selfProfileAvatarOutcomeUnknown
+    } catch {
+      if let serverRejection { throw serverRejection }
+      throw TiebaClientError.selfProfileAvatarOutcomeUnknown
+    }
   }
 
   private func selfProfile(
@@ -4245,13 +4469,6 @@ public actor TiebaAuthenticatedClient {
       .reduce(0) { $0 + $1.identity.byteCount }
   }
 
-  private func adjustedAgreementScore(_ score: Int, isAgreed: Bool) -> Int {
-    let delta = isAgreed ? 1 : -1
-    let (adjusted, overflow) = score.addingReportingOverflow(delta)
-    guard !overflow else { return isAgreed ? Int.max : Int.min }
-    return adjusted
-  }
-
   private func isUncertainAgreementWriteError(_ error: Swift.Error) -> Bool {
     if error is CancellationError { return true }
     guard let error = error as? TiebaClientError else { return true }
@@ -4999,6 +5216,186 @@ public actor TiebaAuthenticatedClient {
 
   func selfProfileEditFlightExists(expectedUserID: Int64) -> Bool {
     selfProfileEditFlights[TiebaSelfProfileEditResourceKey(userID: expectedUserID)] != nil
+  }
+
+  private func waitForSelfProfileAvatarUploadFlight(
+    resourceKey: TiebaSelfProfileAvatarUploadResourceKey,
+    flightID: UUID,
+    task: Task<TiebaSelfProfileAvatarUploadResult, Swift.Error>
+  ) async throws -> TiebaSelfProfileAvatarUploadResult {
+    if Task.isCancelled {
+      cancelUnregisteredSelfProfileAvatarUploadWaiter(
+        resourceKey: resourceKey,
+        flightID: flightID
+      )
+      throw CancellationError()
+    }
+    guard selfProfileAvatarUploadFlights[resourceKey]?.id == flightID else {
+      return try await task.value
+    }
+
+    let waiterID = UUID()
+    let outcome: TiebaSelfProfileAvatarUploadWaitOutcome = await withTaskCancellationHandler {
+      await withCheckedContinuation {
+        (continuation: CheckedContinuation<TiebaSelfProfileAvatarUploadWaitOutcome, Never>) in
+        guard
+          !Task.isCancelled,
+          selfProfileAvatarUploadFlights[resourceKey]?.id == flightID
+        else {
+          if Task.isCancelled {
+            cancelUnregisteredSelfProfileAvatarUploadWaiter(
+              resourceKey: resourceKey,
+              flightID: flightID
+            )
+          }
+          continuation.resume(returning: Task.isCancelled ? .cancelled : .completed)
+          return
+        }
+        selfProfileAvatarUploadWaiters[resourceKey, default: [:]][waiterID] = continuation
+        selfProfileAvatarUploadSharedWaiterIDs[resourceKey, default: []].insert(waiterID)
+      }
+    } onCancel: {
+      Task {
+        await self.cancelSelfProfileAvatarUploadWaiter(
+          resourceKey: resourceKey,
+          flightID: flightID,
+          waiterID: waiterID
+        )
+      }
+    }
+    guard outcome == .completed else { throw CancellationError() }
+    try Task.checkCancellation()
+    return try await task.value
+  }
+
+  private func cancelSelfProfileAvatarUploadWaiter(
+    resourceKey: TiebaSelfProfileAvatarUploadResourceKey,
+    flightID: UUID,
+    waiterID: UUID
+  ) {
+    guard selfProfileAvatarUploadFlights[resourceKey]?.id == flightID else { return }
+    guard var waiters = selfProfileAvatarUploadWaiters[resourceKey] else {
+      cancelUnregisteredSelfProfileAvatarUploadWaiter(
+        resourceKey: resourceKey,
+        flightID: flightID
+      )
+      return
+    }
+    let continuation = waiters.removeValue(forKey: waiterID)
+    if waiters.isEmpty {
+      selfProfileAvatarUploadWaiters.removeValue(forKey: resourceKey)
+    } else {
+      selfProfileAvatarUploadWaiters[resourceKey] = waiters
+    }
+    if var sharedWaiterIDs = selfProfileAvatarUploadSharedWaiterIDs[resourceKey] {
+      sharedWaiterIDs.remove(waiterID)
+      if sharedWaiterIDs.isEmpty {
+        selfProfileAvatarUploadSharedWaiterIDs.removeValue(forKey: resourceKey)
+      } else {
+        selfProfileAvatarUploadSharedWaiterIDs[resourceKey] = sharedWaiterIDs
+      }
+    }
+    if
+      selfProfileAvatarUploadSharedWaiterIDs[resourceKey]?.isEmpty != false,
+      let flight = selfProfileAvatarUploadFlights[resourceKey],
+      flight.stage == .queued || flight.stage == .preflight
+    {
+      detachCancelledSelfProfileAvatarUploadFlight(
+        resourceKey: resourceKey,
+        flightID: flightID
+      )
+    }
+    continuation?.resume(returning: .cancelled)
+  }
+
+  private func cancelUnregisteredSelfProfileAvatarUploadWaiter(
+    resourceKey: TiebaSelfProfileAvatarUploadResourceKey,
+    flightID: UUID
+  ) {
+    detachCancelledSelfProfileAvatarUploadFlight(
+      resourceKey: resourceKey,
+      flightID: flightID
+    )
+  }
+
+  private func detachCancelledSelfProfileAvatarUploadFlight(
+    resourceKey: TiebaSelfProfileAvatarUploadResourceKey,
+    flightID: UUID
+  ) {
+    guard
+      selfProfileAvatarUploadSharedWaiterIDs[resourceKey]?.isEmpty != false,
+      let flight = selfProfileAvatarUploadFlights[resourceKey],
+      flight.id == flightID,
+      flight.stage == .queued || flight.stage == .preflight
+    else { return }
+
+    selfProfileAvatarUploadFlights.removeValue(forKey: resourceKey)
+    let waiters = selfProfileAvatarUploadWaiters.removeValue(forKey: resourceKey) ?? [:]
+    selfProfileAvatarUploadSharedWaiterIDs.removeValue(forKey: resourceKey)
+    flight.task.cancel()
+    for continuation in waiters.values {
+      continuation.resume(returning: .cancelled)
+    }
+  }
+
+  private func finishSelfProfileAvatarUploadFlight(
+    resourceKey: TiebaSelfProfileAvatarUploadResourceKey,
+    flightID: UUID,
+    task: Task<TiebaSelfProfileAvatarUploadResult, Swift.Error>
+  ) async {
+    _ = await task.result
+    guard
+      var flight = selfProfileAvatarUploadFlights[resourceKey],
+      flight.id == flightID
+    else { return }
+    flight.stage = .completed
+    selfProfileAvatarUploadFlights[resourceKey] = flight
+    selfProfileAvatarUploadFlights.removeValue(forKey: resourceKey)
+    let waiters = selfProfileAvatarUploadWaiters.removeValue(forKey: resourceKey) ?? [:]
+    selfProfileAvatarUploadSharedWaiterIDs.removeValue(forKey: resourceKey)
+    for continuation in waiters.values {
+      continuation.resume(returning: .completed)
+    }
+  }
+
+  private func beginSelfProfileAvatarUploadPreflight(
+    resourceKey: TiebaSelfProfileAvatarUploadResourceKey,
+    flightID: UUID
+  ) throws {
+    try Task.checkCancellation()
+    guard
+      var flight = selfProfileAvatarUploadFlights[resourceKey],
+      flight.id == flightID,
+      flight.stage == .queued
+    else { throw CancellationError() }
+    flight.stage = .preflight
+    selfProfileAvatarUploadFlights[resourceKey] = flight
+  }
+
+  private func beginSelfProfileAvatarUploadWrite(
+    resourceKey: TiebaSelfProfileAvatarUploadResourceKey,
+    flightID: UUID
+  ) throws {
+    try Task.checkCancellation()
+    guard
+      var flight = selfProfileAvatarUploadFlights[resourceKey],
+      flight.id == flightID,
+      flight.stage == .preflight
+    else { throw CancellationError() }
+    flight.stage = .writeDispatched
+    selfProfileAvatarUploadFlights[resourceKey] = flight
+  }
+
+  func selfProfileAvatarUploadWaiterCount(expectedUserID: Int64) -> Int {
+    selfProfileAvatarUploadWaiters[
+      TiebaSelfProfileAvatarUploadResourceKey(userID: expectedUserID)
+    ]?.count ?? 0
+  }
+
+  func selfProfileAvatarUploadFlightExists(expectedUserID: Int64) -> Bool {
+    selfProfileAvatarUploadFlights[
+      TiebaSelfProfileAvatarUploadResourceKey(userID: expectedUserID)
+    ] != nil
   }
 
   private func waitForUserFollowFlight(

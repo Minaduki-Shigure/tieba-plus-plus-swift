@@ -200,6 +200,7 @@ public struct TiebaSelfProfileSummary:
   public let username: String
   public let displayName: String
   public let portrait: String
+  public let portraitSource: String
   public let biography: String
   public let editableBiography: String
   public let sex: TiebaSelfProfileSex
@@ -209,6 +210,7 @@ public struct TiebaSelfProfileSummary:
   public let followingCount: Int
   public let followerCount: Int
   public let postCount: Int
+  public let avatarModificationPermission: TiebaSelfProfileAvatarModificationPermission
 
   public init(
     userID: Int64,
@@ -223,12 +225,17 @@ public struct TiebaSelfProfileSummary:
     birthday: TiebaSelfProfileBirthday? = nil,
     isNicknameEditing: Bool = false,
     editingNickname: String? = nil,
-    editableBiography: String? = nil
+    editableBiography: String? = nil,
+    portraitSource: String? = nil,
+    avatarModificationPermission: TiebaSelfProfileAvatarModificationPermission = .denied(
+      message: ""
+    )
   ) {
     self.userID = userID
     self.username = username
     self.displayName = displayName
     self.portrait = portrait
+    self.portraitSource = portraitSource ?? portrait
     self.biography = biography
     self.editableBiography = editableBiography ?? biography
     self.sex = sex
@@ -238,6 +245,7 @@ public struct TiebaSelfProfileSummary:
     self.followingCount = followingCount
     self.followerCount = followerCount
     self.postCount = postCount
+    self.avatarModificationPermission = avatarModificationPermission
   }
 
   public var preferredName: String {

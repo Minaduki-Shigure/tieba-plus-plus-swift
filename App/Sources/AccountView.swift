@@ -151,7 +151,9 @@ struct AccountView: View {
     }
     .onDisappear {
       isPresented = false
-      profileSummaryViewModel.cancel()
+      // A navigation push also makes this root disappear. Keep the verified
+      // lease so an editor result can be published after its own readback.
+      profileSummaryViewModel.suspend()
       onVisibilityChanged(false)
     }
     .sheet(isPresented: $showsLogin) {
@@ -346,7 +348,14 @@ struct AccountView: View {
                     vault: vault
                   ) { savedProfile in
                     guard savedProfile.userID == activeAccount.id else { return }
-                    profileSummaryViewModel.reload()
+                    Task { @MainActor in
+                      let published = await profileSummaryViewModel.publishVerifiedSummary(
+                        savedProfile
+                      )
+                      if !published {
+                        profileSummaryViewModel.reload()
+                      }
+                    }
                   }
                 } label: {
                   Label("编辑个人资料", systemImage: "square.and.pencil")

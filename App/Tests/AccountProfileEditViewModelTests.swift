@@ -642,6 +642,135 @@ final class AccountProfileEditViewModelTests: XCTestCase {
     )
   }
 
+  func testAvatarPermissionIsIndependentFromTextEditRestrictions() async {
+    let restricted = profile(
+      userID: 7,
+      birthday: nil,
+      isNicknameEditing: true,
+      editingNickname: "审核中的昵称",
+      canModifyAvatar: true
+    )
+    let viewModel = AccountProfileEditViewModel(
+      expectedUserID: 7,
+      service: AccountProfileEditServiceSpy(readScripts: [.value(restricted)]),
+      vault: AccountProfileEditVaultSpy(session: session(userID: 7, revision: uuid(24)))
+    )
+
+    await viewModel.loadIfNeeded()
+
+    XCTAssertFalse(viewModel.isEditingEnabled)
+    XCTAssertFalse(viewModel.canSave)
+    XCTAssertTrue(viewModel.canUploadAvatar)
+    XCTAssertNil(viewModel.avatarStatusMessage)
+  }
+
+  func testAvatarUploadPreservesDirtyTextDraftAndPublishesDisposition() async throws {
+    let active = session(userID: 7, revision: uuid(25))
+    let baseline = profile(userID: 7, canModifyAvatar: true)
+    let refreshed = profile(
+      userID: 7,
+      displayName: "服务端的新昵称",
+      canModifyAvatar: true
+    )
+    let expectedResult = AccountProfileAvatarUploadResult(
+      profile: refreshed,
+      disposition: .acceptedPendingReview(message: "头像正在审核")
+    )
+    let service = AccountProfileEditServiceSpy(
+      readScripts: [.value(baseline)],
+      avatarScripts: [.value(expectedResult)]
+    )
+    let viewModel = AccountProfileEditViewModel(
+      expectedUserID: 7,
+      service: service,
+      vault: AccountProfileEditVaultSpy(session: active)
+    )
+    await viewModel.loadIfNeeded()
+    viewModel.setBiography("尚未保存的简介")
+    let upload = try XCTUnwrap(avatarUpload(26))
+
+    let result = await viewModel.uploadAvatar(upload)
+
+    XCTAssertEqual(result?.profile, refreshed)
+    XCTAssertEqual(result?.disposition, expectedResult.disposition)
+    XCTAssertEqual(viewModel.summary, refreshed)
+    XCTAssertEqual(viewModel.draft.biography, "尚未保存的简介")
+    XCTAssertEqual(viewModel.draft.displayName, baseline.displayName)
+    XCTAssertTrue(viewModel.hasUnsavedChanges)
+    XCTAssertEqual(viewModel.avatarState, .acceptedPendingReview("头像正在审核"))
+    XCTAssertEqual(viewModel.avatarStatusMessage, "头像正在审核")
+    let requests = await service.avatarRequestsSnapshot()
+    XCTAssertEqual(
+      requests,
+      [
+        AccountProfileAvatarRequest(
+          userID: 7,
+          revision: uuid(25),
+          uploadID: upload.uploadID,
+          byteCount: upload.jpegData.count,
+          pixelSize: upload.pixelSize
+        )
+      ]
+    )
+  }
+
+  func testAvatarUploadBeforeDispatchRejectsChangedLease() async throws {
+    let original = session(userID: 7, revision: uuid(27))
+    let vault = AccountProfileEditVaultSpy(session: original)
+    let service = AccountProfileEditServiceSpy(
+      readScripts: [.value(profile(userID: 7, canModifyAvatar: true))]
+    )
+    let viewModel = AccountProfileEditViewModel(
+      expectedUserID: 7,
+      service: service,
+      vault: vault
+    )
+    await viewModel.loadIfNeeded()
+    await vault.replaceActive(with: session(userID: 7, revision: uuid(28)))
+
+    let result = await viewModel.uploadAvatar(try XCTUnwrap(avatarUpload(29)))
+
+    XCTAssertNil(result)
+    XCTAssertEqual(viewModel.state, .idle)
+    XCTAssertNil(viewModel.summary)
+    let requests = await service.avatarRequestsSnapshot()
+    XCTAssertTrue(requests.isEmpty)
+  }
+
+  func testChangedLeaseDiscardsSuspendedAvatarResult() async throws {
+    let original = session(userID: 7, revision: uuid(30))
+    let baseline = profile(userID: 7, canModifyAvatar: true)
+    let confirmed = AccountProfileAvatarUploadResult(
+      profile: profile(userID: 7, canModifyAvatar: true),
+      disposition: .confirmed
+    )
+    let vault = AccountProfileEditVaultSpy(session: original)
+    let service = AccountProfileEditServiceSpy(
+      readScripts: [.value(baseline)],
+      avatarScripts: [.suspended(id: 4, value: confirmed)]
+    )
+    let viewModel = AccountProfileEditViewModel(
+      expectedUserID: 7,
+      service: service,
+      vault: vault
+    )
+    await viewModel.loadIfNeeded()
+
+    let task = Task { await viewModel.uploadAvatar(try! XCTUnwrap(avatarUpload(31))) }
+    try await waitForAccountProfileEditTest { await service.suspendedAvatarCount() == 1 }
+    XCTAssertTrue(viewModel.isUploadingAvatar)
+    XCTAssertFalse(viewModel.canSave)
+    XCTAssertFalse(viewModel.requestClose())
+    await vault.replaceActive(with: session(userID: 8, revision: uuid(32)))
+    await service.releaseAvatar(id: 4)
+    let result = await task.value
+
+    XCTAssertNil(result)
+    XCTAssertEqual(viewModel.state, .idle)
+    XCTAssertEqual(viewModel.avatarState, .idle)
+    XCTAssertNil(viewModel.summary)
+  }
+
   private func session(userID: Int64, revision: UUID) -> StoredAccountSession {
     StoredAccountSession(
       id: userID,
@@ -667,7 +796,9 @@ final class AccountProfileEditViewModelTests: XCTestCase {
       showsConstellationOnly: true
     ),
     isNicknameEditing: Bool = false,
-    editingNickname: String = ""
+    editingNickname: String = "",
+    canModifyAvatar: Bool = false,
+    avatarModificationDescription: String = ""
   ) -> AccountProfileSummary {
     AccountProfileSummary(
       userID: userID,
@@ -682,7 +813,17 @@ final class AccountProfileEditViewModelTests: XCTestCase {
       sex: sex,
       birthday: birthday,
       isNicknameEditing: isNicknameEditing,
-      editingNickname: editingNickname
+      editingNickname: editingNickname,
+      canModifyAvatar: canModifyAvatar,
+      avatarModificationDescription: avatarModificationDescription
+    )
+  }
+
+  private func avatarUpload(_ value: UInt8) -> AccountProfileAvatarUpload? {
+    AccountProfileAvatarUpload(
+      uploadID: uuid(value),
+      jpegData: Data([0xFF, 0xD8, value, 0xFF, 0xD9]),
+      pixelSize: 960
     )
   }
 
@@ -702,10 +843,24 @@ private struct AccountProfileEditSaveRequest: Equatable, Sendable {
   let submission: AccountProfileEditSubmission
 }
 
+private struct AccountProfileAvatarRequest: Equatable, Sendable {
+  let userID: Int64
+  let revision: UUID
+  let uploadID: UUID
+  let byteCount: Int
+  let pixelSize: Int
+}
+
 private enum AccountProfileEditScript: Sendable {
   case value(AccountProfileSummary)
   case failure(String)
   case suspended(id: Int, value: AccountProfileSummary)
+}
+
+private enum AccountProfileAvatarScript: Sendable {
+  case value(AccountProfileAvatarUploadResult)
+  case failure(String)
+  case suspended(id: Int, value: AccountProfileAvatarUploadResult)
 }
 
 private struct AccountProfileEditTestError: LocalizedError, Sendable {
@@ -716,19 +871,30 @@ private struct AccountProfileEditTestError: LocalizedError, Sendable {
 private actor AccountProfileEditServiceSpy: AccountService {
   private var readScripts: [AccountProfileEditScript]
   private var saveScripts: [AccountProfileEditScript]
+  private var avatarScripts: [AccountProfileAvatarScript]
   private var readRequests: [AccountProfileEditRequest] = []
   private var saveRequests: [AccountProfileEditSaveRequest] = []
+  private var avatarRequests: [AccountProfileAvatarRequest] = []
   private var suspendedReads:
     [Int: (CheckedContinuation<AccountProfileSummary, Never>, AccountProfileSummary)] = [:]
   private var suspendedSaves:
     [Int: (CheckedContinuation<AccountProfileSummary, Never>, AccountProfileSummary)] = [:]
+  private var suspendedAvatars:
+    [
+      Int: (
+        CheckedContinuation<AccountProfileAvatarUploadResult, Never>,
+        AccountProfileAvatarUploadResult
+      )
+    ] = [:]
 
   init(
     readScripts: [AccountProfileEditScript],
-    saveScripts: [AccountProfileEditScript] = []
+    saveScripts: [AccountProfileEditScript] = [],
+    avatarScripts: [AccountProfileAvatarScript] = []
   ) {
     self.readScripts = readScripts
     self.saveScripts = saveScripts
+    self.avatarScripts = avatarScripts
   }
 
   func selfProfile(session: StoredAccountSession) async throws -> AccountProfileSummary {
@@ -774,6 +940,33 @@ private actor AccountProfileEditServiceSpy: AccountService {
     }
   }
 
+  func uploadSelfProfileAvatar(
+    session: StoredAccountSession,
+    upload: AccountProfileAvatarUpload
+  ) async throws -> AccountProfileAvatarUploadResult {
+    avatarRequests.append(
+      AccountProfileAvatarRequest(
+        userID: session.id,
+        revision: session.sessionRevision,
+        uploadID: upload.uploadID,
+        byteCount: upload.jpegData.count,
+        pixelSize: upload.pixelSize
+      )
+    )
+    guard !avatarScripts.isEmpty else {
+      throw AccountProfileEditTestError(message: "Missing avatar script")
+    }
+    let script = avatarScripts.removeFirst()
+    switch script {
+    case .value(let value):
+      return value
+    case .failure(let message):
+      throw AccountProfileEditTestError(message: message)
+    case .suspended(let id, let value):
+      return await withCheckedContinuation { suspendedAvatars[id] = ($0, value) }
+    }
+  }
+
   func releaseRead(id: Int) {
     guard let (continuation, value) = suspendedReads.removeValue(forKey: id) else { return }
     continuation.resume(returning: value)
@@ -784,10 +977,17 @@ private actor AccountProfileEditServiceSpy: AccountService {
     continuation.resume(returning: value)
   }
 
+  func releaseAvatar(id: Int) {
+    guard let (continuation, value) = suspendedAvatars.removeValue(forKey: id) else { return }
+    continuation.resume(returning: value)
+  }
+
   func suspendedReadCount() -> Int { suspendedReads.count }
   func suspendedSaveCount() -> Int { suspendedSaves.count }
+  func suspendedAvatarCount() -> Int { suspendedAvatars.count }
   func readRequestsSnapshot() -> [AccountProfileEditRequest] { readRequests }
   func saveRequestsSnapshot() -> [AccountProfileEditSaveRequest] { saveRequests }
+  func avatarRequestsSnapshot() -> [AccountProfileAvatarRequest] { avatarRequests }
 
   func validate(credential: AccountCredentials) async throws -> ValidatedAccount {
     throw AccountProfileEditTestError(message: "Unexpected validation")

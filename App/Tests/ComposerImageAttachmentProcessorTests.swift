@@ -53,6 +53,34 @@ final class ComposerImageAttachmentProcessorTests: XCTestCase {
     XCTAssertLessThanOrEqual(result.pixelHeight, 820)
   }
 
+  func testCustomMaximumByteCountIsEnforced() throws {
+    let source = try imageData(type: .png, width: 1_080, height: 1_080)
+    let maximumByteCount: Int64 = 256 * 1_024
+
+    let result = try processor.process(
+      data: source,
+      quality: .standard,
+      maximumByteCount: maximumByteCount
+    )
+
+    XCTAssertLessThanOrEqual(Int64(result.data.count), maximumByteCount)
+    XCTAssertEqual(result.encoding, .jpeg)
+  }
+
+  func testCustomMaximumByteCountCannotWeakenQualityPolicy() throws {
+    let source = try imageData(type: .png, width: 32, height: 32)
+
+    XCTAssertThrowsError(
+      try processor.process(
+        data: source,
+        quality: .standard,
+        maximumByteCount: ComposerImageAttachmentQuality.standard.maximumByteCount + 1
+      )
+    ) { error in
+      XCTAssertEqual(error as? ComposerImageProcessingError, .encodedImageTooLarge)
+    }
+  }
+
   func testProcessingAppliesOrientationAndDoesNotRetainOrientationMetadata() throws {
     let source = try imageData(
       type: .jpeg,

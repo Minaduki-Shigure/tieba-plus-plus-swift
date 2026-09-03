@@ -174,7 +174,22 @@ struct ComposerImageAttachmentProcessor: Sendable {
     data: Data,
     quality: ComposerImageAttachmentQuality
   ) throws -> ComposerProcessedImage {
+    try process(
+      data: data,
+      quality: quality,
+      maximumByteCount: quality.maximumByteCount
+    )
+  }
+
+  func process(
+    data: Data,
+    quality: ComposerImageAttachmentQuality,
+    maximumByteCount: Int64
+  ) throws -> ComposerProcessedImage {
     try Task.checkCancellation()
+    guard maximumByteCount > 0, maximumByteCount <= quality.maximumByteCount else {
+      throw ComposerImageProcessingError.encodedImageTooLarge
+    }
     guard !data.isEmpty else { throw ComposerImageProcessingError.invalidSource }
     guard Int64(data.count) <= ComposerImageProcessingPolicy.maximumSourceByteCount else {
       throw ComposerImageProcessingError.sourceTooLarge
@@ -241,7 +256,11 @@ struct ComposerImageAttachmentProcessor: Sendable {
       width: decoded.width,
       height: decoded.height
     )
-    let encoded = try Self.encodeWithinLimit(controlledImage, quality: quality)
+    let encoded = try Self.encodeWithinLimit(
+      controlledImage,
+      quality: quality,
+      maximumByteCount: maximumByteCount
+    )
     let encodedInspection = try inspectEncodedJPEG(
       encoded.data,
       expectedWidth: encoded.image.width,
@@ -257,6 +276,9 @@ struct ComposerImageAttachmentProcessor: Sendable {
         quality: quality
       )
     else { throw ComposerImageProcessingError.encodedImageTooLarge }
+    guard Int64(result.data.count) <= maximumByteCount else {
+      throw ComposerImageProcessingError.encodedImageTooLarge
+    }
     return result
   }
 
@@ -608,7 +630,8 @@ struct ComposerImageAttachmentProcessor: Sendable {
 
   private static func encodeWithinLimit(
     _ sourceImage: CGImage,
-    quality: ComposerImageAttachmentQuality
+    quality: ComposerImageAttachmentQuality,
+    maximumByteCount: Int64
   ) throws -> EncodedCandidate {
     let compressionQualities: [Double] =
       switch quality {
@@ -627,7 +650,7 @@ struct ComposerImageAttachmentProcessor: Sendable {
           throw ComposerImageProcessingError.encodeFailed
         }
         smallestEncodedByteCount = min(smallestEncodedByteCount, data.count)
-        if Int64(data.count) <= quality.maximumByteCount {
+        if Int64(data.count) <= maximumByteCount {
           return EncodedCandidate(data: data, image: image)
         }
       }
@@ -639,7 +662,7 @@ struct ComposerImageAttachmentProcessor: Sendable {
         0.85,
         max(
           0.50,
-          (Double(quality.maximumByteCount) / Double(smallestEncodedByteCount)).squareRoot()
+          (Double(maximumByteCount) / Double(smallestEncodedByteCount)).squareRoot()
             * 0.90
         )
       )
