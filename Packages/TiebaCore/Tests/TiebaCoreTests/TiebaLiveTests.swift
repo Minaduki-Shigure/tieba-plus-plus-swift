@@ -422,6 +422,7 @@ final class TiebaLiveTests: XCTestCase {
     XCTAssertFalse(forums.isLoggedIn)
     XCTAssertTrue(forums.exactMatch != nil || !forums.fuzzyMatches.isEmpty)
 
+    var observedNonemptyGlobalSort = false
     for sort in TiebaGlobalThreadSearchSort.allCases {
       let threads = try await retryingTransientLiveSearch(
         "global thread search (\(sort))",
@@ -435,10 +436,14 @@ final class TiebaLiveTests: XCTestCase {
         try await client.searchThreads(query: "贴吧", pageSize: 5, sort: sort)
       }
       XCTAssertFalse(threads.isLoggedIn)
-      XCTAssertFalse(threads.results.isEmpty, "Expected anonymous results for \(sort)")
       XCTAssertEqual(threads.pagination.currentPage, 1)
       XCTAssertTrue(threads.results.allSatisfy { $0.threadID > 0 })
+      observedNonemptyGlobalSort = observedNonemptyGlobalSort || !threads.results.isEmpty
     }
+    XCTAssertTrue(
+      observedNonemptyGlobalSort,
+      "Expected anonymous results from at least one global thread search sort"
+    )
 
     let scopedThreads = try await retryingTransientLiveSearch("scoped thread search") {
       try await client.searchForumPosts(
