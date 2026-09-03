@@ -14,7 +14,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-currently serves `v0.65.0-alpha.10` (build 88), whose app-code snapshot includes
+currently serves `v0.65.0-alpha.11` (build 89), whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -51,7 +51,7 @@ validation item.
 This makes existing workflows persistently reachable without adding a data source
 or weighted point; iPhone and iPad interaction remain a physical-device
 validation gate.
-Published `v0.65.0-alpha.10` keeps the acknowledgement-only treatment of content-
+Published `v0.65.0-alpha.11` keeps the acknowledgement-only treatment of content-
 approval writes and adds delayed authoritative reconciliation for topics, floors, and
 nested replies. The control presents the acknowledged projection immediately, then a
 500 ms read either installs the server count or schedules one final delayed read. A
@@ -59,8 +59,11 @@ final state mismatch restores the server snapshot; unavailable reads expose retr
 instead of a falsely confirmed estimate. Account lease, store generation, and entry
 epoch checks reject stale responses, and only the approval control is held during the
 short reconciliation window so no reverse operation is submitted while Tieba's own
-pre-write read may still be stale. These changes improve the existing
-server-write and interaction credit without adding a data source or weighted point;
+pre-write read may still be stale. A possibly dispatched write whose acknowledgement
+or immediate Core readback fails now carries a typed uncertain outcome into that same
+delayed read-only path. It never resends the write, keeps the prior authoritative state
+visible while checking, and adopts only an exact-target server response. These changes
+improve the existing server-write and interaction credit without adding a data source or weighted point;
 real endpoint behavior remains a disposable-account physical-device validation gate.
 The My root now groups local favorites, history, a direct appearance menu,
 settings, and About beneath the existing account workflows. Messages exposes the
@@ -93,7 +96,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.65.0-alpha.10` app-code snapshot is at 80–82%; all experimental
+The public `v0.65.0-alpha.11` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
