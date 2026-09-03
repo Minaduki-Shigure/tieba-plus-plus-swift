@@ -4,12 +4,18 @@ import XCTest
 @testable import TiebaCore
 
 private enum TiebaLiveSearchRetryPolicy {
-  static let delays: [Duration] = [.seconds(5), .seconds(15)]
+  static let errorDelays: [Duration] = [.seconds(5), .seconds(15)]
+  static let emptyResultDelays: [Duration] = [.seconds(2), .seconds(5), .seconds(10)]
+
+  static func delay(afterTransientEmptyResult failedAttempt: Int) -> Duration? {
+    guard failedAttempt > 0, failedAttempt <= emptyResultDelays.count else { return nil }
+    return emptyResultDelays[failedAttempt - 1]
+  }
 
   static func delay(after error: Error, failedAttempt: Int) -> Duration? {
     guard
       failedAttempt > 0,
-      failedAttempt <= delays.count,
+      failedAttempt <= errorDelays.count,
       let clientError = error as? TiebaClientError,
       case .server(let code, let message) = clientError,
       code == 300_003,
@@ -18,7 +24,7 @@ private enum TiebaLiveSearchRetryPolicy {
     else {
       return nil
     }
-    return delays[failedAttempt - 1]
+    return errorDelays[failedAttempt - 1]
   }
 }
 
@@ -39,6 +45,21 @@ final class TiebaLiveTests: XCTestCase {
     )
     XCTAssertNil(
       TiebaLiveSearchRetryPolicy.delay(after: transientError, failedAttempt: 3)
+    )
+    XCTAssertEqual(
+      TiebaLiveSearchRetryPolicy.delay(afterTransientEmptyResult: 1),
+      .seconds(2)
+    )
+    XCTAssertEqual(
+      TiebaLiveSearchRetryPolicy.delay(afterTransientEmptyResult: 2),
+      .seconds(5)
+    )
+    XCTAssertEqual(
+      TiebaLiveSearchRetryPolicy.delay(afterTransientEmptyResult: 3),
+      .seconds(10)
+    )
+    XCTAssertNil(
+      TiebaLiveSearchRetryPolicy.delay(afterTransientEmptyResult: 4)
     )
     XCTAssertNil(
       TiebaLiveSearchRetryPolicy.delay(
@@ -403,9 +424,15 @@ final class TiebaLiveTests: XCTestCase {
 
     for sort in TiebaGlobalThreadSearchSort.allCases {
       let threads = try await retryingTransientLiveSearch(
-        "global thread search (\(sort))"
+        "global thread search (\(sort))",
+        retryingResult: {
+          !$0.isLoggedIn
+            && $0.pagination.currentPage == 1
+            && !$0.pagination.hasPrevious
+            && $0.results.isEmpty
+        }
       ) {
-        try await client.searchThreads(query: "swift", pageSize: 5, sort: sort)
+        try await client.searchThreads(query: "贴吧", pageSize: 5, sort: sort)
       }
       XCTAssertFalse(threads.isLoggedIn)
       XCTAssertFalse(threads.results.isEmpty, "Expected anonymous results for \(sort)")
@@ -865,12 +892,27 @@ final class TiebaLiveTests: XCTestCase {
 
   private func retryingTransientLiveSearch<Value>(
     _ operationName: String,
+    retryingResult shouldRetryResult: (Value) -> Bool = { _ in false },
     operation: () async throws -> Value
   ) async throws -> Value {
     var failedAttempt = 1
     while true {
       do {
-        return try await operation()
+        let value = try await operation()
+        guard shouldRetryResult(value) else { return value }
+        guard
+          let delay = TiebaLiveSearchRetryPolicy.delay(
+            afterTransientEmptyResult: failedAttempt
+          )
+        else {
+          return value
+        }
+        print(
+          "Retrying \(operationName) after a transient empty Tieba search response "
+            + "(failed attempt \(failedAttempt))."
+        )
+        try await Task.sleep(for: delay)
+        failedAttempt += 1
       } catch {
         guard
           let delay = TiebaLiveSearchRetryPolicy.delay(
