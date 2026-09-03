@@ -54,7 +54,7 @@ final class BrowseViewModelTests: XCTestCase {
     )
     XCTAssertEqual(
       cacheBusted.largePortraitURL?.absoluteString,
-      "https://himg.bdimg.com/sys/portraith/item/profile-portrait"
+      "https://himg.bdimg.com/sys/portraith/item/profile-portrait?t=1234567890"
     )
     XCTAssertEqual(
       plain.largePortraitURL?.absoluteString,
