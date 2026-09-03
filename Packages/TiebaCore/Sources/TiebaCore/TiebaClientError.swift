@@ -19,6 +19,7 @@ public enum TiebaClientError: Error, Sendable, Equatable {
     dispatchedTargets: [TiebaOfficialBatchCheckInTarget]
   )
   case threadAgreementWriteConflict
+  case contentAgreementOutcomeUnknown
   case threadCloudFavoriteOutcomeUnknown
   case pollOutcomeUnknown
   case userInteractionPermissionsOutcomeUnknown
@@ -74,6 +75,8 @@ extension TiebaClientError: LocalizedError {
       "The batch check-in was sent, but Tieba did not return a verifiable final result."
     case .threadAgreementWriteConflict:
       "A conflicting thread agreement operation completed; read the current state before retrying."
+    case .contentAgreementOutcomeUnknown:
+      "The content-agreement write may have been sent, but Tieba did not return a verifiable final state."
     case .threadCloudFavoriteOutcomeUnknown:
       "The cloud-favorite write was sent, but Tieba did not return a verifiable final state."
     case .pollOutcomeUnknown:

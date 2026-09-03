@@ -837,6 +837,17 @@ struct ContentAgreementPageData: Hashable, Sendable {
   let agreements: [ContentAgreementData]
 }
 
+enum ContentAgreementMutationError: LocalizedError, Equatable, Sendable {
+  case outcomeUnknown
+
+  var errorDescription: String? {
+    switch self {
+    case .outcomeUnknown:
+      "点赞请求可能已经发送，但贴吧尚未确认最终状态。请重新读取后再决定是否重试。"
+    }
+  }
+}
+
 enum OwnedContentDeletionKind: Hashable, Sendable {
   case topic
   case post

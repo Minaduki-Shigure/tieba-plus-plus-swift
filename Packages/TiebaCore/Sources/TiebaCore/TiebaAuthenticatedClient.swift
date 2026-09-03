@@ -2807,7 +2807,7 @@ public actor TiebaAuthenticatedClient {
       ), reconciled.isAgreed == isAgreed {
         return reconciled
       }
-      throw error
+      throw TiebaClientError.contentAgreementOutcomeUnknown
     }
   }
 

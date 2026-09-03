@@ -2349,6 +2349,71 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     }
   }
 
+  func testContentAgreementOutcomeUnknownMapsToTypedMutationError() async throws {
+    let target = ContentAgreementTarget(
+      kind: .post,
+      forumID: 42,
+      forumName: "swift",
+      threadID: 123,
+      objectID: 457
+    )!
+    let client = AccountClientSpy(
+      agreementMutationError: .contentAgreementOutcomeUnknown
+    )
+    let service = TiebaCoreAccountService(client: client)
+
+    do {
+      _ = try await service.setContentAgreed(
+        session: session(),
+        target: target,
+        isAgreed: true
+      )
+      XCTFail("Expected an unknown content-agreement outcome")
+    } catch let error as ContentAgreementMutationError {
+      XCTAssertEqual(error, .outcomeUnknown)
+      XCTAssertEqual(
+        error.errorDescription,
+        "点赞请求可能已经发送，但贴吧尚未确认最终状态。请重新读取后再决定是否重试。"
+      )
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+
+    let snapshot = await client.snapshot()
+    XCTAssertEqual(snapshot.agreementMutationRequests.map(\.target), [.post(postID: 457)])
+    XCTAssertEqual(snapshot.agreementMutationRequests.map(\.desiredState), [true])
+  }
+
+  func testContentAgreementOtherClientErrorsKeepGenericAccountMapping() async throws {
+    let target = ContentAgreementTarget(
+      kind: .post,
+      forumID: 42,
+      forumName: "swift",
+      threadID: 123,
+      objectID: 457
+    )!
+    let service = TiebaCoreAccountService(
+      client: AccountClientSpy(
+        agreementMutationError: .server(code: 500, message: "sensitive server detail")
+      )
+    )
+
+    do {
+      _ = try await service.setContentAgreed(
+        session: session(),
+        target: target,
+        isAgreed: true
+      )
+      XCTFail("Expected the generic client error to propagate through account mapping")
+    } catch is ContentAgreementMutationError {
+      XCTFail("Only contentAgreementOutcomeUnknown may use the typed mutation error")
+    } catch let error as BrowseError {
+      XCTAssertEqual(error.errorDescription, "账户请求失败（错误码 500）。")
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+  }
+
   func testContentAgreementCoordinatorDoesNotCoalesceSameUserAcrossSessionRevisions()
     async throws
   {
@@ -2904,6 +2969,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
   private let agreement: TiebaAgreementState?
   private let agreementPage: TiebaAgreementPage?
   private let agreementMutation: TiebaAgreementState?
+  private let agreementMutationError: TiebaClientError?
   private let suspendsMutation: Bool
   private let suspendsCheckIn: Bool
   private let suspendsThreadAgreementMutation: Bool
@@ -2959,6 +3025,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     agreement: TiebaAgreementState? = nil,
     agreementPage: TiebaAgreementPage? = nil,
     agreementMutation: TiebaAgreementState? = nil,
+    agreementMutationError: TiebaClientError? = nil,
     suspendsMutation: Bool = false,
     suspendsCheckIn: Bool = false,
     suspendsThreadAgreementMutation: Bool = false,
@@ -2985,6 +3052,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     self.agreement = agreement
     self.agreementPage = agreementPage
     self.agreementMutation = agreementMutation
+    self.agreementMutationError = agreementMutationError
     self.suspendsMutation = suspendsMutation
     self.suspendsCheckIn = suspendsCheckIn
     self.suspendsThreadAgreementMutation = suspendsThreadAgreementMutation
@@ -3412,6 +3480,7 @@ private actor AccountClientSpy: TiebaAuthenticatedAccountClient {
     if suspendsAgreementMutation, !agreementMutationIsReleased {
       await withCheckedContinuation { agreementMutationWaiters.append($0) }
     }
+    if let agreementMutationError { throw agreementMutationError }
     guard let agreementMutation else { throw AccountClientSpyError.unexpectedCall }
     return agreementMutation
   }

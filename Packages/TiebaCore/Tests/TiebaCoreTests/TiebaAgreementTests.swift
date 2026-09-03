@@ -908,7 +908,7 @@ final class TiebaAgreementTests: XCTestCase, @unchecked Sendable {
     XCTAssertEqual(paths.count, 4)
   }
 
-  func testUncertainWriteWithOldReadbackThrowsOriginalError() async throws {
+  func testUncertainWriteWithOldReadbackThrowsOutcomeUnknown() async throws {
     let transport = AgreementQueueTransport(steps: [
       .response(try targetPage(isAgreed: false).serializedData()),
       .response(try membershipResponse(userID: userID, forumID: forumID, forumName: forumName, tbs: tbs).serializedData()),
@@ -916,7 +916,7 @@ final class TiebaAgreementTests: XCTestCase, @unchecked Sendable {
       .response(try targetPage(isAgreed: false).serializedData()),
     ])
     let client = TiebaAuthenticatedClient(transport: transport)
-    await assertError(.network(code: -1_001)) {
+    await assertError(.contentAgreementOutcomeUnknown) {
       _ = try await client.setAgreementState(
         credential: credential(),
         expectedUserID: userID,
@@ -930,6 +930,33 @@ final class TiebaAgreementTests: XCTestCase, @unchecked Sendable {
     let paths = await transport.paths()
     XCTAssertEqual(paths.filter { $0 == "/c/f/pb/page" }.count, 2)
     XCTAssertEqual(paths.filter { $0 == "/c/c/agree/opAgree" }.count, 1)
+  }
+
+  func testUncertainWriteWithFailedReadbackThrowsOutcomeUnknownWithoutRetryingWrite() async throws {
+    let transport = AgreementQueueTransport(steps: [
+      .response(try targetPage(isAgreed: false).serializedData()),
+      .response(try membershipResponse(userID: userID, forumID: forumID, forumName: forumName, tbs: tbs).serializedData()),
+      .failure(.network(code: -1_001)),
+      .failure(.network(code: -1_002)),
+    ])
+    let client = TiebaAuthenticatedClient(transport: transport)
+
+    await assertError(.contentAgreementOutcomeUnknown) {
+      _ = try await client.setAgreementState(
+        credential: credential(),
+        expectedUserID: userID,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        target: .post(postID: postID),
+        isAgreed: true
+      )
+    }
+
+    let paths = await transport.paths()
+    XCTAssertEqual(paths.filter { $0 == "/c/f/pb/page" }.count, 2)
+    XCTAssertEqual(paths.filter { $0 == "/c/c/agree/opAgree" }.count, 1)
+    XCTAssertEqual(paths.count, 4)
   }
 
   func testCancellationAfterPossibleWriteUsesOneReadback() async throws {
@@ -964,7 +991,7 @@ final class TiebaAgreementTests: XCTestCase, @unchecked Sendable {
       .response(try targetPage(isAgreed: false).serializedData()),
     ])
     let client = TiebaAuthenticatedClient(transport: transport)
-    await assertError(.responseTooLarge(maximumBytes: 64 * 1_024)) {
+    await assertError(.contentAgreementOutcomeUnknown) {
       _ = try await client.setAgreementState(
         credential: credential(),
         expectedUserID: userID,
@@ -978,6 +1005,13 @@ final class TiebaAgreementTests: XCTestCase, @unchecked Sendable {
     let paths = await transport.paths()
     XCTAssertEqual(paths.filter { $0 == "/c/c/agree/opAgree" }.count, 1)
     XCTAssertEqual(paths.filter { $0 == "/c/f/pb/page" }.count, 2)
+  }
+
+  func testContentAgreementOutcomeUnknownHasActionableDescription() {
+    XCTAssertEqual(
+      TiebaClientError.contentAgreementOutcomeUnknown.errorDescription,
+      "The content-agreement write may have been sent, but Tieba did not return a verifiable final state."
+    )
   }
 
   func testDefinitiveServerWriteErrorDoesNotReadBack() async throws {

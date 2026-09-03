@@ -1759,6 +1759,8 @@ struct TiebaCoreAccountService: AccountService {
       throw CancellationError()
     } catch ContentAgreementWriteCoordinatorError.conflictingOperationSettled {
       throw BrowseError.unavailable("先前的内容点赞操作已结束，请重新读取当前状态。")
+    } catch TiebaClientError.contentAgreementOutcomeUnknown {
+      throw ContentAgreementMutationError.outcomeUnknown
     } catch let error as BrowseError {
       throw error
     } catch {
