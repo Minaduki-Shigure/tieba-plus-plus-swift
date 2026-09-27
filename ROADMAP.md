@@ -14,7 +14,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-currently serves `v0.65.0-alpha.13` (build 91), whose app-code snapshot includes
+currently serves `v0.65.0-alpha.14` (build 92), whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -22,7 +22,8 @@ settings, cloud-favorite,
 durable owner-deletion, legacy-link, guarded official-wrapper, level-progress,
 account-bound followed-forum check-in marks, bounded regular-expression
 filtering, fixed official username-management
-handoff, and exact cloud-favorite forum-identity fallback workflows.
+handoff, exact cloud-favorite forum-identity fallback workflows, and default-off
+background reply/mention count reminders awaiting physical-device validation.
 Paired profiles continue to support the nested-reply lazy-scroll container.
 The published level-progress and bounded regular-expression filtering additions
 improve existing credited areas without changing the current
@@ -94,7 +95,7 @@ acceptance pass disposable-account device validation.
 | Local data, settings, and customization | 10 | 7 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, hierarchical settings navigation, an independent default-on Explore-tab visibility preference, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, confirmation-frozen foreground check-in execution settings, a TiebaLite-compatible default image-watermark choice, reply-entry visibility, a default-on composer risk notice with an experimental reply-only system handoff attempt pending physical validation, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, Home-toolbar quick switching, a self-profile summary with editable wire fields and nickname-review state, an authenticated current-account following list with a guarded mutual filter, followed and target-user liked forums with optional validated level-up progress, account-bound followed-forum check-in marks, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 14 | Guarded nickname/sex/biography/avatar editing, forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, server-reason-bound personalized recommendation dislike feedback, three text/classic-emoticon reply targets, equivalent new-topic creation, bounded static-image new-topic/direct-topic-reply creation, owner-only topic/ordinary-floor deletion, direct inline-preview reply entry, and credential-free official reporting entry points have implementations; real profile mutation, batch-check-in, creation, deletion, poll and interaction-restriction success, broader uploaded media, unresolvable cloud rows, native reporting, and other reactions remain unavailable or unvalidated on physical devices |
-| Background unread, moderation, and administration | 5 | 0 | Current main adds opt-in iOS background count reminders with session-bound deduplication and foreground reconciliation; delivery still needs physical-device validation. Moderation and administration remain unimplemented |
+| Background unread, moderation, and administration | 5 | 0 | Published alpha.14 adds opt-in iOS background count reminders with session-bound deduplication and foreground reconciliation; delivery still needs physical-device validation. Moderation and administration remain unimplemented |
 | **Total** | **100** | **80–82** | Current full-product estimate; roughly 18–20% remains |
 
 This is a source-workflow coverage estimate, not a release-readiness or
@@ -102,7 +103,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.65.0-alpha.13` app-code snapshot is at 80–82%; all experimental
+The public `v0.65.0-alpha.14` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
@@ -631,12 +632,14 @@ the source metadata is updated to that tested IPA.
 
 ## In progress
 
-Current `main` adds TiebaLite's background reply/mention reminder workflow using
+Published `v0.65.0-alpha.14` adds TiebaLite's background reply/mention reminder workflow using
 `BGAppRefreshTask` and local system notifications. It is default-off, uses one
 existing authenticated summary request, and never loads message bodies in the
 background. The first observation per account session is silent; persisted
 per-channel counts prevent repeat reminders, and validated foreground summaries
-reconcile the baseline. Account changes, credential rotation, cancellation, and
+reconcile the baseline. Request-order tokens reject delayed older observations;
+the next background request is registered before the current task completes.
+Account changes, credential rotation, cancellation, and
 late completion are isolated. The Keychain remains accessible only while unlocked;
 no credential is copied to preferences. Background timing and hosted execution
 are platform constraints. Device checks must cover permission denial/revocation,
