@@ -90,11 +90,17 @@ final class SystemInboxNotificationDelivery: InboxNotificationDelivering {
     content.sound = .default
     content.badge = NSNumber(value: totalCount)
     content.userInfo = ["kind": kind.rawValue, "sessionRevision": sessionRevision.uuidString]
-    try await center.add(UNNotificationRequest(
+    let request = UNNotificationRequest(
       identifier: InboxNotificationRoute.notificationIdentifier(for: kind),
       content: content,
       trigger: nil
-    ))
+    )
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+      center.add(request) { error in
+        if let error { continuation.resume(throwing: error) }
+        else { continuation.resume() }
+      }
+    }
   }
 
   func clear(kind: InboxKind) {
@@ -152,9 +158,13 @@ final class InboxNotificationRuntime: NSObject, ObservableObject {
     vault: (any AccountVault)? = nil,
     scheduling: InboxNotificationScheduling? = nil,
     requestAuthorization: @escaping @MainActor () async throws -> Bool = {
-      try await UNUserNotificationCenter.current().requestAuthorization(
-        options: [.alert, .sound, .badge]
-      )
+      try await withCheckedThrowingContinuation { continuation in
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) {
+          granted, error in
+          if let error { continuation.resume(throwing: error) }
+          else { continuation.resume(returning: granted) }
+        }
+      }
     }
   ) {
     self.defaults = defaults
