@@ -16,7 +16,7 @@ struct InboxNotificationSettingsView: View {
         Text("默认关闭。开启后检查未读数量，提醒只显示数量，不包含消息正文。")
       }
 
-      Section("当前状态") {
+      Section {
         Text(runtime.statusMessage)
           .foregroundStyle(.secondary)
           .accessibilityIdentifier("settings-inbox-notifications-status")
@@ -30,6 +30,8 @@ struct InboxNotificationSettingsView: View {
           Label("打开系统设置", systemImage: "gear")
         }
         .accessibilityIdentifier("settings-inbox-notifications-system-settings")
+      } header: {
+        Text("当前状态")
       } footer: {
         Text("可在系统设置中调整通知权限和后台 App 刷新。")
       }

@@ -63,8 +63,16 @@ final class SystemInboxNotificationDelivery: InboxNotificationDelivering {
   private let center = UNUserNotificationCenter.current()
 
   func isAuthorized() async -> Bool {
-    let status = await center.notificationSettings().authorizationStatus
-    return status == .authorized || status == .provisional || status == .ephemeral
+    // UNNotificationSettings is not Sendable in the deployment SDK. Reduce it
+    // inside its callback so only a Bool crosses back to the main actor.
+    await withCheckedContinuation { continuation in
+      center.getNotificationSettings { settings in
+        let status = settings.authorizationStatus
+        continuation.resume(
+          returning: status == .authorized || status == .provisional || status == .ephemeral
+        )
+      }
+    }
   }
 
   func deliver(
