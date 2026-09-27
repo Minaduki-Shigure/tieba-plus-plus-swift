@@ -15,7 +15,7 @@ final class InboxUnreadSummaryViewModelTests: XCTestCase {
     var received: [(InboxUnreadSummary, UUID)] = []
     let model = InboxUnreadSummaryViewModel(
       service: service, vault: vault,
-      onValidatedSummary: { received.append(($0, $1)) }
+      onValidatedSummary: { summary, revision, _ in received.append((summary, revision)) }
     )
     model.sceneActivityDidChange(isActive: true)
     await model.refresh()
@@ -24,6 +24,107 @@ final class InboxUnreadSummaryViewModelTests: XCTestCase {
     XCTAssertEqual(received.count, 1)
     XCTAssertEqual(received.first?.0, expected)
     XCTAssertEqual(received.first?.1, active.sessionRevision)
+  }
+
+  func testRequestStartTokenKeepsNewerReaderSummaryWhenOlderResponseArrivesLast() async throws {
+    let active = session(userID: 7, revision: uuid(1))
+    let stale = summary(userID: 7, replies: 9, mentions: 9)
+    let afterRead = summary(userID: 7, replies: 0, mentions: 0)
+    let vault = InboxUnreadSummaryVaultSpy(session: active)
+    let service = InboxUnreadSummaryServiceSpy(scripts: [
+      active.sessionRevision: [.suspended(id: 1, value: stale), .value(afterRead)]
+    ])
+    let order = InboxNotificationObservationOrder()
+    var issued: [UUID] = []
+    var receivedTokens: [UUID] = []
+    var accepted: [InboxUnreadSummary] = []
+    func makeModel() -> InboxUnreadSummaryViewModel {
+      InboxUnreadSummaryViewModel(
+        service: service, vault: vault,
+        onSummaryReadStarted: {
+          let token = order.begin()
+          issued.append(token)
+          return token
+        },
+        onValidatedSummary: { summary, _, token in
+          guard let token else { return XCTFail("Missing request-start token") }
+          receivedTokens.append(token)
+          if order.accepts(token) { accepted.append(summary) }
+        }
+      )
+    }
+    let earlierReader = makeModel()
+    earlierReader.sceneActivityDidChange(isActive: true)
+    let earlierRefresh = Task { await earlierReader.refresh() }
+    try await waitForInboxUnreadSummaryTest { await service.requestCount() == 1 }
+    XCTAssertEqual(issued.count, 1, "The token must exist while the server read is suspended")
+
+    let newerReader = makeModel()
+    newerReader.sceneActivityDidChange(isActive: true)
+    await newerReader.refresh()
+    XCTAssertEqual(accepted, [afterRead])
+    await service.release(id: 1)
+    await earlierRefresh.value
+
+    XCTAssertEqual(issued.count, 2)
+    XCTAssertEqual(receivedTokens, Array(issued.reversed()))
+    XCTAssertEqual(accepted, [afterRead], "A delayed old response must not restore the unread badge")
+  }
+
+  func testFailedNewerReadDoesNotMakeOlderSuccessCurrentAgain() async throws {
+    let active = session(userID: 7, revision: uuid(1))
+    let stale = summary(userID: 7, replies: 9, mentions: 9)
+    let vault = InboxUnreadSummaryVaultSpy(session: active)
+    let service = InboxUnreadSummaryServiceSpy(scripts: [
+      active.sessionRevision: [.suspended(id: 1, value: stale), .failure("unavailable")]
+    ])
+    let order = InboxNotificationObservationOrder()
+    var accepted: [InboxUnreadSummary] = []
+    func makeModel() -> InboxUnreadSummaryViewModel {
+      InboxUnreadSummaryViewModel(
+        service: service, vault: vault,
+        onSummaryReadStarted: { order.begin() },
+        onValidatedSummary: { summary, _, token in
+          if let token, order.accepts(token) { accepted.append(summary) }
+        }
+      )
+    }
+    let earlierReader = makeModel()
+    earlierReader.sceneActivityDidChange(isActive: true)
+    let earlierRefresh = Task { await earlierReader.refresh() }
+    try await waitForInboxUnreadSummaryTest { await service.requestCount() == 1 }
+    let newerReader = makeModel()
+    newerReader.sceneActivityDidChange(isActive: true)
+    await newerReader.refresh()
+    XCTAssertEqual(newerReader.state, .failed("unavailable"))
+
+    await service.release(id: 1)
+    await earlierRefresh.value
+    XCTAssertTrue(accepted.isEmpty, "An unavailable current read must preserve the prior baseline")
+  }
+
+  func testInvalidatingNotificationObservationsDiscardsPendingServerResult() async throws {
+    let active = session(userID: 7, revision: uuid(1))
+    let vault = InboxUnreadSummaryVaultSpy(session: active)
+    let service = InboxUnreadSummaryServiceSpy(scripts: [
+      active.sessionRevision: [.suspended(id: 1, value: summary(userID: 7, replies: 9, mentions: 9))]
+    ])
+    let order = InboxNotificationObservationOrder()
+    var accepted: [InboxUnreadSummary] = []
+    let model = InboxUnreadSummaryViewModel(
+      service: service, vault: vault,
+      onSummaryReadStarted: { order.begin() },
+      onValidatedSummary: { summary, _, token in
+        if let token, order.accepts(token) { accepted.append(summary) }
+      }
+    )
+    model.sceneActivityDidChange(isActive: true)
+    let refresh = Task { await model.refresh() }
+    try await waitForInboxUnreadSummaryTest { await service.requestCount() == 1 }
+    order.invalidate()
+    await service.release(id: 1)
+    await refresh.value
+    XCTAssertTrue(accepted.isEmpty)
   }
 
   func testLoadPublishesValidatedSummaryForLegacySessionWithoutSTOKEN() async {

@@ -122,6 +122,9 @@ final class InboxNotificationRuntime: NSObject, ObservableObject {
 
   private let defaults: UserDefaults
   private let delivery: any InboxNotificationDelivering
+  private let requestAuthorization: @MainActor () async throws -> Bool
+  private let scheduling: InboxNotificationScheduling
+  private let observationOrder = InboxNotificationObservationOrder()
   private var coordinator: InboxNotificationCoordinator?
   private var vault: (any AccountVault)?
   private var service: (any AccountService)?
@@ -130,20 +133,43 @@ final class InboxNotificationRuntime: NSObject, ObservableObject {
   private var registered = false
   private var registrationAttempted = false
   private var preferenceEpoch = 0
+  private var statusEpoch = 0
   private var routeEpoch = 0
-  private var scheduleTask: Task<Void, Never>?
   private var baselineTask: Task<Bool, Never>?
   private var inboxReconciliationTask: Task<Void, Never>?
 
   init(
     defaults: UserDefaults,
     delivery: any InboxNotificationDelivering,
-    vault: (any AccountVault)? = nil
+    vault: (any AccountVault)? = nil,
+    scheduling: InboxNotificationScheduling? = nil,
+    requestAuthorization: @escaping @MainActor () async throws -> Bool = {
+      try await UNUserNotificationCenter.current().requestAuthorization(
+        options: [.alert, .sound, .badge]
+      )
+    }
   ) {
     self.defaults = defaults
     self.delivery = delivery
     self.vault = vault
+    self.requestAuthorization = requestAuthorization
     isEnabled = defaults.bool(forKey: Self.enabledKey)
+    self.scheduling = scheduling ?? InboxNotificationScheduling(
+      enabled: defaults.bool(forKey: Self.enabledKey),
+      minimumInterval: Self.minimumRefreshInterval,
+      isBackgroundRefreshAvailable: {
+        UIApplication.shared.backgroundRefreshStatus == .available
+      },
+      isAuthorized: { await delivery.isAuthorized() },
+      submit: { date in
+        let request = BGAppRefreshTaskRequest(identifier: Self.taskIdentifier)
+        request.earliestBeginDate = date
+        try BGTaskScheduler.shared.submit(request)
+      },
+      cancel: {
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.taskIdentifier)
+      }
+    )
     super.init()
   }
 
@@ -161,8 +187,9 @@ final class InboxNotificationRuntime: NSObject, ObservableObject {
     coordinator.setEnabled(isEnabled)
     if !isEnabled { coordinator.accountSessionDidChange() }
     accountObservation = NotificationCenter.default.publisher(for: .accountSessionDidChange)
-      .receive(on: DispatchQueue.main)
       .sink { [weak self] _ in
+        // All account changes are posted by the MainActor AccountChangeNotifications.
+        // Invalidate before postSessionChange returns, without a queued main-thread hop.
         MainActor.assumeIsolated { self?.accountSessionDidChange() }
       }
   }
@@ -190,39 +217,51 @@ final class InboxNotificationRuntime: NSObject, ObservableObject {
   }
 
   func setEnabled(_ enabled: Bool) async {
-    guard !isChangingPreference, enabled != isEnabled else { return }
+    // Turning off must also revoke a pending authorization or initial count read.
+    if enabled {
+      guard !isChangingPreference, !isEnabled else { return }
+    } else {
+      guard isChangingPreference || isEnabled else { return }
+    }
     preferenceEpoch &+= 1
     let epoch = preferenceEpoch
     if !enabled {
+      isChangingPreference = false
       isEnabled = false
       defaults.set(false, forKey: Self.enabledKey)
       pendingRoute = nil
       routeEpoch &+= 1
       activeRun?.cancel()
       baselineTask?.cancel()
+      baselineTask = nil
       inboxReconciliationTask?.cancel()
-      scheduleTask?.cancel()
+      observationOrder.invalidate()
+      scheduling.setEnabled(false)
       coordinator?.setEnabled(false)
       delivery.clearAll()
-      BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.taskIdentifier)
       await refreshStatus()
       return
     }
 
     isChangingPreference = true
-    defer { isChangingPreference = false }
+    defer {
+      if epoch == preferenceEpoch { isChangingPreference = false }
+    }
     do {
-      let granted = try await UNUserNotificationCenter.current().requestAuthorization(
-        options: [.alert, .sound, .badge]
-      )
+      let granted = try await requestAuthorization()
       guard epoch == preferenceEpoch, !Task.isCancelled else { return }
+      // Authorization is the only noninterruptible UI phase. The following count
+      // request may be slow and must not prevent the user from switching off.
+      isChangingPreference = false
       guard granted else {
         statusMessage = "通知权限未开启，可在系统设置中允许通知后再开启。"
         return
       }
       isEnabled = true
       defaults.set(true, forKey: Self.enabledKey)
+      scheduling.setEnabled(true)
       coordinator?.setEnabled(true)
+      if registered { recordSchedulingResult(scheduling.authorizationDidChange(true)) }
       // Establish a silent initial baseline while the user has unlocked the app.
       if let coordinator {
         let task = Task { await coordinator.runRefresh() }
@@ -232,28 +271,30 @@ final class InboxNotificationRuntime: NSObject, ObservableObject {
         } onCancel: {
           task.cancel()
         }
-        baselineTask = nil
+        // An older enable call must not erase a newer enable call's task handle.
+        if epoch == preferenceEpoch { baselineTask = nil }
       }
       guard epoch == preferenceEpoch else { return }
       await refreshStatus()
-      schedule()
     } catch {
-      statusMessage = "无法申请通知权限，请稍后重试。"
+      if epoch == preferenceEpoch { statusMessage = "无法申请通知权限，请稍后重试。" }
     }
   }
 
   func refreshStatus() async {
     let epoch = preferenceEpoch
+    statusEpoch &+= 1
+    let requestStatusEpoch = statusEpoch
     guard isEnabled else {
       statusMessage = "未开启消息提醒。"
       return
     }
     let authorized = await delivery.isAuthorized()
-    guard epoch == preferenceEpoch, isEnabled else { return }
+    guard epoch == preferenceEpoch, requestStatusEpoch == statusEpoch, isEnabled else { return }
     guard authorized else {
       activeRun?.cancel()
       delivery.clearAll()
-      BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.taskIdentifier)
+      scheduling.authorizationDidChange(false)
       statusMessage = "系统通知权限未开启，请前往系统设置允许通知。"
       return
     }
@@ -266,6 +307,7 @@ final class InboxNotificationRuntime: NSObject, ObservableObject {
       return
     }
     statusMessage = "已开启。仅检查当前账户的回复和提及，检查时间由 iOS 安排。"
+    recordSchedulingResult(scheduling.authorizationDidChange(true))
   }
 
   func sceneDidBecomeActive() {
@@ -280,13 +322,21 @@ final class InboxNotificationRuntime: NSObject, ObservableObject {
       coordinator?.cancelRefresh()
     }
     inboxReconciliationTask?.cancel()
-    schedule()
+    if registered { recordSchedulingResult(scheduling.scheduleUsingCachedAuthorization()) }
   }
 
-  func observeForeground(summary: InboxUnreadSummary, sessionRevision: UUID) {
-    guard isEnabled, let coordinator else { return }
+  func beginSummaryObservation() -> UUID? {
+    guard isEnabled else { return nil }
+    return observationOrder.begin()
+  }
+
+  func observeForeground(summary: InboxUnreadSummary, sessionRevision: UUID, token: UUID?) {
+    guard isEnabled, let coordinator, let token, observationOrder.accepts(token) else { return }
     Task {
-      await coordinator.observeForeground(summary: summary, sessionRevision: sessionRevision)
+      await coordinator.observeForeground(
+        summary: summary, sessionRevision: sessionRevision,
+        isCurrentObservation: { self.observationOrder.accepts(token) }
+      )
     }
   }
 
@@ -296,6 +346,7 @@ final class InboxNotificationRuntime: NSObject, ObservableObject {
     guard isEnabled, let coordinator, let service, let vault else { return }
     inboxReconciliationTask?.cancel()
     let epoch = preferenceEpoch
+    let observation = observationOrder.begin()
     inboxReconciliationTask = Task { [weak self] in
       do {
         guard let self, let session = try await vault.activeSession(),
@@ -305,7 +356,11 @@ final class InboxNotificationRuntime: NSObject, ObservableObject {
         let summary = try await service.inboxUnreadSummary(session: session)
         try Task.checkCancellation()
         guard preferenceEpoch == epoch, isEnabled else { return }
-        await coordinator.observeForeground(summary: summary, sessionRevision: sessionRevision)
+        guard observationOrder.accepts(observation) else { return }
+        await coordinator.observeForeground(
+          summary: summary, sessionRevision: sessionRevision,
+          isCurrentObservation: { self.observationOrder.accepts(observation) }
+        )
       } catch {
         // A failed count read never alters the visible inbox or invents a zero badge.
       }
@@ -342,41 +397,28 @@ final class InboxNotificationRuntime: NSObject, ObservableObject {
 
   func accountSessionDidChange() {
     preferenceEpoch &+= 1
+    isChangingPreference = false
     routeEpoch &+= 1
     pendingRoute = nil
     activeRun?.cancel()
     baselineTask?.cancel()
+    baselineTask = nil
     inboxReconciliationTask?.cancel()
+    observationOrder.invalidate()
+    scheduling.invalidate()
     coordinator?.accountSessionDidChange()
     delivery.clearAll()
   }
 
-  private func schedule() {
-    scheduleTask?.cancel()
-    guard isEnabled, registered,
-      UIApplication.shared.backgroundRefreshStatus == .available
-    else { return }
-    let epoch = preferenceEpoch
-    scheduleTask = Task { [weak self] in
-      guard let self else { return }
-      let authorized = await delivery.isAuthorized()
-      guard !Task.isCancelled, epoch == preferenceEpoch, isEnabled else { return }
-      // A denied permission must not create a repeating background wakeup.
-      BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.taskIdentifier)
-      guard authorized, UIApplication.shared.backgroundRefreshStatus == .available else { return }
-      let request = BGAppRefreshTaskRequest(identifier: Self.taskIdentifier)
-      request.earliestBeginDate = Date(timeIntervalSinceNow: Self.minimumRefreshInterval)
-      do {
-        try BGTaskScheduler.shared.submit(request)
-      } catch {
-        statusMessage = "系统暂未接受后台检查，请稍后打开 App 再试。"
-      }
+  private func recordSchedulingResult(_ result: InboxNotificationScheduling.Result) {
+    if result == .failed {
+      statusMessage = "系统暂未接受后台检查，请稍后打开 App 再试。"
     }
   }
 
   private func handle(_ task: BGAppRefreshTask) {
-    schedule()
     guard isEnabled, let coordinator, activeRun == nil else {
+      if registered { recordSchedulingResult(scheduling.scheduleUsingCachedAuthorization()) }
       task.setTaskCompleted(success: false)
       return
     }
@@ -392,9 +434,14 @@ final class InboxNotificationRuntime: NSObject, ObservableObject {
       Task { @MainActor in run?.cancel() }
     }
     run.work = Task { [weak self, run] in
+      guard let self else { run.finish(success: false); return }
+      // Keep the OS task alive through next-request registration, even if the
+      // count read later fails immediately (for example, a locked Keychain).
+      recordSchedulingResult(await scheduling.refreshAuthorizationAndSchedule())
+      guard !Task.isCancelled else { run.finish(success: false); return }
       let success = await coordinator.runRefresh()
       run.finish(success: success && !Task.isCancelled)
-      if self?.activeRun === run { self?.activeRun = nil }
+      if activeRun === run { activeRun = nil }
     }
   }
 }

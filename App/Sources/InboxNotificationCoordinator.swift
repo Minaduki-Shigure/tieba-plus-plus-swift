@@ -223,8 +223,12 @@ final class InboxNotificationCoordinator {
 
   /// The foreground model supplies its already verified summary and credential revision.
   /// Revalidate attribution after the actor hop before replacing the persistent baseline.
-  func observeForeground(summary: InboxUnreadSummary, sessionRevision: UUID) async {
-    guard isEnabled, !Task.isCancelled else { return }
+  func observeForeground(
+    summary: InboxUnreadSummary,
+    sessionRevision: UUID,
+    isCurrentObservation: @MainActor () -> Bool = { true }
+  ) async {
+    guard isEnabled, !Task.isCancelled, isCurrentObservation() else { return }
     // Assign ordering before the vault await: only the newest foreground observation can
     // commit, even if a prior vault read returns later than a newer one.
     generation &+= 1
@@ -232,7 +236,7 @@ final class InboxNotificationCoordinator {
     do {
       guard let session = try await vault.activeSession() else { return }
       try requireCurrent(observedGeneration)
-      guard session.sessionRevision == sessionRevision,
+      guard isCurrentObservation(), session.sessionRevision == sessionRevision,
         AccountCredentialFormat.isValidBDUSS(session.bduss),
         Self.valid(summary, userID: session.id)
       else { return }

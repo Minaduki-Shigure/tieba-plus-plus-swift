@@ -12,7 +12,8 @@ final class InboxUnreadSummaryViewModel: ObservableObject {
   private let vault: any AccountVault
   private let refreshInterval: TimeInterval
   private let now: @Sendable () -> Date
-  private let onValidatedSummary: @MainActor (InboxUnreadSummary, UUID) -> Void
+  private let onSummaryReadStarted: @MainActor () -> UUID?
+  private let onValidatedSummary: @MainActor (InboxUnreadSummary, UUID, UUID?) -> Void
   private var loadedLease: InboxUnreadSummarySessionLease?
   private var lastSuccessfulRefreshAt: Date?
   private var acceptsAutomaticRefresh = false
@@ -24,12 +25,14 @@ final class InboxUnreadSummaryViewModel: ObservableObject {
     vault: any AccountVault,
     refreshInterval: TimeInterval = InboxUnreadSummaryViewModel.defaultRefreshInterval,
     now: @escaping @Sendable () -> Date = { Date() },
-    onValidatedSummary: @escaping @MainActor (InboxUnreadSummary, UUID) -> Void = { _, _ in }
+    onSummaryReadStarted: @escaping @MainActor () -> UUID? = { nil },
+    onValidatedSummary: @escaping @MainActor (InboxUnreadSummary, UUID, UUID?) -> Void = { _, _, _ in }
   ) {
     self.service = service
     self.vault = vault
     self.refreshInterval = max(0, refreshInterval)
     self.now = now
+    self.onSummaryReadStarted = onSummaryReadStarted
     self.onValidatedSummary = onValidatedSummary
   }
 
@@ -105,6 +108,7 @@ final class InboxUnreadSummaryViewModel: ObservableObject {
           clearSnapshot()
         }
 
+        let observationToken = onSummaryReadStarted()
         let outcome: InboxUnreadSummaryRequestOutcome
         do {
           let response = try await service.inboxUnreadSummary(session: sessionBeforeRequest)
@@ -133,7 +137,7 @@ final class InboxUnreadSummaryViewModel: ObservableObject {
             summary = response
             lastSuccessfulRefreshAt = now()
             state = .loaded
-            onValidatedSummary(response, lease.sessionRevision)
+            onValidatedSummary(response, lease.sessionRevision, observationToken)
           } catch {
             state = .failed(error.localizedDescription)
           }

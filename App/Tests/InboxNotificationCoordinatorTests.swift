@@ -370,6 +370,27 @@ final class InboxNotificationCoordinatorTests: XCTestCase {
     XCTAssertEqual(fixture.store.snapshot?.replies, 0)
   }
 
+  func testForegroundReadLosingItsSourceOrderDuringVaultReadCannotPublish() async throws {
+    let fixture = InboxNotificationFixture(replies: 1, mentions: 1)
+    fixture.coordinator.setEnabled(true)
+    var isCurrent = true
+    await fixture.vault.suspendNextRead()
+    let observation = Task {
+      await fixture.coordinator.observeForeground(
+        summary: fixture.summary(replies: 99, mentions: 99),
+        sessionRevision: fixture.session.sessionRevision,
+        isCurrentObservation: { isCurrent }
+      )
+    }
+    try await waitForInboxNotification { await fixture.vault.isSuspended }
+    isCurrent = false
+    await fixture.vault.release()
+    await observation.value
+    XCTAssertEqual(fixture.store.snapshot?.replies, 1)
+    XCTAssertEqual(fixture.store.snapshot?.mentions, 1)
+    XCTAssertTrue(fixture.delivery.attempts.isEmpty)
+  }
+
   func testSnapshotRoundTripAndLimits() throws {
     let snapshot = InboxNotificationSnapshot(
       userID: 7, sessionRevision: UUID(), replies: Int(Int32.max), mentions: 0

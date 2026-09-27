@@ -122,9 +122,10 @@ struct RootView: View {
       wrappedValue: InboxUnreadSummaryViewModel(
         service: accountService,
         vault: accountVault,
-        onValidatedSummary: { summary, revision in
+        onSummaryReadStarted: { InboxNotificationRuntime.shared.beginSummaryObservation() },
+        onValidatedSummary: { summary, revision, token in
           InboxNotificationRuntime.shared.observeForeground(
-            summary: summary, sessionRevision: revision
+            summary: summary, sessionRevision: revision, token: token
           )
         }
       )
@@ -140,7 +141,7 @@ struct RootView: View {
     )
   }
 
-  var body: some View {
+  private var primaryTabs: some View {
     TabView(selection: rootTabSelection) {
       NavigationStack(path: rootPathBinding(for: .home)) {
         List {
@@ -453,6 +454,10 @@ struct RootView: View {
         Label(RootMainTab.account.title, systemImage: RootMainTab.account.systemImage)
       }
     }
+  }
+
+  var body: some View {
+    primaryTabs
     .appNavigationSurface()
     .threadSummaryImageGallery(threadSummaryImageGalleryCoordinator)
     .sheet(isPresented: $showsQuickAccountLogin) {
