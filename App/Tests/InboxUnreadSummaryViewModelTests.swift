@@ -5,6 +5,27 @@ import XCTest
 
 @MainActor
 final class InboxUnreadSummaryViewModelTests: XCTestCase {
+  func testForegroundBaselineCallbackPublishesOnlyValidatedCurrentSessionSummary() async {
+    let active = session(userID: 7, revision: uuid(1))
+    let expected = summary(userID: 7, replies: 3, mentions: 4)
+    let vault = InboxUnreadSummaryVaultSpy(session: active)
+    let service = InboxUnreadSummaryServiceSpy(scripts: [
+      active.sessionRevision: [.value(summary(userID: 8, replies: 99, mentions: 99)), .value(expected)]
+    ])
+    var received: [(InboxUnreadSummary, UUID)] = []
+    let model = InboxUnreadSummaryViewModel(
+      service: service, vault: vault,
+      onValidatedSummary: { received.append(($0, $1)) }
+    )
+    model.sceneActivityDidChange(isActive: true)
+    await model.refresh()
+    XCTAssertTrue(received.isEmpty)
+    await model.refresh()
+    XCTAssertEqual(received.count, 1)
+    XCTAssertEqual(received.first?.0, expected)
+    XCTAssertEqual(received.first?.1, active.sessionRevision)
+  }
+
   func testLoadPublishesValidatedSummaryForLegacySessionWithoutSTOKEN() async {
     let active = session(userID: 7, revision: uuid(1), stoken: nil)
     let vault = InboxUnreadSummaryVaultSpy(session: active)

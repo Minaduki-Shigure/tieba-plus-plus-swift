@@ -25,6 +25,19 @@ and its verified metadata enters the public app source.
 
 ### Release and validation
 
+- **Current main — optional unread reminders:** Settings → 消息提醒 adds a default-off
+  system notification option for the active account's unread replies and mentions.
+  iOS background refresh reuses the existing bounded summary read; it does not
+  fetch message bodies or send mark-read requests. The first successful read
+  establishes a silent baseline. Later per-channel increases notify with current
+  unread counts, equal counts stay silent, and decreases update the baseline and
+  clear stale notifications. Validated foreground summaries share that baseline;
+  a successful inbox first-page load triggers a count read when reminders are on.
+  Logout, account changes, credential rotation, disabling, and task expiration
+  invalidate old work. Notification taps open only the matching current session's
+  inbox. iOS controls execution timing; locked Keychain access, disabled background
+  refresh, force-quitting, and LiveContainer hosting can prevent delivery. Physical
+  device delivery remains unverified; no periodic or real-time delivery is promised.
 - **`v0.65.0-alpha.13` native avatar editing:** The profile editor can select one image
   through the privacy-preserving system picker, normalize its orientation, remove
   metadata, crop it to a user-controlled square, and produce a bounded 960 x 960
@@ -1044,7 +1057,8 @@ and its verified metadata enters the public app source.
   message title, body, forum label, and `quote_pid` never participate in the write
   target. A missing or mismatched target, cancellation, or account change leaves
   the fallback navigation available but opens no composer and sends no write. No
-  background polling or explicit mark-read request is implemented. The local
+  explicit mark-read request is implemented. Optional background reminders read
+  only the separate count summary described above. The local
   inbox filter checks only `message.content` plus the sender's exact UID,
   nickname, and username; the title, quoted content, forum label, and other
   fields do not participate. A placeholder exposes no message-specific content,

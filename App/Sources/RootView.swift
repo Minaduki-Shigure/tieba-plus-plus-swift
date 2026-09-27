@@ -45,6 +45,7 @@ struct RootView: View {
   @EnvironmentObject private var followedForumsViewModel: FollowedForumsViewModel
   @EnvironmentObject private var followedForumCheckInStore: FollowedForumCheckInStore
   @EnvironmentObject private var sceneDelegate: TiebaSceneDelegate
+  @ObservedObject private var inboxNotifications = InboxNotificationRuntime.shared
   @EnvironmentObject private var externalWebPresentation: ExternalWebPresentationModel
   @Environment(\.threadCloudFavoriteStore) private var threadCloudFavoriteStore
   @Environment(\.contentReportCoordinator) private var contentReportCoordinator
@@ -118,7 +119,15 @@ struct RootView: View {
     )
     _accountViewModel = StateObject(wrappedValue: AccountViewModel(vault: accountVault))
     _unreadSummaryViewModel = StateObject(
-      wrappedValue: InboxUnreadSummaryViewModel(service: accountService, vault: accountVault)
+      wrappedValue: InboxUnreadSummaryViewModel(
+        service: accountService,
+        vault: accountVault,
+        onValidatedSummary: { summary, revision in
+          InboxNotificationRuntime.shared.observeForeground(
+            summary: summary, sessionRevision: revision
+          )
+        }
+      )
     )
     _linkPreviewViewModel = StateObject(
       wrappedValue: TiebaLinkPreviewViewModel(service: service)
@@ -550,6 +559,15 @@ struct RootView: View {
     .onReceive(sceneDelegate.$pendingQuickAction.compactMap { $0 }) {
       invocation in
       openHomeScreenQuickAction(invocation)
+    }
+    .onReceive(inboxNotifications.$pendingRoute.compactMap { $0 }) { route in
+      Task { @MainActor in
+        guard let kind = await inboxNotifications.consume(route) else { return }
+        dismissRootPresentationsForHomeScreenQuickAction()
+        navigation = RootStartupNavigation.appending(
+          appRoute: .notifications(kind), to: navigation
+        )
+      }
     }
     .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) {
       _ in

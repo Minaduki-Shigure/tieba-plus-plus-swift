@@ -94,7 +94,7 @@ acceptance pass disposable-account device validation.
 | Local data, settings, and customization | 10 | 7 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, hierarchical settings navigation, an independent default-on Explore-tab visibility preference, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, confirmation-frozen foreground check-in execution settings, a TiebaLite-compatible default image-watermark choice, reply-entry visibility, a default-on composer risk notice with an experimental reply-only system handoff attempt pending physical validation, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, Home-toolbar quick switching, a self-profile summary with editable wire fields and nickname-review state, an authenticated current-account following list with a guarded mutual filter, followed and target-user liked forums with optional validated level-up progress, account-bound followed-forum check-in marks, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
 | Server writes, creation, and social actions | 15 | 14 | Guarded nickname/sex/biography/avatar editing, forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, server-reason-bound personalized recommendation dislike feedback, three text/classic-emoticon reply targets, equivalent new-topic creation, bounded static-image new-topic/direct-topic-reply creation, owner-only topic/ordinary-floor deletion, direct inline-preview reply entry, and credential-free official reporting entry points have implementations; real profile mutation, batch-check-in, creation, deletion, poll and interaction-restriction success, broader uploaded media, unresolvable cloud rows, native reporting, and other reactions remain unavailable or unvalidated on physical devices |
-| Background unread, moderation, and administration | 5 | 0 | Background polling, unread reconciliation, moderation, and administration are not implemented |
+| Background unread, moderation, and administration | 5 | 0 | Current main adds opt-in iOS background count reminders with session-bound deduplication and foreground reconciliation; delivery still needs physical-device validation. Moderation and administration remain unimplemented |
 | **Total** | **100** | **80–82** | Current full-product estimate; roughly 18–20% remains |
 
 This is a source-workflow coverage estimate, not a release-readiness or
@@ -575,7 +575,9 @@ the source metadata is updated to that tested IPA.
   by the Home account control and account page, with direct ReplyMe/AtMe Home-menu
   routes, separate message and fan badges, an existing public follower-list
   destination, exact account-lease isolation, five-minute eligible-surface freshness,
-  no local clearing, a privacy-minimized signed HTTPS form, and no background polling
+  no local clearing, and a privacy-minimized signed HTTPS form. Opt-in background
+  reply/mention count reminders reuse that endpoint with a separate persisted
+  session-bound baseline; fan reminders do not participate
 - Exact nested-notification positioning through the public child-only resolver,
   with parent locking, bidirectional pagination, history continuity, and an
   owning-thread fallback when the target is unavailable; a reply action opens the
@@ -628,6 +630,19 @@ the source metadata is updated to that tested IPA.
   credential injection, browser-account identity claim, or submission-state inference
 
 ## In progress
+
+Current `main` adds TiebaLite's background reply/mention reminder workflow using
+`BGAppRefreshTask` and local system notifications. It is default-off, uses one
+existing authenticated summary request, and never loads message bodies in the
+background. The first observation per account session is silent; persisted
+per-channel counts prevent repeat reminders, and validated foreground summaries
+reconcile the baseline. Account changes, credential rotation, cancellation, and
+late completion are isolated. The Keychain remains accessible only while unlocked;
+no credential is copied to preferences. Background timing and hosted execution
+are platform constraints. Device checks must cover permission denial/revocation,
+locked/unlocked launches, expiration, force-quit, relaunch deduplication, opening
+each channel, and SideStore/LiveContainer behavior. This remains uncredited in the
+background row until delivery is validated, so the overall 80–82% estimate stays.
 
 Current `main` now connects the security-sensitive static-image foundation to
 the new-topic and direct-topic-reply composers. The App normalizes a selected

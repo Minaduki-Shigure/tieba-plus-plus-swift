@@ -44,7 +44,10 @@ struct NotificationsView: View {
         service: accountService,
         vault: vault,
         contentFilterRepository: contentFilterRepository,
-        selectedKind: initialKind
+        selectedKind: initialKind,
+        onValidatedFirstPage: { revision in
+          InboxNotificationRuntime.shared.reconcileInbox(sessionRevision: revision)
+        }
       )
     )
   }

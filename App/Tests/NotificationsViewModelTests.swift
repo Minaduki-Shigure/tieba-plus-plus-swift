@@ -5,6 +5,87 @@ import XCTest
 
 @MainActor
 final class NotificationsViewModelTests: XCTestCase {
+  func testValidatedFirstPageCallbackRunsOnceAfterPublicationAndSkipsPagination() async throws {
+    let active = session(userID: 7)
+    let vault = NotificationsVaultSpy(session: active)
+    let service = NotificationsServiceSpy(scripts: [
+      .init(userID: 7, kind: .replies, requestedPage: 1): [
+        .init(page: page(userID: 7, kind: .replies, ids: [11], page: 1, hasMore: true))
+      ],
+      .init(userID: 7, kind: .replies, requestedPage: 2): [
+        .init(page: page(userID: 7, kind: .replies, ids: [12], page: 2, hasMore: false))
+      ],
+    ])
+    var callbacks: [UUID] = []
+    weak var observedModel: NotificationsViewModel?
+    let viewModel = NotificationsViewModel(
+      service: service, vault: vault,
+      onValidatedFirstPage: { revision in
+        callbacks.append(revision)
+        XCTAssertEqual(observedModel?.state, .loaded)
+        XCTAssertEqual(observedModel?.messages.map(\.id), [11])
+      }
+    )
+    observedModel = viewModel
+
+    await viewModel.refresh()
+    XCTAssertEqual(callbacks, [active.sessionRevision])
+    viewModel.loadMoreIfNeeded(current: try XCTUnwrap(viewModel.messages.last))
+    try await waitForNotificationsTest { viewModel.messages.map(\.id) == [11, 12] }
+    XCTAssertEqual(callbacks, [active.sessionRevision])
+  }
+
+  func testValidatedFirstPageCallbackSkipsMalformedAndFailedResponses() async {
+    let active = session(userID: 7)
+    let vault = NotificationsVaultSpy(session: active)
+    let service = NotificationsServiceSpy(scripts: [
+      .init(userID: 7, kind: .replies, requestedPage: 1): [
+        .init(page: page(userID: 8, kind: .replies, ids: [11], page: 1, hasMore: false)),
+        .init(page: page(userID: 7, kind: .mentions, ids: [11], page: 1, hasMore: false)),
+        .init(page: page(userID: 7, kind: .replies, ids: [11], page: 2, hasMore: false)),
+      ]
+    ])
+    var callbacks: [UUID] = []
+    let viewModel = NotificationsViewModel(
+      service: service, vault: vault,
+      onValidatedFirstPage: { callbacks.append($0) }
+    )
+
+    for _ in 0..<4 { await viewModel.refresh() }
+
+    XCTAssertTrue(callbacks.isEmpty)
+    XCTAssertTrue(viewModel.messages.isEmpty)
+    XCTAssertEqual(viewModel.state, .failed("Missing notification script"))
+  }
+
+  func testValidatedFirstPageCallbackDiscardsUnannouncedCredentialRotation() async throws {
+    let active = session(userID: 7)
+    let replacement = session(userID: 7)
+    let vault = NotificationsVaultSpy(session: active)
+    let service = NotificationsServiceSpy(scripts: [
+      .init(userID: 7, kind: .replies, requestedPage: 1): [
+        .init(
+          page: page(userID: 7, kind: .replies, ids: [11], page: 1, hasMore: false),
+          delayNanoseconds: 120_000_000
+        )
+      ]
+    ])
+    var callbacks: [UUID] = []
+    let viewModel = NotificationsViewModel(
+      service: service, vault: vault,
+      onValidatedFirstPage: { callbacks.append($0) }
+    )
+
+    let refresh = Task { await viewModel.refresh() }
+    try await waitForNotificationsTest { await service.requestCount() == 1 }
+    await vault.replaceActive(with: replacement)
+    await refresh.value
+
+    XCTAssertTrue(callbacks.isEmpty)
+    XCTAssertTrue(viewModel.messages.isEmpty)
+    XCTAssertEqual(viewModel.state, .idle)
+  }
+
   func testInitialLoadAndNextPageDeduplicateMessagesWhileAdvancingStrictly() async throws {
     let active = session(userID: 7)
     let vault = NotificationsVaultSpy(session: active)

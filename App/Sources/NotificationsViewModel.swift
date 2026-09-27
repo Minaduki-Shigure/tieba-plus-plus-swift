@@ -23,6 +23,7 @@ final class NotificationsViewModel: ObservableObject {
   private let service: any AccountService
   private let vault: any AccountVault
   private let contentFilterRepository: any ContentFilterRepository
+  private let onValidatedFirstPage: @MainActor (UUID) -> Void
   private var currentPage = 0
   private var hasMore = true
   private var loadedLease: InboxSessionLease?
@@ -35,12 +36,14 @@ final class NotificationsViewModel: ObservableObject {
     service: any AccountService,
     vault: any AccountVault,
     contentFilterRepository: any ContentFilterRepository = EmptyContentFilterRepository(),
-    selectedKind: InboxKind = .replies
+    selectedKind: InboxKind = .replies,
+    onValidatedFirstPage: @escaping @MainActor (UUID) -> Void = { _ in }
   ) {
     self.service = service
     self.vault = vault
     self.contentFilterRepository = contentFilterRepository
     self.selectedKind = selectedKind
+    self.onValidatedFirstPage = onValidatedFirstPage
   }
 
   var messagePresentations: [InboxMessagePresentation] {
@@ -295,6 +298,11 @@ final class NotificationsViewModel: ObservableObject {
         }
         messages = mergedMessages
         state = .loaded
+        if replacing && page == 1 {
+          // Opening the first inbox page may change server unread counts. The runtime reads
+          // the aggregate again; message flags alone cannot establish the new total.
+          onValidatedFirstPage(lease.sessionRevision)
+        }
       } catch is CancellationError {
         return
       } catch {

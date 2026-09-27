@@ -59,6 +59,25 @@ check-in notifications must match both UID and revision before changing current
 session state. The revision may be persisted in the Keychain archive and carried
 in an in-process notification, but must never substitute for or derive from a
 credential.
+Optional unread notifications are disabled by default and require explicit system
+authorization. A registered `BGAppRefreshTask` may make one existing HTTPS summary
+read for the current account. It must never fetch message bodies, modify read state,
+change Keychain accessibility, or copy credentials to a background-accessible store.
+A locked or unavailable vault skips the run without guessing zero counts. Only a
+bounded versioned baseline containing UID, random session revision, and reply and
+mention counts is stored in local preferences; the notification payload contains
+only the channel and random revision. Both are noncredential metadata. First
+observations are silent, repeated counts do not notify, and decreases remove stale
+notifications. The count is current unread, not proof of a number of new messages.
+Every awaited read or notification delivery is guarded by the active lease and a
+generation. Cancelled uncooperative work retains the execution gate until cleanup;
+it cannot erase a newer delivery. Foreground summaries revalidate their lease before
+reconciling the baseline. Only this feature's two notification IDs are cleared.
+Disabling or changing accounts invalidates the baseline, cancels work, clears those
+notifications and the app badge, and never switches the user's account. Notification
+navigation validates the active revision again after the vault read. iOS scheduling,
+permission, task expiration, and LiveContainer support require device validation.
+
 Local logout deletes the selected Keychain session; it cannot promise to revoke
 an already issued Baidu server token. Users who suspect token exposure must use
 Baidu's account-security controls to invalidate sessions. A user-confirmed
@@ -464,12 +483,12 @@ while active refreshes only when no accepted snapshot exists or the last one is
 at least five minutes old. That explicit refresh may bypass the age gate. Logout,
 switching, or same-UID credential rotation synchronously
 clears the snapshot, including its freshness timestamp, and starts no replacement
-request while inactive. The inbox performs no background polling, explicit
+request while inactive. The inbox list performs no background retrieval, explicit
 mark-read request, or local badge clearing. Direct Home-menu navigation to either
 inbox likewise leaves the server counts untouched locally. The fan-reminder entry
 opens the existing credential-free public
 follower list, not an authenticated notification endpoint; opening it does not
-locally clear `fans`. No baseline is persisted or compared, and the App does not
+locally clear `fans`. No fan baseline is persisted or compared, and the App does not
 claim that a reminder count identifies new followers or that a profile-count
 change identifies follows or unfollows. An implicit server-side unread change
 caused by summary or list retrieval remains a documented real-device validation

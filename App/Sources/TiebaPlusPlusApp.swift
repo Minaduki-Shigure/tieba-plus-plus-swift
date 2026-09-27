@@ -77,6 +77,7 @@ struct TiebaPlusPlusApp: App {
     self.accountVault = accountVault
     self.accountSessionLookup = accountVault
     self.accountService = accountService
+    InboxNotificationRuntime.shared.configure(service: accountService, vault: accountVault)
     let forumMembershipMutator = ForumMembershipMutationCoordinator(
       vault: accountVault,
       service: accountService

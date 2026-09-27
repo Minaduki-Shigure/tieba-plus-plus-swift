@@ -88,6 +88,14 @@ struct HomeScreenQuickActionPendingState: Equatable, Sendable {
 
 @MainActor
 final class TiebaApplicationDelegate: NSObject, UIApplicationDelegate {
+  func application(
+    _ application: UIApplication,
+    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+  ) -> Bool {
+    InboxNotificationRuntime.shared.register()
+    return true
+  }
+
   static func sceneConfiguration(for role: UISceneSession.Role) -> UISceneConfiguration {
     let configuration = UISceneConfiguration(name: nil, sessionRole: role)
     if role == .windowApplication {
@@ -111,6 +119,14 @@ final class TiebaSceneDelegate: NSObject, UIWindowSceneDelegate, ObservableObjec
 
   private var pendingState = HomeScreenQuickActionPendingState()
   private var isSynchronizingPublishedState = false
+
+  func sceneDidBecomeActive(_ scene: UIScene) {
+    InboxNotificationRuntime.shared.sceneDidBecomeActive()
+  }
+
+  func sceneDidEnterBackground(_ scene: UIScene) {
+    InboxNotificationRuntime.shared.sceneDidEnterBackground()
+  }
 
   func scene(
     _ scene: UIScene,

@@ -12,6 +12,7 @@ final class InboxUnreadSummaryViewModel: ObservableObject {
   private let vault: any AccountVault
   private let refreshInterval: TimeInterval
   private let now: @Sendable () -> Date
+  private let onValidatedSummary: @MainActor (InboxUnreadSummary, UUID) -> Void
   private var loadedLease: InboxUnreadSummarySessionLease?
   private var lastSuccessfulRefreshAt: Date?
   private var acceptsAutomaticRefresh = false
@@ -22,12 +23,14 @@ final class InboxUnreadSummaryViewModel: ObservableObject {
     service: any AccountService,
     vault: any AccountVault,
     refreshInterval: TimeInterval = InboxUnreadSummaryViewModel.defaultRefreshInterval,
-    now: @escaping @Sendable () -> Date = { Date() }
+    now: @escaping @Sendable () -> Date = { Date() },
+    onValidatedSummary: @escaping @MainActor (InboxUnreadSummary, UUID) -> Void = { _, _ in }
   ) {
     self.service = service
     self.vault = vault
     self.refreshInterval = max(0, refreshInterval)
     self.now = now
+    self.onValidatedSummary = onValidatedSummary
   }
 
   func refreshIfStale() {
@@ -130,6 +133,7 @@ final class InboxUnreadSummaryViewModel: ObservableObject {
             summary = response
             lastSuccessfulRefreshAt = now()
             state = .loaded
+            onValidatedSummary(response, lease.sessionRevision)
           } catch {
             state = .failed(error.localizedDescription)
           }

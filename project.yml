@@ -43,6 +43,10 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSApplicationCategoryType: public.app-category.social-networking
         NSPhotoLibraryAddUsageDescription: "用于将您选择的贴吧图片保存到系统照片。"
+        UIBackgroundModes:
+          - fetch
+        BGTaskSchedulerPermittedIdentifiers:
+          - io.github.minaduki.tieba-plus-plus.unread-refresh
         CFBundleURLTypes:
           - CFBundleTypeRole: Viewer
             CFBundleURLName: io.github.minaduki.tieba-plus-plus

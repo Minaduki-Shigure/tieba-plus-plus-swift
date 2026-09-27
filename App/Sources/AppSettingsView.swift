@@ -159,6 +159,13 @@ struct AppSettingsView: View {
 
       Section("应用") {
         NavigationLink {
+          InboxNotificationSettingsView(runtime: .shared)
+        } label: {
+          Label("消息提醒", systemImage: "bell.badge")
+        }
+        .accessibilityIdentifier("settings-inbox-notifications")
+
+        NavigationLink {
           AppAboutView()
         } label: {
           Label("关于贴吧++", systemImage: "info.circle")
