@@ -20,10 +20,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if ! gh api --allow-escape-sequences "repos/$GITHUB_REPOSITORY/actions/jobs/109873219127/logs" > "$RUNNER_TEMP/failed-build.log" 2> "$RUNNER_TEMP/diagnostic-error.log"; then
+          if ! gh api --allow-escape-sequences "repos/$GITHUB_REPOSITORY/actions/artifacts/11094314231/zip" > "$RUNNER_TEMP/failed-build.zip" 2> "$RUNNER_TEMP/diagnostic-error.log"; then
             ruby Scripts/report_xcode_errors.rb --mode full --title "Log download failure" "$RUNNER_TEMP/diagnostic-error.log"
             exit 1
           fi
+          unzip -p "$RUNNER_TEMP/failed-build.zip" xcodebuild.log > "$RUNNER_TEMP/failed-build.log"
           if ! ruby Scripts/report_xcode_errors.rb "$RUNNER_TEMP/failed-build.log" 2> "$RUNNER_TEMP/diagnostic-error.log"; then
             ruby Scripts/report_xcode_errors.rb --mode full --title "Diagnostic parser failure" "$RUNNER_TEMP/diagnostic-error.log"
             exit 1
