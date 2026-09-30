@@ -1,4 +1,3 @@
-import CoreFoundation
 import Foundation
 import TiebaProto
 
@@ -59,37 +58,39 @@ extension TiebaAuthenticatedDecoder {
     from body: Data,
     submission: TiebaNewThreadSubmission
   ) throws -> TiebaNewThreadReceipt {
-    let object: [String: Any]
+    let response: AddThreadResIdl
     do {
-      guard
-        let decoded = try JSONSerialization.jsonObject(with: body) as? [String: Any]
-      else {
-        throw TiebaClientError.invalidJSON
-      }
-      object = decoded
-    } catch let error as TiebaClientError {
-      throw error
+      response = try AddThreadResIdl(serializedBytes: body)
     } catch {
-      throw TiebaClientError.invalidJSON
+      throw TiebaClientError.invalidProtobuf
     }
-
-    if newThreadHasChallengeSignal(object) {
-      throw TiebaClientError.newThreadChallengeRequired(
-        message: newThreadErrorMessage(object)
+    let data = response.data
+    if response.hasData,
+      let message = creationChallengeMessage(
+        info: data.hasInfo ? data.info : nil,
+        antiStat: data.hasAntiStat ? data.antiStat : nil,
+        anti: data.hasAnti ? data.anti : nil,
+        error: response.error,
+        messages: [data.extMsg, data.msg, data.preMsg, data.colorMsg],
+        toast: data.hasToast ? data.toast : nil,
+        fallback: "Tieba requires additional verification before this topic can be submitted."
       )
+    {
+      throw TiebaClientError.newThreadChallengeRequired(message: message)
     }
-    guard let errorCode = newThreadErrorCode(object) else {
+    guard response.hasError else {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
-    guard errorCode == 0 else {
+    guard response.error.errorno == 0 else {
       throw TiebaClientError.server(
-        code: errorCode,
-        message: newThreadErrorMessage(object)
+        code: response.error.errorno,
+        message: newThreadProtoErrorMessage(response.error)
       )
     }
     guard
-      let threadID = newThreadPositiveInt64(object["tid"]),
-      let firstPostID = newThreadPositiveInt64(object["pid"])
+      response.hasData,
+      let threadID = newThreadPositiveInt64(data.tid),
+      let firstPostID = newThreadPositiveInt64(data.pid)
     else {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
@@ -177,59 +178,6 @@ extension TiebaAuthenticatedDecoder {
     return receipt
   }
 
-  private static func newThreadErrorCode(_ object: [String: Any]) -> Int32? {
-    if let value = newThreadInt64(object["error_code"]) {
-      return Int32(exactly: value)
-    }
-    if let nested = object["error"] as? [String: Any],
-      let value = newThreadInt64(nested["errno"])
-    {
-      return Int32(exactly: value)
-    }
-    return nil
-  }
-
-  private static func newThreadHasChallengeSignal(_ object: [String: Any]) -> Bool {
-    guard let info = object["info"] as? [String: Any] else { return false }
-    if newThreadChallengeFlag(info["need_vcode"]) {
-      return true
-    }
-    for key in ["vcode_md5", "vcode_pic_url", "pass_token"] {
-      if newThreadChallengeFlag(info[key]) { return true }
-    }
-    return false
-  }
-
-  private static func newThreadChallengeFlag(_ rawValue: Any?) -> Bool {
-    guard let rawValue, !(rawValue is NSNull) else { return false }
-    if let value = rawValue as? Bool { return value }
-    if let text = rawValue as? String {
-      let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-      guard !trimmed.isEmpty else { return false }
-      return newThreadInt64(trimmed).map { $0 != 0 } ?? true
-    }
-    return newThreadInt64(rawValue).map { $0 != 0 } ?? true
-  }
-
-  private static func newThreadErrorMessage(_ object: [String: Any]) -> String {
-    for key in ["msg", "errmsg", "error_msg"] {
-      if let value = newThreadBoundedOptionalText(object[key], maximumBytes: 2_048) {
-        return value
-      }
-    }
-    if let value = newThreadBoundedOptionalText(object["error"], maximumBytes: 2_048) {
-      return value
-    }
-    if let nested = object["error"] as? [String: Any] {
-      for key in ["usermsg", "errmsg"] {
-        if let value = newThreadBoundedOptionalText(nested[key], maximumBytes: 2_048) {
-          return value
-        }
-      }
-    }
-    return ""
-  }
-
   private static func newThreadProtoErrorMessage(_ error: TiebaProto.Error) -> String {
     for candidate in [error.userMsg, error.errmsg] {
       let value = candidate.precomposedStringWithCanonicalMapping
@@ -243,42 +191,13 @@ extension TiebaAuthenticatedDecoder {
     return ""
   }
 
-  private static func newThreadPositiveInt64(_ value: Any?) -> Int64? {
-    guard let parsed = newThreadInt64(value), parsed > 0 else { return nil }
-    return parsed
-  }
-
-  private static func newThreadInt64(_ value: Any?) -> Int64? {
-    let text: String
-    switch value {
-    case let value as String:
-      text = value
-    case let value as NSNumber where CFGetTypeID(value) != CFBooleanGetTypeID():
-      text = value.stringValue
-    default:
-      return nil
-    }
-    let bytes = Array(text.utf8)
-    let digitStart = bytes.first == 0x2D ? 1 : 0
-    guard
-      digitStart < bytes.count,
-      bytes[digitStart...].allSatisfy({ (0x30...0x39).contains($0) })
-    else { return nil }
-    return Int64(text)
-  }
-
-  private static func newThreadBoundedOptionalText(
-    _ rawValue: Any?,
-    maximumBytes: Int
-  ) -> String? {
-    guard let rawValue = rawValue as? String else { return nil }
-    let value = rawValue.precomposedStringWithCanonicalMapping
+  private static func newThreadPositiveInt64(_ value: String) -> Int64? {
     guard
       !value.isEmpty,
-      value.utf8.count <= maximumBytes,
-      !value.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+      value.utf8.allSatisfy({ (0x30...0x39).contains($0) }),
+      let parsed = Int64(value), parsed > 0
     else { return nil }
-    return value
+    return parsed
   }
 
   private static func newThreadRequiredText(

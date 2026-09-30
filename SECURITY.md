@@ -605,13 +605,16 @@ official-client handoff is an external navigation action, not an App submission:
 it must not satisfy, prepare, or dispatch the authenticated write. The home and
 account-page one-click entries only read the authoritative catalog until the
 same foreground confirmation is accepted. Automatic, scheduled, and background
-check-in are deliberately unsupported. `disagree` or
-downvote, rich-media topic/reply creation, editing, deletion, native reporting, and
-every other authenticated content write remain unsupported and must not be
-inferred from the approval, reply, or new-topic endpoints.
+check-in are deliberately unsupported. `disagree` or downvote, voice/video
+creation, editing, and native reporting remain unsupported. The bounded
+static-image composers and owner-only topic/ordinary-floor deletion are separate
+implemented workflows; no other authenticated write may be inferred from the
+approval, reply, or new-topic endpoints.
 
 Text and fixed-catalog classic-emoticon replies use only the existing signed
 protobuf `309731` endpoint for topic, ordinary-floor, and nested-reply targets.
+Current `main` uses client version `12.52.1.0` for this endpoint; this does not
+change the endpoint-specific versions of unrelated account reads or writes.
 The composer accepts ordinary text plus exact `#(name)` tokens from the compiled
 50-name catalog; unknown, malformed, nested, image, `reply`, and every other
 user-supplied rich marker fail closed before a request is built. A visible inline
@@ -661,13 +664,22 @@ poll voting remains a validation-build feature.
 
 Text and fixed-catalog classic-emoticon new-topic creation requires a validated complete BDUSS/STOKEN session
 and a fresh authenticated FRS preflight binding the exact UID, positive forum ID,
-canonical forum name, trusted display name, and valid TBS. It may then send at
-most one signed HTTPS POST to `https://tiebac.baidu.com/c/c/thread/add`. The form
-uses the observed fixed mini-client fields plus only the credential, forum,
-title, body, display name, and TBS needed by that endpoint. The contract's
-`cuid_gid` and `z_id` values remain empty; it must not add an IMEI, Android ID,
-OAID, nonempty CUID/ZID, model, screen, location, installation history,
-advertising data, or randomized telemetry, and every redirect is rejected.
+canonical forum name, trusted display name, and valid TBS. Current `main` may
+then send at most one signed multipart HTTPS POST to
+`https://tiebac.baidu.com/c/c/thread/add?cmd=309730&format=protobuf`.
+The `AddThreadReqIdl` common block contains only client type/version, BDUSS,
+STOKEN, and fresh TBS; the business payload carries the validated forum,
+title, body, display name, title mode, and observed fixed creation flags.
+The outer signed fields are `BDUSS`, `_client_type`, `_client_version=12.52.1.0`,
+and `stoken`, plus the protobuf file. The expected UID is in `client_user_token`;
+the only Cookie value is `ka=open`, never a captured Web credential. It must not
+add CUID/ZID, IMEI, Android ID, OAID, model, screen, location, installation
+history, advertising data, or randomized telemetry, and every redirect is rejected.
+The 128 KiB response is decoded only as `AddThreadResIdl`; an explicit success
+error envelope and positive decimal TID/PID are required before readback.
+Shared anti-abuse fields are checked before acceptance, while the topic-specific
+toast field uses its own schema field number. A dispatched write must never
+retry or fall back to the former mini-program form/JSON contract.
 
 Titles are optional and bounded to 31 Swift characters and 124 UTF-8 bytes;
 bodies use the reply policy's 10,000-character and 32 KiB wire-text limits. Titles reject
@@ -698,7 +710,9 @@ explicitly starts another topic in that forum. The App must not clear it merely
 because the write task returned: a crash before the success navigation became
 visible would otherwise restore an apparently sendable old body.
 
-Current `main` also contains a non-user-facing static-image creation foundation.
+Current `main` uses the bounded static-image creation pipeline in its new-topic
+and direct-topic-reply composers. These paths remain experimental and require
+disposable-account and physical-device validation.
 The App accepts only bounded, single-frame JPEG, PNG, HEIC, or HEIF input and
 always redraws it onto an 8-bit controlled sRGB surface before producing a new
 JPEG. Standard output is bounded to a 1,080-pixel longest side and 5 MiB; high-
@@ -720,7 +734,8 @@ could race those checks; eliminating that residual threat requires a future
 directory-descriptor `openat`/`renameat`/`unlinkat` store.
 
 Core's draft upload contract sends sequential 512,000-byte multipart chunks only
-to the exact `https://tiebac.baidu.com/c/s/uploadPicture` origin. It validates the
+to the exact `https://tiebac.baidu.com/c/s/uploadPicture` origin, with client
+version `12.52.1.0` in current `main`. It validates the
 complete BDUSS/STOKEN session with independent same-UID App and Web probes,
 single-flights only an identical full credential and upload identity, uses a
 per-request boundary that cannot occur in scalar values or binary content, and
@@ -732,15 +747,17 @@ decoded receipt is only syntactically valid until it is rebound to the original
 bytes, upload UUID, expected UID, canonical forum, options, digest, resource ID,
 uploaded dimensions, byte count, and chunk count. That rebinding cannot by itself
 authenticate a format-valid replacement of server-originated `picID`, width, or
-height after persistence; the current App neither persists nor consumes these
-receipts, and the future durable transaction must address that server-result
-integrity boundary before compiling an image marker.
+height after persistence. The App's durable upload ledger must revalidate the
+retained receipt against the frozen upload before compiling a protocol-owned
+image marker; the attachment digest is not cryptographic authentication of a
+server-originated receipt stored in an already compromised App sandbox.
 
-None of this code is reachable from a composer yet. There is no picker, durable
-upload ledger, protocol-owned image-marker compiler, final post snapshot, or
-restart recovery path, so `main` must continue to reject user-supplied image
-markers and rich-media creation remains unsupported until the complete workflow
-and its disposable-account validation are present.
+The App picker, attachment store, upload ledger, protocol-owned image markers,
+frozen final post snapshot, and restart recovery are part of the current bounded
+static-image workflow. User-supplied image markers remain rejected; no upload is
+authorized merely by restoring a draft or selecting a file. Voice/video creation
+is not implemented by this iteration and is not claimed as a capability of the
+compared TiebaLite creation flow.
 
 STOKEN is available only through a validated complete session and only to an
 endpoint whose contract explicitly requires it. The current unfollow, check-in,
@@ -1306,23 +1323,38 @@ only a transient availability/cost snapshot; it never reads an SSID, BSSID,
 carrier identity, or local-network peer and does not probe a URL to classify
 the network.
 
-The image preview-quality preference is independent from that network policy.
+The image preview-quality preference is separate from that loading policy.
 Every standard, high-definition, dynamic, and original candidate is normalized
 through the existing HTTPS media policy before it enters the browsing model. Standard
 quality remains the default; high-definition can select only the separately
 accepted high-definition candidate, then the accepted dynamic candidate, and
-otherwise falls back to the accepted standard candidate. Changing quality
+otherwise falls back to the accepted standard candidate. Current `main` adds an
+opt-in automatic mode using the same process-level network snapshot: it selects
+high definition only for available, non-expensive, non-constrained networking,
+and standard for every other state. Automatic high-definition requests carry
+the existing economical-only transport flags, including across redirects, so
+they cannot continue on cellular, expensive, or constrained networking while
+waiting for a path update. Only the affected body, list, and per-forum-search
+image previews receive this additional restriction; avatars, video covers,
+single-source topic images, and explicit gallery requests retain their policies.
+No new per-row network observer, endpoint, or persistent network data is added.
+Changing quality
 changes the existing URL-based request identity and therefore cannot inherit a
 manual authorization or failed state
-from another source. It does not alter request access flags, byte limits,
-decoder bounds, cache keys, or the gallery's fixed
+from another source. The loading policy can still require cache-only behavior;
+only an exact explicit load authorization overrides the preview transport
+restriction. Standard and explicit high-definition modes keep their prior
+access flags. No quality choice alters byte limits, decoder bounds, cache keys,
+or the gallery's fixed
 original-then-dynamic-then-high-definition-then-standard selection.
 
 A cold manually gated image performs exact in-memory and persistent cache lookups
 and must not create or join a network request until the user presses its load control.
 That authorization is bound to the current HTTPS URL and requested pixel size;
 changing either value or changing the persistent policy revokes it. A path
-change alone must not revoke or restart an already authorized request. Once
+change alone must not revoke or restart an already authorized request while
+its URL and pixel size stay the same; an automatic-quality source replacement
+is a different request and cannot inherit that authorization. Once
 that request reaches a terminal state, the effective policy is evaluated again:
 a path that has become economical may start one restricted automatic attempt,
 while a still-gated failure requires another explicit tap. The decoded cache is

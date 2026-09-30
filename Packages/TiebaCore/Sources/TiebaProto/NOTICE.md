@@ -93,13 +93,26 @@ anti-abuse dependency closure, and the three text-body reply field layouts for
 `/c/c/post/add?cmd=309731&format=protobuf` are adapted from TiebaLite commit
 `268f388c7824ae2c8f6ed549827a943ec8a7f352`, specifically
 `AddPostRequestData.proto`, `AddPostResponseData.proto`, `ReplyPage.kt`, and
-`MixedTiebaApiImpl.kt`. The request uses the observed `12.35.1.0` protocol
-version and a short-lived `anti.tbs` value from an immediately preceding,
-account-bound `PbPage` or `PbFloor` read. Android hardware, installation,
+`MixedTiebaApiImpl.kt`. The request uses a short-lived `anti.tbs` value from an
+immediately preceding, account-bound `PbPage` or `PbFloor` read. Android hardware, installation,
 location, advertising, OAID, ZID, and screen fields are deliberately omitted.
+The current `12.52.1.0` reply client version and the new-topic
+`/c/c/thread/add?cmd=309730&format=protobuf` contract are adapted from TiebaLite
+commit `9701bfb6aaf261cc37b20b5793a8404261077f49`, specifically
+`Enums.kt`, `MixedTiebaApiImpl.kt`, `OfficialProtobufTiebaApi.kt`, and the
+`AddThread/` schemas. The minimal `AddThreadReqIdl` and `AddThreadResIdl`
+definitions preserve the observed field numbers, including the response's
+`toast = 20`; they share the existing anti-abuse response dependencies. New
+topics use the same minimal authenticated multipart transport as replies,
+with `tbs` read immediately from the account-bound forum response, and never
+fall back to the former mini-program form endpoint after dispatch. The static
+image upload client version also follows this commit's `OfficialTiebaApi`
+configuration change to `12.52.1.0`; its upload endpoint, chunk layout, and
+image-marker protocol are unchanged.
 The fixed 50-name classic-emoticon wire catalog and `#(name)` insertion behavior
-are adapted from TiebaLite's `EmoticonManager.kt` and `ReplyPage.kt` at that same
-commit. No TiebaLite or Baidu emoticon bitmap is copied or downloaded. Unknown,
+are adapted from TiebaLite's `EmoticonManager.kt` and `ReplyPage.kt` at commit
+`268f388c7824ae2c8f6ed549827a943ec8a7f352`.
+No TiebaLite or Baidu emoticon bitmap is copied or downloaded. Unknown,
 malformed, nested, image, `reply`, and every other user-supplied rich-content
 marker are rejected; the nested-reply prefix remains protocol-owned and is
 derived only from the freshly read target user. A valid server receipt is

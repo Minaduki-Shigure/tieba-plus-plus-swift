@@ -538,57 +538,72 @@ extension TiebaAuthenticatedDecoder {
   private static func textReplyChallengeMessage(_ response: AddPostResIdl) -> String? {
     guard response.hasData else { return nil }
     let data = response.data
-    let info = data.info
-    let hasPostAntiSignal = data.hasInfo
-      && (info.hasAccessState
-        || !info.confilterHitwords.isEmpty
-        || nonzeroFlag(info.needVcode)
-        || !info.vcodeMd5.isEmpty
-        || !info.vcodePrevType.isEmpty
-        || !info.vcodeType.isEmpty
-        || !info.passToken.isEmpty
-        || !info.blockContent.isEmpty
-        || !info.blockCancel.isEmpty
-        || !info.blockConfirm.isEmpty
-        || !info.vcodePicURL.isEmpty
-        || (info.hasVcodeExtra && hasVcodeExtraSignal(info.vcodeExtra)))
-    let antiStat = data.antiStat
-    let hasAntiStatSignal = data.hasAntiStat
-      && (antiStat.forbidFlag != 0
-        || !antiStat.forbidInfo.isEmpty
-        || antiStat.blockStat != 0
-        || antiStat.hideStat != 0
-        || antiStat.vcodeStat != 0)
-    let anti = data.anti
-    let hasVcodeSignal = data.hasAnti
-      && (!anti.vcodeMd5.isEmpty
-        || !anti.vcodePicURL.isEmpty
-        || !anti.vcodeType.isEmpty
-        || (anti.hasVcodeExtra && hasVcodeExtraSignal(anti.vcodeExtra)))
+    return creationChallengeMessage(
+      info: data.hasInfo ? data.info : nil,
+      antiStat: data.hasAntiStat ? data.antiStat : nil,
+      anti: data.hasAnti ? data.anti : nil,
+      error: response.error,
+      messages: [data.extMsg, data.msg, data.preMsg, data.colorMsg],
+      toast: data.hasToast ? data.toast : nil,
+      fallback: "Tieba requires additional verification before this reply can be submitted."
+    )
+  }
+
+  /// Topic and reply responses share these challenge messages, but their wire
+  /// envelopes (including the toast field number) must be decoded separately.
+  static func creationChallengeMessage(
+    info: PostAntiInfo?,
+    antiStat: PostAntiStat?,
+    anti: VcodeInfo?,
+    error: TiebaProto.Error,
+    messages: [String],
+    toast: Toast?,
+    fallback: String
+  ) -> String? {
+    let info = info ?? PostAntiInfo()
+    let hasPostAntiSignal = info.hasAccessState
+      || !info.confilterHitwords.isEmpty
+      || nonzeroFlag(info.needVcode)
+      || !info.vcodeMd5.isEmpty
+      || !info.vcodePrevType.isEmpty
+      || !info.vcodeType.isEmpty
+      || !info.passToken.isEmpty
+      || !info.blockContent.isEmpty
+      || !info.blockCancel.isEmpty
+      || !info.blockConfirm.isEmpty
+      || !info.vcodePicURL.isEmpty
+      || (info.hasVcodeExtra && hasVcodeExtraSignal(info.vcodeExtra))
+    let antiStat = antiStat ?? PostAntiStat()
+    let hasAntiStatSignal = antiStat.forbidFlag != 0
+      || !antiStat.forbidInfo.isEmpty
+      || antiStat.blockStat != 0
+      || antiStat.hideStat != 0
+      || antiStat.vcodeStat != 0
+    let anti = anti ?? VcodeInfo()
+    let hasVcodeSignal = !anti.vcodeMd5.isEmpty
+      || !anti.vcodePicURL.isEmpty
+      || !anti.vcodeType.isEmpty
+      || (anti.hasVcodeExtra && hasVcodeExtraSignal(anti.vcodeExtra))
     guard hasPostAntiSignal || hasAntiStatSignal || hasVcodeSignal else { return nil }
 
     for candidate in [
       info.blockContent,
       antiStat.forbidInfo,
-      response.error.userMsg,
-      response.error.errmsg,
-      data.extMsg,
-      data.msg,
-      data.preMsg,
-      data.colorMsg,
-    ] {
+      error.userMsg,
+      error.errmsg,
+    ] + messages {
       if let message = boundedOptionalText(candidate, maximumBytes: 2_048), !message.isEmpty {
         return message
       }
     }
-    if data.hasToast {
-      for item in data.toast.content {
+    if let toast {
+      for item in toast.content {
         if let message = boundedOptionalText(item.text, maximumBytes: 2_048), !message.isEmpty {
           return message
         }
       }
     }
-    return "Tieba requires additional verification before this reply can be submitted."
+    return fallback
   }
 
   private static func preferredErrorMessage(_ error: TiebaProto.Error) -> String {

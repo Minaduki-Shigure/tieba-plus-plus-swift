@@ -276,6 +276,35 @@ final class ThreadSummaryRowTests: XCTestCase {
     )
   }
 
+  func testAutomaticQualityChangesListPreviewSourcesWithoutChangingIdentity() throws {
+    let thumbnail = try XCTUnwrap(URL(string: "https://example.com/standard.jpg"))
+    let fullSize = try XCTUnwrap(URL(string: "https://example.com/high-definition.jpg"))
+    let thread = makeThread(contents: [
+      .text("before"),
+      .image(thumbnail: thumbnail, fullSize: fullSize, original: nil, width: 100, height: 100),
+      .text("between"),
+      .image(thumbnail: thumbnail, fullSize: nil, original: nil, width: 100, height: 100),
+    ])
+    for expensive in [false, true, false] {
+      let policy = ContentImagePreviewPolicy.resolved(
+        preference: .automatic,
+        networkSnapshot: ContentMediaNetworkSnapshot(
+          status: .available, isExpensive: expensive, isConstrained: false
+        )
+      )
+      XCTAssertEqual(
+        ThreadSummaryPresentation.media(for: thread, quality: policy.quality),
+        .images(
+          [
+            ThreadSummaryImagePreview(contentOffset: 1, previewURL: expensive ? thumbnail : fullSize),
+            ThreadSummaryImagePreview(contentOffset: 3, previewURL: thumbnail),
+          ],
+          totalCount: 2
+        )
+      )
+    }
+  }
+
   func testCollapsedImageCountPreservesDuplicateURLs() throws {
     let repeatedURL = try XCTUnwrap(URL(string: "https://example.com/repeated.jpg"))
     let thread = makeThread(

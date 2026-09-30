@@ -218,6 +218,7 @@ struct ThreadSummaryRow<Header: View>: View {
   private let onNavigate: (ThreadSummaryNavigationRequest) -> Void
 
   @Environment(\.contentImagePreviewQuality) private var contentImagePreviewQuality
+  @Environment(\.contentImagePreviewNetworkAccess) private var previewNetworkAccess
   @Environment(\.appAccentColor) private var appAccentColor
   @Environment(\.hidesThreadListMedia) private var hidesThreadListMedia
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
@@ -539,7 +540,8 @@ struct ThreadSummaryRow<Header: View>: View {
           loadAccessibilityLabel: "加载帖子图片",
           successAccessibilityLabel: "图片预览",
           openAccessibilityLabel: "打开图片，共 \(totalCount) 张",
-          onOpen: imageOpenAction(for: image)
+          onOpen: imageOpenAction(for: image),
+          networkAccess: previewNetworkAccess
         )
         .frame(maxWidth: 360)
         .frame(height: 150)
@@ -555,7 +557,8 @@ struct ThreadSummaryRow<Header: View>: View {
                 loadAccessibilityLabel: "加载帖子图片 \(index + 1)",
                 successAccessibilityLabel: "图片预览 \(index + 1)，共 \(totalCount) 张",
                 openAccessibilityLabel: "打开图片 \(index + 1)，共 \(totalCount) 张",
-                onOpen: imageOpenAction(for: image)
+                onOpen: imageOpenAction(for: image),
+                networkAccess: previewNetworkAccess
               )
               if index == 2, totalCount > images.count {
                 Label(totalCount.formatted(), systemImage: "photo")
@@ -1035,6 +1038,7 @@ private struct ThreadPreviewImage: View {
   let openAccessibilityLabel: String?
   let onOpen: (() -> Void)?
   let appliesContentThumbnailDimming: Bool
+  let networkAccess: RemoteImageNetworkAccess
 
   init(
     url: URL,
@@ -1042,7 +1046,8 @@ private struct ThreadPreviewImage: View {
     successAccessibilityLabel: String,
     openAccessibilityLabel: String? = nil,
     onOpen: (() -> Void)? = nil,
-    appliesContentThumbnailDimming: Bool = true
+    appliesContentThumbnailDimming: Bool = true,
+    networkAccess: RemoteImageNetworkAccess = .unrestricted
   ) {
     self.url = url
     self.loadAccessibilityLabel = loadAccessibilityLabel
@@ -1050,6 +1055,7 @@ private struct ThreadPreviewImage: View {
     self.openAccessibilityLabel = openAccessibilityLabel
     self.onOpen = onOpen
     self.appliesContentThumbnailDimming = appliesContentThumbnailDimming
+    self.networkAccess = networkAccess
   }
 
   @Environment(\.contentMediaLoadBehavior) private var contentMediaLoadBehavior
@@ -1058,7 +1064,8 @@ private struct ThreadPreviewImage: View {
     ContentRemoteImage(
       url: url,
       maxPixelSize: 720,
-      loadAccessibilityLabel: loadAccessibilityLabel
+      loadAccessibilityLabel: loadAccessibilityLabel,
+      networkAccess: networkAccess
     ) { phase in
       switch phase {
       case .success(let asset, _):

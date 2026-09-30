@@ -694,6 +694,7 @@ private struct ForumPostSearchMediaStrip: View {
 
   @Environment(\.contentMediaLoadBehavior) private var contentMediaLoadBehavior
   @Environment(\.contentImagePreviewQuality) private var contentImagePreviewQuality
+  @Environment(\.contentImagePreviewNetworkAccess) private var previewNetworkAccess
   @Environment(\.hidesThreadListMedia) private var hidesThreadListMedia
 
   @ViewBuilder
@@ -735,7 +736,8 @@ private struct ForumPostSearchMediaStrip: View {
         ContentRemoteImage(
           url: imageURL,
           maxPixelSize: Self.previewMaxPixelSize,
-          loadAccessibilityLabel: "加载搜索结果图片 \(index + 1)"
+          loadAccessibilityLabel: "加载搜索结果图片 \(index + 1)",
+          networkAccess: previewNetworkAccess
         ) { phase in
           switch phase {
           case .success(let asset, _):

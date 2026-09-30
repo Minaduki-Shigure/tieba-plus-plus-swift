@@ -7,6 +7,8 @@
         "AddPollPostResIdl.proto",
         "AddPostReqIdl.proto",
         "AddPostResIdl.proto",
+        "AddThreadReqIdl.proto",
+        "AddThreadResIdl.proto",
         "Agree.proto",
         "Anti.proto",
         "BirthdayInfo.proto",

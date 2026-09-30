@@ -185,6 +185,10 @@ struct TiebaPlusPlusApp: App {
       policy: resolvedContentMediaLoadPolicy,
       networkSnapshot: contentMediaNetworkMonitor.snapshot
     )
+    let imagePreviewPolicy = ContentImagePreviewPolicy.resolved(
+      preference: ContentImagePreviewQuality.resolved(contentImagePreviewQuality),
+      networkSnapshot: contentMediaNetworkMonitor.snapshot
+    )
 
     WindowGroup {
       #if PERFORMANCE_HARNESS
@@ -217,8 +221,9 @@ struct TiebaPlusPlusApp: App {
         .environment(\.contentMediaLoadBehavior, contentMediaLoadBehavior)
         .environment(
           \.contentImagePreviewQuality,
-          ContentImagePreviewQuality.resolved(contentImagePreviewQuality)
+          imagePreviewPolicy.quality
         )
+        .environment(\.contentImagePreviewNetworkAccess, imagePreviewPolicy.networkAccess)
         .environment(\.hidesThreadListMedia, hidesThreadListMedia)
         .environment(\.hidesReplyEntryPoints, hidesReplyEntryPoints)
         .environment(
@@ -293,8 +298,9 @@ struct TiebaPlusPlusApp: App {
         .environment(\.contentMediaLoadBehavior, contentMediaLoadBehavior)
         .environment(
           \.contentImagePreviewQuality,
-          ContentImagePreviewQuality.resolved(contentImagePreviewQuality)
+          imagePreviewPolicy.quality
         )
+        .environment(\.contentImagePreviewNetworkAccess, imagePreviewPolicy.networkAccess)
         .environment(\.hidesThreadListMedia, hidesThreadListMedia)
         .environment(\.hidesReplyEntryPoints, hidesReplyEntryPoints)
         .environment(

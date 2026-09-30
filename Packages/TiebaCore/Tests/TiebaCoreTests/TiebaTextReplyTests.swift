@@ -137,7 +137,7 @@ final class TiebaTextReplyTests: XCTestCase, @unchecked Sendable {
     XCTAssertEqual(parsed.fields["BDUSS"], credential().bduss)
     XCTAssertEqual(parsed.fields["stoken"], credential().stoken)
     XCTAssertEqual(parsed.fields["_client_type"], "2")
-    XCTAssertEqual(parsed.fields["_client_version"], "12.35.1.0")
+    XCTAssertEqual(parsed.fields["_client_version"], "12.52.1.0")
     assertSignature(parsed.fields)
     let differentPayload = try parseMultipart(
       makeRequest(
@@ -154,7 +154,7 @@ final class TiebaTextReplyTests: XCTestCase, @unchecked Sendable {
     XCTAssertEqual(message.data.common.stoken, credential().stoken)
     XCTAssertEqual(message.data.common.tbs, tbs)
     XCTAssertEqual(message.data.common.clientType, 2)
-    XCTAssertEqual(message.data.common.clientVersion, "12.35.1.0")
+    XCTAssertEqual(message.data.common.clientVersion, "12.52.1.0")
     XCTAssertEqual(message.data.content, submission.content)
     XCTAssertEqual(message.data.fid, String(forumID))
     XCTAssertEqual(message.data.kw, forumName)

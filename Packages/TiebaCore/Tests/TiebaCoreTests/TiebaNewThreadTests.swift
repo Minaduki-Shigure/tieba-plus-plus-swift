@@ -1,4 +1,5 @@
 import Foundation
+import SwiftProtobuf
 import XCTest
 
 @testable import TiebaCore
@@ -59,65 +60,79 @@ final class TiebaNewThreadTests: XCTestCase {
     }
   }
 
-  func testRequestUsesSignedHTTPSMinimalContractAndPreservesFormText() throws {
+  func testRequestUsesSignedHTTPSMultipartContractAndPreservesContentBytes() throws {
     let submission = makeSubmission(
       title: "题目 +%&=🙂",
       content: "第一行e\u{301}#(呵呵)\n第二行 +%&=🙂"
     )
     let request = try makeRequest(submission: submission)
-    let parsed = try newThreadForm(request)
+    let parsed = try newThreadMultipart(request)
+    let message = try AddThreadReqIdl(serializedBytes: parsed.protobuf)
 
-    XCTAssertEqual(request.url?.absoluteString, "https://tiebac.baidu.com/c/c/thread/add")
+    XCTAssertEqual(request.url?.scheme, "https")
+    XCTAssertEqual(request.url?.host, "tiebac.baidu.com")
+    XCTAssertEqual(request.url?.path, "/c/c/thread/add")
+    let queryItems = try XCTUnwrap(
+      URLComponents(url: XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems
+    )
+    XCTAssertEqual(queryItems, [
+      URLQueryItem(name: "cmd", value: "309730"),
+      URLQueryItem(name: "format", value: "protobuf"),
+    ])
     XCTAssertEqual(request.httpMethod, "POST")
     XCTAssertFalse(request.httpShouldHandleCookies)
     XCTAssertEqual(request.value(forHTTPHeaderField: "Cookie"), "ka=open")
     XCTAssertEqual(request.value(forHTTPHeaderField: "client_user_token"), String(userID))
-    XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), "bdtb for Android 7.2.0.0")
-    XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+    XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), "bdtb for Android 12.52.1.0")
+    XCTAssertEqual(request.value(forHTTPHeaderField: "x_bd_data_type"), "protobuf")
+    XCTAssertEqual(request.value(forHTTPHeaderField: "Accept-Encoding"), "gzip")
     XCTAssertEqual(
       request.value(forHTTPHeaderField: "Content-Type"),
-      "application/x-www-form-urlencoded"
+      "multipart/form-data; boundary=\(TiebaRequestFactory.multipartBoundary)"
     )
 
     XCTAssertEqual(
       Set(parsed.fields.keys),
-      [
-        "BDUSS", "_client_type", "_client_version", "anonymous", "call_from",
-        "can_no_forum", "content", "cuid_gid", "entrance_type", "fid", "from",
-        "is_feedback", "is_hide", "is_ntitle", "kw", "name_show", "new_vcode",
-        "reply_uid", "sign", "stoken", "subapp_type", "takephoto_num", "tbs", "title",
-        "vcode_tag", "z_id",
-      ]
+      ["BDUSS", "_client_type", "_client_version", "stoken", "sign"]
     )
     XCTAssertEqual(
       parsed.orderedNames,
-      parsed.orderedNames.filter { $0 != "sign" }.sorted() + ["sign"]
+      ["BDUSS", "_client_type", "_client_version", "stoken", "sign"]
     )
-    XCTAssertEqual(parsed.fields["content"], submission.content)
-    XCTAssertEqual(parsed.fields["title"], submission.title)
-    XCTAssertEqual(parsed.fields["fid"], String(forumID))
-    XCTAssertEqual(parsed.fields["kw"], forumName)
-    XCTAssertEqual(parsed.fields["name_show"], "Current User")
-    XCTAssertEqual(parsed.fields["tbs"], tbs)
     XCTAssertEqual(parsed.fields["BDUSS"], credential().bduss)
     XCTAssertEqual(parsed.fields["stoken"], credential().stoken)
     XCTAssertEqual(parsed.fields["_client_type"], "2")
-    XCTAssertEqual(parsed.fields["_client_version"], "7.2.0.0")
-    XCTAssertEqual(parsed.fields["anonymous"], "1")
-    XCTAssertEqual(parsed.fields["call_from"], "2")
-    XCTAssertEqual(parsed.fields["can_no_forum"], "0")
-    XCTAssertEqual(parsed.fields["cuid_gid"], "")
-    XCTAssertEqual(parsed.fields["entrance_type"], "1")
-    XCTAssertEqual(parsed.fields["from"], "1021636m")
-    XCTAssertEqual(parsed.fields["is_feedback"], "0")
-    XCTAssertEqual(parsed.fields["is_hide"], "1")
-    XCTAssertEqual(parsed.fields["is_ntitle"], "0")
-    XCTAssertEqual(parsed.fields["new_vcode"], "1")
-    XCTAssertEqual(parsed.fields["reply_uid"], "null")
-    XCTAssertEqual(parsed.fields["subapp_type"], "mini")
-    XCTAssertEqual(parsed.fields["takephoto_num"], "0")
-    XCTAssertEqual(parsed.fields["vcode_tag"], "12")
-    XCTAssertEqual(parsed.fields["z_id"], "")
+    XCTAssertEqual(parsed.fields["_client_version"], "12.52.1.0")
+
+    XCTAssertTrue(message.hasData)
+    XCTAssertTrue(message.data.hasCommon)
+    // The entire CommonReq must equal this minimal allowlist: adding a device
+    // identifier, timestamp, location or other telemetry would fail equality.
+    var expectedCommon = CommonReq()
+    expectedCommon.clientType = 2
+    expectedCommon.clientVersion = "12.52.1.0"
+    expectedCommon.bduss = credential().bduss
+    expectedCommon.stoken = credential().stoken
+    expectedCommon.tbs = tbs
+    XCTAssertEqual(message.data.common, expectedCommon)
+    XCTAssertEqual(Array(message.data.content.utf8), Array(submission.content.utf8))
+    XCTAssertEqual(message.data.title, submission.title)
+    XCTAssertEqual(message.data.fid, String(forumID))
+    XCTAssertEqual(message.data.kw, forumName)
+    XCTAssertEqual(message.data.nameShow, "Current User")
+    XCTAssertEqual(message.data.anonymous, "1")
+    XCTAssertEqual(message.data.canNoForum, "0")
+    XCTAssertEqual(message.data.entranceType, "0")
+    XCTAssertEqual(message.data.isHide, "1")
+    XCTAssertEqual(message.data.isNtitle, "0")
+    XCTAssertEqual(message.data.newVcode, "1")
+    XCTAssertEqual(message.data.takephotoNum, "0")
+    XCTAssertEqual(message.data.vcodeTag, "12")
+    XCTAssertEqual(message.data.isPictxt, "0")
+    XCTAssertTrue(message.data.hasShowCustomFigure)
+    XCTAssertEqual(message.data.showCustomFigure, 0)
+    XCTAssertTrue(message.data.hasIsShowBless)
+    XCTAssertEqual(message.data.isShowBless, 0)
     XCTAssertEqual(
       parsed.fields["sign"],
       TiebaAuthenticatedRequestFactory.signature(
@@ -134,21 +149,33 @@ final class TiebaNewThreadTests: XCTestCase {
     }
   }
 
-  func testUntitledPolarityAndSignedTitleAndContent() throws {
-    let untitled = try newThreadForm(makeRequest(submission: makeSubmission(title: "")))
-    XCTAssertEqual(untitled.fields["is_ntitle"], "1")
-    XCTAssertEqual(untitled.fields["title"], "")
+  func testUntitledPolarityAndPayloadChangesPreserveCredentialOnlySignature() throws {
+    let untitled = try AddThreadReqIdl(
+      serializedBytes: newThreadMultipart(makeRequest(submission: makeSubmission(title: ""))).protobuf
+    )
+    XCTAssertEqual(untitled.data.isNtitle, "1")
+    XCTAssertEqual(untitled.data.title, "")
 
-    let titled = try newThreadForm(makeRequest(submission: makeSubmission(title: "title")))
-    let changedContent = try newThreadForm(
+    let titled = try newThreadMultipart(makeRequest(submission: makeSubmission(title: "title")))
+    let changedContent = try newThreadMultipart(
       makeRequest(submission: makeSubmission(title: "title", content: "different"))
     )
-    let changedTitle = try newThreadForm(
+    let changedTitle = try newThreadMultipart(
       makeRequest(submission: makeSubmission(title: "different", content: "body"))
     )
-    XCTAssertEqual(titled.fields["is_ntitle"], "0")
-    XCTAssertNotEqual(titled.fields["sign"], changedContent.fields["sign"])
-    XCTAssertNotEqual(titled.fields["sign"], changedTitle.fields["sign"])
+    XCTAssertEqual(try AddThreadReqIdl(serializedBytes: titled.protobuf).data.isNtitle, "0")
+    XCTAssertEqual(
+      try AddThreadReqIdl(serializedBytes: changedContent.protobuf).data.content,
+      "different"
+    )
+    XCTAssertEqual(
+      try AddThreadReqIdl(serializedBytes: changedTitle.protobuf).data.title,
+      "different"
+    )
+    XCTAssertNotEqual(titled.protobuf, changedContent.protobuf)
+    XCTAssertNotEqual(titled.protobuf, changedTitle.protobuf)
+    XCTAssertEqual(titled.fields["sign"], changedContent.fields["sign"])
+    XCTAssertEqual(titled.fields["sign"], changedTitle.fields["sign"])
   }
 
   func testRequestValidationRejectsInvalidIdentityTitleBodyAndTrustedMetadata() {
@@ -187,19 +214,23 @@ final class TiebaNewThreadTests: XCTestCase {
       imageProofs: [proof]
     )
     XCTAssertEqual(
-      try newThreadForm(makeRequest(submission: submission)).fields["content"],
+      try AddThreadReqIdl(
+        serializedBytes: newThreadMultipart(makeRequest(submission: submission)).protobuf
+      ).data.content,
       "正文\n#(pic,\(proof.picID),640,480)"
     )
     XCTAssertEqual(
-      try newThreadForm(
-        makeRequest(
-          submission: makeSubmission(
-            submissionID: submissionID,
-            content: "",
-            imageProofs: [proof]
+      try AddThreadReqIdl(
+        serializedBytes: newThreadMultipart(
+          makeRequest(
+            submission: makeSubmission(
+              submissionID: submissionID,
+              content: "",
+              imageProofs: [proof]
+            )
           )
-        )
-      ).fields["content"],
+        ).protobuf
+      ).data.content,
       "#(pic,\(proof.picID),640,480)"
     )
     XCTAssertThrowsError(
@@ -261,80 +292,152 @@ final class TiebaNewThreadTests: XCTestCase {
     let submission = makeSubmission()
     XCTAssertEqual(
       try TiebaAuthenticatedDecoder.newThreadReceipt(
-        from: Data(#"{"error_code":"0","tid":"3003","pid":4004}"#.utf8),
+        from: try newThreadResponse().serializedData(),
         submission: submission
       ),
       TiebaNewThreadReceipt(threadID: threadID, firstPostID: firstPostID)
     )
 
-    for body in [
-      #"{"tid":"3003","pid":"4004"}"#,
-      #"{"error_code":"0","tid":"0","pid":"4004"}"#,
-      #"{"error_code":"0","tid":"3003","pid":"-1"}"#,
-      #"{"error_code":"0","tid":"3.5","pid":"4004"}"#,
-    ] {
+    var missingError = newThreadResponse()
+    missingError.clearError()
+    var missingData = newThreadResponse()
+    missingData.clearData()
+    var invalidResponses = [missingError, missingData]
+    for invalidID in ["", "0", "-1", "3.5", "+3", " 3", "3 ", "9223372036854775808"] {
+      var invalidThread = newThreadResponse()
+      invalidThread.data.tid = invalidID
+      invalidResponses.append(invalidThread)
+      var invalidPost = newThreadResponse()
+      invalidPost.data.pid = invalidID
+      invalidResponses.append(invalidPost)
+    }
+    for response in invalidResponses {
       XCTAssertThrowsError(
         try TiebaAuthenticatedDecoder.newThreadReceipt(
-          from: Data(body.utf8),
+          from: try response.serializedData(),
           submission: submission
         )
       ) { XCTAssertEqual($0 as? TiebaClientError, .invalidAuthenticatedResponse) }
     }
     XCTAssertThrowsError(
       try TiebaAuthenticatedDecoder.newThreadReceipt(
-        from: Data("not-json".utf8),
+        from: Data("not-protobuf".utf8),
         submission: submission
       )
-    ) { XCTAssertEqual($0 as? TiebaClientError, .invalidJSON) }
+    ) { XCTAssertEqual($0 as? TiebaClientError, .invalidProtobuf) }
   }
 
-  func testReceiptClassifiesChallengeBeforeServerError() {
-    let submission = makeSubmission()
-    for signal in [
-      #""need_vcode":"1""#,
-      #""need_vcode":true"#,
-      #""vcode_md5":"token""#,
-      #""vcode_pic_url":"https://example.invalid/vcode""#,
-      #""pass_token":"token""#,
-    ] {
-      let body = Data(
-        "{\"error_code\":\"340006\",\"msg\":\"需要验证\",\"info\":{\(signal)}}".utf8
-      )
-      XCTAssertThrowsError(
-        try TiebaAuthenticatedDecoder.newThreadReceipt(from: body, submission: submission)
-      ) {
-        XCTAssertEqual(
-          $0 as? TiebaClientError,
-          .newThreadChallengeRequired(message: "需要验证")
-        )
-      }
+  func testReceiptClassifiesEveryPostAntiInfoSignalBeforeServerError() throws {
+    let signals: [(inout PostAntiInfo) -> Void] = [
+      { $0.needVcode = "1" },
+      { $0.vcodeMd5 = "token" },
+      { $0.vcodePrevType = "slide" },
+      { $0.vcodeType = "slide" },
+      { $0.vcodePicURL = "https://example.invalid/vcode" },
+      { $0.passToken = "token" },
+      { $0.blockCancel = "cancel" },
+      { $0.blockConfirm = "confirm" },
+      { $0.blockContent = "需要验证" },
+      { $0.confilterHitwords = ["word"] },
+      { $0.accessState = AccessState() },
+      { $0.vcodeExtra.slideendpoint = "https://example.invalid/challenge" },
+    ]
+    for signal in signals {
+      var response = newThreadResponse(errorCode: 340_006, message: "需要验证")
+      var info = PostAntiInfo()
+      signal(&info)
+      response.data.info = info
+      try assertChallenge(response, message: "需要验证")
     }
-
-    XCTAssertThrowsError(
-      try TiebaAuthenticatedDecoder.newThreadReceipt(
-        from: Data(#"{"error_code":"340006","errmsg":"denied"}"#.utf8),
-        submission: submission
-      )
-    ) { XCTAssertEqual($0 as? TiebaClientError, .server(code: 340_006, message: "denied")) }
-    XCTAssertThrowsError(
-      try TiebaAuthenticatedDecoder.newThreadReceipt(
-        from: Data(#"{"error_code":"-1","errmsg":"denied"}"#.utf8),
-        submission: submission
-      )
-    ) { XCTAssertEqual($0 as? TiebaClientError, .server(code: -1, message: "denied")) }
   }
 
-  func testReceiptDoesNotTreatEmptyFalseZeroOrNullNeedVcodeAsChallenge() throws {
+  func testReceiptClassifiesEveryAntiStatSignalBeforeApparentSuccess() throws {
+    let signals: [(inout PostAntiStat) -> Void] = [
+      { $0.forbidFlag = 1 },
+      { $0.forbidInfo = "需要验证" },
+      { $0.blockStat = 1 },
+      { $0.hideStat = 1 },
+      { $0.vcodeStat = 1 },
+    ]
+    for signal in signals {
+      var response = newThreadResponse(message: "需要验证")
+      var antiStat = PostAntiStat()
+      signal(&antiStat)
+      response.data.antiStat = antiStat
+      try assertChallenge(response, message: "需要验证")
+    }
+  }
+
+  func testReceiptClassifiesEveryVcodeInfoSignalBeforeServerError() throws {
+    let signals: [(inout VcodeInfo) -> Void] = [
+      { $0.vcodeMd5 = "token" },
+      { $0.vcodePicURL = "https://example.invalid/vcode" },
+      { $0.vcodeType = "slide" },
+      { $0.vcodeExtra.textimg = "challenge" },
+      { $0.vcodeExtra.slideimg = "challenge" },
+      { $0.vcodeExtra.endpoint = "https://example.invalid/challenge" },
+      { $0.vcodeExtra.successimg = "challenge" },
+      { $0.vcodeExtra.slideendpoint = "https://example.invalid/challenge" },
+    ]
+    for signal in signals {
+      var response = newThreadResponse(errorCode: 340_006, message: "需要验证")
+      var anti = VcodeInfo()
+      signal(&anti)
+      response.data.anti = anti
+      try assertChallenge(response, message: "需要验证")
+    }
+  }
+
+  func testReceiptChallengeRemainsDefinitiveWhenSuccessEnvelopeIsIncomplete() throws {
+    var response = newThreadResponse()
+    response.clearError()
+    response.data.tid = ""
+    response.data.pid = ""
+    response.data.info.needVcode = "1"
+    try assertChallenge(
+      response,
+      message: "Tieba requires additional verification before this topic can be submitted."
+    )
+  }
+
+  func testReceiptServerErrorUsesUserMessageThenErrorMessage() throws {
+    for code: Int32 in [340_006, -1] {
+      var response = newThreadResponse(errorCode: code, message: "denied")
+      XCTAssertThrowsError(
+        try TiebaAuthenticatedDecoder.newThreadReceipt(
+          from: try response.serializedData(),
+          submission: makeSubmission()
+        )
+      ) { XCTAssertEqual($0 as? TiebaClientError, .server(code: code, message: "denied")) }
+
+      response.error.userMsg = "请稍后重试"
+      XCTAssertThrowsError(
+        try TiebaAuthenticatedDecoder.newThreadReceipt(
+          from: try response.serializedData(),
+          submission: makeSubmission()
+        )
+      ) { XCTAssertEqual($0 as? TiebaClientError, .server(code: code, message: "请稍后重试")) }
+    }
+  }
+
+  func testReceiptDoesNotTreatEmptyOrZeroChallengeMessagesAsChallenge() throws {
     let submission = makeSubmission()
     let expected = TiebaNewThreadReceipt(threadID: threadID, firstPostID: firstPostID)
-    for value in ["\"\"", "\"   \"", "false", "\"0\"", "0", "null"] {
-      let body = Data(
-        ("{\"error_code\":\"0\",\"tid\":\"3003\",\"pid\":\"4004\","
-          + "\"info\":{\"need_vcode\":\(value),\"vcode_md5\":\"\","
-          + "\"vcode_pic_url\":false,\"pass_token\":0}}").utf8
-      )
+    for value in ["", "   ", "0", " 0 "] {
+      var response = newThreadResponse()
+      var info = PostAntiInfo()
+      info.needVcode = value
+      info.vcodeExtra = VcodeExtra()
+      response.data.info = info
+      response.data.antiStat = PostAntiStat()
+      var anti = VcodeInfo()
+      anti.vcodeExtra = VcodeExtra()
+      response.data.anti = anti
       XCTAssertEqual(
-        try TiebaAuthenticatedDecoder.newThreadReceipt(from: body, submission: submission),
+        try TiebaAuthenticatedDecoder.newThreadReceipt(
+          from: try response.serializedData(),
+          submission: submission
+        ),
         expected
       )
     }
@@ -594,21 +697,82 @@ final class TiebaNewThreadTests: XCTestCase {
     )
   }
 
-  private func newThreadForm(_ request: URLRequest) throws -> (
-    fields: [String: String], orderedNames: [String]
+  private func newThreadMultipart(_ request: URLRequest) throws -> (
+    fields: [String: String], orderedNames: [String], protobuf: Data
   ) {
     let body = try XCTUnwrap(request.httpBody)
-    var components = URLComponents()
-    components.percentEncodedQuery = String(decoding: body, as: UTF8.self)
-      .replacingOccurrences(of: "+", with: "%20")
-    let items = try XCTUnwrap(components.queryItems)
-    return (
-      Dictionary(
-        uniqueKeysWithValues: items.compactMap { item in
-          item.value.map { (item.name, $0) }
-        }),
-      items.map(\.name)
+    let boundary = TiebaRequestFactory.multipartBoundary
+    let dataHeader = Data(
+      ("--\(boundary)\r\n"
+        + "Content-Disposition: form-data; name=\"data\"; filename=\"file\"\r\n\r\n").utf8
     )
+    let dataHeaderRange = try XCTUnwrap(body.range(of: dataHeader))
+    let suffix = Data("\r\n--\(boundary)--\r\n".utf8)
+    guard body.suffix(suffix.count) == suffix else {
+      throw TiebaClientError.transportFailure
+    }
+    let protobuf = body.subdata(in: dataHeaderRange.upperBound..<(body.count - suffix.count))
+    let prefix = String(decoding: body[..<dataHeaderRange.lowerBound], as: UTF8.self)
+    let parts = prefix.components(separatedBy: "--\(boundary)\r\n")
+    var fields = [String: String]()
+    var orderedNames = [String]()
+    for part in parts where !part.isEmpty {
+      let separator = try XCTUnwrap(part.range(of: "\r\n\r\n"))
+      let header = String(part[..<separator.lowerBound])
+      var value = String(part[separator.upperBound...])
+      let fieldHeader = "Content-Disposition: form-data; name=\""
+      guard
+        header.hasPrefix(fieldHeader), header.hasSuffix("\""),
+        let terminator = value.range(of: "\r\n", options: .backwards),
+        terminator.upperBound == value.endIndex
+      else {
+        throw TiebaClientError.transportFailure
+      }
+      value.removeSubrange(terminator)
+      let name = String(header.dropFirst(fieldHeader.count).dropLast())
+      guard fields.updateValue(value, forKey: name) == nil else {
+        throw TiebaClientError.transportFailure
+      }
+      orderedNames.append(name)
+    }
+    return (fields, orderedNames, protobuf)
+  }
+
+  private func newThreadResponse(
+    errorCode: Int32 = 0,
+    message: String = ""
+  ) -> AddThreadResIdl {
+    var error = TiebaProto.Error()
+    error.errorno = errorCode
+    error.errmsg = message
+    var data = AddThreadResIdl.DataRes()
+    data.tid = String(threadID)
+    data.pid = String(firstPostID)
+    var response = AddThreadResIdl()
+    response.error = error
+    response.data = data
+    return response
+  }
+
+  private func assertChallenge(
+    _ response: AddThreadResIdl,
+    message: String,
+    file: StaticString = #filePath,
+    line: UInt = #line
+  ) throws {
+    let body = try response.serializedData()
+    XCTAssertThrowsError(
+      try TiebaAuthenticatedDecoder.newThreadReceipt(from: body, submission: makeSubmission()),
+      file: file,
+      line: line
+    ) {
+      XCTAssertEqual(
+        $0 as? TiebaClientError,
+        .newThreadChallengeRequired(message: message),
+        file: file,
+        line: line
+      )
+    }
   }
 
   private func newThreadForumResponse(

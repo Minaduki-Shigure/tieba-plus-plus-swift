@@ -25,6 +25,24 @@ and its verified metadata enters the public app source.
 
 ### Release and validation
 
+- **Current `main`, pending IPA publication:** Image preview quality adds an
+  optional “自动（按网络）” setting. The existing standard default is unchanged;
+  the shared network monitor selects high-definition previews on available,
+  non-expensive, non-constrained paths and standard previews elsewhere. This
+  applies to post bodies, thread cards, and per-forum search, while the separate
+  loading policy still controls whether a request starts. Automatic high-definition
+  requests retain economical-network restrictions across a path change. Galleries
+  keep their original-image selection, and no per-row network observer is added.
+  New-topic submission now uses signed multipart protobuf command `309730` with
+  client version `12.52.1.0`; reply command `309731` and static-image upload use
+  that same version. A dispatched topic write never falls back to the former
+  mini-program form endpoint. Account binding, durable drafts, challenge locks,
+  and exact first-floor readback remain in force. These two areas were checked
+  against TiebaLite `9701bfb6aaf261cc37b20b5793a8404261077f49`; the full-product
+  audit remains at `268f388c`, and the approximately 81% estimate is unchanged.
+  Network transitions and real creation acceptance still require device and
+  disposable-account validation. The public source continues to serve alpha.14
+  (build 92) until the next tested IPA is published.
 - **`v0.65.0-alpha.14` optional unread reminders:** Settings → 消息提醒 adds a default-off
   system notification option for the active account's unread replies and mentions.
   iOS background refresh reuses the existing bounded summary read; it does not

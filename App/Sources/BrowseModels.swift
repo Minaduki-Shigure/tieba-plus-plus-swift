@@ -1645,7 +1645,8 @@ enum BrowseContentImageSourceResolver {
     quality: ContentImagePreviewQuality
   ) -> URL {
     switch quality {
-    case .standard:
+    case .standard, .automatic:
+      // An unresolved automatic preference has no known economical path.
       thumbnail
     case .highDefinition:
       fullSize ?? dynamic ?? thumbnail

@@ -73,6 +73,34 @@ final class ForumPostSearchMediaPresentationTests: XCTestCase {
     )
   }
 
+  func testAutomaticQualityTracksNetworkWithoutExpandingCollapsedSearchMedia() throws {
+    let thumbnail = try XCTUnwrap(URL(string: "https://img.example/standard.jpg"))
+    let fullSize = try XCTUnwrap(URL(string: "https://img.example/high-definition.jpg"))
+    let contents: [BrowseContent] = [
+      .image(thumbnail: thumbnail, fullSize: fullSize, original: nil, width: 100, height: 100)
+    ]
+    for constrained in [false, true, false] {
+      let policy = ContentImagePreviewPolicy.resolved(
+        preference: .automatic,
+        networkSnapshot: ContentMediaNetworkSnapshot(
+          status: .available, isExpensive: false, isConstrained: constrained
+        )
+      )
+      XCTAssertEqual(
+        ForumPostSearchMediaPresentation.resolve(
+          contents: contents, hidesMedia: false, quality: policy.quality
+        ),
+        .expanded(imageURLs: [constrained ? thumbnail : fullSize], totalCount: 1)
+      )
+      XCTAssertEqual(
+        ForumPostSearchMediaPresentation.resolve(
+          contents: contents, hidesMedia: true, quality: policy.quality
+        ),
+        .collapsed(.images(count: 1))
+      )
+    }
+  }
+
   func testVideoOnlyContentRemainsWithoutMediaPresentation() throws {
     let videoURL = try XCTUnwrap(URL(string: "https://video.example/video.mp4"))
     let coverURL = try XCTUnwrap(URL(string: "https://img.example/cover.jpg"))

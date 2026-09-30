@@ -866,21 +866,23 @@ final class AppPreferencesTests: XCTestCase {
       AppPreferenceKey.contentImagePreviewQuality,
       "TiebaPlusPlus.contentImagePreviewQuality"
     )
-    XCTAssertEqual(ContentImagePreviewQuality.allCases, [.standard, .highDefinition])
+    XCTAssertEqual(ContentImagePreviewQuality.allCases, [.standard, .highDefinition, .automatic])
     XCTAssertEqual(
       ContentImagePreviewQuality.allCases.map(\.rawValue),
-      ["standard", "highDefinition"]
+      ["standard", "highDefinition", "automatic"]
     )
     XCTAssertEqual(
       ContentImagePreviewQuality.allCases.map(\.title),
-      ["标准（推荐）", "高清"]
+      ["标准（推荐）", "高清", "自动（按网络）"]
     )
     XCTAssertEqual(ContentImagePreviewQuality.defaultValue, .standard)
     XCTAssertEqual(ContentImagePreviewQuality.resolved("standard"), .standard)
     XCTAssertEqual(ContentImagePreviewQuality.resolved("highDefinition"), .highDefinition)
+    XCTAssertEqual(ContentImagePreviewQuality.resolved("automatic"), .automatic)
     XCTAssertEqual(ContentImagePreviewQuality.resolved(""), .standard)
     XCTAssertEqual(ContentImagePreviewQuality.resolved("future-value"), .standard)
     XCTAssertEqual(EnvironmentValues().contentImagePreviewQuality, .standard)
+    XCTAssertEqual(EnvironmentValues().contentImagePreviewNetworkAccess, .unrestricted)
 
     var environment = EnvironmentValues()
     environment.contentImagePreviewQuality = .highDefinition

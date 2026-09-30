@@ -97,7 +97,8 @@ enum ContentRemoteImageLoadDecision {
     behavior: ContentMediaLoadBehavior,
     lastObservedPolicy: ContentMediaLoadPolicy?,
     request: ContentRemoteImageRequestIdentity,
-    authorizedRequest: ContentRemoteImageRequestIdentity?
+    authorizedRequest: ContentRemoteImageRequestIdentity?,
+    networkAccess: RemoteImageNetworkAccess = .unrestricted
   ) -> DownsampledImageFetchPolicy {
     if lastObservedPolicy == policy, authorizedRequest == request {
       return .allowNetwork(.preview)
@@ -105,7 +106,9 @@ enum ContentRemoteImageLoadDecision {
 
     switch behavior {
     case .automatic:
-      return .allowNetwork(.preview)
+      return networkAccess == .economicalOnly
+        ? .allowEconomicalNetwork(.preview)
+        : .allowNetwork(.preview)
     case .economicalNetworkOnly:
       return .allowEconomicalNetwork(.preview)
     case .userInitiated:
@@ -168,6 +171,7 @@ struct ContentRemoteImage<Content: View>: View {
   let url: URL?
   let maxPixelSize: Int
   let loadAccessibilityLabel: String
+  let networkAccess: RemoteImageNetworkAccess
   @ViewBuilder let content: (ContentRemoteImagePhase) -> Content
 
   @State private var loadState = ContentRemoteImageLoadState()
@@ -176,11 +180,13 @@ struct ContentRemoteImage<Content: View>: View {
     url: URL?,
     maxPixelSize: Int,
     loadAccessibilityLabel: String,
+    networkAccess: RemoteImageNetworkAccess = .unrestricted,
     @ViewBuilder content: @escaping (ContentRemoteImagePhase) -> Content
   ) {
     self.url = url
     self.maxPixelSize = maxPixelSize
     self.loadAccessibilityLabel = loadAccessibilityLabel
+    self.networkAccess = networkAccess
     self.content = content
   }
 
@@ -194,7 +200,8 @@ struct ContentRemoteImage<Content: View>: View {
       behavior: behavior,
       lastObservedPolicy: loadState.lastObservedPolicy,
       request: request,
-      authorizedRequest: loadState.authorizedRequest
+      authorizedRequest: loadState.authorizedRequest,
+      networkAccess: networkAccess
     )
   }
 

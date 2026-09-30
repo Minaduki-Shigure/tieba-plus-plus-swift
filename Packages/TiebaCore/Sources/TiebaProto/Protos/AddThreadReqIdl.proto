@@ -1,0 +1,27 @@
+// Minimal tbclient.AddThread request subset observed in TiebaLite 9701bfb6.
+syntax = "proto3";
+
+import "CommonReq.proto";
+
+message AddThreadReqIdl {
+    message DataReq {
+        CommonReq common = 1;
+        string anonymous = 6;
+        string can_no_forum = 7;
+        string takephoto_num = 9;
+        string entrance_type = 10;
+        string vcode_tag = 16;
+        string new_vcode = 18;
+        string content = 19;
+        string fid = 26;
+        string kw = 27;
+        string is_hide = 29;
+        string title = 38;
+        string is_ntitle = 41;
+        string name_show = 75;
+        string is_pictxt = 77;
+        optional int32 show_custom_figure = 80;
+        optional int32 is_show_bless = 87;
+    }
+    DataReq data = 1;
+}

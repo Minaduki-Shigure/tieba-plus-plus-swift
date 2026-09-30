@@ -6,6 +6,10 @@ limited to the attributed protobuf schemas and fixed classic-emoticon wire-name
 catalog documented in TiebaProto's `NOTICE.md`.
 This audit was last compared with TiebaLite `4.0-dev` at commit
 [`268f388c`](https://github.com/zzc10086/TiebaLite/tree/268f388c7824ae2c8f6ed549827a943ec8a7f352).
+The current-main automatic preview-quality and creation-transport changes were
+separately checked against
+[`9701bfb6`](https://github.com/zzc10086/TiebaLite/tree/9701bfb6aaf261cc37b20b5793a8404261077f49).
+That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
@@ -29,6 +33,11 @@ The published level-progress and bounded regular-expression filtering additions
 improve existing credited areas without changing the current
 80–82% weighted estimate; experimental account writes retain their documented
 physical-device and disposable-account gates.
+Current `main` additionally provides opt-in network-adaptive image preview quality
+and migrates new-topic writes to protobuf command `309730`, updating only the
+topic, reply, and static-image-upload client versions to `12.52.1.0`. These changes
+are not yet in that published IPA and add no weighted point; device network
+transitions and disposable-account creation validation remain required.
 The fixed username handoff and conservative cloud-favorite identity fallback
 improve existing account and server-write areas without adding a native write,
 new data source, or weighted point. Current-main personalized-discovery startup
@@ -473,7 +482,8 @@ the source metadata is updated to that tested IPA.
   validation, and temporary-file leases
 - Responsive one-to-three-column masonry for consecutive post-body image runs
 - Persistent automatic, data-saving, or tap-to-load policy for content media
-- Persistent standard or high-definition quality selection for supported image previews
+- Persistent standard, high-definition, or opt-in network-adaptive quality selection
+  for supported image previews, with standard remaining the default
 - Independent server dynamic-image URL preservation plus ImageIO-confirmed
   multi-frame GIF, WebP, and HEIC/HEIF-sequence playback in previews and the
   gallery, with single-frame fallback, a 500-frame metadata limit, a 16 MiB
@@ -1611,9 +1621,15 @@ standard, high-definition, dynamic, and original candidates already carried by
 the anonymous response. Standard remains the default and preserves the prior URL
 choice. The opt-in high-definition mode selects that candidate when available,
 then the dynamic candidate, and otherwise falls back to the standard candidate.
-It applies dynamically to post bodies, thread cards, and per-forum search
-without changing whether a
-request is automatic, economical, or user initiated. Gallery, sharing, and
+Current `main` adds opt-in automatic quality: the existing app-level network
+snapshot selects high definition only on an available, non-expensive,
+non-constrained path, and standard on every other path. The resolved quality
+applies dynamically to post bodies, thread cards, and per-forum search without
+per-row network observers. Automatic high-definition requests use the existing
+economical-only transport so a path change cannot silently continue them over
+cellular or constrained networking. The separate media-loading preference still
+controls whether loading starts; an exact manual authorization remains bound to
+its URL and pixel size and cannot authorize a changed quality source. Gallery, sharing, and
 saving retain the original-then-dynamic-then-high-definition-then-standard
 chain and do not consult the preview preference. Avatars, video covers, and
 single-source hot-topic images are also unchanged.
@@ -1896,7 +1912,7 @@ explicitly initiated, memory-only, and subject to real-device validation; it
 does not implement TiebaLite's background or automatic sign-in.
 
 Text and fixed-catalog classic-emoticon replies use HTTPS protobuf command `309731` with client version
-`12.35.1.0`. Topic replies, ordinary-floor replies, and replies to a specific
+`12.52.1.0` in current `main`. Topic replies, ordinary-floor replies, and replies to a specific
 nested reply share one endpoint but have distinct `post_from`, parent, quoted,
 and subpost fields. A nested reply alone receives the protocol-owned `reply`
 marker, built from the freshly read target identity. The composer may insert one
@@ -1935,18 +1951,26 @@ can be unlocked only by an explicit new login. Composer navigation uses the
 native stack without a custom back gesture, including cancellation of an
 interactive edge swipe.
 
-Text and fixed-catalog classic-emoticon new topics use one signed HTTPS form at `/c/c/thread/add` after a
+Text and fixed-catalog classic-emoticon new topics in current `main` use one
+signed HTTPS multipart protobuf write at `/c/c/thread/add?cmd=309730&format=protobuf` after a
 fresh authenticated FRS read binds the active UID, positive forum ID, canonical
 forum name, trusted account display name, and valid TBS. The optional title is
 limited to 31 Swift characters and 124 UTF-8 bytes; the body uses the same
 10,000-character and 32 KiB wire-text bounds as replies. Titles reject control
 characters; bodies preserve line breaks and tabs while rejecting other
 unsupported controls. Titles reject all markers; bodies accept only the same
-fixed classic-emoticon catalog and reject every other Tieba rich-content marker. The minimal form
-follows the observed
-TiebaLite contract but deliberately omits Android hardware, advertising,
-installation, screen, network, and telemetry identifiers; every redirect is
-rejected.
+fixed classic-emoticon catalog and reject every other user-supplied Tieba rich-content marker.
+The `AddThreadReqIdl` payload carries the validated forum, content, title mode,
+display name, and fresh TBS with the minimal authenticated common fields.
+The signed multipart envelope uses client version `12.52.1.0`, as do the reply
+and static-image-upload endpoints in this iteration; other endpoint versions
+are unchanged. The new-topic response is decoded as `AddThreadResIdl`, including
+its distinct `toast = 20` field and shared anti-abuse signals. It requires an
+explicit success envelope and positive TID/PID before readback; challenge data
+can never be treated as a successful creation. The request deliberately omits
+Android hardware, advertising, installation, screen, network, and telemetry
+identifiers; every redirect is rejected. A dispatched write never falls back
+to the former mini-program form endpoint or retries through another transport.
 
 One account has one new-topic write tail. An identical submission UUID shares
 its owner, conflicting reuse is rejected, and cancellation before dispatch

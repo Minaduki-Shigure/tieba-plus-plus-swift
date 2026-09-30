@@ -17,11 +17,11 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let sessionClientVersion = "11.10.8.6"
   static let cloudFavoritesClientVersion = "11.10.8.6"
   static let threadCloudFavoriteClientVersion = "12.41.7.1"
-  static let textReplyClientVersion = "12.35.1.0"
+  static let textReplyClientVersion = "12.52.1.0"
   static let pollReadClientVersion = "12.52.1.0"
   static let pollWriteClientVersion = "11.10.8.6"
-  static let newThreadClientVersion = "7.2.0.0"
-  static let staticImageUploadClientVersion = "12.41.7.1"
+  static let newThreadClientVersion = "12.52.1.0"
+  static let staticImageUploadClientVersion = "12.52.1.0"
   static let concernClientVersion = "11.10.8.6"
   static let selfProfileClientVersion = "12.52.1.0"
   static let selfProfileEditClientVersion = "12.41.7.1"
@@ -1240,35 +1240,43 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     let title = submission.title.precomposedStringWithCanonicalMapping
     let isUntitled = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
-    return try signedFormRequest(
-      host: Self.writeHost,
+    var common = CommonReq()
+    common.clientType = 2
+    common.clientVersion = Self.newThreadClientVersion
+    common.bduss = credential.bduss
+    common.stoken = credential.stoken
+    common.tbs = tbs
+
+    var data = AddThreadReqIdl.DataReq()
+    data.common = common
+    data.anonymous = "1"
+    data.canNoForum = "0"
+    data.takephotoNum = "0"
+    data.entranceType = "0"
+    data.vcodeTag = "12"
+    data.newVcode = "1"
+    data.content = validatedSubmission.content.wireValue
+    data.fid = String(submission.forumID)
+    data.kw = normalizedForumName
+    data.isHide = "1"
+    data.title = title
+    data.isNtitle = isUntitled ? "1" : "0"
+    data.nameShow = displayName
+    data.isPictxt = "0"
+    data.showCustomFigure = 0
+    data.isShowBless = 0
+
+    var message = AddThreadReqIdl()
+    message.data = data
+    return try authenticatedProtobufWriteRequest(
       path: "/c/c/thread/add",
+      command: 309_730,
+      message: message,
       fields: [
         ("BDUSS", credential.bduss),
         ("_client_type", "2"),
         ("_client_version", Self.newThreadClientVersion),
-        ("anonymous", "1"),
-        ("call_from", "2"),
-        ("can_no_forum", "0"),
-        ("content", validatedSubmission.content.wireValue),
-        ("cuid_gid", ""),
-        ("entrance_type", "1"),
-        ("fid", String(submission.forumID)),
-        ("from", "1021636m"),
-        ("is_feedback", "0"),
-        ("is_hide", "1"),
-        ("is_ntitle", isUntitled ? "1" : "0"),
-        ("kw", normalizedForumName),
-        ("name_show", displayName),
-        ("new_vcode", "1"),
-        ("reply_uid", "null"),
         ("stoken", credential.stoken),
-        ("subapp_type", "mini"),
-        ("takephoto_num", "0"),
-        ("tbs", tbs),
-        ("title", title),
-        ("vcode_tag", "12"),
-        ("z_id", ""),
       ],
       userAgent: "bdtb for Android \(Self.newThreadClientVersion)",
       clientUserToken: String(expectedUserID),

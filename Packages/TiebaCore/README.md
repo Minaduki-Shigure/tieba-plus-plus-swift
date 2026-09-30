@@ -153,9 +153,9 @@ let newThread = try await authenticatedClient.submitNewThread(
 )
 ```
 
-Core also exposes the lower-level static-image upload transaction needed by a
-future composer. The current App does not call it. A caller must retain the exact
-validated bytes and upload identity, treat a dispatched unknown outcome as
+Core also exposes the lower-level static-image upload transaction used by the
+App's experimental new-topic and direct-topic-reply composers. A caller must
+retain the exact validated bytes and upload identity, treat a dispatched unknown outcome as
 non-resendable in its own durable state, and rebind a decoded receipt before use:
 
 ```swift
@@ -180,7 +180,7 @@ guard receipt.isBound(to: upload, expectedUserID: sessionAccount.userID) else {
 The client coalesces an identical upload ID within one bounded in-memory flight
 window and never automatically retries a dispatched chunk. That is not a
 cross-restart ledger: persistence and final post-transaction recovery belong to
-the App layer before image creation becomes user-visible.
+the App's durable creation pipeline, not the Core client.
 
 `getForumMembership` remains available for callers that need only
 `TiebaForumMembership`. `getForumAccountState` returns that membership plus an
@@ -287,7 +287,8 @@ membership or check-in.
   credential storage are disabled, and every redirect is rejected.
 - Static-image upload uses only the exact HTTPS
   `tiebac.baidu.com/c/s/uploadPicture` endpoint after full-session same-UID
-  validation. It sends sequential 512,000-byte chunks with a per-request
+  validation, with client version `12.52.1.0` in current `main`. It sends
+  sequential 512,000-byte chunks with a per-request
   collision-checked multipart boundary, limits responses to 64 KiB, and omits
   device, installation, advertising, model, screen, and location identifiers.
   A schema-versioned receipt separately retains the uploaded dimensions and the
@@ -393,20 +394,31 @@ membership or check-in.
   debug descriptions and mirrors, and the FRS anti-CSRF value is not exposed by
   the public API.
 - Text and fixed-catalog classic-emoticon new topics use one signed HTTPS
-  `/c/c/thread/add` form only after a
+  multipart protobuf `/c/c/thread/add?cmd=309730&format=protobuf` write only after a
   fresh FRS response binds the expected UID, forum ID/name, trusted display name,
   and valid TBS. Titles are capped at 31 Swift characters and 124 UTF-8 bytes;
   bodies use the 10,000-character/32 KiB reply bounds. Bodies may contain only
   ordinary text and exact tokens from the compiled 50-name classic-emoticon
   catalog; titles and all unsupported rich markers are rejected. Unsupported
-  control characters are also rejected. The minimal form omits
-  hardware-derived and advertising fields,
-  rejects every redirect, and has a 128 KiB response limit. Per-account writes
+  control characters are also rejected. `AddThreadReqIdl` contains minimal
+  authenticated common fields plus the validated business payload. Its signed
+  outer multipart fields are `BDUSS`, `_client_type`, `_client_version`, and
+  `stoken`; the request uses the expected UID header and only `ka=open` as its
+  Cookie value. New topics, replies at command `309731`, and static-image upload
+  use client version `12.52.1.0` in current `main`; other endpoint versions are
+  unchanged. Hardware-derived and advertising fields remain omitted, every
+  redirect is rejected, and the response limit remains 128 KiB.
+  `AddThreadResIdl` supplies the explicit success envelope and positive TID/PID;
+  its `toast = 20` and shared challenge fields are decoded before a receipt can
+  be accepted. Per-account writes
   are serialized; equal submission UUIDs share a flight, conflicting reuse is
   rejected, cancellation before dispatch sends no write, and a dispatched write
   is never retried. Positive TID/PID receipts receive one authenticated first-
   floor readback; exact matches confirm, temporary absence remains accepted, and
-  mismatches or lost receipts become an unknown outcome.
+  mismatches or lost receipts become an unknown outcome. There is no fallback
+  to the former mini-program form/JSON endpoint after dispatch. These contracts
+  remain subject to disposable-account validation; fixture compatibility alone
+  does not prove real creation acceptance.
 
 The account unread summary uses `POST https://tiebac.baidu.com/c/s/msg` with a
 signed form restricted to BDUSS, `_client_version=8.2.2`, and `bookmark=1` plus
@@ -466,3 +478,10 @@ implemented after cross-checking aiotieba commit
 `5545326b2a8e0d784b2f3dfbcb219c7b121e61c2` (GPL-3.0). The per-forum sign-state
 schema and check-in contract were cross-checked against TiebaLite commit
 `268f388c7824ae2c8f6ed549827a943ec8a7f352` (GPL-3.0).
+The current-main new-topic protobuf schemas and creation client-version changes
+were separately checked against TiebaLite
+`9701bfb6aaf261cc37b20b5793a8404261077f49`. The App's automatic preview-quality
+policy was checked against that same revision. These two scoped comparisons do
+not replace the full-product `268f388c` parity audit. Preview-quality selection
+and network observation belong to the App; Core continues to expose the same
+normalized image candidates without observing a device's network.

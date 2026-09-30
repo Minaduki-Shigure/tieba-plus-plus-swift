@@ -663,6 +663,7 @@ private struct BrowseImageView: View {
   let onOpen: () -> Void
 
   @Environment(\.contentMediaLoadBehavior) private var contentMediaLoadBehavior
+  @Environment(\.contentImagePreviewNetworkAccess) private var previewNetworkAccess
 
   private var aspectRatio: CGFloat {
     BrowseImageMasonryGeometry.sanitizedAspectRatio(width: width, height: height)
@@ -673,7 +674,8 @@ private struct BrowseImageView: View {
       ContentRemoteImage(
         url: thumbnailURL,
         maxPixelSize: maximumPreviewPixelSize,
-        loadAccessibilityLabel: "加载正文图片"
+        loadAccessibilityLabel: "加载正文图片",
+        networkAccess: previewNetworkAccess
       ) { phase in
         switch phase {
         case .success(let asset, _):

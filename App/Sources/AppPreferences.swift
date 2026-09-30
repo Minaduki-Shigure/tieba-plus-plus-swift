@@ -693,6 +693,7 @@ enum ContentMediaLoadPolicy: String, CaseIterable, Identifiable, Sendable {
 enum ContentImagePreviewQuality: String, CaseIterable, Hashable, Identifiable, Sendable {
   case standard
   case highDefinition
+  case automatic
 
   static let defaultValue = Self.standard
 
@@ -704,6 +705,8 @@ enum ContentImagePreviewQuality: String, CaseIterable, Hashable, Identifiable, S
       "标准（推荐）"
     case .highDefinition:
       "高清"
+    case .automatic:
+      "自动（按网络）"
     }
   }
 
@@ -716,10 +719,19 @@ private struct ContentImagePreviewQualityEnvironmentKey: EnvironmentKey {
   static let defaultValue = ContentImagePreviewQuality.defaultValue
 }
 
+private struct ContentImagePreviewNetworkAccessEnvironmentKey: EnvironmentKey {
+  static let defaultValue = RemoteImageNetworkAccess.unrestricted
+}
+
 extension EnvironmentValues {
   var contentImagePreviewQuality: ContentImagePreviewQuality {
     get { self[ContentImagePreviewQualityEnvironmentKey.self] }
     set { self[ContentImagePreviewQualityEnvironmentKey.self] = newValue }
+  }
+
+  var contentImagePreviewNetworkAccess: RemoteImageNetworkAccess {
+    get { self[ContentImagePreviewNetworkAccessEnvironmentKey.self] }
+    set { self[ContentImagePreviewNetworkAccessEnvironmentKey.self] = newValue }
   }
 }
 

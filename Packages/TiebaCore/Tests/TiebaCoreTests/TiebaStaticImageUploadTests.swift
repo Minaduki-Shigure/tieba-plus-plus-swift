@@ -67,7 +67,7 @@ final class TiebaStaticImageUploadRequestTests: XCTestCase {
     XCTAssertNil(upload.encodedBytes.range(of: Data(parsed.boundary.utf8)))
     XCTAssertEqual(
       request.value(forHTTPHeaderField: "User-Agent"),
-      "bdtb for Android 12.41.7.1"
+      "bdtb for Android 12.52.1.0"
     )
     XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
     XCTAssertNil(request.value(forHTTPHeaderField: "client_user_token"))
@@ -91,7 +91,7 @@ final class TiebaStaticImageUploadRequestTests: XCTestCase {
     )
     XCTAssertEqual(parsed.fields["BDUSS"], credential.bduss)
     XCTAssertEqual(parsed.fields["_client_type"], "2")
-    XCTAssertEqual(parsed.fields["_client_version"], "12.41.7.1")
+    XCTAssertEqual(parsed.fields["_client_version"], "12.52.1.0")
     XCTAssertEqual(parsed.fields["alt"], "json")
     XCTAssertEqual(parsed.fields["chunkNo"], "1")
     XCTAssertEqual(parsed.fields["forum_name"], "swift")

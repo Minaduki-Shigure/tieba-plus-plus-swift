@@ -280,6 +280,34 @@ final class TiebaNewThreadClientTests: XCTestCase, @unchecked Sendable {
     XCTAssertEqual(serverSnapshot.writeCount, 1)
   }
 
+  func testLegacyJSONSuccessIsUnknownAndNeverFallsBackToAnotherWrite() async {
+    let submission = makeSubmission()
+    let transport = NewThreadStateTransport(forumID: forumID, behavior: .legacyJSONAfterWrite)
+    let client = TiebaAuthenticatedClient(transport: transport)
+
+    for _ in 0..<2 {
+      await assertClientError(.newThreadOutcomeUnknown) {
+        _ = try await client.submitNewThread(
+          credential: credential(),
+          expectedUserID: firstUserID,
+          submission: submission
+        )
+      }
+    }
+
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.preflightCount, 1)
+    XCTAssertEqual(snapshot.writeCount, 1)
+    XCTAssertEqual(snapshot.readbackCount, 0)
+    XCTAssertEqual(
+      snapshot.maximumBodyBytes,
+      [
+        TiebaAuthenticatedClient.forumMembershipResponseMaximumBytes,
+        TiebaAuthenticatedClient.newThreadWriteResponseMaximumBytes,
+      ]
+    )
+  }
+
   func testSameSubmissionSharesOneFlightAndConflictingIdentityIsRejected() async throws {
     let submission = makeSubmission(content: "e\u{301}")
     let transport = NewThreadStateTransport(forumID: forumID, blocksWrites: true)
@@ -639,6 +667,7 @@ private actor NewThreadStateTransport: TiebaTransport {
     case timeoutAfterWrite
     case cancellationAfterWrite
     case malformedAfterWrite
+    case legacyJSONAfterWrite
     case oversizedAfterWrite
     case challenge
     case server
@@ -712,21 +741,17 @@ private actor NewThreadStateTransport: TiebaTransport {
       )
     case "/c/c/thread/add":
       writeCount += 1
-      let fields = try newThreadFormFields(request)
-      guard
-        let rawForumID = fields["fid"],
-        let requestedForumID = Int64(rawForumID),
-        let title = fields["title"],
-        let content = fields["content"],
-        let bduss = fields["BDUSS"]
-      else { throw TiebaClientError.transportFailure }
+      let message = try AddThreadReqIdl(serializedBytes: newThreadProtobufPayload(request))
+      guard let requestedForumID = Int64(message.data.fid) else {
+        throw TiebaClientError.transportFailure
+      }
       let created = StoredThread(
-        userID: resolvedUserID(bduss),
+        userID: resolvedUserID(message.data.common.bduss),
         forumID: requestedForumID,
         threadID: nextThreadID,
         firstPostID: nextPostID,
-        title: title,
-        content: content
+        title: message.data.title,
+        content: message.data.content
       )
       nextThreadID += 1
       nextPostID += 1
@@ -742,7 +767,7 @@ private actor NewThreadStateTransport: TiebaTransport {
       switch behavior {
       case .success, .missingReadback, .mismatchedReadback:
         storedThreads[created.threadID] = created
-        return try newThreadJSONResponse(
+        return try newThreadWriteResponse(
           errorCode: 0,
           threadID: created.threadID,
           firstPostID: created.firstPostID
@@ -758,7 +783,20 @@ private actor NewThreadStateTransport: TiebaTransport {
         throw CancellationError()
       case .malformedAfterWrite:
         storedThreads[created.threadID] = created
-        return TiebaHTTPResponse(body: Data("not-json".utf8), statusCode: 200)
+        return TiebaHTTPResponse(body: Data("not-protobuf".utf8), statusCode: 200)
+      case .legacyJSONAfterWrite:
+        storedThreads[created.threadID] = created
+        return TiebaHTTPResponse(
+          body: try JSONSerialization.data(
+            withJSONObject: [
+              "error_code": "0",
+              "tid": String(created.threadID),
+              "pid": String(created.firstPostID),
+            ],
+            options: [.sortedKeys]
+          ),
+          statusCode: 200
+        )
       case .oversizedAfterWrite:
         storedThreads[created.threadID] = created
         return TiebaHTTPResponse(
@@ -766,7 +804,7 @@ private actor NewThreadStateTransport: TiebaTransport {
           statusCode: 200
         )
       case .challenge:
-        return try newThreadJSONResponse(
+        return try newThreadWriteResponse(
           errorCode: 340_006,
           threadID: created.threadID,
           firstPostID: created.firstPostID,
@@ -774,7 +812,7 @@ private actor NewThreadStateTransport: TiebaTransport {
           challenge: true
         )
       case .server:
-        return try newThreadJSONResponse(
+        return try newThreadWriteResponse(
           errorCode: 340_006,
           threadID: created.threadID,
           firstPostID: created.firstPostID,
@@ -889,18 +927,6 @@ private func newThreadProtobufPayload(_ request: URLRequest) throws -> Data {
   return body.subdata(in: range.upperBound..<(body.count - suffix.count))
 }
 
-private func newThreadFormFields(_ request: URLRequest) throws -> [String: String] {
-  guard let body = request.httpBody else { throw TiebaClientError.transportFailure }
-  var components = URLComponents()
-  components.percentEncodedQuery = String(decoding: body, as: UTF8.self)
-    .replacingOccurrences(of: "+", with: "%20")
-  guard let items = components.queryItems else { throw TiebaClientError.transportFailure }
-  return Dictionary(
-    uniqueKeysWithValues: items.compactMap { item in
-      item.value.map { (item.name, $0) }
-    })
-}
-
 private func newThreadFRSResponse(
   userID: Int64,
   forumID: Int64,
@@ -971,24 +997,29 @@ private func newThreadPageResponse(
   return response
 }
 
-private func newThreadJSONResponse(
-  errorCode: Int,
+private func newThreadWriteResponse(
+  errorCode: Int32,
   threadID: Int64,
   firstPostID: Int64,
   message: String = "",
   challenge: Bool = false
 ) throws -> TiebaHTTPResponse {
-  var object: [String: Any] = [
-    "error_code": String(errorCode),
-    "tid": String(threadID),
-    "pid": String(firstPostID),
-  ]
-  if !message.isEmpty { object["msg"] = message }
-  if challenge { object["info"] = ["need_vcode": "1"] }
-  return TiebaHTTPResponse(
-    body: try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
-    statusCode: 200
-  )
+  var error = TiebaProto.Error()
+  error.errorno = errorCode
+  error.userMsg = message
+  var data = AddThreadResIdl.DataRes()
+  data.tid = String(threadID)
+  data.pid = String(firstPostID)
+  if challenge {
+    var info = PostAntiInfo()
+    info.needVcode = "1"
+    info.blockContent = message
+    data.info = info
+  }
+  var response = AddThreadResIdl()
+  response.error = error
+  response.data = data
+  return try newThreadProtobufResponse(response)
 }
 
 private func newThreadProtobufResponse<Message: SwiftProtobuf.Message>(
