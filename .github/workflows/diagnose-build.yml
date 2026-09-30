@@ -25,6 +25,14 @@ jobs:
             exit 1
           fi
           unzip -p "$RUNNER_TEMP/failed-build.zip" xcodebuild.log > "$RUNNER_TEMP/failed-build.log"
+          ruby -e '
+            lines = File.binread(ARGV[0]).force_encoding("UTF-8").scrub.lines
+            pattern = /Stack dump|PLEASE submit|while (?:evaluating|lowering|running|generating|type-checking)|Assertion|Segmentation|LLVM ERROR|signal \d|Command.*failed|LLVM Profile Error/i
+            indices = lines.each_index.select { |index| pattern.match?(lines[index]) }
+            selected = indices.flat_map { |index| (([0, index - 4].max)..([lines.length - 1, index + 18].min)).to_a }.uniq
+            selected.each { |index| puts "#{index + 1}: #{lines[index]}" }
+          ' "$RUNNER_TEMP/failed-build.log" > "$RUNNER_TEMP/compiler-context.log"
+          ruby Scripts/report_xcode_errors.rb --mode full --title "Compiler failure context" "$RUNNER_TEMP/compiler-context.log"
           if ! ruby Scripts/report_xcode_errors.rb "$RUNNER_TEMP/failed-build.log" 2> "$RUNNER_TEMP/diagnostic-error.log"; then
             ruby Scripts/report_xcode_errors.rb --mode full --title "Diagnostic parser failure" "$RUNNER_TEMP/diagnostic-error.log"
             exit 1
