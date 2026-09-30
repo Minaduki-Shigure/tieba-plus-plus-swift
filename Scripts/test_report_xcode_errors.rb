@@ -118,4 +118,41 @@ class ReportXcodeErrorsTests < Minitest::Test
     assert_includes values.first, "title=Export%3A IPA%2C failed"
     assert_includes values.first, "file=App%3ASources%2CFile.swift"
   end
+
+  def test_colored_source_errors_and_failed_commands_strip_terminal_sequences_before_matching
+    source_error = "App/Sources/Runtime.swift:166:5: error: sending task risks a data race"
+    command = "SwiftCompile normal arm64 App/Sources/Runtime.swift"
+    values = annotations([
+      "\e[1;31m#{source_error}\e[0m",
+      "\e]0;hidden terminal title\aTesting failed:",
+      "\e[31mThe following build commands failed:\e[0m",
+      "\e]8;;https://example.invalid/terminal-link\e\\\t#{command}\e]8;;\e\\",
+      "(1 failure)",
+    ])
+
+    assert_bounded_annotations(values)
+    combined = values.map { |value| annotation_message(value) }.join("\n")
+    assert_includes combined, source_error
+    assert_includes annotation_message(values.first), "\t#{command}"
+    refute_includes combined, "hidden terminal title"
+    refute_includes combined, "example.invalid"
+    refute_match(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/, combined)
+  end
+
+  def test_c1_and_other_control_sequences_are_removed_but_log_whitespace_is_retained
+    values = annotations([
+      "\u009B31merror: invalid\u009B0m\u0000\u0007\u0008\u007F\u0085",
+      "\u009Dhidden OSC\u009Cvisible\ttext\rcontinued",
+      "\ePhidden DCS\e\\\u009Fhidden APC\u009Cfinal error: result",
+    ], mode: "full")
+
+    assert_bounded_annotations(values, maximum_count: 3)
+    combined = values.map { |value| annotation_message(value) }.join("\n")
+    assert_includes combined, "error: invalid"
+    assert_includes combined, "visible\ttext\rcontinued"
+    assert_includes combined, "final error: result"
+    refute_includes combined, "hidden"
+    refute_match(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/, combined)
+    assert_includes values.join, "%0D"
+  end
 end

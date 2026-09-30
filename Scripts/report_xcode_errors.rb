@@ -16,7 +16,19 @@ end.parse!
 log_path = ARGV.fetch(0)
 abort "unexpected arguments: #{ARGV.drop(1).join(" ")}" unless ARGV.length == 1
 
-content = File.binread(log_path).force_encoding(Encoding::UTF_8).scrub
+def sanitize_log(value)
+  # Strip terminal commands before matching diagnostics or constructing annotations.
+  # OSC/DCS payloads may contain window titles, hyperlinks, or other terminal actions;
+  # deleting just ESC would leave that payload mixed into the visible error text.
+  value = value.gsub(/(?:\e\]|\u009D).*?(?:\a|\e\\|\u009C)/m, "")
+  value = value.gsub(/(?:\e[PX^_]|[\u0090\u0098\u009E\u009F]).*?(?:\e\\|\u009C)/m, "")
+  value = value.gsub(/(?:\e\[|\u009B)[0-?]*[ -\/]*[@-~]/, "")
+  value = value.gsub(/\e[ -\/]*[0-~]/, "")
+  # Newlines/tabs remain readable; CR is retained for workflow-command escaping.
+  value.gsub(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/, "")
+end
+
+content = sanitize_log(File.binread(log_path).force_encoding(Encoding::UTF_8).scrub)
 lines = content.lines(chomp: true)
 patterns = [
   /error:/i,
