@@ -237,18 +237,27 @@ final class ComposerGIFImageAttachmentTests: XCTestCase {
     frameDelay: Int = 7, partialSecondFrame: Bool = false, transparentSecondFrame: Bool = false
   ) -> Data {
     func word(_ value: Int) -> [UInt8] { [UInt8(value & 255), UInt8(value >> 8)] }
-    var bytes =
-      Array("GIF89a".utf8) + word(canvasWidth) + word(canvasHeight)
-      + [0x80, 0, 0, 255, 0, 0, 0, 255, 0]
-    bytes += [0x21, 0xFF, 11] + Array("NETSCAPE2.0".utf8) + [3, 1, 0, 0, 0]
+    var bytes = Array("GIF89a".utf8)
+    bytes.append(contentsOf: word(canvasWidth))
+    bytes.append(contentsOf: word(canvasHeight))
+    bytes.append(contentsOf: [0x80, 0, 0, 255, 0, 0, 0, 255, 0])
+    bytes.append(contentsOf: [0x21, 0xFF, 11])
+    bytes.append(contentsOf: "NETSCAPE2.0".utf8)
+    bytes.append(contentsOf: [3, 1, 0, 0, 0])
     for index in 0..<frameCount {
       let partial = index == 1 && partialSecondFrame
       let transparent = index == 1 && transparentSecondFrame
       let flags: UInt8 = index == 0 ? 4 : (transparent ? 13 : 8)
-      bytes += [0x21, 0xF9, 4, flags] + word(frameDelay) + [0, 0]
-      bytes +=
-        [0x2C] + word(partial ? 1 : 0) + word(partial ? 1 : 0)
-        + word(partial ? 1 : 2) + word(partial ? 1 : 2) + [0]
+      bytes.append(contentsOf: [0x21, 0xF9, 4, flags])
+      bytes.append(contentsOf: word(frameDelay))
+      bytes.append(contentsOf: [0, 0, 0x2C])
+      let frameOrigin = partial ? 1 : 0
+      let frameDimension = partial ? 1 : 2
+      bytes.append(contentsOf: word(frameOrigin))
+      bytes.append(contentsOf: word(frameOrigin))
+      bytes.append(contentsOf: word(frameDimension))
+      bytes.append(contentsOf: word(frameDimension))
+      bytes.append(0)
       let indices =
         partial ? [1] : (transparent ? [0, 1, 1, 0] : [Int](repeating: index % 2, count: 4))
       // Clear before each palette index keeps this tiny fixture's LZW width at 3 bits.
@@ -266,7 +275,9 @@ final class ComposerGIFImageAttachmentTests: XCTestCase {
         }
       }
       if bitCount > 0 { compressed.append(UInt8(accumulator & 255)) }
-      bytes += [2, UInt8(compressed.count)] + compressed + [0]
+      bytes.append(contentsOf: [2, UInt8(compressed.count)])
+      bytes.append(contentsOf: compressed)
+      bytes.append(0)
     }
     bytes.append(0x3B)
     return Data(bytes)
