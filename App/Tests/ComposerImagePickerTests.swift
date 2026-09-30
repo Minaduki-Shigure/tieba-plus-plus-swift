@@ -90,9 +90,10 @@ final class ComposerImagePickerTests: XCTestCase {
   }
 
   func testQualityOptionsUseProductWordingAndStableOrder() {
-    XCTAssertEqual(ComposerImagePickerPolicy.qualityOptions, [.standard, .highQuality])
+    XCTAssertEqual(ComposerImagePickerPolicy.qualityOptions, [.standard, .highQuality, .original])
     XCTAssertEqual(ComposerImagePickerPolicy.label(for: .standard), "标准")
     XCTAssertEqual(ComposerImagePickerPolicy.label(for: .highQuality), "高清")
+    XCTAssertEqual(ComposerImagePickerPolicy.label(for: .original), "原图")
   }
 
   func testWatermarkOptionsUseProductWordingAndStableOrder() {

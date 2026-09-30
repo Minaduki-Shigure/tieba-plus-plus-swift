@@ -184,6 +184,8 @@ enum TiebaPictureMediaURLPolicy {
       !lowercasePath.contains("%2e")
     else { return nil }
 
+    // This validates the CDN's PID-bearing filename, not the image's encoded
+    // format. A .jpg CDN URL does not prove that the underlying bytes are JPEG.
     let segments = path.split(separator: "/", omittingEmptySubsequences: false)
     guard
       segments.count >= 4,

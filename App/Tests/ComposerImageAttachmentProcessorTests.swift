@@ -4,6 +4,7 @@ import ImageIO
 import UIKit
 import UniformTypeIdentifiers
 import XCTest
+import zlib
 
 @testable import TiebaPlusPlus
 
@@ -453,6 +454,488 @@ final class ComposerImageAttachmentProcessorTests: XCTestCase {
       ),
       1_080
     )
+  }
+
+  func testOriginalJPEGKeepsCameraDimensionsAndCompressedScanBytes() throws {
+    let source = try imageData(type: .jpeg, width: 4_032, height: 3_024)
+
+    let result = try processor.process(data: source, quality: .original)
+
+    XCTAssertEqual(result.quality, .original)
+    XCTAssertEqual(result.encoding, .jpeg)
+    XCTAssertEqual(result.pixelWidth, 4_032)
+    XCTAssertEqual(result.pixelHeight, 3_024)
+    XCTAssertEqual(try jpegScanBytes(source), try jpegScanBytes(result.data))
+    try processor.validateStoredData(result.data, matching: attachment(for: result))
+  }
+
+  func testOriginalPNGPreservesFormatPixelsAndTransparentAlpha() throws {
+    let source = try transparentPNGData(width: 5_000, height: 8)
+
+    let result = try processor.process(data: source, quality: .original)
+
+    XCTAssertEqual(result.encoding, .png)
+    XCTAssertEqual(imageType(of: result.data), UTType.png.identifier)
+    XCTAssertEqual(result.pixelWidth, 5_000)
+    XCTAssertEqual(result.pixelHeight, 8)
+    XCTAssertEqual(try pngPayloads("IDAT", in: source), try pngPayloads("IDAT", in: result.data))
+    XCTAssertEqual(try averageRGBA(of: result.data).alpha, 0)
+    XCTAssertEqual(try renderedPixels(source), try renderedPixels(result.data))
+    try processor.validateStoredData(result.data, matching: attachment(for: result))
+  }
+
+  func testOriginalRetainsAllEightOrientationsWithoutRotatingEncodedPixels() throws {
+    for type in [UTType.jpeg, .png] {
+      for orientation in 1...8 {
+        let source = try imageData(
+          type: type, width: 40, height: 20,
+          properties: [kCGImagePropertyOrientation: orientation]
+        )
+        XCTAssertEqual(
+          (try imageProperties(of: source)[kCGImagePropertyOrientation] as? NSNumber)?.intValue
+            ?? 1,
+          orientation
+        )
+
+        let result = try processor.process(data: source, quality: .original)
+
+        XCTAssertEqual(result.pixelWidth, 40)
+        XCTAssertEqual(result.pixelHeight, 20)
+        XCTAssertEqual(
+          (try imageProperties(of: result.data)[kCGImagePropertyOrientation] as? NSNumber)?.intValue
+            ?? 1,
+          orientation
+        )
+        XCTAssertEqual(
+          try renderedPixels(source, transform: true),
+          try renderedPixels(result.data, transform: true))
+        try processor.validateStoredData(result.data, matching: attachment(for: result))
+      }
+    }
+  }
+
+  func testOriginalPreservesSRGBAndDisplayP3ColorWithoutCopyingPrivateMetadata() throws {
+    for type in [UTType.jpeg, .png] {
+      for name in [CGColorSpace.sRGB, CGColorSpace.displayP3] {
+        let source = try colorManagedData(type: type, colorSpace: name)
+        let result = try processor.process(data: source, quality: .original)
+        let sourceImage = try decodedImage(source)
+        let resultImage = try decodedImage(result.data)
+        let expectedColorSpace = try XCTUnwrap(CGColorSpace(name: name))
+
+        XCTAssertTrue(CFEqual(try XCTUnwrap(sourceImage.colorSpace), expectedColorSpace))
+        XCTAssertTrue(CFEqual(try XCTUnwrap(resultImage.colorSpace), expectedColorSpace))
+        XCTAssertEqual(try renderedPixels(source), try renderedPixels(result.data))
+        XCTAssertFalse(String(decoding: result.data, as: UTF8.self).contains("private-"))
+        try assertOnlyDisplayMetadata(result.data)
+        try processor.validateStoredData(result.data, matching: attachment(for: result))
+      }
+    }
+  }
+
+  func testOriginalRemovesPrivateEXIFAndPNGTextWhileRetainingOrientation() throws {
+    let privateProperties: [CFString: Any] = [
+      kCGImagePropertyOrientation: 6,
+      kCGImagePropertyGPSDictionary: [
+        kCGImagePropertyGPSLatitudeRef: "N", kCGImagePropertyGPSLatitude: 31.2304,
+        kCGImagePropertyGPSLongitudeRef: "E", kCGImagePropertyGPSLongitude: 121.4737,
+      ],
+      kCGImagePropertyExifDictionary: [kCGImagePropertyExifUserComment: "private-comment"],
+      kCGImagePropertyIPTCDictionary: [kCGImagePropertyIPTCKeywords: ["private-keyword"]],
+      kCGImagePropertyTIFFDictionary: [
+        kCGImagePropertyTIFFArtist: "private-artist",
+        kCGImagePropertyTIFFMake: "private-camera",
+        kCGImagePropertyTIFFDateTime: "2026:01:02 03:04:05",
+      ],
+    ]
+    for type in [UTType.jpeg, .png] {
+      var source = try imageData(type: type, width: 40, height: 20, properties: privateProperties)
+      if type == .png {
+        source = try insertingPNGChunk(
+          "tEXt", payload: Data("Comment\0private-location".utf8), in: source)
+      } else {
+        source = try insertingBeforeJPEGEnd(
+          jpegSegment(marker: 0xFE, payload: Array("private-location".utf8)), in: source
+        )
+      }
+
+      let result = try processor.process(data: source, quality: .original)
+
+      XCTAssertFalse(String(decoding: result.data, as: UTF8.self).contains("private-"))
+      XCTAssertEqual(
+        (try imageProperties(of: result.data)[kCGImagePropertyOrientation] as? NSNumber)?.intValue,
+        6
+      )
+      try assertOnlyDisplayMetadata(result.data)
+    }
+  }
+
+  func testOriginalRejectsCustomColorSpaceInsteadOfSilentlyChangingColor() throws {
+    let source = try colorManagedData(type: .jpeg, colorSpace: CGColorSpace.adobeRGB1998)
+
+    XCTAssertThrowsError(try processor.process(data: source, quality: .original)) { error in
+      XCTAssertEqual(error as? ComposerImageProcessingError, .unsupportedOriginal)
+    }
+    XCTAssertNoThrow(try processor.process(data: source, quality: .standard))
+  }
+
+  func testOriginalDoesNotMistakeIgnoredMalformedICCForDefaultSRGB() throws {
+    let clean = try processor.process(
+      data: imageData(type: .jpeg, width: 16, height: 8), quality: .standard
+    )
+    let malformedProfile =
+      Array("ICC_PROFILE\0".utf8) + [1, 1]
+      + [UInt8](repeating: 0, count: 128)
+    let source = try insertingBeforeJPEGEnd(
+      jpegSegment(marker: 0xE2, payload: malformedProfile), in: clean.data
+    )
+
+    XCTAssertThrowsError(try processor.process(data: source, quality: .original)) { error in
+      XCTAssertEqual(error as? ComposerImageProcessingError, .unsupportedOriginal)
+    }
+  }
+
+  func testOriginalRejectsAnimationAPNGAndAuxiliaryRepresentations() throws {
+    XCTAssertThrowsError(
+      try processor.process(data: animatedGIFData(width: 12, height: 7), quality: .original)
+    ) { error in
+      XCTAssertEqual(error as? ComposerImageProcessingError, .animatedImage)
+    }
+    let png = try imageData(type: .png, width: 12, height: 7)
+    // Even an acTL with a single frame is not an ordinary static PNG.
+    let apng = try insertingPNGChunk("acTL", payload: Data([0, 0, 0, 1, 0, 0, 0, 0]), in: png)
+    XCTAssertThrowsError(try processor.process(data: apng, quality: .original)) { error in
+      XCTAssertEqual(error as? ComposerImageProcessingError, .animatedImage)
+    }
+    let hdrPNG = try insertingPNGChunk("cICP", payload: Data([9, 16, 0, 1]), in: png)
+    XCTAssertThrowsError(try processor.process(data: hdrPNG, quality: .original)) { error in
+      XCTAssertEqual(error as? ComposerImageProcessingError, .unsupportedOriginal)
+    }
+    let jpeg = try imageData(type: .jpeg, width: 12, height: 7)
+    for segment in [
+      jpegSegment(marker: 0xE2, payload: Array("MPF\0auxiliary-image".utf8)),
+      jpegSegment(marker: 0xE1, payload: Array("http://ns.adobe.com/xap/1.0/\0hdrgm:Version".utf8)),
+    ] {
+      XCTAssertThrowsError(
+        try processor.process(data: insertingBeforeJPEGEnd(segment, in: jpeg), quality: .original)
+      )
+    }
+  }
+
+  func testOriginalRejectsHEICInsteadOfConvertingItToJPEG() throws {
+    let destinationTypes = CGImageDestinationCopyTypeIdentifiers() as? [String] ?? []
+    guard destinationTypes.contains(UTType.heic.identifier) else {
+      throw XCTSkip("No HEIC encoder")
+    }
+    let source = try imageData(type: .heic, width: 24, height: 16)
+
+    XCTAssertThrowsError(try processor.process(data: source, quality: .original)) { error in
+      XCTAssertEqual(error as? ComposerImageProcessingError, .unsupportedOriginal)
+    }
+  }
+
+  func testOriginalDoesNotRecompressOrResizeToFitByteBudget() throws {
+    for type in [UTType.jpeg, .png] {
+      let source = try imageData(type: type, width: 128, height: 96)
+      let reference = try processor.process(data: source, quality: .original)
+
+      XCTAssertThrowsError(
+        try processor.process(
+          data: source, quality: .original, maximumByteCount: Int64(reference.data.count - 1))
+      ) { error in
+        XCTAssertEqual(error as? ComposerImageProcessingError, .encodedImageTooLarge)
+      }
+    }
+  }
+
+  func testOriginalStoredValidationRejectsMetadataFormatAndDimensionTamperingBeforeDecode() throws {
+    let counter = LockedCounter()
+    let observingProcessor = ComposerImageAttachmentProcessor { counter.increment() }
+    for type in [UTType.jpeg, .png] {
+      let clean = try processor.process(
+        data: imageData(type: type, width: 16, height: 8), quality: .original)
+      var polluted: Data
+      if type == .jpeg {
+        polluted = try insertingBeforeJPEGEnd(
+          jpegSegment(marker: 0xFE, payload: Array("private-comment".utf8)), in: clean.data
+        )
+      } else {
+        polluted = try insertingPNGChunk(
+          "tEXt", payload: Data("Comment\0private-comment".utf8), in: clean.data)
+      }
+      let pollutedResult = try XCTUnwrap(
+        ComposerProcessedImage(
+          data: polluted, pixelWidth: 16, pixelHeight: 8, encoding: clean.encoding,
+          quality: .original
+        ))
+      XCTAssertThrowsError(
+        try observingProcessor.validateStoredData(
+          polluted, matching: attachment(for: pollutedResult))
+      ) { error in
+        XCTAssertEqual(error as? ComposerImageProcessingError, .metadataWasNotRemoved)
+      }
+      let wrongEncoding = try XCTUnwrap(
+        ComposerProcessedImage(
+          data: clean.data, pixelWidth: 16, pixelHeight: 8,
+          encoding: type == .jpeg ? .png : .jpeg, quality: .original
+        ))
+      XCTAssertThrowsError(
+        try observingProcessor.validateStoredData(
+          clean.data, matching: attachment(for: wrongEncoding))
+      )
+      let wrongDimensions = try XCTUnwrap(
+        ComposerProcessedImage(
+          data: clean.data, pixelWidth: 8, pixelHeight: 16, encoding: clean.encoding,
+          quality: .original
+        ))
+      XCTAssertThrowsError(
+        try observingProcessor.validateStoredData(
+          clean.data, matching: attachment(for: wrongDimensions))
+      )
+    }
+    XCTAssertEqual(counter.value, 0)
+  }
+
+  func testOriginalRejectsOversizedSourceDimensionsBeforeFullDecode() throws {
+    let source = try imageData(type: .jpeg, width: 16, height: 8)
+    let counter = LockedCounter()
+    let observingProcessor = ComposerImageAttachmentProcessor { counter.increment() }
+    for (width, height) in [(UInt16(16_385), UInt16(1)), (UInt16(4_096), UInt16(3_073))] {
+      let oversized = try replacingSOFDimensions(in: source, width: width, height: height)
+      XCTAssertThrowsError(try observingProcessor.process(data: oversized, quality: .original)) {
+        error in
+        XCTAssertEqual(error as? ComposerImageProcessingError, .sourcePixelCountTooLarge)
+      }
+    }
+    XCTAssertEqual(counter.value, 0)
+  }
+
+  func testOriginalStoredPNGRejectsBadCRCTruncationAndTrailingBytes() throws {
+    let clean = try processor.process(
+      data: imageData(type: .png, width: 16, height: 8), quality: .original)
+    var wrongCRC = clean.data
+    wrongCRC[wrongCRC.count - 1] ^= 1
+    for damaged in [wrongCRC, Data(clean.data.dropLast()), clean.data + Data([0])] {
+      let candidate = try XCTUnwrap(
+        ComposerProcessedImage(
+          data: damaged, pixelWidth: 16, pixelHeight: 8, encoding: .png, quality: .original
+        ))
+      XCTAssertThrowsError(
+        try processor.validateStoredData(damaged, matching: attachment(for: candidate)))
+    }
+  }
+
+  func testOriginalAcceptsGrayscaleWithoutICCAndPreservesProgressiveJPEGScans() throws {
+    // Small synthetic grayscale and progressive gradients encoded with
+    // ImageMagick; no platform encoder assumptions or personal image assets.
+    let grayscaleJPEG =
+      "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/wAALCAAGAAgBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAABv/EABsQAAAHAQAAAAAAAAAAAAAAAAABBAYYUpLR/9oACAEBAAA/AGUJWfZLg+D/2Q=="
+    let grayscalePNG =
+      "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAAAAADbboAnAAAAFUlEQVQI12M0ZoAAFjkYQx63CIwBAByPAOLQNipSAAAAAElFTkSuQmCC"
+    let progressiveJPEG =
+      "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/2wBDAQMDAwQDBAgEBAgQCwkLEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBD/wgARCAAGAAgDAREAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAAB//EABUBAQEAAAAAAAAAAAAAAAAAAAYH/9oADAMBAAIQAxAAAAESqi7/xAAWEAADAAAAAAAAAAAAAAAAAAAAAhX/2gAIAQEAAQUCoOf/xAAXEQADAQAAAAAAAAAAAAAAAAAABBdh/9oACAEDAQE/AaM3p//EABcRAAMBAAAAAAAAAAAAAAAAAAAEF2H/2gAIAQIBAT8BlyWH/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFRABAQAAAAAAAAAAAAAAAAAAAHH/2gAIAQEAAT8hu//aAAwDAQACAAMAAAAQ/wD/xAAXEQADAQAAAAAAAAAAAAAAAAAAYZHh/9oACAEDAQE/EF1p/8QAFxEAAwEAAAAAAAAAAAAAAAAAAGGR4f/aAAgBAgEBPxBsYf/EABYQAAMAAAAAAAAAAAAAAAAAAABhkf/aAAgBAQABPxBVn//Z"
+    for fixture in [grayscaleJPEG, grayscalePNG, progressiveJPEG] {
+      let source = try XCTUnwrap(Data(base64Encoded: fixture))
+      let result = try processor.process(data: source, quality: .original)
+
+      XCTAssertEqual(result.pixelWidth, 8)
+      XCTAssertEqual(result.pixelHeight, 6)
+      XCTAssertEqual(try renderedPixels(source), try renderedPixels(result.data))
+      if result.encoding == .jpeg {
+        XCTAssertEqual(try jpegScanBytes(source), try jpegScanBytes(result.data))
+      }
+      try processor.validateStoredData(result.data, matching: attachment(for: result))
+    }
+  }
+
+  func testOriginalRejects16BitPNGInsteadOfSilentlyReducingBitDepth() throws {
+    let source = try XCTUnwrap(
+      Data(
+        base64Encoded:
+          "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGEAAAAACL/lxkAAAAIklEQVQI12M0NmZAAYyBr1EFWOR3oAvsRNOyTgRNhRyaFgAY3AT5IrlIKAAAAABJRU5ErkJggg=="
+      ))
+    XCTAssertThrowsError(try processor.process(data: source, quality: .original)) { error in
+      XCTAssertEqual(error as? ComposerImageProcessingError, .unsupportedOriginal)
+    }
+  }
+
+  func testOriginalPreservesIndexedPNGPaletteAndPerEntryTransparency() throws {
+    let source = try XCTUnwrap(
+      Data(
+        base64Encoded:
+          "iVBORw0KGgoAAAANSUhEUgAAAAQAAAACCAMAAABIdo1RAAAABlBMVEUAAAD/AAAb/40iAAAAAXRSTlMAQObYZgAAAA9JREFUCNdjYGRkYGAAEQAAIgAFnBl6mAAAAABJRU5ErkJggg=="
+      ))
+    let result = try processor.process(data: source, quality: .original)
+
+    for name in ["PLTE", "tRNS", "IDAT"] {
+      XCTAssertEqual(try pngPayloads(name, in: result.data), try pngPayloads(name, in: source))
+    }
+    let pixels = try renderedPixels(result.data)
+    XCTAssertEqual(pixels, try renderedPixels(source))
+    XCTAssertEqual(pixels[3], 255)
+    XCTAssertEqual(pixels[11], 0)
+    try processor.validateStoredData(result.data, matching: attachment(for: result))
+  }
+
+  func testOriginalBoundsICCInflationAndRemovesCompressedTextBeforeImageIO() throws {
+    let source = try imageData(type: .png, width: 16, height: 8)
+    var profile = Data(repeating: 0, count: 256 * 1_024 + 1)
+    profile.replaceSubrange(0..<4, with: [0, 4, 0, 1])
+    profile.replaceSubrange(36..<40, with: Data("acsp".utf8))
+    let oversizedICC = try insertingPNGChunk(
+      "iCCP", payload: Data("Oversized\0\0".utf8) + compressed(profile), in: source
+    )
+    XCTAssertThrowsError(try ComposerOriginalImageSanitizer.preflight(oversizedICC)) { error in
+      XCTAssertEqual(error as? ComposerImageProcessingError, .unsupportedOriginal)
+    }
+    XCTAssertThrowsError(try processor.process(data: oversizedICC, quality: .original)) { error in
+      XCTAssertEqual(error as? ComposerImageProcessingError, .unsupportedOriginal)
+    }
+    let privateText = Data(repeating: 65, count: 2 * 1_024 * 1_024)
+    let ztxt = try insertingPNGChunk(
+      "zTXt", payload: Data("Comment\0\0".utf8) + compressed(privateText), in: source
+    )
+    let itxt = try insertingPNGChunk(
+      "iTXt",
+      payload: Data("XML:com.adobe.xmp\0".utf8) + Data([1, 0, 0, 0]) + compressed(privateText),
+      in: ztxt
+    )
+    XCTAssertEqual(
+      try ComposerOriginalImageSanitizer.preflight(itxt),
+      try ComposerOriginalImageSanitizer.preflight(source))
+    XCTAssertEqual(
+      try processor.process(data: itxt, quality: .original),
+      try processor.process(data: source, quality: .original)
+    )
+  }
+
+  private func compressed(_ data: Data) throws -> Data {
+    var size = compressBound(uLong(data.count))
+    var result = [UInt8](repeating: 0, count: Int(size))
+    let status = data.withUnsafeBytes { input in
+      result.withUnsafeMutableBufferPointer { output in
+        compress2(
+          output.baseAddress, &size, input.bindMemory(to: UInt8.self).baseAddress,
+          uLong(data.count), Z_BEST_COMPRESSION)
+      }
+    }
+    XCTAssertEqual(status, Z_OK)
+    return Data(result.prefix(Int(size)))
+  }
+
+  private func attachment(for result: ComposerProcessedImage) throws -> ComposerImageAttachment {
+    try XCTUnwrap(
+      ComposerImageAttachment(
+        id: UUID(), sha256: sha256(of: result.data), byteCount: Int64(result.data.count),
+        pixelWidth: result.pixelWidth, pixelHeight: result.pixelHeight,
+        encoding: result.encoding, quality: result.quality
+      ))
+  }
+
+  private func assertOnlyDisplayMetadata(_ data: Data) throws {
+    let properties = try imageProperties(of: data)
+    for key in [
+      kCGImagePropertyGPSDictionary, kCGImagePropertyExifDictionary,
+      kCGImagePropertyExifAuxDictionary, kCGImagePropertyIPTCDictionary,
+    ] {
+      XCTAssertNil(properties[key])
+    }
+    if let tiff = properties[kCGImagePropertyTIFFDictionary] as? [String: Any] {
+      XCTAssertTrue(Set(tiff.keys).isSubset(of: [kCGImagePropertyTIFFOrientation as String]))
+    }
+  }
+
+  private func colorManagedData(type: UTType, colorSpace name: CFString) throws -> Data {
+    let space = try XCTUnwrap(CGColorSpace(name: name))
+    let context = try XCTUnwrap(
+      CGContext(
+        data: nil, width: 32, height: 24, bitsPerComponent: 8, bytesPerRow: 0,
+        space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+      ))
+    context.setFillColor(try XCTUnwrap(CGColor(colorSpace: space, components: [1, 0.25, 0, 1])))
+    context.fill(CGRect(x: 0, y: 0, width: 32, height: 24))
+    let data = NSMutableData()
+    let destination = try XCTUnwrap(
+      CGImageDestinationCreateWithData(data as CFMutableData, type.identifier as CFString, 1, nil))
+    CGImageDestinationAddImage(
+      destination, try XCTUnwrap(context.makeImage()),
+      [
+        kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFArtist: "private-artist"]
+      ] as CFDictionary)
+    XCTAssertTrue(CGImageDestinationFinalize(destination))
+    return data as Data
+  }
+
+  private func decodedImage(_ data: Data, transform: Bool = false) throws -> CGImage {
+    let source = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
+    if transform {
+      return try XCTUnwrap(
+        CGImageSourceCreateThumbnailAtIndex(
+          source, 0,
+          [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 100,
+          ] as CFDictionary))
+    }
+    return try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+  }
+
+  private func renderedPixels(_ data: Data, transform: Bool = false) throws -> Data {
+    let image = try decodedImage(data, transform: transform)
+    let context = try XCTUnwrap(
+      CGContext(
+        data: nil, width: image.width, height: image.height, bitsPerComponent: 8,
+        bytesPerRow: image.width * 4, space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+      ))
+    context.draw(
+      image, in: CGRect(x: 0, y: 0, width: CGFloat(image.width), height: CGFloat(image.height)))
+    return Data(bytes: try XCTUnwrap(context.data), count: context.bytesPerRow * image.height)
+  }
+
+  private func jpegScanBytes(_ data: Data) throws -> Data {
+    let bytes = [UInt8](data)
+    // Fixtures emitted by ImageIO use a single baseline scan. Comparing it
+    // detects any recompression independently of the application's sanitizer.
+    let start = try XCTUnwrap(
+      bytes.indices.dropLast().first(where: {
+        bytes[$0] == 0xFF && bytes[$0 + 1] == 0xDA
+      }))
+    return Data(bytes[start..<(bytes.count - 2)])
+  }
+
+  private func pngPayloads(_ name: String, in data: Data) throws -> [Data] {
+    var values: [Data] = []
+    var offset = 8
+    while offset + 12 <= data.count {
+      let length = data[offset..<(offset + 4)].reduce(0) { ($0 << 8) | Int($1) }
+      guard length <= data.count - offset - 12 else { throw TestFixtureError.missingEndOfImage }
+      if String(decoding: data[(offset + 4)..<(offset + 8)], as: UTF8.self) == name {
+        values.append(Data(data[(offset + 8)..<(offset + 8 + length)]))
+      }
+      offset += length + 12
+    }
+    return values
+  }
+
+  private func insertingPNGChunk(_ name: String, payload: Data, in data: Data) throws -> Data {
+    guard data.count >= 33 else { throw TestFixtureError.missingEndOfImage }
+    let body = Data(name.utf8) + payload
+    var crc = UInt32.max
+    for byte in body {
+      crc ^= UInt32(byte)
+      for _ in 0..<8 { crc = crc & 1 == 0 ? crc >> 1 : (crc >> 1) ^ 0xEDB8_8320 }
+    }
+    crc ^= UInt32.max
+    func bigEndian(_ value: UInt32) -> Data {
+      Data([
+        UInt8(value >> 24), UInt8((value >> 16) & 255), UInt8((value >> 8) & 255),
+        UInt8(value & 255),
+      ])
+    }
+    let chunk = bigEndian(UInt32(payload.count)) + body + bigEndian(crc)
+    return Data(data.prefix(33)) + chunk + data.dropFirst(33)
   }
 
   private func imageData(

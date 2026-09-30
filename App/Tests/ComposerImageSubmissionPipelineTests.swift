@@ -532,7 +532,33 @@ final class ComposerImageSubmissionPipelineTests: XCTestCase {
     XCTAssertNil(deletedState)
   }
 
-  private func makeEnvironment(imageCount: Int) async throws -> PipelineEnvironment {
+  func testOriginalPNGResumesVerifiedReceiptWithoutUploadingItAgain() async throws {
+    let environment = try await makeEnvironment(imageCount: 2, quality: .original)
+    defer { environment.remove() }
+    XCTAssertEqual(environment.attachments.map(\.encoding), [.png, .png])
+    let submission = try makeNewThread(attachments: environment.attachments)
+    let reference = try makeReference(submissionID: submission.id)
+    _ = try await environment.pipeline.prepareNewThread(
+      submission: submission, reference: reference
+    )
+    _ = try await seedNextReceipt(environment: environment, submissionID: submission.id)
+
+    _ = try await environment.pipeline.executeNewThread(
+      submission: submission, reference: reference
+    )
+
+    let observations = await environment.service.observations()
+    XCTAssertEqual(observations.dispatchedAttachmentIDs, [environment.attachments[1].id])
+    XCTAssertEqual(observations.recoveredAttachmentIDs, [environment.attachments[0].id])
+    XCTAssertEqual(observations.finalSubmissionCount, 1)
+    XCTAssertEqual(observations.uploadPendingWasVisible, [true])
+    XCTAssertEqual(observations.finalPendingWasVisible, [true])
+  }
+
+  private func makeEnvironment(
+    imageCount: Int,
+    quality: ComposerImageAttachmentQuality? = nil
+  ) async throws -> PipelineEnvironment {
     let rootURL = FileManager.default.temporaryDirectory
       .appendingPathComponent(
         "ComposerImageSubmissionPipelineTests-\(UUID().uuidString)",
@@ -554,7 +580,7 @@ final class ComposerImageSubmissionPipelineTests: XCTestCase {
       attachments.append(
         try await attachmentStore.importImage(
           data: input,
-          quality: index.isMultiple(of: 2) ? .standard : .highQuality,
+          quality: quality ?? (index.isMultiple(of: 2) ? .standard : .highQuality),
           id: pipelineUUID(index + 1)
         )
       )
@@ -805,7 +831,7 @@ private actor PipelineServiceSpy: AccountService {
       encodedBytes: validatedBytes,
       pixelWidth: attachment.pixelWidth,
       pixelHeight: attachment.pixelHeight,
-      preservesOriginal: attachment.quality == .highQuality,
+      preservesOriginal: attachment.quality.preservesOriginalForUpload,
       watermark: watermark
     )
     return ComposerPreparedImageUpload(
@@ -1082,7 +1108,7 @@ private func pipelineReceipt(
         contentSHA256: pipelineHexadecimal(SHA256.hash(data: bytes)),
         userID: prepared.sessionUserID,
         forumName: prepared.forumName,
-        preservesOriginal: prepared.attachment.quality == .highQuality,
+        preservesOriginal: prepared.attachment.quality.preservesOriginalForUpload,
         watermark: prepared.watermark,
         uploadedPixelWidth: prepared.attachment.pixelWidth,
         uploadedPixelHeight: prepared.attachment.pixelHeight,

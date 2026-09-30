@@ -229,7 +229,7 @@ struct ComposerImageUploadAttachmentSnapshot:
   }
 
   var id: UUID { attachment.id }
-  var preservesOriginal: Bool { attachment.quality == .highQuality }
+  var preservesOriginal: Bool { attachment.quality.preservesOriginalForUpload }
   var description: String { "ComposerImageUploadAttachmentSnapshot(redacted)" }
   var debugDescription: String { description }
   var customMirror: Mirror {

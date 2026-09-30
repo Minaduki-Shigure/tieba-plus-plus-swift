@@ -25,6 +25,16 @@ and its verified metadata enters the public app source.
 
 ### Release and validation
 
+- **Current-main original static images:** The new “原图” composer choice retains
+  JPEG/PNG encoded dimensions and image data while removing private metadata.
+  Orientation and supported sRGB/Display P3 color are preserved; transparent PNG
+  stays transparent. Original images are bounded to 10 MiB, 16,384 pixels per
+  side and 12,582,912 total pixels, with explicit rejection instead of silent
+  recompression. Standard/high-quality output and old draft/upload identities
+  retain their prior meaning. Animated/HDR and unsupported color profiles remain
+  excluded; real JPEG/PNG upload acceptance and device rendering still require
+  disposable-account validation. This extends the existing image workflow and
+  leaves the overall parity estimate unchanged.
 - **`v0.65.0-alpha.17` thread-owner floor management:** A logged-in topic author can
   use the long-press menu to delete another author's ordinary floor after an
   explicit destructive confirmation. A fresh authenticated read must prove

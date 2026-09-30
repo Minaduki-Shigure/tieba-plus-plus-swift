@@ -103,6 +103,79 @@ final class TiebaStaticImageContentTests: XCTestCase {
     XCTAssertEqual(Set([standard, original]).count, 2)
   }
 
+  func testOriginalPNGUsesReceiptDimensionsForMarkerAndReadbackWithoutChangingUploadBinding()
+    throws
+  {
+    let submissionID = UUID()
+    // A real, local 2 x 3 static PNG. The synthetic server receipt below swaps
+    // dimensions to exercise orientation handling; this is not a live upload.
+    let png = try XCTUnwrap(
+      Data(
+        base64Encoded:
+          "iVBORw0KGgoAAAANSUhEUgAAAAIAAAADCAIAAAA2iEnWAAAAEUlEQVR4nGP4z8DA8B+MEBQAQdMF+08zgXEAAAAASUVORK5CYII="
+      ))
+    let fixture = staticImageContentFixture(
+      submissionID: submissionID,
+      userID: userID,
+      forumID: forumID,
+      forumName: forumName,
+      picID: pictureID("a"),
+      width: 2,
+      height: 3,
+      serverWidth: 3,
+      serverHeight: 2,
+      preservesOriginal: true,
+      bytes: png
+    )
+    XCTAssertTrue(fixture.receipt.isBound(to: fixture.upload, expectedUserID: userID))
+    let proof = try TiebaStaticImageContentProof.bind(
+      upload: fixture.upload,
+      receipt: fixture.receipt,
+      expectedUserID: userID,
+      submissionID: submissionID,
+      forumID: forumID
+    )
+    XCTAssertEqual(
+      try compile("", proofs: [proof], submissionID: submissionID).wireValue,
+      "#(pic,\(proof.picID),3,2)"
+    )
+
+    let incorrectlyReorientedUpload = TiebaStaticImageUpload(
+      uploadID: fixture.upload.uploadID,
+      forumName: forumName,
+      encodedBytes: png,
+      pixelWidth: 3,
+      pixelHeight: 2,
+      preservesOriginal: true
+    )
+    XCTAssertFalse(
+      fixture.receipt.isBound(
+        to: incorrectlyReorientedUpload, expectedUserID: userID
+      ))
+    XCTAssertThrowsError(
+      try TiebaStaticImageContentProof.bind(
+        upload: incorrectlyReorientedUpload,
+        receipt: fixture.receipt,
+        expectedUserID: userID,
+        submissionID: submissionID,
+        forumID: forumID
+      ))
+
+    // CDN filenames and uploaded encoding are separate: readback still proves
+    // the same PID, with the dimensions reported by the server receipt.
+    var returnedImage = imageFragment(type: 3, picID: proof.picID)
+    returnedImage.bsize = "3,2"
+    XCTAssertTrue(
+      readbackMatches(
+        [returnedImage], userContent: "", proofs: [proof], submissionID: submissionID
+      ))
+    returnedImage.bsize = "2,3"
+    XCTAssertFalse(
+      readbackMatches(
+        [returnedImage], userContent: "", proofs: [proof], submissionID: submissionID
+      ))
+  }
+
   func testCompilerBuildsOnlyInternalTiebaLiteMarkersAndAllowsImageOnlyBody() throws {
     let submissionID = UUID()
     let proofs = try ["a", "b"].map {
@@ -483,6 +556,8 @@ func staticImageContentFixture(
   picID: String,
   width: Int = 640,
   height: Int = 480,
+  serverWidth: Int? = nil,
+  serverHeight: Int? = nil,
   preservesOriginal: Bool = false,
   watermark: TiebaStaticImageWatermark = .forumName,
   bytes: Data = Data([0x01, 0x02, 0x03])
@@ -512,8 +587,8 @@ func staticImageContentFixture(
     uploadedPixelHeight: height,
     resourceID: TiebaStaticImageUploadPolicy.resourceID(for: bytes),
     picID: picID,
-    width: width,
-    height: height,
+    width: serverWidth ?? width,
+    height: serverHeight ?? height,
     byteCount: bytes.count,
     chunkCount: chunkCount
   )

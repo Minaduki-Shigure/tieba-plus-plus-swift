@@ -8,6 +8,7 @@ enum ComposerImageProcessingError: Error, Equatable, LocalizedError, Sendable {
   case invalidSource
   case sourceTooLarge
   case unsupportedFormat
+  case unsupportedOriginal
   case animatedImage
   case invalidDimensions
   case sourcePixelCountTooLarge
@@ -25,6 +26,8 @@ enum ComposerImageProcessingError: Error, Equatable, LocalizedError, Sendable {
       "选择的图片文件过大。"
     case .unsupportedFormat:
       "仅支持静态 JPEG、PNG 或 HEIC 图片。"
+    case .unsupportedOriginal:
+      "原图模式仅支持普通静态 JPEG/PNG，以及可验证的 sRGB、Display P3 色彩；HDR、特殊格式或自定义色彩请改用标准或高清模式。"
     case .animatedImage:
       "暂不支持动画或多帧图片。"
     case .invalidDimensions:
@@ -139,10 +142,12 @@ struct ComposerProcessedImage: Equatable, Sendable {
     guard
       !data.isEmpty,
       Int64(data.count) <= quality.maximumByteCount,
+      encoding == .jpeg || quality == .original,
       ComposerImageAttachment.acceptsDimensions(
         width: pixelWidth,
         height: pixelHeight,
-        maximumPixelSize: quality.maximumPixelSize
+        maximumPixelSize: quality.maximumPixelSize,
+        maximumPixelCount: quality.maximumPixelCount
       )
     else { return nil }
     self.data = data
@@ -194,9 +199,12 @@ struct ComposerImageAttachmentProcessor: Sendable {
     guard Int64(data.count) <= ComposerImageProcessingPolicy.maximumSourceByteCount else {
       throw ComposerImageProcessingError.sourceTooLarge
     }
+    let inspectionData =
+      quality == .original
+      ? try ComposerOriginalImageSanitizer.preflight(data) : data
     guard
       let source = CGImageSourceCreateWithData(
-        data as CFData,
+        inspectionData as CFData,
         [kCGImageSourceShouldCache: false] as CFDictionary
       )
     else {
@@ -211,6 +219,14 @@ struct ComposerImageAttachmentProcessor: Sendable {
       )
     else {
       throw ComposerImageProcessingError.sourcePixelCountTooLarge
+    }
+    if quality == .original {
+      return try processOriginal(
+        data: data,
+        source: source,
+        inspection: inspection,
+        maximumByteCount: maximumByteCount
+      )
     }
     guard
       let thumbnailMaximumPixelSize =
@@ -289,9 +305,20 @@ struct ComposerImageAttachmentProcessor: Sendable {
     guard
       !data.isEmpty,
       Int64(data.count) == attachment.byteCount,
-      Int64(data.count) <= attachment.quality.maximumByteCount,
-      attachment.encoding == .jpeg
+      Int64(data.count) <= attachment.quality.maximumByteCount
     else { throw ComposerImageProcessingError.invalidSource }
+    if attachment.quality == .original {
+      _ = try inspectOriginal(
+        data,
+        expectedWidth: attachment.pixelWidth,
+        expectedHeight: attachment.pixelHeight,
+        expectedEncoding: attachment.encoding
+      )
+      return
+    }
+    guard attachment.encoding == .jpeg else {
+      throw ComposerImageProcessingError.invalidSource
+    }
     _ = try inspectEncodedJPEG(
       data,
       expectedWidth: attachment.pixelWidth,
@@ -308,6 +335,150 @@ struct ComposerImageAttachmentProcessor: Sendable {
   private struct EncodedCandidate {
     let data: Data
     let image: CGImage
+  }
+
+  private func processOriginal(
+    data: Data,
+    source: CGImageSource,
+    inspection: SourceInspection,
+    maximumByteCount: Int64
+  ) throws -> ComposerProcessedImage {
+    let encoding = try Self.originalEncoding(source)
+    let sanitized = try Self.sanitizeOriginal(data, source: source, encoding: encoding)
+    guard Int64(sanitized.count) <= maximumByteCount else {
+      // Unlike the JPEG quality modes, never downscale or recompress this path.
+      throw ComposerImageProcessingError.encodedImageTooLarge
+    }
+    _ = try inspectOriginal(
+      sanitized,
+      expectedWidth: inspection.width,
+      expectedHeight: inspection.height,
+      expectedEncoding: encoding
+    )
+    guard
+      let result = ComposerProcessedImage(
+        data: sanitized,
+        pixelWidth: inspection.width,
+        pixelHeight: inspection.height,
+        encoding: encoding,
+        quality: .original
+      )
+    else { throw ComposerImageProcessingError.invalidDimensions }
+    return result
+  }
+
+  private static func originalEncoding(
+    _ source: CGImageSource
+  ) throws -> ComposerImageAttachmentEncoding {
+    switch CGImageSourceGetType(source) as String? {
+    case UTType.jpeg.identifier: return .jpeg
+    case UTType.png.identifier: return .png
+    default: throw ComposerImageProcessingError.unsupportedOriginal
+    }
+  }
+
+  private static func sanitizeOriginal(
+    _ data: Data,
+    source: CGImageSource,
+    encoding: ComposerImageAttachmentEncoding
+  ) throws -> Data {
+    let properties =
+      CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
+      as? [CFString: Any] ?? [:]
+    let orientation = (properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
+    guard (1...8).contains(orientation) else {
+      throw ComposerImageProcessingError.unsupportedOriginal
+    }
+    // MPF/APNG/HDR container markers are also checked before bytes are copied.
+    // ImageIO exposes Apple's auxiliary gain map independently of frame count.
+    guard
+      CGImageSourceCopyAuxiliaryDataInfoAtIndex(
+        source, 0, kCGImageAuxiliaryDataTypeHDRGainMap
+      ) == nil
+    else { throw ComposerImageProcessingError.unsupportedOriginal }
+    return try ComposerOriginalImageSanitizer.sanitize(
+      data,
+      encoding: encoding,
+      orientation: orientation,
+      canonicalColorProfile: { originalProfile in
+        // Validate the actual embedded profile, not ImageIO's decoded image
+        // space: a decoder may ignore damaged ICC and fall back to sRGB.
+        guard let colorSpace = CGColorSpace(iccData: originalProfile as CFData) else {
+          throw ComposerImageProcessingError.unsupportedOriginal
+        }
+        for name in [CGColorSpace.sRGB, CGColorSpace.displayP3] {
+          if let canonical = CGColorSpace(name: name), CFEqual(colorSpace, canonical),
+            let profile = canonical.copyICCData()
+          {
+            return profile as Data
+          }
+        }
+        // A profile name is not evidence of equivalent color semantics. Unknown
+        // profiles must not be silently stripped, converted, or copied with text.
+        throw ComposerImageProcessingError.unsupportedOriginal
+      }
+    )
+  }
+
+  private func inspectOriginal(
+    _ data: Data,
+    expectedWidth: Int,
+    expectedHeight: Int,
+    expectedEncoding: ComposerImageAttachmentEncoding
+  ) throws -> SourceInspection {
+    try Task.checkCancellation()
+    let inspectionData = try ComposerOriginalImageSanitizer.preflight(data)
+    guard inspectionData == data else {
+      throw ComposerImageProcessingError.metadataWasNotRemoved
+    }
+    guard
+      Int64(data.count) <= ComposerImageAttachmentQuality.original.maximumByteCount,
+      let source = CGImageSourceCreateWithData(
+        data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary
+      )
+    else { throw ComposerImageProcessingError.invalidSource }
+    let inspection = try Self.inspectSource(source, requiresStrippedMetadata: false)
+    guard
+      inspection.width == expectedWidth,
+      inspection.height == expectedHeight,
+      try Self.originalEncoding(source) == expectedEncoding,
+      ComposerImageProcessingPolicy.acceptsSourceDimensions(
+        width: inspection.width, height: inspection.height
+      )
+    else { throw ComposerImageProcessingError.invalidDimensions }
+    // Canonical re-sanitization is also the stored-file privacy check. It allows
+    // only the synthesized orientation and system color profile, not arbitrary
+    // EXIF/XMP/private PNG chunks even if the attachment digest was recomputed.
+    guard try Self.sanitizeOriginal(data, source: source, encoding: expectedEncoding) == data else {
+      throw ComposerImageProcessingError.metadataWasNotRemoved
+    }
+    beforeValidatedJPEGFullDecode()
+    try Task.checkCancellation()
+    guard
+      let decoded = CGImageSourceCreateImageAtIndex(
+        source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
+      ),
+      CGImageSourceGetStatus(source) == .statusComplete,
+      CGImageSourceGetStatusAtIndex(source, 0) == .statusComplete,
+      decoded.width == inspection.width,
+      decoded.height == inspection.height,
+      decoded.bitsPerComponent <= 8,
+      decoded.bytesPerRow > 0,
+      decoded.bytesPerRow <= ComposerImageProcessingPolicy.maximumSourceDecodedByteCount
+        / inspection.height,
+      Self.hasSupportedOriginalColorModel(decoded.colorSpace)
+    else { throw ComposerImageProcessingError.decodeFailed }
+    try Task.checkCancellation()
+    return inspection
+  }
+
+  private static func hasSupportedOriginalColorModel(_ colorSpace: CGColorSpace?) -> Bool {
+    guard let colorSpace else { return false }
+    switch colorSpace.model {
+    case .rgb, .monochrome: return true
+    case .indexed: return colorSpace.baseColorSpace?.model == .rgb
+    default: return false
+    }
   }
 
   private static func inspectSource(
@@ -639,6 +810,8 @@ struct ComposerImageAttachmentProcessor: Sendable {
         [0.90, 0.82, 0.72, 0.60, 0.48, 0.36]
       case .highQuality:
         [0.95, 0.88, 0.80, 0.70, 0.58, 0.46, 0.34]
+      case .original:
+        []  // The original branch never invokes a lossy encoder.
       }
     var image = sourceImage
 

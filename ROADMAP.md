@@ -7,7 +7,8 @@ catalog documented in TiebaProto's `NOTICE.md`.
 This audit was last compared with TiebaLite `4.0-dev` at commit
 [`268f388c`](https://github.com/zzc10086/TiebaLite/tree/268f388c7824ae2c8f6ed549827a943ec8a7f352).
 The current-main automatic preview-quality, creation-transport, batch literal
-keyword entry, thread-list like entry, and thread-owner ordinary-floor deletion workflows were
+keyword entry, thread-list like entry, thread-owner ordinary-floor deletion, and
+original static-image selection workflows were
 separately checked against
 [`9701bfb6`](https://github.com/zzc10086/TiebaLite/tree/9701bfb6aaf261cc37b20b5793a8404261077f49).
 That narrower comparison does not replace the full-product audit above.
@@ -677,7 +678,7 @@ each channel, and SideStore/LiveContainer behavior. This remains uncredited in t
 background row until delivery is validated, so the overall 80–82% estimate stays.
 
 Current `main` now connects the security-sensitive static-image foundation to
-the new-topic and direct-topic-reply composers. The App normalizes a selected
+the new-topic and direct-topic-reply composers. Standard/high-quality normalizes a selected
 single-frame JPEG, PNG, HEIC, or HEIF into a bounded, metadata-stripped JPEG;
 stores up to nine ordered attachments under private random filenames with file
 protection, backup exclusion, and digest validation; and persists account-scoped
@@ -685,7 +686,16 @@ draft and upload state. Core validates the complete session, serializes
 same-account uploads, sends sequential 512,000-byte chunks, owns typed image-marker
 compilation, and never retries an uncertain dispatched chunk. The final write is
 bound to an immutable target, content, attachment order, processing choice,
-watermark, session, and submission ID. Restart recovery performs no network work
+watermark, session, and submission ID. A separate original mode retains static
+JPEG/PNG dimensions and compressed image data while removing private metadata,
+retaining orientation and supported display color, and preserving PNG alpha.
+It is bounded to 10 MiB, 16,384 pixels per side and 12,582,912 total pixels;
+oversize, animated/HDR and unsupported color-profile inputs fail explicitly.
+Old JPEG attachment JSON and v1 intent digests retain their exact meaning;
+mixed old JPEG/original PNG records keep verified receipts and unknown-outcome
+locks across restart. Real original-image upload/rendering remains a validation
+gate, and this extension adds no weighted parity point.
+Restart recovery performs no network work
 until an explicit resume, while locked outcomes remain read-only.
 The shared settings menu now stores TiebaLite's stable `0`/`1`/`2` watermark
 values, defaults to forum name, and fails back to that default for unknown
@@ -696,7 +706,7 @@ the current default; changing the preference never mutates a live image draft or
 starts network work.
 
 Attachment removal and terminal submission cleanup write a durable bounded
-tombstone but do not physically delete the private composer JPEG in current
+tombstone but do not physically delete the private composer images in current
 `main`. The reference audit spans all new-topic drafts, reply drafts, and upload
 ledger records, but its snapshot is not atomic with in-flight UI and store
 mutations; treating it as deletion authorization could therefore remove a live

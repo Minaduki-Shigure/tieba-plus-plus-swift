@@ -161,6 +161,47 @@ final class ComposerImageAttachmentStoreTests: XCTestCase {
     )
   }
 
+  func testOriginalPNGSurvivesStoreRestartAndRejectsEncodingSubstitution() async throws {
+    let environment = try StoreTestEnvironment()
+    defer { environment.remove() }
+    let attachment = try await environment.makeStore().importImage(
+      data: imageData(width: 80, height: 40),
+      quality: .original
+    )
+    let restarted = environment.makeStore()
+    let bytes = try await restarted.validatedData(for: attachment)
+    XCTAssertEqual(attachment.encoding, .png)
+    XCTAssertTrue(attachment.relativePrivateFilename.hasSuffix(".png"))
+    XCTAssertEqual(attachment.sha256, sha256(of: bytes))
+
+    let substituted = try XCTUnwrap(
+      ComposerImageAttachment(
+        id: attachment.id,
+        sha256: attachment.sha256,
+        byteCount: attachment.byteCount,
+        pixelWidth: attachment.pixelWidth,
+        pixelHeight: attachment.pixelHeight,
+        encoding: .jpeg,
+        quality: .original
+      ))
+    try bytes.write(
+      to: environment.storeURL.appendingPathComponent(
+        substituted.relativePrivateFilename
+      ))
+    do {
+      _ = try await restarted.validatedData(for: substituted)
+      XCTFail("PNG bytes must not be accepted as a JPEG attachment")
+    } catch {
+      XCTAssertEqual(error as? ComposerImageAttachmentStoreError, .storedFileTampered)
+    }
+    try await restarted.remove(attachment)
+    XCTAssertFalse(
+      FileManager.default.fileExists(
+        atPath:
+          environment.storeURL.appendingPathComponent(attachment.relativePrivateFilename).path
+      ))
+  }
+
   func testValidatedDataRejectsSizeHashDimensionAndDecodeTampering() async throws {
     let environment = try StoreTestEnvironment()
     defer { environment.remove() }

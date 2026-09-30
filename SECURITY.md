@@ -736,21 +736,35 @@ visible would otherwise restore an apparently sendable old body.
 Current `main` uses the bounded static-image creation pipeline in its new-topic
 and direct-topic-reply composers. These paths remain experimental and require
 disposable-account and physical-device validation.
-The App accepts only bounded, single-frame JPEG, PNG, HEIC, or HEIF input and
-always redraws it onto an 8-bit controlled sRGB surface before producing a new
-JPEG. Standard output is bounded to a 1,080-pixel longest side and 5 MiB; high-
+The standard/high-quality paths accept bounded, single-frame JPEG, PNG, HEIC,
+or HEIF input and redraw it onto an 8-bit controlled sRGB surface before producing
+a new JPEG. Standard output is bounded to a 1,080-pixel longest side and 5 MiB; high-
 quality output has a 4,096-pixel longest-side ceiling and 10 MiB byte ceiling,
 while a separate total-pixel budget may reduce either dimension to keep decoding
 and redraw memory bounded. Alpha is flattened onto white. The encoded JPEG is
 accepted only after a marker-level dimension check, metadata-segment stripping,
 ImageIO property inspection, and a bounded full decode.
 
+The separate original mode retains static JPEG scan data or PNG IDAT data,
+encoded dimensions and PNG transparency. A container allowlist removes private
+EXIF/XMP/IPTC/comments, thumbnails and opaque metadata; orientation is rebuilt
+as a minimal tag. An embedded RGB profile must match a system sRGB/Display P3
+space and is replaced by that canonical profile, rather than forwarding original
+profile descriptions. Unknown profiles, animated/multi-image, HDR/gain-map,
+unsupported depth and malformed inputs are rejected instead of silently
+recompressed. Original mode allows 10 MiB, a 16,384-pixel side limit and
+12,582,912 total pixels with a 96 MiB decoded-layout limit. PNG private compressed
+text is removed before ImageIO sees it; ICC decompression is bounded to 256 KiB.
+Stored original files repeat format, dimensions, canonical metadata and decode
+checks before upload. This preserves image content, not byte-for-byte source
+files; the independent standard/high-quality JPEG policy is not weakened.
+
 Attachment metadata stores only a random UUID filename, SHA-256, byte count,
 dimensions, encoding, and local quality choice. Source paths, filenames, Photos
-asset identifiers, URLs, and image metadata are not retained. Files live below a
+asset identifiers, URLs, and private source metadata are not retained. Files live below a
 trusted Application Support root, are excluded from backup, use complete file
 protection, and are read through a no-follow regular-file descriptor with size,
-inode, digest, JPEG, and dimension validation. Directory-chain checks reject
+inode, digest, actual JPEG/PNG encoding, and dimension validation. Directory-chain checks reject
 symbolic-link redirection. Publication and deletion still use Foundation path
 operations, so a hostile writer already executing inside the same App sandbox
 could race those checks; eliminating that residual threat requires a future

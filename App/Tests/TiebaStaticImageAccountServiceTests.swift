@@ -226,6 +226,55 @@ final class TiebaStaticImageAccountServiceTests: XCTestCase {
     XCTAssertEqual(uploadRequestCount, 0)
   }
 
+  func testOriginalPNGPreparationAndReceiptRecoveryPreserveBytesAndFullDimensions() async throws {
+    let bytes = Data([0x89, 0x50, 0x4e, 0x47])
+    let attachment = try staticImageAttachment(
+      id: staticImageUUID(80), bytes: bytes,
+      width: 4_032, height: 3_024, quality: .original, encoding: .png
+    )
+    let receipt = try staticImageReceipt(
+      attachment: attachment, bytes: bytes, userID: 9, forumName: "swift",
+      preservesOriginal: true
+    )
+    let spy = StaticImageAccountClientSpy(uploadBehavior: .receipt(receipt))
+    let service = TiebaCoreAccountService(client: spy)
+    let prepared = try await service.prepareStaticImageUpload(
+      session: staticImageSession(), submissionID: staticImageUUID(81),
+      forumID: 7, forumName: "swift", attachment: attachment,
+      validatedBytes: bytes, watermark: .forumName
+    )
+    XCTAssertEqual(prepared.coreUpload.encodedBytes, bytes)
+    XCTAssertEqual(prepared.coreUpload.pixelWidth, 4_032)
+    XCTAssertEqual(prepared.coreUpload.pixelHeight, 3_024)
+    XCTAssertTrue(prepared.coreUpload.preservesOriginal)
+    let recovered = try await service.recoverStaticImageUpload(
+      prepared, authenticatedReceipt: receipt
+    )
+    XCTAssertEqual(recovered.attachment, attachment)
+    XCTAssertEqual(recovered.receipt, receipt)
+    let uploadCount = await spy.uploadRequestCount()
+    XCTAssertEqual(uploadCount, 0)
+
+    _ = try await service.submitTextReply(
+      session: staticImageSession(),
+      submission: directImageReplySubmission(
+        id: staticImageUUID(81), attachments: [attachment]
+      ),
+      imageUploads: [recovered]
+    )
+    _ = try await service.submitNewThread(
+      session: staticImageSession(),
+      submission: imageNewThreadSubmission(
+        id: staticImageUUID(81), attachments: [attachment]
+      ),
+      imageUploads: [recovered]
+    )
+    let replies = await spy.replySubmissions()
+    XCTAssertEqual(replies.first?.imageProofs.map(\.uploadID), [attachment.id])
+    let threads = await spy.newThreadSubmissions()
+    XCTAssertEqual(threads.first?.imageProofs.map(\.uploadID), [attachment.id])
+  }
+
   func testDispatchRejectsForgedReceiptIdentity() async throws {
     let bytes = Data([0x21, 0x22, 0x23])
     let attachment = try staticImageAttachment(id: staticImageUUID(4), bytes: bytes)
@@ -907,7 +956,8 @@ private func staticImageAttachment(
   bytes: Data,
   width: Int = 640,
   height: Int = 480,
-  quality: ComposerImageAttachmentQuality = .standard
+  quality: ComposerImageAttachmentQuality = .standard,
+  encoding: ComposerImageAttachmentEncoding = .jpeg
 ) throws -> ComposerImageAttachment {
   try XCTUnwrap(
     ComposerImageAttachment(
@@ -916,6 +966,7 @@ private func staticImageAttachment(
       byteCount: Int64(bytes.count),
       pixelWidth: width,
       pixelHeight: height,
+      encoding: encoding,
       quality: quality
     )
   )

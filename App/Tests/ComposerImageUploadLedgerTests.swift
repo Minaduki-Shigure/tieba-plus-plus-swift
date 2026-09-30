@@ -486,6 +486,30 @@ final class ComposerImageUploadLedgerTests: XCTestCase {
     )
   }
 
+  func testAlpha17JPEGIntentV1DigestsRemainUnchanged() throws {
+    // Frozen from the v1 field order, byte lengths and big-endian values at
+    // b31242b (alpha.17), independently hashed outside the production encoder.
+    let cases: [(Bool, String)] = [
+      (false, "49Pl7nCASMbZsaX2pxfiPWWyIwCNg5jXw624NXJqJeI="),
+      (true, "90oL6fLC4ED9k42rKexNOYnu8Gw8rgx4ILzoeo0dxQA="),
+    ]
+    for (preservesOriginal, digest) in cases {
+      let image = try fixture(index: 1, preservesOriginal: preservesOriginal)
+      let legacy = try JSONDecoder().decode(
+        ComposerImageUploadIntentDigest.self,
+        from: JSONSerialization.data(withJSONObject: [
+          "schemaVersion": 1, "digest": digest,
+        ])
+      )
+      XCTAssertEqual(
+        ComposerImageUploadIntentDigest.newThread(
+          key: makeKey(), title: "title", content: "body",
+          attachmentSnapshots: [image.snapshot]
+        ), legacy
+      )
+    }
+  }
+
   func testNewThreadAndDirectTopicReplyContextsRoundTripWithoutLosingOrder() async throws {
     let location = makeLocation()
     defer { try? FileManager.default.removeItem(at: location.directory) }
@@ -666,6 +690,55 @@ final class ComposerImageUploadLedgerTests: XCTestCase {
     try await ledger.delete(for: key)
     let deleted = try await ledger.load(for: key)
     XCTAssertNil(deleted)
+  }
+
+  func testMixedLegacyJPEGAndOriginalPNGKeepReceiptsAndUnknownLockAcrossRestart() async throws {
+    let location = makeLocation()
+    defer { try? FileManager.default.removeItem(at: location.directory) }
+    let key = makeKey()
+    let legacy = try fixture(index: 1, preservesOriginal: true)
+    let original = try fixture(
+      index: 2, preservesOriginal: true, quality: .original, encoding: .png
+    )
+    let ledger = makeLedger(fileURL: location.file)
+    _ = try await prepareNewThread(
+      in: ledger, key: key, attachments: [legacy.snapshot, original.snapshot]
+    )
+    _ = try await ledger.markAttachmentDispatchPending(
+      for: key, nextAttachmentID: legacy.attachment.id
+    )
+    _ = try await ledger.recordBoundReceipt(
+      legacy.receipt, verifiedAgainst: legacy.upload, for: key
+    )
+    _ = try await ledger.markAttachmentDispatchPending(
+      for: key, nextAttachmentID: original.attachment.id
+    )
+    let pending = try await makeLedger(fileURL: location.file).record(for: key)
+    XCTAssertEqual(pending?.successfulReceiptPrefix, [legacy.receipt])
+    XCTAssertEqual(pending?.nextAttachment?.attachment, original.attachment)
+    XCTAssertTrue(pending?.blocksAutomaticResend == true)
+
+    let unknown = try await ledger.markOutcomeUnknown(for: key)
+    let reopened = makeLedger(fileURL: location.file)
+    let restored = try await reopened.record(for: key)
+    XCTAssertEqual(restored, unknown)
+    XCTAssertEqual(restored?.successfulReceiptPrefix, [legacy.receipt])
+    XCTAssertTrue(restored?.blocksAutomaticResend == true)
+    XCTAssertEqual(restored?.nextAttachment?.attachment.encoding, .png)
+    XCTAssertTrue(restored?.nextAttachment?.preservesOriginal == true)
+    await assertLedgerError(.invalidTransition) {
+      try await reopened.delete(for: key)
+    }
+
+    // Same bytes/ID marked as high-quality JPEG must not change a frozen intent.
+    let replacement = try fixture(index: 2, preservesOriginal: true)
+    let beforeAttempt = try Data(contentsOf: location.file)
+    await assertLedgerError(.intentMismatch) {
+      try await self.prepareNewThread(
+        in: reopened, key: key, attachments: [legacy.snapshot, replacement.snapshot]
+      )
+    }
+    XCTAssertEqual(try Data(contentsOf: location.file), beforeAttempt)
   }
 
   func testAttachmentOutcomeUnknownRetainsExactUnsentPrefixAndNextAttachment() async throws {
@@ -1655,12 +1728,14 @@ final class ComposerImageUploadLedgerTests: XCTestCase {
     watermark: TiebaStaticImageWatermark = .forumName,
     userID: Int64 = 1001,
     forumName: String = "swift",
-    pictureID: String? = nil
+    pictureID: String? = nil,
+    quality: ComposerImageAttachmentQuality? = nil,
+    encoding: ComposerImageAttachmentEncoding = .jpeg
   ) throws -> ImageFixture {
     let bytes = Data([0x10, UInt8(index & 0xFF), 0x20, 0x30, 0x40])
     let id = fixedUUID(index)
     let sha256 = hexadecimal(SHA256.hash(data: bytes))
-    let quality: ComposerImageAttachmentQuality = preservesOriginal ? .highQuality : .standard
+    let effectiveQuality = quality ?? (preservesOriginal ? .highQuality : .standard)
     let attachment = try XCTUnwrap(
       ComposerImageAttachment(
         id: id,
@@ -1668,7 +1743,8 @@ final class ComposerImageUploadLedgerTests: XCTestCase {
         byteCount: Int64(bytes.count),
         pixelWidth: 2,
         pixelHeight: 2,
-        quality: quality
+        encoding: encoding,
+        quality: effectiveQuality
       )
     )
     let snapshot = try XCTUnwrap(

@@ -3,6 +3,7 @@ import Foundation
 enum ComposerImageAttachmentQuality: String, Codable, CaseIterable, Sendable {
   case standard
   case highQuality
+  case original
 
   var maximumPixelSize: Int {
     switch self {
@@ -10,14 +11,26 @@ enum ComposerImageAttachmentQuality: String, Codable, CaseIterable, Sendable {
       1_080
     case .highQuality:
       4_096
+    case .original:
+      ComposerImageProcessingPolicy.maximumSourcePixelDimension
     }
   }
+
+  var maximumPixelCount: Int {
+    self == .original
+      ? ComposerImageProcessingPolicy.maximumSourcePixelCount
+      : ComposerImageProcessingPolicy.maximumDecodedPixelCount
+  }
+
+  // The server flag preserves the uploaded representation. High quality still
+  // uploads a locally recompressed JPEG; original retains the source encoding.
+  var preservesOriginalForUpload: Bool { self != .standard }
 
   var maximumByteCount: Int64 {
     switch self {
     case .standard:
       5 * 1_024 * 1_024
-    case .highQuality:
+    case .highQuality, .original:
       10 * 1_024 * 1_024
     }
   }
@@ -25,11 +38,14 @@ enum ComposerImageAttachmentQuality: String, Codable, CaseIterable, Sendable {
 
 enum ComposerImageAttachmentEncoding: String, Codable, Sendable {
   case jpeg
+  case png
 
   var filenameExtension: String {
     switch self {
     case .jpeg:
       "jpg"
+    case .png:
+      "png"
     }
   }
 }
@@ -62,10 +78,12 @@ struct ComposerImageAttachment:
       Self.isValidSHA256(sha256),
       byteCount > 0,
       byteCount <= quality.maximumByteCount,
+      encoding == .jpeg || quality == .original,
       Self.acceptsDimensions(
         width: pixelWidth,
         height: pixelHeight,
-        maximumPixelSize: quality.maximumPixelSize
+        maximumPixelSize: quality.maximumPixelSize,
+        maximumPixelCount: quality.maximumPixelCount
       )
     else { return nil }
 
@@ -184,7 +202,13 @@ struct ComposerImageAttachment:
       !value.contains("\\"),
       !value.contains("..")
     else { return false }
-    return UUID(uuidString: String(value.dropLast(4))) != nil && value.hasSuffix(".jpg")
+    guard
+      let id = UUID(uuidString: String(value.dropLast(4))),
+      let encoding = [ComposerImageAttachmentEncoding.jpeg, .png].first(where: {
+        value.hasSuffix(".\($0.filenameExtension)")
+      })
+    else { return false }
+    return value == privateFilename(for: id, encoding: encoding)
   }
 
   static func isValidSHA256(_ value: String) -> Bool {
@@ -198,15 +222,17 @@ struct ComposerImageAttachment:
   static func acceptsDimensions(
     width: Int,
     height: Int,
-    maximumPixelSize: Int
+    maximumPixelSize: Int,
+    maximumPixelCount: Int = ComposerImageProcessingPolicy.maximumDecodedPixelCount
   ) -> Bool {
     guard
       width > 0,
       height > 0,
       maximumPixelSize > 0,
+      maximumPixelCount > 0,
       width <= maximumPixelSize,
       height <= maximumPixelSize,
-      width <= ComposerImageProcessingPolicy.maximumDecodedPixelCount / height
+      width <= maximumPixelCount / height
     else { return false }
     return true
   }

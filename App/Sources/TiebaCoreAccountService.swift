@@ -2334,7 +2334,7 @@ struct TiebaCoreAccountService: AccountService {
     case .standard:
       preservesOriginal = false
       maximumBytes = TiebaStaticImageUploadPolicy.maximumStandardImageBytes
-    case .highQuality:
+    case .highQuality, .original:
       preservesOriginal = true
       maximumBytes = TiebaStaticImageUploadPolicy.maximumOriginalImageBytes
     }
@@ -2452,7 +2452,7 @@ struct TiebaCoreAccountService: AccountService {
     for (attachment, result) in zip(attachments, uploads) {
       let receipt = result.receipt
       let proof = result.proof
-      let preservesOriginal = attachment.quality == .highQuality
+      let preservesOriginal = attachment.quality.preservesOriginalForUpload
       guard
         result.sessionRevision == session.sessionRevision,
         result.attachment == attachment,

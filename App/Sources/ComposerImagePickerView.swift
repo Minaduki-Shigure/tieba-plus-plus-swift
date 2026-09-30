@@ -8,7 +8,9 @@ import TiebaCore
 enum ComposerImagePickerPolicy {
   static let thumbnailSideLength: CGFloat = 76
   static let maximumAttachmentCount = ComposerImageDraftPolicy.maximumAttachmentCount
-  static let qualityOptions: [ComposerImageAttachmentQuality] = [.standard, .highQuality]
+  static let qualityOptions: [ComposerImageAttachmentQuality] = [
+    .standard, .highQuality, .original,
+  ]
   static let watermarkOptions: [TiebaStaticImageWatermark] = [
     .forumName,
     .username,
@@ -58,6 +60,8 @@ enum ComposerImagePickerPolicy {
       "标准"
     case .highQuality:
       "高清"
+    case .original:
+      "原图"
     }
   }
 
@@ -231,6 +235,12 @@ struct ComposerImagePickerView: View {
       }
 
       optionControls
+
+      if quality == .original {
+        Text("仅影响新添加的图片。原图保留 JPEG／PNG 的尺寸与格式，移除位置等隐私信息，每张最多 10 MB。HEIC 请选标准或高清。")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
     }
     .task(
       id: ComposerImagePickerThumbnailRefreshID(
