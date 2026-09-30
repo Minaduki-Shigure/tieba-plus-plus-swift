@@ -18,7 +18,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-currently serves `v0.65.0-alpha.14` (build 92), whose app-code snapshot includes
+serves `v0.65.0-alpha.15` (build 93) after publication, whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -33,10 +33,10 @@ The published level-progress and bounded regular-expression filtering additions
 improve existing credited areas without changing the current
 80–82% weighted estimate; experimental account writes retain their documented
 physical-device and disposable-account gates.
-Current `main` additionally provides opt-in network-adaptive image preview quality
+Alpha.15 additionally provides opt-in network-adaptive image preview quality
 and migrates new-topic writes to protobuf command `309730`, updating only the
 topic, reply, and static-image-upload client versions to `12.52.1.0`. These changes
-are not yet in that published IPA and add no weighted point; device network
+add no weighted point; device network
 transitions and disposable-account creation validation remain required.
 The fixed username handoff and conservative cloud-favorite identity fallback
 improve existing account and server-write areas without adding a native write,
