@@ -205,10 +205,12 @@ final class TiebaOwnActivityTests: XCTestCase {
   func testCancelledTaskNeverDispatches() async {
     let transport = OwnActivityTransport(bodies: sessionBodies())
     let client = TiebaAuthenticatedClient(transport: transport)
+    let credential = credential()
+    let userID = userID
     let task = Task {
       withUnsafeCurrentTask { $0?.cancel() }
       return try await client.getOwnReplies(
-        credential: self.credential(), expectedUserID: self.userID)
+        credential: credential, expectedUserID: userID)
     }
     do {
       _ = try await task.value
@@ -216,6 +218,27 @@ final class TiebaOwnActivityTests: XCTestCase {
     } catch is CancellationError {} catch { XCTFail("Unexpected \(error)") }
     let requests = await transport.requests
     XCTAssertTrue(requests.isEmpty)
+  }
+
+  func testCancellationAfterIdentityOrPrivateResponseDoesNotDeliverActivity() async throws {
+    let credential = credential()
+    let userID = userID
+    for index in [1, 2] {
+      let transport = OwnActivityTransport(
+        bodies: sessionBodies() + [try response().serializedData()],
+        cancellationResponseIndex: index
+      )
+      let client = TiebaAuthenticatedClient(transport: transport)
+      let task = Task {
+        try await client.getOwnReplies(credential: credential, expectedUserID: userID)
+      }
+      do {
+        _ = try await task.value
+        XCTFail("Cancellation must not deliver an activity page")
+      } catch is CancellationError {} catch { XCTFail("Unexpected \(error)") }
+      let requests = await transport.requests
+      XCTAssertEqual(requests.count, index + 1)
+    }
   }
 
   func testEmptyAndHiddenPagesRetainDistinctVisibilityState() throws {
@@ -401,10 +424,14 @@ final class TiebaOwnActivityTests: XCTestCase {
 
 private actor OwnActivityTransport: TiebaTransport {
   private let bodies: [Data]
+  private let cancellationResponseIndex: Int?
   private(set) var requests = [URLRequest]()
   private(set) var limits = [Int?]()
 
-  init(bodies: [Data]) { self.bodies = bodies }
+  init(bodies: [Data], cancellationResponseIndex: Int? = nil) {
+    self.bodies = bodies
+    self.cancellationResponseIndex = cancellationResponseIndex
+  }
 
   func send(_ request: URLRequest) async throws -> TiebaHTTPResponse {
     try await send(request, maximumBodyBytes: nil)
@@ -415,6 +442,9 @@ private actor OwnActivityTransport: TiebaTransport {
     limits.append(maximumBodyBytes)
     guard bodies.indices.contains(requests.count - 1) else {
       throw TiebaClientError.transportFailure
+    }
+    if cancellationResponseIndex == requests.count - 1 {
+      withUnsafeCurrentTask { $0?.cancel() }
     }
     // Deliberately ignore the transport's limit: the client must also guard size.
     return TiebaHTTPResponse(body: bodies[requests.count - 1], statusCode: 200)
