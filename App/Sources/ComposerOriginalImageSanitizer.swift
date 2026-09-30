@@ -15,6 +15,8 @@ enum ComposerOriginalImageSanitizer {
     var result = Data(bytes.prefix(8))
     var index = 8
     var foundProfile = false
+    var foundCICP = false
+    var sawPaletteOrImage = false
     while index < bytes.count {
       try Task.checkCancellation()
       guard index <= bytes.count - 12 else { throw invalid }
@@ -26,16 +28,23 @@ enum ComposerOriginalImageSanitizer {
       if ["acTL", "fcTL", "fdAT"].contains(name) {
         throw ComposerImageProcessingError.animatedImage
       }
-      if ["cICP", "mDCv", "cLLi"].contains(name) {
+      if ["mDCV", "cLLI", "mDCv", "cLLi"].contains(name) {
         throw ComposerImageProcessingError.unsupportedOriginal
+      }
+      if name == "PLTE" || name == "IDAT" { sawPaletteOrImage = true }
+      if name == "cICP" {
+        guard !foundCICP, !sawPaletteOrImage else { throw invalid }
+        foundCICP = true
+        try validateSDRCICP(bytes[(index + 8)..<(index + 8 + length)])
       }
       if name == "iCCP" {
         guard !foundProfile else { throw invalid }
         foundProfile = true
         _ = try expandedColorProfile(bytes[(index + 8)..<(index + 8 + length)])
       }
-      if ["IHDR", "PLTE", "IDAT", "IEND", "tRNS", "gAMA", "cHRM", "sRGB", "iCCP", "eXIf"].contains(
-        name)
+      if ["IHDR", "PLTE", "IDAT", "IEND", "tRNS", "gAMA", "cHRM", "sRGB", "iCCP", "eXIf", "cICP"]
+        .contains(
+          name)
       {
         result.append(contentsOf: bytes[index..<end])
       } else if bytes[index + 4] & 0x20 == 0 {
@@ -45,6 +54,16 @@ enum ComposerOriginalImageSanitizer {
       index = end
     }
     return result
+  }
+
+  private static func validateSDRCICP(_ payload: ArraySlice<UInt8>) throws {
+    // PNG Third Edition §11.3.2.6: cICP is the highest-precedence color chunk,
+    // including SDR Display P3 (example 4), not an HDR-only marker. Preserve
+    // these exact full-range RGB/sRGB-transfer tuples; reject PQ, HLG, unknown
+    // primaries, non-RGB matrices and narrow-range signals without converting.
+    guard payload.elementsEqual([1, 13, 0, 1]) || payload.elementsEqual([12, 13, 0, 1]) else {
+      throw ComposerImageProcessingError.unsupportedOriginal
+    }
   }
 
   private static func expandedColorProfile(_ payload: ArraySlice<UInt8>) throws -> Data {
@@ -283,8 +302,13 @@ enum ComposerOriginalImageSanitizer {
         sawEnd = true
       case "acTL", "fcTL", "fdAT":
         throw ComposerImageProcessingError.animatedImage
-      case "cICP", "mDCv", "cLLi":
+      case "mDCV", "cLLI", "mDCv", "cLLi":
         throw ComposerImageProcessingError.unsupportedOriginal
+      case "cICP":
+        guard !sawImage, !uniqueChunks.contains("PLTE"), uniqueChunks.insert(name).inserted else {
+          throw invalid
+        }
+        try validateSDRCICP(bytes[(index + 8)..<(end - 4)])
       case "PLTE", "tRNS", "gAMA", "cHRM", "sRGB", "iCCP":
         guard !sawImage, uniqueChunks.insert(name).inserted else { throw invalid }
         if name == "gAMA", length != 4 { throw invalid }
@@ -300,7 +324,7 @@ enum ComposerOriginalImageSanitizer {
           throw ComposerImageProcessingError.unsupportedOriginal
         }
       }
-      if ["IHDR", "IDAT", "IEND", "PLTE", "tRNS", "gAMA", "cHRM", "sRGB"].contains(name) {
+      if ["IHDR", "IDAT", "IEND", "PLTE", "tRNS", "gAMA", "cHRM", "sRGB", "cICP"].contains(name) {
         chunks.append((name, Data(bytes[index..<end])))
       }
       index = end

@@ -750,7 +750,10 @@ encoded dimensions and PNG transparency. A container allowlist removes private
 EXIF/XMP/IPTC/comments, thumbnails and opaque metadata; orientation is rebuilt
 as a minimal tag. An embedded RGB profile must match a system sRGB/Display P3
 space and is replaced by that canonical profile, rather than forwarding original
-profile descriptions. Unknown profiles, animated/multi-image, HDR/gain-map,
+profile descriptions. PNG cICP is retained only for the exact full-range SDR
+sRGB or Display P3 tuples; unknown, PQ/HLG, narrow-range, malformed, duplicate,
+or misplaced cICP and HDR display/light-level metadata are rejected.
+Unknown profiles, animated/multi-image, HDR/gain-map,
 unsupported depth and malformed inputs are rejected instead of silently
 recompressed. Original mode allows 10 MiB, a 16,384-pixel side limit and
 12,582,912 total pixels with a 96 MiB decoded-layout limit. PNG private compressed

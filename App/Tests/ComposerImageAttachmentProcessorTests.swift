@@ -675,6 +675,72 @@ final class ComposerImageAttachmentProcessorTests: XCTestCase {
     }
   }
 
+  func testOriginalPreservesPreciselySignaledSDRCICPIncludingDisplayP3() throws {
+    for (name, tuple) in [
+      (CGColorSpace.sRGB, Data([1, 13, 0, 1])),
+      (CGColorSpace.displayP3, Data([12, 13, 0, 1])),
+    ] {
+      let encoded = try colorManagedData(type: .png, colorSpace: name)
+      // Explicitly supply the PNG3 SDR tuple, independent of whether this OS's
+      // encoder emits cICP. Keep any ICC/gAMA/cHRM fallback to test coexistence.
+      let source = try insertingPNGChunk(
+        "cICP", payload: tuple, in: removingPNGChunks(["cICP"], from: encoded)
+      )
+      XCTAssertEqual(try pngPayloads("cICP", in: source), [tuple])
+      XCTAssertNoThrow(try ComposerOriginalImageSanitizer.preflight(source))
+
+      let result = try processOriginalFixture(source, context: "SDR cICP \(Array(tuple))")
+
+      XCTAssertEqual(try pngPayloads("cICP", in: result.data), [tuple])
+      XCTAssertEqual(try pngPayloads("IDAT", in: result.data), try pngPayloads("IDAT", in: source))
+      XCTAssertEqual(try renderedPixels(result.data), try renderedPixels(source))
+      XCTAssertEqual(try ComposerOriginalImageSanitizer.preflight(result.data), result.data)
+      try processor.validateStoredData(result.data, matching: attachment(for: result))
+    }
+  }
+
+  func testOriginalRejectsHDRUnknownMalformedDuplicateAndLateCICP() throws {
+    let source = try removingPNGChunks(
+      ["cICP"], from: imageData(type: .png, width: 16, height: 8)
+    )
+    for tuple: [UInt8] in [
+      [9, 16, 0, 1], [9, 18, 0, 1], [12, 16, 0, 1],  // PQ / HLG
+      [12, 13, 1, 1], [12, 13, 0, 0], [2, 13, 0, 1],  // matrix / range / primaries
+      [12, 13, 0], [12, 13, 0, 1, 0],  // malformed length
+    ] {
+      let candidate = try insertingPNGChunk("cICP", payload: Data(tuple), in: source)
+      XCTAssertThrowsError(try ComposerOriginalImageSanitizer.preflight(candidate))
+      XCTAssertThrowsError(try processor.process(data: candidate, quality: .original))
+    }
+    let single = try insertingPNGChunk("cICP", payload: Data([12, 13, 0, 1]), in: source)
+    let duplicate = try insertingPNGChunk("cICP", payload: Data([12, 13, 0, 1]), in: single)
+    // Move the cICP inserted immediately after IHDR to immediately before IEND.
+    let late =
+      Data(single.prefix(33)) + single[49..<(single.count - 12)]
+      + single[33..<49] + single.suffix(12)
+    let palette = try XCTUnwrap(
+      Data(
+        base64Encoded:
+          "iVBORw0KGgoAAAANSUhEUgAAAAQAAAACCAMAAABIdo1RAAAABlBMVEUAAAD/AAAb/40iAAAAAXRSTlMAQObYZgAAAA9JREFUCNdjYGRkYGAAEQAAIgAFnBl6mAAAAABJRU5ErkJggg=="
+      ))
+    let paletteWithCICP = try insertingPNGChunk("cICP", payload: Data([1, 13, 0, 1]), in: palette)
+    // This fixture has an 18-byte PLTE immediately after the inserted 16-byte cICP.
+    let afterPalette =
+      Data(paletteWithCICP.prefix(33)) + paletteWithCICP[49..<67]
+      + paletteWithCICP[33..<49] + paletteWithCICP.dropFirst(67)
+    for candidate in [duplicate, late, afterPalette] {
+      XCTAssertThrowsError(try ComposerOriginalImageSanitizer.preflight(candidate))
+      XCTAssertThrowsError(try processor.process(data: candidate, quality: .original))
+    }
+    for name in ["mDCV", "cLLI", "mDCv", "cLLi"] {
+      let payloadLength = name.hasPrefix("cLL") ? 8 : 24
+      let candidate = try insertingPNGChunk(
+        name, payload: Data(repeating: 0, count: payloadLength), in: single)
+      XCTAssertThrowsError(try ComposerOriginalImageSanitizer.preflight(candidate))
+      XCTAssertThrowsError(try processor.process(data: candidate, quality: .original))
+    }
+  }
+
   func testOriginalDoesNotRecompressOrResizeToFitByteBudget() throws {
     for type in [UTType.jpeg, .png] {
       let source = try imageData(type: type, width: 128, height: 96)
@@ -926,9 +992,23 @@ final class ComposerImageAttachmentProcessorTests: XCTestCase {
     let profileName = properties[kCGImagePropertyProfileName] as? String ?? "none"
     let profile = space.flatMap { $0.copyICCData() }
     let iccBytes = profile.map { CFDataGetLength($0) } ?? 0
+    var pngDescription = ""
+    if imageType(of: source) == UTType.png.identifier {
+      var names: [String] = []
+      var offset = 8
+      while offset + 12 <= source.count {
+        let length = source[offset..<(offset + 4)].reduce(0) { ($0 << 8) | Int($1) }
+        guard length <= source.count - offset - 12 else { break }
+        let name = String(decoding: source[(offset + 4)..<(offset + 8)], as: UTF8.self)
+        names.append(name)
+        offset += length + 12
+      }
+      let tuples = try pngPayloads("cICP", in: source).map { Array($0) }
+      pngDescription = " chunks=\(names.joined(separator: ",")) cICP=\(tuples)"
+    }
     return "type=\(imageType(of: source) ?? "unknown") size=\(image.width)x\(image.height) "
       + "bits=\(image.bitsPerComponent) model=\(space?.model.rawValue ?? -1) "
-      + "alpha=\(image.alphaInfo.rawValue) profile=\(profileName) iccBytes=\(iccBytes)"
+      + "alpha=\(image.alphaInfo.rawValue) profile=\(profileName) iccBytes=\(iccBytes)\(pngDescription)"
   }
 
   private func transparentSRGBPNGData(width: Int, height: Int) throws -> Data {
@@ -1021,6 +1101,19 @@ final class ComposerImageAttachmentProcessorTests: XCTestCase {
     }
     let chunk = bigEndian(UInt32(payload.count)) + body + bigEndian(crc)
     return Data(data.prefix(33)) + chunk + data.dropFirst(33)
+  }
+
+  private func removingPNGChunks(_ names: Set<String>, from data: Data) throws -> Data {
+    var result = Data(data.prefix(8))
+    var offset = 8
+    while offset + 12 <= data.count {
+      let length = data[offset..<(offset + 4)].reduce(0) { ($0 << 8) | Int($1) }
+      guard length <= data.count - offset - 12 else { throw TestFixtureError.missingEndOfImage }
+      let name = String(decoding: data[(offset + 4)..<(offset + 8)], as: UTF8.self)
+      if !names.contains(name) { result.append(data[offset..<(offset + length + 12)]) }
+      offset += length + 12
+    }
+    return result
   }
 
   private func imageData(
