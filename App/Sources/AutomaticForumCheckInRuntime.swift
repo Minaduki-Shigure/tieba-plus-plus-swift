@@ -28,7 +28,7 @@ extension AutomaticForumCheckInCoordinator: AutomaticForumCheckInRunning {}
 /// The coordinator and its journal own dispatch, readback, and daily deduplication.
 @MainActor
 final class AutomaticForumCheckInRuntime: ObservableObject {
-  typealias Registration = @MainActor (@escaping @Sendable (BGTask) -> Void) -> Bool
+  typealias Registration = @MainActor (@escaping @MainActor (BGTask) -> Void) -> Bool
   static let shared = AutomaticForumCheckInRuntime(defaults: .standard)
   static let taskIdentifier = "io.github.minaduki.tieba-plus-plus.daily-check-in"
   static let enabledKey = "TiebaPlusPlus.automaticForumCheckInEnabled"
@@ -116,8 +116,12 @@ final class AutomaticForumCheckInRuntime: ObservableObject {
           return false
         }
         return BGTaskScheduler.shared.register(
-          forTaskWithIdentifier: Self.taskIdentifier, using: .main, launchHandler: handler
-        )
+          forTaskWithIdentifier: Self.taskIdentifier, using: .main
+        ) { task in
+          // BGTask is not Sendable. The explicit main queue is the boundary at
+          // which its callback can synchronously enter the actor without a hop.
+          MainActor.assumeIsolated { handler(task) }
+        }
       }
     self.submit =
       submit ?? { date in
@@ -162,23 +166,21 @@ final class AutomaticForumCheckInRuntime: ObservableObject {
     guard !registrationAttempted else { return }
     registrationAttempted = true
     registered = registerTask { [weak self] task in
-      MainActor.assumeIsolated {
-        guard let self, let task = task as? BGAppRefreshTask else {
-          task.setTaskCompleted(success: false)
-          return
-        }
-        let completion = AutomaticForumCheckInBackgroundCompletion { success in
-          task.expirationHandler = nil
-          task.setTaskCompleted(success: success)
-        }
-        task.expirationHandler = { @Sendable [weak self, weak completion] in
-          Task { @MainActor in
-            guard let completion else { return }
-            self?.expireBackgroundRefresh(completion)
-          }
-        }
-        self.handleBackgroundRefresh(completion)
+      guard let self, let task = task as? BGAppRefreshTask else {
+        task.setTaskCompleted(success: false)
+        return
       }
+      let completion = AutomaticForumCheckInBackgroundCompletion { success in
+        task.expirationHandler = nil
+        task.setTaskCompleted(success: success)
+      }
+      task.expirationHandler = { @Sendable [weak self, weak completion] in
+        Task { @MainActor in
+          guard let completion else { return }
+          self?.expireBackgroundRefresh(completion)
+        }
+      }
+      self.handleBackgroundRefresh(completion)
     }
     refreshScheduling()
   }
