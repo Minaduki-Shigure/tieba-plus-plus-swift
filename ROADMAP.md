@@ -19,7 +19,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-serves `v0.65.0-alpha.16` (build 94) after publication, whose app-code snapshot includes
+serves `v0.65.0-alpha.17` (build 95) after publication, whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -120,7 +120,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.65.0-alpha.16` app-code snapshot is at 80–82%; all experimental
+The public `v0.65.0-alpha.17` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
@@ -175,7 +175,7 @@ remains unimplemented because the compared TiebaLite source contains
 contradictory concrete parameters for that irreversible request. An endpoint-
 specific authoritative absence proof also remains before this workflow can
 leave disposable-account validation.
-Current `main` extends that workflow to the topic author's deletion of another
+Alpha.17 extends that workflow to the topic author's deletion of another
 author's loaded ordinary floor. The target separately records the true floor
 author and the initiating thread owner. Core revalidates the exact account,
 topic owner, canonical first-floor identity, target PID/author/floor, and fresh
