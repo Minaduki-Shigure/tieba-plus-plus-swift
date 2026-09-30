@@ -136,9 +136,12 @@ private struct ContentFilterSettingsContent: View {
     }
     .sheet(isPresented: $showsAddRule) {
       NavigationStack {
-        AddContentFilterRuleView(list: viewModel.selectedList) { rule in
-          Task { await viewModel.add(rule) }
-        }
+        AddContentFilterRuleView(
+          list: viewModel.selectedList,
+          existingRules: viewModel.snapshot.rules,
+          onSave: { try await viewModel.add($0) },
+          onSaveBatch: { try await viewModel.add($0) }
+        )
       }
       .appNavigationSurface()
     }
@@ -218,13 +221,18 @@ private struct ContentFilterRuleRow: View {
 private struct AddContentFilterRuleView: View {
   @Environment(\.dismiss) private var dismiss
   let list: ContentFilterList
-  let onSave: (ContentFilterRule) -> Void
+  let existingRules: [ContentFilterRule]
+  let onSave: (ContentFilterRule) async throws -> Void
+  let onSaveBatch: ([ContentFilterRule]) async throws -> Void
 
   @State private var kind = ContentFilterRuleKind.keyword
   @State private var keyword = ""
   @State private var keywordMatchMode = ContentFilterKeywordMatchMode.literal
+  @State private var keywordInputMode = ContentFilterKeywordInputMode.single
   @State private var userID = ""
   @State private var username = ""
+  @State private var isSaving = false
+  @State private var saveErrorMessage: String?
 
   var body: some View {
     Form {
@@ -248,20 +256,45 @@ private struct AddContentFilterRuleView: View {
           .pickerStyle(.segmented)
           .accessibilityIdentifier("content-filter-keyword-match-mode")
 
-          TextField(keywordMatchMode == .literal ? "关键词" : "正则表达式", text: $keyword)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            .accessibilityIdentifier("content-filter-keyword-pattern")
+          if keywordMatchMode == .literal {
+            Picker("输入方式", selection: $keywordInputMode) {
+              ForEach(ContentFilterKeywordInputMode.allCases) { mode in
+                Text(mode.title).tag(mode)
+              }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("content-filter-keyword-input-mode")
+          }
+
+          if isBatchInput {
+            TextEditor(text: $keyword)
+              .frame(minHeight: 120)
+              .textInputAutocapitalization(.never)
+              .autocorrectionDisabled()
+              .accessibilityLabel("批量关键词，以空格或换行分隔")
+              .accessibilityIdentifier("content-filter-keyword-batch-input")
+            if let preview = try? batchPreview() {
+              Text("将新增 \(preview.newKeywords.count) 条规则，跳过 \(preview.existingCount) 条已有规则")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("content-filter-keyword-batch-preview")
+            }
+          } else {
+            TextField(keywordMatchMode == .literal ? "关键词" : "正则表达式", text: $keyword)
+              .textInputAutocapitalization(.never)
+              .autocorrectionDisabled()
+              .accessibilityIdentifier("content-filter-keyword-pattern")
+          }
         } footer: {
-          if
-            !keyword.isEmpty,
-            let validationMessage = ContentFilterKeywordPatternPolicy.validationMessage(
-              for: keyword,
-              mode: keywordMatchMode
-            )
-          {
-            Text(validationMessage)
-              .foregroundStyle(.red)
+          VStack(alignment: .leading, spacing: 4) {
+            if isBatchInput {
+              Text("以空格、换行或制表符分隔；重复关键词仅保留一次，每个词单独成为规则，匹配任意一个即生效。含空格的短语请使用“单个词 / 短语”。")
+              Text("每个关键词最多 \(SafeContentFilterRegex.maximumPatternCharacters) 个字符，屏蔽列表与白名单合计最多 \(FileContentFilterStore.defaultMaximumRules) 条规则。白名单仍优先于屏蔽关键词。")
+            }
+            if !keyword.isEmpty, let keywordValidationMessage {
+              Text(keywordValidationMessage)
+                .foregroundStyle(.red)
+            }
           }
         }
       case .user:
@@ -274,26 +307,67 @@ private struct AddContentFilterRuleView: View {
         }
       }
     }
+    .disabled(isSaving)
     .navigationTitle(list == .block ? "添加屏蔽规则" : "添加白名单规则")
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
       ToolbarItem(placement: .cancellationAction) {
         Button("取消") { dismiss() }
+          .disabled(isSaving)
       }
       ToolbarItem(placement: .confirmationAction) {
-        Button("添加", action: save)
-          .disabled(!isValid)
+        Button(isSaving ? "保存中…" : "添加", action: save)
+          .disabled(!isValid || isSaving)
       }
+    }
+    .interactiveDismissDisabled(isSaving)
+    .alert(
+      "无法保存规则",
+      isPresented: Binding(
+        get: { saveErrorMessage != nil },
+        set: { if !$0 { saveErrorMessage = nil } }
+      )
+    ) {
+      Button("好") { saveErrorMessage = nil }
+    } message: {
+      Text(saveErrorMessage ?? "未知错误")
+    }
+  }
+
+  private var isBatchInput: Bool {
+    keywordMatchMode == .literal && keywordInputMode == .batch
+  }
+
+  private func batchPreview() throws -> ContentFilterKeywordBatchPreview {
+    try ContentFilterKeywordInputPolicy.batchPreview(
+      keyword,
+      list: list,
+      existingRules: existingRules
+    )
+  }
+
+  private var keywordValidationMessage: String? {
+    do {
+      if isBatchInput {
+        let preview = try batchPreview()
+        if preview.newKeywords.isEmpty { return "这些关键词均已存在，没有需要新增的规则。" }
+      } else {
+        _ = try ContentFilterKeywordInputPolicy.validatedPatterns(
+          keyword,
+          matchMode: keywordMatchMode,
+          inputMode: keywordInputMode
+        )
+      }
+      return nil
+    } catch {
+      return error.localizedDescription
     }
   }
 
   private var isValid: Bool {
     switch kind {
     case .keyword:
-      return ContentFilterKeywordPatternPolicy.validationMessage(
-        for: keyword,
-        mode: keywordMatchMode
-      ) == nil
+      return keywordValidationMessage == nil
     case .user:
       let name = normalized(username)
       let idText = normalized(userID)
@@ -304,34 +378,42 @@ private struct AddContentFilterRuleView: View {
   }
 
   private func save() {
-    guard isValid else { return }
-    switch kind {
-    case .keyword:
-      guard
-        let pattern = try? ContentFilterKeywordPatternPolicy.validated(
-          keyword,
-          mode: keywordMatchMode
-        )
-      else { return }
-      switch keywordMatchMode {
-      case .literal:
-        onSave(.keyword(pattern, list: list))
-      case .regularExpression:
-        guard let rule = try? ContentFilterRule.regularExpression(pattern, list: list) else {
-          return
+    guard isValid, !isSaving else { return }
+    isSaving = true
+    Task { @MainActor in
+      defer { isSaving = false }
+      do {
+        switch kind {
+        case .keyword:
+          if isBatchInput {
+            let preview = try batchPreview()
+            try await onSaveBatch(preview.newKeywords.map { .keyword($0, list: list) })
+          } else {
+            let pattern = try ContentFilterKeywordPatternPolicy.validated(
+              keyword,
+              mode: keywordMatchMode
+            )
+            switch keywordMatchMode {
+            case .literal:
+              try await onSave(.keyword(pattern, list: list))
+            case .regularExpression:
+              try await onSave(.regularExpression(pattern, list: list))
+            }
+          }
+        case .user:
+          try await onSave(
+            .user(
+              id: Int64(normalized(userID)),
+              name: normalized(username),
+              list: list
+            )
+          )
         }
-        onSave(rule)
+        dismiss()
+      } catch {
+        saveErrorMessage = error.localizedDescription
       }
-    case .user:
-      onSave(
-        .user(
-          id: Int64(normalized(userID)),
-          name: normalized(username),
-          list: list
-        )
-      )
     }
-    dismiss()
   }
 
   private func normalized(_ value: String) -> String {

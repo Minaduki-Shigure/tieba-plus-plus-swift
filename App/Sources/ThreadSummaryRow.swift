@@ -227,6 +227,7 @@ struct ThreadSummaryRow<Header: View>: View {
   @Environment(\.openExternalWeb) private var openExternalWeb
   @Environment(\.openURL) private var openURL
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.contentAgreementStore) private var contentAgreementStore
 
   init(
     thread: BrowseThread,
@@ -282,16 +283,19 @@ struct ThreadSummaryRow<Header: View>: View {
   }
 
   var body: some View {
-    if thread.isPinned {
-      primaryNavigation {
-        VStack(alignment: .leading, spacing: 6) {
-          header()
-          pinnedRow
+    Group {
+      if thread.isPinned {
+        primaryNavigation {
+          VStack(alignment: .leading, spacing: 6) {
+            header()
+            pinnedRow
+          }
         }
+      } else {
+        regularRow
       }
-    } else {
-      regularRow
     }
+    .threadSummaryAgreementMenu(thread: thread)
   }
 
   private var pinnedRow: some View {
@@ -749,11 +753,28 @@ struct ThreadSummaryRow<Header: View>: View {
     }
   }
 
+  @ViewBuilder
   private func metricLine(allowsReplyNavigation: Bool) -> some View {
+    if let contentAgreementStore,
+      let target = ThreadSummaryAgreementPolicy.target(for: thread)
+    {
+      ThreadSummaryAgreementMetricsObserver(entry: contentAgreementStore.entry(for: target)) {
+        snapshot in
+        metricLayout(allowsReplyNavigation: allowsReplyNavigation, agreement: snapshot)
+      }
+    } else {
+      metricLayout(allowsReplyNavigation: allowsReplyNavigation, agreement: nil)
+    }
+  }
+
+  private func metricLayout(
+    allowsReplyNavigation: Bool,
+    agreement: ContentAgreementSnapshot?
+  ) -> some View {
     ViewThatFits(in: .horizontal) {
       HStack(spacing: 14) {
         primaryMetrics(allowsReplyNavigation: allowsReplyNavigation)
-        secondaryMetrics
+        secondaryMetrics(agreement: agreement)
         Spacer(minLength: 0)
       }
 
@@ -762,9 +783,13 @@ struct ThreadSummaryRow<Header: View>: View {
           primaryMetrics(allowsReplyNavigation: allowsReplyNavigation)
           Spacer(minLength: 0)
         }
-        if thread.agreeCount > 0 || thread.shareCount > 0 {
+        if ThreadSummaryAgreementPolicy.showsSecondaryMetrics(
+          snapshot: agreement,
+          fallbackScore: thread.agreeScore,
+          shareCount: thread.shareCount
+        ) {
           HStack(spacing: 14) {
-            secondaryMetrics
+            secondaryMetrics(agreement: agreement)
             Spacer(minLength: 0)
           }
         }
@@ -916,9 +941,15 @@ struct ThreadSummaryRow<Header: View>: View {
   }
 
   @ViewBuilder
-  private var secondaryMetrics: some View {
-    if thread.agreeCount > 0 {
-      ThreadMetric(systemImage: "hand.thumbsup", value: thread.agreeCount, label: "赞同")
+  private func secondaryMetrics(agreement: ContentAgreementSnapshot?) -> some View {
+    let score = agreement?.agreeScore ?? thread.agreeScore
+    if score > 0 || agreement != nil {
+      ThreadMetric(
+        systemImage: agreement?.isAgreed == true ? "hand.thumbsup.fill" : "hand.thumbsup",
+        value: score,
+        label: "净赞数"
+      )
+      .foregroundStyle(agreement?.isAgreed == true ? Color.accentColor : Color.secondary)
     }
     if thread.shareCount > 0 {
       ThreadMetric(

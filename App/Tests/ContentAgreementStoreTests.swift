@@ -1183,6 +1183,34 @@ final class ContentAgreementStoreTests: XCTestCase {
     XCTAssertEqual(missingEntry.state, .failed(previous: nil))
   }
 
+  func testEvictedReadyEntryHeldBySummaryObserverLosesItsAccountSnapshot() async throws {
+    let active = agreementSession(revisionComponent: 901)
+    let target = agreementTarget(objectID: 100)
+    let service = ContentAgreementStoreServiceSpy(
+      singleReads: [
+        active.sessionRevision: agreementData(
+          session: active, target: target, isAgreed: true, score: 75
+        )
+      ]
+    )
+    let store = ContentAgreementStore(
+      access: AccountAccess(vault: ContentAgreementStoreVaultSpy(session: active), service: service),
+      capacity: 1,
+      observesAccountSessionChanges: false
+    )
+    let retainedEntry = store.entry(for: target)
+    try await store.reload(target)
+    XCTAssertEqual(retainedEntry.state, .ready(.init(isAgreed: true, agreeScore: 75)))
+
+    _ = store.entry(for: agreementTarget(objectID: 101))
+
+    XCTAssertEqual(retainedEntry.state, .unknown)
+    XCTAssertNil(retainedEntry.displayedSnapshot)
+    store.accountSessionDidChange()
+    XCTAssertNil(retainedEntry.displayedSnapshot)
+    XCTAssertFalse(retainedEntry === store.entry(for: target))
+  }
+
   func testActiveScopeEntryIsNotEvictedByBoundedCache() async throws {
     let active = agreementSession(revisionComponent: 6)
     let target = agreementTarget(objectID: 104)

@@ -420,6 +420,15 @@ membership or check-in.
   remain subject to disposable-account validation; fixture compatibility alone
   does not prove real creation acceptance.
 
+After a valid new-topic or reply acknowledgement, a network/transport failure,
+cancellation, or HTTP 408/429/5xx during the subsequent readback retains the
+exact receipt as accepted-awaiting-visibility. It never reports confirmation or
+replays the write. The App's existing explicit visibility check can later verify
+that exact target. Missing acknowledgements, malformed or oversized readbacks,
+authentication rejection, server rejection, and identity/content mismatches
+remain unknown outcomes. This distinction applies to topics and all three
+reply targets, including supported image submissions.
+
 The account unread summary uses `POST https://tiebac.baidu.com/c/s/msg` with a
 signed form restricted to BDUSS, `_client_version=8.2.2`, and `bookmark=1` plus
 the generated signature. It sends no Cookie, STOKEN, UID header, or Android

@@ -256,14 +256,24 @@ final class ContentAgreementStore {
   @discardableResult
   func setAgreed(
     _ isAgreed: Bool,
-    for target: ContentAgreementTarget
+    for target: ContentAgreementTarget,
+    expectedSession: StoredAccountSession? = nil
   ) async throws -> ContentAgreementSnapshot {
+    let requestedLease = expectedSession.map(ContentAgreementSessionLease.init)
+    try validateRequestedLease(requestedLease, for: target)
     if let flight = mutationFlights[target] {
+      if let requestedLease, flight.lease != requestedLease {
+        throw BrowseError.unavailable("当前账户已经变化，请重新读取点赞状态。")
+      }
       if flight.targetAgreed == isAgreed {
-        return try await flight.task.value
+        let snapshot = try await flight.task.value
+        try validateRequestedLease(requestedLease, for: target)
+        return snapshot
       }
       _ = await flight.task.result
+      try validateRequestedLease(requestedLease, for: target)
       try await reload(target)
+      try validateRequestedLease(requestedLease, for: target)
       if case .ready(let snapshot) = entry(for: target).state, snapshot.isAgreed == isAgreed {
         return snapshot
       }
@@ -757,6 +767,19 @@ final class ContentAgreementStore {
     return current == lease
   }
 
+  private func validateRequestedLease(
+    _ lease: ContentAgreementSessionLease?,
+    for target: ContentAgreementTarget
+  ) throws {
+    guard let lease else { return }
+    // Callers that read before writing can freeze the account that initiated
+    // the action. A fresh vault read alone cannot prove that cached state was
+    // read for that same account during an interleaved account switch.
+    guard generationMatches(lease: lease), entries[target]?.lease == lease else {
+      throw BrowseError.unavailable("当前账户已经变化，请重新读取点赞状态。")
+    }
+  }
+
   private func activeDescriptorsByRequest()
     -> [ContentAgreementReadRequest: ContentAgreementReadDescriptor]
   {
@@ -907,6 +930,11 @@ final class ContentAgreementStore {
       .filter { $0.activeWriteCount == 0 && !protectedTargets.contains($0.target) }
       .sorted { $0.lastAccessOrdinal < $1.lastAccessOrdinal }
     for entry in candidates.prefix(max(entries.count - capacity, 0)) {
+      // SwiftUI may still retain an observed entry after cache eviction. Clear
+      // its account-bound state and invalidate any outstanding read first.
+      entry.epoch = nextEpoch()
+      entry.lease = nil
+      entry.setState(.unknown)
       entries.removeValue(forKey: entry.target)
     }
   }

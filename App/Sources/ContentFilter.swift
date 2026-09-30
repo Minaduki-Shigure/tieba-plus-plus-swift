@@ -72,6 +72,20 @@ enum ContentFilterDisplayMode: String, CaseIterable, Codable, Hashable, Identifi
   }
 }
 
+enum ContentFilterKeywordInputMode: String, CaseIterable, Identifiable, Sendable {
+  case single
+  case batch
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .single: "单个词 / 短语"
+    case .batch: "批量输入"
+    }
+  }
+}
+
 struct ContentFilterRule: Codable, Hashable, Identifiable, Sendable {
   let id: UUID
   let list: ContentFilterList
@@ -483,15 +497,90 @@ enum ContentFilterStoreError: LocalizedError, Equatable, Sendable {
   }
 }
 
+enum ContentFilterKeywordInputError: LocalizedError, Equatable, Sendable {
+  case inputTooLarge
+
+  var errorDescription: String? {
+    "批量输入内容过长，请分批添加。"
+  }
+}
+
+struct ContentFilterKeywordBatchPreview: Equatable, Sendable {
+  let newKeywords: [String]
+  let existingCount: Int
+}
+
+enum ContentFilterKeywordInputPolicy {
+  static let maximumInputBytes = 256 * 1_024
+
+  static func validatedPatterns(
+    _ value: String,
+    matchMode: ContentFilterKeywordMatchMode,
+    inputMode: ContentFilterKeywordInputMode
+  ) throws -> [String] {
+    // Batch mode only changes new literal input. Existing phrases and regular
+    // expressions keep their whitespace and matching semantics.
+    guard matchMode == .literal, inputMode == .batch else {
+      return [try ContentFilterKeywordPatternPolicy.validated(value, mode: matchMode)]
+    }
+    guard value.utf8.count <= maximumInputBytes else {
+      throw ContentFilterKeywordInputError.inputTooLarge
+    }
+    var patterns: [String] = []
+    var seen: Set<String> = []
+    for token in value.split(whereSeparator: \.isWhitespace) {
+      let pattern = try ContentFilterKeywordPatternPolicy.validated(String(token), mode: .literal)
+      if seen.insert(pattern).inserted {
+        patterns.append(pattern)
+        guard patterns.count <= FileContentFilterStore.defaultMaximumRules else {
+          throw ContentFilterStoreError.tooManyRules
+        }
+      }
+    }
+    guard !patterns.isEmpty else { throw ContentFilterKeywordPatternError.empty }
+    return patterns
+  }
+
+  static func batchPreview(
+    _ value: String,
+    list: ContentFilterList,
+    existingRules: [ContentFilterRule],
+    maximumRules: Int = FileContentFilterStore.defaultMaximumRules
+  ) throws -> ContentFilterKeywordBatchPreview {
+    let patterns = try validatedPatterns(value, matchMode: .literal, inputMode: .batch)
+    let existingKeywords = Set(existingRules.lazy.filter {
+      $0.kind == .keyword && $0.list == list && $0.keywordMatchMode == .literal
+    }.map(\.keyword))
+    let newKeywords = patterns.filter { !existingKeywords.contains($0) }
+    guard existingRules.count + newKeywords.count <= maximumRules else {
+      throw ContentFilterStoreError.tooManyRules
+    }
+    return ContentFilterKeywordBatchPreview(
+      newKeywords: newKeywords,
+      existingCount: patterns.count - newKeywords.count
+    )
+  }
+}
+
 protocol ContentFilterRepository: Sendable {
   func snapshot() async throws -> ContentFilterSnapshot
   @discardableResult
   func add(_ rule: ContentFilterRule) async throws -> ContentFilterRule
+  /// Adds all new identities in one transaction; existing rules are preserved.
+  @discardableResult
+  func add(_ rules: [ContentFilterRule]) async throws -> [ContentFilterRule]
   func delete(id: UUID) async throws
   func deleteAll(in list: ContentFilterList) async throws
   func setDisplayMode(_ mode: ContentFilterDisplayMode) async throws
   func setBlockVideos(_ blockVideos: Bool) async throws
   func reset() async throws
+}
+
+extension ContentFilterRepository {
+  func add(_ rules: [ContentFilterRule]) async throws -> [ContentFilterRule] {
+    // Repositories without batch support must not fall back to partial writes.
+    throw ContentFilterStoreError.unavailable
+  }
 }
 
 struct EmptyContentFilterRepository: ContentFilterRepository {
@@ -630,27 +719,46 @@ actor FileContentFilterStore: ContentFilterRepository {
 
   @discardableResult
   func add(_ rule: ContentFilterRule) async throws -> ContentFilterRule {
-    let rule = try Self.normalizedRule(rule)
+    let added = try insert([rule], skippingDuplicates: false)
+    return added[0]
+  }
+
+  @discardableResult
+  func add(_ rules: [ContentFilterRule]) async throws -> [ContentFilterRule] {
+    try insert(rules, skippingDuplicates: true)
+  }
+
+  private func insert(
+    _ rules: [ContentFilterRule],
+    skippingDuplicates: Bool
+  ) throws -> [ContentFilterRule] {
+    // Validate every input before committing anything, including later rules.
+    let rules = try rules.map(Self.normalizedRule)
     var candidate = try loadArchiveForMutation()
-    guard candidate.rules.count < maximumRules else {
+    var identities = Set(candidate.rules.map(\.identityKey))
+    var added: [ContentFilterRule] = []
+    for rule in rules {
+      guard identities.insert(rule.identityKey).inserted else {
+        if skippingDuplicates { continue }
+        throw ContentFilterStoreError.duplicateRule
+      }
+      added.append(rule)
+    }
+    guard !added.isEmpty else { return [] }
+    guard candidate.rules.count + added.count <= maximumRules else {
       throw ContentFilterStoreError.tooManyRules
     }
-    if rule.kind == .keyword && rule.keywordMatchMode == .regularExpression {
-      let regularExpressionCount = candidate.rules.lazy.filter {
-        $0.kind == .keyword && $0.keywordMatchMode == .regularExpression
-      }.count
-      guard regularExpressionCount < maximumRegularExpressionRules else {
-        throw ContentFilterStoreError.tooManyRegularExpressions
-      }
+    candidate.rules.append(contentsOf: added)
+    let regularExpressionCount = candidate.rules.lazy.filter {
+      $0.kind == .keyword && $0.keywordMatchMode == .regularExpression
+    }.count
+    guard regularExpressionCount <= maximumRegularExpressionRules else {
+      throw ContentFilterStoreError.tooManyRegularExpressions
     }
-    guard !candidate.rules.contains(where: { $0.identityKey == rule.identityKey }) else {
-      throw ContentFilterStoreError.duplicateRule
-    }
-    candidate.rules.append(rule)
     candidate.rules = normalizedRules(candidate.rules)
     try commit(candidate)
     notifyChange()
-    return rule
+    return added
   }
 
   func delete(id: UUID) async throws {

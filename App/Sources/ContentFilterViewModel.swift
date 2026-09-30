@@ -48,22 +48,28 @@ final class ContentFilterViewModel: ObservableObject {
     }
   }
 
-  func add(_ rule: ContentFilterRule) async {
-    let generation = beginRequest()
-    do {
+  func add(_ rule: ContentFilterRule) async throws {
+    try await saveRules {
       _ = try await repository.add(rule)
-      let snapshot = try await repository.snapshot()
-      guard generation == requestGeneration else { return }
-      self.snapshot = snapshot
-      hasLoaded = true
-      loadErrorMessage = nil
-      operationErrorMessage = nil
-    } catch is CancellationError {
-      return
-    } catch {
-      guard generation == requestGeneration else { return }
-      operationErrorMessage = error.localizedDescription
     }
+  }
+
+  func add(_ rules: [ContentFilterRule]) async throws {
+    try await saveRules {
+      _ = try await repository.add(rules)
+    }
+  }
+
+  private func saveRules(_ write: () async throws -> Void) async throws {
+    let generation = beginRequest()
+    // The editor waits for the transaction and keeps its draft on failure.
+    try await write()
+    let snapshot = try await repository.snapshot()
+    guard generation == requestGeneration else { return }
+    self.snapshot = snapshot
+    hasLoaded = true
+    loadErrorMessage = nil
+    operationErrorMessage = nil
   }
 
   func delete(id: UUID) async {

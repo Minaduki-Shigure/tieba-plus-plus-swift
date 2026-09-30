@@ -593,8 +593,20 @@ share only their expected-target union. Scope changes, a write in progress, or
 an account switch must invalidate or epoch-guard stale batch results so they
 cannot overwrite a mutation or the new account's state.
 
-Follow, unfollow, check-in, poll voting, topic, post, or nested-reply approval or
-cancellation, and each supported text/classic-emoticon topic, floor, or nested-reply
+Topic, post, and nested-reply approval or cancellation requires an explicit tap
+on that action, without a second confirmation dialog. Shared thread-summary
+cards expose it only in the long-press menu and only with an explicit valid
+first-floor PID and complete forum identity. Ordinary taps remain navigation;
+scrolling and opening the menu perform no additional authenticated read. An
+explicit menu action freezes the active account's UID and session revision,
+reads the exact current state, then passes that frozen lease into the shared
+store's write gate. A recommendation persona cannot choose the write account.
+An uncertain failed action offers a read-only refresh, not an implicit replay.
+Evicting an observed entry clears its account-bound state and invalidates stale
+reads before removal. Displayed vote totals come from authoritative snapshots,
+never from local increment/decrement or an acknowledgement's default scalar.
+
+Follow, unfollow, check-in, poll voting, and each supported text/classic-emoticon topic, floor, or nested-reply
 submission, plus equivalent new-topic creation, all require explicit user
 confirmation. For reply and new-topic creation, this confirmation must bind an
 immutable target-and-content snapshot immediately before dispatch. Editing,
@@ -692,11 +704,21 @@ downloaded. An identical submission
 UUID shares one owner, conflicting reuse fails, and all new-topic writes for one
 UID are serialized. Cancellation before dispatch performs no write. Once the
 write is dispatched, it is never automatically retried: an unparseable receipt,
-transport loss, or mismatched authenticated readback becomes an unknown outcome.
+write-response transport loss, or mismatched authenticated readback becomes an unknown outcome.
 A positive TID/PID is confirmed only by an exact account, forum, thread, first-
 floor author, explicit-title, and structured text/emoticon body match. A missing first floor remains
 accepted-awaiting-visibility; an untitled topic may accept a server-generated
 display title only when every other proof matches.
+
+For new topics and all three reply targets, a valid creation acknowledgement is
+retained when only its subsequent readback fails due to network/transport
+unavailability, cancellation, or HTTP 408/429/5xx. The result is explicitly
+accepted-awaiting-visibility, never confirmed. The existing account-bound draft
+stores preserve its exact receipt and allow only a later explicit visibility
+read, not a second submission. Malformed or oversized responses, authentication
+or server rejection, and identity/content conflicts do not use this availability
+exception. Losing the creation acknowledgement itself still leaves an unknown,
+non-resendable outcome; no receipt is inferred from a failed write.
 
 The App stores new-topic drafts in a bounded, versioned atomic archive keyed by
 the account UID and exact forum identity. The archive contains title, body,
@@ -1091,7 +1113,7 @@ private-message evidence remain outside this boundary.
 Parent and child filtering use one immutable rule snapshot; hiding the parent or
 anchor must not expose filtered content, alter pagination identity, or synthesize
 a pasteboard value. A visible parent or child may expose only the separately
-authenticated, confirmation-gated approval or cancellation control described
+authenticated, explicit-action approval or cancellation control described
 above. Reply, `disagree`, downvote, create, edit, delete, native report
 submission, and all other authenticated write operations remain unavailable.
 
@@ -1842,8 +1864,11 @@ switch to a different UID while reads or writes are in flight. It must also
 confirm that shared batch reads do not duplicate requests, scope removal stops
 protecting removed targets, a late batch cannot overwrite a confirmed write or a
 new account, signed-out browsing makes no authenticated call, inline previews
-expose no approval mutation, and complete-page parent and child controls both
-require explicit confirmation. Check-in validation must additionally cover an unfollowed forum,
+expose no approval mutation, and complete-page parent and child approval controls
+require an explicit action without a confirmation dialog. Summary-menu testing
+must also cover no writes on ordinary taps, missing first-floor identity,
+idempotent intents, failed-read recovery, and account switching during preflight.
+Check-in validation must additionally cover an unfollowed forum,
 missing sign state, already-signed idempotence, returned-UID mismatch, and the
 same-forum follow/check-in exclusion rule. Cloud-favorite validation must cover
 list and thread-detail remove, add, saved-position update, an unresolvable deleted

@@ -98,6 +98,91 @@ final class TiebaNewThreadClientTests: XCTestCase, @unchecked Sendable {
     )
   }
 
+  func testReceiptSurvivesTemporaryReadbackFailureAndRecoversWithoutAnotherWrite() async throws {
+    for failure in [
+      CreationReadbackFailure.network,
+      .timeout,
+      .transport,
+      .cancellation,
+      .urlCancellation,
+      .http(408),
+      .http(429),
+      .http(500),
+      .http(503),
+      .http(599),
+    ] {
+      let transport = NewThreadStateTransport(forumID: forumID, readbackFailure: failure)
+      let client = TiebaAuthenticatedClient(transport: transport)
+      let submission = makeSubmission()
+      let expectedReceipt = TiebaNewThreadReceipt(threadID: 30_030, firstPostID: 40_040)
+      let result = try await client.submitNewThread(
+        credential: credential(), expectedUserID: firstUserID, submission: submission
+      )
+      XCTAssertEqual(result.outcome, .acceptedAwaitingVisibility(expectedReceipt), "\(failure)")
+      let repeated = try await client.submitNewThread(
+        credential: credential(), expectedUserID: firstUserID, submission: submission
+      )
+      XCTAssertEqual(repeated, result)
+      let pending = await transport.snapshot()
+      XCTAssertEqual(pending.preflightCount, 1)
+      XCTAssertEqual(pending.writeCount, 1)
+      XCTAssertEqual(pending.readbackCount, 1)
+
+      await transport.restoreReadback()
+      let verified = try await client.verifyNewThreadVisibility(
+        credential: credential(), expectedUserID: firstUserID,
+        submission: submission, receipt: expectedReceipt
+      )
+      XCTAssertEqual(verified, expectedReceipt)
+      let recovered = await transport.snapshot()
+      XCTAssertEqual(recovered.preflightCount, 2)
+      XCTAssertEqual(recovered.writeCount, 1)
+      XCTAssertEqual(recovered.readbackCount, 2)
+    }
+  }
+
+  func testUntrustedReadbackNeverDowngradesToAcceptedReceiptOrRetriesWrite() async {
+    for failure in [
+      CreationReadbackFailure.invalidProtobuf,
+      .oversized,
+      .http(400),
+      .http(401),
+      .http(403),
+      .server,
+    ] {
+      let transport = NewThreadStateTransport(forumID: forumID, readbackFailure: failure)
+      let client = TiebaAuthenticatedClient(transport: transport)
+      let submission = makeSubmission()
+      for _ in 0..<2 {
+        await assertClientError(.newThreadOutcomeUnknown) {
+          _ = try await client.submitNewThread(
+            credential: credential(), expectedUserID: firstUserID, submission: submission
+          )
+        }
+      }
+      let snapshot = await transport.snapshot()
+      XCTAssertEqual(snapshot.preflightCount, 1)
+      XCTAssertEqual(snapshot.writeCount, 1)
+      XCTAssertEqual(snapshot.readbackCount, 1)
+    }
+  }
+
+  func testReceiptDoesNotOverrideReadbackAccountMismatch() async {
+    let transport = NewThreadStateTransport(forumID: forumID, behavior: .wrongAccountReadback)
+    let client = TiebaAuthenticatedClient(transport: transport)
+    let submission = makeSubmission()
+    for _ in 0..<2 {
+      await assertClientError(.newThreadOutcomeUnknown) {
+        _ = try await client.submitNewThread(
+          credential: credential(), expectedUserID: firstUserID, submission: submission
+        )
+      }
+    }
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.writeCount, 1)
+    XCTAssertEqual(snapshot.readbackCount, 1)
+  }
+
   func testVisibilityVerificationReturnsNilWhileFirstFloorIsUnavailable() async throws {
     let submission = makeSubmission()
     let receipt = TiebaNewThreadReceipt(threadID: 30_030, firstPostID: 40_040)
@@ -663,6 +748,7 @@ private actor NewThreadStateTransport: TiebaTransport {
     case success
     case missingReadback
     case mismatchedReadback
+    case wrongAccountReadback
     case networkAfterWrite
     case timeoutAfterWrite
     case cancellationAfterWrite
@@ -693,6 +779,7 @@ private actor NewThreadStateTransport: TiebaTransport {
   private let behavior: Behavior
   private let blocksWrites: Bool
   private let blocksPreflight: Bool
+  private var readbackFailure: CreationReadbackFailure?
   private var preflightCount = 0
   private var writeCount = 0
   private var readbackCount = 0
@@ -707,12 +794,14 @@ private actor NewThreadStateTransport: TiebaTransport {
     forumID: Int64,
     behavior: Behavior = .success,
     blocksWrites: Bool = false,
-    blocksPreflight: Bool = false
+    blocksPreflight: Bool = false,
+    readbackFailure: CreationReadbackFailure? = nil
   ) {
     self.forumID = forumID
     self.behavior = behavior
     self.blocksWrites = blocksWrites
     self.blocksPreflight = blocksPreflight
+    self.readbackFailure = readbackFailure
   }
 
   func send(_ request: URLRequest) async throws -> TiebaHTTPResponse {
@@ -765,7 +854,7 @@ private actor NewThreadStateTransport: TiebaTransport {
         }
       }
       switch behavior {
-      case .success, .missingReadback, .mismatchedReadback:
+      case .success, .missingReadback, .mismatchedReadback, .wrongAccountReadback:
         storedThreads[created.threadID] = created
         return try newThreadWriteResponse(
           errorCode: 0,
@@ -825,13 +914,16 @@ private actor NewThreadStateTransport: TiebaTransport {
       guard let stored = storedThreads[message.data.kz] else {
         throw TiebaClientError.invalidAuthenticatedResponse
       }
-      return try newThreadProtobufResponse(
-        newThreadPageResponse(
-          stored: stored,
-          includesFirstPost: behavior != .missingReadback,
-          content: behavior == .mismatchedReadback ? "different" : stored.content
-        )
+      if let readbackFailure {
+        return try readbackFailure.response(maximumBodyBytes: maximumBodyBytes)
+      }
+      var response = newThreadPageResponse(
+        stored: stored,
+        includesFirstPost: behavior != .missingReadback,
+        content: behavior == .mismatchedReadback ? "different" : stored.content
       )
+      if behavior == .wrongAccountReadback { response.data.user.id += 1 }
+      return try newThreadProtobufResponse(response)
     default:
       throw TiebaClientError.invalidEndpoint
     }
@@ -868,6 +960,10 @@ private actor NewThreadStateTransport: TiebaTransport {
     let waiters = writeWaiters
     writeWaiters.removeAll()
     for waiter in waiters { waiter.resume() }
+  }
+
+  func restoreReadback() {
+    readbackFailure = nil
   }
 
   func snapshot() -> Snapshot {
@@ -1026,4 +1122,48 @@ private func newThreadProtobufResponse<Message: SwiftProtobuf.Message>(
   _ message: Message
 ) throws -> TiebaHTTPResponse {
   TiebaHTTPResponse(body: try message.serializedData(), statusCode: 200)
+}
+
+/// Shared transport fixture for topic and reply readbacks. Failures are injected
+/// only after a valid creation receipt, so write uncertainty stays independently tested.
+enum CreationReadbackFailure: Sendable {
+  case network
+  case timeout
+  case transport
+  case cancellation
+  case urlCancellation
+  case http(Int)
+  case invalidProtobuf
+  case oversized
+  case server
+
+  func response(maximumBodyBytes: Int?) throws -> TiebaHTTPResponse {
+    switch self {
+    case .network:
+      throw TiebaClientError.network(code: -1_005)
+    case .timeout:
+      throw URLError(.timedOut)
+    case .transport:
+      throw TiebaClientError.transportFailure
+    case .cancellation:
+      throw CancellationError()
+    case .urlCancellation:
+      throw URLError(.cancelled)
+    case .http(let status):
+      return TiebaHTTPResponse(body: Data(), statusCode: status)
+    case .invalidProtobuf:
+      return TiebaHTTPResponse(body: Data([0xff]), statusCode: 200)
+    case .oversized:
+      return TiebaHTTPResponse(
+        body: Data(repeating: 0, count: (maximumBodyBytes ?? 1_048_576) + 1), statusCode: 200
+      )
+    case .server:
+      // PbPage and PbFloor both carry Error as field 1, so the same error-only
+      // envelope exercises their real decoders without any trusted page data.
+      var response = PbPageResIdl()
+      response.error.errorno = 340_006
+      response.error.errmsg = "read denied"
+      return TiebaHTTPResponse(body: try response.serializedData(), statusCode: 200)
+    }
+  }
 }

@@ -3498,7 +3498,10 @@ public actor TiebaAuthenticatedClient {
         outcome = .acceptedAwaitingVisibility(receipt)
       }
     } catch {
-      throw TiebaClientError.replyOutcomeUnknown
+      guard Self.isTemporarilyUnavailableCreationReadback(error) else {
+        throw TiebaClientError.replyOutcomeUnknown
+      }
+      outcome = .acceptedAwaitingVisibility(receipt)
     }
     return TiebaTextReplyResult(
       submissionID: submission.submissionID,
@@ -3576,7 +3579,10 @@ public actor TiebaAuthenticatedClient {
         outcome = .acceptedAwaitingVisibility(receipt)
       }
     } catch {
-      throw TiebaClientError.newThreadOutcomeUnknown
+      guard Self.isTemporarilyUnavailableCreationReadback(error) else {
+        throw TiebaClientError.newThreadOutcomeUnknown
+      }
+      outcome = .acceptedAwaitingVisibility(receipt)
     }
     return TiebaNewThreadResult(
       submissionID: submission.submissionID,
@@ -3585,6 +3591,23 @@ public actor TiebaAuthenticatedClient {
       forumName: normalizedForumName,
       outcome: outcome
     )
+  }
+
+  /// A valid creation acknowledgement survives an unavailable *read*. Keep its
+  /// exact receipt for an explicit later visibility check without replaying the
+  /// write. Identity/content mismatches and invalid replies are not availability
+  /// failures and must retain the stricter unknown-outcome state.
+  private static func isTemporarilyUnavailableCreationReadback(_ error: any Swift.Error) -> Bool {
+    if error is CancellationError { return true }
+    guard let error = error as? TiebaClientError else { return false }
+    switch error {
+    case .network, .transportFailure:
+      return true
+    case .httpStatus(let status):
+      return status == 408 || status == 429 || (500...599).contains(status)
+    default:
+      return false
+    }
   }
 
   private func runStaticImageUploadWithAccountLease(

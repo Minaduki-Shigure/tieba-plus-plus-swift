@@ -6,7 +6,8 @@ limited to the attributed protobuf schemas and fixed classic-emoticon wire-name
 catalog documented in TiebaProto's `NOTICE.md`.
 This audit was last compared with TiebaLite `4.0-dev` at commit
 [`268f388c`](https://github.com/zzc10086/TiebaLite/tree/268f388c7824ae2c8f6ed549827a943ec8a7f352).
-The current-main automatic preview-quality and creation-transport changes were
+The current-main automatic preview-quality, creation-transport, batch literal
+keyword entry, and thread-list like entry workflows were
 separately checked against
 [`9701bfb6`](https://github.com/zzc10086/TiebaLite/tree/9701bfb6aaf261cc37b20b5793a8404261077f49).
 That narrower comparison does not replace the full-product audit above.
@@ -38,6 +39,13 @@ and migrates new-topic writes to protobuf command `309730`, updating only the
 topic, reply, and static-image-upload client versions to `12.52.1.0`. These changes
 add no weighted point; device network
 transitions and disposable-account creation validation remain required.
+Current `main` additionally retains validated creation receipts across temporarily
+unavailable visibility reads, for later read-only verification without resending.
+The filter editor supports explicit whitespace-separated batch literal rules,
+and shared thread rows expose account-bound like/unlike through a long-press
+menu while ordinary taps retain thread navigation. These improve existing areas
+without increasing the weighted estimate; native interaction and real-account
+validation remain outstanding.
 The fixed username handoff and conservative cloud-favorite identity fallback
 improve existing account and server-write areas without adding a native write,
 new data source, or weighted point. Current-main personalized-discovery startup
@@ -112,7 +120,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.65.0-alpha.14` app-code snapshot is at 80–82%; all experimental
+The public `v0.65.0-alpha.15` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
@@ -1827,6 +1835,13 @@ code, or a backtracking engine. User rules match an exact positive UID or exact
 name. An allow rule takes precedence only within the same matching domain and
 inspected field: a user allow rule does not override a blocked keyword, and a
 keyword allowed in one field does not override a blocked match in another.
+New literal rules can be entered individually (the unchanged default, preserving
+spaces in a phrase) or in an explicit batch mode. Batch mode splits Unicode
+whitespace, normalizes and deduplicates tokens, previews new versus existing
+rules, and saves all new rules in one transaction. The 128-character per-pattern
+and 500-total-rule limits still apply; regular expressions are never split,
+existing rule identities remain intact, and a failed save retains the editor's
+input. Multiple rules continue to match as OR within their existing domain.
 Blocked content can remain as a placeholder or be fully hidden. In per-forum
 search, the matched entity and each displayed topic or parent-floor context are
 filtered independently. A blocked context can be replaced or omitted without
@@ -1937,7 +1952,11 @@ dispatch guarantees zero write. After dispatch, the owner continues even if its
 caller or view disappears. A valid returned PID is read exactly once: a matching
 author, structured text/emoticon body, parent, and marker confirms success; a genuinely absent PID becomes
 accepted-awaiting-visibility; any visible mismatch or lost receipt becomes an
-unknown outcome. Neither case resends the write.
+unknown outcome. Current `main` also retains a valid receipt when the subsequent
+read fails because of network/transport unavailability, cancellation, or HTTP
+408/429/5xx. The existing explicit visibility check can later confirm that exact
+reply without sending it again. Malformed, oversized, authentication-rejected,
+or identity/content-mismatched reads remain unknown. Neither case resends the write.
 
 The App binds each composer to `userID + sessionRevision` and stores its exact
 draft by account, forum, thread, first post, and reply target. The bounded atomic
@@ -1974,12 +1993,14 @@ to the former mini-program form endpoint or retries through another transport.
 
 One account has one new-topic write tail. An identical submission UUID shares
 its owner, conflicting reuse is rejected, and cancellation before dispatch
-performs no write. After dispatch, transport loss, malformed receipts, or
+performs no write. After dispatch, write-response transport loss, malformed receipts, or
 mismatched readback become an unknown outcome and are never resent. A positive
 TID/PID receipt is confirmed only when an authenticated first-floor readback
 matches the account, forum, thread, author, explicit title when supplied, and
 exact structured text/emoticon body. Temporary first-floor absence remains
-accepted-awaiting-visibility. The App persists a non-sendable marker before the
+accepted-awaiting-visibility. The same temporary readback-failure handling as
+replies preserves a valid receipt for the existing explicit read-only recovery
+flow; a failed read is never treated as confirmed creation. The App persists a non-sendable marker before the
 write, isolates drafts by account and forum, locks challenge and unknown states,
 and allows an untitled topic's server-generated display title only after all
 other proof matches. Confirmed creation remains as a bounded local tombstone

@@ -117,6 +117,96 @@ final class TiebaTextReplyClientTests: XCTestCase, @unchecked Sendable {
     XCTAssertEqual(snapshot.writeCount, 1)
   }
 
+  func testAllReplyTargetsRetainReceiptThroughTemporaryReadbackFailureWithoutRepeatingWrite() async throws {
+    let cases: [(TiebaTextReplyTarget, CreationReadbackFailure)] = [
+      (.thread(firstPostID: firstPostID), .network),
+      (.post(postID: parentPostID), .cancellation),
+      (.subpost(parentPostID: parentPostID, subpostID: targetSubpostID), .http(503)),
+      (.thread(firstPostID: firstPostID), .transport),
+    ]
+    for (target, failure) in cases {
+      let transport = TextReplyStateTransport(target: target, readbackFailure: failure)
+      let client = TiebaAuthenticatedClient(transport: transport)
+      let submission = makeSubmission(target: target)
+      let expectedReceipt: TiebaTextReplyReceipt
+      let preflightReads: Int
+      switch target {
+      case .thread:
+        expectedReceipt = .post(postID: 70_070)
+        preflightReads = 1
+      case .post(let parent):
+        expectedReceipt = .subpost(parentPostID: parent, subpostID: 70_070)
+        preflightReads = 1
+      case .subpost(let parent, _):
+        expectedReceipt = .subpost(parentPostID: parent, subpostID: 70_070)
+        preflightReads = 2
+      }
+
+      let result = try await client.submitTextReply(
+        credential: credential(), expectedUserID: firstUserID, submission: submission
+      )
+      XCTAssertEqual(result.outcome, .acceptedAwaitingVisibility(expectedReceipt))
+      let repeated = try await client.submitTextReply(
+        credential: credential(), expectedUserID: firstUserID, submission: submission
+      )
+      XCTAssertEqual(repeated, result)
+      let pending = await transport.snapshot()
+      XCTAssertEqual(pending.writeCount, 1)
+      XCTAssertEqual(pending.pageReadCount + pending.floorReadCount, preflightReads + 1)
+    }
+  }
+
+  func testUntrustedReplyReadbacksStayUnknownAcrossPageAndFloorResponses() async {
+    let cases: [(TiebaTextReplyTarget, CreationReadbackFailure)] = [
+      (.thread(firstPostID: firstPostID), .invalidProtobuf),
+      (.post(postID: parentPostID), .oversized),
+      (.subpost(parentPostID: parentPostID, subpostID: targetSubpostID), .http(401)),
+      (.thread(firstPostID: firstPostID), .http(403)),
+      (.post(postID: parentPostID), .server),
+    ]
+    for (target, failure) in cases {
+      let transport = TextReplyStateTransport(target: target, readbackFailure: failure)
+      let client = TiebaAuthenticatedClient(transport: transport)
+      let submission = makeSubmission(target: target)
+      for _ in 0..<2 {
+        await assertClientError(.replyOutcomeUnknown) {
+          _ = try await client.submitTextReply(
+            credential: credential(), expectedUserID: firstUserID, submission: submission
+          )
+        }
+      }
+      let snapshot = await transport.snapshot()
+      XCTAssertEqual(snapshot.writeCount, 1)
+      let preflightReads = if case .subpost = target { 2 } else { 1 }
+      XCTAssertEqual(snapshot.pageReadCount + snapshot.floorReadCount, preflightReads + 1)
+    }
+  }
+
+  func testReceiptDoesNotOverrideNestedReadbackContentOrAuthorMismatch() async {
+    for behavior in [
+      TextReplyStateTransport.Behavior.mismatchedReadback,
+      .wrongAuthorReadback,
+    ] {
+      let target = TiebaTextReplyTarget.subpost(
+        parentPostID: parentPostID, subpostID: targetSubpostID
+      )
+      let transport = TextReplyStateTransport(target: target, behavior: behavior)
+      let client = TiebaAuthenticatedClient(transport: transport)
+      let submission = makeSubmission(target: target)
+      for _ in 0..<2 {
+        await assertClientError(.replyOutcomeUnknown) {
+          _ = try await client.submitTextReply(
+            credential: credential(), expectedUserID: firstUserID, submission: submission
+          )
+        }
+      }
+      let snapshot = await transport.snapshot()
+      XCTAssertEqual(snapshot.writeCount, 1)
+      XCTAssertEqual(snapshot.pageReadCount, 1)
+      XCTAssertEqual(snapshot.floorReadCount, 2)
+    }
+  }
+
   func testPostDispatchFailuresAreUnknownAndNeverRetried() async {
     for behavior in [
       TextReplyStateTransport.Behavior.networkAfterWrite,
@@ -493,6 +583,7 @@ private actor TextReplyStateTransport: TiebaTransport {
     case success
     case missingReadback
     case mismatchedReadback
+    case wrongAuthorReadback
     case networkAfterWrite
     case timeoutAfterWrite
     case cancellationAfterWrite
@@ -519,6 +610,7 @@ private actor TextReplyStateTransport: TiebaTransport {
   private let blocksWrites: Bool
   private let blocksPreflight: Bool
   private let firstPostID: Int64
+  private var readbackFailure: CreationReadbackFailure?
   private var writeCount = 0
   private var pageReadCount = 0
   private var floorReadCount = 0
@@ -533,13 +625,15 @@ private actor TextReplyStateTransport: TiebaTransport {
     behavior: Behavior = .success,
     blocksWrites: Bool = false,
     blocksPreflight: Bool = false,
-    firstPostID: Int64 = 4_004
+    firstPostID: Int64 = 4_004,
+    readbackFailure: CreationReadbackFailure? = nil
   ) {
     self.target = target
     self.behavior = behavior
     self.blocksWrites = blocksWrites
     self.blocksPreflight = blocksPreflight
     self.firstPostID = firstPostID
+    self.readbackFailure = readbackFailure
   }
 
   func send(_ request: URLRequest) async throws -> TiebaHTTPResponse {
@@ -562,6 +656,9 @@ private actor TextReplyStateTransport: TiebaTransport {
       let accountID = resolvedUserID(message.data.common.bduss)
       let requestedPostID = message.data.pid
       if let stored = storedReplies[requestedPostID] {
+        if let readbackFailure {
+          return try readbackFailure.response(maximumBodyBytes: maximumBodyBytes)
+        }
         return try protobufResponse(
           clientPageResponse(
             userID: accountID,
@@ -570,7 +667,7 @@ private actor TextReplyStateTransport: TiebaTransport {
             firstPostID: firstPostID,
             locatedPostID: requestedPostID,
             locatedFloor: 3,
-            authorID: stored.userID,
+            authorID: behavior == .wrongAuthorReadback ? stored.userID + 1 : stored.userID,
             content: behavior == .mismatchedReadback ? "different" : stored.content
           )
         )
@@ -605,6 +702,9 @@ private actor TextReplyStateTransport: TiebaTransport {
       floorReadCount += 1
       let message = try PbFloorReqIdl(serializedBytes: clientProtobufPayload(request))
       if let stored = storedReplies[message.data.spid] {
+        if let readbackFailure {
+          return try readbackFailure.response(maximumBodyBytes: maximumBodyBytes)
+        }
         return try protobufResponse(
           clientFloorResponse(
             forumID: message.data.forumID,
@@ -612,7 +712,7 @@ private actor TextReplyStateTransport: TiebaTransport {
             firstPostID: firstPostID,
             parentPostID: message.data.pid,
             subpostID: message.data.spid,
-            authorID: stored.userID,
+            authorID: behavior == .wrongAuthorReadback ? stored.userID + 1 : stored.userID,
             authorName: "Current User",
             authorPortrait: "current-portrait",
             content: behavior == .mismatchedReadback ? "different" : stored.content,
@@ -656,7 +756,7 @@ private actor TextReplyStateTransport: TiebaTransport {
         }
       }
       switch behavior {
-      case .success, .mismatchedReadback:
+      case .success, .mismatchedReadback, .wrongAuthorReadback:
         storedReplies[createdID] = StoredReply(userID: accountID, content: userContent)
         return try protobufResponse(addPostResponse(threadID: message.data.tid, postID: createdID))
       case .missingReadback:

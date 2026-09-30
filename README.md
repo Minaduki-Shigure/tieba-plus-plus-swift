@@ -25,6 +25,19 @@ and its verified metadata enters the public app source.
 
 ### Release and validation
 
+- **Current `main` receipt recovery and list interactions:** After Tieba returns a
+  valid creation receipt, a temporarily unavailable visibility read preserves
+  the exact topic/post/comment IDs as pending. The composer can later check
+  visibility without resubmitting; missing or invalid write acknowledgements
+  remain outcome-unknown. Shared thread cards add long-press like/unlike actions
+  using the active account, an exact first-floor identity, and authoritative
+  server state. Ordinary taps still open the thread, and scrolling adds no
+  account request. The filter editor adds opt-in batch literal-keyword input
+  with whitespace splitting, deduplication, a preview, and one atomic save;
+  existing phrases and regular expressions keep their meaning. These additions
+  improve existing credited workflows; the approximately 81% parity estimate
+  remains unchanged. Real-account writes and native menu interaction still
+  need disposable-account and device validation.
 - **`v0.65.0-alpha.15` creation protocol and automatic preview quality:** Image preview quality adds an
   optional “自动（按网络）” setting. The existing standard default is unchanged;
   the shared network monitor selects high-definition previews on available,
