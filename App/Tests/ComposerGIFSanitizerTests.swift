@@ -61,11 +61,9 @@ final class ComposerGIFSanitizerTests: XCTestCase {
     XCTAssertEqual(result.data, source)
   }
 
-  func testGIF87aStaticIsAcceptedBut89aExtensionsAndReserved87aFieldsAreRejected() throws {
+  func testGIF87aStaticRemainsUnchangedAndReserved87aFieldsAreRejected() throws {
     let source = gif(version: "87a", blocks: frame())
     XCTAssertEqual(try ComposerGIFSanitizer.sanitize(source).data, source)
-    assertRejected(gif(version: "87a", blocks: control(delay: 1) + frame()), .invalidGIF)
-    assertRejected(gif(version: "87a", blocks: comment([1]) + frame()), .invalidGIF)
     var sortedGlobal = Array(source)
     sortedGlobal[10] |= 0x08
     assertRejected(Data(sortedGlobal), .invalidGIF)
@@ -75,6 +73,58 @@ final class ComposerGIFSanitizerTests: XCTestCase {
     var sortedLocal = frame(localPalette: true)
     sortedLocal[9] |= 0x20
     assertRejected(gif(version: "87a", blocks: sortedLocal), .invalidGIF)
+  }
+
+  func testGIF87aSupportedExtensionsNormalizeOutputVersionAfterValidation() throws {
+    for extensions in [
+      control(delay: 1), loop(0), comment([1]),
+      application("PRIVATE1001", payload: [1]),
+    ] {
+      let source = gif(version: "87a", blocks: extensions + frame())
+      let expected = try ComposerGIFSanitizer.sanitize(gif(blocks: extensions + frame()))
+      let result = try ComposerGIFSanitizer.sanitize(source)
+      XCTAssertEqual(result, expected)
+      XCTAssertEqual(try ComposerGIFSanitizer.sanitize(result.data), result)
+    }
+  }
+
+  func testNativeImageIOGIF87aAnimationNormalizesOnlyVersionByte() throws {
+    // Actual CGImageDestination output, captured on Apple's CI runner. The
+    // header says 87a despite the NETSCAPE loop and two 89a control extensions.
+    let source = try XCTUnwrap(
+      Data(
+        base64Encoded:
+          "R0lGODdhCAAGAKIAAAAAAP8AAAD/AP///wAAAAAAAAAAAAAAACH/C05FVFNDQVBFMi4w"
+          + "AwEAAAAh+QQFBwAEACwAAAAACAAGAAADBxi63P4wrgQAIfkEBQ0ABAAsAAAAAAgABgAA"
+          + "Awcoutz+MK4EADs="))
+    var expected = source
+    expected[4] = UInt8(ascii: "9")
+
+    let result = try ComposerGIFSanitizer.sanitize(source)
+
+    XCTAssertEqual(result.data, expected)  // All palettes, controls and LZW bytes are unchanged.
+    XCTAssertEqual(result.width, 8)
+    XCTAssertEqual(result.height, 6)
+    XCTAssertEqual(result.frameCount, 2)
+    XCTAssertEqual(result.frameDelaysCentiseconds, [7, 13])
+    XCTAssertEqual(result.loopCount, 0)
+    XCTAssertEqual(try ComposerGIFSanitizer.sanitize(result.data), result)
+  }
+
+  func testGIF87aVersionNormalizationDoesNotRelaxOtherValidation() {
+    assertRejected(gif(version: "87a", blocks: [0x21, 0x01] + frame()), .unsupportedGIF)
+    assertRejected(gif(version: "87a", blocks: [0x21, 0xFC, 0] + frame()), .unsupportedGIF)
+    assertRejected(
+      gif(version: "87a", blocks: control(delay: 1) + control(delay: 2) + frame()), .invalidGIF)
+    var badControl = control(delay: 1)
+    badControl[3] |= 0x80
+    assertRejected(gif(version: "87a", blocks: badControl + frame()), .invalidGIF)
+    var sortedLocal = frame(localPalette: true)
+    sortedLocal[9] |= 0x20
+    assertRejected(gif(version: "87a", blocks: control(delay: 1) + sortedLocal), .invalidGIF)
+    assertRejected(gif(version: "87a", blocks: control(delay: 12_001) + frame()), .resourceLimit)
+    assertRejected(
+      gif(version: "87a", blocks: control(delay: 1) + frame()) + Data([0]), .invalidGIF)
   }
 
   func testLocalPaletteCanReplaceMissingGlobalPaletteButDoesNotLeakToNextFrame() throws {
