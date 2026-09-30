@@ -155,4 +155,45 @@ class ReportXcodeErrorsTests < Minitest::Test
     refute_match(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/, combined)
     assert_includes values.join, "%0D"
   end
+
+  def test_swift_irgen_crash_keeps_source_and_thunk_context_ahead_of_profile_errors
+    request = '3. While evaluating request IRGenRequest(IR Generation for file "/build/App/Sources/AutomaticForumCheckInSettingsView.swift")'
+    function = '4. While emitting IR SIL function "@$sSbScA_pSgIeAghyg_SbIeAghn_TR".'
+    crash = [
+      "Please submit a bug report (https://swift.org/contributing/#reporting-bugs)",
+      "Stack dump:",
+      "1. Apple Swift version 6.1.2 (swiftlang-6.1.2.1.2 clang-1700.0.13.5)",
+      "2. Compiling with effective version 6.0",
+      request,
+      function,
+      "llvm::SmallVectorBase<unsigned int>::grow_pod(void*, unsigned long, unsigned long)",
+      "swift::irgen::SyncCallEmission::setArgs(llvm::ArrayRef<llvm::Value*>)",
+      "Abort trap: 6",
+    ]
+    context = 120.times.map { |index| "Other build output #{index}: #{'detail ' * 80}" }
+    profiles = 20.times.map { |index| "LLVM Profile Error: default.profraw Operation not permitted #{index}" }
+    command = "SwiftCompile normal arm64 App/Sources/AutomaticForumCheckInSettingsView.swift"
+    values = annotations(
+      crash + context + profiles + ["Testing failed:", "The following build commands failed:", command, "(1 failure)"]
+    )
+
+    assert_bounded_annotations(values)
+    assert_match(/title=Xcode compiler crash/, values.first)
+    details = annotation_message(values.first)
+    assert_includes details, request
+    assert_includes details, function
+    assert_includes details, "Apple Swift version 6.1.2"
+    assert_includes details, "SmallVectorBase"
+    assert_includes details, "SyncCallEmission::setArgs"
+    assert_includes annotation_message(values[1]), command
+  end
+
+  def test_normal_swift_version_banner_is_not_reported_as_a_compiler_crash
+    values = annotations([
+      "Apple Swift version 6.1.2", "App/Sources/Value.swift:1:5: error: cannot find value"
+    ])
+
+    assert_empty values.grep(/title=Xcode compiler crash/)
+    assert_includes values.map { |value| annotation_message(value) }.join, "cannot find value"
+  end
 end

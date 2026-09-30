@@ -36,6 +36,7 @@ patterns = [
   /testing failed:/i,
   /build failed/i,
   /the following build commands failed:/i,
+  /command (?:SwiftCompile|SwiftEmitModule|CompileSwiftSources).*failed/i,
 ]
 
 def escape_command_message(value)
@@ -117,6 +118,19 @@ if options[:mode] == "full"
   exit
 end
 
+# Swift frontend crashes often never produce a source-located "error:" line.
+# The request and SIL context identify the actual source even if a long stack
+# trace and unrelated profile-write warnings push them outside the final tail.
+crash_marker = /stack dump:|while evaluating request|while emitting IR SIL function|compiler.*crashed|please submit a bug report/i
+compiler_crash = if lines.any? { |line| crash_marker.match?(line) }
+  requests = lines.grep(/while evaluating request/i).last(3)
+  functions = lines.grep(/while emitting IR SIL function/i).last(2)
+  versions = lines.grep(/(?:Apple )?Swift version \d|compiling with effective version/i).last(2)
+  markers = lines.grep(/stack dump:|compiler.*crashed|please submit a bug report|abort trap|segmentation fault|assertion.*failed|LLVM ERROR:/i).last(4)
+  frames = lines.grep(/SmallVector.*grow|SyncCallEmission::setArgs/i).last(3)
+  (requests + functions + versions + markers + frames).uniq.map { |line| bounded_message(line) }
+end
+
 # These command lines usually contain no literal "error:". In a verbose build
 # they are the only actionable clue after the generic "Testing failed" summary.
 failed_commands_index = lines.rindex { |line| /the following build commands failed:/i.match?(line) }
@@ -134,7 +148,7 @@ tail_lines = lines.last(100).reject do |line|
   /\A(?:SwiftCompile|SwiftEmitModule|SwiftDriver|CompileSwiftSources)\b/.match?(line)
 end
 tails = tail_messages(tail_lines.join("\n"))
-diagnostic_budget = MAXIMUM_ANNOTATIONS - tails.length - (failed_commands ? 1 : 0)
+diagnostic_budget = MAXIMUM_ANNOTATIONS - tails.length - (failed_commands ? 1 : 0) - (compiler_crash ? 1 : 0)
 diagnostics = lines.select { |line| patterns.any? { |pattern| pattern.match?(line) } }
 diagnostics = lines.last(40) if diagnostics.empty?
 diagnostics = diagnostics.reject(&:empty?).uniq
@@ -143,6 +157,13 @@ diagnostics = diagnostics.reject(&:empty?).uniq
 located = diagnostics.select { |line| /:\d+(?::\d+)?: error:/i.match?(line) }.last(diagnostic_budget)
 selected = located + (diagnostics - located).last(diagnostic_budget - located.length)
 
+if compiler_crash
+  emit_error(
+    title: "#{options[:title]} compiler crash",
+    message: compiler_crash.join("\n"),
+    file: options[:file]
+  )
+end
 if failed_commands
   emit_error(
     title: "#{options[:title]} failed commands",
