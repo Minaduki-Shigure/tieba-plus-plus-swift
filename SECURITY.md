@@ -130,6 +130,18 @@ switching, or same-UID credential rotation clears it synchronously. Successful
 minimal-field compatibility and server-side account binding remain physical-
 device validation questions; CI uses synthetic credentials and fixtures only.
 
+The account activity entry uses a separate authenticated V12 `userpost` request
+for the current account's own topics or replies. Core validates the complete
+BDUSS/STOKEN identity against the requested UID before fetching each page; the
+App independently checks its Keychain UID/session-revision lease before and
+after the operation. Anonymous profile requests remain credential-free. Activity
+results stay in memory and are cleared when leaving the list, backgrounding,
+switching accounts, or rotating credentials. A reply's enclosing thread author
+is not treated as the author of that reply. CI uses only synthetic credentials
+and bounded response fixtures; minimum-field server acceptance remains a device
+validation gate. This endpoint does not establish access to deleted or
+moderation-only content.
+
 The current-main native self-profile editor is a separate experimental write
 boundary. It exposes only nickname, sex, and biography. Before a write, Core
 requires the App and Web session probes to return the same UID and that UID to

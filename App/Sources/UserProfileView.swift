@@ -1210,7 +1210,7 @@ private struct UserRelationshipControl: View {
   }
 }
 
-private struct UserActivityReplyRow: View {
+struct UserActivityReplyRow: View {
   let reply: BrowseUserReply
   let onNavigate: (UserReplyNavigationTarget) -> Void
 

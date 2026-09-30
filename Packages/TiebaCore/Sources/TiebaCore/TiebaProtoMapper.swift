@@ -553,10 +553,14 @@ enum TiebaProtoMapper {
     _ data: UserPostResIdl.DataRes,
     userID: Int64,
     requestedPage: Int,
-    pageSize: Int
+    pageSize: Int,
+    usesAuthenticatedThreadCardContext: Bool = false
   ) -> TiebaUserReplyPage {
     let replies = data.postList.prefix(maximumUserReplyGroups).flatMap {
-      userReplies($0, expectedUserID: userID)
+      userReplies(
+        $0, expectedUserID: userID,
+        usesAuthenticatedThreadCardContext: usesAuthenticatedThreadCardContext
+      )
     }
     return TiebaUserReplyPage(
       userID: userID,
@@ -837,12 +841,13 @@ enum TiebaProtoMapper {
 
   private static func userReplies(
     _ proto: PostInfoList,
-    expectedUserID: Int64
+    expectedUserID: Int64,
+    usesAuthenticatedThreadCardContext: Bool
   ) -> [TiebaUserReply] {
     guard
       let threadID = Int64(exactly: proto.threadID), threadID > 0,
       let forumID = Int64(exactly: proto.forumID), forumID >= 0,
-      proto.userID == 0 || proto.userID == expectedUserID
+      usesAuthenticatedThreadCardContext || proto.userID == 0 || proto.userID == expectedUserID
     else { return [] }
 
     var authorProto = User()
@@ -850,7 +855,9 @@ enum TiebaProtoMapper {
     authorProto.name = proto.userName
     authorProto.nameShow = proto.nameShow
     authorProto.portrait = proto.userPortrait
-    let author = optionalUser(authorProto)
+    // V12 wraps the caller's replies in thread cards. Their outer author is not
+    // necessarily the inner reply's author; the inner schema has no author field.
+    let author = usesAuthenticatedThreadCardContext ? nil : optionalUser(authorProto)
 
     return proto.content.prefix(maximumUserRepliesPerGroup).compactMap { item in
       guard let postID = Int64(exactly: item.postID), postID > 0 else { return nil }

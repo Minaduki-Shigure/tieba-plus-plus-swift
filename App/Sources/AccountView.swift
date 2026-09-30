@@ -337,6 +337,21 @@ struct AccountView: View {
             }
 
             if activeAccount.hasFullCredentials {
+              NavigationLink {
+                OwnActivityView(
+                  browseService: browseService,
+                  accountService: accountService,
+                  vault: vault,
+                  historyRepository: historyRepository,
+                  favoritesRepository: favoritesRepository,
+                  searchHistoryRepository: searchHistoryRepository
+                )
+              } label: {
+                Label("我的发帖与回复", systemImage: "text.bubble")
+              }
+              .disabled(viewModel.isMutating)
+              .accessibilityIdentifier("account-own-activity")
+
               if
                 profileSummaryViewModel.state == .loaded,
                 activeProfileSummary != nil

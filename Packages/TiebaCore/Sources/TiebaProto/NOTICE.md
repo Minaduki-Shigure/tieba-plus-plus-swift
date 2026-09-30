@@ -27,6 +27,12 @@ to bind a list image to its owning post, are adapted from TiebaLite commit
 `268f388c7824ae2c8f6ed549827a943ec8a7f352`, specifically its
 `PbContent.proto` and `Media.proto` definitions.
 
+The authenticated own-activity `UserPostReqIdl` additions (`subtype`, `q_type`,
+and explicit presence for `is_thread`/`is_view_card`) are adapted from TiebaLite
+commit `9701bfb6aaf261cc37b20b5793a8404261077f49`, specifically
+`UserPost/UserPostRequestData.proto`. Screen, device, location, and unused
+fields are omitted; existing anonymous requests retain their prior wire fields.
+
 The `Agree.diff_agree_num` field used for post score display is adapted from
 TiebaLite commit `b8409486a2f7bd85881835163bd2c1ebe4fed7f7`.
 The minimal `HotThreadList` request/response and `RecommendTopicList` schemas,

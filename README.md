@@ -25,6 +25,14 @@ and its verified metadata enters the public app source.
 
 ### Release and validation
 
+- **Current `main` account activity:** My → 我的发帖与回复 reads the active
+  account's own topics and replies through a separate authenticated V12 request.
+  Both tabs support refresh and explicit pagination; reply rows retain ordinary
+  floor and nested-reply navigation. Switching accounts or renewing the same
+  account's credentials discards old results. Records remain in memory, and
+  public profile browsing keeps its anonymous transport. Real-account response
+  compatibility and navigation still need device validation; this is not a
+  deleted-content or moderation-history viewer. The parity estimate is unchanged.
 - **`v0.65.0-alpha.21` optional daily check-in:** Settings → 签到与发布 → 每日自动签到
   adds a default-off daily schedule for the active account, defaulting to 09:00
   Beijing time. Keeping the app open past that time or returning later starts

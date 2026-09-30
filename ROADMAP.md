@@ -8,12 +8,25 @@ This audit was last compared with TiebaLite `4.0-dev` at commit
 [`268f388c`](https://github.com/zzc10086/TiebaLite/tree/268f388c7824ae2c8f6ed549827a943ec8a7f352).
 The current-main automatic preview-quality, creation-transport, batch literal
 keyword entry, thread-list like entry, thread-owner ordinary-floor deletion, and
-original static-image selection, and optional daily check-in workflows were
+original static-image selection, optional daily check-in, and authenticated
+own-topic/reply activity workflows were
 separately checked against
 [`9701bfb6`](https://github.com/zzc10086/TiebaLite/tree/9701bfb6aaf261cc37b20b5793a8404261077f49).
 That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
+
+Current `main` adds a separate authenticated **我的发帖与回复** entry under My.
+TiebaLite's own replies tab and V12 `userpost` request are the reference; the
+existing public profile remains anonymous. The account page provides both topic
+and reply tabs, pull-to-refresh, explicit page loading, hidden/empty/error states,
+and exact ordinary-floor or nested-reply navigation. Requests and results are
+bound to the active UID and session revision and are not persisted. This closes
+an implementation gap within account activity; real-account payload compatibility,
+privacy settings, and device navigation remain validation gates, so the weighted
+estimate is unchanged. Upstream's undeveloped `agreeme` declaration is not counted
+as a completed received-likes UI, and upstream also restricts image selection to
+new topics and direct topic replies rather than nested replies.
 
 The estimate below measures end-user workflow scope in the current `main`
 source, not line count or endpoint count. Full credit requires an end-to-end

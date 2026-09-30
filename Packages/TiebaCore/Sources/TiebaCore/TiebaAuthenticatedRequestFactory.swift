@@ -27,6 +27,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
   static let selfProfileEditClientVersion = "12.41.7.1"
   static let selfProfileAvatarUploadClientVersion = "12.52.1.0"
   static let ownFollowingClientVersion = "12.41.7.1"
+  static let ownActivityClientVersion = "12.52.1.0"
   static let userFollowClientVersion = "11.10.8.6"
   static let userInteractionPermissionsClientVersion = "12.41.7.1"
   static let personalizedFeedbackClientVersion = "12.41.7.1"
@@ -258,6 +259,49 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
       message: message,
       fields: [("stoken", credential.stoken)],
       userAgent: Self.selfProfileUserAgent,
+      clientUserToken: String(expectedUserID),
+      cookie: "ka=open"
+    )
+  }
+
+  func ownActivity(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    isThread: Bool,
+    page: Int,
+    pageSize: Int
+  ) throws -> URLRequest {
+    try validate(credential)
+    try validatePositiveID(expectedUserID, name: "Expected user ID")
+    try validatePage(page, name: "Page")
+    try validatePageSize(pageSize, maximum: 100, name: "Page size")
+    try validateConfiguration()
+
+    var common = CommonReq()
+    common.clientType = 2
+    common.clientVersion = Self.ownActivityClientVersion
+    common.bduss = credential.bduss
+    common.stoken = credential.stoken
+
+    var data = UserPostReqIdl.DataReq()
+    data.uid = expectedUserID
+    data.rn = UInt32(pageSize)
+    data.isThread = isThread ? 1 : 0
+    data.needContent = 1
+    if !isThread { data.subtype = 0 }
+    data.pn = UInt32(page)
+    data.common = common
+    data.qType = 1
+    data.isViewCard = isThread ? 1 : 0
+
+    var message = UserPostReqIdl()
+    message.data = data
+    return try authenticatedProtobufReadRequest(
+      path: "/c/u/feed/userpost",
+      command: 303_002,
+      message: message,
+      fields: [("stoken", credential.stoken)],
+      userAgent: "bdtb for Android \(Self.ownActivityClientVersion)",
       clientUserToken: String(expectedUserID),
       cookie: "ka=open"
     )

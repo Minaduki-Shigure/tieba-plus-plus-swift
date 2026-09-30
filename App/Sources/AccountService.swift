@@ -95,6 +95,23 @@ struct UserLikedForumPageData: Hashable, Sendable {
   let hasMore: Bool
 }
 
+enum OwnActivityKind: String, CaseIterable, Identifiable, Sendable {
+  case threads
+  case replies
+
+  var id: Self { self }
+  var title: String { self == .threads ? "我的帖子" : "我的回复" }
+}
+
+struct OwnActivityPageData: Sendable {
+  let accountUserID: Int64
+  let threads: [BrowseThread]
+  let replies: [BrowseUserReply]
+  let currentPage: Int
+  let hasMore: Bool
+  let isHidden: Bool
+}
+
 enum AccountProfileSex: String, CaseIterable, Identifiable, Hashable, Sendable {
   case unspecified
   case male
@@ -1156,6 +1173,9 @@ enum ComposerImageUploadError:
 
 protocol AccountService: Sendable {
   func validate(credential: AccountCredentials) async throws -> ValidatedAccount
+  func ownActivity(
+    session: StoredAccountSession, kind: OwnActivityKind, page: Int, pageSize: Int
+  ) async throws -> OwnActivityPageData
   func selfProfile(
     session: StoredAccountSession
   ) async throws -> AccountProfileSummary
@@ -1346,6 +1366,12 @@ protocol AccountService: Sendable {
 }
 
 extension AccountService {
+  func ownActivity(
+    session: StoredAccountSession, kind: OwnActivityKind, page: Int, pageSize: Int
+  ) async throws -> OwnActivityPageData {
+    throw BrowseError.unavailable("当前账户服务不支持读取本人帖子和回复。")
+  }
+
   func deleteOwnedContent(
     session: StoredAccountSession,
     target: OwnedContentDeletionTarget

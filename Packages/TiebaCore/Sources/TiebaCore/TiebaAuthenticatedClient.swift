@@ -940,6 +940,7 @@ public actor TiebaAuthenticatedClient {
   static let selfProfileEditResponseMaximumBytes = 64 * 1_024
   static let selfProfileAvatarUploadResponseMaximumBytes = 64 * 1_024
   static let ownFollowingResponseMaximumBytes = TiebaPublicSocialPolicy.maximumResponseBodyBytes
+  static let ownActivityResponseMaximumBytes = 4 * 1_024 * 1_024
   static let userRelationshipResponseMaximumBytes = 2 * 1_024 * 1_024
   static let userFollowWriteResponseMaximumBytes = 64 * 1_024
   static let userInteractionPermissionsResponseMaximumBytes = 64 * 1_024
@@ -1562,6 +1563,65 @@ public actor TiebaAuthenticatedClient {
       flightID: flightID,
       task: task
     )
+  }
+
+  /// Reads this session's own V12 activity, independently of the public profile feed.
+  public func getOwnThreads(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    page: Int = 1,
+    pageSize: Int = 20
+  ) async throws -> TiebaUserThreadPage {
+    let response = try await ownActivityResponse(
+      credential: credential, expectedUserID: expectedUserID,
+      isThread: true, page: page, pageSize: pageSize
+    )
+    return try TiebaOwnActivityDecoder.threads(
+      from: response, expectedUserID: expectedUserID, page: page, pageSize: pageSize
+    )
+  }
+
+  /// Each inner activity item supplies its own PID, time, and post/comment kind.
+  public func getOwnReplies(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    page: Int = 1,
+    pageSize: Int = 20
+  ) async throws -> TiebaUserReplyPage {
+    let response = try await ownActivityResponse(
+      credential: credential, expectedUserID: expectedUserID,
+      isThread: false, page: page, pageSize: pageSize
+    )
+    return try TiebaOwnActivityDecoder.replies(
+      from: response, expectedUserID: expectedUserID, page: page, pageSize: pageSize
+    )
+  }
+
+  private func ownActivityResponse(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    isThread: Bool,
+    page: Int,
+    pageSize: Int
+  ) async throws -> UserPostResIdl {
+    // Validate arguments and the fixed endpoint before sending any credential.
+    let request = try requestFactory.ownActivity(
+      credential: credential, expectedUserID: expectedUserID,
+      isThread: isThread, page: page, pageSize: pageSize
+    )
+    try Task.checkCancellation()
+    // UserPost has no response-level UID. Bind the explicit requested UID to both
+    // credentials first; a public-looking/empty response is not identity evidence.
+    let account = try await validateSession(credential: credential)
+    guard account.userID == expectedUserID else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    try Task.checkCancellation()
+    let response: UserPostResIdl = try await sendProtobuf(
+      request, maximumBodyBytes: Self.ownActivityResponseMaximumBytes
+    )
+    try Task.checkCancellation()
+    return response
   }
 
   public func getOwnFollowing(

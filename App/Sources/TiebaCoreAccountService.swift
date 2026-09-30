@@ -3,6 +3,12 @@ import Foundation
 @_spi(TiebaPlusPlusApp) import TiebaCore
 
 protocol TiebaAuthenticatedAccountClient: Sendable {
+  func getOwnThreads(
+    credential: TiebaSessionCredential, expectedUserID: Int64, page: Int, pageSize: Int
+  ) async throws -> TiebaUserThreadPage
+  func getOwnReplies(
+    credential: TiebaSessionCredential, expectedUserID: Int64, page: Int, pageSize: Int
+  ) async throws -> TiebaUserReplyPage
   func validateAccount(
     credential: TiebaBDUSSCredential
   ) async throws -> TiebaAuthenticatedAccount
@@ -238,6 +244,18 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
 }
 
 extension TiebaAuthenticatedAccountClient {
+  func getOwnThreads(
+    credential: TiebaSessionCredential, expectedUserID: Int64, page: Int, pageSize: Int
+  ) async throws -> TiebaUserThreadPage {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
+  func getOwnReplies(
+    credential: TiebaSessionCredential, expectedUserID: Int64, page: Int, pageSize: Int
+  ) async throws -> TiebaUserReplyPage {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
   func uploadStaticImage(
     credential: TiebaSessionCredential,
     expectedUserID: Int64,
@@ -616,6 +634,57 @@ struct TiebaCoreAccountService: AccountService {
       throw Self.accountError(error)
     }
     return try Self.accountProfileSummary(response, expectedUserID: session.id)
+  }
+
+  func ownActivity(
+    session: StoredAccountSession, kind: OwnActivityKind, page: Int, pageSize: Int
+  ) async throws -> OwnActivityPageData {
+    guard session.id > 0, let credentials = session.credentials else {
+      throw BrowseError.unavailable("此账户需要重新登录，才能安全读取本人帖子和回复。")
+    }
+    guard (1...Int(Int32.max)).contains(page), (1...50).contains(pageSize) else {
+      throw BrowseError.unavailable("本人动态的分页参数无效，请重新加载后再试。")
+    }
+    let filter = (try? await contentFilterRepository.snapshot()) ?? .empty
+    try Task.checkCancellation()
+    do {
+      switch kind {
+      case .threads:
+        let response = try await client.getOwnThreads(
+          credential: Self.coreSessionCredential(credentials), expectedUserID: session.id,
+          page: page, pageSize: pageSize
+        )
+        try Task.checkCancellation()
+        guard response.userID == session.id, response.pagination.currentPage == page else {
+          throw BrowseError.unavailable("贴吧返回了不匹配的本人帖子，请重新加载后再试。")
+        }
+        let mapped = TiebaCoreBrowseService.mapUserThreadPage(response, applying: filter)
+        return OwnActivityPageData(
+          accountUserID: response.userID, threads: mapped.threads, replies: [],
+          currentPage: mapped.currentPage, hasMore: mapped.hasMore, isHidden: mapped.isHidden
+        )
+      case .replies:
+        let response = try await client.getOwnReplies(
+          credential: Self.coreSessionCredential(credentials), expectedUserID: session.id,
+          page: page, pageSize: pageSize
+        )
+        try Task.checkCancellation()
+        guard response.userID == session.id, response.pagination.currentPage == page else {
+          throw BrowseError.unavailable("贴吧返回了不匹配的本人回复，请重新加载后再试。")
+        }
+        let mapped = TiebaCoreBrowseService.mapUserReplyPage(response, applying: filter)
+        return OwnActivityPageData(
+          accountUserID: response.userID, threads: [], replies: mapped.replies,
+          currentPage: mapped.currentPage, hasMore: mapped.hasMore, isHidden: mapped.isHidden
+        )
+      }
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch let error as BrowseError {
+      throw error
+    } catch {
+      throw Self.accountError(error)
+    }
   }
 
   func updateSelfProfile(
