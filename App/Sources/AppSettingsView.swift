@@ -455,6 +455,15 @@ struct AppSettingsView: View {
   private var checkInAndPostingSettings: some View {
     settingsPage(title: AppSettingsCategory.checkInAndPosting.title) {
       Section {
+        NavigationLink {
+          AutomaticForumCheckInSettingsView()
+        } label: {
+          Label("每日自动签到", systemImage: "calendar.badge.clock")
+        }
+        .accessibilityIdentifier("settings-automatic-forum-check-in")
+      }
+
+      Section {
         Picker("单吧签到间隔", selection: forumBatchCheckInDelayModeSelection) {
           ForEach(ForumBatchCheckInDelayMode.allCases) { mode in
             Text(mode.displayName).tag(mode)
@@ -472,7 +481,7 @@ struct AppSettingsView: View {
         Text("一键签到")
       } footer: {
         Text(
-          "这些设置只影响从一键签到页面主动开始的前台流程，不会创建后台或定时任务。"
+          "签到间隔与官方批签设置也适用于开启后的自动签到。自动签到遇到失败时始终停止。"
             + "关闭失败中止后，仅在单吧签到已明确失败时继续；账户变化、取消或结果未知时仍会停止。"
         )
       }

@@ -20,6 +20,15 @@ struct ForumBatchCheckInView: View {
     content
       .navigationTitle("一键签到")
       .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .navigationBarTrailing) {
+          NavigationLink {
+            AutomaticForumCheckInSettingsView()
+          } label: {
+            Label("自动签到设置", systemImage: "calendar.badge.clock")
+          }
+        }
+      }
       .task { await viewModel.loadIfNeeded() }
       .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
         showsStartConfirmation = false

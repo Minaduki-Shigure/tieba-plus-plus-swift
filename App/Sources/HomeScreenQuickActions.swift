@@ -93,6 +93,7 @@ final class TiebaApplicationDelegate: NSObject, UIApplicationDelegate {
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
     InboxNotificationRuntime.shared.register()
+    AutomaticForumCheckInRuntime.shared.register()
     return true
   }
 
@@ -122,10 +123,16 @@ final class TiebaSceneDelegate: NSObject, UIWindowSceneDelegate, ObservableObjec
 
   func sceneDidBecomeActive(_ scene: UIScene) {
     InboxNotificationRuntime.shared.sceneDidBecomeActive()
+    AutomaticForumCheckInRuntime.shared.sceneDidBecomeActive(scene.session.persistentIdentifier)
   }
 
   func sceneDidEnterBackground(_ scene: UIScene) {
     InboxNotificationRuntime.shared.sceneDidEnterBackground()
+    AutomaticForumCheckInRuntime.shared.sceneDidEnterBackground(scene.session.persistentIdentifier)
+  }
+
+  func sceneDidDisconnect(_ scene: UIScene) {
+    AutomaticForumCheckInRuntime.shared.sceneDidEnterBackground(scene.session.persistentIdentifier)
   }
 
   func scene(

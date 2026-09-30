@@ -88,6 +88,7 @@ struct TiebaPlusPlusApp: App {
       forumMembershipMutator: forumMembershipMutator
     )
     self.accountAccess = accountAccess
+    AutomaticForumCheckInRuntime.shared.configure(access: accountAccess)
     self.personalizedFeedbackService = TiebaCorePersonalizedFeedbackService(
       client: authenticatedClient
     )

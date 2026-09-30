@@ -532,6 +532,37 @@ lease checks. Neither pacing mode authorizes background or scheduled work.
 The official batch's structured authorization-change result also stops the run;
 the single-forum service does not expose a separate authorization-error type.
 
+Daily automatic check-in has its own default-off opt-in, configurable UTC+8
+minute, and optional background-refresh preference. That opt-in authorizes only
+the current full-credential account's followed forums. Each run freezes pacing
+and official-batch choices and always stops after failure. Foreground activation
+and a timer cover due/catch-up execution; a separately registered BGAppRefresh
+task provides opportunistic background execution with a 25-second soft budget.
+Scheduling/cancellation of the next request precedes task completion. Disabling,
+account changes, clock changes, and expiration revoke future dispatch; an old
+worker retains its execution gate until even a noncooperative request settles.
+
+Each possible service dispatch requires a durable journal claim keyed by UID,
+full UTC+8 day, and canonical forum identity. Claims start outcome-unknown;
+positive receipts settle them for the original account even after UI invalidation.
+Only evidence that the exact claimed target was not dispatched permits release.
+Unknown outcomes never fall back to another write and only authoritative,
+same-account/forum/day reads may confirm them. Explicit result checks perform no
+write. Failed targets pause the day's automatic run. Disabling/re-enabling,
+session rotation, time changes, and process restart do not reset dispatch claims.
+
+The journal uses a separate Keychain-backed HMAC domain, a stable cross-process
+lock, atomic replacement and file/directory durability synchronization, complete
+file protection and backup exclusion. It stores target IDs/names, dates, random
+run IDs and outcomes, never credentials or TBS. It retains 31 days with a durable
+oldest-permitted-day watermark; clock rollback cannot reclaim pruned days.
+Capacity (32,768 entries, 8 MiB), corruption, missing keys, unsupported schemas,
+and storage failures stop dispatch instead of silently discarding claims. HMAC
+does not prevent rollback to an older authentic file by a compromised sandbox.
+Credential protection stays unchanged; a locked device may skip background work
+and retry after unlocking. No exact-time or LiveContainer background guarantee
+is made. Real-account and device validation remains required.
+
 Approval state for a topic, ordinary post, or nested reply must come from an
 authenticated protobuf response, never from the anonymous default value of
 `Agree.has_agree`. Topic and post reads use PB Page; nested-reply reads use PB
@@ -606,7 +637,7 @@ Evicting an observed entry clears its account-bound state and invalidates stale
 reads before removal. Displayed vote totals come from authoritative snapshots,
 never from local increment/decrement or an acknowledgement's default scalar.
 
-Follow, unfollow, check-in, poll voting, and each supported text/classic-emoticon topic, floor, or nested-reply
+Follow, unfollow, manual check-in, poll voting, and each supported text/classic-emoticon topic, floor, or nested-reply
 submission, plus equivalent new-topic creation, all require explicit user
 confirmation. For reply and new-topic creation, this confirmation must bind an
 immutable target-and-content snapshot immediately before dispatch. Editing,
@@ -616,8 +647,9 @@ advisory and must never satisfy this confirmation requirement. Its reply-only
 official-client handoff is an external navigation action, not an App submission:
 it must not satisfy, prepare, or dispatch the authenticated write. The home and
 account-page one-click entries only read the authoritative catalog until the
-same foreground confirmation is accepted. Automatic, scheduled, and background
-check-in are deliberately unsupported. `disagree` or downvote, voice/video
+same foreground confirmation is accepted. Daily automation is separately
+authorized by its default-off setting and constrained by its durable journal;
+opening a manual page or shortcut does not enable it. `disagree` or downvote, voice/video
 creation, editing, and native reporting remain unsupported. The bounded
 static-image composers, self-authored topic/ordinary-floor deletion, and
 thread-owner deletion of other authors' ordinary floors are separate

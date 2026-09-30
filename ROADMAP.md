@@ -8,7 +8,7 @@ This audit was last compared with TiebaLite `4.0-dev` at commit
 [`268f388c`](https://github.com/zzc10086/TiebaLite/tree/268f388c7824ae2c8f6ed549827a943ec8a7f352).
 The current-main automatic preview-quality, creation-transport, batch literal
 keyword entry, thread-list like entry, thread-owner ordinary-floor deletion, and
-original static-image selection workflows were
+original static-image selection, and optional daily check-in workflows were
 separately checked against
 [`9701bfb6`](https://github.com/zzc10086/TiebaLite/tree/9701bfb6aaf261cc37b20b5793a8404261077f49).
 That narrower comparison does not replace the full-product audit above.
@@ -633,8 +633,15 @@ the source metadata is updated to that tested IPA.
   The confirmation also freezes whether official batch is enabled, whether an
   authoritative single-forum failure stops later targets, and whether individual
   requests use a random 3.5-to-under-8-second or fixed 2-second interval. Unknown
-  outcomes, cancellation, and account changes always stop. Background and
-  automatic check-in are not implemented
+  outcomes, cancellation, and account changes always stop
+- Default-off daily check-in for the current account, with a configurable
+  UTC+8 time, foreground due/catch-up execution, and optional opportunistic iOS
+  background refresh. A durable account/day/forum journal separates confirmed,
+  failed, unknown, and not-yet-dispatched targets. Restart, account switching,
+  preference changes, and task expiration cannot authorize an unknown retry.
+  Only readback can resolve unknown targets; failure pauses that day's run.
+  Automatic runs always stop on failure, irrespective of the manual-run preference.
+  Real-account and physical-device background validation remains outstanding
 - Account-bound approval and cancellation on the canonical topic, ordinary
   floors, and both parent and child items in a full nested-reply page, with
   explicit confirmation and lease-guarded read-only recovery
@@ -1926,7 +1933,7 @@ resent. At the application boundary, the account UID plus `sessionRevision`
 forms the lease for every read and write, so switching accounts or logging the
 same UID in again discards late state from the older session. Check-in
 additionally requires authoritative per-forum sign state and rejects an
-unfollowed forum. All writes require explicit user confirmation and perform no
+unfollowed forum. Manual writes require explicit user authorization and perform no
 write when the server already reports the requested state. Acknowledging or
 disabling the composer-entry notice is never this write authorization. Anonymous
 browsing must continue to work without creating, reading, or storing an account
@@ -1951,8 +1958,28 @@ current forum unsigned, but it never retries that target. A malformed or
 unconfirmed result, cancellation, or account-lease change always stops.
 The policy and its slow random or fixed 2-second pacing mode are frozen into the
 same explicit confirmation snapshot. The flow remains foreground-only,
-explicitly initiated, memory-only, and subject to real-device validation; it
-does not implement TiebaLite's background or automatic sign-in.
+explicitly initiated, memory-only, and subject to real-device validation.
+
+The separate default-off daily check-in feature aligns with TiebaLite's current
+account, daily-time, interval, and official-batch options. It defaults to 09:00
+Beijing time, runs while the app is active or catches up after activation, and
+optionally submits a separate `BGAppRefreshTask` request. iOS chooses whether
+and when to execute it; the task uses a 25-second soft budget and schedules its
+next opportunity before completion. It does not request notification permission
+or relax credential accessibility. A locked Keychain or unavailable background
+environment leaves foreground catch-up available.
+
+Before every possible dispatch, an authenticated, durably synchronized journal
+claims the exact account UID, full UTC+8 date, and forum IDs/names. Positive
+receipts settle those claims even if cancellation or an account change has
+already invalidated the UI. Process interruption leaves a claim outcome-unknown,
+never permission to resend. Proven undispatched targets can be released and
+resumed; failures and unknowns pause automatic dispatch. The explicit result
+check is read-only. Records retain 31 days with a persistent oldest-permitted
+date so pruning followed by clock rollback cannot reopen an old day. Default-off
+automation remains partially credited until disposable-account and device
+validation, including restart, midnight, background expiry, and LiveContainer
+behavior, is complete; the weighted 80–82% estimate is unchanged.
 
 Text and fixed-catalog classic-emoticon replies use HTTPS protobuf command `309731` with client version
 `12.52.1.0` in current `main`. Topic replies, ordinary-floor replies, and replies to a specific

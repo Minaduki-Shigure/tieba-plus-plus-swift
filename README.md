@@ -25,6 +25,19 @@ and its verified metadata enters the public app source.
 
 ### Release and validation
 
+- **Current `main` optional daily check-in:** Settings → 签到与发布 → 每日自动签到
+  adds a default-off daily schedule for the active account, defaulting to 09:00
+  Beijing time. Keeping the app open past that time or returning later starts
+  a due run. Optional iOS background refresh offers additional opportunities,
+  with execution time and availability controlled by iOS. An account/day/forum
+  journal survives restart, preserves confirmed results, and resumes only targets
+  that have not been dispatched. Unknown results are read back without resending;
+  failure pauses that day's automatic run. Switching accounts or disabling the
+  feature stops later requests while preserving late results for the original
+  account. Automatic runs use the selected interval and official-batch option,
+  and always stop after failure. Real-account acceptance, locked-device behavior,
+  and background execution in LiveContainer still need physical-device validation.
+  The approximately 81% parity estimate remains unchanged pending that validation.
 - **`v0.65.0-alpha.18` original static images:** The new “原图” composer choice retains
   JPEG/PNG encoded dimensions and image data while removing private metadata.
   Orientation and supported sRGB/Display P3 color are preserved; transparent PNG
@@ -484,8 +497,9 @@ and its verified metadata enters the public app source.
   the dispatch set do not fall back to individual writes. If the batch response
   is lost or cannot be proved complete, the App performs read-only per-forum
   reconciliation for the exact dispatched targets and marks unresolved results
-  for review without retrying or sending individual check-ins. There is no
-  background or automatic check-in, and real-account behavior remains a
+  for review without retrying or sending individual check-ins. The separate
+  default-off daily automation described above does not replace this manual
+  confirmation flow, and real-account behavior remains a
   physical-device validation gate.
   Settings can instead disable the official batch and process every target
   individually, choose TiebaLite's slow random 3.5-to-under-8-second interval or
@@ -1256,18 +1270,18 @@ and its verified metadata enters the public app source.
   single-forum request; the confirmation freezes those choices and the selected
   slow or fast interval. A failed target is never retried, while any uncertain
   single result, cancellation, or account-lease change still stops the
-  run. All supported writes
-  require an explicit user action; destructive operations and creation retain
+  run. Supported writes require an explicit user action or the separate opt-in
+  daily check-in setting; destructive operations and creation retain
   their separate confirmation, while like/unlike requires no extra dialog. The configurable composer-entry risk
-  notice is not that confirmation. Background and automatic check-in are not
-  implemented.
+  notice is not that confirmation. Optional daily check-in preserves dispatch
+  records across launches; background execution is best-effort only.
 - **Unsupported operations:** Guess-based removal of unresolvable cloud-favorite
   rows, bulk cloud/local synchronization, disagreement and other remaining
   reaction types, image creation for ordinary-floor and nested replies,
   voice and arbitrary rich-media topic/reply creation, content
   deletion beyond the active account's own loaded topic or ordinary floor and
   other authors' ordinary floors in its own topic,
-  native or credential-injected reporting, background or automatic check-in,
+  native or credential-injected reporting,
   explicit notification mark-read/unread writes, and moderation remain
   unavailable until their request contracts and recovery paths have been
   validated on a disposable account.

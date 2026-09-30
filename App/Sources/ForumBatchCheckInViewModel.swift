@@ -112,6 +112,33 @@ private struct ForumBatchCheckInDelayTask {
   let task: Task<Void, Never>
 }
 
+/// Optional automation boundary. Manual runs keep their existing confirmation and
+/// behavior. A durable claim precedes each service call; settlement deliberately
+/// happens before UI/session invalidation can discard a late result.
+struct ForumBatchCheckInExecutionHooks {
+  let allowsContinuation: @MainActor () -> Bool
+  let beforeDispatch:
+    @MainActor (
+      StoredAccountSession, [ForumBatchCheckInTarget]
+    ) async throws -> Void
+  let releaseUndispatched:
+    @MainActor (
+      StoredAccountSession, [ForumBatchCheckInTarget]
+    ) async throws -> Void
+  let settleBatch:
+    @MainActor (
+      StoredAccountSession, [ForumBatchCheckInTarget], Result<ForumBatchCheckInData, Error>
+    ) async throws -> Void
+  let settleSingle:
+    @MainActor (
+      StoredAccountSession, ForumBatchCheckInTarget, Result<ForumAccountStateData, Error>
+    ) async throws -> Void
+  let observeReadback:
+    @MainActor (
+      StoredAccountSession, ForumBatchCheckInTarget, ForumAccountStateData
+    ) async throws -> Void
+}
+
 @MainActor
 final class ForumBatchCheckInViewModel: ObservableObject {
   private static let maximumForumNameUTF8ByteCount = 1_024
@@ -122,8 +149,12 @@ final class ForumBatchCheckInViewModel: ObservableObject {
   @Published private(set) var entries: [ForumBatchCheckInEntry] = []
   @Published private(set) var errorMessage: String?
 
+  var loadedCatalog: ForumCheckInCatalogData? { catalog }
+
   private let access: AccountAccess
   private let interRequestDelay: @Sendable (ForumBatchCheckInDelayMode) async -> Void
+  private let executionHooks: ForumBatchCheckInExecutionHooks?
+  private let excludedAutomaticTargetIDs: Set<Int64>
   private var catalog: ForumCheckInCatalogData?
   private var currentLease: ForumBatchCheckInSessionLease?
   private var operation: ForumBatchCheckInOperation?
@@ -133,6 +164,8 @@ final class ForumBatchCheckInViewModel: ObservableObject {
 
   init(
     access: AccountAccess,
+    executionHooks: ForumBatchCheckInExecutionHooks? = nil,
+    excludedAutomaticTargetIDs: Set<Int64> = [],
     interRequestDelay: @escaping @Sendable (ForumBatchCheckInDelayMode) async -> Void = { mode in
       let milliseconds = UInt64.random(in: mode.delayMillisecondsRange)
       try? await Task.sleep(nanoseconds: milliseconds * 1_000_000)
@@ -140,6 +173,8 @@ final class ForumBatchCheckInViewModel: ObservableObject {
   ) {
     self.access = access
     self.interRequestDelay = interRequestDelay
+    self.executionHooks = executionHooks
+    self.excludedAutomaticTargetIDs = excludedAutomaticTargetIDs
   }
 
   func loadIfNeeded() async {
@@ -178,6 +213,9 @@ final class ForumBatchCheckInViewModel: ObservableObject {
         currentLease = lease
         entries = normalized.targets.compactMap { target in
           if target.status == .checkedIn { return nil }
+          if executionHooks != nil, excludedAutomaticTargetIDs.contains(target.forumID) {
+            return nil
+          }
           if target.isForbidden {
             return ForumBatchCheckInEntry(
               id: target.forumID,
@@ -260,7 +298,8 @@ final class ForumBatchCheckInViewModel: ObservableObject {
       return
     }
     let executionPolicy = confirmation.executionPolicy
-    let initialOfficialTargets = executionPolicy.usesOfficialBatch
+    let initialOfficialTargets =
+      executionPolicy.usesOfficialBatch
       ? officialBatchEligibleTargets().map {
         ForumBatchCheckInTarget(forumID: $0.id, forumName: $0.forumName)
       }
@@ -311,6 +350,12 @@ final class ForumBatchCheckInViewModel: ObservableObject {
         finishStopped(operation: activeOperation, generation: requestGeneration)
         return
       }
+      guard
+        await prepareAutomatedDispatch(
+          session: session, targets: initialOfficialTargets,
+          operation: activeOperation, generation: requestGeneration
+        )
+      else { return }
       let service = access.service
       let batchWrite = Task {
         try await service.batchCheckIn(
@@ -330,6 +375,17 @@ final class ForumBatchCheckInViewModel: ObservableObject {
       }
       clearBatchTask(for: activeOperation.id)
       if Task.isCancelled { activeOperation.requestStop() }
+      do {
+        try await executionHooks?.settleBatch(session, initialOfficialTargets, result)
+      } catch {
+        failAutomationPersistence(operation: activeOperation, generation: requestGeneration)
+        return
+      }
+      guard
+        automaticContinuationIsAllowed(
+          operation: activeOperation, generation: requestGeneration
+        )
+      else { return }
       guard operationIsCurrent(activeOperation, generation: requestGeneration) else { return }
       guard await keepCurrentLease(expectedLease, operation: activeOperation) else { return }
       switch result {
@@ -410,6 +466,13 @@ final class ForumBatchCheckInViewModel: ObservableObject {
       }
 
       let target = entries[index]
+      let automaticTarget = ForumBatchCheckInTarget(forumID: target.id, forumName: target.forumName)
+      guard
+        await prepareAutomatedDispatch(
+          session: session, targets: [automaticTarget],
+          operation: activeOperation, generation: requestGeneration
+        )
+      else { return }
       entries[index].outcome = .inProgress
       updateRunningState(operation: activeOperation)
       let service = access.service
@@ -422,6 +485,17 @@ final class ForumBatchCheckInViewModel: ObservableObject {
       }
       let result = await singleWrite.result
       if Task.isCancelled { activeOperation.requestStop() }
+      do {
+        try await executionHooks?.settleSingle(session, automaticTarget, result)
+      } catch {
+        failAutomationPersistence(operation: activeOperation, generation: requestGeneration)
+        return
+      }
+      guard
+        automaticContinuationIsAllowed(
+          operation: activeOperation, generation: requestGeneration
+        )
+      else { return }
       guard operationIsCurrent(activeOperation, generation: requestGeneration) else { return }
       guard await keepCurrentLease(expectedLease, operation: activeOperation) else { return }
 
@@ -532,6 +606,55 @@ final class ForumBatchCheckInViewModel: ObservableObject {
     errorMessage = nil
   }
 
+  private func prepareAutomatedDispatch(
+    session: StoredAccountSession,
+    targets: [ForumBatchCheckInTarget],
+    operation expectedOperation: ForumBatchCheckInOperation,
+    generation expectedGeneration: Int
+  ) async -> Bool {
+    guard let executionHooks else { return true }
+    do {
+      try await executionHooks.beforeDispatch(session, targets)
+      guard operationIsCurrent(expectedOperation, generation: expectedGeneration),
+        !expectedOperation.shouldStop(), !Task.isCancelled
+      else {
+        // The service has not been called, so this exact claim can be released.
+        try await executionHooks.releaseUndispatched(session, targets)
+        finishStopped(operation: expectedOperation, generation: expectedGeneration)
+        return false
+      }
+      return true
+    } catch is CancellationError {
+      finishStopped(operation: expectedOperation, generation: expectedGeneration)
+    } catch {
+      failAutomationPersistence(operation: expectedOperation, generation: expectedGeneration)
+    }
+    return false
+  }
+
+  private func automaticContinuationIsAllowed(
+    operation expectedOperation: ForumBatchCheckInOperation,
+    generation expectedGeneration: Int
+  ) -> Bool {
+    guard executionHooks?.allowsContinuation() != false else {
+      expectedOperation.requestStop()
+      finishStopped(operation: expectedOperation, generation: expectedGeneration)
+      return false
+    }
+    return true
+  }
+
+  private func failAutomationPersistence(
+    operation expectedOperation: ForumBatchCheckInOperation,
+    generation expectedGeneration: Int
+  ) {
+    expectedOperation.requestStop()
+    guard operationIsCurrent(expectedOperation, generation: expectedGeneration) else { return }
+    markPendingStopped()
+    errorMessage = "无法安全保存自动签到结果，已停止后续请求。请重新读取状态。"
+    state = .needsReview(summary: summary())
+  }
+
   private func normalizedCatalog(
     _ data: ForumCheckInCatalogData,
     lease: ForumBatchCheckInSessionLease
@@ -630,7 +753,8 @@ final class ForumBatchCheckInViewModel: ObservableObject {
       }
     }
     for index in entries.indices
-    where initialOfficialTargetIDs.contains(entries[index].id) && entries[index].outcome == .pending {
+    where initialOfficialTargetIDs.contains(entries[index].id) && entries[index].outcome == .pending
+    {
       entries[index].outcome = .stopped
     }
     return .accepted(
@@ -664,7 +788,8 @@ final class ForumBatchCheckInViewModel: ObservableObject {
     )
     var seen = Set<Int64>()
     var normalizedDispatched = [ForumBatchCheckInTarget]()
-    var payloadIsValid = !dispatchedTargets.isEmpty
+    var payloadIsValid =
+      !dispatchedTargets.isEmpty
       && dispatchedTargets.count <= Self.maximumOfficialBatchCount
     for target in dispatchedTargets {
       guard
@@ -693,6 +818,11 @@ final class ForumBatchCheckInViewModel: ObservableObject {
     markPendingStopped()
     let service = access.service
     for target in normalizedDispatched {
+      guard
+        automaticContinuationIsAllowed(
+          operation: expectedOperation, generation: expectedGeneration
+        )
+      else { return }
       guard operationIsCurrent(expectedOperation, generation: expectedGeneration) else { return }
       guard await keepCurrentLease(lease, operation: expectedOperation) else { return }
       let readback = Task.detached {
@@ -703,17 +833,33 @@ final class ForumBatchCheckInViewModel: ObservableObject {
         )
       }
       let result = await readback.result
+      if case .success(let accountState) = result {
+        do {
+          try await executionHooks?.observeReadback(session, target, accountState)
+        } catch {
+          failAutomationPersistence(operation: expectedOperation, generation: expectedGeneration)
+          return
+        }
+      }
+      guard
+        automaticContinuationIsAllowed(
+          operation: expectedOperation, generation: expectedGeneration
+        )
+      else { return }
       guard operationIsCurrent(expectedOperation, generation: expectedGeneration) else { return }
       guard await keepCurrentLease(lease, operation: expectedOperation) else { return }
       guard operationIsCurrent(expectedOperation, generation: expectedGeneration) else { return }
-      guard let index = entries.firstIndex(where: {
-        $0.id == target.forumID
-          && $0.forumName == target.forumName
-          && $0.outcome == .stopped
-      }) else { return }
+      guard
+        let index = entries.firstIndex(where: {
+          $0.id == target.forumID
+            && $0.forumName == target.forumName
+            && $0.outcome == .stopped
+        })
+      else { return }
       let entry = entries[index]
       switch result {
-      case .success(let state) where confirmedSingleResult(
+      case .success(let state)
+      where confirmedSingleResult(
         state,
         target: entry,
         lease: lease
@@ -800,6 +946,23 @@ final class ForumBatchCheckInViewModel: ObservableObject {
       )
     }
     let result = await readback.result
+    if case .success(let accountState) = result {
+      do {
+        try await executionHooks?.observeReadback(
+          session,
+          ForumBatchCheckInTarget(forumID: target.id, forumName: target.forumName),
+          accountState
+        )
+      } catch {
+        failAutomationPersistence(operation: expectedOperation, generation: expectedGeneration)
+        return .unconfirmed
+      }
+    }
+    guard
+      automaticContinuationIsAllowed(
+        operation: expectedOperation, generation: expectedGeneration
+      )
+    else { return .unconfirmed }
     guard operationIsCurrent(expectedOperation, generation: expectedGeneration) else {
       return .unconfirmed
     }
@@ -931,7 +1094,8 @@ final class ForumBatchCheckInViewModel: ObservableObject {
   }
 
   private func updateRunningState(operation: ForumBatchCheckInOperation) {
-    state = operation.shouldStop()
+    state =
+      operation.shouldStop()
       ? .stopping(progress: progress())
       : .running(progress: progress())
   }

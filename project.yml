@@ -47,6 +47,7 @@ targets:
           - fetch
         BGTaskSchedulerPermittedIdentifiers:
           - io.github.minaduki.tieba-plus-plus.unread-refresh
+          - io.github.minaduki.tieba-plus-plus.daily-check-in
         CFBundleURLTypes:
           - CFBundleTypeRole: Viewer
             CFBundleURLName: io.github.minaduki.tieba-plus-plus
