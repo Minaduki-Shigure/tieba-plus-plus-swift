@@ -10,5 +10,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
-      - run: swiftc App/Sources/ComposerGIFSanitizer.swift Scripts/diagnose_gif.swift -o /tmp/diagnose-gif
+      - run: >-
+          swiftc App/Sources/ComposerGIFSanitizer.swift
+          App/Sources/ComposerImageAttachment.swift
+          App/Sources/ComposerImageAttachmentProcessor.swift
+          App/Sources/ComposerOriginalImageSanitizer.swift
+          Scripts/diagnose_gif.swift -o /tmp/diagnose-gif
       - run: /tmp/diagnose-gif

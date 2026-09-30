@@ -1,4 +1,5 @@
 import CoreGraphics
+import CryptoKit
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
@@ -43,8 +44,18 @@ struct GIFDiagnostic {
     do {
       let inspected = try ComposerGIFSanitizer.sanitize(encoded)
       print("::notice title=Sanitized::\(inspected.width)x\(inspected.height) frames=\(inspected.frameCount)")
+      let processor = ComposerImageAttachmentProcessor()
+      let result = try processor.process(data: encoded, quality: .original)
+      let digest = SHA256.hash(data: result.data).map { String(format: "%02x", $0) }.joined()
+      let attachment = ComposerImageAttachment(
+        id: UUID(), sha256: digest, byteCount: Int64(result.data.count),
+        pixelWidth: result.pixelWidth, pixelHeight: result.pixelHeight,
+        encoding: result.encoding, quality: result.quality)!
+      try processor.validateStoredData(result.data, matching: attachment)
+      print("::notice title=Verified processor::Original import and stored frame decode passed")
     } catch {
       print("::notice title=Sanitizer error::\(error)")
+      throw error
     }
   }
 }
