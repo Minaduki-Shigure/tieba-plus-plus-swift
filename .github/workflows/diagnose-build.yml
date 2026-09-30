@@ -1,0 +1,24 @@
+name: Read failed build diagnostics
+
+on:
+  push:
+    tags: [diagnose-alpha20-build]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Read failed iOS build log
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/jobs/109873219127/logs" > "$RUNNER_TEMP/failed-build.log"
+          ruby Scripts/report_xcode_errors.rb "$RUNNER_TEMP/failed-build.log"

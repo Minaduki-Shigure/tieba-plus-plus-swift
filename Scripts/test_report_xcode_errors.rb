@@ -6,14 +6,34 @@ require "tempfile"
 
 class ReportXcodeErrorsTests < Minitest::Test
   def report(lines)
+    annotations(lines).grep(/title=Xcode diagnostic/)
+  end
+
+  def annotations(lines, mode: "xcode", title: "Xcode", source: nil)
     Tempfile.create(["xcode-diagnostics", ".log"]) do |file|
       file.write(lines.join("\n"))
       file.flush
+      arguments = ["--mode", mode, "--title", title]
+      arguments += ["--file", source] if source
       output, status = Open3.capture2(
-        RbConfig.ruby, File.join(__dir__, "report_xcode_errors.rb"), file.path
+        RbConfig.ruby, File.join(__dir__, "report_xcode_errors.rb"), *arguments, file.path
       )
       assert status.success?
-      output.lines.grep(/title=Xcode diagnostic/)
+      output.lines.grep(/\A::error /)
+    end
+  end
+
+  def annotation_message(annotation)
+    annotation.split("::", 3).last.chomp
+      .gsub("%0A", "\n").gsub("%0D", "\r").gsub("%25", "%")
+  end
+
+  def assert_bounded_annotations(values, maximum_count: 10)
+    assert_operator values.length, :<=, maximum_count
+    values.each do |annotation|
+      escaped_message = annotation.split("::", 3).last.chomp
+      assert_operator escaped_message.bytesize, :<=, 3_500
+      assert annotation_message(annotation).valid_encoding?
     end
   end
 
@@ -32,5 +52,70 @@ class ReportXcodeErrorsTests < Minitest::Test
     assert_equal 9, annotations.length
     assert_includes annotations.join, failures.last
     refute_includes annotations.join, failures.first
+  end
+
+  def test_final_failed_commands_survive_a_verbose_tail_without_source_located_errors
+    context = 90.times.map { |index| "Build context #{index}: #{'detail ' * 80}" }
+    command = "SwiftCompile normal arm64 App/Sources/Problem.swift (in target 'App')"
+    values = annotations(
+      context + ["LLVM Profile Error: Cannot write default.profraw", "Testing failed:",
+                 "The following build commands failed:", command, "(1 failure)"]
+    )
+
+    assert_bounded_annotations(values)
+    assert_match(/title=Xcode failed commands/, values.first)
+    assert_includes annotation_message(values.first), command
+    assert_includes annotation_message(values.first), "(1 failure)"
+    tails = values.grep(/title=Xcode log tail/)
+    assert_equal 3, tails.length
+    assert_includes annotation_message(tails.first), "(1 failure)", "Latest tail block must be emitted first"
+    refute_includes annotation_message(tails.last), "Build context 0:"
+  end
+
+  def test_source_failure_is_not_crowded_out_by_tail_chunks_and_progress_noise
+    failure = "App/Tests/Images.swift:7: error: -[Images testColor] : pixel mismatch"
+    context = 70.times.map { |index| "Context #{index}: #{'detail ' * 80}" }
+    noise = 20.times.map { |index| "SwiftCompile normal arm64 Progress#{index}.swift" }
+    values = annotations([failure] + context + noise + ["** TEST FAILED **"])
+
+    assert_bounded_annotations(values)
+    assert_includes values.map { |value| annotation_message(value) }.join, failure
+    refute_includes values.grep(/log tail/).join, "Progress19.swift"
+  end
+
+  def test_long_unicode_command_keeps_its_identity_and_final_path_with_safe_escaping
+    command = "SwiftCompile normal arm64 " + ("目录%\r " * 1_000) + "FinalProblem.swift"
+    values = annotations(["The following build commands failed:", command, "(1 failure)"])
+
+    assert_bounded_annotations(values)
+    assert_includes annotation_message(values.first), "SwiftCompile normal arm64"
+    assert_includes annotation_message(values.first), "目录%\r "
+    assert_includes annotation_message(values.first), "FinalProblem.swift"
+    assert_includes annotation_message(values.first), "(1 failure)"
+    assert_includes values.first, "%25"
+    assert_includes values.first, "%0D"
+  end
+
+  def test_failure_summary_keeps_the_last_commands_not_only_the_first_25_lines
+    commands = 40.times.map { |index| "CompileC /tmp/Object#{index}.o Source#{index}.m" }
+    values = annotations(["The following build commands failed:"] + commands + ["(40 failures)"])
+
+    assert_bounded_annotations(values)
+    assert_includes annotation_message(values.first), commands.last
+    assert_includes annotation_message(values.first), "(40 failures)"
+  end
+
+  def test_full_mode_splits_latest_context_without_losing_final_failure_and_escapes_properties
+    context = 140.times.map { |index| "Full log #{index}: #{'输出 ' * 80}" }
+    values = annotations(
+      context + ["Final failure: xcodebuild exited 65"], mode: "full",
+      title: "Export: IPA, failed", source: "App:Sources,File.swift"
+    )
+
+    assert_bounded_annotations(values, maximum_count: 3)
+    assert_equal 3, values.length
+    assert_includes annotation_message(values.first), "Final failure: xcodebuild exited 65"
+    assert_includes values.first, "title=Export%3A IPA%2C failed"
+    assert_includes values.first, "file=App%3ASources%2CFile.swift"
   end
 end
