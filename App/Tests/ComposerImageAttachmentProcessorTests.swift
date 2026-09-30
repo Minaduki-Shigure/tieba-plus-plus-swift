@@ -140,6 +140,8 @@ final class ComposerImageAttachmentProcessorTests: XCTestCase {
 
   func testTransparentPNGPixelsAreCompositedOntoWhiteBeforeJPEGEncoding() throws {
     let source = try transparentPNGData(width: 24, height: 24)
+    // Keep coverage of UIKit's automatic (device/content-dependent) encoding.
+    print("Automatic transparent PNG fixture: \(try fixtureDiagnostics(source))")
 
     let result = try processor.process(data: source, quality: .standard)
     let rgba = try averageRGBA(of: result.data)
@@ -470,9 +472,13 @@ final class ComposerImageAttachmentProcessorTests: XCTestCase {
   }
 
   func testOriginalPNGPreservesFormatPixelsAndTransparentAlpha() throws {
-    let source = try transparentPNGData(width: 5_000, height: 8)
+    let source = try transparentSRGBPNGData(width: 5_000, height: 8)
+    let sourceImage = try decodedImage(source)
+    XCTAssertEqual(sourceImage.bitsPerComponent, 8)
+    XCTAssertEqual(sourceImage.colorSpace?.model, .rgb)
+    XCTAssertEqual(try imageProperties(of: source)[kCGImagePropertyHasAlpha] as? Bool, true)
 
-    let result = try processor.process(data: source, quality: .original)
+    let result = try processOriginalFixture(source, context: "8-bit sRGB transparent PNG")
 
     XCTAssertEqual(result.encoding, .png)
     XCTAssertEqual(imageType(of: result.data), UTType.png.identifier)
@@ -518,18 +524,53 @@ final class ComposerImageAttachmentProcessorTests: XCTestCase {
     for type in [UTType.jpeg, .png] {
       for name in [CGColorSpace.sRGB, CGColorSpace.displayP3] {
         let source = try colorManagedData(type: type, colorSpace: name)
-        let result = try processor.process(data: source, quality: .original)
+        let context = "\(type.identifier) / \(name)"
+        let result: ComposerProcessedImage
+        do {
+          result = try processOriginalFixture(source, context: context)
+        } catch {
+          // Exercise every format/profile pair even if an earlier one fails.
+          continue
+        }
         let sourceImage = try decodedImage(source)
         let resultImage = try decodedImage(result.data)
         let expectedColorSpace = try XCTUnwrap(CGColorSpace(name: name))
 
-        XCTAssertTrue(CFEqual(try XCTUnwrap(sourceImage.colorSpace), expectedColorSpace))
-        XCTAssertTrue(CFEqual(try XCTUnwrap(resultImage.colorSpace), expectedColorSpace))
+        let expectedProfile = try XCTUnwrap(expectedColorSpace.copyICCData()) as Data
+        for image in [sourceImage, resultImage] {
+          let actualSpace = try XCTUnwrap(image.colorSpace)
+          let actualProfile = try XCTUnwrap(actualSpace.copyICCData()) as Data
+          XCTAssertEqual(
+            try ComposerImageAttachmentProcessor.canonicalOriginalColorProfile(actualProfile),
+            expectedProfile, context
+          )
+          XCTAssertEqual(actualSpace.isWideGamutRGB, CFEqual(name, CGColorSpace.displayP3), context)
+        }
         XCTAssertEqual(try renderedPixels(source), try renderedPixels(result.data))
         XCTAssertFalse(String(decoding: result.data, as: UTF8.self).contains("private-"))
         try assertOnlyDisplayMetadata(result.data)
         try processor.validateStoredData(result.data, matching: attachment(for: result))
       }
+    }
+  }
+
+  func testOriginalCanonicalizesSystemICCAndRoundTrippedICCWithoutNamedSpaceEqualityAssumption()
+    throws
+  {
+    for name in [CGColorSpace.sRGB, CGColorSpace.displayP3] {
+      let namedSpace = try XCTUnwrap(CGColorSpace(name: name))
+      let profile = try XCTUnwrap(namedSpace.copyICCData()) as Data
+      let iccSpace = try XCTUnwrap(CGColorSpace(iccData: profile as CFData))
+      let roundTripped = try XCTUnwrap(iccSpace.copyICCData()) as Data
+      print(
+        "System ICC fixture \(name): namedEqualsICC=\(CFEqual(namedSpace, iccSpace)) "
+          + "roundTripBytesEqual=\(profile == roundTripped) bytes=\(profile.count)"
+      )
+
+      XCTAssertEqual(
+        try ComposerImageAttachmentProcessor.canonicalOriginalColorProfile(profile), profile)
+      XCTAssertEqual(
+        try ComposerImageAttachmentProcessor.canonicalOriginalColorProfile(roundTripped), profile)
     }
   }
 
@@ -862,6 +903,50 @@ final class ComposerImageAttachmentProcessorTests: XCTestCase {
       [
         kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFArtist: "private-artist"]
       ] as CFDictionary)
+    XCTAssertTrue(CGImageDestinationFinalize(destination))
+    return data as Data
+  }
+
+  private func processOriginalFixture(_ source: Data, context: String) throws
+    -> ComposerProcessedImage
+  {
+    do {
+      return try processor.process(data: source, quality: .original)
+    } catch {
+      let diagnostics = (try? fixtureDiagnostics(source)) ?? "diagnostics unavailable"
+      XCTFail("Original fixture \(context): \(error); \(diagnostics)")
+      throw error
+    }
+  }
+
+  private func fixtureDiagnostics(_ source: Data) throws -> String {
+    let image = try decodedImage(source)
+    let properties = try imageProperties(of: source)
+    let space = image.colorSpace
+    let profileName = properties[kCGImagePropertyProfileName] as? String ?? "none"
+    let profile = space.flatMap { $0.copyICCData() }
+    let iccBytes = profile.map { CFDataGetLength($0) } ?? 0
+    return "type=\(imageType(of: source) ?? "unknown") size=\(image.width)x\(image.height) "
+      + "bits=\(image.bitsPerComponent) model=\(space?.model.rawValue ?? -1) "
+      + "alpha=\(image.alphaInfo.rawValue) profile=\(profileName) iccBytes=\(iccBytes)"
+  }
+
+  private func transparentSRGBPNGData(width: Int, height: Int) throws -> Data {
+    // UIKit's automatic renderer can select grayscale or extended formats for
+    // an empty canvas. This fixture explicitly exercises the promised 8-bit
+    // RGB+alpha path, independently of the simulator's preferred pixel format.
+    let context = try XCTUnwrap(
+      CGContext(
+        data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+        space: try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+      ))
+    let data = NSMutableData()
+    let destination = try XCTUnwrap(
+      CGImageDestinationCreateWithData(
+        data as CFMutableData, UTType.png.identifier as CFString, 1, nil
+      ))
+    CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
     XCTAssertTrue(CGImageDestinationFinalize(destination))
     return data as Data
   }

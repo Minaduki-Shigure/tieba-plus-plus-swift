@@ -26,6 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Test failure diagnostic reporting
+        run: ruby Scripts/test_report_xcode_errors.rb
       - name: Test source publication tooling
         id: source_tests
         continue-on-error: true

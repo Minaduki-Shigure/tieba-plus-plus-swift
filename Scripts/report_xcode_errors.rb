@@ -54,7 +54,12 @@ end
 
 diagnostics = lines.select { |line| patterns.any? { |pattern| pattern.match?(line) } }
 diagnostics = lines.last(40) if diagnostics.empty?
-diagnostics.reject(&:empty?).last(9).each do |line|
+diagnostics = diagnostics.reject(&:empty?).uniq
+# Keep source-located compiler/XCTest failures visible even when fixture decoder
+# errors or LLVM profile-write warnings occur later in the same test run.
+located = diagnostics.select { |line| /:\d+(?::\d+)?: error:/i.match?(line) }.last(9)
+selected = located + (diagnostics - located).last(9 - located.length)
+diagnostics.select { |line| selected.include?(line) }.each do |line|
   emit_error(title: "#{options[:title]} diagnostic", message: line, file: options[:file])
 end
 

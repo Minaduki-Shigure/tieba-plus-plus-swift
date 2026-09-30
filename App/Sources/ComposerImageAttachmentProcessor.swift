@@ -400,24 +400,31 @@ struct ComposerImageAttachmentProcessor: Sendable {
       data,
       encoding: encoding,
       orientation: orientation,
-      canonicalColorProfile: { originalProfile in
-        // Validate the actual embedded profile, not ImageIO's decoded image
-        // space: a decoder may ignore damaged ICC and fall back to sRGB.
-        guard let colorSpace = CGColorSpace(iccData: originalProfile as CFData) else {
-          throw ComposerImageProcessingError.unsupportedOriginal
-        }
-        for name in [CGColorSpace.sRGB, CGColorSpace.displayP3] {
-          if let canonical = CGColorSpace(name: name), CFEqual(colorSpace, canonical),
-            let profile = canonical.copyICCData()
-          {
-            return profile as Data
-          }
-        }
-        // A profile name is not evidence of equivalent color semantics. Unknown
-        // profiles must not be silently stripped, converted, or copied with text.
-        throw ComposerImageProcessingError.unsupportedOriginal
-      }
+      canonicalColorProfile: canonicalOriginalColorProfile
     )
+  }
+
+  static func canonicalOriginalColorProfile(_ originalProfile: Data) throws -> Data {
+    // Validate the actual embedded profile, not ImageIO's decoded image space:
+    // a decoder may ignore damaged ICC and fall back to sRGB. Named color
+    // spaces and ICC-based instances need not compare equal, even when the
+    // latter was created from the former's own copyICCData(). Compare matching
+    // representations; never use the untrusted profile's display name.
+    guard originalProfile.count <= 256 * 1_024,
+      let colorSpace = CGColorSpace(iccData: originalProfile as CFData)
+    else { throw ComposerImageProcessingError.unsupportedOriginal }
+    for name in [CGColorSpace.sRGB, CGColorSpace.displayP3] {
+      guard let canonical = CGColorSpace(name: name),
+        let profile = canonical.copyICCData()
+      else { continue }
+      if originalProfile == profile as Data {
+        return profile as Data
+      }
+      if let reference = CGColorSpace(iccData: profile), CFEqual(colorSpace, reference) {
+        return profile as Data
+      }
+    }
+    throw ComposerImageProcessingError.unsupportedOriginal
   }
 
   private func inspectOriginal(
