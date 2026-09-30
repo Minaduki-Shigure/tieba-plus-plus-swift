@@ -20,7 +20,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-serves `v0.65.0-alpha.17` (build 95) after publication, whose app-code snapshot includes
+serves `v0.65.0-alpha.18` (build 96) after publication, whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -47,6 +47,13 @@ and shared thread rows expose account-bound like/unlike through a long-press
 menu while ordinary taps retain thread navigation. These improve existing areas
 without increasing the weighted estimate; native interaction and real-account
 validation remain outstanding.
+Alpha.17 adds thread-owner management of other authors' ordinary floors with
+fresh ownership and target checks. Alpha.18 extends static-image composition
+with a bounded original JPEG/PNG mode, preserving encoded dimensions, image
+data, orientation, transparency, and supported color while removing private
+metadata. Existing standard/high-quality output and persisted upload identities
+keep their meaning. These extend already credited areas; real deletion and
+original-image upload acceptance remain disposable-account/device gates.
 The fixed username handoff and conservative cloud-favorite identity fallback
 improve existing account and server-write areas without adding a native write,
 new data source, or weighted point. Current-main personalized-discovery startup
@@ -121,7 +128,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.65.0-alpha.17` app-code snapshot is at 80–82%; all experimental
+The public `v0.65.0-alpha.18` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
