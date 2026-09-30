@@ -6,9 +6,11 @@ struct AutomaticForumCheckInSettingsView: View {
   var body: some View {
     List {
       Section {
+        // Xcode 16.4 crashes in IRGen when a bound MainActor Bool method is
+        // passed as the setter. Explicit closures avoid that reabstraction thunk.
         Toggle(
           "每日自动签到",
-          isOn: Binding(get: { runtime.isEnabled }, set: runtime.setEnabled)
+          isOn: Binding(get: { runtime.isEnabled }, set: { runtime.setEnabled($0) })
         )
         .accessibilityIdentifier("automatic-check-in-enabled")
 
@@ -22,7 +24,7 @@ struct AutomaticForumCheckInSettingsView: View {
         Toggle(
           "尝试后台补签",
           isOn: Binding(
-            get: { runtime.usesBackgroundRefresh }, set: runtime.setUsesBackgroundRefresh
+            get: { runtime.usesBackgroundRefresh }, set: { runtime.setUsesBackgroundRefresh($0) }
           )
         )
         .accessibilityIdentifier("automatic-check-in-background")
