@@ -237,7 +237,7 @@ struct ComposerImagePickerView: View {
       optionControls
 
       if quality == .original {
-        Text("仅影响新添加的图片。原图保留 JPEG／PNG 的尺寸与格式，移除位置等隐私信息，每张最多 10 MB。HEIC 请选标准或高清。")
+        Text("仅影响新添加的图片。原图支持 JPEG、PNG 和 GIF，保留尺寸与格式并移除隐私信息，每张最多 10 MB。GIF 按原动画上传；HEIC 请选标准或高清。")
           .font(.caption)
           .foregroundStyle(.secondary)
       }
@@ -348,6 +348,17 @@ struct ComposerImagePickerView: View {
           .padding(4)
           .background(.regularMaterial, in: Circle())
           .padding(4)
+      }
+      .overlay(alignment: .bottomTrailing) {
+        if attachment.encoding == .gif {
+          Text("GIF")
+            .font(.caption2.bold())
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 3))
+            .padding(4)
+            .accessibilityHidden(true)
+        }
       }
       .accessibilityLabel(thumbnailAccessibilityLabel(attachment, at: index))
 
@@ -668,8 +679,9 @@ struct ComposerImagePickerView: View {
     at index: Int
   ) -> String {
     let qualityLabel = ComposerImagePickerPolicy.label(for: attachment.quality)
+    let formatLabel = attachment.encoding == .gif ? "GIF，" : ""
     return
-      "第 \(index + 1) 张图片，\(attachment.pixelWidth) 乘 \(attachment.pixelHeight) 像素，\(qualityLabel)"
+      "第 \(index + 1) 张图片，\(formatLabel)\(attachment.pixelWidth) 乘 \(attachment.pixelHeight) 像素，\(qualityLabel)"
   }
 }
 

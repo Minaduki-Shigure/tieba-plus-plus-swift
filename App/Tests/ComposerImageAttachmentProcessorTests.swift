@@ -271,17 +271,17 @@ final class ComposerImageAttachmentProcessorTests: XCTestCase {
     XCTAssertEqual(imageType(of: result.data), UTType.jpeg.identifier)
   }
 
-  func testRejectsAnimatedImages() throws {
+  func testAnimatedGIFRequiresOriginalQuality() throws {
     let animated = try animatedGIFData(width: 12, height: 7)
 
     XCTAssertThrowsError(
       try processor.process(data: animated, quality: .standard)
     ) { error in
-      XCTAssertEqual(error as? ComposerImageProcessingError, .animatedImage)
+      XCTAssertEqual(error as? ComposerImageProcessingError, .gifRequiresOriginal)
     }
   }
 
-  func testRejectsStaticImageFormatsOutsideTheAllowlist() throws {
+  func testStaticGIFAlsoRequiresOriginalQuality() throws {
     let data = NSMutableData()
     let destination = try XCTUnwrap(
       CGImageDestinationCreateWithData(
@@ -301,7 +301,7 @@ final class ComposerImageAttachmentProcessorTests: XCTestCase {
     XCTAssertThrowsError(
       try processor.process(data: data as Data, quality: .standard)
     ) { error in
-      XCTAssertEqual(error as? ComposerImageProcessingError, .unsupportedFormat)
+      XCTAssertEqual(error as? ComposerImageProcessingError, .gifRequiresOriginal)
     }
   }
 
@@ -636,12 +636,7 @@ final class ComposerImageAttachmentProcessorTests: XCTestCase {
     }
   }
 
-  func testOriginalRejectsAnimationAPNGAndAuxiliaryRepresentations() throws {
-    XCTAssertThrowsError(
-      try processor.process(data: animatedGIFData(width: 12, height: 7), quality: .original)
-    ) { error in
-      XCTAssertEqual(error as? ComposerImageProcessingError, .animatedImage)
-    }
+  func testOriginalRejectsAPNGAndAuxiliaryRepresentations() throws {
     let png = try imageData(type: .png, width: 12, height: 7)
     // Even an acTL with a single frame is not an ordinary static PNG.
     let apng = try insertingPNGChunk("acTL", payload: Data([0, 0, 0, 1, 0, 0, 0, 0]), in: png)

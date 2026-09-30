@@ -110,6 +110,9 @@ enum ComposerOriginalImageSanitizer {
       return try jpeg(data, orientation: orientation, colorProfile: canonicalColorProfile)
     case .png:
       return try png(data, orientation: orientation, colorProfile: canonicalColorProfile)
+    case .gif:
+      // GIF has a separate container and per-frame verification path.
+      throw ComposerImageProcessingError.unsupportedGIF
     }
   }
 

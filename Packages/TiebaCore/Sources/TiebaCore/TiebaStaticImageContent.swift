@@ -356,8 +356,13 @@ enum TiebaStaticImageContentCompiler {
     _ fragment: PbContent,
     matches proof: TiebaStaticImageContentProof
   ) -> Bool {
-    let rawURLs = [fragment.src, fragment.cdnSrc, fragment.bigCdnSrc, fragment.originSrc]
-      .filter { !$0.isEmpty }
+    // Include every URL the mapper may display, including animated media and
+    // fallback CDN fields; one matching still preview cannot prove that an
+    // unrelated animation or full-size fallback belongs to this upload.
+    let rawURLs = [
+      fragment.src, fragment.cdnSrc, fragment.cdnSrcActive,
+      fragment.bigCdnSrc, fragment.bigSrc, fragment.originSrc, fragment.dynamic,
+    ].filter { !$0.isEmpty }
     let pictureIDs = rawURLs.compactMap { pictureID(from: $0) }
     guard
       !rawURLs.isEmpty,

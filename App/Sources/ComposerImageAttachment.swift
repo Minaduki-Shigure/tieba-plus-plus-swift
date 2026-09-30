@@ -39,6 +39,7 @@ enum ComposerImageAttachmentQuality: String, Codable, CaseIterable, Sendable {
 enum ComposerImageAttachmentEncoding: String, Codable, Sendable {
   case jpeg
   case png
+  case gif
 
   var filenameExtension: String {
     switch self {
@@ -46,6 +47,8 @@ enum ComposerImageAttachmentEncoding: String, Codable, Sendable {
       "jpg"
     case .png:
       "png"
+    case .gif:
+      "gif"
     }
   }
 }
@@ -79,6 +82,13 @@ struct ComposerImageAttachment:
       byteCount > 0,
       byteCount <= quality.maximumByteCount,
       encoding == .jpeg || quality == .original,
+      encoding != .gif
+        || Self.acceptsDimensions(
+          width: pixelWidth,
+          height: pixelHeight,
+          maximumPixelSize: ComposerGIFSanitizer.maximumDimension,
+          maximumPixelCount: ComposerGIFSanitizer.maximumFramePixels
+        ),
       Self.acceptsDimensions(
         width: pixelWidth,
         height: pixelHeight,
@@ -204,7 +214,7 @@ struct ComposerImageAttachment:
     else { return false }
     guard
       let id = UUID(uuidString: String(value.dropLast(4))),
-      let encoding = [ComposerImageAttachmentEncoding.jpeg, .png].first(where: {
+      let encoding = [ComposerImageAttachmentEncoding.jpeg, .png, .gif].first(where: {
         value.hasSuffix(".\($0.filenameExtension)")
       })
     else { return false }

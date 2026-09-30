@@ -82,6 +82,54 @@ final class ComposerImageAttachmentStoreTests: XCTestCase {
     XCTAssertEqual(validatedData.count, Int(decoded.byteCount))
   }
 
+  func testOriginalGIFSurvivesStoredMetadataAndStoreRestartWithEveryFrame() async throws {
+    let environment = try StoreTestEnvironment()
+    defer { environment.remove() }
+    let input = try gifData()
+    let store = environment.makeStore()
+    let attachment = try await store.importImage(data: input, quality: .original)
+    XCTAssertEqual(attachment.encoding, .gif)
+    XCTAssertTrue(attachment.relativePrivateFilename.hasSuffix(".gif"))
+    let restored = try JSONDecoder().decode(
+      ComposerImageAttachment.self, from: JSONEncoder().encode(attachment))
+    let bytes = try await environment.makeStore().validatedData(for: restored)
+    XCTAssertEqual(sha256(of: bytes), attachment.sha256)
+    let source = try XCTUnwrap(CGImageSourceCreateWithData(bytes as CFData, nil))
+    XCTAssertEqual(CGImageSourceGetCount(source), 2)
+    for index in 0..<2 {
+      let frame = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, index, nil))
+      XCTAssertEqual(frame.width, 12)
+      XCTAssertEqual(frame.height, 8)
+    }
+    let properties = try XCTUnwrap(CGImageSourceCopyProperties(source, nil) as? [CFString: Any])
+    let gif = try XCTUnwrap(properties[kCGImagePropertyGIFDictionary] as? [CFString: Any])
+    XCTAssertEqual((gif[kCGImagePropertyGIFLoopCount] as? NSNumber)?.intValue, 3)
+  }
+
+  func testStoredGIFRejectsReintroducedCommentEvenWhenDigestWasUpdated() async throws {
+    let environment = try StoreTestEnvironment()
+    defer { environment.remove() }
+    let store = environment.makeStore()
+    let attachment = try await store.importImage(data: gifData(), quality: .original)
+    var bytes = try await store.validatedData(for: attachment)
+    // A valid comment before the trailer must be removed on import, and rejected
+    // if injected into an already-validated private file with rewritten metadata.
+    bytes.insert(contentsOf: [0x21, 0xFE, 3, 0x58, 0x4D, 0x50, 0], at: bytes.count - 1)
+    try bytes.write(
+      to: environment.storeURL.appendingPathComponent(attachment.relativePrivateFilename))
+    let forged = try XCTUnwrap(
+      ComposerImageAttachment(
+        id: attachment.id, sha256: sha256(of: bytes), byteCount: Int64(bytes.count),
+        pixelWidth: attachment.pixelWidth, pixelHeight: attachment.pixelHeight,
+        encoding: .gif, quality: .original))
+    do {
+      _ = try await store.validatedData(for: forged)
+      XCTFail("A matching digest must not bypass stored GIF privacy validation")
+    } catch {
+      XCTAssertEqual(error as? ComposerImageAttachmentStoreError, .storedFileTampered)
+    }
+  }
+
   func testAttachmentInitializerAndDecoderRejectMaliciousRelativePaths() throws {
     let id = UUID()
     let digest = String(repeating: "a", count: 64)
@@ -801,6 +849,30 @@ final class ComposerImageAttachmentStoreTests: XCTestCase {
       )
     }
     return try XCTUnwrap(image.pngData())
+  }
+
+  private func gifData() throws -> Data {
+    let bytes = NSMutableData()
+    let destination = try XCTUnwrap(
+      CGImageDestinationCreateWithData(
+        bytes, UTType.gif.identifier as CFString, 2, nil))
+    CGImageDestinationSetProperties(
+      destination,
+      [
+        kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 3]
+      ] as CFDictionary)
+    for color in [UIColor.systemBlue, .systemRed] {
+      let png = try imageData(width: 12, height: 8, color: color)
+      let source = try XCTUnwrap(CGImageSourceCreateWithData(png as CFData, nil))
+      let frame = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+      CGImageDestinationAddImage(
+        destination, frame,
+        [
+          kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 0.2]
+        ] as CFDictionary)
+    }
+    XCTAssertTrue(CGImageDestinationFinalize(destination))
+    return bytes as Data
   }
 
   private func jpegDataWithPrivateMetadata(width: Int, height: Int) throws -> Data {

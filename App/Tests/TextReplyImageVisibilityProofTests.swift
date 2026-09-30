@@ -105,6 +105,24 @@ final class TextReplyImageVisibilityProofTests: XCTestCase {
       )
     )
   }
+
+  func testDynamicImageURLMustProveSamePictureIdentityWithoutGuessingFormat() throws {
+    let expectation = try imageExpectation(1, pictureCharacter: "a", width: 640, height: 480)
+    let matching = imageVisibilityURL("a")
+    let conflicting = imageVisibilityURL("b")
+    let unknownGIFPath = try XCTUnwrap(
+      URL(
+        string: "https://imgsrc.baidu.com/forum/pic/item/" + String(repeating: "a", count: 40)
+          + ".gif"))
+    for (dynamic, expected) in [(matching, true), (conflicting, false), (unknownGIFPath, false)] {
+      let content = BrowseContent.image(
+        thumbnail: matching, fullSize: matching, original: matching, dynamic: dynamic,
+        width: 640, height: 480)
+      XCTAssertEqual(
+        TextReplyImageVisibilityProof.exactDirectTopicReply(
+          from: [content], matching: "", expectations: [expectation]), expected)
+    }
+  }
 }
 
 private func imageExpectation(

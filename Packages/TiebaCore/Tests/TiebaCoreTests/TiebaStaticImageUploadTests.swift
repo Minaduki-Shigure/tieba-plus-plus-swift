@@ -163,6 +163,71 @@ final class TiebaStaticImageUploadRequestTests: XCTestCase {
     }
   }
 
+  func testAnimatedGIFBytesSurviveMultipartChunksAndReceiptBindsBothFrames() throws {
+    let bytes = twoFrameGIFSpanningUploadChunks()
+    XCTAssertGreaterThan(bytes.count, TiebaStaticImageUploadPolicy.chunkSize)
+    XCTAssertEqual(bytes.prefix(6), Data("GIF89a".utf8))
+    XCTAssertEqual(bytes.last, 0x3B)
+
+    for preservesOriginal in [false, true] {
+      let upload = makeStaticImageUpload(
+        bytes: bytes, width: 1, height: 1, preservesOriginal: preservesOriginal
+      )
+      let plan = try validatedPlan(upload)
+      XCTAssertEqual(plan.chunkCount, 2)
+      var reconstructed = Data()
+      for chunkNumber in 1...plan.chunkCount {
+        let request = try factory.staticImageUploadChunk(
+          credential: staticImageCredential(),
+          expectedUserID: 1_001,
+          plan: plan,
+          chunkNumber: chunkNumber
+        )
+        let parsed = try parseStaticImageMultipart(request)
+        XCTAssertEqual(parsed.fields["size"], String(bytes.count))
+        XCTAssertEqual(parsed.fields["saveOrigin"], preservesOriginal ? "1" : "0")
+        XCTAssertEqual(parsed.fields["resourceId"], plan.resourceID)
+        reconstructed.append(parsed.chunk)
+      }
+      // Both frames, their delays, and extensions remain byte-for-byte intact;
+      // the upload layer must not flatten animations even without saveOrigin.
+      XCTAssertEqual(reconstructed, bytes)
+
+      var response = finalStaticImageObject(
+        resourceID: plan.resourceID, chunkNumber: 2, width: 1, height: 1
+      )
+      let pictureID = String(repeating: "a", count: 40)
+      response["picInfo"] = [
+        "originPic": [
+          "width": "1", "height": "1", "type": "gif",
+          "picUrl": "https://tiebapic.baidu.com/forum/pic/item/\(pictureID).jpg",
+        ]
+      ]
+      let result = try TiebaStaticImageUploadDecoder.decodeChunkResponse(
+        from: JSONSerialization.data(withJSONObject: response),
+        plan: plan,
+        chunkNumber: 2
+      )
+      guard case .completed(let receipt) = result else {
+        return XCTFail("Expected GIF upload receipt")
+      }
+      XCTAssertTrue(receipt.isBound(to: upload, expectedUserID: 1_001))
+      XCTAssertFalse(receipt.isBound(to: upload, expectedUserID: 2_002))
+      XCTAssertEqual(receipt.byteCount, bytes.count)
+      XCTAssertEqual(receipt.chunkCount, 2)
+
+      var changedSecondFrame = bytes
+      // White -> black pixel in the second frame only, preserving file length,
+      // first-frame bytes, dimensions, upload ID, and every scalar upload field.
+      changedSecondFrame[changedSecondFrame.count - 4] = 0x44
+      let substituted = makeStaticImageUpload(
+        id: upload.uploadID, bytes: changedSecondFrame,
+        width: 1, height: 1, preservesOriginal: preservesOriginal
+      )
+      XCTAssertFalse(receipt.isBound(to: substituted, expectedUserID: 1_001))
+    }
+  }
+
   func testMultipartBoundaryIsPerRequestAndCannotBeTerminatedByChunkBytes() throws {
     let legacyBoundary = "--------7da3d81520810*"
     let bytes = Data(
@@ -1417,6 +1482,28 @@ private func makeStaticImageUpload(
     preservesOriginal: preservesOriginal,
     watermark: watermark
   )
+}
+
+private func twoFrameGIFSpanningUploadChunks() -> Data {
+  var bytes = Data("GIF89a".utf8)
+  // 1x1 logical screen, two-entry global black/white color table.
+  bytes.append(contentsOf: [1, 0, 1, 0, 0x80, 0, 0, 0, 0, 0, 255, 255, 255])
+  let framePrefix: [UInt8] = [
+    0x21, 0xF9, 4, 0, 5, 0, 0, 0,  // Graphics control: 0.05-second delay.
+    0x2C, 0, 0, 0, 0, 1, 0, 1, 0, 0,  // 1x1 image descriptor.
+    2, 2,  // LZW minimum code size and sub-block length.
+  ]
+  bytes.append(contentsOf: framePrefix + [0x44, 0x01, 0])
+  // Legal comment sub-blocks place the second frame beyond the chunk boundary.
+  bytes.append(contentsOf: [0x21, 0xFE])
+  for _ in 0..<2_010 {
+    bytes.append(255)
+    bytes.append(Data(repeating: 0x61, count: 255))
+  }
+  bytes.append(0)
+  bytes.append(contentsOf: framePrefix + [0x4C, 0x01, 0])
+  bytes.append(0x3B)
+  return bytes
 }
 
 private func staticImageCredential(

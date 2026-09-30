@@ -10,6 +10,9 @@ enum ComposerImageProcessingError: Error, Equatable, LocalizedError, Sendable {
   case unsupportedFormat
   case unsupportedOriginal
   case animatedImage
+  case gifRequiresOriginal
+  case unsupportedGIF
+  case gifResourceLimit
   case invalidDimensions
   case sourcePixelCountTooLarge
   case decodedImageTooLarge
@@ -25,11 +28,17 @@ enum ComposerImageProcessingError: Error, Equatable, LocalizedError, Sendable {
     case .sourceTooLarge:
       "选择的图片文件过大。"
     case .unsupportedFormat:
-      "仅支持静态 JPEG、PNG 或 HEIC 图片。"
+      "仅支持静态 JPEG、PNG、HEIC 图片，以及原图模式下的 GIF。"
     case .unsupportedOriginal:
       "原图模式仅支持普通静态 JPEG/PNG，以及可验证的 sRGB、Display P3 色彩；HDR、特殊格式或自定义色彩请改用标准或高清模式。"
     case .animatedImage:
-      "暂不支持动画或多帧图片。"
+      "暂不支持此格式的动画或多帧图片；GIF 请使用原图模式。"
+    case .gifRequiresOriginal:
+      "GIF 图片请先选择原图模式，以保留动画。"
+    case .unsupportedGIF:
+      "这张 GIF 包含暂不支持的图像数据或扩展，无法保证原图效果。"
+    case .gifResourceLimit:
+      "GIF 超过安全处理限制：最多 10 MB、单边 4096 像素、500 帧和单次播放 120 秒，并受累计像素限制。"
     case .invalidDimensions:
       "图片尺寸无效。"
     case .sourcePixelCountTooLarge:
@@ -143,6 +152,13 @@ struct ComposerProcessedImage: Equatable, Sendable {
       !data.isEmpty,
       Int64(data.count) <= quality.maximumByteCount,
       encoding == .jpeg || quality == .original,
+      encoding != .gif
+        || ComposerImageAttachment.acceptsDimensions(
+          width: pixelWidth,
+          height: pixelHeight,
+          maximumPixelSize: ComposerGIFSanitizer.maximumDimension,
+          maximumPixelCount: ComposerGIFSanitizer.maximumFramePixels
+        ),
       ComposerImageAttachment.acceptsDimensions(
         width: pixelWidth,
         height: pixelHeight,
@@ -160,11 +176,14 @@ struct ComposerProcessedImage: Equatable, Sendable {
 
 struct ComposerImageAttachmentProcessor: Sendable {
   private let beforeValidatedJPEGFullDecode: @Sendable () -> Void
+  private let beforeValidatedGIFFrameDecode: @Sendable (Int) -> Void
 
   init(
-    beforeValidatedJPEGFullDecode: @escaping @Sendable () -> Void = {}
+    beforeValidatedJPEGFullDecode: @escaping @Sendable () -> Void = {},
+    beforeValidatedGIFFrameDecode: @escaping @Sendable (Int) -> Void = { _ in }
   ) {
     self.beforeValidatedJPEGFullDecode = beforeValidatedJPEGFullDecode
+    self.beforeValidatedGIFFrameDecode = beforeValidatedGIFFrameDecode
   }
 
   func process(
@@ -198,6 +217,26 @@ struct ComposerImageAttachmentProcessor: Sendable {
     guard !data.isEmpty else { throw ComposerImageProcessingError.invalidSource }
     guard Int64(data.count) <= ComposerImageProcessingPolicy.maximumSourceByteCount else {
       throw ComposerImageProcessingError.sourceTooLarge
+    }
+    if Self.hasGIFSignature(data) {
+      guard quality == .original else {
+        throw ComposerImageProcessingError.gifRequiresOriginal
+      }
+      let inspection = try Self.sanitizedGIF(data)
+      guard Int64(inspection.data.count) <= maximumByteCount else {
+        throw ComposerImageProcessingError.encodedImageTooLarge
+      }
+      try validateGIFFrames(inspection)
+      guard
+        let result = ComposerProcessedImage(
+          data: inspection.data,
+          pixelWidth: inspection.width,
+          pixelHeight: inspection.height,
+          encoding: .gif,
+          quality: .original
+        )
+      else { throw ComposerImageProcessingError.invalidDimensions }
+      return result
     }
     let inspectionData =
       quality == .original
@@ -307,6 +346,20 @@ struct ComposerImageAttachmentProcessor: Sendable {
       Int64(data.count) == attachment.byteCount,
       Int64(data.count) <= attachment.quality.maximumByteCount
     else { throw ComposerImageProcessingError.invalidSource }
+    if attachment.encoding == .gif || Self.hasGIFSignature(data) {
+      guard attachment.encoding == .gif, attachment.quality == .original else {
+        throw ComposerImageProcessingError.invalidSource
+      }
+      let inspection = try Self.sanitizedGIF(data)
+      guard inspection.data == data else {
+        throw ComposerImageProcessingError.metadataWasNotRemoved
+      }
+      guard inspection.width == attachment.pixelWidth,
+        inspection.height == attachment.pixelHeight
+      else { throw ComposerImageProcessingError.invalidDimensions }
+      try validateGIFFrames(inspection)
+      return
+    }
     if attachment.quality == .original {
       _ = try inspectOriginal(
         data,
@@ -335,6 +388,62 @@ struct ComposerImageAttachmentProcessor: Sendable {
   private struct EncodedCandidate {
     let data: Data
     let image: CGImage
+  }
+
+  private static func hasGIFSignature(_ data: Data) -> Bool {
+    // Route even unsupported GIF versions through the bounded container parser.
+    // ImageIO must never inspect an unvalidated GIF container on this path.
+    data.starts(with: [0x47, 0x49, 0x46])
+  }
+
+  private static func sanitizedGIF(_ data: Data) throws -> ComposerGIFSanitizer.Inspection {
+    do {
+      return try ComposerGIFSanitizer.sanitize(data)
+    } catch let error as ComposerGIFSanitizerError {
+      switch error {
+      case .invalidGIF: throw ComposerImageProcessingError.invalidSource
+      case .unsupportedGIF: throw ComposerImageProcessingError.unsupportedGIF
+      case .resourceLimit: throw ComposerImageProcessingError.gifResourceLimit
+      }
+    }
+  }
+
+  private func validateGIFFrames(_ inspection: ComposerGIFSanitizer.Inspection) throws {
+    try Task.checkCancellation()
+    guard
+      let source = CGImageSourceCreateWithData(
+        inspection.data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary
+      ),
+      CGImageSourceGetType(source) as String? == UTType.gif.identifier,
+      CGImageSourceGetCount(source) == inspection.frameCount,
+      CGImageSourceGetStatus(source) == .statusComplete
+    else { throw ComposerImageProcessingError.decodeFailed }
+
+    let maximumFrameDecodedBytes = ComposerGIFSanitizer.maximumFramePixels * 8
+    for index in 0..<inspection.frameCount {
+      try Task.checkCancellation()
+      // Release each decoded frame before advancing; retaining the full animation
+      // would multiply the canvas allocation by the number of frames.
+      try autoreleasepool {
+        defer { CGImageSourceRemoveCacheAtIndex(source, index) }
+        beforeValidatedGIFFrameDecode(index)
+        try Task.checkCancellation()
+        guard
+          let decoded = CGImageSourceCreateImageAtIndex(
+            source, index,
+            [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
+          ),
+          CGImageSourceGetStatusAtIndex(source, index) == .statusComplete,
+          decoded.width > 0, decoded.width <= inspection.width,
+          decoded.height > 0, decoded.height <= inspection.height,
+          decoded.bitsPerComponent > 0, decoded.bitsPerComponent <= 8,
+          decoded.bytesPerRow > 0,
+          decoded.bytesPerRow <= maximumFrameDecodedBytes / decoded.height,
+          Self.hasSupportedOriginalColorModel(decoded.colorSpace)
+        else { throw ComposerImageProcessingError.decodeFailed }
+      }
+    }
+    try Task.checkCancellation()
   }
 
   private func processOriginal(

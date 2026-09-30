@@ -741,6 +741,42 @@ final class ComposerImageUploadLedgerTests: XCTestCase {
     XCTAssertEqual(try Data(contentsOf: location.file), beforeAttempt)
   }
 
+  func testGIFUploadReceiptAndUnknownOutcomeRetainFormatAcrossRestart() async throws {
+    let location = makeLocation()
+    defer { try? FileManager.default.removeItem(at: location.directory) }
+    let key = makeKey()
+    let gif = try fixture(index: 1, preservesOriginal: true, quality: .original, encoding: .gif)
+    let next = try fixture(index: 2, preservesOriginal: true, quality: .original, encoding: .gif)
+    let ledger = makeLedger(fileURL: location.file)
+    _ = try await prepareNewThread(
+      in: ledger, key: key, attachments: [gif.snapshot, next.snapshot])
+    _ = try await ledger.markAttachmentDispatchPending(
+      for: key, nextAttachmentID: gif.attachment.id)
+    _ = try await ledger.recordBoundReceipt(gif.receipt, verifiedAgainst: gif.upload, for: key)
+    let resumed = makeLedger(fileURL: location.file)
+    let confirmed = try await resumed.record(for: key)
+    XCTAssertEqual(confirmed?.successfulReceiptPrefix, [gif.receipt])
+    XCTAssertEqual(confirmed?.nextAttachment?.attachment, next.attachment)
+    XCTAssertEqual(confirmed?.nextAttachment?.attachment.encoding, .gif)
+    _ = try await resumed.markAttachmentDispatchPending(
+      for: key, nextAttachmentID: next.attachment.id)
+    _ = try await resumed.markOutcomeUnknown(for: key)
+    let restarted = makeLedger(fileURL: location.file)
+    let unknown = try await restarted.record(for: key)
+    XCTAssertTrue(unknown?.blocksAutomaticResend == true)
+    XCTAssertEqual(unknown?.successfulReceiptPrefix, [gif.receipt])
+
+    // Format is part of the frozen intent even if a caller reuses ID and bytes.
+    let replacement = try fixture(
+      index: 2, preservesOriginal: true, quality: .original, encoding: .png)
+    await assertLedgerError(.intentMismatch) {
+      try await self.prepareNewThread(
+        in: restarted, key: key, attachments: [gif.snapshot, replacement.snapshot])
+    }
+    let afterRejectedReplacement = try await restarted.record(for: key)
+    XCTAssertEqual(afterRejectedReplacement, unknown)
+  }
+
   func testAttachmentOutcomeUnknownRetainsExactUnsentPrefixAndNextAttachment() async throws {
     let location = makeLocation()
     defer { try? FileManager.default.removeItem(at: location.directory) }

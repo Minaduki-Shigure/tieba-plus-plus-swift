@@ -25,6 +25,20 @@ and its verified metadata enters the public app source.
 
 ### Release and validation
 
+- **Current `main` original GIF creation:** New-topic and direct-topic-reply
+  composers accept GIF in 原图 mode, with a GIF badge on its thumbnail. The
+  importer retains image data, palettes, frame timing, transparency, disposal,
+  and supported loop information while removing private metadata. It checks all
+  frames before storing or uploading, with limits of 10 MiB, 500 frames, a
+  4,096-pixel side, 4,194,304 canvas pixels, 100 million cumulative canvas pixels,
+  and a bounded 120-second cycle. Standard/high-quality modes ask for 原图
+  instead of silently flattening the animation. Existing account-bound drafts,
+  upload receipts and uncertain-result locks also cover GIF. Actual server
+  animation retention, watermark behavior and Photos selection still need
+  disposable-account/device validation; a visible post does not prove its
+  animation survived server processing. The parity estimate is unchanged.
+  Text-only type-35 content now remains readable rather than becoming an empty
+  component placeholder; existing described cards retain their presentation.
 - **`v0.65.0-alpha.22` account activity:** My → 我的发帖与回复 reads the active
   account's own topics and replies through a separate authenticated V12 request.
   Both tabs support refresh and explicit pagination; reply rows retain ordinary
@@ -52,8 +66,9 @@ and its verified metadata enters the public app source.
   stays transparent. Original images are bounded to 10 MiB, 16,384 pixels per
   side and 12,582,912 total pixels, with explicit rejection instead of silent
   recompression. Standard/high-quality output and old draft/upload identities
-  retain their prior meaning. Animated/HDR and unsupported color profiles remain
-  excluded; real JPEG/PNG upload acceptance and device rendering still require
+  retain their prior meaning. Animated PNG, other unsupported animation formats,
+  HDR and unsupported color profiles remain excluded; real JPEG/PNG upload
+  acceptance and device rendering still require
   disposable-account validation. This extends the existing image workflow and
   leaves the overall parity estimate unchanged.
 - **`v0.65.0-alpha.17` thread-owner floor management:** A logged-in topic author can

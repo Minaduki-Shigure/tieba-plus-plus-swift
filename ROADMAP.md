@@ -8,13 +8,24 @@ This audit was last compared with TiebaLite `4.0-dev` at commit
 [`268f388c`](https://github.com/zzc10086/TiebaLite/tree/268f388c7824ae2c8f6ed549827a943ec8a7f352).
 The current-main automatic preview-quality, creation-transport, batch literal
 keyword entry, thread-list like entry, thread-owner ordinary-floor deletion, and
-original static-image selection, optional daily check-in, and authenticated
+original image/GIF selection, optional daily check-in, and authenticated
 own-topic/reply activity workflows were
 separately checked against
 [`9701bfb6`](https://github.com/zzc10086/TiebaLite/tree/9701bfb6aaf261cc37b20b5793a8404261077f49).
 That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
+
+Current `main` extends original-image creation to GIF in new topics and direct
+topic replies, matching TiebaLite's original-byte upload path. A bounded container
+rewrite preserves animation data and removes metadata before ImageIO; all frames
+are decoded sequentially before use. GIF participates in existing account-bound
+drafts, upload receipts and unknown-outcome locks. Core and App visibility checks
+require the same picture identity across dynamic and fallback image URLs; they
+do not infer animation retention from a filename or a successful post readback.
+Photos import, server-side animation retention/watermarks and recovered uploads
+remain device gates, with no additional parity point yet. Text-only type-35
+fragments also retain their body instead of becoming empty component cards.
 
 Current `main` adds a separate authenticated **我的发帖与回复** entry under My.
 TiebaLite's own replies tab and V12 `userpost` request are the reference; the
@@ -717,7 +728,8 @@ watermark, session, and submission ID. A separate original mode retains static
 JPEG/PNG dimensions and compressed image data while removing private metadata,
 retaining orientation and supported display color, and preserving PNG alpha.
 It is bounded to 10 MiB, 16,384 pixels per side and 12,582,912 total pixels;
-oversize, animated/HDR and unsupported color-profile inputs fail explicitly.
+Oversize, animated PNG, unsupported animation/HDR and unsupported color-profile
+inputs fail explicitly.
 Old JPEG attachment JSON and v1 intent digests retain their exact meaning;
 mixed old JPEG/original PNG records keep verified receipts and unknown-outcome
 locks across restart. Real original-image upload/rendering remains a validation

@@ -777,7 +777,7 @@ explicitly starts another topic in that forum. The App must not clear it merely
 because the write task returned: a crash before the success navigation became
 visible would otherwise restore an apparently sendable old body.
 
-Current `main` uses the bounded static-image creation pipeline in its new-topic
+Current `main` uses the bounded image creation pipeline in its new-topic
 and direct-topic-reply composers. These paths remain experimental and require
 disposable-account and physical-device validation.
 The standard/high-quality paths accept bounded, single-frame JPEG, PNG, HEIC,
@@ -797,11 +797,35 @@ space and is replaced by that canonical profile, rather than forwarding original
 profile descriptions. PNG cICP is retained only for the exact full-range SDR
 sRGB or Display P3 tuples; unknown, PQ/HLG, narrow-range, malformed, duplicate,
 or misplaced cICP and HDR display/light-level metadata are rejected.
-Unknown profiles, animated/multi-image, HDR/gain-map,
+Unknown profiles, animated PNG and other unsupported multi-image formats, HDR/gain-map,
 unsupported depth and malformed inputs are rejected instead of silently
 recompressed. Original mode allows 10 MiB, a 16,384-pixel side limit and
 12,582,912 total pixels with a 96 MiB decoded-layout limit. PNG private compressed
 text is removed before ImageIO sees it; ICC decompression is bounded to 256 KiB.
+GIF original mode is a separate path. Before constructing an ImageIO source,
+an independent parser checks the GIF87a/GIF89a container, frame rectangles,
+color tables, extension/sub-block lengths, terminators and resource budgets.
+It retains encoded image data, palettes, graphic controls and validated loop
+extensions; removes comments and opaque application metadata; and rejects
+rendering or interactive extensions it cannot preserve, including Plain Text,
+unknown disposal operations, user-input controls and embedded color profiles.
+Limits are 10 MiB, 4,096 pixels per side, 4,194,304 canvas pixels, 500 frames,
+100 million cumulative canvas pixels, and 12,000 centiseconds per cycle using
+at least two centiseconds per frame for the work budget. Original delays and
+loop counts are not rewritten, and infinite looping is not multiplied into the
+import budget. Frames are fully decoded one at a time with bounded decoded
+layouts, never collected into an in-memory animation. Stored GIF validation
+repeats this process and requires byte-exact canonical sanitization, even if a
+caller supplies a recomputed digest. The GIF contract follows the
+[GIF89a specification](https://www.w3.org/Graphics/GIF/spec-gif89a.txt) and
+[ImageIO sequence properties](https://developer.apple.com/documentation/imageio/gif-image-properties).
+Existing byte-bound upload receipts and format-bound upload intents cover GIF;
+legacy JPEG/PNG intent digests and receipt schemas retain their meaning.
+Picture visibility checks include nonempty dynamic/fallback URL identities but
+do not prove that the server retained animation. Unknown URL forms remain
+unconfirmed and cannot trigger a retry or silent JPEG fallback. Real server
+acceptance and animation retention remain disposable-account validation gates.
+
 Stored original files repeat format, dimensions, canonical metadata and decode
 checks before upload. This preserves image content, not byte-for-byte source
 files; the independent standard/high-quality JPEG policy is not weakened.
@@ -811,7 +835,7 @@ dimensions, encoding, and local quality choice. Source paths, filenames, Photos
 asset identifiers, URLs, and private source metadata are not retained. Files live below a
 trusted Application Support root, are excluded from backup, use complete file
 protection, and are read through a no-follow regular-file descriptor with size,
-inode, digest, actual JPEG/PNG encoding, and dimension validation. Directory-chain checks reject
+inode, digest, actual JPEG/PNG/GIF encoding, and dimension validation. Directory-chain checks reject
 symbolic-link redirection. Publication and deletion still use Foundation path
 operations, so a hostile writer already executing inside the same App sandbox
 could race those checks; eliminating that residual threat requires a future

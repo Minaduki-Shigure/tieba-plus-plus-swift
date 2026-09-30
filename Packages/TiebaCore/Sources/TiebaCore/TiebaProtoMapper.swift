@@ -1312,7 +1312,21 @@ enum TiebaProtoMapper {
       )
     case 10:
       .voice(TiebaVoice(md5: proto.voiceMd5, duration: TimeInterval(proto.duringTime) / 1_000))
-    case 35, 36, 37:
+    case 35:
+      // TiebaLite also treats type 35 as ordinary text. Only an explicit,
+      // nonempty card description can replace that text; empty protobuf defaults
+      // must not erase the body or invent a navigable component.
+      if proto.hasTiebaplusInfo,
+        !proto.tiebaplusInfo.desc.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      {
+        .tiebaPlus(
+          description: proto.tiebaplusInfo.desc,
+          url: videoPageURL(proto.tiebaplusInfo.jumpURL)
+        )
+      } else {
+        .text(proto.text)
+      }
+    case 36, 37:
       .tiebaPlus(
         description: proto.tiebaplusInfo.desc,
         url: remoteURL(proto.tiebaplusInfo.jumpURL)

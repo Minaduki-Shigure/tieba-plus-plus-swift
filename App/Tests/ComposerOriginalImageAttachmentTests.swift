@@ -49,7 +49,7 @@ final class ComposerOriginalImageAttachmentTests: XCTestCase {
       attachment.relativePrivateFilename.uppercased(),
       "../" + attachment.relativePrivateFilename,
       attachment.relativePrivateFilename + ".jpg",
-      attachment.id.uuidString.lowercased() + ".gif",
+      attachment.id.uuidString.lowercased() + ".webp",
     ] {
       XCTAssertFalse(ComposerImageAttachment.isValidRelativePrivateFilename(invalid), invalid)
     }
@@ -64,6 +64,24 @@ final class ComposerOriginalImageAttachmentTests: XCTestCase {
         encoding: .png,
         quality: .original
       ))
+  }
+
+  func testGIFOriginalAttachmentUsesCanonicalFilenameAndItsOwnCanvasBudget() throws {
+    let attachment = try XCTUnwrap(
+      makeAttachment(encoding: .gif, quality: .original, width: 640, height: 480))
+    XCTAssertEqual(
+      attachment.relativePrivateFilename, attachment.id.uuidString.lowercased() + ".gif")
+    XCTAssertTrue(
+      ComposerImageAttachment.isValidRelativePrivateFilename(attachment.relativePrivateFilename))
+    XCTAssertEqual(
+      try JSONDecoder().decode(
+        ComposerImageAttachment.self, from: JSONEncoder().encode(attachment)),
+      attachment)
+    XCTAssertNil(makeAttachment(encoding: .gif, quality: .standard, width: 10, height: 10))
+    XCTAssertNil(makeAttachment(encoding: .gif, quality: .highQuality, width: 10, height: 10))
+    XCTAssertNil(makeAttachment(encoding: .gif, quality: .original, width: 4_097, height: 1))
+    XCTAssertNil(makeAttachment(encoding: .gif, quality: .original, width: 4_096, height: 1_025))
+    XCTAssertNotNil(makeAttachment(encoding: .gif, quality: .original, width: 2_048, height: 2_048))
   }
 
   private func makeAttachment(

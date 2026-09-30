@@ -457,6 +457,74 @@ final class TiebaStaticImageContentTests: XCTestCase {
     )
   }
 
+  func testReadbackAcceptsSamePictureDynamicAndFallbackURLsWithoutChangingStaticImages() throws {
+    let submissionID = UUID()
+    let proof = try makeStaticImageContentProof(
+      submissionID: submissionID, userID: userID, forumID: forumID,
+      forumName: forumName, picID: pictureID("a")
+    )
+    let matchingURL = "https://tiebapic.baidu.com/forum/pic/item/\(proof.picID).jpg"
+    for type: UInt32 in [3, 20] {
+      var fragment = imageFragment(type: type, picID: proof.picID)
+      fragment.bsize = "640,480"
+      // Static images continue to pass with empty dynamic/fallback fields.
+      XCTAssertTrue(
+        readbackMatches(
+          [fragment], userContent: "", proofs: [proof], submissionID: submissionID
+        ))
+      fragment.dynamic = matchingURL
+      fragment.cdnSrcActive = matchingURL
+      fragment.bigSrc = matchingURL
+      XCTAssertTrue(
+        readbackMatches(
+          [fragment], userContent: "", proofs: [proof], submissionID: submissionID
+        ))
+
+      // Any actual display candidate can supply evidence when the usual src
+      // is absent, but it must still identify the receipt's exact picture.
+      for field: WritableKeyPath<PbContent, String> in [
+        \.dynamic, \.cdnSrcActive, \.bigSrc,
+      ] {
+        var fallbackOnly = PbContent()
+        fallbackOnly.type = type
+        fallbackOnly.bsize = "640,480"
+        fallbackOnly[keyPath: field] = matchingURL
+        XCTAssertTrue(
+          readbackMatches(
+            [fallbackOnly], userContent: "", proofs: [proof], submissionID: submissionID
+          ))
+      }
+    }
+  }
+
+  func testReadbackRejectsUnprovenDynamicAndFallbackURLsEvenWithMatchingStillPreview() throws {
+    let submissionID = UUID()
+    let proof = try makeStaticImageContentProof(
+      submissionID: submissionID, userID: userID, forumID: forumID,
+      forumName: forumName, picID: pictureID("a")
+    )
+    for field: WritableKeyPath<PbContent, String> in [
+      \.dynamic, \.cdnSrcActive, \.bigSrc,
+    ] {
+      for rawURL in [
+        "https://tiebapic.baidu.com/forum/pic/item/\(pictureID("b")).jpg",
+        "https://tiebapic.baidu.com/forum/pic/item/\(proof.picID).gif",
+        "https://tiebapic.baidu.com/forum/pic/item/\(proof.picID).png",
+        "https://example.com/forum/pic/item/\(proof.picID).jpg",
+        "https://tiebapic.baidu.com/forum/pic/item/\(proof.picID).jpg?unknown=1",
+        "not a URL",
+      ] {
+        var fragment = imageFragment(type: 3, picID: proof.picID)
+        fragment.bsize = "640,480"
+        fragment[keyPath: field] = rawURL
+        XCTAssertFalse(
+          readbackMatches(
+            [fragment], userContent: "", proofs: [proof], submissionID: submissionID
+          ), rawURL)
+      }
+    }
+  }
+
   private func compile(
     _ userContent: String,
     proofs: [TiebaStaticImageContentProof],
