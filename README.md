@@ -28,7 +28,9 @@ and its verified metadata enters the public app source.
 - **`v0.65.0-alpha.24` original GIF creation:** New-topic and direct-topic-reply
   composers accept GIF in 原图 mode, with a GIF badge on its thumbnail. The
   importer retains image data, palettes, frame timing, transparency, disposal,
-  and supported loop information while removing private metadata. It checks all
+  and supported loop information while removing private metadata. Apple-encoded
+  GIF87a files with validated animation extensions receive a canonical GIF89a
+  header without changing their frames. The importer checks all
   frames before storing or uploading, with limits of 10 MiB, 500 frames, a
   4,096-pixel side, 4,194,304 canvas pixels, 100 million cumulative canvas pixels,
   and a bounded 120-second cycle. Standard/high-quality modes ask for 原图

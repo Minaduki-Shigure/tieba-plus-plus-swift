@@ -809,6 +809,10 @@ It retains encoded image data, palettes, graphic controls and validated loop
 extensions; removes comments and opaque application metadata; and rejects
 rendering or interactive extensions it cannot preserve, including Plain Text,
 unknown disposal operations, user-input controls and embedded color profiles.
+ImageIO can label an animated file GIF87a while emitting GIF89a extensions.
+Validated supported extensions are accepted and the output header is normalized
+to GIF89a; true extension-free GIF87a files retain their original header. This
+compatibility case does not bypass block validation or resource budgets.
 Limits are 10 MiB, 4,096 pixels per side, 4,194,304 canvas pixels, 500 frames,
 100 million cumulative canvas pixels, and 12,000 centiseconds per cycle using
 at least two centiseconds per frame for the work budget. Original delays and

@@ -97,8 +97,12 @@ enum ComposerGIFSanitizer {
         case 0x2C:
           try image(start: start)
         case 0x21:
-          guard is89a else { throw ComposerGIFSanitizerError.invalidGIF }
           try extensionBlock(start: start)
+          // ImageIO can label animations GIF87a while writing valid 89a
+          // extensions. After validating a supported extension, correct only
+          // the output version (GIF89a section 17). Keep the input version for
+          // the existing reserved-field checks; do not reinterpret other bits.
+          if !is89a { result[4] = UInt8(ascii: "9") }
         case 0x3B:
           guard cursor == bytes.count, !delays.isEmpty, pendingControl == nil else {
             throw ComposerGIFSanitizerError.invalidGIF
