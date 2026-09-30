@@ -1855,18 +1855,26 @@ struct TiebaCoreAccountService: AccountService {
   ) async throws -> OwnedContentDeletionReceipt {
     guard
       session.id > 0,
-      session.id == target.authorID,
+      session.id == target.deletionAccountID,
       let credentials = session.credentials
     else {
       throw OwnedContentDeletionError.definitelyNotAccepted(
-        "只有当前账户本人发布的内容可以删除；请重新登录或切换账户后再试。"
+        "只能删除本人发布的内容或本人主题中的普通楼层；请重新登录或切换账户后再试。"
       )
     }
     let coreTarget: TiebaOwnedContentDeletionTarget = switch target.kind {
     case .topic:
       .thread(firstPostID: target.objectID)
     case .post:
-      .post(postID: target.objectID)
+      if target.threadOwnerID != nil {
+        .postInOwnedThread(
+          postID: target.objectID,
+          postAuthorID: target.authorID,
+          floor: target.floor
+        )
+      } else {
+        .post(postID: target.objectID)
+      }
     }
     do {
       let response = try await client.deleteOwnedContent(

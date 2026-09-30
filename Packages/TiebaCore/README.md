@@ -429,6 +429,18 @@ authentication rejection, server rejection, and identity/content mismatches
 remain unknown outcomes. This distinction applies to topics and all three
 reply targets, including supported image submissions.
 
+Explicit content deletion supports self-authored topics and ordinary floors,
+plus a distinct `postInOwnedThread(postID:postAuthorID:floor:)` target for another
+author's floor in the active account's topic. The latter requires a fresh PB
+page to bind the account, topic owner, canonical first-floor PID, exact target
+author/floor/PID, forum, and TBS. Present first-floor data must agree with that
+ownership. Only this verified target uses `is_vipdel=1/delete_my_post=0` on
+`/c/c/bawu/delpost`; self-deletion keeps its earlier contract. Both post modes
+share one stable deletion identity. Unknown outcomes never resend, conflicting
+metadata cannot reuse a success receipt, and an accepted acknowledgement is not
+a separate proof that the content has disappeared. Forum moderation and
+nested-reply deletion remain unsupported.
+
 The account unread summary uses `POST https://tiebac.baidu.com/c/s/msg` with a
 signed form restricted to BDUSS, `_client_version=8.2.2`, and `bookmark=1` plus
 the generated signature. It sends no Cookie, STOKEN, UID header, or Android

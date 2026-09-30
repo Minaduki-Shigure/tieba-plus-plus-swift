@@ -803,6 +803,27 @@ public struct TiebaAgreementPage: Sendable, Hashable {
 public enum TiebaOwnedContentDeletionTarget: Sendable, Hashable {
   case thread(firstPostID: Int64)
   case post(postID: Int64)
+  case postInOwnedThread(postID: Int64, postAuthorID: Int64, floor: Int)
+
+  func validate(expectedUserID: Int64) throws {
+    guard expectedUserID > 0 else {
+      throw TiebaClientError.invalidArgument("Expected user ID must be positive.")
+    }
+    switch self {
+    case .thread(let firstPostID):
+      guard firstPostID > 0 else {
+        throw TiebaClientError.invalidArgument("First post ID must be positive.")
+      }
+    case .post(let postID):
+      guard postID > 0 else {
+        throw TiebaClientError.invalidArgument("Post ID must be positive.")
+      }
+    case .postInOwnedThread(let postID, let postAuthorID, let floor):
+      guard postID > 0, postAuthorID > 0, postAuthorID != expectedUserID, floor > 1 else {
+        throw TiebaClientError.invalidArgument("Invalid thread-owner deletion target.")
+      }
+    }
+  }
 }
 
 public struct TiebaOwnedContentDeletionReceipt: Sendable, Hashable {

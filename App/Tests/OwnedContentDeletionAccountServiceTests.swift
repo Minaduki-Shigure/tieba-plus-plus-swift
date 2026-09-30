@@ -15,6 +15,10 @@ final class OwnedContentDeletionAccountServiceTests: XCTestCase {
         try deletionAccountTarget(kind: .post, objectID: 102, floor: 2),
         .post(postID: 102)
       ),
+      (
+        try deletionAccountTarget(authorID: 8, threadOwnerID: 7),
+        .postInOwnedThread(postID: 102, postAuthorID: 8, floor: 2)
+      ),
     ]
 
     for (index, mapping) in cases.enumerated() {
@@ -68,6 +72,21 @@ final class OwnedContentDeletionAccountServiceTests: XCTestCase {
       }
       let requestCount = await spy.requestCount()
       XCTAssertEqual(requestCount, 0, name)
+    }
+  }
+
+  func testThreadOwnerDeletionCannotBeInvokedByTheFloorAuthorOrAnotherAccount() async throws {
+    let target = try deletionAccountTarget(authorID: 8, threadOwnerID: 7)
+    for userID: Int64 in [8, 9] {
+      let spy = OwnedContentDeletionAccountClientSpy()
+      let service = TiebaCoreAccountService(client: spy)
+      await assertDeletionAccountError(.definitelyNotAccepted, message: "wrong actor \(userID)") {
+        try await service.deleteOwnedContent(
+          session: deletionAccountSession(userID: userID), target: target
+        )
+      }
+      let requests = await spy.requestCount()
+      XCTAssertEqual(requests, 0)
     }
   }
 
@@ -309,13 +328,17 @@ private func mismatchedDeletionTarget(
     .thread(firstPostID: firstPostID + 1)
   case .post(let postID):
     .post(postID: postID + 1)
+  case .postInOwnedThread(let postID, let postAuthorID, let floor):
+    .postInOwnedThread(postID: postID + 1, postAuthorID: postAuthorID, floor: floor)
   }
 }
 
 private func deletionAccountTarget(
   kind: OwnedContentDeletionKind = .post,
   objectID: Int64 = 102,
-  floor: Int = 2
+  floor: Int = 2,
+  authorID: Int64 = 7,
+  threadOwnerID: Int64? = nil
 ) throws -> OwnedContentDeletionTarget {
   try XCTUnwrap(
     OwnedContentDeletionTarget(
@@ -324,8 +347,9 @@ private func deletionAccountTarget(
       forumName: "swift",
       threadID: 100,
       objectID: objectID,
-      authorID: 7,
-      floor: floor
+      authorID: authorID,
+      floor: floor,
+      threadOwnerID: threadOwnerID
     )
   )
 }

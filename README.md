@@ -19,12 +19,21 @@ and its verified metadata enters the public app source.
 | Anonymous browsing | Available across personalized discovery, rankings, search, forums, threads, replies, profiles, and media |
 | Local features | Available with TiebaLite-aligned Home, Explore, Messages, and My primary tabs backed by independent system navigation stacks; an independent default-on preference can remove only Explore from the tab bar without changing the Home discovery-section preference or saved startup destination. My groups local favorites, history, an inline appearance choice, settings, and About, while Messages exposes global search in its own stack. History, favorites, filtering, appearance with an independent system/OLED dark-surface choice, media preferences, explicit standard/pure/only-author immersive thread-reading modes, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, a next-launch destination including personalized discovery and the inbox, and ordered iOS Home Screen quick actions for existing destinations are also available. The primary-tab shell and reply notice's system handoff attempt remain pending physical-device validation |
 | Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary and guarded native nickname/sex/biography/avatar editor, a credential-free handoff to Baidu's fixed official username-management page, followed forums with validated level-up progress and account-bound today-check-in marks where the server supplies them, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with a shared Home-toolbar/account-page message badge, separate optional fan-reminder badge, and authoritative reply actions, Tieba cloud favorites with a saved-position-to-latest-update handoff, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
-| Server-side writes | Guarded profile text and avatar edits, forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies plus explicitly confirmed deletion of the active account's own topic or ordinary floor; these newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
+| Server-side writes | Guarded profile text and avatar edits, forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies plus explicitly confirmed deletion of the active account's own topic or ordinary floor, or another author's ordinary floor in its own topic; these newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
 | TiebaLite parity | Current `main` and public `v0.65.0-alpha.16`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
 | Distribution | The public SideStore/LiveContainer source serves `v0.65.0-alpha.16` (build 94) after its tested IPA is published |
 
 ### Release and validation
 
+- **Current `main` thread-owner floor management:** A logged-in topic author can
+  use the long-press menu to delete another author's ordinary floor after an
+  explicit destructive confirmation. A fresh authenticated read must prove
+  both the topic ownership and the exact floor identity before one deletion
+  request. The floor's real author remains part of the target; this grants no
+  forum-moderator or nested-reply deletion capability. Existing self-deletion
+  and old signed deletion records remain compatible, and changing the deletion
+  mode cannot bypass an accepted or unknown outcome. Real server acceptance
+  remains a disposable-account validation step.
 - **`v0.65.0-alpha.16` receipt recovery and list interactions:** After Tieba returns a
   valid creation receipt, a temporarily unavailable visibility read preserves
   the exact topic/post/comment IDs as pending. The composer can later check
@@ -1238,14 +1247,16 @@ and its verified metadata enters the public app source.
   slow or fast interval. A failed target is never retried, while any uncertain
   single result, cancellation, or account-lease change still stops the
   run. All supported writes
-  require explicit user confirmation; the configurable composer-entry risk
+  require an explicit user action; destructive operations and creation retain
+  their separate confirmation, while like/unlike requires no extra dialog. The configurable composer-entry risk
   notice is not that confirmation. Background and automatic check-in are not
   implemented.
 - **Unsupported operations:** Guess-based removal of unresolvable cloud-favorite
   rows, bulk cloud/local synchronization, disagreement and other remaining
   reaction types, image creation for ordinary-floor and nested replies,
   voice and arbitrary rich-media topic/reply creation, content
-  deletion beyond the active account's own loaded topic or ordinary floor,
+  deletion beyond the active account's own loaded topic or ordinary floor and
+  other authors' ordinary floors in its own topic,
   native or credential-injected reporting, background or automatic check-in,
   explicit notification mark-read/unread writes, and moderation remain
   unavailable until their request contracts and recovery paths have been

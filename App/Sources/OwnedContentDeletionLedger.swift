@@ -166,7 +166,7 @@ struct OwnedContentDeletionLedgerKey: Hashable, Codable, Sendable {
   let objectID: Int64
 
   init?(userID: Int64, target: OwnedContentDeletionTarget) {
-    guard userID == target.authorID else { return nil }
+    guard userID == target.deletionAccountID else { return nil }
     self.init(
       userID: userID,
       forumID: target.forumID,
@@ -255,6 +255,7 @@ struct OwnedContentDeletionLedgerTargetSnapshot: Hashable, Codable, Sendable {
   let objectID: Int64
   let authorID: Int64
   let floor: Int
+  let threadOwnerID: Int64?
 
   init?(_ target: OwnedContentDeletionTarget) {
     guard
@@ -265,7 +266,8 @@ struct OwnedContentDeletionLedgerTargetSnapshot: Hashable, Codable, Sendable {
         threadID: target.threadID,
         objectID: target.objectID,
         authorID: target.authorID,
-        floor: target.floor
+        floor: target.floor,
+        threadOwnerID: target.threadOwnerID
       ),
       validated == target
     else { return nil }
@@ -276,6 +278,7 @@ struct OwnedContentDeletionLedgerTargetSnapshot: Hashable, Codable, Sendable {
     objectID = validated.objectID
     authorID = validated.authorID
     floor = validated.floor
+    threadOwnerID = validated.threadOwnerID
   }
 
   var target: OwnedContentDeletionTarget? {
@@ -286,7 +289,8 @@ struct OwnedContentDeletionLedgerTargetSnapshot: Hashable, Codable, Sendable {
       threadID: threadID,
       objectID: objectID,
       authorID: authorID,
-      floor: floor
+      floor: floor,
+      threadOwnerID: threadOwnerID
     )
   }
 
@@ -298,11 +302,21 @@ struct OwnedContentDeletionLedgerTargetSnapshot: Hashable, Codable, Sendable {
     case objectID
     case authorID
     case floor
+    case threadOwnerID
   }
 
   init(from decoder: any Decoder) throws {
-    try requireOwnedContentDeletionLedgerKeys(decoder, CodingKeys.self)
+    try requireOwnedContentDeletionLedgerKeys(
+      decoder,
+      CodingKeys.self,
+      optionalKeys: [CodingKeys.threadOwnerID.stringValue]
+    )
     let container = try decoder.container(keyedBy: CodingKeys.self)
+    // Absence is the original author-only schema-1 representation. Explicit
+    // null is not another canonical spelling of that authority.
+    let threadOwnerID = try container.contains(.threadOwnerID)
+      ? container.decode(Int64.self, forKey: .threadOwnerID)
+      : nil
     guard
       let target = OwnedContentDeletionTarget(
         kind: try container.decode(
@@ -314,7 +328,8 @@ struct OwnedContentDeletionLedgerTargetSnapshot: Hashable, Codable, Sendable {
         threadID: try container.decode(Int64.self, forKey: .threadID),
         objectID: try container.decode(Int64.self, forKey: .objectID),
         authorID: try container.decode(Int64.self, forKey: .authorID),
-        floor: try container.decode(Int.self, forKey: .floor)
+        floor: try container.decode(Int.self, forKey: .floor),
+        threadOwnerID: threadOwnerID
       ),
       let value = Self(target)
     else {
@@ -346,6 +361,8 @@ struct OwnedContentDeletionLedgerTargetSnapshot: Hashable, Codable, Sendable {
     try container.encode(objectID, forKey: .objectID)
     try container.encode(authorID, forKey: .authorID)
     try container.encode(floor, forKey: .floor)
+    // Omitting nil preserves every authenticated byte of existing archives.
+    try container.encodeIfPresent(threadOwnerID, forKey: .threadOwnerID)
   }
 }
 
@@ -1503,14 +1520,18 @@ private struct OwnedContentDeletionLedgerAnyCodingKey: CodingKey {
 
 private func requireOwnedContentDeletionLedgerKeys<Key: CodingKey & CaseIterable>(
   _ decoder: any Decoder,
-  _ keyType: Key.Type
+  _ keyType: Key.Type,
+  optionalKeys: Set<String> = []
 ) throws {
   let actual = Set(
     try decoder.container(keyedBy: OwnedContentDeletionLedgerAnyCodingKey.self)
       .allKeys.map(\.stringValue)
   )
   let expected = Set(Key.allCases.map(\.stringValue))
-  guard actual == expected else {
+  guard
+    actual.isSubset(of: expected),
+    expected.subtracting(optionalKeys).isSubset(of: actual)
+  else {
     throw DecodingError.dataCorrupted(
       .init(codingPath: decoder.codingPath, debugDescription: "Unexpected archive fields.")
     )

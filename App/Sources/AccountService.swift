@@ -920,6 +920,11 @@ struct OwnedContentDeletionTarget: Hashable, Sendable {
   let objectID: Int64
   let authorID: Int64
   let floor: Int
+  // nil preserves the original author-only deletion contract. A non-nil
+  // identity authorizes only another author's ordinary floor in this thread.
+  let threadOwnerID: Int64?
+
+  var deletionAccountID: Int64 { threadOwnerID ?? authorID }
 
   init?(
     kind: OwnedContentDeletionKind,
@@ -928,7 +933,8 @@ struct OwnedContentDeletionTarget: Hashable, Sendable {
     threadID: Int64,
     objectID: Int64,
     authorID: Int64,
-    floor: Int
+    floor: Int,
+    threadOwnerID: Int64? = nil
   ) {
     let forumName = forumName.trimmingCharacters(in: .whitespacesAndNewlines)
       .precomposedStringWithCanonicalMapping
@@ -943,9 +949,12 @@ struct OwnedContentDeletionTarget: Hashable, Sendable {
     else { return nil }
     switch kind {
     case .topic:
-      guard floor == 1 else { return nil }
+      guard floor == 1, threadOwnerID == nil else { return nil }
     case .post:
       guard floor > 1 else { return nil }
+    }
+    if let threadOwnerID {
+      guard threadOwnerID > 0, threadOwnerID != authorID else { return nil }
     }
     self.kind = kind
     self.forumID = forumID
@@ -954,9 +963,10 @@ struct OwnedContentDeletionTarget: Hashable, Sendable {
     self.objectID = objectID
     self.authorID = authorID
     self.floor = floor
+    self.threadOwnerID = threadOwnerID
   }
 
-  init?(thread: BrowseThread, post: BrowsePost) {
+  init?(thread: BrowseThread, post: BrowsePost, asThreadOwner: Bool = false) {
     guard
       thread.id > 0,
       post.threadID == thread.id,
@@ -965,6 +975,7 @@ struct OwnedContentDeletionTarget: Hashable, Sendable {
     else { return nil }
     if post.floor == 1 {
       guard
+        !asThreadOwner,
         thread.firstPostID == post.id,
         thread.authorID > 0,
         thread.authorID == post.authorID
@@ -980,6 +991,14 @@ struct OwnedContentDeletionTarget: Hashable, Sendable {
       )
     } else {
       guard post.floor > 1, post.id != thread.firstPostID else { return nil }
+      if asThreadOwner {
+        guard
+          thread.firstPostID > 0,
+          thread.authorID > 0,
+          !thread.isServerHidden,
+          thread.authorID != post.authorID
+        else { return nil }
+      }
       self.init(
         kind: .post,
         forumID: thread.forumID,
@@ -987,7 +1006,8 @@ struct OwnedContentDeletionTarget: Hashable, Sendable {
         threadID: thread.id,
         objectID: post.id,
         authorID: post.authorID,
-        floor: post.floor
+        floor: post.floor,
+        threadOwnerID: asThreadOwner ? thread.authorID : nil
       )
     }
   }

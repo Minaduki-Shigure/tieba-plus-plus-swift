@@ -1284,6 +1284,7 @@ struct ThreadView: View {
                       ? nil
                       : ContentReportTarget(thread: viewModel.thread, post: firstPost),
                     deletionTarget: nil,
+                    threadOwnerDeletionTarget: nil,
                     requestDeletion: requestOwnedContentDeletion,
                     openComments: { commentID in
                       presentComments(
@@ -1392,6 +1393,11 @@ struct ThreadView: View {
                     deletionTarget: isPureReadingMode
                       ? nil
                       : OwnedContentDeletionTarget(thread: viewModel.thread, post: post),
+                    threadOwnerDeletionTarget: isPureReadingMode
+                      ? nil
+                      : OwnedContentDeletionTarget(
+                        thread: viewModel.thread, post: post, asThreadOwner: true
+                      ),
                     requestDeletion: requestOwnedContentDeletion,
                     openComments: { commentID in
                       presentComments(
@@ -2555,6 +2561,7 @@ private struct PostView: View, Equatable {
   let reportThread: BrowseThread
   let reportTarget: ContentReportTarget?
   let deletionTarget: OwnedContentDeletionTarget?
+  let threadOwnerDeletionTarget: OwnedContentDeletionTarget?
   let requestDeletion: (PendingOwnedContentDeletion) -> Void
   let openComments: (Int64?) -> Void
   let selectText: (String) -> Void
@@ -2582,6 +2589,7 @@ private struct PostView: View, Equatable {
       && lhs.reportThread.localVisibility == rhs.reportThread.localVisibility
       && lhs.reportTarget == rhs.reportTarget
       && lhs.deletionTarget == rhs.deletionTarget
+      && lhs.threadOwnerDeletionTarget == rhs.threadOwnerDeletionTarget
       && lhs.requestReplyIsAvailable == rhs.requestReplyIsAvailable
       && lhs.requestInlineCommentReplyIsAvailable
         == rhs.requestInlineCommentReplyIsAvailable
@@ -2709,6 +2717,7 @@ private struct PostView: View, Equatable {
         OwnedContentDeletionMenuSlot(
           store: ownedContentDeletionStore,
           target: deletionTarget,
+          threadOwnerTarget: threadOwnerDeletionTarget,
           requestDeletion: requestDeletion
         )
       }

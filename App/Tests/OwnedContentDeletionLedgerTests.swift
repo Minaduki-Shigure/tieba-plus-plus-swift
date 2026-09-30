@@ -5,6 +5,259 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class OwnedContentDeletionLedgerTests: XCTestCase {
+  func testLegacySchemaOneAuthorOnlyArchiveRetainsCanonicalBytesAndTerminalLock() async throws {
+    let location = try makeOwnedContentDeletionLedgerLocation()
+    defer { try? FileManager.default.removeItem(at: location.directory) }
+    // Literal legacy bytes, rather than a fixture encoded with the new model.
+    let payload = Data(
+      #"{"records":[{"createdAt":100000,"key":{"forumID":42,"kind":"post","objectID":102,"threadID":100,"userID":7},"operationID":"00000000-0000-0000-0000-000000000001","originSessionRevision":"00000000-0000-0000-0000-000000000002","phase":"outcomeUnknown","targetSnapshot":{"authorID":7,"floor":2,"forumID":42,"forumName":"swift","kind":"post","objectID":102,"threadID":100},"updatedAt":100000}],"schemaVersion":1}"#.utf8
+    )
+    let archive = try ownedContentDeletionLedgerEnvelope(canonicalPayload: payload)
+    try archive.write(to: location.file)
+    let ledger = FileOwnedContentDeletionLedger(
+      fileURL: location.file,
+      testingKey: ownedContentDeletionLedgerTestingKey
+    )
+    let records = try await ledger.records()
+    let record = try XCTUnwrap(records.first)
+    let target = try ownedContentDeletionLedgerTarget(objectID: 102, floor: 2)
+    XCTAssertEqual(records.count, 1)
+    XCTAssertEqual(try record.reconstructedTarget(), target)
+    XCTAssertNil(record.targetSnapshot.threadOwnerID)
+    XCTAssertEqual(record.restoredTerminal, .outcomeUnknown)
+    XCTAssertEqual(FileOwnedContentDeletionLedger.schemaVersion, 1)
+
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    let legacySnapshot = Data(
+      #"{"authorID":7,"floor":2,"forumID":42,"forumName":"swift","kind":"post","objectID":102,"threadID":100}"#.utf8
+    )
+    XCTAssertEqual(try encoder.encode(record.targetSnapshot), legacySnapshot)
+    await assertOwnedContentDeletionLedgerError(.resourceLocked) {
+      try await ledger.prepare(
+        target: target,
+        accountID: 7,
+        sessionRevision: ownedContentDeletionLedgerUUID(3),
+        operationID: ownedContentDeletionLedgerUUID(4),
+        at: Date(timeIntervalSince1970: 101)
+      )
+    }
+    XCTAssertEqual(try Data(contentsOf: location.file), archive)
+  }
+
+  func testThreadOwnerDeletionLedgerRoundTripsActorAndContentAuthorSeparately() async throws {
+    let target = try ownedContentDeletionLedgerTarget(
+      objectID: 102,
+      floor: 2,
+      userID: 8,
+      threadOwnerID: 7
+    )
+    XCTAssertNil(OwnedContentDeletionLedgerKey(userID: target.authorID, target: target))
+    let key = try XCTUnwrap(OwnedContentDeletionLedgerKey(userID: 7, target: target))
+    for phase in [OwnedContentDeletionLedgerPhase.dispatchPending, .outcomeUnknown, .accepted] {
+      let location = try makeOwnedContentDeletionLedgerLocation()
+      defer { try? FileManager.default.removeItem(at: location.directory) }
+      let ledger = FileOwnedContentDeletionLedger(
+        fileURL: location.file,
+        testingKey: ownedContentDeletionLedgerTestingKey
+      )
+      await assertOwnedContentDeletionLedgerError(.invalidTarget) {
+        try await ledger.prepare(
+          target: target,
+          accountID: target.authorID,
+          sessionRevision: ownedContentDeletionLedgerUUID(1),
+          operationID: ownedContentDeletionLedgerUUID(2),
+          at: Date(timeIntervalSince1970: 100)
+        )
+      }
+      let pending = try await ledger.prepare(
+        target: target,
+        accountID: target.deletionAccountID,
+        sessionRevision: ownedContentDeletionLedgerUUID(1),
+        operationID: ownedContentDeletionLedgerUUID(2),
+        at: Date(timeIntervalSince1970: 100)
+      )
+      XCTAssertEqual(pending.key, key)
+      XCTAssertEqual(pending.key.userID, 7)
+      XCTAssertEqual(pending.targetSnapshot.authorID, 8)
+      XCTAssertEqual(pending.targetSnapshot.threadOwnerID, 7)
+      let reopened = FileOwnedContentDeletionLedger(
+        fileURL: location.file,
+        testingKey: ownedContentDeletionLedgerTestingKey
+      )
+      if phase != .dispatchPending {
+        _ = try await reopened.transition(
+          for: key,
+          operationID: pending.operationID,
+          to: phase,
+          at: Date(timeIntervalSince1970: 101)
+        )
+      }
+      let candidate = try await reopened.record(for: key)
+      let record = try XCTUnwrap(candidate)
+      XCTAssertEqual(record.phase, phase)
+      XCTAssertEqual(try record.reconstructedTarget(), target)
+    }
+  }
+
+  func testUnknownResourceLockCannotBeBypassedByChangingDeletionAuthorityOrAuthor() async throws {
+    let selfTarget = try ownedContentDeletionLedgerTarget(objectID: 102, floor: 2)
+    let ownerTarget = try ownedContentDeletionLedgerTarget(
+      objectID: 102, floor: 2, userID: 8, threadOwnerID: 7
+    )
+    let differentAuthorTarget = try ownedContentDeletionLedgerTarget(
+      objectID: 102, floor: 2, userID: 9, threadOwnerID: 7
+    )
+    let targets = [selfTarget, ownerTarget, differentAuthorTarget]
+    let key = try XCTUnwrap(OwnedContentDeletionLedgerKey(userID: 7, target: selfTarget))
+    for original in targets {
+      let location = try makeOwnedContentDeletionLedgerLocation()
+      defer { try? FileManager.default.removeItem(at: location.directory) }
+      let ledger = FileOwnedContentDeletionLedger(
+        fileURL: location.file,
+        testingKey: ownedContentDeletionLedgerTestingKey
+      )
+      let pending = try await ledger.prepare(
+        target: original,
+        accountID: 7,
+        sessionRevision: ownedContentDeletionLedgerUUID(1),
+        operationID: ownedContentDeletionLedgerUUID(2),
+        at: Date(timeIntervalSince1970: 100)
+      )
+      let unknown = try await ledger.transition(
+        for: key,
+        operationID: pending.operationID,
+        to: .outcomeUnknown,
+        at: Date(timeIntervalSince1970: 101)
+      )
+      let archive = try Data(contentsOf: location.file)
+      let reopened = FileOwnedContentDeletionLedger(
+        fileURL: location.file,
+        testingKey: ownedContentDeletionLedgerTestingKey
+      )
+      for target in targets {
+        XCTAssertEqual(OwnedContentDeletionLedgerKey(userID: 7, target: target), key)
+        await assertOwnedContentDeletionLedgerError(.resourceLocked) {
+          try await reopened.prepare(
+            target: target,
+            accountID: 7,
+            sessionRevision: ownedContentDeletionLedgerUUID(3),
+            operationID: ownedContentDeletionLedgerUUID(4),
+            at: Date(timeIntervalSince1970: 102)
+          )
+        }
+      }
+      let retained = try await reopened.records()
+      XCTAssertEqual(retained, [unknown])
+      XCTAssertEqual(try Data(contentsOf: location.file), archive)
+    }
+  }
+
+  func testSignedInvalidThreadOwnerSnapshotsFailClosedWithoutRewritingArchive() async throws {
+    let location = try makeOwnedContentDeletionLedgerLocation()
+    defer { try? FileManager.default.removeItem(at: location.directory) }
+    let target = try ownedContentDeletionLedgerTarget(
+      objectID: 102, floor: 2, userID: 8, threadOwnerID: 7
+    )
+    let ledger = FileOwnedContentDeletionLedger(
+      fileURL: location.file,
+      testingKey: ownedContentDeletionLedgerTestingKey
+    )
+    _ = try await ledger.prepare(
+      target: target,
+      accountID: 7,
+      sessionRevision: ownedContentDeletionLedgerUUID(1),
+      operationID: ownedContentDeletionLedgerUUID(2),
+      at: Date(timeIntervalSince1970: 100)
+    )
+    let originalArchive = try ownedContentDeletionLedgerJSONObject(at: location.file)
+    let mutations: [(inout [String: Any]) -> Void] = [
+      { $0["threadOwnerID"] = NSNull() },
+      { $0["threadOwnerID"] = 0 },
+      { $0["threadOwnerID"] = -1 },
+      { $0["threadOwnerID"] = 8 }, // Cannot masquerade as deleting one's own post.
+      { $0["threadOwnerID"] = 9 }, // Does not match the authenticated record's actor.
+      { $0["threadOwnerID"] = "7" },
+      { $0.removeValue(forKey: "threadOwnerID") },
+      { $0["kind"] = "topic"; $0["floor"] = 1 },
+      { $0["floor"] = 1 },
+      { $0["authority"] = "moderator" },
+      { $0.removeValue(forKey: "authorID") },
+    ]
+    for mutate in mutations {
+      var archive = originalArchive
+      var records = try XCTUnwrap(archive["records"] as? [[String: Any]])
+      var snapshot = try XCTUnwrap(records[0]["targetSnapshot"] as? [String: Any])
+      mutate(&snapshot)
+      records[0]["targetSnapshot"] = snapshot
+      archive["records"] = records
+      let payload = try JSONSerialization.data(withJSONObject: archive, options: [.sortedKeys])
+      // A valid MAC is deliberate: semantic and canonical validation must also hold.
+      let invalidArchive = try ownedContentDeletionLedgerEnvelope(canonicalPayload: payload)
+      try invalidArchive.write(to: location.file)
+      let reopened = FileOwnedContentDeletionLedger(
+        fileURL: location.file,
+        testingKey: ownedContentDeletionLedgerTestingKey
+      )
+      await assertOwnedContentDeletionLedgerError(.corruptedArchive) {
+        try await reopened.records()
+      }
+      await assertPrepareDoesNotOverwrite(
+        expectedError: .corruptedArchive,
+        originalData: invalidArchive,
+        location: location,
+        ledger: reopened
+      )
+    }
+  }
+
+  func testChangingDeletionAuthorityWithoutAuthenticatingPayloadIsRejected() async throws {
+    let location = try makeOwnedContentDeletionLedgerLocation()
+    defer { try? FileManager.default.removeItem(at: location.directory) }
+    let target = try ownedContentDeletionLedgerTarget(objectID: 102, floor: 2)
+    let ledger = FileOwnedContentDeletionLedger(
+      fileURL: location.file,
+      testingKey: ownedContentDeletionLedgerTestingKey
+    )
+    _ = try await ledger.prepare(
+      target: target,
+      accountID: 7,
+      sessionRevision: ownedContentDeletionLedgerUUID(1),
+      operationID: ownedContentDeletionLedgerUUID(2),
+      at: Date(timeIntervalSince1970: 100)
+    )
+    let originalEnvelope = try ownedContentDeletionLedgerDecodedEnvelope(at: location.file)
+    var archive = try ownedContentDeletionLedgerJSONObject(at: location.file)
+    var records = try XCTUnwrap(archive["records"] as? [[String: Any]])
+    var snapshot = try XCTUnwrap(records[0]["targetSnapshot"] as? [String: Any])
+    snapshot["authorID"] = 8
+    snapshot["threadOwnerID"] = 7
+    records[0]["targetSnapshot"] = snapshot
+    archive["records"] = records
+    let payload = try JSONSerialization.data(withJSONObject: archive, options: [.sortedKeys])
+    let tamperedArchive = try ownedContentDeletionLedgerEncodeEnvelope(
+      .init(
+        schemaVersion: 1,
+        canonicalPayload: payload,
+        authenticationCode: originalEnvelope.authenticationCode
+      )
+    )
+    try tamperedArchive.write(to: location.file)
+    let reopened = FileOwnedContentDeletionLedger(
+      fileURL: location.file,
+      testingKey: ownedContentDeletionLedgerTestingKey
+    )
+    await assertOwnedContentDeletionLedgerError(.authenticationFailed) {
+      try await reopened.records()
+    }
+    await assertPrepareDoesNotOverwrite(
+      expectedError: .authenticationFailed,
+      originalData: tamperedArchive,
+      location: location,
+      ledger: reopened
+    )
+  }
+
   func testFileLedgerRoundTripsPendingUnknownAndAcceptedRecords() async throws {
     let location = try makeOwnedContentDeletionLedgerLocation()
     defer { try? FileManager.default.removeItem(at: location.directory) }
@@ -1179,7 +1432,8 @@ private func ownedContentDeletionLedgerTarget(
   forumName: String = "swift",
   objectID: Int64,
   floor: Int,
-  userID: Int64 = 7
+  userID: Int64 = 7,
+  threadOwnerID: Int64? = nil
 ) throws -> OwnedContentDeletionTarget {
   try XCTUnwrap(
     OwnedContentDeletionTarget(
@@ -1189,7 +1443,8 @@ private func ownedContentDeletionLedgerTarget(
       threadID: 100,
       objectID: objectID,
       authorID: userID,
-      floor: floor
+      floor: floor,
+      threadOwnerID: threadOwnerID
     )
   )
 }

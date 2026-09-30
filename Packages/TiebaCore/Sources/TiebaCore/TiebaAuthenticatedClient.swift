@@ -438,6 +438,20 @@ private struct TiebaOwnedContentDeletionResourceKey: Hashable, Sendable {
   let forumID: Int64
   let threadID: Int64
   let target: TiebaOwnedContentDeletionTarget
+
+  init(userID: Int64, forumID: Int64, threadID: Int64, target: TiebaOwnedContentDeletionTarget) {
+    self.userID = userID
+    self.forumID = forumID
+    self.threadID = threadID
+    // Ownership mode and mutable metadata must not create a new deletion resource.
+    // A prior unknown/accepted result locks this actor's target under either mode.
+    switch target {
+    case .thread, .post:
+      self.target = target
+    case .postInOwnedThread(let postID, _, _):
+      self.target = .post(postID: postID)
+    }
+  }
 }
 
 private struct TiebaOwnedContentDeletionIdentity:
@@ -447,12 +461,18 @@ private struct TiebaOwnedContentDeletionIdentity:
   private let stoken: String
   private let cookieName: TiebaBDUSSCookieName
   let forumName: String
+  let target: TiebaOwnedContentDeletionTarget
 
-  init(credential: TiebaSessionCredential, forumName: String) {
+  init(
+    credential: TiebaSessionCredential,
+    forumName: String,
+    target: TiebaOwnedContentDeletionTarget
+  ) {
     bduss = credential.bduss
     stoken = credential.stoken
     cookieName = credential.bdussCookieName
     self.forumName = forumName
+    self.target = target
   }
 
   var description: String { "TiebaOwnedContentDeletionIdentity(redacted)" }
@@ -2818,6 +2838,7 @@ public actor TiebaAuthenticatedClient {
     target: TiebaOwnedContentDeletionTarget
   ) async throws -> TiebaOwnedContentDeletionReceipt {
     try Task.checkCancellation()
+    try target.validate(expectedUserID: expectedUserID)
     let forumName = try requestFactory.normalizedForumName(forumName)
     let resourceKey = TiebaOwnedContentDeletionResourceKey(
       userID: expectedUserID,
@@ -2828,6 +2849,9 @@ public actor TiebaAuthenticatedClient {
     if let terminal = ownedContentDeletionTerminals[resourceKey] {
       switch terminal {
       case .accepted(let receipt):
+        guard receipt.target == target else {
+          throw TiebaClientError.ownedContentDeletionWriteConflict
+        }
         return receipt
       case .outcomeUnknown:
         throw TiebaClientError.ownedContentDeletionOutcomeUnknown
@@ -2836,7 +2860,8 @@ public actor TiebaAuthenticatedClient {
 
     let identity = TiebaOwnedContentDeletionIdentity(
       credential: credential,
-      forumName: forumName
+      forumName: forumName,
+      target: target
     )
     if let flight = ownedContentDeletionFlights[resourceKey] {
       guard flight.identity == identity else {
@@ -2958,7 +2983,7 @@ public actor TiebaAuthenticatedClient {
     switch target {
     case .thread(let firstPostID):
       targetPostID = firstPostID
-    case .post(let postID):
+    case .post(let postID), .postInOwnedThread(let postID, _, _):
       targetPostID = postID
     }
     let pageRequest = try requestFactory.agreementPage(

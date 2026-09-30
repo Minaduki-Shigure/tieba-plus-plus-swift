@@ -59,6 +59,7 @@ extension TiebaAuthenticatedDecoder {
     }
 
     let targetPostID: Int64
+    let expectedPostAuthorID: Int64
     switch target {
     case .thread(let firstPostID):
       guard
@@ -72,11 +73,47 @@ extension TiebaAuthenticatedDecoder {
         throw TiebaClientError.invalidAuthenticatedResponse
       }
       targetPostID = firstPostID
+      expectedPostAuthorID = expectedUserID
     case .post(let postID):
       guard postID > 0, postID != response.data.thread.firstPostID else {
         throw TiebaClientError.invalidAuthenticatedResponse
       }
       targetPostID = postID
+      expectedPostAuthorID = expectedUserID
+    case .postInOwnedThread(let postID, let postAuthorID, let floor):
+      guard
+        postID > 0,
+        postAuthorID > 0,
+        postAuthorID != expectedUserID,
+        floor > 1,
+        response.data.thread.firstPostID > 0,
+        postID != response.data.thread.firstPostID,
+        resolvedAuthorID(
+          declared: response.data.thread.authorID,
+          embedded: response.data.thread.hasAuthor ? response.data.thread.author.id : 0
+        ) == expectedUserID
+      else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+      var firstFloorPosts = posts.filter {
+        $0.id == response.data.thread.firstPostID || $0.floor == 1
+      }
+      if response.data.hasFirstFloorPost {
+        firstFloorPosts.append(response.data.firstFloorPost)
+      }
+      guard firstFloorPosts.allSatisfy({ firstPost in
+        firstPost.id == response.data.thread.firstPostID
+          && firstPost.floor == 1
+          && (firstPost.tid == 0 || firstPost.tid == threadID)
+          && resolvedAuthorID(
+            declared: firstPost.authorID,
+            embedded: firstPost.hasAuthor ? firstPost.author.id : 0
+          ) == expectedUserID
+      }) else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+      targetPostID = postID
+      expectedPostAuthorID = postAuthorID
     }
 
     let matches = posts.filter { $0.id == targetPostID }
@@ -88,7 +125,7 @@ extension TiebaAuthenticatedDecoder {
       resolvedAuthorID(
         declared: post.authorID,
         embedded: post.hasAuthor ? post.author.id : 0
-      ) == expectedUserID
+      ) == expectedPostAuthorID
     else {
       throw TiebaClientError.invalidAuthenticatedResponse
     }
@@ -99,6 +136,10 @@ extension TiebaAuthenticatedDecoder {
       }
     case .post:
       guard post.floor > 1 else {
+        throw TiebaClientError.invalidAuthenticatedResponse
+      }
+    case .postInOwnedThread(_, _, let floor):
+      guard Int(post.floor) == floor else {
         throw TiebaClientError.invalidAuthenticatedResponse
       }
     }

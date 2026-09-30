@@ -51,7 +51,9 @@ struct PendingOwnedContentDeletion: Equatable, Sendable {
     case .topic:
       "将使用当前贴吧账户永久删除你发布的主题；成功后整个帖子将无法继续浏览。此操作无法撤销。"
     case .post:
-      "将永久删除你发布的第 \(target.floor) 楼及其楼中楼回复。此操作无法撤销。"
+      target.threadOwnerID == nil
+        ? "将永久删除你发布的第 \(target.floor) 楼及其楼中楼回复。此操作无法撤销。"
+        : "将以楼主身份永久删除自己主题中他人发布的第 \(target.floor) 楼及其楼中楼回复。此操作无法撤销。"
     }
   }
 }
@@ -186,13 +188,13 @@ final class OwnedContentDeletionStore {
       )
     }
     guard
-      pending.target.authorID == pending.lease.userID,
+      pending.target.deletionAccountID == pending.lease.userID,
       let resourceKey = OwnedContentDeletionLedgerKey(
         userID: pending.lease.userID,
         target: pending.target
       )
     else {
-      throw OwnedContentDeletionError.unavailable("删除目标不属于当前账户。")
+      throw OwnedContentDeletionError.unavailable("当前账户不具有此目标的删除身份。")
     }
     let operationKey = OperationKey(lease: pending.lease, target: pending.target)
     if let terminal = terminals[resourceKey] {
@@ -294,7 +296,7 @@ final class OwnedContentDeletionStore {
       return
     }
     let lease = AccountSessionLease(session)
-    guard session.id == entry.target.authorID, session.credentials != nil else {
+    guard session.id == entry.target.deletionAccountID, session.credentials != nil else {
       entry.setState(.unavailable)
       return
     }
@@ -738,6 +740,7 @@ final class OwnedContentDeletionStore {
 struct OwnedContentDeletionMenuSlot: View {
   let store: OwnedContentDeletionStore?
   let target: OwnedContentDeletionTarget?
+  var threadOwnerTarget: OwnedContentDeletionTarget? = nil
   let requestDeletion: (PendingOwnedContentDeletion) -> Void
 
   @ViewBuilder
@@ -745,6 +748,13 @@ struct OwnedContentDeletionMenuSlot: View {
     if let store, let target {
       OwnedContentDeletionObservedMenuItem(
         entry: store.entry(for: target),
+        store: store,
+        requestDeletion: requestDeletion
+      )
+    }
+    if let store, let threadOwnerTarget {
+      OwnedContentDeletionObservedMenuItem(
+        entry: store.entry(for: threadOwnerTarget),
         store: store,
         requestDeletion: requestDeletion
       )
@@ -792,7 +802,10 @@ private struct OwnedContentDeletionObservedMenuItem: View {
   private var actionTitle: String {
     switch entry.target.kind {
     case .topic: "删除主题"
-    case .post: "删除第 \(entry.target.floor) 楼"
+    case .post:
+      entry.target.threadOwnerID == nil
+        ? "删除第 \(entry.target.floor) 楼"
+        : "作为楼主删除第 \(entry.target.floor) 楼"
     }
   }
 }

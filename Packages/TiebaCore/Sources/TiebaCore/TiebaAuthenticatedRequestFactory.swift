@@ -1859,6 +1859,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     tbs: String
   ) throws -> URLRequest {
     try validate(credential)
+    try target.validate(expectedUserID: expectedUserID)
     guard expectedUserID > 0 else {
       throw TiebaClientError.invalidArgument("Expected user ID must be positive.")
     }
@@ -1897,6 +1898,16 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
         ("src", "1"),
         ("is_vipdel", "0"),
         ("delete_my_post", "1"),
+        ("tbs", tbs),
+      ])
+    case .postInOwnedThread(let postID, _, _):
+      path = "/c/c/bawu/delpost"
+      fields.append(contentsOf: [
+        ("pid", String(postID)),
+        ("isfloor", "0"),
+        ("src", "1"),
+        ("is_vipdel", "1"),
+        ("delete_my_post", "0"),
         ("tbs", tbs),
       ])
     }

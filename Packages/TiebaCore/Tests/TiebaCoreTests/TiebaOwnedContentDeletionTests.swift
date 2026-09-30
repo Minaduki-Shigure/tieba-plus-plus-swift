@@ -93,6 +93,205 @@ final class TiebaOwnedContentDeletionTests: XCTestCase, @unchecked Sendable {
     XCTAssertNil(fields["stoken"])
   }
 
+  func testThreadOwnerDeletionUsesTheOrdinaryPostManagementContract() throws {
+    let request = try factory().deleteOwnedContent(
+      credential: credential().bdussCredential,
+      expectedUserID: userID,
+      forumID: forumID,
+      forumName: forumName,
+      threadID: threadID,
+      target: managedPostTarget,
+      tbs: tbs
+    )
+    let fields = try formFields(request)
+
+    assertCommonWriteRequest(request, path: "/c/c/bawu/delpost")
+    XCTAssertEqual(Set(fields.keys), [
+      "BDUSS", "_client_version", "delete_my_post", "fid", "is_vipdel", "isfloor",
+      "pid", "sign", "src", "tbs", "word", "z",
+    ])
+    XCTAssertEqual(fields["fid"], String(forumID))
+    XCTAssertEqual(fields["word"], forumName)
+    XCTAssertEqual(fields["z"], String(threadID))
+    XCTAssertEqual(fields["pid"], String(postID))
+    XCTAssertEqual(fields["isfloor"], "0")
+    XCTAssertEqual(fields["src"], "1")
+    XCTAssertEqual(fields["is_vipdel"], "1")
+    XCTAssertEqual(fields["delete_my_post"], "0")
+    XCTAssertEqual(fields["tbs"], tbs)
+    XCTAssertEqual(fields["sign"], signature(for: fields))
+  }
+
+  func testInvalidThreadOwnerTargetsFailBeforeAnyNetworkRequest() async throws {
+    let targets: [TiebaOwnedContentDeletionTarget] = [
+      .postInOwnedThread(postID: 0, postAuthorID: userID + 1, floor: 2),
+      .postInOwnedThread(postID: -1, postAuthorID: userID + 1, floor: 2),
+      .postInOwnedThread(postID: postID, postAuthorID: 0, floor: 2),
+      .postInOwnedThread(postID: postID, postAuthorID: -1, floor: 2),
+      .postInOwnedThread(postID: postID, postAuthorID: userID, floor: 2),
+      .postInOwnedThread(postID: postID, postAuthorID: userID + 1, floor: 1),
+      .postInOwnedThread(postID: postID, postAuthorID: userID + 1, floor: 0),
+      .postInOwnedThread(postID: postID, postAuthorID: userID + 1, floor: -1),
+    ]
+    let transport = OwnedContentDeletionTransport(steps: [])
+    let client = TiebaAuthenticatedClient(transport: transport)
+    for target in targets {
+      XCTAssertThrowsError(
+        try factory().deleteOwnedContent(
+          credential: credential().bdussCredential,
+          expectedUserID: userID,
+          forumID: forumID,
+          forumName: forumName,
+          threadID: threadID,
+          target: target,
+          tbs: tbs
+        )
+      )
+      await assertError(.invalidArgument("Invalid thread-owner deletion target.")) {
+        _ = try await self.deletePost(using: client, target: target)
+      }
+    }
+    let snapshot = await transport.snapshot()
+    XCTAssertTrue(snapshot.paths.isEmpty)
+  }
+
+  func testThreadOwnerPreflightBindsBothAuthorsAndTheExactOrdinaryFloor() throws {
+    let context = try deletionContext(managedPostResponse(), target: managedPostTarget)
+    XCTAssertEqual(context.userID, userID)
+    XCTAssertEqual(context.target, managedPostTarget)
+    XCTAssertEqual(context.tbs, tbs)
+    // A located page may omit the first floor. In that case, verified thread metadata
+    // provides authority; if the first floor is present it must agree with that metadata.
+    var noFirstFloor = managedPostResponse()
+    noFirstFloor.data.clearFirstFloorPost()
+    XCTAssertNoThrow(try deletionContext(noFirstFloor, target: managedPostTarget))
+    // Adding a management mode must not broaden the existing self-deletion contract.
+    assertInvalidPreflight(managedPostResponse(), target: .post(postID: postID))
+
+    for (_, response) in invalidManagedPostResponses() {
+      assertInvalidPreflight(response, target: managedPostTarget)
+    }
+    assertInvalidPreflight(
+      managedPostResponse(),
+      target: .postInOwnedThread(postID: firstPostID, postAuthorID: userID + 1, floor: 2)
+    )
+    assertInvalidPreflight(
+      managedPostResponse(),
+      target: .postInOwnedThread(postID: postID, postAuthorID: userID + 1, floor: 3)
+    )
+  }
+
+  func testUnverifiedThreadOwnerContextNeverDispatchesDeletion() async throws {
+    for (name, response) in invalidManagedPostResponses() {
+      let transport = OwnedContentDeletionTransport(steps: [
+        .response(try response.serializedData())
+      ])
+      let client = TiebaAuthenticatedClient(transport: transport)
+      await assertError(.invalidAuthenticatedResponse) {
+        _ = try await self.deletePost(using: client, target: self.managedPostTarget)
+      }
+      let snapshot = await transport.snapshot()
+      XCTAssertEqual(snapshot.paths, ["/c/f/pb/page"], name)
+    }
+  }
+
+  func testThreadOwnerDeletionReturnsAnExactReceiptAndDoesNotReplayAcceptedTargets()
+    async throws
+  {
+    let transport = OwnedContentDeletionTransport(steps: [
+      .response(try managedPostResponse().serializedData()),
+      .response(Data(#"{"error_code":0}"#.utf8)),
+    ])
+    let client = TiebaAuthenticatedClient(transport: transport)
+    let receipt = try await deletePost(using: client, target: managedPostTarget)
+    XCTAssertEqual(receipt.userID, userID)
+    XCTAssertEqual(receipt.forumID, forumID)
+    XCTAssertEqual(receipt.threadID, threadID)
+    XCTAssertEqual(receipt.target, managedPostTarget)
+    let repeated = try await deletePost(using: client, target: managedPostTarget)
+    XCTAssertEqual(repeated, receipt)
+
+    for target in conflictingManagedPostTargets {
+      await assertError(.ownedContentDeletionWriteConflict) {
+        _ = try await self.deletePost(using: client, target: target)
+      }
+    }
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.paths, ["/c/f/pb/page", "/c/c/bawu/delpost"])
+    let write = try XCTUnwrap(snapshot.requests.last)
+    let fields = try formFields(write)
+    XCTAssertEqual(fields["pid"], String(postID))
+    XCTAssertEqual(fields["is_vipdel"], "1")
+    XCTAssertEqual(fields["delete_my_post"], "0")
+  }
+
+  func testThreadOwnerConcurrentMetadataConflictsCannotJoinOrReplayTheWrite() async throws {
+    let transport = OwnedContentDeletionTransport(
+      steps: [
+        .response(try managedPostResponse().serializedData()),
+        .response(Data(#"{"error_code":0}"#.utf8)),
+      ],
+      blockedRequestIndex: 1
+    )
+    let client = TiebaAuthenticatedClient(transport: transport)
+    let first = Task { try await self.deletePost(using: client, target: self.managedPostTarget) }
+    guard await transport.waitUntilRequestCount(2) else {
+      await transport.releaseBlockedRequest()
+      first.cancel()
+      _ = await first.result
+      return XCTFail("Thread-owner deletion write did not dispatch")
+    }
+    for target in conflictingManagedPostTargets {
+      await assertError(.ownedContentDeletionWriteConflict) {
+        _ = try await self.deletePost(using: client, target: target)
+      }
+    }
+    let equivalent = Task {
+      try await self.deletePost(using: client, target: self.managedPostTarget)
+    }
+    await transport.releaseBlockedRequest()
+    let receipt = try await first.value
+    let repeated = try await equivalent.value
+    XCTAssertEqual(receipt, repeated)
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.paths, ["/c/f/pb/page", "/c/c/bawu/delpost"])
+  }
+
+  func testUnknownDeletionLocksTheSamePostAcrossOwnershipModesAndMetadata() async throws {
+    for initialTarget in [managedPostTarget, .post(postID: postID)] {
+      let response = initialTarget == managedPostTarget ? managedPostResponse() : pageResponse()
+      let transport = OwnedContentDeletionTransport(steps: [
+        .response(try response.serializedData()),
+        .failure(.transportFailure),
+      ])
+      let client = TiebaAuthenticatedClient(transport: transport)
+      await assertError(.ownedContentDeletionOutcomeUnknown) {
+        _ = try await self.deletePost(using: client, target: initialTarget)
+      }
+      for target in [managedPostTarget] + conflictingManagedPostTargets {
+        await assertError(.ownedContentDeletionOutcomeUnknown) {
+          _ = try await self.deletePost(using: client, target: target)
+        }
+      }
+      let snapshot = await transport.snapshot()
+      XCTAssertEqual(snapshot.paths, ["/c/f/pb/page", "/c/c/bawu/delpost"])
+    }
+  }
+
+  func testAcceptedSelfDeletionCannotBeReplayedAsThreadOwnerDeletion() async throws {
+    let transport = OwnedContentDeletionTransport(steps: [
+      .response(try pageResponse().serializedData()),
+      .response(Data(#"{"error_code":0}"#.utf8)),
+    ])
+    let client = TiebaAuthenticatedClient(transport: transport)
+    _ = try await deletePost(using: client)
+    await assertError(.ownedContentDeletionWriteConflict) {
+      _ = try await self.deletePost(using: client, target: self.managedPostTarget)
+    }
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.paths, ["/c/f/pb/page", "/c/c/bawu/delpost"])
+  }
+
   func testRequestFactoryRejectsUnboundIdentifiersAndMalformedTBS() throws {
     let factory = factory()
     XCTAssertThrowsError(
@@ -439,6 +638,95 @@ final class TiebaOwnedContentDeletionTests: XCTestCase, @unchecked Sendable {
     return response
   }
 
+  private var managedPostTarget: TiebaOwnedContentDeletionTarget {
+    .postInOwnedThread(postID: postID, postAuthorID: userID + 1, floor: 2)
+  }
+
+  private var conflictingManagedPostTargets: [TiebaOwnedContentDeletionTarget] {
+    [
+      .post(postID: postID),
+      .postInOwnedThread(postID: postID, postAuthorID: userID + 2, floor: 2),
+      .postInOwnedThread(postID: postID, postAuthorID: userID + 1, floor: 3),
+    ]
+  }
+
+  private func managedPostResponse() -> PbPageResIdl {
+    var response = pageResponse()
+    response.data.postList[0].authorID = userID + 1
+    response.data.postList[0].author.id = userID + 1
+    return response
+  }
+
+  private func invalidManagedPostResponses() -> [(String, PbPageResIdl)] {
+    let mutations: [(String, (inout PbPageResIdl) -> Void)] = [
+      ("signed out", { $0.data.user.isLogin = 0 }),
+      ("different actor", { $0.data.user.id = self.userID + 1 }),
+      ("different forum", { $0.data.forum.id = self.forumID + 1 }),
+      ("different forum name", { $0.data.forum.name = "different" }),
+      ("different thread", { $0.data.thread.id = self.threadID + 1 }),
+      ("different thread forum", { $0.data.thread.fid = self.forumID + 1 }),
+      ("missing first post ID", { $0.data.thread.firstPostID = 0 }),
+      ("target is first post", { $0.data.thread.firstPostID = self.postID }),
+      ("different first floor ID", { $0.data.firstFloorPost.id = self.firstPostID + 2 }),
+      ("invalid first floor number", { $0.data.firstFloorPost.floor = 2 }),
+      ("different first floor thread", { $0.data.firstFloorPost.tid = self.threadID + 1 }),
+      ("different first floor author", {
+        $0.data.firstFloorPost.authorID = self.userID + 1
+        $0.data.firstFloorPost.author.id = self.userID + 1
+      }),
+      ("conflicting first floor author", { $0.data.firstFloorPost.author.id = self.userID + 1 }),
+      ("conflicting loaded first floor", {
+        var firstPost = $0.data.firstFloorPost
+        $0.data.clearFirstFloorPost()
+        firstPost.authorID = self.userID + 1
+        firstPost.author.id = self.userID + 1
+        $0.data.postList.append(firstPost)
+      }),
+      ("noncanonical loaded first floor ID", {
+        var firstPost = $0.data.firstFloorPost
+        $0.data.clearFirstFloorPost()
+        firstPost.id = self.firstPostID + 2
+        $0.data.postList.append(firstPost)
+      }),
+      ("noncanonical loaded first floor number", {
+        var firstPost = $0.data.firstFloorPost
+        $0.data.clearFirstFloorPost()
+        firstPost.floor = 2
+        $0.data.postList.append(firstPost)
+      }),
+      ("different thread author", {
+        $0.data.thread.authorID = self.userID + 1
+        $0.data.thread.author.id = self.userID + 1
+      }),
+      ("conflicting thread author", { $0.data.thread.author.id = self.userID + 1 }),
+      ("unknown thread author", {
+        $0.data.thread.authorID = 0
+        $0.data.thread.author.id = 0
+      }),
+      ("different post ID", { $0.data.postList[0].id = self.postID + 1 }),
+      ("different post thread", { $0.data.postList[0].tid = self.threadID + 1 }),
+      ("different post author", {
+        $0.data.postList[0].authorID = self.userID + 2
+        $0.data.postList[0].author.id = self.userID + 2
+      }),
+      ("conflicting post author", { $0.data.postList[0].author.id = self.userID + 2 }),
+      ("unknown post author", {
+        $0.data.postList[0].authorID = 0
+        $0.data.postList[0].author.id = 0
+      }),
+      ("different floor", { $0.data.postList[0].floor = 3 }),
+      ("first floor disguised as reply", { $0.data.postList[0].floor = 1 }),
+      ("duplicate target post", { $0.data.postList.append($0.data.postList[0]) }),
+      ("missing target post", { $0.data.postList = [] }),
+      ("invalid TBS", { $0.data.anti.tbs = "invalid" }),
+    ]
+    return mutations.map { name, mutation in
+      var response = managedPostResponse()
+      mutation(&response)
+      return (name, response)
+    }
+  }
+
   private func deletionContext(
     _ response: PbPageResIdl,
     target: TiebaOwnedContentDeletionTarget
@@ -536,7 +824,8 @@ final class TiebaOwnedContentDeletionTests: XCTestCase, @unchecked Sendable {
   }
 
   private func deletePost(
-    using client: TiebaAuthenticatedClient
+    using client: TiebaAuthenticatedClient,
+    target: TiebaOwnedContentDeletionTarget? = nil
   ) async throws -> TiebaOwnedContentDeletionReceipt {
     try await client.deleteOwnedContent(
       credential: credential(),
@@ -544,7 +833,7 @@ final class TiebaOwnedContentDeletionTests: XCTestCase, @unchecked Sendable {
       forumID: forumID,
       forumName: forumName,
       threadID: threadID,
-      target: .post(postID: postID)
+      target: target ?? .post(postID: postID)
     )
   }
 
@@ -571,12 +860,14 @@ private enum OwnedContentDeletionStep: Sendable {
 private struct OwnedContentDeletionTransportSnapshot: Sendable {
   let paths: [String]
   let maximumBodyBytes: [Int?]
+  let requests: [URLRequest]
 }
 
 private actor OwnedContentDeletionTransport: TiebaTransport {
   private var steps: [OwnedContentDeletionStep]
   private var paths = [String]()
   private var maximumBodyBytes = [Int?]()
+  private var requests = [URLRequest]()
   private let blockedRequestIndex: Int?
   private var blockedRequestContinuation: CheckedContinuation<Void, Never>?
   private var isBlockedRequestReleased = false
@@ -599,6 +890,7 @@ private actor OwnedContentDeletionTransport: TiebaTransport {
   ) async throws -> TiebaHTTPResponse {
     let requestIndex = paths.count
     paths.append(request.url?.path ?? "")
+    requests.append(request)
     self.maximumBodyBytes.append(maximumBodyBytes)
     if let blockedRequestIndex,
       requestIndex == blockedRequestIndex,
@@ -639,7 +931,8 @@ private actor OwnedContentDeletionTransport: TiebaTransport {
   func snapshot() -> OwnedContentDeletionTransportSnapshot {
     OwnedContentDeletionTransportSnapshot(
       paths: paths,
-      maximumBodyBytes: maximumBodyBytes
+      maximumBodyBytes: maximumBodyBytes,
+      requests: requests
     )
   }
 }

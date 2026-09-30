@@ -4,6 +4,55 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class OwnedContentDeletionTargetTests: XCTestCase {
+  func testThreadOwnerTargetKeepsTheOtherAuthorsIdentityAndSeparateDeletingAccount() throws {
+    let thread = deletionThread()
+    let reply = deletionPost(id: 102, threadID: thread.id, floor: 2, authorID: 8)
+    let own = try XCTUnwrap(OwnedContentDeletionTarget(thread: thread, post: reply))
+    let managed = try XCTUnwrap(
+      OwnedContentDeletionTarget(thread: thread, post: reply, asThreadOwner: true)
+    )
+
+    XCTAssertEqual(own.deletionAccountID, 8)
+    XCTAssertNil(own.threadOwnerID)
+    XCTAssertEqual(managed.deletionAccountID, 7)
+    XCTAssertEqual(managed.threadOwnerID, thread.authorID)
+    XCTAssertEqual(managed.authorID, reply.authorID)
+    XCTAssertEqual(managed.objectID, reply.id)
+    XCTAssertEqual(managed.floor, reply.floor)
+    XCTAssertNotEqual(own, managed)
+  }
+
+  func testThreadOwnerTargetRequiresResolvedVisibleTopicAndAnotherAuthorsOrdinaryFloor() {
+    let reply = deletionPost(id: 102, threadID: 10, floor: 2, authorID: 8)
+    for thread in [
+      deletionThread(visibility: .placeholder), deletionThread(authorID: 0),
+      deletionThread(firstPostID: 0), deletionThread(isServerHidden: true),
+    ] {
+      XCTAssertNil(OwnedContentDeletionTarget(thread: thread, post: reply, asThreadOwner: true))
+    }
+    for post in [
+      deletionPost(id: 101, threadID: 10, floor: 1, authorID: 7),
+      deletionPost(id: 102, threadID: 10, floor: 2, authorID: 7),
+      deletionPost(id: 101, threadID: 10, floor: 2, authorID: 8),
+      deletionPost(id: 102, threadID: 11, floor: 2, authorID: 8),
+      deletionPost(id: 102, threadID: 10, floor: 2, authorID: 8, visibility: .hidden),
+    ] {
+      XCTAssertNil(
+        OwnedContentDeletionTarget(thread: deletionThread(), post: post, asThreadOwner: true)
+      )
+    }
+    for ownerID: Int64 in [0, -1, 8] {
+      XCTAssertNil(OwnedContentDeletionTarget(
+        kind: .post, forumID: 42, forumName: "swift", threadID: 10,
+        objectID: 102, authorID: 8, floor: 2, threadOwnerID: ownerID
+      ))
+    }
+    XCTAssertNil(OwnedContentDeletionTarget(
+      kind: .topic, forumID: 42, forumName: "swift", threadID: 10,
+      objectID: 101, authorID: 8, floor: 1, threadOwnerID: 7
+    ))
+  }
+
   func testTopicAndOrdinaryPostTargetsRequireExactVisibleOwnershipMetadata() throws {
     let thread = deletionThread()
     let firstPost = deletionPost(id: 101, threadID: thread.id, floor: 1, authorID: 7)
@@ -104,6 +153,66 @@ final class OwnedContentDeletionTargetTests: XCTestCase {
 
 @MainActor
 final class OwnedContentDeletionStoreTests: XCTestCase {
+  func testThreadOwnerPermissionAndConfirmationStayBoundToInitiatingAccount() async throws {
+    let owner = deletionSession(revisionComponent: 50, userID: 7)
+    let target = deletionTarget(authorID: 8, threadOwnerID: owner.id)
+    let vault = OwnedContentDeletionVaultSpy(session: owner)
+    let service = OwnedContentDeletionServiceSpy()
+    let store = OwnedContentDeletionStore(
+      access: AccountAccess(vault: vault, service: service),
+      ledger: TransientOwnedContentDeletionLedger(), observesAccountSessionChanges: false
+    )
+    await store.reloadActiveSession()
+    let pending = try XCTUnwrap(store.pendingRequest(for: target))
+    XCTAssertEqual(pending.lease, AccountSessionLease(owner))
+    XCTAssertNil(store.pendingRequest(for: deletionTarget(authorID: 8)))
+
+    // Being the floor author does not authorize reuse of the old owner's intent.
+    await vault.replaceActive(with: deletionSession(revisionComponent: 51, userID: 8))
+    do {
+      _ = try await store.delete(pending)
+      XCTFail("An account switch must invalidate the confirmation")
+    } catch {}
+    let writes = await service.writeCount()
+    XCTAssertEqual(writes, 0)
+    await store.reloadActiveSession()
+    XCTAssertNil(store.pendingRequest(for: target))
+    XCTAssertNotNil(store.pendingRequest(for: deletionTarget(authorID: 8)))
+  }
+
+  func testThreadOwnerUnknownOutcomeSurvivesRestartAndCannotBeRecastAsOwnDeletion() async throws {
+    let owner = deletionSession(revisionComponent: 52, userID: 7)
+    let target = deletionTarget(authorID: 8, threadOwnerID: owner.id)
+    let vault = OwnedContentDeletionVaultSpy(session: owner)
+    let service = OwnedContentDeletionServiceSpy(behavior: .outcomeUnknown)
+    let ledger = TransientOwnedContentDeletionLedger()
+    let access = AccountAccess(vault: vault, service: service)
+    let store = OwnedContentDeletionStore(
+      access: access, ledger: ledger, observesAccountSessionChanges: false
+    )
+    await store.reloadActiveSession()
+    let pending = try XCTUnwrap(store.pendingRequest(for: target))
+    do { _ = try await store.delete(pending); XCTFail("Expected unknown result") } catch {}
+
+    let restored = OwnedContentDeletionStore(
+      access: access, ledger: ledger, observesAccountSessionChanges: false
+    )
+    await restored.reloadActiveSession()
+    XCTAssertNil(restored.pendingRequest(for: target))
+    let recast = deletionTarget(authorID: owner.id)
+    XCTAssertNil(restored.pendingRequest(for: recast))
+    for retryTarget in [target, recast] {
+      do {
+        _ = try await restored.delete(
+          PendingOwnedContentDeletion(target: retryTarget, lease: AccountSessionLease(owner))
+        )
+        XCTFail("Stable content identity must remain locked")
+      } catch {}
+    }
+    let writes = await service.writeCount()
+    XCTAssertEqual(writes, 1)
+  }
+
   func testOnlyExactOwnerWithFullCredentialsGetsADeletionRequest() async throws {
     let session = deletionSession(revisionComponent: 1, userID: 7)
     let target = deletionTarget(authorID: session.id)
@@ -701,6 +810,49 @@ final class OwnedContentDeletionStoreTests: XCTestCase {
 
 @MainActor
 final class OwnedContentDeletionThreadViewModelTests: XCTestCase {
+  func testManagedFloorReceiptPreservesAuthorForRemovalAndRestoredStalePageTombstone() async throws {
+    let thread = deletionThread()
+    let removed = deletionPost(id: 102, threadID: thread.id, floor: 2, authorID: 8)
+    let retained = deletionPost(id: 103, threadID: thread.id, floor: 3, authorID: 9)
+    let target = try XCTUnwrap(
+      OwnedContentDeletionTarget(thread: thread, post: removed, asThreadOwner: true)
+    )
+    let session = deletionSession(revisionComponent: 53, userID: thread.authorID)
+    let ledger = TransientOwnedContentDeletionLedger()
+    let service = OwnedContentDeletionServiceSpy()
+    let access = AccountAccess(vault: OwnedContentDeletionVaultSpy(session: session), service: service)
+    let store = OwnedContentDeletionStore(
+      access: access, ledger: ledger, observesAccountSessionChanges: false
+    )
+    await store.reloadActiveSession()
+    let pending = try XCTUnwrap(store.pendingRequest(for: target))
+    let receipt = try await store.delete(pending)
+    XCTAssertEqual(receipt.target.authorID, removed.authorID)
+    XCTAssertEqual(receipt.accountID, thread.authorID)
+    let restored = OwnedContentDeletionStore(
+      access: access, ledger: ledger, observesAccountSessionChanges: false
+    )
+    await restored.reloadActiveSession()
+    let restoredTargets = await restored.restoredTargets(threadID: thread.id)
+    XCTAssertEqual(restoredTargets.accepted, [target])
+    let page = PostPageData(
+      thread: thread, posts: [removed, retained], currentPage: 1, hasMore: false,
+      firstPost: deletionPost(id: 101, threadID: thread.id, floor: 1, authorID: 7)
+    )
+    let viewModel = ThreadViewModel(
+      thread: thread, service: OwnedContentDeletionBrowseService(pages: [page, page])
+    )
+    XCTAssertTrue(viewModel.stageAcceptedContentDeletion(try XCTUnwrap(restoredTargets.accepted.first)))
+    viewModel.loadIfNeeded()
+    await viewModel.waitForCurrentLoad()
+    XCTAssertEqual(viewModel.posts.map(\.id), [retained.id])
+    viewModel.reload()
+    await viewModel.waitForCurrentLoad()
+    XCTAssertEqual(viewModel.posts.map(\.id), [retained.id])
+    let writes = await service.writeCount()
+    XCTAssertEqual(writes, 1)
+  }
+
   func testAcceptedPostDeletionRemovesOnlyExactPostAndRebuildsDerivedIndexes() async throws {
     let thread = deletionThread()
     let firstPost = deletionPost(id: 101, threadID: thread.id, floor: 1, authorID: 7)
@@ -1442,7 +1594,10 @@ private func deletionSession(
 }
 
 private func deletionThread(
-  visibility: LocalContentVisibility = .visible
+  visibility: LocalContentVisibility = .visible,
+  authorID: Int64 = 7,
+  firstPostID: Int64 = 101,
+  isServerHidden: Bool = false
 ) -> BrowseThread {
   BrowseThread(
     id: 10,
@@ -1456,8 +1611,9 @@ private func deletionThread(
     createdAt: nil,
     lastReplyAt: nil,
     contents: [.text("first post")],
-    authorID: 7,
-    firstPostID: 101,
+    authorID: authorID,
+    firstPostID: firstPostID,
+    isServerHidden: isServerHidden,
     localVisibility: visibility
   )
 }
@@ -1484,7 +1640,9 @@ private func deletionPost(
   )
 }
 
-private func deletionTarget(authorID: Int64) -> OwnedContentDeletionTarget {
+private func deletionTarget(
+  authorID: Int64, threadOwnerID: Int64? = nil
+) -> OwnedContentDeletionTarget {
   OwnedContentDeletionTarget(
     kind: .post,
     forumID: 42,
@@ -1492,7 +1650,8 @@ private func deletionTarget(authorID: Int64) -> OwnedContentDeletionTarget {
     threadID: 10,
     objectID: 102,
     authorID: authorID,
-    floor: 2
+    floor: 2,
+    threadOwnerID: threadOwnerID
   )!
 }
 

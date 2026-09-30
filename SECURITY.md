@@ -619,7 +619,8 @@ account-page one-click entries only read the authoritative catalog until the
 same foreground confirmation is accepted. Automatic, scheduled, and background
 check-in are deliberately unsupported. `disagree` or downvote, voice/video
 creation, editing, and native reporting remain unsupported. The bounded
-static-image composers and owner-only topic/ordinary-floor deletion are separate
+static-image composers, self-authored topic/ordinary-floor deletion, and
+thread-owner deletion of other authors' ordinary floors are separate
 implemented workflows; no other authenticated write may be inferred from the
 approval, reply, or new-topic endpoints.
 
@@ -1951,18 +1952,27 @@ uncertain failures, cancellation, logout, account switching, and same-UID
 credential rotation before this leaves validation builds.
 
 Deletion of self-authored content is limited to loaded topics and ordinary
-floors. The App may use a visible author UID only to decide whether to present a
+floors. A topic author can additionally request deletion of another author's
+ordinary floor in that same topic. The App may use visible author UIDs only to decide whether to present a
 candidate action; Core must independently probe the exact authenticated PB page
 and bind the active UID, forum ID and canonical name, thread ID, target post ID,
 floor kind, target author UID, and a fresh valid `tbs` before dispatch. Topic
 deletion additionally requires both the thread author and first-floor author to
-match the active UID. Moderator deletion flags are always disabled.
+match the active UID. The separate thread-owner target must retain the actual
+floor author and floor number; fresh PB metadata must independently prove the
+active UID owns the topic, the target matches that author and floor, and its PID
+is not the positive canonical first-floor PID. When first-floor data is present,
+its identity must also match the canonical PID, floor one, and the same topic
+owner. Missing, contradictory, cross-thread, or duplicate target metadata fails
+closed. This does not authorize forum-moderator deletion or nested-reply deletion.
 
 After a separate destructive confirmation, Core may send at most one signed
 HTTPS form request to the exact `tiebac.baidu.com/c/c/bawu/delthread` or
 `/c/c/bawu/delpost` path. The write contains BDUSS, fixed client version,
 forum/thread/target IDs, canonical forum name, fresh `tbs`, and only the fixed
-self-deletion flags; it contains no STOKEN, device identifier, advertising
+self-deletion flags, or the explicitly verified thread-owner ordinary-floor
+flags `isfloor=0`, `src=1`, `is_vipdel=1`, `delete_my_post=0`;
+it contains no STOKEN, device identifier, advertising
 identifier, stored cookie jar, or Authorization header. A complete BDUSS/STOKEN
 session is nevertheless required at the App boundary to bind the account lease.
 Equivalent in-flight requests share one operation and different targets for the
@@ -1976,12 +1986,17 @@ resolves the conflicting `isfloor` and `src` contracts in the compared client.
 Before any deletion service call, the App writes a `dispatchPending` record to a
 separate HMAC-authenticated archive. Its stable key is the deleting UID, forum
 ID, thread ID, target kind, and target object ID; canonical forum name, floor,
-author, originating session revision, and operation UUID remain strict audit
+author, optional distinct thread-owner UID, originating session revision, and operation UUID remain strict audit
 metadata. The file is capped at 4,096 records and 4 MiB, never evicts a deletion
 record, serializes independent repository instances through a persistent
 same-directory lock, and uses staged write, file sync, atomic rename, and parent-
 directory sync. A write error after rename is treated as potentially published
 and resolved by operation-ID readback rather than assumed absent.
+The optional thread-owner UID is omitted for old author-only records, preserving
+their schema-1 canonical payload and signature bytes. Explicit null, invalid or
+self-matching owner IDs, a topic target with a management owner, and unexpected
+keys are rejected. Permission mode and author metadata never enter the stable
+resource key in App or Core, so changing either cannot evade terminal locks.
 
 On launch, `dispatchPending` restores as outcome-unknown; accepted and explicit
 unknown phases retain their terminal meaning. These records are not removed by
