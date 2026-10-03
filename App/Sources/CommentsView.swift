@@ -402,8 +402,7 @@ struct CommentsView: View {
           .frame(maxWidth: .infinity, alignment: .leading)
           .padding(.horizontal, 14)
           .padding(.vertical, 9)
-          .appSurfaceBackground(.card)
-          .background(Color(uiColor: .secondarySystemBackground))
+          .appSurfaceBackground(.card, fallback: Color(uiColor: .secondarySystemBackground))
           .accessibilityAddTraits(.isHeader)
           .accessibilityIdentifier("comments-count-header")
 

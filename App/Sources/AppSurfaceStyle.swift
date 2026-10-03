@@ -236,12 +236,15 @@ extension EnvironmentValues {
 
 private struct AppPageSurfaceModifier: ViewModifier {
   @Environment(\.appDarkSurfaceStyle) private var style
+  @Environment(\.wallpaperTheme) private var wallpaper
   @Environment(\.colorScheme) private var colorScheme
   let role: AppSurfaceRole
 
   @ViewBuilder
   func body(content: Content) -> some View {
-    if AppSurfacePolicy.isOLEDActive(style: style, colorScheme: colorScheme) {
+    if wallpaper != nil {
+      content.modifier(WallpaperPageCanvas())
+    } else if AppSurfacePolicy.isOLEDActive(style: style, colorScheme: colorScheme) {
       content.background {
         style.color(for: role).ignoresSafeArea()
       }
@@ -253,12 +256,17 @@ private struct AppPageSurfaceModifier: ViewModifier {
 
 private struct AppScrollableSurfaceModifier: ViewModifier {
   @Environment(\.appDarkSurfaceStyle) private var style
+  @Environment(\.wallpaperTheme) private var wallpaper
   @Environment(\.colorScheme) private var colorScheme
   let role: AppSurfaceRole
 
   @ViewBuilder
   func body(content: Content) -> some View {
-    if AppSurfacePolicy.isOLEDActive(style: style, colorScheme: colorScheme) {
+    if wallpaper != nil {
+      content
+        .scrollContentBackground(.hidden)
+        .modifier(WallpaperPageCanvas())
+    } else if AppSurfacePolicy.isOLEDActive(style: style, colorScheme: colorScheme) {
       content
         .scrollContentBackground(.hidden)
         .background {
@@ -272,12 +280,15 @@ private struct AppScrollableSurfaceModifier: ViewModifier {
 
 private struct AppListRowSurfaceModifier: ViewModifier {
   @Environment(\.appDarkSurfaceStyle) private var style
+  @Environment(\.wallpaperTheme) private var wallpaper
   @Environment(\.colorScheme) private var colorScheme
   let role: AppSurfaceRole
 
   @ViewBuilder
   func body(content: Content) -> some View {
-    if AppSurfacePolicy.isOLEDActive(style: style, colorScheme: colorScheme) {
+    if let wallpaper {
+      content.listRowBackground(WallpaperSemanticSurface(settings: wallpaper.settings, role: role))
+    } else if AppSurfacePolicy.isOLEDActive(style: style, colorScheme: colorScheme) {
       content.listRowBackground(style.color(for: role))
     } else {
       content
@@ -287,13 +298,19 @@ private struct AppListRowSurfaceModifier: ViewModifier {
 
 private struct AppSurfaceBackgroundModifier: ViewModifier {
   @Environment(\.appDarkSurfaceStyle) private var style
+  @Environment(\.wallpaperTheme) private var wallpaper
   @Environment(\.colorScheme) private var colorScheme
   let role: AppSurfaceRole
+  let fallback: Color?
 
   @ViewBuilder
   func body(content: Content) -> some View {
-    if AppSurfacePolicy.isOLEDActive(style: style, colorScheme: colorScheme) {
+    if let wallpaper {
+      content.background(WallpaperSemanticSurface(settings: wallpaper.settings, role: role))
+    } else if AppSurfacePolicy.isOLEDActive(style: style, colorScheme: colorScheme) {
       content.background(style.color(for: role))
+    } else if let fallback {
+      content.background(fallback)
     } else {
       content
     }
@@ -302,11 +319,14 @@ private struct AppSurfaceBackgroundModifier: ViewModifier {
 
 private struct AppRegularMaterialSurfaceModifier: ViewModifier {
   @Environment(\.appDarkSurfaceStyle) private var style
+  @Environment(\.wallpaperTheme) private var wallpaper
   @Environment(\.colorScheme) private var colorScheme
 
   @ViewBuilder
   func body(content: Content) -> some View {
-    if AppSurfacePolicy.isOLEDActive(style: style, colorScheme: colorScheme) {
+    if let wallpaper {
+      content.background(WallpaperSemanticSurface(settings: wallpaper.settings, role: .bar))
+    } else if AppSurfacePolicy.isOLEDActive(style: style, colorScheme: colorScheme) {
       content.background(style.color(for: .bar))
     } else {
       content.background(.regularMaterial)
@@ -316,11 +336,14 @@ private struct AppRegularMaterialSurfaceModifier: ViewModifier {
 
 private struct AppBarMaterialSurfaceModifier: ViewModifier {
   @Environment(\.appDarkSurfaceStyle) private var style
+  @Environment(\.wallpaperTheme) private var wallpaper
   @Environment(\.colorScheme) private var colorScheme
 
   @ViewBuilder
   func body(content: Content) -> some View {
-    if AppSurfacePolicy.isOLEDActive(style: style, colorScheme: colorScheme) {
+    if let wallpaper {
+      content.background(WallpaperSemanticSurface(settings: wallpaper.settings, role: .bar))
+    } else if AppSurfacePolicy.isOLEDActive(style: style, colorScheme: colorScheme) {
       content.background(style.color(for: .bar))
     } else {
       content.background(.bar)
@@ -330,11 +353,20 @@ private struct AppBarMaterialSurfaceModifier: ViewModifier {
 
 private struct AppNavigationSurfaceModifier: ViewModifier {
   @Environment(\.appDarkSurfaceStyle) private var style
+  @Environment(\.wallpaperTheme) private var wallpaper
   @Environment(\.colorScheme) private var colorScheme
 
   @ViewBuilder
   func body(content: Content) -> some View {
-    if AppSurfacePolicy.isOLEDActive(style: style, colorScheme: colorScheme) {
+    if let wallpaper {
+      content
+        .toolbarBackground(.hidden, for: .navigationBar, .tabBar)
+        .toolbarColorScheme(wallpaper.settings.appearance.colorScheme, for: .navigationBar, .tabBar)
+        .background {
+          WallpaperThemePreview(image: wallpaper.image, settings: wallpaper.settings)
+            .ignoresSafeArea()
+        }
+    } else if AppSurfacePolicy.isOLEDActive(style: style, colorScheme: colorScheme) {
       content
         .toolbarBackground(style.color(for: .bar), for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
@@ -357,8 +389,8 @@ extension View {
     modifier(AppListRowSurfaceModifier(role: role))
   }
 
-  func appSurfaceBackground(_ role: AppSurfaceRole) -> some View {
-    modifier(AppSurfaceBackgroundModifier(role: role))
+  func appSurfaceBackground(_ role: AppSurfaceRole, fallback: Color? = nil) -> some View {
+    modifier(AppSurfaceBackgroundModifier(role: role, fallback: fallback))
   }
 
   func appRegularMaterialSurface() -> some View {

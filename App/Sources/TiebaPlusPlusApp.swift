@@ -15,6 +15,7 @@ struct TiebaPlusPlusApp: App {
   @StateObject private var videoPlaybackController: VideoPlaybackController
   @StateObject private var followedForumsViewModel: FollowedForumsViewModel
   @StateObject private var followedForumCheckInStore: FollowedForumCheckInStore
+  @StateObject private var wallpaperTheme = WallpaperThemeController.shared
   @AppStorage(AppPreferenceKey.appearance)
   private var appearance = AppAppearance.system.rawValue
   @AppStorage(AppPreferenceKey.darkSurfaceStyle)
@@ -183,7 +184,15 @@ struct TiebaPlusPlusApp: App {
   }
 
   var body: some Scene {
-    let resolvedAccentColor = AppAccentColorSelection.resolved(accentColor).style
+    let wallpaperSnapshot = wallpaperTheme.snapshot
+    let wallpaperSeed = wallpaperSnapshot?.settings.accentRGB.flatMap(AppAccentColorSeed.init(rgb:))
+    let resolvedAccentColor = AppAccentColorStyle(
+      selection: wallpaperSeed.map(AppAccentColorSelection.custom)
+        ?? AppAccentColorSelection.resolved(accentColor),
+      usesWallpaperContrast: wallpaperSnapshot != nil
+    )
+    let resolvedAppearance = wallpaperSnapshot?.settings.appearance.colorScheme
+      ?? AppAppearance.resolved(appearance).colorScheme
     let resolvedDarkSurfaceStyle = AppDarkSurfaceStyle.resolved(darkSurfaceStyle)
     let resolvedContentMediaLoadPolicy = ContentMediaLoadPolicy.resolved(contentMediaLoadPolicy)
     let contentMediaLoadBehavior = ContentMediaLoadBehavior.resolved(
@@ -218,6 +227,8 @@ struct TiebaPlusPlusApp: App {
         .appTextSizeAdjustment(AppTextSizeAdjustment.resolved(textSizeAdjustment))
         .environment(\.appAccentColor, resolvedAccentColor)
         .environment(\.appDarkSurfaceStyle, resolvedDarkSurfaceStyle)
+        .environment(\.wallpaperTheme, wallpaperSnapshot)
+        .task { await wallpaperTheme.load() }
         .environment(\.contentFilterRepository, contentFilterRepository)
         .environment(
           \.contentMediaLoadPolicy,
@@ -265,7 +276,7 @@ struct TiebaPlusPlusApp: App {
         }
         .contentReportPresentation(contentReportCoordinator)
         .tint(resolvedAccentColor.color)
-        .preferredColorScheme(AppAppearance.resolved(appearance).colorScheme)
+        .preferredColorScheme(resolvedAppearance)
       #else
         RootView(
           service: service,
@@ -295,6 +306,8 @@ struct TiebaPlusPlusApp: App {
         .appTextSizeAdjustment(AppTextSizeAdjustment.resolved(textSizeAdjustment))
         .environment(\.appAccentColor, resolvedAccentColor)
         .environment(\.appDarkSurfaceStyle, resolvedDarkSurfaceStyle)
+        .environment(\.wallpaperTheme, wallpaperSnapshot)
+        .task { await wallpaperTheme.load() }
         .environment(\.contentFilterRepository, contentFilterRepository)
         .environment(
           \.contentMediaLoadPolicy,
@@ -342,7 +355,7 @@ struct TiebaPlusPlusApp: App {
         }
         .contentReportPresentation(contentReportCoordinator)
         .tint(resolvedAccentColor.color)
-        .preferredColorScheme(AppAppearance.resolved(appearance).colorScheme)
+        .preferredColorScheme(resolvedAppearance)
       #endif
     }
   }

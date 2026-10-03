@@ -47,6 +47,28 @@ and its verified metadata enters the public app source.
   [Core and iOS CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37119608002)
   passed, including account rotation, dispatch cancellation, delayed or unknown
   outcomes, repeated journal failures and recovery after a completed file rename.
+- **Unreleased transparent image themes:** Settings → 外观与布局 → 透明图片主题
+  offers local Photos import, drag/zoom cropping to the current window, blur and
+  opacity previews, light/dark reading colors, colors extracted from the image,
+  and a custom accent. Only Save enables the draft; Cancel preserves the installed
+  theme, and Restore Default returns to the user's existing appearance, OLED and
+  accent preferences. One bounded, preprocessed image is shared by semantic page,
+  list, floor and navigation/tab surfaces; scrolling performs no image decoding or
+  live blur. The original preferences, content identities, routes and media cache
+  keys are unchanged. High contrast and Reduce Transparency use opaque readable
+  surfaces. Wallpaper files live separately from disposable image caches.
+  Recommended wallpapers use anonymous bounded HTTPS downloads with an explicit
+  retry and local-photo fallback. The original catalog currently redirects to
+  HTTP, which is refused; the fallback is the same author's verified
+  [Pages repository catalog](https://github.com/HuanCheng65/huancheng65.github.io/blob/master/TiebaLite/wallpapers.json).
+  On 2026-10-03 its HTTPS static copy returned seven entries and the first image
+  returned HTTP 200; this does not establish availability of every image.
+  Geometry, draft races, durable-storage faults and native surface-rendering tests
+  are added, with a UI save/relaunch/reset flow using a generated image and the
+  real processor and repository. Apple-platform compilation and these iOS tests
+  require Actions; Photos authorization, iPad split view, accessibility and
+  physical-device memory/scroll behavior remain separate validation gates. The
+  parity estimate is unchanged.
 - **`v0.65.0-alpha.33` inline classic emoticons:** Post bodies, full nested replies,
   and inline reply previews display known classic faces inside the text line.
   Structured faces and exact `#(name)` text markers use the same compiled official

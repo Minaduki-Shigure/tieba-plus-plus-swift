@@ -520,17 +520,26 @@ struct AppAccentColorStyle: Equatable, Hashable, Sendable {
   let palette: AppAccentPalette
   let didFallback: Bool
 
-  init(selection: AppAccentColorSelection) {
+  init(selection: AppAccentColorSelection, usesWallpaperContrast: Bool = false) {
     self.selection = selection
+    let basePalette: AppAccentPalette
     switch selection {
     case .preset(let preset):
-      palette = preset.palette
+      basePalette = preset.palette
       didFallback = false
     case .custom(let seed):
       let result = AppAccentPalette.validatedCustomOrDefault(seed: seed)
-      palette = result.palette
+      basePalette = result.palette
       didFallback = result.didFallback
     }
+    palette = usesWallpaperContrast
+      ? AppAccentPalette(
+        light: basePalette.highContrastLight,
+        dark: basePalette.highContrastDark,
+        highContrastLight: basePalette.highContrastLight,
+        highContrastDark: basePalette.highContrastDark
+      )
+      : basePalette
   }
 
   var title: String { selection.title }
