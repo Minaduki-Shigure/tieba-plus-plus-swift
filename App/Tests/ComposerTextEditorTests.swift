@@ -105,7 +105,9 @@ final class ComposerTextEditorTests: XCTestCase {
   }
 
   func testExpandedCatalogTokensInsertWithoutChangingAdjacentComposedCharacters() throws {
-    let text = "👩🏽‍💻前选中e\u{301}后"
+    // Exercise multi-scalar emoji and a decomposed accent without a ZWJ,
+    // which the existing send policy rejects as a format-control scalar.
+    let text = "👍🏽前选中e\u{301}后"
     let selection = ComposerTextSelection(NSRange(try XCTUnwrap(text.range(of: "选中")), in: text))
     for name in ["沙发", "吃瓜"] {
       let token = try XCTUnwrap(TiebaClassicEmoticonCatalog.token(for: name))
@@ -117,7 +119,7 @@ final class ComposerTextEditorTests: XCTestCase {
         )
       )
 
-      XCTAssertTrue(result.text.utf8.elementsEqual("👩🏽‍💻前\(token)e\u{301}后".utf8))
+      XCTAssertTrue(result.text.utf8.elementsEqual("👍🏽前\(token)e\u{301}后".utf8))
       XCTAssertTrue(result.selection.isValid(for: result.text))
       XCTAssertEqual(result.selection.location, selection.location + token.utf16.count)
       XCTAssertTrue(TextReplyContentPolicy.isValid(result.text))
