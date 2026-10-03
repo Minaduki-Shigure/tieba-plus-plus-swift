@@ -16,7 +16,7 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
-WebP creation closes a format gap in TiebaLite `9701bfb6`'s `ReplyPage` →
+Alpha.39/build 117 WebP creation closes a format gap in TiebaLite `9701bfb6`'s `ReplyPage` →
 `ImagePicker` → `ImageUploader` flow: its image picker accepts WebP and its
 original upload path retains the selected bytes. Tieba++ now accepts static
 WebP for standard/high-quality JPEG conversion and static or animated WebP for
@@ -31,8 +31,14 @@ payloads, so its status alone cannot establish validity. Standard/high-quality
 conversion also requires strict color and alpha decoding before producing JPEG.
 Mixed JPEG/PNG/GIF/WebP drafts retain ordered attachment identities and existing
 authenticated upload-receipt recovery. No upload endpoint or automatic resend
-behavior changes. Native decoding, persistence and offline pipeline regressions
-remain release gates; live server acceptance and animation retention require
+behavior changes. The
+[native decoder validation](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37157423713)
+passed 46 container and image-processing tests. The
+[full-app candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37157633656)
+passed all 2,600 app tests without failures or skips, including 50 new WebP tests
+covering containers, decoding, mixed-format persistence and offline uploads.
+Tag CI, anonymous integration and UI regressions remain release gates;
+live server acceptance and animation retention require
 disposable-account/device validation. The 80–82% weighted estimate is unchanged.
 
 Alpha.38 matches TiebaLite `9701bfb6`'s `MainPage` →
@@ -197,7 +203,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-serves `v0.65.0-alpha.38` (build 116) after publication, whose app-code snapshot includes
+serves `v0.65.0-alpha.39` (build 117) after publication, whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -305,7 +311,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.65.0-alpha.38` app-code snapshot is at 80–82%; all experimental
+The public `v0.65.0-alpha.39` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
@@ -892,7 +898,7 @@ locked/unlocked launches, expiration, force-quit, relaunch deduplication, openin
 each channel, and SideStore/LiveContainer behavior. This remains uncredited in the
 background row until delivery is validated, so the overall 80–82% estimate stays.
 
-Current `main` now connects the security-sensitive static-image foundation to
+Current `main` now connects the security-sensitive image foundation to
 the new-topic and direct-topic-reply composers. Standard/high-quality normalizes a selected
 single-frame JPEG, PNG, HEIC, HEIF, or WebP into a bounded, metadata-stripped JPEG;
 stores up to nine ordered attachments under private random filenames with file
@@ -901,14 +907,16 @@ draft and upload state. Core validates the complete session, serializes
 same-account uploads, sends sequential 512,000-byte chunks, owns typed image-marker
 compilation, and never retries an uncertain dispatched chunk. The final write is
 bound to an immutable target, content, attachment order, processing choice,
-watermark, session, and submission ID. A separate original mode retains static
-JPEG/PNG dimensions and compressed image data while removing private metadata,
-retaining orientation and supported display color, and preserving PNG alpha.
-It is bounded to 10 MiB, 16,384 pixels per side and 12,582,912 total pixels;
-Oversize, animated PNG, unsupported animation/HDR and unsupported color-profile
-inputs fail explicitly.
+watermark, session, and submission ID. A separate original mode retains JPEG,
+PNG, GIF and WebP dimensions and compressed image data while removing private
+metadata, retaining supported orientation/display color and transparency.
+GIF and animated WebP retain frame controls and require original mode. Original
+uploads are bounded to 10 MiB; static images allow at most 16,384 pixels per side
+and 12,582,912 total pixels. Animations have stricter canvas, frame-count,
+cumulative-pixel and duration limits. Oversize, animated PNG, unsupported
+animation/HDR and unsupported color-profile inputs fail explicitly.
 Old JPEG attachment JSON and v1 intent digests retain their exact meaning;
-mixed old JPEG/original PNG records keep verified receipts and unknown-outcome
+mixed JPEG/PNG/GIF/WebP records keep verified receipts and unknown-outcome
 locks across restart. Real original-image upload/rendering remains a validation
 gate, and this extension adds no weighted parity point.
 Restart recovery performs no network work
