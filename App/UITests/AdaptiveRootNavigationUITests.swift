@@ -58,6 +58,11 @@ final class AdaptiveRootNavigationUITests: XCTestCase {
     try requireTitle("推荐·第1次", app: app)
     try setWidth(840, mode: "sidebar", app: app)
     try tap(tab("home", mode: "sidebar", app: app))
+    // Home owns the initial unread read. Wait for it before pushing Settings,
+    // which deliberately suspends Home's root-only automatic reads.
+    try wait(
+      NSPredicate(format: "value == %@", "7"),
+      element: tab("notifications", mode: "sidebar", app: app))
     try tap(app.buttons["home-settings-entry"])
     try requireNavigationTitle("设置", app: app)
     try wait(

@@ -135,6 +135,26 @@ final class RootTabBarTests: XCTestCase {
     XCTAssertFalse(accepts(nil, attached: nil))
   }
 
+  func testKeyboardFrameCacheSurvivesSameScreenButCannotReturnAfterMovingToAnotherScreen() {
+    let firstScreen = NSObject()
+    let secondScreen = NSObject()
+    let original = CGRect(x: 0, y: 520, width: 390, height: 324)
+    var cachedFrame: CGRect? = original
+    for attachedScreen in [firstScreen, nil, firstScreen] {
+      cachedFrame = RootTabBarKeyboardPolicy.retainedFrame(
+        cachedFrame, frameScreen: firstScreen, attachedScreen: attachedScreen)
+      XCTAssertEqual(cachedFrame, original, "Same-screen reattachment must retain keyboard state.")
+    }
+    cachedFrame = RootTabBarKeyboardPolicy.retainedFrame(
+      cachedFrame, frameScreen: firstScreen, attachedScreen: secondScreen)
+    XCTAssertNil(cachedFrame)
+    // A dismissal on screen A is ignored while the bar is on B. Returning to A
+    // must not revive the cached docked frame even without a new notification.
+    cachedFrame = RootTabBarKeyboardPolicy.retainedFrame(
+      cachedFrame, frameScreen: firstScreen, attachedScreen: firstScreen)
+    XCTAssertNil(cachedFrame)
+  }
+
   func testHostedBarKeepsItsNativeInstanceAndKeyboardStateAcrossVisibilityChanges() async throws {
     let visibility = RootTabBarTestVisibility()
     let host = UIHostingController(rootView: RootTabBarTestHost(visibility: visibility))

@@ -220,6 +220,13 @@ final class RootNativeTabBar: UITabBar {
   }
 
   private func updateKeyboardCoverage() {
+    // While attached to a different display we ignore the original display's
+    // notifications, including its keyboard dismissal. Discard that frame now
+    // so returning later cannot resurrect stale coverage. Temporary detachment
+    // and reattachment on the same screen still preserve the current frame.
+    keyboardFrameInScreen = RootTabBarKeyboardPolicy.retainedFrame(
+      keyboardFrameInScreen, frameScreen: keyboardFrameScreen, attachedScreen: window?.screen)
+    if keyboardFrameInScreen == nil { keyboardFrameScreen = nil }
     let coversBottom: Bool
     if let window, let frame = keyboardFrameInScreen, keyboardFrameScreen === window.screen {
       coversBottom = RootTabBarKeyboardPolicy.coversBottom(
@@ -244,6 +251,14 @@ final class RootNativeTabBar: UITabBar {
 }
 
 enum RootTabBarKeyboardPolicy {
+  static func retainedFrame(
+    _ frame: CGRect?, frameScreen: AnyObject?, attachedScreen: AnyObject?
+  ) -> CGRect? {
+    guard let attachedScreen else { return frame }
+    guard let frameScreen, frameScreen === attachedScreen else { return nil }
+    return frame
+  }
+
   static func acceptsNotification(
     notificationScreen: AnyObject?, windowScreen: AnyObject?, isLocal: Bool?
   ) -> Bool {
