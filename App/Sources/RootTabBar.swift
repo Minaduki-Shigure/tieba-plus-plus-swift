@@ -178,12 +178,12 @@ final class RootNativeTabBar: UITabBar {
           !isLocal
         { return }
         if notification.name == UIResponder.keyboardWillHideNotification {
-          keyboardFrameInScreen = nil
+          self.keyboardFrameInScreen = nil
         } else {
-          keyboardFrameInScreen =
+          self.keyboardFrameInScreen =
             (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
         }
-        updateKeyboardCoverage()
+        self.updateKeyboardCoverage()
       }
     }
   }
