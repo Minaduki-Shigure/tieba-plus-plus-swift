@@ -126,7 +126,8 @@ struct WallpaperThemeSettingsView: View {
   }
 
   private var imageSelection: some View {
-    VStack(alignment: .leading, spacing: 12) {
+    let photoPickerTitle = model.source == nil ? "从照片选择图片" : "更换图片"
+    return VStack(alignment: .leading, spacing: 12) {
       Text(controller.document == nil ? "尚未启用" : "已启用")
         .font(.subheadline)
         .foregroundStyle(.secondary)
@@ -135,7 +136,7 @@ struct WallpaperThemeSettingsView: View {
         .font(.subheadline)
         .foregroundStyle(.secondary)
       PhotosPicker(selection: $selectedImage, matching: .images, photoLibrary: .shared()) {
-        Label(model.source == nil ? "从照片选择图片" : "更换图片", systemImage: "photo.on.rectangle")
+        Label(photoPickerTitle, systemImage: "photo.on.rectangle")
           .frame(maxWidth: .infinity, minHeight: 32)
       }
       .buttonStyle(.borderedProminent)
@@ -619,7 +620,8 @@ private actor WallpaperRecommendationThumbnailLoader {
     }
     let id = UUID()
     try await withTaskCancellationHandler {
-      try await withCheckedThrowingContinuation { continuation in
+      try await withCheckedThrowingContinuation {
+        (continuation: CheckedContinuation<Void, any Error>) in
         if Task.isCancelled {
           continuation.resume(throwing: CancellationError())
         } else {
