@@ -1292,7 +1292,8 @@ struct UserActivityReplyRow: View {
       Text(reply.excerpt.isEmpty ? "（非文字回复）" : reply.excerpt)
         .font(.body)
         .foregroundStyle(.primary)
-        .lineLimit(4)
+        .lineLimit(nil)
+        .fixedSize(horizontal: false, vertical: true)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }
