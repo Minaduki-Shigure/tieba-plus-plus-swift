@@ -78,6 +78,7 @@ actor CloudFavoriteMutationGate {
   private enum Finalization: Sendable {
     case receipt(CloudFavoriteMutationLedgerPhase)
     case definiteFailure
+    case failedPreparation(previous: CloudFavoriteMutationLedgerRecord?)
   }
   // Protocol evidence must survive a transient disk failure and coordinator
   // recreation. Retain only the journal identity/result, never credentials.
@@ -148,6 +149,14 @@ actor CloudFavoriteMutationGate {
     try await persistPendingFinalization(key)
   }
 
+  func discardFailedPreparation(
+    key: CloudFavoriteMutationLedgerKey, operationID: UUID,
+    previous: CloudFavoriteMutationLedgerRecord?
+  ) async throws {
+    pendingFinalizations[key] = (operationID, .failedPreparation(previous: previous))
+    try await persistPendingFinalization(key)
+  }
+
   private func persistPendingFinalization(_ key: CloudFavoriteMutationLedgerKey) async throws {
     guard let pending = pendingFinalizations[key] else { return }
     let ledger = ledger
@@ -160,10 +169,20 @@ actor CloudFavoriteMutationGate {
           _ = try await ledger.transition(key: key, operationID: pending.operationID, phase: phase)
         case .definiteFailure:
           try await ledger.removeAfterDefiniteFailure(key: key, operationID: pending.operationID)
+        case .failedPreparation(let previous):
+          let current = try await ledger.record(for: key)
+          // A failed prepare may not have replaced the prior completed record.
+          // Preserve that exact snapshot; all other records still require CAS.
+          if current != previous || previous?.blocksWrites == true {
+            try await ledger.removeAfterDefiniteFailure(key: key, operationID: pending.operationID)
+          }
         }
       }.value
       pendingFinalizations.removeValue(forKey: key)
-      if case .definiteFailure = pending.result { failedClosed.remove(key) }
+      switch pending.result {
+      case .definiteFailure, .failedPreparation: failedClosed.remove(key)
+      case .receipt: break
+      }
     } catch {
       failedClosed.insert(key)
       throw error
@@ -305,15 +324,23 @@ actor CloudFavoriteRecordRemovalCoordinator {
     session: StoredAccountSession, target: CloudFavoriteRecordTarget, operationID: UUID
   ) async throws {
     try await requireCurrent(session, target: target)
+    let previous = try await gate.ledger.record(for: target.key)
+    var prepared = false
     do {
       _ = try await gate.ledger.prepare(
         key: target.key, operationID: operationID,
         sessionRevision: session.sessionRevision, now: Date()
       )
+      prepared = true
       try await requireCurrent(session, target: target)
     } catch {
       do {
-        try await removePreparedOperation(key: target.key, operationID: operationID)
+        if prepared {
+          try await removePreparedOperation(key: target.key, operationID: operationID)
+        } else {
+          try await gate.discardFailedPreparation(
+            key: target.key, operationID: operationID, previous: previous)
+        }
       } catch {
         await gate.failClosed(target.key)
         throw error

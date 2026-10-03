@@ -448,6 +448,41 @@ final class CloudFavoriteRecordRemovalTests: XCTestCase {
     let count = await client.dispatches
     XCTAssertEqual(count, 1)
   }
+
+  func testFailedPrepareRecoversWithOrWithoutAnOlderCompletedRecord() async throws {
+    for hasPrevious in [false, true] {
+      for failureAfterCommit in [false, true] {
+        let session = cleanupSession()
+        let target = try cleanupTarget(session)
+        let ledger = CleanupTransitionFaultLedger(transitionFailures: 0)
+        if hasPrevious {
+          let old = try await ledger.prepare(
+            key: target.key, operationID: UUID(), sessionRevision: session.sessionRevision,
+            now: Date())
+          _ = try await ledger.transition(
+            key: target.key, operationID: old.operationID, phase: .observedAbsent)
+        }
+        let previous = try await ledger.record(for: target.key)
+        await ledger.failNextPreparation(afterCommit: failureAfterCommit)
+        let client = CleanupClient(ledger: ledger)
+        let service = TiebaCoreAccountService(
+          client: client, cloudFavoriteMutationGate: .init(ledger: ledger),
+          cloudFavoriteVault: CleanupVault(session))
+        do {
+          _ = try await service.removeCloudFavoriteRecord(session: session, target: target)
+          XCTFail("Failed preparation must never dispatch")
+        } catch {}
+        let remaining = try await ledger.record(for: target.key)
+        XCTAssertEqual(remaining, failureAfterCommit ? nil : previous)
+        _ = try await service.setThreadCloudFavorite(
+          session: session, target: cleanupNormalTarget(), markedPostID: 99)
+        let dispatches = await client.dispatches
+        let ordinary = await client.ordinaryWrites
+        XCTAssertEqual(dispatches, 0)
+        XCTAssertEqual(ordinary, 1, "A definitely unsent preparation must not lock future writes")
+      }
+    }
+  }
 }
 
 private func cleanupSession(userID: Int64 = 7) -> StoredAccountSession {
@@ -605,10 +640,12 @@ private actor CleanupTransitionFaultLedger: CloudFavoriteMutationLedgerRepositor
   private let storage = TransientCloudFavoriteMutationLedger()
   private var transitionFailures: Int
   private var removalFailures: Int
+  private var preparationFailureAfterCommit: Bool?
   init(transitionFailures: Int = 1, removalFailures: Int = 0) {
     self.transitionFailures = transitionFailures
     self.removalFailures = removalFailures
   }
+  func failNextPreparation(afterCommit: Bool) { preparationFailureAfterCommit = afterCommit }
   func records() async throws -> [CloudFavoriteMutationLedgerRecord] { try await storage.records() }
   func record(for key: CloudFavoriteMutationLedgerKey) async throws
     -> CloudFavoriteMutationLedgerRecord?
@@ -618,8 +655,13 @@ private actor CleanupTransitionFaultLedger: CloudFavoriteMutationLedgerRepositor
   func prepare(
     key: CloudFavoriteMutationLedgerKey, operationID: UUID, sessionRevision: UUID, now: Date
   ) async throws -> CloudFavoriteMutationLedgerRecord {
-    try await storage.prepare(
+    let failureAfterCommit = preparationFailureAfterCommit
+    preparationFailureAfterCommit = nil
+    if failureAfterCommit == false { throw CloudFavoriteMutationLedgerError.writeFailed }
+    let result = try await storage.prepare(
       key: key, operationID: operationID, sessionRevision: sessionRevision, now: now)
+    if failureAfterCommit == true { throw CloudFavoriteMutationLedgerError.writeFailed }
+    return result
   }
   func transition(
     key: CloudFavoriteMutationLedgerKey, operationID: UUID,
