@@ -177,6 +177,7 @@ jobs:
           -scheme TiebaPlusPlus
           -configuration Debug
           -derivedDataPath build/DerivedData
+          -resultBundlePath app-test-results.xcresult
           -destination "$IOS_SIMULATOR_DESTINATION"
           -skipPackagePluginValidation
           CODE_SIGNING_ALLOWED=NO
@@ -184,6 +185,25 @@ jobs:
       - name: Report Xcode diagnostics
         if: ${{ always() && steps.app_tests.outcome == 'failure' }}
         run: ruby Scripts/report_xcode_errors.rb xcodebuild.log
+      - name: Export app test attachments
+        if: ${{ always() && (steps.app_tests.outcome == 'success' || steps.app_tests.outcome == 'failure') }}
+        run: |
+          set -euo pipefail
+          xcrun xcresulttool export attachments \
+            --path app-test-results.xcresult \
+            --output-path app-test-attachments
+          xcrun xcresulttool get test-results summary \
+            --path app-test-results.xcresult --compact > app-test-summary.json
+      - name: Upload app test results
+        if: ${{ always() && (steps.app_tests.outcome == 'success' || steps.app_tests.outcome == 'failure') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-test-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            app-test-results.xcresult
+            app-test-attachments/
+            app-test-summary.json
+          retention-days: 7
       - name: Upload Xcode failure log
         if: ${{ always() && steps.app_tests.outcome == 'failure' }}
         uses: actions/upload-artifact@v4
