@@ -767,6 +767,29 @@ enum TiebaAuthenticatedDecoder {
     try checkServerError(object)
   }
 
+  /// Unlike legacy write decoding, a missing success code is not an ACK.
+  static func checkCloudFavoriteRecordCleanupResponse(_ body: Data) throws {
+    let object = try responseObject(from: body)
+    let code: Int64
+    if let string = object["error_code"] as? String, let integer = Int64(string) {
+      code = integer
+    } else {
+      code = try requiredExactJSONInteger(object["error_code"])
+    }
+    guard code == 0 else {
+      throw TiebaClientError.server(
+        code: Int32(clamping: code),
+        message: errorMessage(object, nestedError: object["error"] as? [String: Any])
+      )
+    }
+    do {
+      try checkServerError(object)
+    } catch {
+      // Conflicting success/error envelopes are not a definitive rejection.
+      throw TiebaClientError.invalidJSON
+    }
+  }
+
   static func forumCheckIn(from body: Data, expectedUserID: Int64) throws -> TiebaForumCheckIn {
     let object = try responseObject(from: body)
     try checkServerError(object)

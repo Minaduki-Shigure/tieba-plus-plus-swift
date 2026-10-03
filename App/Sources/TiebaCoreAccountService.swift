@@ -59,6 +59,13 @@ protocol TiebaAuthenticatedAccountClient: Sendable {
     forumID: Int64,
     threadID: Int64
   ) async throws -> TiebaThreadCloudFavoriteState
+  func cleanupCloudFavoriteRecord(
+    credential: TiebaSessionCredential, expectedUserID: Int64, threadID: Int64,
+    beforeDispatch: @escaping @Sendable () async throws -> Void
+  ) async throws -> TiebaCloudFavoriteRecordCleanupReceipt
+  func verifyCloudFavoriteRecordAbsence(
+    credential: TiebaSessionCredential, expectedUserID: Int64, threadID: Int64
+  ) async throws -> TiebaCloudFavoriteRecordObservation
   func setThreadCloudFavoriteState(
     credential: TiebaSessionCredential,
     expectedUserID: Int64,
@@ -422,6 +429,19 @@ extension TiebaAuthenticatedAccountClient {
     throw TiebaClientError.invalidAuthenticatedResponse
   }
 
+  func cleanupCloudFavoriteRecord(
+    credential: TiebaSessionCredential, expectedUserID: Int64, threadID: Int64,
+    beforeDispatch: @escaping @Sendable () async throws -> Void
+  ) async throws -> TiebaCloudFavoriteRecordCleanupReceipt {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
+  func verifyCloudFavoriteRecordAbsence(
+    credential: TiebaSessionCredential, expectedUserID: Int64, threadID: Int64
+  ) async throws -> TiebaCloudFavoriteRecordObservation {
+    throw TiebaClientError.invalidAuthenticatedResponse
+  }
+
   func setThreadCloudFavoriteState(
     credential: TiebaSessionCredential,
     expectedUserID: Int64,
@@ -565,17 +585,27 @@ struct TiebaCoreAccountService: AccountService {
   private let client: any TiebaAuthenticatedAccountClient
   private let contentFilterRepository: any ContentFilterRepository
   private let threadCloudFavoriteWriteCoordinator: ThreadCloudFavoriteWriteCoordinator
+  private let cloudFavoriteRecordRemovalCoordinator: CloudFavoriteRecordRemovalCoordinator
   private let forumWriteCoordinator: ForumAccountWriteCoordinator
   private let threadAgreementWriteCoordinator: ThreadAgreementWriteCoordinator
   private let contentAgreementWriteCoordinator: ContentAgreementWriteCoordinator
 
   init(
     client: any TiebaAuthenticatedAccountClient = TiebaAuthenticatedClient(),
-    contentFilterRepository: any ContentFilterRepository = EmptyContentFilterRepository()
+    contentFilterRepository: any ContentFilterRepository = EmptyContentFilterRepository(),
+    cloudFavoriteMutationGate: CloudFavoriteMutationGate = CloudFavoriteMutationGate(
+      ledger: TransientCloudFavoriteMutationLedger()
+    ),
+    cloudFavoriteVault: (any AccountVault)? = nil
   ) {
     self.client = client
     self.contentFilterRepository = contentFilterRepository
-    self.threadCloudFavoriteWriteCoordinator = ThreadCloudFavoriteWriteCoordinator(client: client)
+    self.threadCloudFavoriteWriteCoordinator = ThreadCloudFavoriteWriteCoordinator(
+      client: client, gate: cloudFavoriteMutationGate, vault: cloudFavoriteVault
+    )
+    self.cloudFavoriteRecordRemovalCoordinator = CloudFavoriteRecordRemovalCoordinator(
+      client: client, gate: cloudFavoriteMutationGate, vault: cloudFavoriteVault
+    )
     self.forumWriteCoordinator = ForumAccountWriteCoordinator(client: client)
     self.threadAgreementWriteCoordinator = ThreadAgreementWriteCoordinator(client: client)
     self.contentAgreementWriteCoordinator = ContentAgreementWriteCoordinator(client: client)
@@ -1213,6 +1243,10 @@ struct TiebaCoreAccountService: AccountService {
         target: target,
         markedPostID: markedPostID
       )
+    } catch let error as CloudFavoriteRecordRemovalError {
+      throw BrowseError.unavailable(error.localizedDescription)
+    } catch let error as CloudFavoriteMutationLedgerError {
+      throw BrowseError.unavailable(error.localizedDescription)
     } catch is CancellationError {
       throw CancellationError()
     } catch let error as BrowseError {
@@ -1236,6 +1270,40 @@ struct TiebaCoreAccountService: AccountService {
       }
     }
     return data
+  }
+
+  func cloudFavoriteRecordRemovalStatuses(
+    session: StoredAccountSession
+  ) async throws -> [CloudFavoriteRecordRemovalStatus] {
+    try await cloudFavoriteRecordRemovalCoordinator.statuses(session: session)
+  }
+
+  func removeCloudFavoriteRecord(
+    session: StoredAccountSession, target: CloudFavoriteRecordTarget
+  ) async throws -> CloudFavoriteRecordRemovalStatus {
+    try Task.checkCancellation()
+    // Preflight remains cancellable. Once a receipt exists, the coordinator
+    // persists its evidence independently before checking cancellation/lease.
+    do {
+      return try await cloudFavoriteRecordRemovalCoordinator.remove(session: session, target: target)
+    } catch let error as TiebaCloudFavoriteRecordCleanupError {
+      switch error {
+      case .writeConflict:
+        throw CloudFavoriteRecordRemovalError.busy
+      case .recordNotPresent:
+        throw BrowseError.unavailable("完整列表中未找到这条收藏，因此没有发送移除请求。请刷新列表。")
+      case .inconclusive:
+        throw BrowseError.unavailable("云收藏列表持续变化或未能完整读取，因此没有发送移除请求。请稍后再试。")
+      }
+    } catch let error as TiebaClientError {
+      throw Self.accountError(error)
+    }
+  }
+
+  func verifyCloudFavoriteRecordRemoval(
+    session: StoredAccountSession, target: CloudFavoriteRecordTarget
+  ) async throws -> CloudFavoriteRecordRemovalStatus {
+    try await cloudFavoriteRecordRemovalCoordinator.verify(session: session, target: target)
   }
 
   func concernFeed(
@@ -3076,6 +3144,7 @@ private struct ThreadCloudFavoriteWriteIdentity:
   Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable
 {
   let sessionRevision: UUID
+  let forumID: Int64
   let forumName: String
   private let bduss: String
   private let stoken: String
@@ -3087,6 +3156,7 @@ private struct ThreadCloudFavoriteWriteIdentity:
     target: ThreadCloudFavoriteTarget
   ) {
     sessionRevision = session.sessionRevision
+    forumID = target.forumID
     forumName = target.forumName
     bduss = credential.bduss
     stoken = credential.stoken
@@ -3095,6 +3165,7 @@ private struct ThreadCloudFavoriteWriteIdentity:
 
   static func == (lhs: Self, rhs: Self) -> Bool {
     lhs.sessionRevision == rhs.sessionRevision
+      && lhs.forumID == rhs.forumID
       && lhs.forumName == rhs.forumName
       && lhs.bduss == rhs.bduss
       && lhs.stoken == rhs.stoken
@@ -3118,12 +3189,10 @@ private struct ThreadCloudFavoriteWriteIdentity:
 private actor ThreadCloudFavoriteWriteCoordinator {
   private struct Key: Hashable, Sendable {
     let userID: Int64
-    let forumID: Int64
     let threadID: Int64
 
     init(userID: Int64, target: ThreadCloudFavoriteTarget) {
       self.userID = userID
-      forumID = target.forumID
       threadID = target.threadID
     }
   }
@@ -3136,11 +3205,19 @@ private actor ThreadCloudFavoriteWriteCoordinator {
   }
 
   private let client: any TiebaAuthenticatedAccountClient
+  private let gate: CloudFavoriteMutationGate
+  private let vault: (any AccountVault)?
   private var inFlight: [Key: Entry] = [:]
   private var conflictWaiters = 0
 
-  init(client: any TiebaAuthenticatedAccountClient) {
+  init(
+    client: any TiebaAuthenticatedAccountClient,
+    gate: CloudFavoriteMutationGate,
+    vault: (any AccountVault)?
+  ) {
     self.client = client
+    self.gate = gate
+    self.vault = vault
   }
 
   func perform(
@@ -3175,15 +3252,29 @@ private actor ThreadCloudFavoriteWriteCoordinator {
 
     let client = client
     let expectedUserID = session.id
+    let gate = gate
+    let vault = vault
+    guard
+      let resourceKey = CloudFavoriteMutationLedgerKey(
+        userID: session.id, threadID: target.threadID
+      )
+    else { throw CloudFavoriteRecordRemovalError.unavailable }
     let entryID = UUID()
     let task = Task.detached { () async throws -> TiebaThreadCloudFavoriteState in
-      try await client.setThreadCloudFavoriteState(
-        credential: credential,
-        expectedUserID: expectedUserID,
-        forumID: target.forumID,
-        threadID: target.threadID,
-        markedPostID: markedPostID
-      )
+      try await gate.performOrdinaryWrite(key: resourceKey) {
+        if let vault {
+          guard let active = try await vault.activeSession(), active.id == session.id,
+            active.sessionRevision == session.sessionRevision
+          else { throw CloudFavoriteRecordRemovalError.sessionChanged }
+        }
+        return try await client.setThreadCloudFavoriteState(
+          credential: credential,
+          expectedUserID: expectedUserID,
+          forumID: target.forumID,
+          threadID: target.threadID,
+          markedPostID: markedPostID
+        )
+      }
     }
     inFlight[key] = Entry(
       id: entryID,

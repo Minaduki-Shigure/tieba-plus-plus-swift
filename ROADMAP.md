@@ -16,6 +16,40 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
+The implementation adds list-level cloud-favorite record cleanup against
+TiebaLite `9701bfb6`'s `rmstore` workflow, including deleted records for which no
+forum or original post can be recovered. It uses a separate positive UID/TID
+target, explicitly confirmed against the current session revision. The normal
+forum/PID favorite contracts are unchanged. Fresh app/web account validation,
+TBS and an exact saved-list presence read precede the single dispatch; presence
+can be confirmed as soon as the target TID appears on a valid page.
+The App persists dispatch intent before sending and retains separate unknown,
+acknowledged-awaiting-verification and observed-absent states; an absence read
+does not manufacture a missing acknowledgement. A pending record survives
+restart and credential renewal and shares a UID/TID gate with ordinary favorite
+add/update/remove. The cloud-list page restores a read-only verification entry
+even when the corresponding row is no longer visible. Ledger failures stop
+writes rather than erasing uncertain intent.
+
+Verification follows fixed 20-record offsets through a required empty terminal
+page, for up to 100 nonempty pages / 2,000 records per scan and 30 seconds across
+both scans with an absolute cancellation deadline. Short pages continue; duplicate IDs, differing ordered scans,
+unreadable pages and exhausted limits are inconclusive. Offset pagination has no
+server snapshot token, so stable absence is an observation rather than an atomic
+proof of deletion. HMAC protects persisted journal integrity, but does not
+detect rollback to an older authentic archive. Protocol, persistence, concurrency
+and UI model regressions are covered by automated tests; live account acceptance,
+slow/changing large lists and iOS confirmation/relaunch behavior remain validation
+gates. The weighted parity estimate is unchanged pending those checks.
+
+The [cloud-cleanup CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37119608002)
+passed the complete Core and iOS App suites plus the real system icon UI test.
+Recovery coverage includes preserving an already received acknowledgement across
+disk errors, cancelled non-dispatch, old completed records surviving a failed
+new preparation, repeated post-rename sync failures, and retaining the visible
+verification entry until an absence result is durably saved. Alpha.34 packages
+this workflow; these automated fixtures do not establish live account acceptance.
+
 Current `main` adds native inline classic-emoticon images to post bodies, full
 nested replies and their compact inline previews, matching TiebaLite's
 `EmoticonText`/`PbContentRender` reading workflow. It recognizes structured faces
@@ -101,7 +135,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-serves `v0.65.0-alpha.33` (build 111) after publication, whose app-code snapshot includes
+serves `v0.65.0-alpha.34` (build 112) after publication, whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -209,7 +243,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.65.0-alpha.33` app-code snapshot is at 80–82%; all experimental
+The public `v0.65.0-alpha.34` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
@@ -682,13 +716,12 @@ the source metadata is updated to that tested IPA.
   a dismissible saved-position-to-latest-update handoff for consistent metadata,
   deleted-thread state, account-lease isolation, a separate author header that
   opens the credential-free public profile only for a positive server UID, and
-  confirmed list deletion only after raw thread/forum rebinding. Author username,
-  display name, and strict portrait URL remain presentation-only and never enter
-  the deletion target. If the anonymous thread identity is
-  unavailable, an exact retained forum name may obtain a positive forum ID from
-  one bounded anonymous FRS response, but the existing authenticated PB probe
-  must still bind that forum and thread before any write. Fully unresolvable rows
-  remain zero-write. Thread detail separately supports confirmed add, saved-floor
+  confirmed list-record cleanup after fresh app/web account validation and an
+  exact authenticated-list TID match. Deleted or otherwise unresolvable topics
+  use the independent record-removal contract without guessing a forum ID.
+  Author username, display name, and strict portrait URL remain presentation-only
+  and never enter the cleanup target. A durable UID/TID intent and recovery gate
+  prevents unknown outcomes from being resent. Thread detail separately supports confirmed add, saved-floor
   update, and removal with read-only reconciliation. Exact visible floors expose
   the same snapshot-bound actions from their context menu, and the confirmed
   marker is shown only on its exact PID

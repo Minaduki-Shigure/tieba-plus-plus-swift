@@ -183,6 +183,17 @@ final class ThreadCloudFavoriteStore {
     evictIfNeeded()
   }
 
+  /// Record cleanup has no verified FID. Invalidate only matching account/TID
+  /// entries rather than manufacturing a normal forum-bound change event.
+  func recordRemovalWasObserved(userID: Int64, sessionRevision: UUID, threadID: Int64) {
+    let lease = ThreadCloudFavoriteSessionLease(userID: userID, sessionRevision: sessionRevision)
+    for (target, entry) in entries where target.threadID == threadID && entry.lease == lease {
+      entry.epoch &+= 1
+      readFlights.removeValue(forKey: target)?.task.cancel()
+      entry.setState(.failed(previous: nil, message: "收藏列表中已观察到移除，请重新读取主题收藏状态。"))
+    }
+  }
+
   @discardableResult
   func reload(
     _ target: ThreadCloudFavoriteTarget

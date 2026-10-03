@@ -1215,6 +1215,15 @@ protocol AccountService: Sendable {
     offset: Int,
     pageSize: Int
   ) async throws -> CloudFavoritePage
+  func cloudFavoriteRecordRemovalStatuses(
+    session: StoredAccountSession
+  ) async throws -> [CloudFavoriteRecordRemovalStatus]
+  func removeCloudFavoriteRecord(
+    session: StoredAccountSession, target: CloudFavoriteRecordTarget
+  ) async throws -> CloudFavoriteRecordRemovalStatus
+  func verifyCloudFavoriteRecordRemoval(
+    session: StoredAccountSession, target: CloudFavoriteRecordTarget
+  ) async throws -> CloudFavoriteRecordRemovalStatus
   func threadCloudFavorite(
     session: StoredAccountSession,
     target: ThreadCloudFavoriteTarget
@@ -1523,6 +1532,22 @@ extension AccountService {
     target: ThreadCloudFavoriteTarget
   ) async throws -> ThreadCloudFavoriteData {
     throw BrowseError.unavailable("当前账户服务不支持读取主题收藏状态。")
+  }
+
+  func cloudFavoriteRecordRemovalStatuses(
+    session: StoredAccountSession
+  ) async throws -> [CloudFavoriteRecordRemovalStatus] { [] }
+
+  func removeCloudFavoriteRecord(
+    session: StoredAccountSession, target: CloudFavoriteRecordTarget
+  ) async throws -> CloudFavoriteRecordRemovalStatus {
+    throw CloudFavoriteRecordRemovalError.unavailable
+  }
+
+  func verifyCloudFavoriteRecordRemoval(
+    session: StoredAccountSession, target: CloudFavoriteRecordTarget
+  ) async throws -> CloudFavoriteRecordRemovalStatus {
+    throw CloudFavoriteRecordRemovalError.unavailable
   }
 
   func setThreadCloudFavorite(

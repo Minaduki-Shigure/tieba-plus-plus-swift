@@ -20,11 +20,33 @@ and its verified metadata enters the public app source.
 | Local features | Available with TiebaLite-aligned Home, Explore, Messages, and My primary tabs backed by independent system navigation stacks; an independent default-on preference can remove only Explore from the tab bar without changing the Home discovery-section preference or saved startup destination. My groups local favorites, history, an inline appearance choice, settings, and About, while Messages exposes global search in its own stack. History, favorites, filtering, appearance with an independent system/OLED dark-surface choice, media preferences, explicit standard/pure/only-author immersive thread-reading modes, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, a next-launch destination including personalized discovery and the inbox, and ordered iOS Home Screen quick actions for existing destinations are also available. The primary-tab shell and reply notice's system handoff attempt remain pending physical-device validation |
 | Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary and guarded native nickname/sex/biography/avatar editor, a credential-free handoff to Baidu's fixed official username-management page, followed forums with validated level-up progress and account-bound today-check-in marks where the server supplies them, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with a shared Home-toolbar/account-page message badge, separate optional fan-reminder badge, and authoritative reply actions, Tieba cloud favorites with a saved-position-to-latest-update handoff, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded profile text and avatar edits, forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies plus explicitly confirmed deletion of the active account's own topic or ordinary floor, or another author's ordinary floor in its own topic; these newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
-| TiebaLite parity | Current `main` and public `v0.65.0-alpha.33`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
-| Distribution | The public SideStore/LiveContainer source serves `v0.65.0-alpha.33` (build 111) after its tested IPA is published |
+| TiebaLite parity | Current `main` and public `v0.65.0-alpha.34`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
+| Distribution | The public SideStore/LiveContainer source serves `v0.65.0-alpha.34` (build 112) after its tested IPA is published |
 
 ### Release and validation
 
+- **`v0.65.0-alpha.34` cloud-favorite record cleanup:** My → 贴吧收藏 can explicitly remove an
+  exact saved-list record even when its thread has been deleted, its forum name
+  is missing, or the original post can no longer be resolved. The separate
+  record API revalidates the current account, finds the exact authenticated-list record, and
+  dispatches `rmstore` once with `fid="null"`; normal forum/floor favorite APIs
+  keep their existing validation. A durable UID/TID journal distinguishes a
+  server acknowledgement, an unknown result, and subsequently observed absence.
+  Pending results survive relaunch and credential renewal, block other favorite
+  writes for the same account/thread, and offer **继续核验（不重发）**, including
+  when the row has disappeared from the list. Verification requires two matching
+  complete scans, ending at an empty page; short pages do not count as completion.
+  Duplicate/changing pages, errors, 2,000-record/100-page limits and a 30-second
+  absolute scan deadline leave the result unconfirmed. Cancellation before the
+  transport runs clears the prepared intent. A received acknowledgement or
+  definite rejection survives transient storage failures within the shared
+  coordinator gate; recovery retries journal persistence without resending.
+  These are bounded observations, not
+  an atomic server snapshot. Real-account compatibility and physical-device
+  validation remain outstanding; no account writes were used to develop tests.
+  [Core and iOS CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37119608002)
+  passed, including account rotation, dispatch cancellation, delayed or unknown
+  outcomes, repeated journal failures and recovery after a completed file rename.
 - **Unreleased transparent image themes:** Settings → 外观与布局 → 透明图片主题
   offers local Photos import, drag/zoom cropping to the current window, blur and
   opacity previews, light/dark reading colors, colors extracted from the image,
@@ -360,11 +382,13 @@ and its verified metadata enters the public app source.
   to Baidu's fixed official username-management HTTPS page through the selected
   browser mode;
   the App never exports its saved credentials and warns that the browser may be
-  signed out or using another account. Cloud-favorite list removal can now use
+  signed out or using another account. That release added
   one exact anonymous FRS forum-identity fallback when the ordinary anonymous
   thread identity is unavailable, while conflicting identities, account-lease
   changes, unresolvable rows, and failed authenticated UID/forum/thread probes
-  remain zero-write. It retains `v0.64.0-alpha.2`'s structurally validated
+  remained zero-write. Current list-record cleanup supersedes that limitation
+  through its separate authenticated UID/TID contract described above.
+  It retains `v0.64.0-alpha.2`'s structurally validated
   followed-forum and loaded-forum level progress plus bounded, non-backtracking
   regular-expression content filters described below.
   It retains `v0.63.0-alpha.1`'s accumulated navigation, media-entry/export,
@@ -624,12 +648,12 @@ and its verified metadata enters the public app source.
   immersive-reading floor surfaces never expose a mutation action. Every
   mutation is followed by a read-only reconciliation; an uncertain write is
   never retried. The cloud-favorites list can also remove
-  one item after a separate destructive confirmation. It first resolves the raw
-  anonymous PB thread/forum identity. If that read is unavailable and the row
-  retains an exact nonempty forum name, a bounded anonymous FRS read may prove
-  only that exact canonical name and positive forum ID. Either candidate must
-  then pass the existing authenticated UID/forum/thread preflight before the
-  single write; an unresolvable deleted or renamed item sends no write. Logged-in
+  one item after a separate destructive confirmation. Its independent record
+  cleanup binds the current account and exact TID to a freshly read cloud-list
+  entry, including deleted topics or rows with no recoverable forum. It records
+  the dispatch intent before the single request and retains unresolved results
+  for read-only recovery. Ordinary thread/floor favorite writes keep their
+  existing authenticated forum/thread preflight. Logged-in
   thread and full nested-reply pages also expose experimental, draft-backed composers for replying to the
   topic, an ordinary floor, or a specific nested reply. A visible inline
   nested-reply preview can open the same exact-target composer without first
@@ -889,7 +913,7 @@ and its verified metadata enters the public app source.
   IPA and checks it against the published source. The public source therefore
   never exposes the release-preparation commit by itself; version, graph, or
   concurrent-source mismatches fail closed.
-  The source distributes the verified `v0.65.0-alpha.33` IPA (build 111) after publication.
+  The source distributes the verified `v0.65.0-alpha.34` IPA (build 112) after publication.
 - **Login hotfix:** `v0.54.0-alpha.1` can reach Tieba's account page without
   completing because its callback and Cookie matching are too strict.
   `v0.54.1-alpha.1` made that failure explicit and confirmed that iOS 18.7.2
@@ -1259,14 +1283,13 @@ and its verified metadata enters the public app source.
   account-lease isolation, independently openable positive-UID author profiles,
   and explicitly confirmed single-item removal. Author and topic controls are
   sibling navigation regions rather than nested actions; missing identity never
-  guesses from a name, portrait, or thread ID. Before a list removal, a raw
-  anonymous PB response normally binds the thread to a
-  positive forum ID and canonical forum name. When that read fails, a retained
-  nonempty row name may use one bounded anonymous FRS identity fallback, but only
-  when the response returns that exact trim-and-NFC canonical name and a positive
-  forum ID. The authenticated PB preflight then binds either candidate to the
-  exact account and thread before writing. A fully deleted, renamed, or otherwise
-  unresolvable item remains visible and sends no write. A logged-in thread separately reads
+  guesses from a name, portrait, or thread ID. List-record removal validates the
+  app and web account, rereads the exact saved-list TID, obtains fresh TBS, and
+  uses the separate `fid="null"` record endpoint once. It can remove a deleted
+  topic's saved record without guessing a forum ID. A durable account/thread
+  journal preserves unknown results and prevents redispatch across relaunch;
+  observed absence requires two matching bounded list scans ending at an empty
+  page. A logged-in thread separately reads
   its exact cloud state and offers explicitly confirmed add, saved-floor update,
   and removal controls. These operations never upload, merge, or delete the
   independent local favorites archive. Successful authenticated reads and writes
@@ -1388,7 +1411,7 @@ and its verified metadata enters the public app source.
   about 18–20%; its anonymous reading and media subtotal remains about 91–95%.
   This measures implemented end-to-end workflows with partial credit for
   device-validation gates; it is not a claim that every path is release-ready.
-  The public `v0.65.0-alpha.33` app-code snapshot has the same 80–82% weighted
+  The public `v0.65.0-alpha.34` app-code snapshot has the same 80–82% weighted
   estimate and includes the configurable primary shell, My/Messages shortcuts,
   search highlighting, cloud-favorite author links, guarded profile text and
   avatar editing, authoritative content-approval readback, and optional background
@@ -1396,8 +1419,8 @@ and its verified metadata enters the public app source.
   paths retain their documented device-validation gates.
   The largest remaining gaps are
   rich-media creation, background reminder device validation, broader settings,
-  remaining account/social actions, unresolvable cloud-favorite
-  rows, and moderation.
+  remaining account/social actions, live validation of cloud-favorite
+  record cleanup, and moderation.
 
 ## Architecture
 

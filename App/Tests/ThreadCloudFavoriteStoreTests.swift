@@ -5,6 +5,61 @@ import XCTest
 
 @MainActor
 final class ThreadCloudFavoriteStoreTests: XCTestCase {
+  func testRecordRemovalInvalidatesOnlyExactAccountRevisionAndThreadWithoutFabricatingFID() async throws {
+    let session = favoriteSession(revisionComponent: 91)
+    let target = favoriteTarget(threadID: 910)
+    let other = favoriteTarget(threadID: 911)
+    let vault = ThreadCloudFavoriteVaultSpy(session: session)
+    let service = ThreadCloudFavoriteStoreServiceSpy(readResults: [
+      FavoriteReadKey(session: session, target: target): [
+        .success(favoriteData(session: session, target: target, markedPostID: 9101))
+      ],
+      FavoriteReadKey(session: session, target: other): [
+        .success(favoriteData(session: session, target: other, markedPostID: 9111))
+      ],
+    ])
+    let store = makeFavoriteStore(vault: vault, service: service)
+    await store.activate(target, for: UUID())
+    await store.activate(other, for: UUID())
+    let entry = store.entry(for: target)
+
+    store.recordRemovalWasObserved(
+      userID: session.id + 1, sessionRevision: session.sessionRevision, threadID: target.threadID)
+    store.recordRemovalWasObserved(
+      userID: session.id, sessionRevision: UUID(), threadID: target.threadID)
+    XCTAssertEqual(entry.displayedSnapshot, favoriteSnapshot(9101))
+
+    store.recordRemovalWasObserved(
+      userID: session.id, sessionRevision: session.sessionRevision, threadID: target.threadID)
+    XCTAssertNil(entry.displayedSnapshot)
+    guard case .failed = entry.state else { return XCTFail("Must offer a fresh read") }
+    XCTAssertEqual(store.entry(for: other).displayedSnapshot, favoriteSnapshot(9111))
+    let writes = await service.writeCount()
+    XCTAssertEqual(writes, 0)
+  }
+
+  func testRecordRemovalInvalidationRejectsAnOlderInFlightFavoriteRead() async throws {
+    let session = favoriteSession(revisionComponent: 92)
+    let target = favoriteTarget(threadID: 912)
+    let vault = ThreadCloudFavoriteVaultSpy(session: session)
+    let service = ThreadCloudFavoriteStoreServiceSpy(
+      readResults: [FavoriteReadKey(session: session, target: target): [
+        .success(favoriteData(session: session, target: target, markedPostID: 9121))
+      ]],
+      suspendedReadRevisions: [session.sessionRevision]
+    )
+    let store = makeFavoriteStore(vault: vault, service: service)
+    let read = Task { await store.activate(target, for: UUID()) }
+    try await waitForThreadCloudFavoriteStoreTest { await service.readCount() == 1 }
+    store.recordRemovalWasObserved(
+      userID: session.id, sessionRevision: session.sessionRevision, threadID: target.threadID)
+    await service.releaseReads(for: session.sessionRevision)
+    await read.value
+    let entry = store.entry(for: target)
+    XCTAssertNil(entry.displayedSnapshot)
+    guard case .failed = entry.state else { return XCTFail("Old read must not restore the marker") }
+  }
+
   func testSignedOutActivationMakesNoAuthenticatedRequest() async {
     let target = favoriteTarget(threadID: 10)
     let vault = ThreadCloudFavoriteVaultSpy()
