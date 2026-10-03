@@ -519,7 +519,8 @@ struct RootView: View {
     rootPresentedContent
     .onAppear {
       rootIsVisible = true
-      updateHomeRefreshActivity()
+      updateHomeRefreshActivity(
+        scenePhase: scenePhase, navigation: navigation, isVisible: true)
       #if DEBUG
         ExploreRefreshLifecycleDiagnostics.active?.recordRoot(
           phase: String(describing: scenePhase), tab: navigation.selectedTab)
@@ -555,27 +556,28 @@ struct RootView: View {
         showsExploreTab: $0
       )
     }
-    .onChange(of: scenePhase) {
-      updateHomeRefreshActivity()
+    .onChange(of: scenePhase) { newPhase in
+      updateHomeRefreshActivity(
+        scenePhase: newPhase, navigation: navigation, isVisible: rootIsVisible)
       #if DEBUG
         ExploreRefreshLifecycleDiagnostics.active?.recordRoot(
-          phase: String(describing: $0), tab: navigation.selectedTab)
+          phase: String(describing: newPhase), tab: navigation.selectedTab)
       #endif
-      mediaPlaybackCoordinator.setSceneActive($0 == .active)
-      linkPreviewViewModel.sceneActivityDidChange(isActive: $0 == .active)
+      mediaPlaybackCoordinator.setSceneActive(newPhase == .active)
+      linkPreviewViewModel.sceneActivityDidChange(isActive: newPhase == .active)
       followedForumCheckInStore.sceneActivityDidChange(
-        isActive: $0 == .active,
+        isActive: newPhase == .active,
         shouldLoad: RootFollowedForumsActivationPolicy.isActive(navigation: navigation)
           || followedForumsViewModel.hasActiveFullListSurface
       )
       unreadSummaryViewModel.sceneActivityDidChange(
         isActive: RootUnreadSummaryActivationPolicy.isActive(
-          sceneIsActive: $0 == .active,
+          sceneIsActive: newPhase == .active,
           navigation: navigation,
           accountSurfaceIsVisible: accountSurfaceIsVisible
         )
       )
-      if $0 != .active {
+      if newPhase != .active {
         searchSuggestionViewModel.cancelAndClear()
       }
     }
@@ -583,7 +585,8 @@ struct RootView: View {
       mediaPlaybackCoordinator.activeSurfaceDidChange()
     }
     .onChange(of: navigation) { navigation in
-      updateHomeRefreshActivity()
+      updateHomeRefreshActivity(
+        scenePhase: scenePhase, navigation: navigation, isVisible: rootIsVisible)
       #if DEBUG
         ExploreRefreshLifecycleDiagnostics.active?.recordRoot(
           phase: String(describing: scenePhase), tab: navigation.selectedTab)
@@ -607,7 +610,8 @@ struct RootView: View {
     }
     .onDisappear {
       rootIsVisible = false
-      updateHomeRefreshActivity()
+      updateHomeRefreshActivity(
+        scenePhase: scenePhase, navigation: navigation, isVisible: false)
       searchSuggestionViewModel.cancelAndClear()
       linkPreviewViewModel.sceneActivityDidChange(isActive: false)
     }
@@ -1147,8 +1151,18 @@ struct RootView: View {
     rootIsVisible && rootTabIsActive(.home) && hasLoadedHomeAccount
   }
 
-  private func updateHomeRefreshActivity() {
-    if rootIsVisible, rootTabIsActive(.home) {
+  private func updateHomeRefreshActivity(
+    scenePhase: ScenePhase, navigation: RootMainNavigationState, isVisible: Bool
+  ) {
+    // onChange delivers the new value before its captured View necessarily
+    // reflects it. Register interest from the event values, especially during
+    // cold launch's inactive -> active transition and navigation changes.
+    let resolvedNavigation = RootMainTabVisibilityPolicy.reconciled(
+      navigation, showsExploreTab: showsExploreTab)
+    if isVisible,
+      RootMainTabActivationPolicy.isActive(
+        sceneIsActive: scenePhase == .active, navigation: resolvedNavigation, tab: .home)
+    {
       // Home needs later pages too: a pinned forum may not be on page one.
       followedForumsViewModel.completeIndexSurfaceDidAppear(id: homeIndexSurfaceID)
     } else {
