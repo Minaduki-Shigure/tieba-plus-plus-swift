@@ -219,6 +219,161 @@ final class TiebaCloudFavoriteRecordCleanupTests: XCTestCase {
     XCTAssertEqual(snapshot.writes, 0)
   }
 
+  func testDeadlineReturnsAndCancelsTransportWithoutWaitingForItsCompletion() async throws {
+    let gate = CleanupRecordResponseGate()
+    let transport = CleanupRecordTransport(pages: [[456], [456]], listGates: [1: gate])
+    let client = TiebaAuthenticatedClient(
+      transport: transport, cloudFavoriteRecordScanTimeout: .milliseconds(100))
+    let hook = CleanupRecordHook()
+    let finished = CleanupRecordCompletion()
+    let task = Task {
+      defer { finished.finish() }
+      return try await client.cleanupCloudFavoriteRecord(
+        credential: cleanupCredential(), expectedUserID: 123, threadID: 456
+      ) { try await hook.call() }
+    }
+    let completion = await finished.wait()
+    let cancelled = await gate.waitUntilCancelled()
+    let suspended = await gate.isSuspended
+    let before = await transport.snapshot()
+    let hookCalls = await hook.calls
+    // Release on failure so a broken timeout cannot leave the test hanging.
+    if !completion { await gate.release() }
+    XCTAssertTrue(completion, "Deadline must finish while transport is suspended")
+    XCTAssertTrue(cancelled)
+    XCTAssertTrue(suspended)
+    XCTAssertEqual(before.writes, 0)
+    XCTAssertEqual(hookCalls, 0)
+    switch await task.result {
+    case .success: XCTFail("A response arriving after the deadline cannot authorize dispatch")
+    case .failure(let error):
+      XCTAssertEqual(
+        error as? TiebaCloudFavoriteRecordCleanupError, .inconclusive(.deadlineExceeded))
+    }
+    let retry: TiebaCloudFavoriteRecordCleanupReceipt
+    do {
+      retry = try await client.cleanupCloudFavoriteRecord(
+        credential: cleanupCredential(), expectedUserID: userID, threadID: threadID
+      ) { try await hook.call() }
+    } catch {
+      await gate.release()
+      throw error
+    }
+    XCTAssertEqual(retry.outcome, .acceptedAwaitingVerification)
+    // The replacement write must finish while the old transport is still held.
+    let stillSuspended = await gate.isSuspended
+    XCTAssertTrue(stillSuspended)
+    await gate.release()
+    let returned = await gate.waitUntilReturned()
+    XCTAssertTrue(returned)
+    await assertNormalWriteConflict(client)
+    let after = await transport.snapshot()
+    XCTAssertEqual(after.writes, 1)
+  }
+
+  func testVerificationDeadlineDoesNotStartFinalAccountProbes() async throws {
+    let gate = CleanupRecordResponseGate()
+    let transport = CleanupRecordTransport(pages: [[]], listGates: [1: gate])
+    let client = TiebaAuthenticatedClient(
+      transport: transport, cloudFavoriteRecordScanTimeout: .milliseconds(100))
+    let finished = CleanupRecordCompletion()
+    let task = Task {
+      defer { finished.finish() }
+      return try await client.verifyCloudFavoriteRecordAbsence(
+        credential: cleanupCredential(), expectedUserID: 123, threadID: 456)
+    }
+    let completed = await finished.wait()
+    let cancelled = await gate.waitUntilCancelled()
+    let before = await transport.snapshot()
+    await gate.release()
+    XCTAssertTrue(completed)
+    XCTAssertTrue(cancelled)
+    let observation = try await task.value
+    XCTAssertEqual(observation, .inconclusive(.deadlineExceeded))
+    XCTAssertEqual(before.appProbes, 1)
+    XCTAssertEqual(before.webProbes, 1)
+    XCTAssertEqual(before.offsets, [0])
+    XCTAssertEqual(before.writes, 0)
+    let returned = await gate.waitUntilReturned()
+    XCTAssertTrue(returned)
+    let after = await transport.snapshot()
+    XCTAssertEqual(after.paths, before.paths)
+  }
+
+  func testParentCancellationReturnsWithoutWaitingForSuspendedTransport() async throws {
+    let gate = CleanupRecordResponseGate()
+    let transport = CleanupRecordTransport(pages: [[456], [456]], listGates: [1: gate])
+    let client = TiebaAuthenticatedClient(transport: transport)
+    let hook = CleanupRecordHook()
+    let finished = CleanupRecordCompletion()
+    let task = Task {
+      defer { finished.finish() }
+      return try await client.cleanupCloudFavoriteRecord(
+        credential: cleanupCredential(), expectedUserID: 123, threadID: 456
+      ) { try await hook.call() }
+    }
+    let entered = await gate.waitUntilEntered()
+    task.cancel()
+    let completion = await finished.wait()
+    let cancelled = await gate.waitUntilCancelled()
+    let suspended = await gate.isSuspended
+    let before = await transport.snapshot()
+    let hookCalls = await hook.calls
+    if !completion { await gate.release() }
+    XCTAssertTrue(completion, "Cancellation must finish while transport is suspended")
+    XCTAssertTrue(entered)
+    XCTAssertTrue(cancelled)
+    XCTAssertTrue(suspended)
+    XCTAssertEqual(before.writes, 0)
+    XCTAssertEqual(hookCalls, 0)
+    switch await task.result {
+    case .success: XCTFail("Expected cancellation before dispatch")
+    case .failure(let error): XCTAssertTrue(error is CancellationError)
+    }
+    let retry: TiebaCloudFavoriteRecordCleanupReceipt
+    do {
+      retry = try await client.cleanupCloudFavoriteRecord(
+        credential: cleanupCredential(), expectedUserID: userID, threadID: threadID
+      ) {}
+    } catch {
+      await gate.release()
+      throw error
+    }
+    XCTAssertEqual(retry.outcome, .acceptedAwaitingVerification)
+    let stillSuspended = await gate.isSuspended
+    XCTAssertTrue(stillSuspended)
+    await gate.release()
+    let returned = await gate.waitUntilReturned()
+    XCTAssertTrue(returned)
+    await assertNormalWriteConflict(client)
+    let after = await transport.snapshot()
+    XCTAssertEqual(after.writes, 1)
+  }
+
+  func testSecondScanUsesRemainingBudgetFromFirstScan() async throws {
+    let gate = CleanupRecordResponseGate()
+    let transport = CleanupRecordTransport(pages: [[], []], listGates: [1: gate])
+    let client = TiebaAuthenticatedClient(
+      transport: transport, cloudFavoriteRecordScanTimeout: .seconds(2))
+    let task = Task {
+      try await client.verifyCloudFavoriteRecordAbsence(
+        credential: cleanupCredential(), expectedUserID: 123, threadID: 456)
+    }
+    let entered = await gate.waitUntilEntered()
+    try? await Task.sleep(for: .milliseconds(150))
+    await gate.release()
+    let observation = try await task.value
+    XCTAssertTrue(entered)
+    XCTAssertEqual(observation, .observedAbsent)
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.offsets, [0, 0])
+    XCTAssertEqual(snapshot.listTimeouts.count, 2)
+    if snapshot.listTimeouts.count == 2 {
+      XCTAssertLessThan(snapshot.listTimeouts[1], snapshot.listTimeouts[0] - 0.1)
+    }
+    XCTAssertEqual(snapshot.writes, 0)
+  }
+
   func testInitialAndFinalSessionMismatchAndMissingFreshTBSNeverDispatch() async {
     let transports = [
       CleanupRecordTransport(pages: [[456], [], [456], []], appIDs: [999]),
@@ -347,8 +502,8 @@ final class TiebaCloudFavoriteRecordCleanupTests: XCTestCase {
     XCTAssertEqual(snapshot.writes, 1)
   }
 
-  func testCancelledTaskAfterDispatchHookReturnsUnknownWithoutResending() async throws {
-    let transport = CleanupRecordTransport(pages: [[456], [], [456], []])
+  func testCancelledTaskAfterDispatchHookDoesNotDispatchAndAllowsNewConfirmation() async throws {
+    let transport = CleanupRecordTransport(pages: [[456], [456]])
     let client = TiebaAuthenticatedClient(transport: transport)
     let credential = cleanupCredential()
     let task = Task {
@@ -359,13 +514,18 @@ final class TiebaCloudFavoriteRecordCleanupTests: XCTestCase {
       }
     }
     let receipt = try await task.value
-    XCTAssertEqual(receipt.outcome, .unknown)
+    XCTAssertEqual(receipt.outcome, .notDispatched)
+    let before = await transport.snapshot()
+    XCTAssertEqual(before.writes, 0)
+    let hook = CleanupRecordHook()
     let repeated = try await client.cleanupCloudFavoriteRecord(
       credential: credential, expectedUserID: 123, threadID: 456
-    ) { XCTFail("A persisted dispatch intent cannot be retried automatically") }
-    XCTAssertEqual(repeated.outcome, .unknown)
+    ) { try await hook.call() }
+    XCTAssertEqual(repeated.outcome, .acceptedAwaitingVerification)
+    let calls = await hook.calls
+    XCTAssertEqual(calls, 1)
     let snapshot = await transport.snapshot()
-    XCTAssertEqual(snapshot.writes, 0)
+    XCTAssertEqual(snapshot.writes, 1)
   }
 
   func testIdentityChangeAtVerificationEndDoesNotReleaseUnknownTerminal() async throws {
@@ -561,6 +721,7 @@ private actor CleanupRecordTransport: TiebaTransport {
   struct Snapshot: Sendable {
     let paths: [String]
     let offsets: [Int]
+    let listTimeouts: [TimeInterval]
     let appProbes: Int
     let webProbes: Int
     let writes: Int
@@ -575,6 +736,8 @@ private actor CleanupRecordTransport: TiebaTransport {
   private let writeBehavior: WriteBehavior
   private var paths = [String]()
   private var offsets = [Int]()
+  private var listTimeouts = [TimeInterval]()
+  private let listGates: [Int: CleanupRecordResponseGate]
   private var appProbes = 0
   private var webProbes = 0
   private var writes = 0
@@ -591,7 +754,8 @@ private actor CleanupRecordTransport: TiebaTransport {
     webIDs: [Int64] = [],
     tbs: String = String(repeating: "a", count: 26),
     writeBehavior: WriteBehavior = .body(Data("{\"error_code\":0}".utf8)),
-    blocksPB: Bool = false
+    blocksPB: Bool = false,
+    listGates: [Int: CleanupRecordResponseGate] = [:]
   ) {
     self.pages = pages
     self.listOverride = listOverride
@@ -601,6 +765,7 @@ private actor CleanupRecordTransport: TiebaTransport {
     self.tbs = tbs
     self.writeBehavior = writeBehavior
     self.blocksPB = blocksPB
+    self.listGates = listGates
   }
 
   func send(_ request: URLRequest) async throws -> TiebaHTTPResponse {
@@ -626,11 +791,13 @@ private actor CleanupRecordTransport: TiebaTransport {
     case "/c/f/post/threadstore":
       let fields = cleanupFields(request)
       offsets.append(Int(fields["offset"] ?? "") ?? -1)
+      listTimeouts.append(request.timeoutInterval)
       if let listFailureAfterPages, offsets.count > listFailureAfterPages {
         throw URLError(.timedOut)
       }
       guard fields["rn"] == "20" else { throw TiebaClientError.invalidArgument("Unexpected rn") }
       let ids = pages.isEmpty ? [] : pages.removeFirst()
+      if let gate = listGates[offsets.count] { await gate.waitIgnoringCancellation() }
       body =
         try listOverride
         ?? JSONSerialization.data(withJSONObject: [
@@ -665,7 +832,8 @@ private actor CleanupRecordTransport: TiebaTransport {
 
   func snapshot() -> Snapshot {
     .init(
-      paths: paths, offsets: offsets, appProbes: appProbes, webProbes: webProbes, writes: writes)
+      paths: paths, offsets: offsets, listTimeouts: listTimeouts,
+      appProbes: appProbes, webProbes: webProbes, writes: writes)
   }
 
   func waitUntilPB() async -> Bool {
@@ -680,6 +848,86 @@ private actor CleanupRecordTransport: TiebaTransport {
     pbReleased = true
     pbContinuation?.resume()
     pbContinuation = nil
+  }
+}
+
+/// Models a response body that never finishes even when its task is cancelled.
+/// Tests explicitly release it after checking that the client has already returned.
+private actor CleanupRecordResponseGate {
+  private var continuation: CheckedContinuation<Void, Never>?
+  private var entered = false
+  private var released = false
+  private var cancelled = false
+  private var returned = false
+
+  var isSuspended: Bool { entered && !released }
+
+  func waitIgnoringCancellation() async {
+    entered = true
+    await withTaskCancellationHandler {
+      if !released { await withCheckedContinuation { continuation = $0 } }
+    } onCancel: {
+      Task { await self.recordCancellation() }
+    }
+    returned = true
+  }
+
+  func waitUntilEntered() async -> Bool {
+    for _ in 0..<1_000 {
+      if entered { return true }
+      try? await Task.sleep(for: .milliseconds(1))
+    }
+    return false
+  }
+
+  func waitUntilCancelled() async -> Bool {
+    for _ in 0..<1_000 {
+      if cancelled { return true }
+      try? await Task.sleep(for: .milliseconds(1))
+    }
+    return false
+  }
+
+  func waitUntilReturned() async -> Bool {
+    for _ in 0..<1_000 {
+      if returned { return true }
+      try? await Task.sleep(for: .milliseconds(1))
+    }
+    return false
+  }
+
+  func release() {
+    released = true
+    continuation?.resume()
+    continuation = nil
+  }
+
+  private func recordCancellation() { cancelled = true }
+}
+
+private final class CleanupRecordCompletion: @unchecked Sendable {
+  private let lock = NSLock()
+  private var completed = false
+
+  func finish() {
+    lock.lock()
+    completed = true
+    lock.unlock()
+  }
+
+  func wait() async -> Bool {
+    let deadline = ContinuousClock.now.advanced(by: .seconds(1))
+    while ContinuousClock.now < deadline {
+      if isCompleted { return true }
+      try? await Task.sleep(for: .milliseconds(1))
+    }
+    return isCompleted
+  }
+
+  private var isCompleted: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return completed
   }
 }
 
