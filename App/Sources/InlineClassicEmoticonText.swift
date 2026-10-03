@@ -162,6 +162,14 @@ struct InlineClassicEmoticonText: View {
     self.accentColor = accentColor
     self.splitsParagraphs = splitsParagraphs
     self.imageLoader = imageLoader
+    // Retain a warm first-layout snapshot for this view's lifetime, just as we
+    // retain an asynchronously loaded batch. Global cache eviction must not
+    // turn already-visible images back into differently sized text tokens.
+    _assets = State(
+      initialValue: imageLoader.cachedImages(
+        for: .init(
+          urls: plan.urls, fetchPolicy: .cacheOnly(.preview)
+        )))
     _imageSide = ScaledMetric(wrappedValue: imageSide, relativeTo: textStyle)
     _baselineOffset = ScaledMetric(wrappedValue: -3, relativeTo: textStyle)
   }

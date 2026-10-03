@@ -183,6 +183,13 @@ final class InlineClassicEmoticonTextTests: XCTestCase {
     XCTAssertGreaterThan(try redPixelCount(spaced), 500)
     XCTAssertEqual(spaced.size.width, 180, accuracy: 1)
     XCTAssertGreaterThan(spaced.size.height, compact.size.height)
+
+    let retainedView = InlineClassicEmoticonText(
+      plan: InlineClassicEmoticonPlan([.text("#(笑眼)#(笑眼)")]), imageLoader: loader)
+    await repository.clearMemoryCache()
+    let retainedRenderer = ImageRenderer(content: retainedView.font(.body))
+    retainedRenderer.scale = 1
+    XCTAssertGreaterThan(try redPixelCount(XCTUnwrap(retainedRenderer.uiImage)), 500)
     let requests = await transport.recordedRequests()
     XCTAssertEqual(requests.count, 1, "Rendering must reuse the decoded memory entry")
   }
