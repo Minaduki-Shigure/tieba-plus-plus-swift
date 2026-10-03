@@ -409,11 +409,15 @@
         throw Self.unsupported
       }
       let count = await homeProbe.record("catalog")
-      let targets = (1...2).map { page in
+      let status: ForumCheckInCatalogStatus = count > 1 ? .checkedIn : .pending
+      let targets: [ForumCheckInCatalogTarget] = [
         ForumCheckInCatalogTarget(
-          forumID: Int64(200 + page), forumName: page == 1 ? "离线首页甲" : "离线首页乙",
-          level: page + 1, status: count > 1 ? .checkedIn : .pending, isForbidden: false)
-      }
+          forumID: 201, forumName: "离线首页甲", level: 2,
+          status: status, isForbidden: false),
+        ForumCheckInCatalogTarget(
+          forumID: 202, forumName: "离线首页乙", level: 3,
+          status: status, isForbidden: false),
+      ]
       return ForumCheckInCatalogData(userID: session.id, targets: targets, officialBatchPolicy: nil)
     }
 
