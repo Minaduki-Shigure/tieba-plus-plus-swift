@@ -135,7 +135,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-serves `v0.65.0-alpha.35` (build 113) after publication, whose app-code snapshot includes
+serves `v0.65.0-alpha.36` (build 114) after publication, whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -234,7 +234,7 @@ acceptance pass disposable-account device validation.
 | Media rendering, playback, and export | 15 | 14 | Images, bounded GIF/WebP/HEIC-sequence playback, galleries, video, voice, sharing, saving, media policy, and a bounded persistent image cache are implemented; cache lifecycle remains a physical-device validation gate |
 | Local data, settings, and customization | 10 | 7 | History, favorites, public-content and inbox filtering, appearance, text size, media preferences, hierarchical settings navigation, an independent default-on Explore-tab visibility preference, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, confirmation-frozen foreground check-in execution settings, a TiebaLite-compatible default image-watermark choice, reply-entry visibility, a default-on composer risk notice with an experimental reply-only system handoff attempt pending physical validation, local version/source information, and a TiebaLite-aligned inbox startup destination are implemented; wider customization remains |
 | Account, session, and private read flows | 15 | 9 | Login, Home-toolbar quick switching, a self-profile summary with editable wire fields and nickname-review state, an authenticated current-account following list with a guarded mutual filter, followed and target-user liked forums with optional validated level-up progress, account-bound followed-forum check-in marks, target-bound user relationship state, cloud favorites, inbox, foreground unread summary, and concern are implemented; several private reads still need real-account validation or broader activity coverage |
-| Server writes, creation, and social actions | 15 | 14 | Guarded nickname/sex/biography/avatar editing, forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, server-reason-bound personalized recommendation dislike feedback, three text/classic-emoticon reply targets, equivalent new-topic creation, bounded static-image new-topic/direct-topic-reply creation, self-authored topic/ordinary-floor deletion and thread-owner management of other authors' ordinary floors, direct inline-preview reply entry, and credential-free official reporting entry points have implementations; real profile mutation, batch-check-in, creation, deletion, poll and interaction-restriction success, broader uploaded media, unresolvable cloud rows, native reporting, and other reactions remain unavailable or unvalidated on physical devices |
+| Server writes, creation, and social actions | 15 | 14 | Guarded nickname/sex/biography/avatar editing, forum/user follow and unfollow, server-side user interaction restrictions, single-forum and explicitly confirmed foreground batch check-in, account-bound poll voting, approval, verified list/thread-detail cloud-favorite mutations, server-reason-bound personalized recommendation dislike feedback, three text/classic-emoticon reply targets, equivalent new-topic creation, bounded static-image new-topic/direct-topic-reply creation, self-authored topic/ordinary-floor/nested-reply deletion and thread-owner management of other authors' ordinary floors and nested replies, direct inline-preview reply entry, and credential-free official reporting entry points have implementations; real profile mutation, batch-check-in, creation, deletion, poll and interaction-restriction success, broader uploaded media, unresolvable cloud rows, native reporting, and other reactions remain unavailable or unvalidated on physical devices |
 | Background unread, moderation, and administration | 5 | 0 | Published alpha.14 adds opt-in iOS background count reminders with session-bound deduplication and foreground reconciliation; delivery still needs physical-device validation. Moderation and administration remain unimplemented |
 | **Total** | **100** | **80–82** | Current full-product estimate; roughly 18–20% remains |
 
@@ -243,7 +243,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.65.0-alpha.35` app-code snapshot is at 80–82%; all experimental
+The public `v0.65.0-alpha.36` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
@@ -307,7 +307,7 @@ change nor changed author metadata can bypass an uncertain prior deletion.
 Schema-1 signed records without the optional owner identity retain their exact
 canonical encoding. This adds no weighted point before disposable-account
 validation and does not claim forum moderation or nested-reply deletion parity.
-The next candidate adds the actual nested-reply deletion workflow from TiebaLite
+Alpha.36 adds the actual nested-reply deletion workflow from TiebaLite
 `9701bfb6`: `SubPostsPage` identifies the selected child and the account's author
 or topic-owner role; `SubPostsViewModel` passes `subPostId ?: postId` and
 `isFloor=false` to `delPostFlow`. That concrete call yields `isfloor=0`, `src=1`,
@@ -323,8 +323,10 @@ records without that new field retain the same authenticated bytes. A clear ACK
 projects only the child out of the complete list and inline previews; stale
 refreshes and pagination cannot reintroduce it. An unknown result remains locked
 across relaunch and credential renewal. No automatic resend or absence inference
-is added. Native regressions and disposable-account/device validation remain
-required, with no weighted parity increase claimed yet.
+is added. Native regressions cover both ownership modes, old-journal encoding,
+notification and refresh races, exact-child projection, and forward/backward
+pagination. Disposable-account/device validation remains required, with no
+weighted parity increase claimed yet.
 The explicitly confirmed followed-list unfollow action closes a TiebaLite workflow
 gap while reusing the already credited forum-membership endpoint and shared list
 snapshot. It therefore adds no weighted point by itself.
