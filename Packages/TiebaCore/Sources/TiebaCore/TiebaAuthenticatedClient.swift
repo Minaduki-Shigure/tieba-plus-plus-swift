@@ -1059,6 +1059,13 @@ public actor TiebaAuthenticatedClient {
   private var threadCloudFavoriteFlights = [
     TiebaThreadCloudFavoriteResourceKey: TiebaThreadCloudFavoriteFlight
   ]()
+  private var cloudFavoriteRecordOperations = Set<TiebaThreadCloudFavoriteResourceKey>()
+  // Accepted and uncertain dispatches cannot silently become retryable writes.
+  // The App persists this intent across process restarts; Core protects its own
+  // callers until a subsequent complete scan observes absence.
+  private var cloudFavoriteRecordTerminals = [
+    TiebaThreadCloudFavoriteResourceKey: TiebaCloudFavoriteRecordCleanupReceipt
+  ]()
   private var threadCloudFavoriteSharedWaiters = [
     UUID: [UUID: CheckedContinuation<TiebaThreadCloudFavoriteWaitOutcome, Never>]
   ]()
@@ -1958,6 +1965,216 @@ public actor TiebaAuthenticatedClient {
     )
   }
 
+  /// Remove exactly one record from the account's cloud favorites, including a
+  /// deleted thread whose original FID/PID can no longer be resolved.
+  public func cleanupCloudFavoriteRecord(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    threadID: Int64,
+    beforeDispatch: @escaping @Sendable () async throws -> Void
+  ) async throws -> TiebaCloudFavoriteRecordCleanupReceipt {
+    try Task.checkCancellation()
+    try requestFactory.validateCloudFavoriteRecordArguments(
+      credential: credential, expectedUserID: expectedUserID, threadID: threadID
+    )
+    let key = TiebaThreadCloudFavoriteResourceKey(userID: expectedUserID, threadID: threadID)
+    guard !cloudFavoriteRecordOperations.contains(key), threadCloudFavoriteFlights[key] == nil
+    else {
+      throw TiebaCloudFavoriteRecordCleanupError.writeConflict
+    }
+    cloudFavoriteRecordOperations.insert(key)
+    defer { cloudFavoriteRecordOperations.remove(key) }
+
+    let account = try await validateSession(credential: credential)
+    guard account.userID == expectedUserID else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    if let terminal = cloudFavoriteRecordTerminals[key] { return terminal }
+    switch try await observeCloudFavoriteRecord(
+      credential: credential, expectedUserID: expectedUserID, threadID: threadID
+    ) {
+    case .observedPresent: break
+    case .observedAbsent: throw TiebaCloudFavoriteRecordCleanupError.recordNotPresent
+    case .inconclusive(let issue): throw TiebaCloudFavoriteRecordCleanupError.inconclusive(issue)
+    }
+
+    // Revalidate both account surfaces and obtain fresh TBS after the list reads.
+    let context = try await cloudFavoriteRecordSessionContext(
+      credential: credential, expectedUserID: expectedUserID
+    )
+    let request = try requestFactory.cleanupCloudFavoriteRecord(
+      credential: credential, expectedUserID: expectedUserID, threadID: threadID, tbs: context.tbs
+    )
+    try Task.checkCancellation()
+    // The caller durably records dispatchPending and checks its session lease.
+    // A throwing hook is still a preflight failure, never an unknown dispatch.
+    try await beforeDispatch()
+
+    let outcome: TiebaCloudFavoriteRecordCleanupOutcome
+    do {
+      try Task.checkCancellation()
+      let body = try await send(
+        request, maximumBodyBytes: Self.threadCloudFavoriteWriteResponseMaximumBytes)
+      try TiebaAuthenticatedDecoder.checkCloudFavoriteRecordCleanupResponse(body)
+      outcome = .acceptedAwaitingVerification
+    } catch let error as TiebaClientError {
+      if case .server(let code, let message) = error {
+        outcome = .rejected(code: code, message: message)
+      } else {
+        outcome = .unknown
+      }
+    } catch {
+      outcome = .unknown
+    }
+    let receipt = TiebaCloudFavoriteRecordCleanupReceipt(
+      target: .init(userID: expectedUserID, threadID: threadID), outcome: outcome
+    )
+    if case .rejected = outcome {} else { cloudFavoriteRecordTerminals[key] = receipt }
+    return receipt
+  }
+
+  /// Read-only reconciliation. Observed absence does not imply an earlier write
+  /// was acknowledged or caused the disappearance of this record.
+  public func verifyCloudFavoriteRecordAbsence(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    threadID: Int64
+  ) async throws -> TiebaCloudFavoriteRecordObservation {
+    try Task.checkCancellation()
+    try requestFactory.validateCloudFavoriteRecordArguments(
+      credential: credential, expectedUserID: expectedUserID, threadID: threadID
+    )
+    let key = TiebaThreadCloudFavoriteResourceKey(userID: expectedUserID, threadID: threadID)
+    guard !cloudFavoriteRecordOperations.contains(key), threadCloudFavoriteFlights[key] == nil
+    else {
+      throw TiebaCloudFavoriteRecordCleanupError.writeConflict
+    }
+    cloudFavoriteRecordOperations.insert(key)
+    defer { cloudFavoriteRecordOperations.remove(key) }
+    let account = try await validateSession(credential: credential)
+    guard account.userID == expectedUserID else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    let observation = try await observeCloudFavoriteRecord(
+      credential: credential, expectedUserID: expectedUserID, threadID: threadID
+    )
+    let finalAccount = try await validateSession(credential: credential)
+    guard finalAccount.userID == expectedUserID else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    if observation == .observedAbsent { cloudFavoriteRecordTerminals.removeValue(forKey: key) }
+    return observation
+  }
+
+  private func cloudFavoriteRecordSessionContext(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64
+  ) async throws -> TiebaOfficialCheckInSessionContext {
+    let appRequest = try requestFactory.validateSessionApp(credential: credential)
+    let appBody = try await send(appRequest, maximumBodyBytes: Self.accountResponseMaximumBytes)
+    let context = try TiebaOfficialCheckInDecoder.sessionContext(
+      from: appBody, expectedUserID: expectedUserID
+    )
+    try Task.checkCancellation()
+    let webRequest = try requestFactory.validateSessionWeb(credential: credential)
+    let webBody = try await send(webRequest, maximumBodyBytes: Self.webSessionResponseMaximumBytes)
+    guard try TiebaAuthenticatedDecoder.webAccountID(from: webBody) == expectedUserID else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    return context
+  }
+
+  private func observeCloudFavoriteRecord(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    threadID: Int64
+  ) async throws -> TiebaCloudFavoriteRecordObservation {
+    let deadline = ContinuousClock.now.advanced(by: .seconds(30))
+    do {
+      let firstScan = try await scanCloudFavoriteRecordIDs(
+        credential: credential, expectedUserID: expectedUserID,
+        threadID: threadID, deadline: deadline
+      )
+      guard case .complete(let first) = firstScan else { return .observedPresent }
+      let secondScan = try await scanCloudFavoriteRecordIDs(
+        credential: credential, expectedUserID: expectedUserID,
+        threadID: threadID, deadline: deadline
+      )
+      guard case .complete(let second) = secondScan else { return .observedPresent }
+      guard first == second else { return .inconclusive(.changedBetweenScans) }
+      return .observedAbsent
+    } catch is CancellationError {
+      throw CancellationError()
+    } catch let issue as CloudFavoriteRecordScanFailure {
+      return .inconclusive(issue.issue)
+    } catch {
+      try Task.checkCancellation()
+      return .inconclusive(.unreadablePage)
+    }
+  }
+
+  private struct CloudFavoriteRecordScanFailure: Swift.Error {
+    let issue: TiebaCloudFavoriteRecordScanIssue
+  }
+
+  private enum CloudFavoriteRecordScanResult {
+    case found
+    case complete([Int64])
+  }
+
+  private func scanCloudFavoriteRecordIDs(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    threadID: Int64,
+    deadline: ContinuousClock.Instant
+  ) async throws -> CloudFavoriteRecordScanResult {
+    var result = [Int64]()
+    var seen = Set<Int64>()
+    let pageSize = 20
+    // One hundred nonempty pages, followed by a required empty terminator.
+    for pageIndex in 0...100 {
+      try Task.checkCancellation()
+      let remaining = ContinuousClock.now.duration(to: deadline)
+      guard remaining > .zero else {
+        throw CloudFavoriteRecordScanFailure(issue: .deadlineExceeded)
+      }
+      var request = try requestFactory.cloudFavorites(
+        credential: credential, expectedUserID: expectedUserID,
+        offset: pageIndex * pageSize, pageSize: pageSize
+      )
+      let seconds =
+        Double(remaining.components.seconds)
+        + Double(remaining.components.attoseconds) / 1e18
+      request.timeoutInterval = min(request.timeoutInterval, seconds)
+      let body = try await send(request, maximumBodyBytes: Self.cloudFavoritesResponseMaximumBytes)
+      guard ContinuousClock.now < deadline else {
+        throw CloudFavoriteRecordScanFailure(issue: .deadlineExceeded)
+      }
+      // A missing/malformed success code must not establish list membership.
+      try TiebaAuthenticatedDecoder.checkCloudFavoriteRecordCleanupResponse(body)
+      let page = try TiebaAuthenticatedDecoder.cloudFavorites(
+        from: body, expectedUserID: expectedUserID,
+        offset: pageIndex * pageSize, pageSize: pageSize
+      )
+      // Positive membership needs only one exact record. It remains useful for
+      // very large lists or when later pages cannot be read. Only absence needs
+      // complete, duplicate-free, bounded and stable scans.
+      if page.favorites.contains(where: { $0.id == threadID }) { return .found }
+      if page.favorites.isEmpty { return .complete(result) }
+      guard pageIndex < 100, result.count + page.favorites.count <= 2_000 else {
+        throw CloudFavoriteRecordScanFailure(issue: .limitExceeded)
+      }
+      for favorite in page.favorites {
+        guard seen.insert(favorite.id).inserted else {
+          throw CloudFavoriteRecordScanFailure(issue: .duplicateRecord)
+        }
+        result.append(favorite.id)
+      }
+      // A short page is not an EOF signal for threadstore. Continue at offset+rn.
+    }
+    throw CloudFavoriteRecordScanFailure(issue: .limitExceeded)
+  }
+
   public func getThreadCloudFavoriteState(
     credential: TiebaSessionCredential,
     expectedUserID: Int64,
@@ -1996,6 +2213,12 @@ public actor TiebaAuthenticatedClient {
       credential: credential,
       forumID: forumID
     )
+    guard
+      !cloudFavoriteRecordOperations.contains(resourceKey),
+      cloudFavoriteRecordTerminals[resourceKey] == nil
+    else {
+      throw TiebaCloudFavoriteRecordCleanupError.writeConflict
+    }
     if let flight = threadCloudFavoriteFlights[resourceKey] {
       if flight.identity == identity, flight.markedPostID == markedPostID {
         try await waitForSharedThreadCloudFavoriteFlight(

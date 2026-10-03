@@ -325,179 +325,199 @@ final class CloudFavoritesViewModelTests: XCTestCase {
     )
   }
 
-  func testConfirmedRemovalResolvesTargetWritesOnceAndReloadsFromZero() async throws {
+  func testConfirmedRecordRemovalUsesExactThreadOnceWithoutResolverAndReloadsFromZero() async throws
+  {
     let active = cloudSession(userID: 7, revision: cloudUUID(31))
-    let item = cloudItem(id: 11)
-    let target = ThreadCloudFavoriteTarget(
-      forumID: 42,
-      forumName: item.forumName,
-      threadID: item.id
-    )!
-    let vault = CloudFavoritesVaultSpy(session: active)
-    let service = CloudFavoritesServiceSpy(
-      scripts: [
-        .init(userID: 7, offset: 0): [
-          .page(cloudPage(userID: 7, items: [item], nextOffset: nil, hasMore: false)),
-          .page(cloudPage(userID: 7, items: [], nextOffset: nil, hasMore: false)),
+    for item in [
+      cloudItem(id: 11), cloudItem(id: 12, isDeleted: true), cloudItem(id: 13, forumName: ""),
+    ] {
+      let vault = CloudFavoritesVaultSpy(session: active)
+      let service = CloudFavoritesServiceSpy(
+        scripts: [
+          .init(userID: 7, offset: 0): [
+            .page(cloudPage(userID: 7, items: [item], nextOffset: nil, hasMore: false)),
+            .page(cloudPage(userID: 7, items: [], nextOffset: nil, hasMore: false)),
+          ]
+        ],
+        removalScripts: [
+          .status(cloudRemovalStatus(threadID: item.id, phase: .observedAbsent, acknowledged: true))
         ]
-      ],
-      threadReads: [
-        item.id: [.success(cloudFavoriteData(session: active, target: target, markedPostID: 111))]
-      ],
-      threadWrites: [
-        item.id: [.success(cloudFavoriteData(session: active, target: target, markedPostID: nil))]
-      ]
-    )
-    let browse = CloudFavoritesRemovalBrowseSpy(
-      result: .success(
-        BrowseThreadIdentity(threadID: item.id, forumID: target.forumID, forumName: target.forumName)
       )
-    )
-    let store = ThreadCloudFavoriteStore(
-      access: AccountAccess(vault: vault, service: service),
-      observesAccountSessionChanges: false
-    )
-    let viewModel = CloudFavoritesViewModel(
-      service: service,
-      vault: vault,
-      browseService: browse,
-      cloudFavoriteStore: store
-    )
-
-    await viewModel.refresh()
-    viewModel.requestRemoval(of: item)
-    XCTAssertEqual(viewModel.pendingRemoval?.thread, item)
-    let preconfirmationReadCount = await service.threadReadCount()
-    let preconfirmationWriteCount = await service.threadWriteCount()
-    XCTAssertEqual(preconfirmationReadCount, 0)
-    XCTAssertEqual(preconfirmationWriteCount, 0)
-
-    viewModel.confirmPendingRemoval()
-    try await waitForCloudFavoritesTest {
-      let requestCount = await service.requestCount()
-      return viewModel.removingThreadID == nil
-        && viewModel.state == .loaded
-        && viewModel.threads.isEmpty
-        && requestCount == 2
+      let browse = CloudFavoritesRemovalBrowseSpy(
+        result: .failure(CloudFavoritesTestFailure(message: "Resolver must not run")))
+      let viewModel = CloudFavoritesViewModel(service: service, vault: vault, browseService: browse)
+      await viewModel.refresh()
+      viewModel.requestRemoval(of: item)
+      XCTAssertEqual(viewModel.pendingRemoval?.thread, item)
+      let before = await service.removalRequestsSnapshot()
+      XCTAssertTrue(before.isEmpty)
+      viewModel.confirmPendingRemoval()
+      viewModel.confirmPendingRemoval()
+      try await waitForCloudFavoritesTest {
+        let count = await service.requestCount()
+        return viewModel.removingThreadID == nil && viewModel.state == .loaded
+          && viewModel.threads.isEmpty && count == 2
+      }
+      let writes = await service.removalRequestsSnapshot()
+      XCTAssertEqual(
+        writes,
+        [
+          CloudFavoriteRecordTarget(
+            userID: active.id, threadID: item.id, sessionRevision: active.sessionRevision)!
+        ])
+      let listRequests = await service.requestsSnapshot()
+      XCTAssertEqual(listRequests.map(\.offset), [0, 0])
+      let resolverCount = await browse.requestCount()
+      let forumRequests = await browse.forumRequestSnapshot()
+      let oldReads = await service.threadReadCount()
+      let oldWrites = await service.threadWriteCount()
+      XCTAssertEqual(resolverCount, 0)
+      XCTAssertTrue(forumRequests.isEmpty)
+      XCTAssertEqual(oldReads, 0)
+      XCTAssertEqual(oldWrites, 0)
+      XCTAssertNil(viewModel.removalFailure)
     }
-
-    let listRequests = await service.requestsSnapshot()
-    let targetRequests = await browse.requestSnapshot()
-    let readCount = await service.threadReadCount()
-    let writeCount = await service.threadWriteCount()
-    XCTAssertEqual(listRequests.map(\.offset), [0, 0])
-    XCTAssertEqual(targetRequests, [.init(threadID: item.id, expectedForumName: "swift")])
-    XCTAssertEqual(readCount, 1)
-    XCTAssertEqual(writeCount, 1)
-    XCTAssertNil(viewModel.removalFailure)
   }
 
-  func testConfirmedRemovalUsesExactForumFallbackBeforeAuthenticatedProbe() async throws {
-    let active = cloudSession(userID: 7, revision: cloudUUID(37))
-    let item = cloudItem(id: 111)
-    let target = ThreadCloudFavoriteTarget(
-      forumID: 42,
-      forumName: item.forumName,
-      threadID: item.id
-    )!
-    let vault = CloudFavoritesVaultSpy(session: active)
+  func testUnknownAndAcceptedResultsKeepRowUntilExplicitReadOnlyVerification() async throws {
+    for phase in [CloudFavoriteMutationLedgerPhase.outcomeUnknown, .acceptedAwaitingVerification] {
+      let active = cloudSession(userID: 7)
+      let item = cloudItem(id: 111, isDeleted: true)
+      let acknowledged = phase == .acceptedAwaitingVerification
+      let pending = cloudRemovalStatus(threadID: item.id, phase: phase, acknowledged: acknowledged)
+      let service = CloudFavoritesServiceSpy(
+        scripts: [
+          .init(userID: 7, offset: 0): [
+            .page(cloudPage(userID: 7, items: [item], nextOffset: nil, hasMore: false)),
+            .page(cloudPage(userID: 7, items: [], nextOffset: nil, hasMore: false)),
+          ]
+        ],
+        removalScripts: [.status(pending)],
+        verificationScripts: [
+          .status(
+            cloudRemovalStatus(
+              threadID: item.id, phase: .observedAbsent, acknowledged: acknowledged))
+        ]
+      )
+      let viewModel = CloudFavoritesViewModel(
+        service: service, vault: CloudFavoritesVaultSpy(session: active))
+      await viewModel.refresh()
+      viewModel.requestRemoval(of: item)
+      viewModel.confirmPendingRemoval()
+      try await waitForCloudFavoritesTest {
+        viewModel.removingThreadID == nil && viewModel.removalStatuses == [pending]
+      }
+      XCTAssertEqual(viewModel.threads, [item])
+      XCTAssertEqual(viewModel.removalNotice, pending.message)
+      let priorVerifications = await service.verificationRequestsSnapshot()
+      let priorListCount = await service.requestCount()
+      XCTAssertTrue(priorVerifications.isEmpty)
+      XCTAssertEqual(priorListCount, 1)
+
+      viewModel.verifyRemoval(threadID: item.id)
+      viewModel.verifyRemoval(threadID: item.id)
+      try await waitForCloudFavoritesTest {
+        viewModel.state == .loaded && viewModel.threads.isEmpty && viewModel.removingThreadID == nil
+      }
+      let writes = await service.removalRequestsSnapshot()
+      let reads = await service.verificationRequestsSnapshot()
+      XCTAssertEqual(writes.count, 1)
+      XCTAssertEqual(reads, writes)
+      XCTAssertTrue(viewModel.removalStatuses.isEmpty)
+      XCTAssertNil(viewModel.removalFailure)
+    }
+  }
+
+  func testRefreshDuringUnknownRemovalWaitsAndReloadsFromOffsetZero() async throws {
+    let active = cloudSession(userID: 7)
+    let item = cloudItem(id: 114)
+    let updated = cloudItem(id: 114, title: "服务器新标题")
+    let unknown = cloudRemovalStatus(threadID: item.id, phase: .outcomeUnknown)
+    let gate = CloudFavoritesTestGate()
     let service = CloudFavoritesServiceSpy(
       scripts: [
         .init(userID: 7, offset: 0): [
           .page(cloudPage(userID: 7, items: [item], nextOffset: nil, hasMore: false)),
-          .page(cloudPage(userID: 7, items: [], nextOffset: nil, hasMore: false)),
+          .page(cloudPage(userID: 7, items: [updated], nextOffset: nil, hasMore: false)),
         ]
       ],
-      threadReads: [
-        item.id: [.success(cloudFavoriteData(session: active, target: target, markedPostID: 111))]
-      ],
-      threadWrites: [
-        item.id: [.success(cloudFavoriteData(session: active, target: target, markedPostID: nil))]
-      ]
-    )
-    let browse = CloudFavoritesRemovalBrowseSpy(
-      result: .failure(CloudFavoritesTestFailure(message: "Anonymous thread unavailable")),
-      forumResult: .success(BrowseForumIdentity(forumID: 42, forumName: "swift"))
-    )
-    let store = ThreadCloudFavoriteStore(
-      access: AccountAccess(vault: vault, service: service),
-      observesAccountSessionChanges: false
+      removalScripts: [.status(unknown, gate: gate)]
     )
     let viewModel = CloudFavoritesViewModel(
-      service: service,
-      vault: vault,
-      browseService: browse,
-      cloudFavoriteStore: store
-    )
-
+      service: service, vault: CloudFavoritesVaultSpy(session: active))
     await viewModel.refresh()
     viewModel.requestRemoval(of: item)
     viewModel.confirmPendingRemoval()
-    try await waitForCloudFavoritesTest {
-      let requestCount = await service.requestCount()
-      return viewModel.removingThreadID == nil
-        && viewModel.state == .loaded
-        && viewModel.threads.isEmpty
-        && requestCount == 2
+    try await waitForCloudFavoritesTest { await service.recordOperationCount() == 1 }
+    var refreshStarted = false
+    let refresh = Task { @MainActor in
+      refreshStarted = true
+      await viewModel.refresh()
     }
+    try await waitForCloudFavoritesTest { refreshStarted }
+    let requestCountBeforeSettlement = await service.requestCount()
+    XCTAssertEqual(requestCountBeforeSettlement, 1)
+    await gate.release()
+    await refresh.value
 
-    let targetRequests = await browse.requestSnapshot()
-    let forumRequests = await browse.forumRequestSnapshot()
-    let readCount = await service.threadReadCount()
-    let writeCount = await service.threadWriteCount()
-    XCTAssertEqual(targetRequests, [.init(threadID: item.id, expectedForumName: "swift")])
-    XCTAssertEqual(forumRequests, ["swift"])
-    XCTAssertEqual(readCount, 1)
-    XCTAssertEqual(writeCount, 1)
+    XCTAssertEqual(viewModel.threads, [updated])
+    XCTAssertEqual(viewModel.removalStatuses, [unknown])
     XCTAssertNil(viewModel.removalFailure)
+    let listRequests = await service.requestsSnapshot()
+    let writes = await service.removalRequestsSnapshot()
+    let verifications = await service.verificationRequestsSnapshot()
+    XCTAssertEqual(listRequests.map(\.offset), [0, 0])
+    XCTAssertEqual(writes.count, 1)
+    XCTAssertTrue(verifications.isEmpty)
   }
 
-  func testSessionRotationWhileForumFallbackIsPendingSendsNoAuthenticatedRequest() async throws {
-    let active = cloudSession(userID: 7, revision: cloudUUID(38))
-    let rotated = cloudSession(userID: 7, revision: cloudUUID(39))
-    let item = cloudItem(id: 112)
-    let vault = CloudFavoritesVaultSpy(session: active)
+  func testRestartedPendingCanBeVerifiedEvenWhenFavoriteListIsEmpty() async throws {
+    let active = cloudSession(userID: 7, revision: cloudUUID(39))
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("cloud-favorite-ledger.json")
+    let testKey = Data(repeating: 0x72, count: 32)
+    let original = FileCloudFavoriteMutationLedger(fileURL: file, testingKey: testKey)
+    _ = try await original.prepare(
+      key: CloudFavoriteMutationLedgerKey(userID: 7, threadID: 112)!, operationID: UUID(),
+      sessionRevision: cloudUUID(38), now: Date())
+    let restored = try await FileCloudFavoriteMutationLedger(fileURL: file, testingKey: testKey)
+      .records()
+    let statuses = restored.map {
+      cloudRemovalStatus(
+        threadID: $0.key.threadID, phase: $0.restoredPhase, acknowledged: $0.receiptAcknowledged)
+    }
     let service = CloudFavoritesServiceSpy(
       scripts: [
         .init(userID: 7, offset: 0): [
-          .page(cloudPage(userID: 7, items: [item], nextOffset: nil, hasMore: false))
+          .page(cloudPage(userID: 7, items: [], nextOffset: nil, hasMore: false)),
+          .page(cloudPage(userID: 7, items: [], nextOffset: nil, hasMore: false)),
         ]
-      ]
-    )
-    let forumGate = CloudFavoritesForumIdentityGate()
-    let browse = CloudFavoritesRemovalBrowseSpy(
-      result: .failure(CloudFavoritesTestFailure(message: "Anonymous thread unavailable")),
-      forumResult: .success(BrowseForumIdentity(forumID: 42, forumName: "swift")),
-      forumGate: forumGate
-    )
-    let store = ThreadCloudFavoriteStore(
-      access: AccountAccess(vault: vault, service: service),
-      observesAccountSessionChanges: false
+      ],
+      verificationScripts: [.status(cloudRemovalStatus(threadID: 112, phase: .observedAbsent))],
+      removalStatuses: statuses
     )
     let viewModel = CloudFavoritesViewModel(
-      service: service,
-      vault: vault,
-      browseService: browse,
-      cloudFavoriteStore: store
-    )
-
+      service: service, vault: CloudFavoritesVaultSpy(session: active))
     await viewModel.refresh()
-    viewModel.requestRemoval(of: item)
-    viewModel.confirmPendingRemoval()
-    await forumGate.waitUntilSuspended()
-    await vault.replaceActive(with: rotated)
-    await forumGate.resume()
-    try await waitForCloudFavoritesTest { viewModel.removingThreadID == nil }
-
-    let readCount = await service.threadReadCount()
-    let writeCount = await service.threadWriteCount()
-    XCTAssertEqual(viewModel.threads, [item])
-    XCTAssertNotNil(viewModel.removalFailure)
-    XCTAssertEqual(readCount, 0)
-    XCTAssertEqual(writeCount, 0)
+    XCTAssertTrue(viewModel.threads.isEmpty)
+    XCTAssertEqual(viewModel.removalStatuses, statuses)
+    viewModel.verifyRemoval(threadID: 112)
+    try await waitForCloudFavoritesTest {
+      viewModel.removingThreadID == nil && viewModel.removalStatuses.isEmpty
+    }
+    let writes = await service.removalRequestsSnapshot()
+    let reads = await service.verificationRequestsSnapshot()
+    XCTAssertTrue(writes.isEmpty)
+    XCTAssertEqual(
+      reads,
+      [
+        CloudFavoriteRecordTarget(
+          userID: 7, threadID: 112, sessionRevision: active.sessionRevision)!
+      ])
   }
 
-  func testCancelConfirmationAndStaleLeaseSendNoResolverOrWriteRequests() async throws {
+  func testCancelConfirmationAndStaleLeaseSendNoRecordMutationOrVerification() async throws {
     let active = cloudSession(userID: 7, revision: cloudUUID(32))
     let rotated = cloudSession(userID: 7, revision: cloudUUID(33))
     let item = cloudItem(id: 12)
@@ -509,41 +529,28 @@ final class CloudFavoritesViewModelTests: XCTestCase {
         ]
       ]
     )
-    let browse = CloudFavoritesRemovalBrowseSpy(
-      result: .success(BrowseThreadIdentity(threadID: item.id, forumID: 42, forumName: "swift"))
-    )
-    let store = ThreadCloudFavoriteStore(
-      access: AccountAccess(vault: vault, service: service),
-      observesAccountSessionChanges: false
-    )
-    let viewModel = CloudFavoritesViewModel(
-      service: service,
-      vault: vault,
-      browseService: browse,
-      cloudFavoriteStore: store
-    )
+    let viewModel = CloudFavoritesViewModel(service: service, vault: vault)
     await viewModel.refresh()
 
     viewModel.requestRemoval(of: item)
     viewModel.cancelPendingRemoval()
     for _ in 0..<20 { await Task.yield() }
-    let cancelledResolverCount = await browse.requestCount()
-    XCTAssertEqual(cancelledResolverCount, 0)
+    XCTAssertNil(viewModel.pendingRemoval)
+    let cancelledRequests = await service.removalRequestsSnapshot()
+    XCTAssertTrue(cancelledRequests.isEmpty)
 
     viewModel.requestRemoval(of: item)
     await vault.replaceActive(with: rotated)
     viewModel.confirmPendingRemoval()
     try await waitForCloudFavoritesTest { viewModel.removingThreadID == nil }
 
-    let resolverCount = await browse.requestCount()
-    let readCount = await service.threadReadCount()
-    let writeCount = await service.threadWriteCount()
-    XCTAssertEqual(resolverCount, 0)
-    XCTAssertEqual(readCount, 0)
-    XCTAssertEqual(writeCount, 0)
+    let writes = await service.removalRequestsSnapshot()
+    let reads = await service.verificationRequestsSnapshot()
+    XCTAssertTrue(writes.isEmpty)
+    XCTAssertTrue(reads.isEmpty)
   }
 
-  func testResolverMismatchPreservesRowAndSendsNoAuthenticatedRequest() async throws {
+  func testUnreadableRemovalHistoryPreservesListButDisablesRemoval() async throws {
     let active = cloudSession(userID: 7, revision: cloudUUID(34))
     let item = cloudItem(id: 13)
     let vault = CloudFavoritesVaultSpy(session: active)
@@ -552,33 +559,94 @@ final class CloudFavoritesViewModelTests: XCTestCase {
         .init(userID: 7, offset: 0): [
           .page(cloudPage(userID: 7, items: [item], nextOffset: nil, hasMore: false))
         ]
-      ]
+      ],
+      historyFailure: "ledger unreadable"
     )
-    let browse = CloudFavoritesRemovalBrowseSpy(
-      result: .success(BrowseThreadIdentity(threadID: 999, forumID: 42, forumName: "swift"))
-    )
-    let store = ThreadCloudFavoriteStore(
-      access: AccountAccess(vault: vault, service: service),
-      observesAccountSessionChanges: false
-    )
-    let viewModel = CloudFavoritesViewModel(
-      service: service,
-      vault: vault,
-      browseService: browse,
-      cloudFavoriteStore: store
-    )
+    let viewModel = CloudFavoritesViewModel(service: service, vault: vault)
     await viewModel.refresh()
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertTrue(viewModel.removalHistoryError?.contains("ledger unreadable") == true)
+    viewModel.requestRemoval(of: item)
+    XCTAssertNil(viewModel.pendingRemoval)
+    viewModel.confirmPendingRemoval()
+    XCTAssertEqual(viewModel.threads, [item])
+    XCTAssertEqual(viewModel.removalFailure?.message, viewModel.removalHistoryError)
+    let writes = await service.removalRequestsSnapshot()
+    let reads = await service.verificationRequestsSnapshot()
+    XCTAssertTrue(writes.isEmpty)
+    XCTAssertTrue(reads.isEmpty)
+  }
 
+  func testOldLeaseRemovalOrVerificationResponseCannotUpdateNewAccount() async throws {
+    for verificationOnly in [false, true] {
+      let active = cloudSession(userID: 7, revision: cloudUUID(37))
+      let replacement = cloudSession(userID: 8, revision: cloudUUID(38))
+      let oldItem = cloudItem(id: 71)
+      let newItem = cloudItem(id: 81)
+      let vault = CloudFavoritesVaultSpy(session: active)
+      let gate = CloudFavoritesTestGate()
+      let delayed = CloudFavoriteRemovalScript.status(
+        cloudRemovalStatus(threadID: oldItem.id, phase: .observedAbsent), gate: gate)
+      let service = CloudFavoritesServiceSpy(
+        scripts: [
+          .init(userID: 7, offset: 0): [
+            .page(cloudPage(userID: 7, items: [oldItem], nextOffset: nil, hasMore: false))
+          ],
+          .init(userID: 8, offset: 0): [
+            .page(cloudPage(userID: 8, items: [newItem], nextOffset: nil, hasMore: false))
+          ],
+        ],
+        removalScripts: verificationOnly ? [] : [delayed],
+        verificationScripts: verificationOnly ? [delayed] : [],
+        removalStatuses: verificationOnly
+          ? [cloudRemovalStatus(threadID: oldItem.id, phase: .outcomeUnknown)] : []
+      )
+      let viewModel = CloudFavoritesViewModel(service: service, vault: vault)
+      await viewModel.refresh()
+      if verificationOnly {
+        viewModel.verifyRemoval(threadID: oldItem.id)
+      } else {
+        viewModel.requestRemoval(of: oldItem)
+        viewModel.confirmPendingRemoval()
+      }
+      try await waitForCloudFavoritesTest { await service.recordOperationCount() == 1 }
+      await vault.replaceActive(with: replacement)
+      await service.replaceRemovalStatuses([])
+      viewModel.accountSessionDidChange()
+      try await waitForCloudFavoritesTest { viewModel.threads == [newItem] }
+      await gate.release()
+      try await waitForCloudFavoritesTest { await service.completedRecordOperationCount() == 1 }
+      for _ in 0..<20 { await Task.yield() }
+      XCTAssertEqual(viewModel.threads, [newItem])
+      XCTAssertNil(viewModel.removalNotice)
+      XCTAssertNil(viewModel.removalFailure)
+      XCTAssertTrue(viewModel.removalStatuses.isEmpty)
+      let requests = await service.requestsSnapshot()
+      XCTAssertEqual(requests.map(\.userID), [7, 8])
+    }
+  }
+
+  func testDefiniteServerRejectionRetainsRowAndShowsError() async throws {
+    let active = cloudSession(userID: 7)
+    let item = cloudItem(id: 113, isDeleted: true)
+    let service = CloudFavoritesServiceSpy(
+      scripts: [
+        .init(userID: 7, offset: 0): [
+          .page(cloudPage(userID: 7, items: [item], nextOffset: nil, hasMore: false))
+        ]
+      ],
+      removalScripts: [.failure("server rejected")])
+    let viewModel = CloudFavoritesViewModel(
+      service: service, vault: CloudFavoritesVaultSpy(session: active))
+    await viewModel.refresh()
     viewModel.requestRemoval(of: item)
     viewModel.confirmPendingRemoval()
     try await waitForCloudFavoritesTest { viewModel.removalFailure != nil }
-
     XCTAssertEqual(viewModel.threads, [item])
-    XCTAssertTrue(viewModel.removalFailure?.message.contains("没有发送删除请求") == true)
-    let readCount = await service.threadReadCount()
-    let writeCount = await service.threadWriteCount()
-    XCTAssertEqual(readCount, 0)
-    XCTAssertEqual(writeCount, 0)
+    XCTAssertEqual(viewModel.removalFailure?.message, "server rejected")
+    XCTAssertTrue(viewModel.removalStatuses.isEmpty)
+    let requests = await service.removalRequestsSnapshot()
+    XCTAssertEqual(requests.count, 1)
   }
 
   func testCloudFavoriteChangeRequiresExactLeaseAndRestartsAtOffsetZero() async throws {
@@ -685,6 +753,11 @@ private enum CloudFavoritesScript: Sendable {
   case requiresRelogin
 }
 
+private enum CloudFavoriteRemovalScript: Sendable {
+  case status(CloudFavoriteRecordRemovalStatus, gate: CloudFavoritesTestGate? = nil)
+  case failure(String)
+}
+
 private actor CloudFavoritesTestGate {
   private var continuation: CheckedContinuation<Void, Never>?
   private var isReleased = false
@@ -710,27 +783,82 @@ private struct CloudFavoritesTestFailure: LocalizedError, Sendable {
 private actor CloudFavoritesServiceSpy: AccountService {
   private var scripts: [CloudFavoritesRequest: [CloudFavoritesScript]]
   private var requests: [CloudFavoritesRequest] = []
-  private var threadReads: [
-    Int64: [Result<ThreadCloudFavoriteData, CloudFavoritesTestFailure>]
-  ]
-  private var threadWrites: [
-    Int64: [Result<ThreadCloudFavoriteData, CloudFavoritesTestFailure>]
-  ]
+  private var removalScripts: [CloudFavoriteRemovalScript]
+  private var verificationScripts: [CloudFavoriteRemovalScript]
+  private var removalStatuses: [CloudFavoriteRecordRemovalStatus]
+  private let historyFailure: String?
+  private var removalRequests: [CloudFavoriteRecordTarget] = []
+  private var verificationRequests: [CloudFavoriteRecordTarget] = []
+  private var completedRecordOperations = 0
+  private var threadReads: [Int64: [Result<ThreadCloudFavoriteData, CloudFavoritesTestFailure>]]
+  private var threadWrites: [Int64: [Result<ThreadCloudFavoriteData, CloudFavoritesTestFailure>]]
   private var threadReadRequests: [ThreadCloudFavoriteTarget] = []
   private var threadWriteRequests: [(ThreadCloudFavoriteTarget, Int64?)] = []
 
   init(
     scripts: [CloudFavoritesRequest: [CloudFavoritesScript]],
-    threadReads: [
-      Int64: [Result<ThreadCloudFavoriteData, CloudFavoritesTestFailure>]
-    ] = [:],
-    threadWrites: [
-      Int64: [Result<ThreadCloudFavoriteData, CloudFavoritesTestFailure>]
-    ] = [:]
+    threadReads: [Int64: [Result<ThreadCloudFavoriteData, CloudFavoritesTestFailure>]] = [:],
+    threadWrites: [Int64: [Result<ThreadCloudFavoriteData, CloudFavoritesTestFailure>]] = [:],
+    removalScripts: [CloudFavoriteRemovalScript] = [],
+    verificationScripts: [CloudFavoriteRemovalScript] = [],
+    removalStatuses: [CloudFavoriteRecordRemovalStatus] = [],
+    historyFailure: String? = nil
   ) {
     self.scripts = scripts
     self.threadReads = threadReads
     self.threadWrites = threadWrites
+    self.removalScripts = removalScripts
+    self.verificationScripts = verificationScripts
+    self.removalStatuses = removalStatuses
+    self.historyFailure = historyFailure
+  }
+
+  func cloudFavoriteRecordRemovalStatuses(
+    session: StoredAccountSession
+  ) async throws -> [CloudFavoriteRecordRemovalStatus] {
+    if let historyFailure { throw CloudFavoritesTestFailure(message: historyFailure) }
+    return removalStatuses
+  }
+
+  func removeCloudFavoriteRecord(
+    session: StoredAccountSession, target: CloudFavoriteRecordTarget
+  ) async throws -> CloudFavoriteRecordRemovalStatus {
+    removalRequests.append(target)
+    guard target.matches(session), !removalScripts.isEmpty else {
+      throw CloudFavoritesTestFailure(message: "Unexpected record mutation")
+    }
+    let script = removalScripts.removeFirst()
+    return try await execute(script)
+  }
+
+  func verifyCloudFavoriteRecordRemoval(
+    session: StoredAccountSession, target: CloudFavoriteRecordTarget
+  ) async throws -> CloudFavoriteRecordRemovalStatus {
+    verificationRequests.append(target)
+    guard target.matches(session), !verificationScripts.isEmpty else {
+      throw CloudFavoritesTestFailure(message: "Unexpected record verification")
+    }
+    let script = verificationScripts.removeFirst()
+    return try await execute(script)
+  }
+
+  private func execute(_ script: CloudFavoriteRemovalScript) async throws
+    -> CloudFavoriteRecordRemovalStatus
+  {
+    defer { completedRecordOperations += 1 }
+    switch script {
+    case .status(let status, let gate):
+      if let gate { await gate.wait() }
+      removalStatuses.removeAll { $0.threadID == status.threadID }
+      if status.requiresVerification { removalStatuses.append(status) }
+      return status
+    case .failure(let message):
+      throw CloudFavoritesTestFailure(message: message)
+    }
+  }
+
+  func replaceRemovalStatuses(_ statuses: [CloudFavoriteRecordRemovalStatus]) {
+    removalStatuses = statuses
   }
 
   func cloudFavorites(
@@ -842,6 +970,10 @@ private actor CloudFavoritesServiceSpy: AccountService {
   func requestsSnapshot() -> [CloudFavoritesRequest] { requests }
   func threadReadCount() -> Int { threadReadRequests.count }
   func threadWriteCount() -> Int { threadWriteRequests.count }
+  func removalRequestsSnapshot() -> [CloudFavoriteRecordTarget] { removalRequests }
+  func verificationRequestsSnapshot() -> [CloudFavoriteRecordTarget] { verificationRequests }
+  func recordOperationCount() -> Int { removalRequests.count + verificationRequests.count }
+  func completedRecordOperationCount() -> Int { completedRecordOperations }
 }
 
 private struct CloudFavoritesRemovalTargetRequest: Equatable, Sendable {
@@ -1009,12 +1141,13 @@ private func cloudItem(
   id: Int64,
   title: String? = nil,
   latestFloor: Int? = 3,
-  isDeleted: Bool = false
+  isDeleted: Bool = false,
+  forumName: String = "swift"
 ) -> CloudFavoriteThread {
   CloudFavoriteThread(
     id: id,
     title: title ?? "Thread \(id)",
-    forumName: "swift",
+    forumName: forumName,
     author: cloudFavoriteAuthor(
       userID: id + 100,
       username: "author-account-\(id)",
@@ -1079,6 +1212,14 @@ private func cloudFavoriteData(
 
 private func cloudUUID(_ value: UInt8) -> UUID {
   UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, value))
+}
+
+private func cloudRemovalStatus(
+  threadID: Int64, phase: CloudFavoriteMutationLedgerPhase, acknowledged: Bool = false
+) -> CloudFavoriteRecordRemovalStatus {
+  CloudFavoriteRecordRemovalStatus(
+    threadID: threadID, phase: phase, receiptAcknowledged: acknowledged,
+    observation: phase == .observedAbsent ? .observedAbsent : nil)
 }
 
 @MainActor

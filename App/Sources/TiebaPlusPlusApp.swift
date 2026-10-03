@@ -72,7 +72,11 @@ struct TiebaPlusPlusApp: App {
     let authenticatedClient = TiebaAuthenticatedClient(configuration: clientConfiguration)
     let accountService: any AccountService = TiebaCoreAccountService(
       client: authenticatedClient,
-      contentFilterRepository: contentFilterRepository
+      contentFilterRepository: contentFilterRepository,
+      cloudFavoriteMutationGate: CloudFavoriteMutationGate(
+        ledger: FileCloudFavoriteMutationLedger.live()
+      ),
+      cloudFavoriteVault: accountVault
     )
     self.accountVault = accountVault
     self.accountSessionLookup = accountVault

@@ -1000,6 +1000,49 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
     )
   }
 
+  /// Record cleanup uses the upstream rmstore sentinel, never a made-up FID.
+  /// Keep this contract separate from the validated forum/floor favorite API.
+  func cleanupCloudFavoriteRecord(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    threadID: Int64,
+    tbs: String
+  ) throws -> URLRequest {
+    try validateCloudFavoriteRecordArguments(
+      credential: credential, expectedUserID: expectedUserID, threadID: threadID
+    )
+    guard Self.isValidTBS(tbs) else {
+      throw TiebaClientError.invalidAuthenticatedResponse
+    }
+    let version = Self.threadCloudFavoriteClientVersion
+    return try signedFormRequest(
+      host: Self.writeHost,
+      path: "/c/c/post/rmstore",
+      fields: [
+        ("BDUSS", credential.bduss),
+        ("_client_version", version),
+        ("fid", "null"),
+        ("stoken", credential.stoken),
+        ("tbs", tbs),
+        ("tid", String(threadID)),
+        ("user_id", String(expectedUserID)),
+      ],
+      userAgent: "bdtb for Android \(version)",
+      clientUserToken: String(expectedUserID),
+      cookie: "ka=open"
+    )
+  }
+
+  func validateCloudFavoriteRecordArguments(
+    credential: TiebaSessionCredential,
+    expectedUserID: Int64,
+    threadID: Int64
+  ) throws {
+    try validate(credential)
+    try validatePositiveID(expectedUserID, name: "Expected user ID")
+    try validatePositiveID(threadID, name: "Thread ID")
+  }
+
   func validateThreadCloudFavoriteWriteArguments(
     credential: TiebaSessionCredential,
     expectedUserID: Int64,

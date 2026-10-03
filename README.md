@@ -25,6 +25,21 @@ and its verified metadata enters the public app source.
 
 ### Release and validation
 
+- **Cloud-favorite record cleanup:** My → 贴吧收藏 can explicitly remove an
+  exact saved-list record even when its thread has been deleted, its forum name
+  is missing, or the original post can no longer be resolved. The separate
+  record API revalidates the current account, finds the exact authenticated-list record, and
+  dispatches `rmstore` once with `fid="null"`; normal forum/floor favorite APIs
+  keep their existing validation. A durable UID/TID journal distinguishes a
+  server acknowledgement, an unknown result, and subsequently observed absence.
+  Pending results survive relaunch and credential renewal, block other favorite
+  writes for the same account/thread, and offer **继续核验（不重发）**, including
+  when the row has disappeared from the list. Verification requires two matching
+  complete scans, ending at an empty page; short pages do not count as completion.
+  Duplicate/changing pages, errors, 2,000-record/100-page limits and a 30-second
+  scan budget leave the result unconfirmed. These are bounded observations, not
+  an atomic server snapshot. Real-account compatibility and physical-device
+  validation remain outstanding; no account writes were used to develop tests.
 - **`v0.65.0-alpha.33` inline classic emoticons:** Post bodies, full nested replies,
   and inline reply previews display known classic faces inside the text line.
   Structured faces and exact `#(name)` text markers use the same compiled official
