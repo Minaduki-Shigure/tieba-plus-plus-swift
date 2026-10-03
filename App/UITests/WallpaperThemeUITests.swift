@@ -108,7 +108,14 @@ final class WallpaperThemeUITests: XCTestCase {
 
   @MainActor
   private func restoreDefault(_ app: XCUIApplication) throws {
-    try tap(app.buttons["wallpaper-theme-reset"], app: app)
+    let reset = app.buttons["wallpaper-theme-reset"]
+    try reveal(reset, app: app)
+    let tabBar = app.tabBars["root-tab-bar"]
+    XCTAssertTrue(tabBar.exists, "The root tab bar must remain available in the editor.")
+    XCTAssertLessThanOrEqual(
+      reset.frame.maxY, tabBar.frame.minY + 1,
+      "The final editor action must be fully above the tab bar after scrolling to it.")
+    try tap(reset, app: app)
     try tap(app.buttons["wallpaper-theme-confirm-reset"], app: app)
     try waitForEditorDismissal(app)
   }
@@ -172,17 +179,9 @@ final class WallpaperThemeUITests: XCTestCase {
         throw WallpaperUITestError.unavailable(
           "Element has no layout frame: \(element.identifier)")
       }
-      let movesUp = targetFrame.midY > visible.midY
-      let upperY = visible.minY + visible.height * 0.25
-      let lowerY = visible.minY + visible.height * 0.75
-      let origin = scrollView.coordinate(withNormalizedOffset: .zero)
-      let marginX = try scrollGestureX(app, scroll: scrollView, visible: visible)
-        - scrollFrame.minX
-      let start = origin.withOffset(CGVector(
-        dx: marginX, dy: (movesUp ? lowerY : upperY) - scrollFrame.minY))
-      let end = origin.withOffset(CGVector(
-        dx: marginX, dy: (movesUp ? upperY : lowerY) - scrollFrame.minY))
-      start.press(forDuration: 0.05, thenDragTo: end)
+      let distance = visible.height * (targetFrame.midY > visible.midY ? -0.5 : 0.5)
+      try dragScrollableContent(
+        app, scroll: scrollView, tracking: element, visible: visible, distance: distance)
       if element.isHittable { return }
     }
     throw WallpaperUITestError.unavailable(
@@ -195,72 +194,55 @@ final class WallpaperThemeUITests: XCTestCase {
   }
 
   @MainActor
-  private func scrollGestureX(
-    _ app: XCUIApplication, scroll: XCUIElement, visible: CGRect
-  ) throws -> CGFloat {
-    guard scroll.identifier == "wallpaper-theme-editor-scroll" else {
-      return visible.minX + 8
-    }
-    // ScrollView's accessibility frame includes the landscape safe area. Anchor
-    // to its actual content instead of dragging at x=8 outside the scrollable
-    // region. The 16pt content padding avoids the crop gesture and sliders; the
-    // photo picker shares that leading edge even when the crop is centered.
-    let contentAnchor = app.descendants(matching: .any)
-      .matching(identifier: "wallpaper-theme-photo-picker").firstMatch
-    guard contentAnchor.exists else {
-      throw WallpaperUITestError.unavailable("The editor has no content anchor.")
-    }
-    let frame = contentAnchor.frame
-    guard !frame.isEmpty, !frame.isNull, frame.minX.isFinite else {
-      throw WallpaperUITestError.unavailable("The editor content anchor has no valid frame.")
-    }
-    return max(visible.minX + 4, min(visible.maxX - 4, frame.minX - 8))
-  }
-
-  @MainActor
-  private func dragEditorContent(
-    _ app: XCUIApplication, scroll: XCUIElement, crop: XCUIElement,
+  private func dragScrollableContent(
+    _ app: XCUIApplication, scroll: XCUIElement, tracking target: XCUIElement,
     visible: CGRect, distance: CGFloat
   ) throws {
-    // The landscape ScrollView's AX frame includes margins that do not consume
-    // scrolling gestures. Start on actual visible content, outside the crop's
-    // own drag gesture and the sliders/segmented control.
+    // A ScrollView's AX frame includes margins that do not reliably consume
+    // scrolling gestures in either orientation. Reveal and rotation both start
+    // on actual visible content, outside controls with their own drag gestures.
     let usable = visible.insetBy(dx: 4, dy: 8)
     let downward = distance > 0
-    let before = crop.frame
+    let before = target.frame
+    var excludedFrames = scroll.sliders.allElementsBoundByIndex.map(\.frame)
+      + scroll.segmentedControls.allElementsBoundByIndex.map(\.frame)
+    let crop = scroll.descendants(matching: .any)
+      .matching(identifier: "wallpaper-theme-crop").firstMatch
+    if crop.exists { excludedFrames.append(crop.frame) }
     let texts = scroll.staticTexts.allElementsBoundByIndex
-    let resetCrop = app.buttons["wallpaper-theme-reset-crop"]
+    let buttons = scroll.buttons.allElementsBoundByIndex
     var candidate: (element: XCUIElement, point: CGPoint, travel: CGFloat)?
-    for group in [texts, [resetCrop]] {
+    for group in [texts, buttons] {
       for element in group {
         guard element.exists else { continue }
         let frame = element.frame
         let point = CGPoint(x: frame.midX, y: frame.midY)
         let travel = downward ? usable.maxY - point.y : point.y - usable.minY
         guard !frame.isEmpty, !frame.isNull, usable.contains(point),
-          !before.contains(point), travel >= 24,
+          !excludedFrames.contains(where: { $0.contains(point) }), travel >= 24,
           travel > (candidate?.travel ?? 0), element.isHittable
         else { continue }
         candidate = (element, point, travel)
       }
       // Prefer text. If a short drag moves every heading offscreen, a vertical
-      // drag on the ordinary reset button can still scroll without tapping it.
+      // drag on an ordinary button can still scroll without tapping it.
       if candidate != nil { break }
     }
     guard let candidate else {
       throw WallpaperUITestError.unavailable(
-        "No visible editor content can begin a scroll: crop=\(before), viewport=\(visible)")
+        "No visible content can begin a scroll: target=\(target.identifier) \(before), "
+          + "viewport=\(visible), excluded=\(excludedFrames)")
     }
     let delta = min(abs(distance), candidate.travel) * (downward ? 1.0 : -1.0)
     let origin = app.coordinate(withNormalizedOffset: .zero)
     let start = origin.withOffset(CGVector(dx: candidate.point.x, dy: candidate.point.y))
     let end = origin.withOffset(CGVector(dx: candidate.point.x, dy: candidate.point.y + delta))
     start.press(forDuration: 0.05, thenDragTo: end)
-    let after = crop.frame
+    let after = target.frame
     guard (after.minY - before.minY) * (downward ? 1.0 : -1.0) > 1 else {
       throw WallpaperUITestError.unavailable(
-        "Editor content did not scroll from \(candidate.element.label) at \(candidate.point) "
-          + "by \(delta): crop before=\(before), after=\(after)")
+        "Content did not scroll from \(candidate.element.label) at \(candidate.point) "
+          + "by \(delta): target=\(target.identifier), before=\(before), after=\(after)")
     }
   }
 
@@ -305,8 +287,8 @@ final class WallpaperThemeUITests: XCTestCase {
             // Bring its center into view without dragging inside the crop gesture.
             let distance = max(-visible.height * 0.6, min(
               visible.height * 0.6, visible.midY - geometry.crop.midY))
-            try dragEditorContent(
-              app, scroll: scroll, crop: crop, visible: visible, distance: distance)
+            try dragScrollableContent(
+              app, scroll: scroll, tracking: crop, visible: visible, distance: distance)
             stableSamples = 0
             previous = nil
           } else if crop.isHittable, geometry.saveEnabled {

@@ -226,7 +226,9 @@ final class ExploreRefreshUITests: XCTestCase {
 
   @MainActor
   private func attachScreenshot(_ name: String, app: XCUIApplication) {
-    let screenshot = XCTAttachment(screenshot: app.screenshot())
+    // Application captures can crop with portrait bounds after rotation on the
+    // simulator. Capture the display, as the wallpaper geometry test does.
+    let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
     screenshot.name = name
     screenshot.lifetime = .keepAlways
     add(screenshot)
