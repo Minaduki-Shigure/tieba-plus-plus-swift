@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, ci/explore-reselection-refresh-1003]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
