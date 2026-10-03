@@ -46,7 +46,16 @@ final class PersonalizedFeedViewModel: ObservableObject {
   static let filteredScanPausedMessage = "连续多页没有来自已关注贴吧的内容，可以继续查找。"
 
   @Published private(set) var items: [PersonalizedFeedItem] = []
-  @Published private(set) var state: LoadState = .idle
+  #if DEBUG
+    @Published private(set) var state: LoadState = .idle {
+      didSet {
+        ExploreRefreshLifecycleDiagnostics.active?.recordModel(
+          event: "state", state: state, generation: generation)
+      }
+    }
+  #else
+    @Published private(set) var state: LoadState = .idle
+  #endif
   @Published private(set) var isRefreshing = false
   @Published private(set) var isLoadingMore = false
   @Published private(set) var hasMore = true
@@ -297,6 +306,10 @@ final class PersonalizedFeedViewModel: ObservableObject {
     if state == .loading {
       state = kind == .replacement && items.isEmpty ? .idle : .loaded
     }
+    #if DEBUG
+      ExploreRefreshLifecycleDiagnostics.active?.recordModel(
+        event: "cancel", state: state, generation: generation)
+    #endif
   }
 
   private func performFeedbackSubmission(
@@ -520,6 +533,10 @@ final class PersonalizedFeedViewModel: ObservableObject {
     let requestGeneration = generation
     let requestScope = scope
     let requestPersona = persona
+    #if DEBUG
+      ExploreRefreshLifecycleDiagnostics.active?.recordModel(
+        event: "start", state: state, generation: generation)
+    #endif
     let service = service
     let accountSessionLookup = accountSessionLookup
     let accountVault = accountVault

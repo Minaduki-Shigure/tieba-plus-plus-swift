@@ -114,9 +114,88 @@
     @ObservedObject var probe: ExploreRefreshUITestProbe
 
     var body: some View {
-      Text(probe.summary)
-        .font(.system(size: 9, design: .monospaced))
-        .accessibilityIdentifier("explore-refresh-request-counts")
+      VStack(alignment: .leading, spacing: 1) {
+        Text(probe.summary)
+          .font(.system(size: 9, design: .monospaced))
+          .accessibilityIdentifier("explore-refresh-request-counts")
+        if let diagnostics = ExploreRefreshLifecycleDiagnostics.active {
+          ExploreRefreshLifecycleProbeView(diagnostics: diagnostics)
+        }
+      }
+    }
+  }
+
+  private struct ExploreRefreshLifecycleProbeView: View {
+    @ObservedObject var diagnostics: ExploreRefreshLifecycleDiagnostics
+
+    var body: some View {
+      Text(diagnostics.summary)
+        .font(.system(size: 7, design: .monospaced))
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: 390, alignment: .leading)
+        .accessibilityIdentifier("explore-refresh-lifecycle")
+    }
+  }
+
+  /// Synchronous, fixture-only observations. No tasks, notifications or feed
+  /// state are changed; release builds compile out both this type and its calls.
+  @MainActor
+  final class ExploreRefreshLifecycleDiagnostics: ObservableObject {
+    static let active: ExploreRefreshLifecycleDiagnostics? =
+      ProcessInfo.processInfo.arguments.contains("--explore-refresh-ui-testing")
+      ? ExploreRefreshLifecycleDiagnostics() : nil
+
+    @Published private(set) var summary = "lifecycle awaiting events"
+    private var sequence = 0
+    private var appearances = 0
+    private var disappearances = 0
+    private var starts = 0
+    private var cancellations = 0
+    private var root = "root=?"
+    private var explore = "explore=?"
+    private var personal = "personal=?"
+    private var model = "model=?"
+
+    func recordRoot(phase: String, tab: RootMainTab) {
+      sequence += 1
+      root = "root#\(sequence) phase=\(phase) tab=\(tab.rawValue)"
+      publish()
+    }
+
+    func recordExplore(selection: ExploreSection, sections: [ExploreSection], ready: Bool) {
+      sequence += 1
+      explore = "explore#\(sequence) selected=\(selection.rawValue) ready=\(ready) "
+        + "pages=\(sections.map(\.rawValue).joined(separator: ","))"
+      publish()
+    }
+
+    func recordPersonal(event: String, active: Bool, visible: Bool) {
+      sequence += 1
+      if event == "appear" { appearances += 1 }
+      if event == "disappear" { disappearances += 1 }
+      personal = "personal#\(sequence) \(event) appear=\(appearances) disappear=\(disappearances) "
+        + "active=\(active) visible=\(visible) load=\(active && visible)"
+      publish()
+    }
+
+    func recordModel(event: String, state: LoadState, generation: Int) {
+      sequence += 1
+      if event == "start" { starts += 1 }
+      if event == "cancel" { cancellations += 1 }
+      let stateName: String
+      switch state {
+      case .idle: stateName = "idle"
+      case .loading: stateName = "loading"
+      case .loaded: stateName = "loaded"
+      case .failed: stateName = "failed"
+      }
+      model = "model#\(sequence) \(event) state=\(stateName) generation=\(generation) "
+        + "starts=\(starts) cancels=\(cancellations)"
+      publish()
+    }
+
+    private func publish() {
+      summary = [root, explore, personal, model].joined(separator: "\n")
     }
   }
 

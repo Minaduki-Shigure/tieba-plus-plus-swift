@@ -84,6 +84,10 @@ struct PersonalizedFeedView: View {
     }
     .onAppear {
       isVisible = true
+      #if DEBUG
+        ExploreRefreshLifecycleDiagnostics.active?.recordPersonal(
+          event: "appear", active: isActive, visible: isVisible)
+      #endif
       synchronizeActivation()
     }
     .task { await personaViewModel.loadIfNeeded() }
@@ -111,6 +115,10 @@ struct PersonalizedFeedView: View {
     .onChange(of: followedForumIndexViewModel.state) { _ in synchronizeScope() }
     .onDisappear {
       isVisible = false
+      #if DEBUG
+        ExploreRefreshLifecycleDiagnostics.active?.recordPersonal(
+          event: "disappear", active: isActive, visible: isVisible)
+      #endif
       refreshTask?.cancel()
       refreshTask = nil
       personaReloadTask?.cancel()
@@ -422,6 +430,10 @@ struct PersonalizedFeedView: View {
   private func synchronizeActivation() {
     let persona = personaViewModel.selection
     let shouldLoad = isVisible && isActive
+    #if DEBUG
+      ExploreRefreshLifecycleDiagnostics.active?.recordPersonal(
+        event: "activation", active: isActive, visible: isVisible)
+    #endif
     viewModel.setPersona(persona, loadIfNeeded: false)
     followedForumIndexViewModel.setPersona(
       persona,
