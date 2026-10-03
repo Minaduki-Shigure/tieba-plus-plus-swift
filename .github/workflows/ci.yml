@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, ci/home-reselection-refresh-1004]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -180,6 +180,10 @@ jobs:
           -resultBundlePath app-test-results.xcresult
           -destination "$IOS_SIMULATOR_DESTINATION"
           -skipPackagePluginValidation
+          -only-testing:TiebaPlusPlusTests/HomeRefreshCoordinatorTests
+          -only-testing:TiebaPlusPlusTests/RootTabBarTests
+          -only-testing:TiebaPlusPlusTests/AccountViewModelTests
+          -only-testing:TiebaPlusPlusTests/FollowedForumCheckInStoreTests
           CODE_SIGNING_ALLOWED=NO
           test 2>&1 | tee xcodebuild.log
       - name: Report Xcode diagnostics
