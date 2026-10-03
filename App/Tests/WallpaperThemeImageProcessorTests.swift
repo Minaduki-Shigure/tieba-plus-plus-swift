@@ -17,14 +17,35 @@ final class WallpaperThemeImageProcessorTests: XCTestCase {
       ])
     let imported = try properties(data)
     XCTAssertNotNil(imported[kCGImagePropertyGPSDictionary])
+    XCTAssertNotNil(
+      (imported[kCGImagePropertyExifDictionary] as? [CFString: Any])?[kCGImagePropertyExifUserComment])
+    XCTAssertNotNil(
+      (imported[kCGImagePropertyTIFFDictionary] as? [CFString: Any])?[kCGImagePropertyTIFFArtist])
     let prepared = try WallpaperThemeImageProcessor.prepare(data: data)
     XCTAssertLessThanOrEqual(max(prepared.image.width, prepared.image.height), 2_048)
     XCTAssertLessThanOrEqual(prepared.image.width * prepared.image.height, 4_000_000)
     XCTAssertLessThanOrEqual(prepared.jpegData.count, 8 * 1_024 * 1_024)
     let output = try properties(prepared.jpegData)
     XCTAssertNil(output[kCGImagePropertyGPSDictionary])
-    XCTAssertNil(output[kCGImagePropertyExifDictionary])
     XCTAssertNil(output[kCGImagePropertyTIFFDictionary])
+    if let exifValue = output[kCGImagePropertyExifDictionary] {
+      let exif = try XCTUnwrap(exifValue as? [CFString: Any])
+      XCTAssertNil(exif[kCGImagePropertyExifUserComment])
+      // ImageIO can synthesize these image-description fields when encoding a
+      // fresh sRGB JPEG. No imported/private EXIF fields may survive.
+      let generatedFields: [CFString: Int] = [
+        kCGImagePropertyExifColorSpace: 1,
+        kCGImagePropertyExifPixelXDimension: prepared.image.width,
+        kCGImagePropertyExifPixelYDimension: prepared.image.height,
+      ]
+      for (key, value) in exif {
+        guard let expected = generatedFields[key] else {
+          XCTFail("Unexpected output EXIF field: \(key)")
+          continue
+        }
+        XCTAssertEqual((value as? NSNumber)?.intValue, expected, "\(key)")
+      }
+    }
     XCTAssertTrue((1...6).contains(prepared.palette.count))
     XCTAssertTrue(prepared.palette.allSatisfy { $0 <= 0xFF_FF_FF })
   }
@@ -85,12 +106,26 @@ final class WallpaperThemeImageProcessorTests: XCTestCase {
     XCTAssertEqual((output[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue, 400)
   }
 
-  func testDeclaredImageBombIsRejectedBeforePixelDecoding() throws {
+  func testValidNarrowPNGExceedingDimensionBudgetIsRejected() throws {
+    // The real fixture needs only 640 KB of pixel storage, while its width is
+    // over the app's declared-dimension limit. No enormous bitmap is allocated.
+    let data = try encodedImage(width: 20_000, height: 8)
+    XCTAssertLessThan(data.count, 1_024 * 1_024)
+    let metadata = try properties(data)
+    XCTAssertEqual((metadata[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue, 20_000)
+    XCTAssertEqual((metadata[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue, 8)
+    XCTAssertThrowsError(try WallpaperThemeImageProcessor.prepare(data: data)) {
+      XCTAssertEqual($0 as? WallpaperThemeError, .imageTooLarge)
+    }
+  }
+
+  func testMalformedOversizedPNGHeadersAreRejected() throws {
     let original = try encodedImage(width: 8, height: 8)
     for (width, height) in [(20_000, 8), (12_000, 12_000)] {
       let forged = try replacingPNGDimensions(original, width: width, height: height)
       XCTAssertThrowsError(try WallpaperThemeImageProcessor.prepare(data: forged)) {
-        XCTAssertEqual($0 as? WallpaperThemeError, .imageTooLarge)
+        let failure = $0 as? WallpaperThemeError
+        XCTAssertTrue(failure == .invalidImage || failure == .imageTooLarge, "Unexpected error: \($0)")
       }
     }
   }
@@ -204,8 +239,8 @@ final class WallpaperThemeImageProcessorTests: XCTestCase {
     for (offset, value) in [(16, width), (20, height)] {
       for index in 0..<4 { result[offset + index] = UInt8((value >> (24 - index * 8)) & 255) }
     }
-    // Recompute the IHDR CRC so ImageIO can inspect valid container metadata;
-    // the deliberately mismatched payload must never reach a pixel decode.
+    // Correct the IHDR CRC without resizing the pixel payload. ImageIO may
+    // reject this malformed container before the app can inspect its dimensions.
     var crc: UInt32 = 0xFF_FF_FF_FF
     for byte in result[12..<29] {
       crc ^= UInt32(byte)
