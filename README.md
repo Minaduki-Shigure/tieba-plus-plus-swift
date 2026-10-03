@@ -355,11 +355,13 @@ and its verified metadata enters the public app source.
   to Baidu's fixed official username-management HTTPS page through the selected
   browser mode;
   the App never exports its saved credentials and warns that the browser may be
-  signed out or using another account. Cloud-favorite list removal can now use
+  signed out or using another account. That release added
   one exact anonymous FRS forum-identity fallback when the ordinary anonymous
   thread identity is unavailable, while conflicting identities, account-lease
   changes, unresolvable rows, and failed authenticated UID/forum/thread probes
-  remain zero-write. It retains `v0.64.0-alpha.2`'s structurally validated
+  remained zero-write. Current list-record cleanup supersedes that limitation
+  through its separate authenticated UID/TID contract described above.
+  It retains `v0.64.0-alpha.2`'s structurally validated
   followed-forum and loaded-forum level progress plus bounded, non-backtracking
   regular-expression content filters described below.
   It retains `v0.63.0-alpha.1`'s accumulated navigation, media-entry/export,
@@ -619,12 +621,12 @@ and its verified metadata enters the public app source.
   immersive-reading floor surfaces never expose a mutation action. Every
   mutation is followed by a read-only reconciliation; an uncertain write is
   never retried. The cloud-favorites list can also remove
-  one item after a separate destructive confirmation. It first resolves the raw
-  anonymous PB thread/forum identity. If that read is unavailable and the row
-  retains an exact nonempty forum name, a bounded anonymous FRS read may prove
-  only that exact canonical name and positive forum ID. Either candidate must
-  then pass the existing authenticated UID/forum/thread preflight before the
-  single write; an unresolvable deleted or renamed item sends no write. Logged-in
+  one item after a separate destructive confirmation. Its independent record
+  cleanup binds the current account and exact TID to a freshly read cloud-list
+  entry, including deleted topics or rows with no recoverable forum. It records
+  the dispatch intent before the single request and retains unresolved results
+  for read-only recovery. Ordinary thread/floor favorite writes keep their
+  existing authenticated forum/thread preflight. Logged-in
   thread and full nested-reply pages also expose experimental, draft-backed composers for replying to the
   topic, an ordinary floor, or a specific nested reply. A visible inline
   nested-reply preview can open the same exact-target composer without first
@@ -1254,14 +1256,13 @@ and its verified metadata enters the public app source.
   account-lease isolation, independently openable positive-UID author profiles,
   and explicitly confirmed single-item removal. Author and topic controls are
   sibling navigation regions rather than nested actions; missing identity never
-  guesses from a name, portrait, or thread ID. Before a list removal, a raw
-  anonymous PB response normally binds the thread to a
-  positive forum ID and canonical forum name. When that read fails, a retained
-  nonempty row name may use one bounded anonymous FRS identity fallback, but only
-  when the response returns that exact trim-and-NFC canonical name and a positive
-  forum ID. The authenticated PB preflight then binds either candidate to the
-  exact account and thread before writing. A fully deleted, renamed, or otherwise
-  unresolvable item remains visible and sends no write. A logged-in thread separately reads
+  guesses from a name, portrait, or thread ID. List-record removal validates the
+  app and web account, rereads the exact saved-list TID, obtains fresh TBS, and
+  uses the separate `fid="null"` record endpoint once. It can remove a deleted
+  topic's saved record without guessing a forum ID. A durable account/thread
+  journal preserves unknown results and prevents redispatch across relaunch;
+  observed absence requires two matching bounded list scans ending at an empty
+  page. A logged-in thread separately reads
   its exact cloud state and offers explicitly confirmed add, saved-floor update,
   and removal controls. These operations never upload, merge, or delete the
   independent local favorites archive. Successful authenticated reads and writes
@@ -1391,8 +1392,8 @@ and its verified metadata enters the public app source.
   paths retain their documented device-validation gates.
   The largest remaining gaps are
   rich-media creation, background reminder device validation, broader settings,
-  remaining account/social actions, unresolvable cloud-favorite
-  rows, and moderation.
+  remaining account/social actions, live validation of cloud-favorite
+  record cleanup, and moderation.
 
 ## Architecture
 

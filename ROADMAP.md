@@ -16,7 +16,7 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
-This change completes list-level cloud-favorite record cleanup against
+The implementation adds list-level cloud-favorite record cleanup against
 TiebaLite `9701bfb6`'s `rmstore` workflow, including deleted records for which no
 forum or original post can be recovered. It uses a separate positive UID/TID
 target, explicitly confirmed against the current session revision. The normal
@@ -33,7 +33,7 @@ writes rather than erasing uncertain intent.
 
 Verification follows fixed 20-record offsets through a required empty terminal
 page, for up to 100 nonempty pages / 2,000 records per scan and 30 seconds across
-both scans. Short pages continue; duplicate IDs, differing ordered scans,
+both scans with an absolute cancellation deadline. Short pages continue; duplicate IDs, differing ordered scans,
 unreadable pages and exhausted limits are inconclusive. Offset pagination has no
 server snapshot token, so stable absence is an observation rather than an atomic
 proof of deletion. HMAC protects persisted journal integrity, but does not
@@ -708,13 +708,12 @@ the source metadata is updated to that tested IPA.
   a dismissible saved-position-to-latest-update handoff for consistent metadata,
   deleted-thread state, account-lease isolation, a separate author header that
   opens the credential-free public profile only for a positive server UID, and
-  confirmed list deletion only after raw thread/forum rebinding. Author username,
-  display name, and strict portrait URL remain presentation-only and never enter
-  the deletion target. If the anonymous thread identity is
-  unavailable, an exact retained forum name may obtain a positive forum ID from
-  one bounded anonymous FRS response, but the existing authenticated PB probe
-  must still bind that forum and thread before any write. Fully unresolvable rows
-  remain zero-write. Thread detail separately supports confirmed add, saved-floor
+  confirmed list-record cleanup after fresh app/web account validation and an
+  exact authenticated-list TID match. Deleted or otherwise unresolvable topics
+  use the independent record-removal contract without guessing a forum ID.
+  Author username, display name, and strict portrait URL remain presentation-only
+  and never enter the cleanup target. A durable UID/TID intent and recovery gate
+  prevents unknown outcomes from being resent. Thread detail separately supports confirmed add, saved-floor
   update, and removal with read-only reconciliation. Exact visible floors expose
   the same snapshot-bound actions from their context menu, and the confirmed
   marker is shown only on its exact PID
