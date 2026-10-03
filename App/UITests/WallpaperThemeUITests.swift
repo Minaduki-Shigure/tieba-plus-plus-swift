@@ -217,6 +217,53 @@ final class WallpaperThemeUITests: XCTestCase {
     return max(visible.minX + 4, min(visible.maxX - 4, frame.minX - 8))
   }
 
+  @MainActor
+  private func dragEditorContent(
+    _ app: XCUIApplication, scroll: XCUIElement, crop: XCUIElement,
+    visible: CGRect, distance: CGFloat
+  ) throws {
+    // The landscape ScrollView's AX frame includes margins that do not consume
+    // scrolling gestures. Start on actual visible content, outside the crop's
+    // own drag gesture and the sliders/segmented control.
+    let usable = visible.insetBy(dx: 4, dy: 8)
+    let downward = distance > 0
+    let before = crop.frame
+    let texts = scroll.staticTexts.allElementsBoundByIndex
+    let resetCrop = app.buttons["wallpaper-theme-reset-crop"]
+    var candidate: (element: XCUIElement, point: CGPoint, travel: CGFloat)?
+    for group in [texts, [resetCrop]] {
+      for element in group {
+        guard element.exists else { continue }
+        let frame = element.frame
+        let point = CGPoint(x: frame.midX, y: frame.midY)
+        let travel = downward ? usable.maxY - point.y : point.y - usable.minY
+        guard !frame.isEmpty, !frame.isNull, usable.contains(point),
+          !before.contains(point), travel >= 24,
+          travel > (candidate?.travel ?? 0), element.isHittable
+        else { continue }
+        candidate = (element, point, travel)
+      }
+      // Prefer text. If a short drag moves every heading offscreen, a vertical
+      // drag on the ordinary reset button can still scroll without tapping it.
+      if candidate != nil { break }
+    }
+    guard let candidate else {
+      throw WallpaperUITestError.unavailable(
+        "No visible editor content can begin a scroll: crop=\(before), viewport=\(visible)")
+    }
+    let delta = min(abs(distance), candidate.travel) * (downward ? 1.0 : -1.0)
+    let origin = app.coordinate(withNormalizedOffset: .zero)
+    let start = origin.withOffset(CGVector(dx: candidate.point.x, dy: candidate.point.y))
+    let end = origin.withOffset(CGVector(dx: candidate.point.x, dy: candidate.point.y + delta))
+    start.press(forDuration: 0.05, thenDragTo: end)
+    let after = crop.frame
+    guard (after.minY - before.minY) * (downward ? 1.0 : -1.0) > 1 else {
+      throw WallpaperUITestError.unavailable(
+        "Editor content did not scroll from \(candidate.element.label) at \(candidate.point) "
+          + "by \(delta): crop before=\(before), after=\(after)")
+    }
+  }
+
   /// Save can still be enabled for the previous viewport during rotation. Require
   /// UIKit's window/chrome and the model-driven crop to agree on the new geometry.
   @MainActor
@@ -258,17 +305,8 @@ final class WallpaperThemeUITests: XCTestCase {
             // Bring its center into view without dragging inside the crop gesture.
             let distance = max(-visible.height * 0.6, min(
               visible.height * 0.6, visible.midY - geometry.crop.midY))
-            let origin = scroll.coordinate(withNormalizedOffset: .zero)
-            let marginX = try scrollGestureX(app, scroll: scroll, visible: visible)
-              - geometry.scroll.minX
-            let startY = visible.midY - distance / 2
-            let start = origin.withOffset(CGVector(
-              dx: marginX,
-              dy: startY - geometry.scroll.minY))
-            let end = origin.withOffset(CGVector(
-              dx: marginX,
-              dy: startY + distance - geometry.scroll.minY))
-            start.press(forDuration: 0.05, thenDragTo: end)
+            try dragEditorContent(
+              app, scroll: scroll, crop: crop, visible: visible, distance: distance)
             stableSamples = 0
             previous = nil
           } else if crop.isHittable, geometry.saveEnabled {
