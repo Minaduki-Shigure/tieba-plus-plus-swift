@@ -41,12 +41,15 @@ final class ComposerWebPPersistenceTests: XCTestCase {
     // WebP animation between older supported formats rather than a WebP-only draft.
     let ordered = ComposerImagePickerPolicy.moving(attachments, from: 4, by: -3)
     XCTAssertEqual(ordered.map(\.encoding), [.jpeg, .webp, .png, .gif, .webp])
+    // Both draft stores encode milliseconds since 1970. Use an exact timestamp
+    // so floating-point Date conversion cannot obscure attachment round trips.
+    let updatedAt = Date(timeIntervalSince1970: 100)
     let threadTarget = try XCTUnwrap(NewThreadTarget(forumID: 7, forumName: "swift"))
     let threadKey = try XCTUnwrap(NewThreadDraftKey(userID: 9, target: threadTarget))
     let threadDraft = try XCTUnwrap(
       NewThreadDraft(
         key: threadKey, title: "WebP 混合草稿", content: "离线图片测试",
-        attachments: ordered, imageWatermark: .none))
+        attachments: ordered, imageWatermark: .none, updatedAt: updatedAt))
     let threadFile = root.appendingPathComponent("thread-drafts.json")
     try await FileNewThreadDraftStore(fileURL: threadFile).save(threadDraft)
     let loadedThread = try await FileNewThreadDraftStore(fileURL: threadFile).draft(for: threadKey)
@@ -57,7 +60,8 @@ final class ComposerWebPPersistenceTests: XCTestCase {
     let replyKey = try XCTUnwrap(TextReplyDraftKey(userID: 9, target: replyTarget))
     let replyDraft = try XCTUnwrap(
       TextReplyDraft(
-        key: replyKey, content: "混合图片回复", attachments: ordered, imageWatermark: .none))
+        key: replyKey, content: "混合图片回复", attachments: ordered, imageWatermark: .none,
+        updatedAt: updatedAt))
     let replyFile = root.appendingPathComponent("reply-drafts.json")
     try await FileTextReplyDraftStore(fileURL: replyFile).save(replyDraft)
     let loadedReply = try await FileTextReplyDraftStore(fileURL: replyFile).draft(for: replyKey)

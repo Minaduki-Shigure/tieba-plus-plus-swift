@@ -33,8 +33,9 @@ and its verified metadata enters the public app source.
   retained. Animated WebP requires original mode rather than silently becoming
   a still picture. The format has the same ordered drafts, upload receipts and
   recovery behavior as existing attachments. Container limits are checked before
-  decoding. Each animation frame is also decoded independently, because a
-  successful composed-image decode can conceal a damaged frame. These checks
+  decoding. Pinned libwebp 1.6.0 strictly decodes each frame before ImageIO display
+  validation: ImageIO can return a complete, blank bitmap for damaged color or
+  alpha data. This also guards standard/high-quality conversion, and the checks
   run again when stored bytes are validated. Original uploads are capped at
   10 MiB; animations additionally have
   canvas, frame-count, cumulative-pixel and duration bounds. Native ImageIO,

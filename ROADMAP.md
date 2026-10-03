@@ -24,9 +24,11 @@ original-mode preservation in new topics and direct topic replies. Animation
 requires original mode, so it cannot silently flatten. Bounded RIFF inspection
 preserves VP8/VP8L/alpha payloads and animation controls, removes private metadata,
 and retains only orientation and recognized canonical display profiles. Every
-original frame is decoded before admission and during stored-file validation;
-animation frames additionally receive independent still-image decoding, since
-the animation compositor can report success despite a damaged codec payload.
+original frame is decoded independently with pinned libwebp 1.6.0 before ImageIO
+display validation, both at admission and during stored-file validation. ImageIO
+can return a complete, zero-filled bitmap for damaged static or animated codec
+payloads, so its status alone cannot establish validity. Standard/high-quality
+conversion also requires strict color and alpha decoding before producing JPEG.
 Mixed JPEG/PNG/GIF/WebP drafts retain ordered attachment identities and existing
 authenticated upload-receipt recovery. No upload endpoint or automatic resend
 behavior changes. Native decoding, persistence and offline pipeline regressions
