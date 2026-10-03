@@ -175,10 +175,9 @@ final class WallpaperThemeUITests: XCTestCase {
       let movesUp = targetFrame.midY > visible.midY
       let upperY = visible.minY + visible.height * 0.25
       let lowerY = visible.minY + visible.height * 0.75
-      // The editor has 16pt content padding. Its center contains the crop's
-      // drag gesture and sliders, so scroll through the empty leading margin.
       let origin = scrollView.coordinate(withNormalizedOffset: .zero)
-      let marginX = visible.minX + 8 - scrollFrame.minX
+      let marginX = try scrollGestureX(app, scroll: scrollView, visible: visible)
+        - scrollFrame.minX
       let start = origin.withOffset(CGVector(
         dx: marginX, dy: (movesUp ? lowerY : upperY) - scrollFrame.minY))
       let end = origin.withOffset(CGVector(
@@ -193,6 +192,29 @@ final class WallpaperThemeUITests: XCTestCase {
   @MainActor
   private func waitUntilEnabled(_ element: XCUIElement) throws {
     try wait(NSPredicate(format: "exists == true AND enabled == true"), element: element)
+  }
+
+  @MainActor
+  private func scrollGestureX(
+    _ app: XCUIApplication, scroll: XCUIElement, visible: CGRect
+  ) throws -> CGFloat {
+    guard scroll.identifier == "wallpaper-theme-editor-scroll" else {
+      return visible.minX + 8
+    }
+    // ScrollView's accessibility frame includes the landscape safe area. Anchor
+    // to its actual content instead of dragging at x=8 outside the scrollable
+    // region. The 16pt content padding avoids the crop gesture and sliders; the
+    // photo picker shares that leading edge even when the crop is centered.
+    let contentAnchor = app.descendants(matching: .any)
+      .matching(identifier: "wallpaper-theme-photo-picker").firstMatch
+    guard contentAnchor.exists else {
+      throw WallpaperUITestError.unavailable("The editor has no content anchor.")
+    }
+    let frame = contentAnchor.frame
+    guard !frame.isEmpty, !frame.isNull, frame.minX.isFinite else {
+      throw WallpaperUITestError.unavailable("The editor content anchor has no valid frame.")
+    }
+    return max(visible.minX + 4, min(visible.maxX - 4, frame.minX - 8))
   }
 
   /// Save can still be enabled for the previous viewport during rotation. Require
@@ -237,12 +259,14 @@ final class WallpaperThemeUITests: XCTestCase {
             let distance = max(-visible.height * 0.6, min(
               visible.height * 0.6, visible.midY - geometry.crop.midY))
             let origin = scroll.coordinate(withNormalizedOffset: .zero)
+            let marginX = try scrollGestureX(app, scroll: scroll, visible: visible)
+              - geometry.scroll.minX
             let startY = visible.midY - distance / 2
             let start = origin.withOffset(CGVector(
-              dx: visible.minX + 8 - geometry.scroll.minX,
+              dx: marginX,
               dy: startY - geometry.scroll.minY))
             let end = origin.withOffset(CGVector(
-              dx: visible.minX + 8 - geometry.scroll.minX,
+              dx: marginX,
               dy: startY + distance - geometry.scroll.minY))
             start.press(forDuration: 0.05, thenDragTo: end)
             stableSamples = 0
