@@ -15,6 +15,7 @@ targets:
     sources:
       - App.swift
       - SupportingTypes.swift
+      - ../App/Sources/RootMainNavigation.swift
       - ../App/Sources/RootAdaptiveNavigation.swift
       - ../App/Sources/RootTabBar.swift
     settings:
