@@ -157,31 +157,52 @@ final class RootTabBarTests: XCTestCase {
 
   func testHostedBarKeepsItsNativeInstanceAndKeyboardStateAcrossVisibilityChanges() async throws {
     let visibility = RootTabBarTestVisibility()
-    let host = UIHostingController(rootView: RootTabBarTestHost(visibility: visibility))
+    let layout = RootTabBarTestLayoutRecorder()
+    let host = UIHostingController(
+      rootView: RootTabBarTestHost(visibility: visibility, layout: layout))
     let context = try makeWindow(root: host)
     defer { closeWindow(context) }
     func height() -> CGFloat {
-      host.sizeThatFits(in: CGSize(width: context.window.bounds.width, height: 200)).height
+      // Read the mounted bar's outer region, not the whole hosting controller's
+      // sizeThatFits result (which also participates in window safe-area layout).
+      layout.region?.bounds.height ?? .nan
     }
-    try await waitUntil { self.nativeBar(in: host.view) != nil && height() > 1 }
+    func diagnostics() -> String {
+      let bar = nativeBar(in: host.view)
+      return "visible=\(visibility.isVisible) region=\(String(describing: layout.region?.frame)) "
+        + "window=\(context.window.bounds) safeArea=\(context.window.safeAreaInsets) "
+        + "host=\(host.view.bounds) bar=\(String(describing: bar?.frame)) "
+        + "attached=\(bar?.window === context.window)\n"
+        + nativeViewDiagnostics(host.view)
+    }
+    try await waitUntil(phase: "initial mounted bar", diagnostics: diagnostics) {
+      self.nativeBar(in: host.view) != nil && height() > 1
+    }
     let bar = try XCTUnwrap(nativeBar(in: host.view))
     // Observe production layout rather than wrapping the representable's
     // callback, which updateUIView is entitled to replace at any time.
     postKeyboard(frame: dockedFrame(in: context.window), screen: context.window.screen)
-    try await waitUntil { height() < 1 }
+    try await waitUntil(phase: "first docked keyboard hides bar", diagnostics: diagnostics) {
+      height() < 1
+    }
     visibility.isVisible = false
     try await settleLayout(host.view)
     XCTAssertTrue(nativeBar(in: host.view) === bar)
     visibility.isVisible = true
     try await settleLayout(host.view)
-    XCTAssertLessThan(height(), 1, "Returning to narrow layout must not reveal the bar over a keyboard.")
+    XCTAssertLessThan(
+      height(), 1, "Returning to narrow layout must not reveal the bar over a keyboard. \(diagnostics())")
     XCTAssertTrue(nativeBar(in: host.view) === bar)
 
     postKeyboardHide(screen: context.window.screen)
-    try await waitUntil { height() > 1 }
+    try await waitUntil(phase: "first keyboard dismissal restores bar", diagnostics: diagnostics) {
+      height() > 1
+    }
     XCTAssertTrue(nativeBar(in: host.view) === bar)
     postKeyboard(frame: dockedFrame(in: context.window), screen: context.window.screen)
-    try await waitUntil { height() < 1 }
+    try await waitUntil(phase: "second docked keyboard hides bar", diagnostics: diagnostics) {
+      height() < 1
+    }
     visibility.isVisible = false
     try await settleLayout(host.view)
     // The mounted bar must also continue processing a keyboard dismissal while
@@ -189,7 +210,9 @@ final class RootTabBarTests: XCTestCase {
     postKeyboardHide(screen: context.window.screen)
     try await settleLayout(host.view)
     visibility.isVisible = true
-    try await waitUntil { height() > 1 }
+    try await waitUntil(phase: "hidden dismissal is preserved on restore", diagnostics: diagnostics) {
+      height() > 1
+    }
     XCTAssertTrue(nativeBar(in: host.view) === bar)
   }
 
@@ -404,12 +427,26 @@ final class RootTabBarTests: XCTestCase {
       userInfo: [UIResponder.keyboardIsLocalUserInfoKey: isLocal])
   }
 
-  private func waitUntil(_ condition: @MainActor () -> Bool) async throws {
+  private func nativeViewDiagnostics(_ view: UIView, depth: Int = 0) -> String {
+    guard depth < 8 else { return "" }
+    let prefix = String(repeating: "  ", count: depth)
+    let own = "\(prefix)\(type(of: view)) frame=\(view.frame) bounds=\(view.bounds) "
+      + "safeArea=\(view.safeAreaInsets) alpha=\(view.alpha) hidden=\(view.isHidden)\n"
+    return own + view.subviews.map { nativeViewDiagnostics($0, depth: depth + 1) }.joined()
+  }
+
+  private func waitUntil(
+    phase: String = "native keyboard callback",
+    diagnostics: @MainActor () -> String = { "" },
+    file: StaticString = #filePath,
+    line: UInt = #line,
+    _ condition: @MainActor () -> Bool
+  ) async throws {
     for _ in 0..<200 {
       if condition() { return }
       try await Task.sleep(for: .milliseconds(10))
     }
-    XCTFail("Timed out waiting for the native tab bar's layout or keyboard callback.")
+    XCTFail("Timed out: \(phase). \(diagnostics())", file: file, line: line)
     throw RootTabBarTestError.timeout
   }
 
@@ -428,13 +465,37 @@ private final class RootTabBarTestVisibility: ObservableObject {
 @MainActor
 private struct RootTabBarTestHost: View {
   @ObservedObject var visibility: RootTabBarTestVisibility
+  let layout: RootTabBarTestLayoutRecorder
 
   var body: some View {
-    RootTabBar(
-      isVisible: visibility.isVisible,
-      selectedTab: .home, showsExploreTab: true, notificationBadge: nil,
-      allowsExploreRefresh: false, allowsHomeRefresh: false, onSelect: { _ in })
+    VStack(spacing: 0) {
+      Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+      RootTabBar(
+        isVisible: visibility.isVisible,
+        selectedTab: .home, showsExploreTab: true, notificationBadge: nil,
+        allowsExploreRefresh: false, allowsHomeRefresh: false, onSelect: { _ in })
+        .background(RootTabBarTestLayoutProbe(recorder: layout))
+    }
   }
+}
+
+@MainActor
+private final class RootTabBarTestLayoutRecorder {
+  weak var region: UIView?
+}
+
+private struct RootTabBarTestLayoutProbe: UIViewRepresentable {
+  let recorder: RootTabBarTestLayoutRecorder
+
+  func makeUIView(context: Context) -> UIView {
+    let view = UIView()
+    view.isUserInteractionEnabled = false
+    view.accessibilityElementsHidden = true
+    recorder.region = view
+    return view
+  }
+
+  func updateUIView(_ uiView: UIView, context: Context) {}
 }
 
 @MainActor
