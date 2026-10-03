@@ -178,6 +178,154 @@ final class WallpaperThemeEditorTests: XCTestCase {
     XCTAssertTrue(model.canSave)
   }
 
+  func testResumeRestartsInterruptedInitialRestoreAndRejectsItsLateResult() async throws {
+    let source = try makeSource(1)
+    let gate = WallpaperEditorTestGate<WallpaperThemeSource>()
+    let attempts = WallpaperEditorTestCounter()
+    let model = WallpaperThemeEditorModel(
+      processing: .init(
+        prepare: { _ in
+          if await attempts.next() == 1 { return await gate.wait() }
+          return source
+        },
+        render: { source, _, _, _ in .init(image: source.image, jpegData: source.jpegData) }
+      ), previewDelayNanoseconds: 0)
+    model.updateViewportSize(CGSize(width: 400, height: 800))
+    var settings = WallpaperThemeSettings.defaultValue
+    settings.appearance = .dark
+    settings.imageOpacity = 0.45
+    model.restore(document: document(jpeg: Data([1]), settings: settings))
+    let interrupted = model.importTask
+    await gate.waitUntilEntered()
+    model.discard()
+    model.resume()
+    await model.waitForImport()
+    await model.waitForPreview()
+    var edited = model.settings
+    edited.imageOpacity = 0.63
+    model.updateSettings(edited)
+    await gate.resolve(source)
+    await interrupted?.value
+
+    XCTAssertEqual(model.source?.jpegData, Data([1]))
+    XCTAssertEqual(model.rendered?.jpegData, Data([1]))
+    XCTAssertEqual(model.settings, edited)
+    XCTAssertEqual(model.settings.appearance, .dark)
+    XCTAssertTrue(model.canSave)
+    XCTAssertNil(model.errorMessage)
+    let count = await attempts.value
+    XCTAssertEqual(count, 2)
+  }
+
+  func testFailedExplicitReplacementDoesNotResumeSupersededInitialRestore() async throws {
+    let source = try makeSource(1)
+    let gate = WallpaperEditorTestGate<WallpaperThemeSource>()
+    let attempts = WallpaperEditorTestCounter()
+    let model = WallpaperThemeEditorModel(
+      processing: .init(
+        prepare: { _ in
+          if await attempts.next() == 1 { return await gate.wait() }
+          return source
+        },
+        render: { source, _, _, _ in .init(image: source.image, jpegData: source.jpegData) }
+      ), previewDelayNanoseconds: 0)
+    model.updateViewportSize(CGSize(width: 400, height: 800))
+    model.restore(document: document(jpeg: Data([1])))
+    let interrupted = model.importTask
+    await gate.waitUntilEntered()
+    model.importImage { throw WallpaperEditorTestError.failed }
+    await model.waitForImport()
+    model.discard()
+    model.resume()
+    await model.waitForImport()
+    await gate.resolve(source)
+    await interrupted?.value
+
+    XCTAssertNil(model.source)
+    XCTAssertNil(model.rendered)
+    XCTAssertNotNil(model.errorMessage)
+    XCTAssertFalse(model.canSave)
+    let count = await attempts.value
+    XCTAssertEqual(count, 1)
+  }
+
+  func testCancelledExplicitReplacementDoesNotResumeSupersededInitialRestore() async throws {
+    let first = try makeSource(1)
+    let second = try makeSource(2)
+    let restoreGate = WallpaperEditorTestGate<WallpaperThemeSource>()
+    let replacementGate = WallpaperEditorTestGate<WallpaperThemeSource>()
+    let attempts = WallpaperEditorTestCounter()
+    let model = WallpaperThemeEditorModel(
+      processing: .init(
+        prepare: { data in
+          let attempt = await attempts.next()
+          if attempt == 1 { return await restoreGate.wait() }
+          if attempt == 2 { return await replacementGate.wait() }
+          return data == Data([1]) ? first : second
+        },
+        render: { source, _, _, _ in .init(image: source.image, jpegData: source.jpegData) }
+      ), previewDelayNanoseconds: 0)
+    model.updateViewportSize(CGSize(width: 400, height: 800))
+    model.restore(document: document(jpeg: Data([1])))
+    let interrupted = model.importTask
+    await restoreGate.waitUntilEntered()
+    model.importImage { Data([2]) }
+    let replacement = model.importTask
+    await replacementGate.waitUntilEntered()
+    model.discard()
+    model.resume()
+    await model.waitForImport()
+    await restoreGate.resolve(first)
+    await replacementGate.resolve(second)
+    await interrupted?.value
+    await replacement?.value
+
+    XCTAssertNil(model.source)
+    XCTAssertNil(model.rendered)
+    XCTAssertFalse(model.isImporting)
+    XCTAssertFalse(model.canSave)
+    let count = await attempts.value
+    XCTAssertEqual(count, 2)
+  }
+
+  func testResumingAfterExplicitReplacementPreservesTheNewDraft() async throws {
+    let first = try makeSource(1)
+    let second = try makeSource(2)
+    let gate = WallpaperEditorTestGate<WallpaperThemeSource>()
+    let attempts = WallpaperEditorTestCounter()
+    let model = WallpaperThemeEditorModel(
+      processing: .init(
+        prepare: { data in
+          if await attempts.next() == 1 { return await gate.wait() }
+          return data == Data([1]) ? first : second
+        },
+        render: { source, _, _, _ in .init(image: source.image, jpegData: source.jpegData) }
+      ), previewDelayNanoseconds: 0)
+    model.updateViewportSize(CGSize(width: 400, height: 800))
+    model.restore(document: document(jpeg: Data([1])))
+    let interrupted = model.importTask
+    await gate.waitUntilEntered()
+    model.importImage { Data([2]) }
+    await model.waitForImport()
+    await model.waitForPreview()
+    var settings = model.settings
+    settings.imageOpacity = 0.72
+    model.updateSettings(settings)
+    model.discard()
+    model.resume()
+    await model.waitForImport()
+    await model.waitForPreview()
+    await gate.resolve(first)
+    await interrupted?.value
+
+    XCTAssertEqual(model.source?.jpegData, Data([2]))
+    XCTAssertEqual(model.rendered?.jpegData, Data([2]))
+    XCTAssertEqual(model.settings, settings)
+    XCTAssertTrue(model.canSave)
+    let count = await attempts.value
+    XCTAssertEqual(count, 2)
+  }
+
   func testSaveFailurePreservesDraftAndAllowsExplicitRetry() async throws {
     let source = try makeSource(3)
     let model = makeModel(source: source)
@@ -351,6 +499,14 @@ final class WallpaperThemeEditorTests: XCTestCase {
     )
   }
 
+  private func document(
+    jpeg: Data, settings: WallpaperThemeSettings = .defaultValue
+  ) -> WallpaperThemeDocument {
+    .init(
+      record: .init(id: UUID(), settings: settings, crop: .initial, aspectRatio: 0.5),
+      sourceJPEG: jpeg, renderedJPEG: jpeg)
+  }
+
   private func makeSource(_ byte: UInt8) throws -> WallpaperThemeSource {
     let context = try XCTUnwrap(
       CGContext(
@@ -372,6 +528,7 @@ private enum WallpaperEditorTestError: Error { case failed }
 private actor WallpaperEditorTestCounter {
   private(set) var value = 0
   func increment() { value += 1 }
+  func next() -> Int { value += 1; return value }
 }
 
 /// Intentionally ignores cancellation to exercise request-identity validation.
