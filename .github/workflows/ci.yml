@@ -271,6 +271,11 @@ jobs:
             icon-assets.json
             ui-test-attachments/
           retention-days: 7
+      - name: Shut down iPhone UI simulator before iPad tests
+        if: ${{ always() && env.ICON_UI_SIMULATOR_ID != '' }}
+        run: |
+          xcrun simctl shutdown "$ICON_UI_SIMULATOR_ID" || true
+          xcrun simctl list devices booted || true
       - name: Create clean iPad simulator for adaptive navigation
         id: adaptive_simulator
         continue-on-error: true
