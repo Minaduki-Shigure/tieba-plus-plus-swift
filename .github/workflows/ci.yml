@@ -198,7 +198,7 @@ jobs:
           set -euo pipefail
           xcrun assetutil --info build/DerivedData/Build/Products/Debug-iphonesimulator/TiebaPlusPlus.app/Assets.car > icon-assets.json
           ruby Scripts/validate_compiled_app_icons.rb icon-assets.json
-      - name: Create clean simulator for app icon UI tests
+      - name: Create clean simulator for UI tests
         run: |
           set -euo pipefail
           selected_device="${IOS_SIMULATOR_DESTINATION##*id=}"
@@ -213,7 +213,7 @@ jobs:
           icon_device_id="$(xcrun simctl create "Tieba icon UI $GITHUB_RUN_ID" "$icon_device_type" "$icon_runtime")"
           echo "ICON_UI_SIMULATOR_ID=$icon_device_id" >> "$GITHUB_ENV"
           echo "ICON_UI_SIMULATOR_DESTINATION=platform=iOS Simulator,id=$icon_device_id" >> "$GITHUB_ENV"
-      - name: Test system app icon switching
+      - name: Test app icon and wallpaper workflows
         id: icon_ui_tests
         continue-on-error: true
         run: >-
@@ -230,10 +230,16 @@ jobs:
           -skipPackagePluginValidation
           CODE_SIGNING_ALLOWED=NO
           test 2>&1 | tee icon-ui-test.log
-      - name: Report icon UI diagnostics
+      - name: Report UI diagnostics
         if: ${{ always() && steps.icon_ui_tests.outcome == 'failure' }}
         run: ruby Scripts/report_xcode_errors.rb icon-ui-test.log
-      - name: Upload icon UI results
+      - name: Export UI test attachments
+        if: ${{ always() && (steps.icon_ui_tests.outcome == 'success' || steps.icon_ui_tests.outcome == 'failure') }}
+        run: >-
+          xcrun xcresulttool export attachments
+          --path icon-ui-results.xcresult
+          --output-path ui-test-attachments
+      - name: Upload UI results
         if: ${{ always() && (steps.icon_ui_tests.outcome == 'success' || steps.icon_ui_tests.outcome == 'failure') }}
         uses: actions/upload-artifact@v4
         with:
@@ -242,11 +248,12 @@ jobs:
             icon-ui-test.log
             icon-ui-results.xcresult
             icon-assets.json
+            ui-test-attachments/
           retention-days: 7
       - name: Fail when app validation fails
         if: ${{ always() && (steps.app_tests.outcome == 'failure' || steps.icon_assets.outcome == 'failure' || steps.icon_ui_tests.outcome == 'failure') }}
         run: exit 1
-      - name: Remove app icon test simulator
+      - name: Remove UI test simulator
         if: ${{ always() && env.ICON_UI_SIMULATOR_ID != '' }}
         run: |
           xcrun simctl shutdown "$ICON_UI_SIMULATOR_ID" || true
