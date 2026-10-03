@@ -16,7 +16,7 @@ final class WallpaperThemeUITests: XCTestCase {
     defer {
       let hierarchy = XCTAttachment(string: app.debugDescription)
       hierarchy.name = "Wallpaper theme final hierarchy"
-      hierarchy.lifetime = .deleteOnSuccess
+      hierarchy.lifetime = .keepAlways
       add(hierarchy)
       attachScreenshot("Wallpaper theme final state", app: app)
       XCUIDevice.shared.orientation = .portrait
@@ -66,9 +66,13 @@ final class WallpaperThemeUITests: XCTestCase {
     attachScreenshot("Wallpaper restored after relaunch", app: app)
 
     XCUIDevice.shared.orientation = .landscapeLeft
-    try waitUntilEnabled(app.buttons["wallpaper-theme-save"])
-    attachScreenshot("Wallpaper editor landscape crop", app: app)
+    try await waitForRotatedEditor(app, landscape: true)
+    try tap(app.buttons["wallpaper-theme-save"], app: app)
+    try waitForEditorDismissal(app)
     XCUIDevice.shared.orientation = .portrait
+    try openEditorFromAppearance(app)
+    try requireStatus("已启用", app: app)
+    try await waitForRotatedEditor(app, landscape: false)
     try restoreDefault(app)
 
     app.terminate()
@@ -189,6 +193,134 @@ final class WallpaperThemeUITests: XCTestCase {
   @MainActor
   private func waitUntilEnabled(_ element: XCUIElement) throws {
     try wait(NSPredicate(format: "exists == true AND enabled == true"), element: element)
+  }
+
+  /// Save can still be enabled for the previous viewport during rotation. Require
+  /// UIKit's window/chrome and the model-driven crop to agree on the new geometry.
+  @MainActor
+  private func waitForRotatedEditor(_ app: XCUIApplication, landscape: Bool) async throws {
+    let deadline = Date().addingTimeInterval(interfaceTimeout)
+    var previous: WallpaperEditorGeometry?
+    var stableSamples = 0
+    var lastGeometry: WallpaperEditorGeometry?
+    var succeeded = false
+    defer {
+      attachRotationEvidence(app, geometry: lastGeometry, landscape: landscape)
+    }
+    repeat {
+      guard app.state == .runningForeground else {
+        throw WallpaperUITestError.unavailable("The editor left the foreground during rotation.")
+      }
+      let crop = app.descendants(matching: .any)
+        .matching(identifier: "wallpaper-theme-crop").firstMatch
+      let scroll = app.scrollViews["wallpaper-theme-editor-scroll"]
+      if crop.exists, scroll.exists, app.windows.firstMatch.exists,
+        app.navigationBars.firstMatch.exists, app.tabBars.firstMatch.exists
+      {
+        let geometry = WallpaperEditorGeometry(
+          app: app.frame,
+          window: app.windows.firstMatch.frame,
+          scroll: scroll.frame,
+          navigation: app.navigationBars.firstMatch.frame,
+          tab: app.tabBars.firstMatch.frame,
+          crop: crop.frame,
+          saveEnabled: app.buttons["wallpaper-theme-save"].isEnabled
+        )
+        lastGeometry = geometry
+        if geometry.matchesOrientation(landscape: landscape) {
+          let visible = geometry.visibleViewport
+          let intersection = geometry.crop.intersection(visible)
+          let requiredHeight = min(geometry.crop.height, visible.height) * 0.7
+          if intersection.isNull || intersection.height < requiredHeight {
+            // A crop may legitimately be taller than the landscape viewport.
+            // Bring its center into view without dragging inside the crop gesture.
+            let distance = max(-visible.height * 0.6, min(
+              visible.height * 0.6, visible.midY - geometry.crop.midY))
+            let origin = scroll.coordinate(withNormalizedOffset: .zero)
+            let startY = visible.midY - distance / 2
+            let start = origin.withOffset(CGVector(
+              dx: visible.minX + 8 - geometry.scroll.minX,
+              dy: startY - geometry.scroll.minY))
+            let end = origin.withOffset(CGVector(
+              dx: visible.minX + 8 - geometry.scroll.minX,
+              dy: startY + distance - geometry.scroll.minY))
+            start.press(forDuration: 0.05, thenDragTo: end)
+            stableSamples = 0
+            previous = nil
+          } else if crop.isHittable, geometry.saveEnabled {
+            stableSamples = geometry == previous ? stableSamples + 1 : 1
+            previous = geometry
+            if stableSamples >= 3 {
+              succeeded = true
+              break
+            }
+          } else {
+            stableSamples = 0
+            previous = nil
+          }
+        } else {
+          stableSamples = 0
+          previous = nil
+        }
+      } else {
+        stableSamples = 0
+        previous = nil
+      }
+      try await Task.sleep(nanoseconds: 150_000_000)
+    } while Date() < deadline
+    guard succeeded else {
+      throw WallpaperUITestError.unavailable(
+        "Editor did not settle into \(landscape ? "landscape" : "portrait"): \(String(describing: lastGeometry))"
+      )
+    }
+  }
+
+  @MainActor
+  private func attachRotationEvidence(
+    _ app: XCUIApplication, geometry: WallpaperEditorGeometry?, landscape: Bool
+  ) {
+    let name = "Wallpaper editor \(landscape ? "landscape" : "portrait")"
+    let appScreenshot = app.screenshot()
+    let screenScreenshot = XCUIScreen.main.screenshot()
+    var screenshots = [("app", appScreenshot), ("screen", screenScreenshot)]
+    if app.windows.firstMatch.exists {
+      screenshots.append(("window", app.windows.firstMatch.screenshot()))
+    }
+    let details = screenshots.map { source, screenshot in
+      let image = screenshot.image
+      return "\(source): size=\(image.size), orientation=\(image.imageOrientation.rawValue), "
+        + "pixels=\(image.cgImage?.width ?? 0)x\(image.cgImage?.height ?? 0)"
+    }.joined(separator: "\n")
+    let hierarchy = XCTAttachment(string:
+      "state=\(app.state.rawValue)\ndeviceOrientation=\(XCUIDevice.shared.orientation.rawValue)\n"
+        + "geometry=\(String(describing: geometry))\n\(details)\n\n\(app.debugDescription)")
+    hierarchy.name = "\(name) geometry and hierarchy"
+    hierarchy.lifetime = .keepAlways
+    add(hierarchy)
+    for (source, screenshot) in screenshots {
+      let attachment = XCTAttachment(screenshot: screenshot)
+      attachment.name = "\(name) \(source) capture"
+      attachment.lifetime = .keepAlways
+      add(attachment)
+    }
+    // Screen capture avoids relying on an element's potentially stale rotation
+    // crop. Keep the app/window captures above so discrepancies remain visible.
+    XCTAssertEqual(app.state, .runningForeground)
+    let image = screenScreenshot.image
+    let swapped = [UIImage.Orientation.left, .leftMirrored, .right, .rightMirrored]
+      .contains(image.imageOrientation)
+    let width = swapped ? image.cgImage?.height : image.cgImage?.width
+    let height = swapped ? image.cgImage?.width : image.cgImage?.height
+    if let width, let height, let geometry, geometry.window.height > 0 {
+      XCTAssertEqual(
+        Double(width) / Double(height),
+        Double(geometry.window.width / geometry.window.height),
+        accuracy: 0.02,
+        "The screen capture must match the observed app window orientation."
+      )
+    } else {
+      XCTFail("Rotation evidence did not contain a screen image and window geometry.")
+    }
   }
 
   @MainActor
@@ -363,6 +495,39 @@ private struct WallpaperHomeRegion {
   let name: String
   let points: [CGPoint]
   let requiredColoredPoints: Int
+}
+
+private struct WallpaperEditorGeometry: Equatable {
+  let app: CGRect
+  let window: CGRect
+  let scroll: CGRect
+  let navigation: CGRect
+  let tab: CGRect
+  let crop: CGRect
+  let saveEnabled: Bool
+
+  var visibleViewport: CGRect {
+    let bounds = scroll.intersection(window)
+    let top = max(bounds.minY, navigation.maxY)
+    let bottom = min(bounds.maxY, tab.minY)
+    return CGRect(x: bounds.minX, y: top, width: bounds.width, height: max(0, bottom - top))
+  }
+
+  func matchesOrientation(landscape: Bool) -> Bool {
+    guard
+      app.width > 0, app.height > 0, window.width > 0, window.height > 0,
+      crop.width > 0, crop.height > 0,
+      (app.width > app.height) == landscape,
+      (window.width > window.height) == landscape,
+      abs(app.width - window.width) < 2, abs(app.height - window.height) < 2,
+      navigation.width > navigation.height * 3,
+      navigation.width >= window.width * 0.7,
+      visibleViewport.width > 16, visibleViewport.height > 64,
+      crop.minX >= visibleViewport.minX - 1,
+      crop.maxX <= visibleViewport.maxX + 1
+    else { return false }
+    return abs(crop.width / crop.height - window.width / window.height) < 0.02
+  }
 }
 
 private enum WallpaperUITestError: Error {
