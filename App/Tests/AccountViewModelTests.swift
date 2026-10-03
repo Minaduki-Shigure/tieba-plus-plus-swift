@@ -707,9 +707,9 @@ final class AccountViewModelTests: XCTestCase {
       let refresh = Task { await model.refreshHome() }
       try await waitForAccountState { await service.followedRequestSnapshot().count == 2 }
       if signsOut {
-        await vault.removeAll()
+        try await vault.removeAll()
       } else {
-        await vault.upsert(session(userID: 7, name: "rotated"))
+        try await vault.upsert(session(userID: 7, name: "rotated"))
       }
       await service.releaseSuspendedFollowedRequest()
       await refresh.value
