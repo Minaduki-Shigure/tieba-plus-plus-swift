@@ -90,6 +90,8 @@ targets:
         SUPPORTS_MACCATALYST: false
         ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: true
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "AppIconLight AppIconDark"
     scheme:
       testTargets:
         - TiebaPlusPlusTests
@@ -108,7 +110,29 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.minaduki.tieba-plus-plus.tests
         GENERATE_INFOPLIST_FILE: true
 
+  TiebaPlusPlusUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: App/UITests
+    dependencies:
+      - target: TiebaPlusPlus
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.minaduki.tieba-plus-plus.uitests
+        GENERATE_INFOPLIST_FILE: true
+        TEST_TARGET_NAME: TiebaPlusPlus
+
 schemes:
+  TiebaPlusPlusIconsUI:
+    build:
+      targets:
+        TiebaPlusPlus: all
+        TiebaPlusPlusUITests: [test]
+    test:
+      config: Debug
+      targets:
+        - TiebaPlusPlusUITests
   TiebaPlusPlusPerformance:
     build:
       targets:

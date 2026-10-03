@@ -25,6 +25,18 @@ and its verified metadata enters the public app source.
 
 ### Release and validation
 
+- **Current `main` alternate app icons:** Settings → 外观与布局 → 应用图标
+  offers Classic Blue, Light and Dark variants of this project's own artwork.
+  The choice is independent of in-app appearance. A shared coordinator reads
+  the current icon from iOS, serializes user requests, and rereads it after
+  success, failure or foreground return; it never marks an unconfirmed choice
+  as selected or writes a second local preference. Unsupported installations
+  show a disabled picker. Build tests inspect the actual iPhone/iPad icon
+  declarations and images, and a separate clean-simulator UI test changes all
+  three icons and checks persistence after relaunch. Physical-device and
+  LiveContainer home-screen behavior still require validation. The weighted
+  parity estimate is unchanged. Configuration follows
+  [Apple's alternate app icon guide](https://developer.apple.com/documentation/xcode/configuring-your-app-to-use-alternate-app-icons).
 - **`v0.65.0-alpha.27` visual classic-emoticon picker:** New-topic and all three
   reply composers share a searchable grid of 126 fixed names, including 吃瓜,
   捂嘴笑 and 菜狗. Existing 50-name drafts keep their exact wire tokens. Small

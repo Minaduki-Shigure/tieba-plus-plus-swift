@@ -1538,6 +1538,21 @@ editor starts from the current valid selection instead. Neither value may enter
 a request, URL, cookie, account record, cache key, download policy, content
 archive, analytics, or log.
 
+Application-icon selection is a separate system presentation operation. Only
+the bundled primary icon (`nil`) and the two compiled alternate names
+`AppIconLight` and `AppIconDark` can be submitted to UIKit. A shared main-actor
+coordinator admits explicit foreground user actions one at a time, checks the
+current system capability, and rereads `alternateIconName` after completion,
+failure and foreground return. A callback without the requested system name
+does not produce a success selection. No duplicate local preference, account
+credential, network request, private API, automatic appearance-triggered switch
+or background icon operation is involved. The ordinary unit suite uses an
+injected system; the separate UI suite operates real UIKit on a disposable clean
+simulator, acknowledges the expected system alerts and restores the primary icon.
+LiveContainer may report host-managed icon state; UIKit success is not proof that
+the guest app owns a separate Home Screen icon, and that installation path remains
+a physical-device validation gate.
+
 The native picker binds an in-memory CGColor draft with opacity disabled.
 Conversion accepts only finite, bounded RGB or monochrome input that can be
 converted to extended sRGB, explicitly clips and quantizes it to opaque 8-bit

@@ -193,3 +193,53 @@ jobs:
       - name: Fail when app tests fail
         if: ${{ always() && steps.app_tests.outcome == 'failure' }}
         run: exit 1
+      - name: Create clean simulator for app icon UI tests
+        run: |
+          set -euo pipefail
+          selected_device="${IOS_SIMULATOR_DESTINATION##*id=}"
+          read -r icon_device_type icon_runtime < <(
+            xcrun simctl list devices available -j | jq -r --arg id "$selected_device" '
+              .devices | to_entries[] | .key as $runtime | .value[]
+              | select(.udid == $id) | [.deviceTypeIdentifier, $runtime] | @tsv
+            '
+          )
+          test -n "$icon_device_type"
+          test -n "$icon_runtime"
+          icon_device_id="$(xcrun simctl create "Tieba icon UI $GITHUB_RUN_ID" "$icon_device_type" "$icon_runtime")"
+          echo "ICON_UI_SIMULATOR_ID=$icon_device_id" >> "$GITHUB_ENV"
+          echo "ICON_UI_SIMULATOR_DESTINATION=platform=iOS Simulator,id=$icon_device_id" >> "$GITHUB_ENV"
+      - name: Test system app icon switching
+        id: icon_ui_tests
+        continue-on-error: true
+        run: >-
+          set -o pipefail;
+          xcodebuild
+          -project TiebaPlusPlus.xcodeproj
+          -scheme TiebaPlusPlusIconsUI
+          -configuration Debug
+          -destination "$ICON_UI_SIMULATOR_DESTINATION"
+          -parallel-testing-enabled NO
+          -resultBundlePath icon-ui-results.xcresult
+          -skipPackagePluginValidation
+          CODE_SIGNING_ALLOWED=NO
+          test 2>&1 | tee icon-ui-test.log
+      - name: Report icon UI diagnostics
+        if: ${{ always() && steps.icon_ui_tests.outcome == 'failure' }}
+        run: ruby Scripts/report_xcode_errors.rb icon-ui-test.log
+      - name: Upload icon UI results
+        if: ${{ always() && (steps.icon_ui_tests.outcome == 'success' || steps.icon_ui_tests.outcome == 'failure') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: icon-ui-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            icon-ui-test.log
+            icon-ui-results.xcresult
+          retention-days: 7
+      - name: Fail when icon UI tests fail
+        if: ${{ always() && steps.icon_ui_tests.outcome == 'failure' }}
+        run: exit 1
+      - name: Remove app icon test simulator
+        if: ${{ always() && env.ICON_UI_SIMULATOR_ID != '' }}
+        run: |
+          xcrun simctl shutdown "$ICON_UI_SIMULATOR_ID" || true
+          xcrun simctl delete "$ICON_UI_SIMULATOR_ID"

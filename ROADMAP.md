@@ -16,6 +16,17 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
+Current `main` adds the application-icon choice available in TiebaLite's
+`CustomSettingsPage`, using three color variants of this project's existing
+artwork. Settings → 外观与布局 → 应用图标 uses UIKit's system-reported current
+icon and capability, preserves the actual selection on failure, prevents
+overlapping requests, and can restore the primary icon. The selection persists
+in iOS rather than a separate application preference. A clean-simulator UI flow
+exercises real navigation, system confirmation, all choices and relaunch, in
+addition to bundle-resource and state-machine tests. Device/LiveContainer
+desktop behavior remains a separate gate; this completes a narrow customization
+gap without adding a weighted point.
+
 Current `main` expands the fixed classic-emoticon catalog from 50 to 126 names
 and gives the shared new-topic/reply picker image previews and name search.
 The original 50 tokens and their order remain unchanged; the additional names
@@ -513,6 +524,10 @@ the source metadata is updated to that tested IPA.
 - Six-category settings navigation that preserves every existing preference,
   local-history state, cache operation, and About destination
 - Native system, light, and dark appearance selection
+- Classic, light and dark application-icon variants with system-authoritative
+  selection, serialized changes, explicit error recovery and primary-icon restore;
+  independent of in-app appearance, with physical-device/LiveContainer validation
+  still required
 - Persistent selection among five preset accents and one opaque custom sRGB
   accent, with adaptive light, dark, and high-contrast variants
 - Persistent six-position app text-size adjustment relative to iOS Dynamic Type

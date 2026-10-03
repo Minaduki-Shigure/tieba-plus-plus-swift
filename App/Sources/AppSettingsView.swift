@@ -244,6 +244,13 @@ struct AppSettingsView: View {
         .accessibilityValue(selectedAccentColor.title)
         .accessibilityIdentifier("settings-accent-color")
 
+        NavigationLink {
+          AppIconSettingsView(model: .shared)
+        } label: {
+          Label("应用图标", systemImage: "app.badge")
+        }
+        .accessibilityIdentifier("settings-app-icon")
+
         Picker("应用内字号", selection: textSizeAdjustmentSelection) {
           ForEach(AppTextSizeAdjustment.allCases) { adjustment in
             Text(adjustment.title).tag(adjustment)
