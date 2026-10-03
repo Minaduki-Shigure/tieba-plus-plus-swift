@@ -470,7 +470,9 @@ struct RootView: View {
     }
   }
 
-  var body: some View {
+  // Separate opaque view boundaries keep SwiftUI's generic type checking
+  // bounded without changing the modifier order or introducing type erasure.
+  private var rootLayout: some View {
     // Reserve the bar's measured height in layout. An outer safeAreaInset can
     // be swallowed by TabView's UIKit container, leaving the last scroll row
     // underneath the bar even when the page has reached its bottom.
@@ -487,6 +489,10 @@ struct RootView: View {
       )
     }
     .appNavigationSurface()
+  }
+
+  private var rootPresentedContent: some View {
+    rootLayout
     .threadSummaryImageGallery(threadSummaryImageGalleryCoordinator)
     .sheet(isPresented: $showsQuickAccountLogin) {
       NavigationStack {
@@ -507,6 +513,10 @@ struct RootView: View {
         onOpen: openLinkPreview
       )
     }
+  }
+
+  private var rootLifecycleContent: some View {
+    rootPresentedContent
     .onAppear {
       rootIsVisible = true
       updateHomeRefreshActivity()
@@ -601,6 +611,10 @@ struct RootView: View {
       searchSuggestionViewModel.cancelAndClear()
       linkPreviewViewModel.sceneActivityDidChange(isActive: false)
     }
+  }
+
+  private var rootEventContent: some View {
+    rootLifecycleContent
     .onReceive(NotificationCenter.default.publisher(for: .localFavoritesDidChange)) { _ in
       Task { @MainActor in favoritesViewModel.reload() }
     }
@@ -680,6 +694,10 @@ struct RootView: View {
             || followedForumsViewModel.hasActiveFullListSurface)
       )
     }
+  }
+
+  var body: some View {
+    rootEventContent
     .onChange(of: followedForumsViewModel.forums) { forums in
       guard let pendingFollowedForumUnfollow else { return }
       let normalizedName = FollowedForumPin.normalizedForumName(
