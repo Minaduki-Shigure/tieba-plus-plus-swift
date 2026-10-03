@@ -237,7 +237,11 @@ final class WallpaperThemeUITests: XCTestCase {
     let origin = app.coordinate(withNormalizedOffset: .zero)
     let start = origin.withOffset(CGVector(dx: candidate.point.x, dy: candidate.point.y))
     let end = origin.withOffset(CGVector(dx: candidate.point.x, dy: candidate.point.y + delta))
-    start.press(forDuration: 0.05, thenDragTo: end)
+    // Stop the finger before lifting it. An immediate release at the default
+    // velocity flicks the scroll view past the target, making centering alternate
+    // above and below the viewport despite each drag moving the right direction.
+    start.press(
+      forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
     let after = target.frame
     guard (after.minY - before.minY) * (downward ? 1.0 : -1.0) > 1 else {
       throw WallpaperUITestError.unavailable(

@@ -363,7 +363,7 @@ private struct AppNavigationSurfaceModifier: ViewModifier {
         .toolbarBackground(.hidden, for: .navigationBar, .tabBar)
         .toolbarColorScheme(wallpaper.settings.appearance.colorScheme, for: .navigationBar, .tabBar)
         .background {
-          WallpaperThemePreview(image: wallpaper.image, settings: wallpaper.settings)
+          WallpaperLiveCanvas(image: wallpaper.image, settings: wallpaper.settings)
             .ignoresSafeArea()
         }
     } else if AppSurfacePolicy.isOLEDActive(style: style, colorScheme: colorScheme) {

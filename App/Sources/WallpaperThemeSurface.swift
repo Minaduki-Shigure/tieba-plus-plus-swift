@@ -123,7 +123,7 @@ struct WallpaperPageCanvas: ViewModifier {
       .environment(\.wallpaperCanvasInstalled, installed || wallpaper != nil)
       .background {
         if let wallpaper, !installed {
-          WallpaperThemePreview(image: wallpaper.image, settings: wallpaper.settings)
+          WallpaperLiveCanvas(image: wallpaper.image, settings: wallpaper.settings)
             .ignoresSafeArea()
         }
       }
