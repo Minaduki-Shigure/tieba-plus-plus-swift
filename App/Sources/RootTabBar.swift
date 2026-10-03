@@ -9,6 +9,7 @@ struct RootTabBar: View {
   let showsExploreTab: Bool
   let notificationBadge: String?
   let allowsExploreRefresh: Bool
+  let allowsHomeRefresh: Bool
   let onSelect: (RootMainTab) -> Void
 
   @Environment(\.appAccentColor) private var accentColor
@@ -23,6 +24,7 @@ struct RootTabBar: View {
       showsExploreTab: showsExploreTab,
       notificationBadge: notificationBadge,
       allowsExploreRefresh: allowsExploreRefresh,
+      allowsHomeRefresh: allowsHomeRefresh,
       accentColor: accentColor.uiColor,
       colorScheme: colorScheme,
       layoutDirection: layoutDirection,
@@ -51,6 +53,7 @@ struct RootTabBarControl: UIViewRepresentable {
   let showsExploreTab: Bool
   let notificationBadge: String?
   let allowsExploreRefresh: Bool
+  let allowsHomeRefresh: Bool
   let accentColor: UIColor
   let colorScheme: ColorScheme
   let layoutDirection: LayoutDirection
@@ -91,6 +94,7 @@ struct RootTabBarControl: UIViewRepresentable {
       showsExploreTab: showsExploreTab,
       notificationBadge: notificationBadge,
       allowsExploreRefresh: allowsExploreRefresh,
+      allowsHomeRefresh: allowsHomeRefresh,
       onSelect: onSelect
     )
     bar.onKeyboardCoverageChanged = onKeyboardCoverageChanged
@@ -119,6 +123,7 @@ struct RootTabBarControl: UIViewRepresentable {
       showsExploreTab: Bool,
       notificationBadge: String?,
       allowsExploreRefresh: Bool,
+      allowsHomeRefresh: Bool = false,
       onSelect: @escaping (RootMainTab) -> Void
     ) {
       self.onSelect = onSelect
@@ -144,6 +149,8 @@ struct RootTabBarControl: UIViewRepresentable {
       itemsByTab[.notifications]?.badgeValue = notificationBadge
       itemsByTab[.explore]?.accessibilityHint =
         allowsExploreRefresh ? "再次选择以刷新当前频道" : nil
+      itemsByTab[.home]?.accessibilityHint =
+        allowsHomeRefresh ? "再次选择以刷新首页" : nil
     }
 
     func tabBar(_ tabBar: UITabBar, didSelect item: UITabBarItem) {
@@ -241,6 +248,7 @@ enum RootTabBarKeyboardPolicy {
 enum RootTabSelectionAction: Equatable {
   case select(RootMainTab)
   case refreshExplore
+  case refreshHome
   case none
 }
 
@@ -249,15 +257,19 @@ enum RootTabSelectionPolicy {
     selecting tab: RootMainTab,
     navigation: RootMainNavigationState,
     showsExploreTab: Bool,
-    sceneIsActive: Bool
+    sceneIsActive: Bool,
+    hasActiveAccount: Bool = false
   ) -> RootTabSelectionAction {
     guard RootMainTabVisibilityPolicy.visibleTabs(showsExploreTab: showsExploreTab).contains(tab)
     else { return .none }
     guard tab == navigation.selectedTab else { return .select(tab) }
-    guard tab == .explore,
-      RootMainTabActivationPolicy.isActive(
-        sceneIsActive: sceneIsActive, navigation: navigation, tab: .explore)
+    guard RootMainTabActivationPolicy.isActive(
+        sceneIsActive: sceneIsActive, navigation: navigation, tab: tab)
     else { return .none }
-    return .refreshExplore
+    switch tab {
+    case .explore: return .refreshExplore
+    case .home: return hasActiveAccount ? .refreshHome : .none
+    case .notifications, .account: return .none
+    }
   }
 }

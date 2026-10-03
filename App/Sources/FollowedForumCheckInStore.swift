@@ -153,7 +153,14 @@ final class FollowedForumCheckInStore: ObservableObject {
   }
 
   func refresh() async {
+    guard !Task.isCancelled else { return }
     discardExpiredProjectionIfNeeded()
+    if let task = loadTask {
+      // User refreshes share the current read. Account/catalog invalidation
+      // still replaces that read through its explicit startLoad() path.
+      await task.value
+      return
+    }
     startLoad()
     let task = loadTask
     await task?.value

@@ -116,6 +116,49 @@ final class RootTabBarTests: XCTestCase {
     XCTAssertFalse(covers(.infinite))
   }
 
+  func testHomeReselectionRequiresAnActiveAccountAndVisibleForegroundRoot() {
+    let root = RootMainNavigationState(selectedTab: .home)
+    func homeAction(
+      _ navigation: RootMainNavigationState? = nil,
+      signedIn: Bool = true, active: Bool = true
+    ) -> RootTabSelectionAction {
+      RootTabSelectionPolicy.action(
+        selecting: .home, navigation: navigation ?? root, showsExploreTab: true,
+        sceneIsActive: active, hasActiveAccount: signedIn)
+    }
+    XCTAssertEqual(homeAction(), .refreshHome)
+    XCTAssertEqual(homeAction(signedIn: false), .none)
+    XCTAssertEqual(homeAction(active: false), .none)
+    var pushed = root
+    pushed.append(.forum("Swift"), to: .home)
+    let original = pushed
+    XCTAssertEqual(homeAction(pushed), .none)
+    XCTAssertEqual(pushed, original)
+    XCTAssertEqual(
+      homeAction(RootMainNavigationState(selectedTab: .explore)), .select(.home))
+    XCTAssertEqual(
+      RootTabSelectionPolicy.action(
+        selecting: .home, navigation: root, showsExploreTab: false,
+        sceneIsActive: true, hasActiveAccount: true), .refreshHome)
+  }
+
+  func testHomeRefreshHintTracksEligibilityWithoutChangingNativeItemIdentity() throws {
+    let coordinator = RootTabBarControl.Coordinator()
+    let bar = UITabBar()
+    coordinator.update(
+      bar: bar, selectedTab: .home, showsExploreTab: true,
+      notificationBadge: nil, allowsExploreRefresh: false, allowsHomeRefresh: true,
+      onSelect: { _ in })
+    let home = try XCTUnwrap(bar.selectedItem)
+    XCTAssertEqual(home.accessibilityHint, "再次选择以刷新首页")
+    coordinator.update(
+      bar: bar, selectedTab: .home, showsExploreTab: true,
+      notificationBadge: nil, allowsExploreRefresh: false, allowsHomeRefresh: false,
+      onSelect: { _ in })
+    XCTAssertTrue(home === bar.selectedItem)
+    XCTAssertNil(home.accessibilityHint)
+  }
+
   private func action(
     _ tab: RootMainTab,
     navigation: RootMainNavigationState,

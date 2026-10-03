@@ -65,9 +65,11 @@ final class FollowedForumsViewModel: ObservableObject {
   private var currentPage = 0
   private var hasMore = true
   private var loadTask: Task<Void, Never>?
+  private var homeRefreshFailed = false
   private var epoch = 0
   private var completeIndexSurfaceIDs = Set<UUID>()
   private var pinMutationTask: Task<Void, Never>?
+  private var pinMutationVersion = 0
   private var unfollowTask: Task<Void, Never>?
   private var unfollowOperation: UnfollowOperation?
 
@@ -87,7 +89,8 @@ final class FollowedForumsViewModel: ObservableObject {
     self.service = service
     self.vault = vault
     self.pinRepository = pinRepository
-    self.forumMembershipMutator = forumMembershipMutator
+    self.forumMembershipMutator =
+      forumMembershipMutator
       ?? ForumMembershipMutationCoordinator(vault: vault, service: service)
   }
 
@@ -150,7 +153,8 @@ final class FollowedForumsViewModel: ObservableObject {
       let accountID = pinAccountID,
       let normalizedName = FollowedForumPin.normalizedForumName(forum.name)
     else { return false }
-    let newestPin = followedForumPins
+    let newestPin =
+      followedForumPins
       .filter { $0.accountID == accountID && $0.forumID == forum.id }
       .max {
         if $0.pinnedAt != $1.pinnedAt { return $0.pinnedAt < $1.pinnedAt }
@@ -189,6 +193,7 @@ final class FollowedForumsViewModel: ObservableObject {
   private func removeInactiveAccountPin(_ change: ForumMembershipChange) {
     let pinRepository = pinRepository
     let previousTask = pinMutationTask
+    pinMutationVersion &+= 1
     pinMutationTask = Task {
       await previousTask?.value
       try? await pinRepository.removePin(
@@ -220,7 +225,10 @@ final class FollowedForumsViewModel: ObservableObject {
 
   func retryCompleteIndex() {
     guard hasActiveCompleteIndexSurface, !isSignedOut else { return }
-    if loadMoreError != nil, hasMore {
+    if homeRefreshFailed {
+      guard loadTask == nil else { return }
+      loadHomeCatalog()
+    } else if loadMoreError != nil, hasMore {
       retryLoadMore()
     } else {
       reload()
@@ -232,7 +240,26 @@ final class FollowedForumsViewModel: ObservableObject {
   }
 
   func refresh() async {
+    guard !Task.isCancelled else { return }
+    if let loadTask {
+      await loadTask.value
+      return
+    }
     reload()
+    let task = loadTask
+    await task?.value
+  }
+
+  /// Home displays a projection of the complete catalog (including later-page
+  /// pins). Keep the previous account snapshot until every replacement page is
+  /// validated; a failed page must not leave Home showing a truncated catalog.
+  func refreshHome() async {
+    guard !Task.isCancelled else { return }
+    if let loadTask {
+      await loadTask.value
+      return
+    }
+    loadHomeCatalog()
     let task = loadTask
     await task?.value
   }
@@ -263,6 +290,7 @@ final class FollowedForumsViewModel: ObservableObject {
     let requestEpoch = epoch
     let pinRepository = pinRepository
     let previousTask = pinMutationTask
+    pinMutationVersion &+= 1
     pinMutationTask = Task {
       await previousTask?.value
       var cleanupError: String?
@@ -295,6 +323,7 @@ final class FollowedForumsViewModel: ObservableObject {
 
     let pinRepository = pinRepository
     let previousTask = pinMutationTask
+    pinMutationVersion &+= 1
     pinMutationTask = Task {
       await previousTask?.value
       do {
@@ -385,7 +414,10 @@ final class FollowedForumsViewModel: ObservableObject {
 
   func retryLoadMore() {
     guard loadMoreError != nil, !isLoadingMore else { return }
-    if hasMore {
+    if homeRefreshFailed {
+      guard loadTask == nil else { return }
+      loadHomeCatalog()
+    } else if hasMore {
       load(page: currentPage + 1, replacing: false)
     } else {
       reload()
@@ -418,6 +450,7 @@ final class FollowedForumsViewModel: ObservableObject {
 
   private func beginNewEpoch(loadImmediately: Bool) {
     invalidateLoad()
+    homeRefreshFailed = false
     currentPage = 0
     hasMore = true
     loadedLease = nil
@@ -436,6 +469,143 @@ final class FollowedForumsViewModel: ObservableObject {
     if loadImmediately {
       load(page: 1, replacing: true)
     }
+  }
+
+  private func loadHomeCatalog() {
+    invalidateLoad()
+    let requestEpoch = epoch
+    homeRefreshFailed = false
+    loadMoreError = nil
+    isLoadingMore = true
+    state = .loading
+    indexState = .loading
+    loadTask = Task {
+      var catalogLease: FollowedForumsSessionLease?
+      defer {
+        if requestEpoch == epoch {
+          isLoadingMore = false
+          requestLease = nil
+          loadTask = nil
+        }
+      }
+      do {
+        var replacement = [FollowedForumItem]()
+        for page in 1...Self.maximumCatalogPageCount {
+          guard
+            let session = try await homeSession(
+              requestEpoch: requestEpoch, expectedLease: catalogLease
+            )
+          else { return }
+          let lease = FollowedForumsSessionLease(session)
+          catalogLease = lease
+          requestLease = lease
+          let response = try await service.followedForums(
+            session: session, page: page, pageSize: 50)
+          guard try await homeSession(requestEpoch: requestEpoch, expectedLease: lease) != nil
+          else { return }
+          try Self.validate(
+            response, requestedPage: page, replacing: page == 1, currentPage: page - 1)
+          let merged = merge(replacement, response.forums)
+          guard merged.count <= Self.maximumRetainedForums else {
+            throw BrowseError.unavailable("关注贴吧数量超过当前安全读取上限，请稍后重新加载。")
+          }
+          // A repeated nonempty terminal page is not a valid complete snapshot
+          // either. An empty terminal page is allowed after an exact page boundary.
+          if merged.count == replacement.count, response.hasMore || !response.forums.isEmpty {
+            throw BrowseError.unavailable("关注贴吧分页未取得进展，请重新加载后再试。")
+          }
+          replacement = merged
+          if response.hasMore {
+            guard page < Self.maximumCatalogPageCount,
+              replacement.count < Self.maximumRetainedForums
+            else {
+              throw BrowseError.unavailable("关注贴吧数量超过当前安全读取上限，请稍后重新加载。")
+            }
+            continue
+          }
+
+          // Read pins only after the catalog finishes, so a pin changed while
+          // requests were in flight is not overwritten by an early disk snapshot.
+          let pinReadVersion = pinMutationVersion
+          await pinMutationTask?.value
+          var replacementPins = followedForumPins
+          var replacementPinError: String?
+          do {
+            replacementPins = try await pinRepository.pins(accountID: lease.userID)
+          } catch {
+            replacementPinError = error.localizedDescription
+          }
+          guard try await homeSession(requestEpoch: requestEpoch, expectedLease: lease) != nil
+          else { return }
+          currentPage = page
+          hasMore = false
+          loadedLease = lease
+          pinAccountID = lease.userID
+          // A mutation can finish while pins or the final lease are being read.
+          // Its published projection/error owns the newer version. Capture the
+          // version before awaiting the prior task so mutations queued during
+          // that wait are covered too, including a failed disk-read fallback.
+          if pinReadVersion == pinMutationVersion {
+            followedForumPins = replacementPins
+            pinOperationError = replacementPinError
+          }
+          forums = replacement
+          loadedForumNamesByID = Dictionary(
+            uniqueKeysWithValues: replacement.compactMap { forum in
+              FollowedForumPin.normalizedForumName(forum.name).map { (forum.id, $0) }
+            })
+          isSignedOut = false
+          state = .loaded
+          indexState = .ready(
+            FollowedForumIndexSnapshot(lease: lease, forumIDs: Set(replacement.map(\.id))))
+          return
+        }
+      } catch is CancellationError {
+        return
+      } catch {
+        guard requestEpoch == epoch, !Task.isCancelled else { return }
+        let message = error.localizedDescription
+        // A network error must not bypass the account check. Retain old rows
+        // only if we can still verify their exact session revision.
+        do {
+          guard
+            try await homeSession(
+              requestEpoch: requestEpoch, expectedLease: catalogLease
+            ) != nil
+          else { return }
+        } catch {
+          guard requestEpoch == epoch, !Task.isCancelled else { return }
+          beginNewEpoch(loadImmediately: false)
+        }
+        homeRefreshFailed = true
+        indexState = .failed(message)
+        if forums.isEmpty {
+          state = .failed(message)
+        } else {
+          state = .loaded
+          loadMoreError = message
+        }
+      }
+    }
+  }
+
+  private func homeSession(
+    requestEpoch: Int, expectedLease: FollowedForumsSessionLease?
+  ) async throws -> StoredAccountSession? {
+    try Task.checkCancellation()
+    guard requestEpoch == epoch else { return nil }
+    let session = try await vault.activeSession()
+    try Task.checkCancellation()
+    guard requestEpoch == epoch else { return nil }
+    guard let session else {
+      discardResultsFromMissingSession(requestEpoch: requestEpoch)
+      return nil
+    }
+    guard expectedLease?.matches(session) != false, loadedLease?.matches(session) != false else {
+      discardResultsFromChangedSession(requestEpoch: requestEpoch)
+      return nil
+    }
+    return session
   }
 
   private func load(page: Int, replacing: Bool) {

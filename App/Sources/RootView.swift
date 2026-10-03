@@ -32,6 +32,9 @@ struct RootView: View {
   @State private var query = ""
   @State private var navigation: RootMainNavigationState
   @State private var exploreRefreshRequestID: UInt64 = 0
+  @State private var homeIndexSurfaceID = UUID()
+  @State private var rootIsVisible = false
+  @StateObject private var homeRefreshCoordinator = HomeRefreshCoordinator()
   @State private var showsAllSearchHistory = false
   @State private var showsRecentForums = true
   @State private var showsQuickAccountLogin = false
@@ -479,6 +482,7 @@ struct RootView: View {
         showsExploreTab: showsExploreTab,
         notificationBadge: homeUnreadBadgePresentation?.badgeText,
         allowsExploreRefresh: rootTabIsActive(.explore),
+        allowsHomeRefresh: canReselectHome,
         onSelect: selectRootTabFromBar
       )
     }
@@ -504,6 +508,8 @@ struct RootView: View {
       )
     }
     .onAppear {
+      rootIsVisible = true
+      updateHomeRefreshActivity()
       #if DEBUG
         ExploreRefreshLifecycleDiagnostics.active?.recordRoot(
           phase: String(describing: scenePhase), tab: navigation.selectedTab)
@@ -540,6 +546,7 @@ struct RootView: View {
       )
     }
     .onChange(of: scenePhase) {
+      updateHomeRefreshActivity()
       #if DEBUG
         ExploreRefreshLifecycleDiagnostics.active?.recordRoot(
           phase: String(describing: $0), tab: navigation.selectedTab)
@@ -566,6 +573,7 @@ struct RootView: View {
       mediaPlaybackCoordinator.activeSurfaceDidChange()
     }
     .onChange(of: navigation) { navigation in
+      updateHomeRefreshActivity()
       #if DEBUG
         ExploreRefreshLifecycleDiagnostics.active?.recordRoot(
           phase: String(describing: scenePhase), tab: navigation.selectedTab)
@@ -588,6 +596,8 @@ struct RootView: View {
       )
     }
     .onDisappear {
+      rootIsVisible = false
+      updateHomeRefreshActivity()
       searchSuggestionViewModel.cancelAndClear()
       linkPreviewViewModel.sceneActivityDidChange(isActive: false)
     }
@@ -619,6 +629,7 @@ struct RootView: View {
       )
     }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+      homeRefreshCoordinator.invalidate()
       pendingFollowedForumUnfollow = nil
       accountViewModel.invalidateForAccountSessionChange()
       Task { @MainActor in await accountViewModel.loadIfNeeded() }
@@ -751,12 +762,15 @@ struct RootView: View {
       selecting: tab,
       navigation: effectiveNavigation,
       showsExploreTab: showsExploreTab,
-      sceneIsActive: scenePhase == .active
+      sceneIsActive: scenePhase == .active && rootIsVisible,
+      hasActiveAccount: hasLoadedHomeAccount
     ) {
     case .select(let tab):
       rootTabSelection.wrappedValue = tab
     case .refreshExplore:
       exploreRefreshRequestID &+= 1
+    case .refreshHome:
+      Task { await refreshHome() }
     case .none:
       break
     }
@@ -1095,11 +1109,34 @@ struct RootView: View {
 
   @MainActor
   private func refreshHome() async {
-    favoritesViewModel.reload()
-    recentForumsViewModel.reload()
-    async let forums: Void = followedForumsViewModel.refresh()
-    async let checkIns: Void = followedForumCheckInStore.refresh()
-    _ = await (forums, checkIns)
+    guard !Task.isCancelled, rootIsVisible, rootTabIsActive(.home) else { return }
+    await homeRefreshCoordinator.refresh {
+      guard !Task.isCancelled else { return }
+      async let favorites: Void = favoritesViewModel.refresh()
+      async let history: Void = recentForumsViewModel.refresh()
+      async let forums: Void = followedForumsViewModel.refreshHome()
+      async let checkIns: Void = followedForumCheckInStore.refresh()
+      _ = await (favorites, history, forums, checkIns)
+    }
+  }
+
+  private var hasLoadedHomeAccount: Bool {
+    accountViewModel.state == .loaded && !accountViewModel.isMutating
+      && accountViewModel.activeAccount != nil
+  }
+
+  private var canReselectHome: Bool {
+    rootIsVisible && rootTabIsActive(.home) && hasLoadedHomeAccount
+  }
+
+  private func updateHomeRefreshActivity() {
+    if rootIsVisible, rootTabIsActive(.home) {
+      // Home needs later pages too: a pinned forum may not be on page one.
+      followedForumsViewModel.completeIndexSurfaceDidAppear(id: homeIndexSurfaceID)
+    } else {
+      followedForumsViewModel.completeIndexSurfaceDidDisappear(id: homeIndexSurfaceID)
+      homeRefreshCoordinator.invalidate()
+    }
   }
 
   @ViewBuilder
@@ -1171,6 +1208,21 @@ struct RootView: View {
           Text("这会修改当前贴吧账户的关注列表。")
         }
 
+        if let message = followedForumsViewModel.loadMoreError {
+          VStack(alignment: .leading, spacing: 8) {
+            Label(message, systemImage: "exclamationmark.triangle")
+              .foregroundStyle(.secondary)
+              .accessibilityIdentifier("home-followed-forums-refresh-error")
+            Button {
+              Task { await refreshHome() }
+            } label: {
+              Label("重试", systemImage: "arrow.clockwise")
+            }
+            .accessibilityIdentifier("home-followed-forums-refresh-retry")
+          }
+          .appListRowSurface(.card)
+        }
+
         NavigationLink(value: RootDestination.followedForums) {
           Label("查看全部", systemImage: "list.bullet")
         }
@@ -1179,6 +1231,10 @@ struct RootView: View {
         HStack(spacing: 8) {
           Text("关注的贴吧")
             .accessibilityAddTraits(.isHeader)
+          if homeRefreshCoordinator.isRefreshing {
+            ProgressView()
+              .accessibilityLabel("正在刷新首页")
+          }
           Spacer(minLength: 8)
           if let action = followedForumsLayoutToggleAction {
             FollowedForumsLayoutToggleButton(
@@ -1190,6 +1246,11 @@ struct RootView: View {
         }
         .textCase(nil)
       }
+    } else if followedForumsViewModel.state == .loading {
+      Section("关注的贴吧") {
+        ProgressView("正在读取关注的贴吧")
+      }
+      .appListRowSurface(.card)
     } else if case .failed(let message) = followedForumsViewModel.state,
       !followedForumsViewModel.isSignedOut
     {
@@ -1197,7 +1258,7 @@ struct RootView: View {
         Label(message, systemImage: "exclamationmark.triangle")
           .foregroundStyle(.secondary)
         Button {
-          followedForumsViewModel.reload()
+          Task { await refreshHome() }
         } label: {
           Label("重试", systemImage: "arrow.clockwise")
         }

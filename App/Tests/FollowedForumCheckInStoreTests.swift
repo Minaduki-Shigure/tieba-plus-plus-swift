@@ -672,6 +672,265 @@ final class FollowedForumCheckInStoreTests: XCTestCase {
     }
     XCTAssertFalse(store.isCheckedInToday(forum, forumLease: lease))
   }
+
+  func testRefreshJoinsInitialLoadAndCancellingOneWaiterPreservesSharedResult() async throws {
+    let session = checkInSession(userID: 7, revision: checkInUUID(20))
+    let loader = SuspendedFollowedCheckInCatalogLoader(
+      suspendedRevision: session.sessionRevision,
+      catalogs: [
+        session.sessionRevision: checkInCatalog(
+          userID: 7,
+          targets: [
+            checkInTarget(id: 1, name: "one", status: .checkedIn)
+          ])
+      ]
+    )
+    addTeardownBlock { await loader.releaseSuspendedRequest() }
+    let store = FollowedForumCheckInStore(
+      vault: FollowedCheckInVaultSpy(session: session),
+      catalogLoader: { try await loader.load(session: $0) },
+      now: { followedCheckInStableDate() }
+    )
+    defer { store.cancel() }
+    store.loadIfNeeded()
+    try await waitForFollowedCheckInState { await loader.requestedRevisions().count == 1 }
+
+    var started = 0
+    var finished = 0
+    let first = Task { @MainActor in
+      started += 1
+      await store.refresh()
+      finished += 1
+    }
+    let second = Task { @MainActor in
+      started += 1
+      await store.refresh()
+      finished += 1
+    }
+    defer {
+      first.cancel()
+      second.cancel()
+    }
+    try await waitForFollowedCheckInState { started == 2 }
+    first.cancel()
+    XCTAssertEqual(finished, 0)
+    await loader.releaseSuspendedRequest()
+    try await waitForFollowedCheckInState { finished == 2 && store.state == .ready }
+
+    XCTAssertTrue(
+      store.isCheckedInToday(
+        checkInForum(id: 1, name: "one"), forumLease: AccountSessionLease(session)))
+    let requests = await loader.requestedRevisions()
+    XCTAssertEqual(requests, [session.sessionRevision])
+  }
+
+  func testBusyRefreshIsSharedAndCompletedRefreshCanRunAgain() async throws {
+    let session = checkInSession(userID: 7, revision: checkInUUID(21))
+    let loader = SuspendedFollowedCheckInCatalogLoader(
+      suspendedRevision: session.sessionRevision,
+      suspendedRequestNumber: 2,
+      catalogs: [session.sessionRevision: checkInCatalog(userID: 7, targets: [])]
+    )
+    addTeardownBlock { await loader.releaseSuspendedRequest() }
+    let store = FollowedForumCheckInStore(
+      vault: FollowedCheckInVaultSpy(session: session),
+      catalogLoader: { try await loader.load(session: $0) },
+      now: { followedCheckInStableDate() }
+    )
+    defer { store.cancel() }
+    store.loadIfNeeded()
+    try await waitForFollowedCheckInState { store.state == .ready }
+
+    var finished = 0
+    let first = Task { @MainActor in
+      await store.refresh()
+      finished += 1
+    }
+    defer { first.cancel() }
+    try await waitForFollowedCheckInState { await loader.requestedRevisions().count == 2 }
+    var joined = false
+    let second = Task { @MainActor in
+      joined = true
+      await store.refresh()
+      finished += 1
+    }
+    defer { second.cancel() }
+    try await waitForFollowedCheckInState { joined }
+    XCTAssertEqual(finished, 0)
+    await loader.releaseSuspendedRequest()
+    try await waitForFollowedCheckInState { finished == 2 && store.state == .ready }
+    let sharedRequests = await loader.requestedRevisions()
+    XCTAssertEqual(sharedRequests.count, 2)
+
+    let next = Task { @MainActor in
+      await store.refresh()
+      finished += 1
+    }
+    defer { next.cancel() }
+    try await waitForFollowedCheckInState { finished == 3 && store.state == .ready }
+    let completedRequests = await loader.requestedRevisions()
+    XCTAssertEqual(completedRequests.count, 3)
+  }
+
+  func testLateAccountReadCannotPublishOrClearTheReplacementRefreshTask() async throws {
+    let oldSession = checkInSession(userID: 7, revision: checkInUUID(22))
+    let newSession = checkInSession(userID: 8, revision: checkInUUID(23))
+    let vault = FollowedCheckInVaultSpy(session: oldSession)
+    let oldLoader = SuspendedFollowedCheckInCatalogLoader(
+      suspendedRevision: oldSession.sessionRevision,
+      catalogs: [oldSession.sessionRevision: checkInCatalog(userID: 7, targets: [])]
+    )
+    let newLoader = SuspendedFollowedCheckInCatalogLoader(
+      suspendedRevision: newSession.sessionRevision,
+      catalogs: [
+        newSession.sessionRevision: checkInCatalog(
+          userID: 8,
+          targets: [
+            checkInTarget(id: 2, name: "new", status: .checkedIn)
+          ])
+      ]
+    )
+    addTeardownBlock {
+      await oldLoader.releaseSuspendedRequest()
+      await newLoader.releaseSuspendedRequest()
+    }
+    let store = FollowedForumCheckInStore(
+      vault: vault,
+      catalogLoader: { session in
+        if session.sessionRevision == oldSession.sessionRevision {
+          return try await oldLoader.load(session: session)
+        }
+        return try await newLoader.load(session: session)
+      },
+      now: { followedCheckInStableDate() }
+    )
+    defer { store.cancel() }
+    var oldFinished = false
+    let oldRefresh = Task { @MainActor in
+      await store.refresh()
+      oldFinished = true
+    }
+    defer { oldRefresh.cancel() }
+    try await waitForFollowedCheckInState { await oldLoader.requestedRevisions().count == 1 }
+    await vault.setActiveSession(newSession)
+    store.accountSessionDidChange(loadImmediately: true)
+    try await waitForFollowedCheckInState { await newLoader.requestedRevisions().count == 1 }
+    await oldLoader.releaseSuspendedRequest()
+    try await waitForFollowedCheckInState { oldFinished }
+    XCTAssertNil(store.snapshot)
+    XCTAssertEqual(store.state, .loading)
+
+    var joined = false
+    var finished = false
+    let newRefresh = Task { @MainActor in
+      joined = true
+      await store.refresh()
+      finished = true
+    }
+    defer { newRefresh.cancel() }
+    try await waitForFollowedCheckInState { joined }
+    XCTAssertFalse(finished)
+    await newLoader.releaseSuspendedRequest()
+    try await waitForFollowedCheckInState { finished && store.state == .ready }
+    XCTAssertEqual(store.snapshot?.lease, AccountSessionLease(newSession))
+    XCTAssertTrue(
+      store.isCheckedInToday(
+        checkInForum(id: 2, name: "new"), forumLease: AccountSessionLease(newSession)))
+    let replacementRequests = await newLoader.requestedRevisions()
+    XCTAssertEqual(replacementRequests, [newSession.sessionRevision])
+  }
+
+  func testRefreshRetriesAnInitialCatalogFailure() async throws {
+    let session = checkInSession(userID: 7, revision: checkInUUID(24))
+    let loader = FollowedCheckInCatalogLoaderSpy(responses: [
+      .failure(FollowedCheckInTestFailure(message: "offline")),
+      .success(checkInCatalog(userID: 7, targets: [])),
+    ])
+    let store = makeFollowedCheckInStore(
+      vault: FollowedCheckInVaultSpy(session: session), loader: loader)
+    defer { store.cancel() }
+    store.loadIfNeeded()
+    try await waitForFollowedCheckInState { store.state == .unavailable }
+
+    var finished = false
+    let refresh = Task { @MainActor in
+      await store.refresh()
+      finished = true
+    }
+    defer { refresh.cancel() }
+    try await waitForFollowedCheckInState { finished && store.state == .ready }
+    let requests = await loader.requestedRevisions()
+    XCTAssertEqual(requests, [session.sessionRevision, session.sessionRevision])
+  }
+
+  func testCancelledRefreshInvocationDoesNotReadTheVaultOrCatalog() async throws {
+    let session = checkInSession(userID: 7, revision: checkInUUID(25))
+    let vault = FollowedCheckInVaultSpy(session: session)
+    let loader = FollowedCheckInCatalogLoaderSpy(responses: [
+      .success(checkInCatalog(userID: 7, targets: []))
+    ])
+    let store = makeFollowedCheckInStore(vault: vault, loader: loader)
+    defer { store.cancel() }
+    var finished = false
+    let refresh = Task { @MainActor in
+      withUnsafeCurrentTask { $0?.cancel() }
+      await store.refresh()
+      finished = true
+    }
+    defer { refresh.cancel() }
+    try await waitForFollowedCheckInState { finished }
+    XCTAssertEqual(store.state, .idle)
+    let vaultReads = await vault.activeSessionReadCount()
+    let requests = await loader.requestedRevisions()
+    XCTAssertEqual(vaultReads, 0)
+    XCTAssertTrue(requests.isEmpty)
+  }
+
+  func testJoiningRefreshExpiresYesterdayBeforeWaitingAndAllowsMidnightReplacement() async throws {
+    let beforeMidnight = Date(timeIntervalSince1970: 1_787_673_570)
+    let afterMidnight = Date(timeIntervalSince1970: 1_787_673_630)
+    let clock = FollowedCheckInDateBox(beforeMidnight)
+    let session = checkInSession(userID: 7, revision: checkInUUID(26))
+    let loader = SuspendedFollowedCheckInCatalogLoader(
+      suspendedRevision: session.sessionRevision,
+      suspendedRequestNumber: 2,
+      catalogs: [session.sessionRevision: checkInCatalog(userID: 7, targets: [])]
+    )
+    addTeardownBlock { await loader.releaseSuspendedRequest() }
+    let store = FollowedForumCheckInStore(
+      vault: FollowedCheckInVaultSpy(session: session),
+      catalogLoader: { try await loader.load(session: $0) },
+      now: { clock.value() },
+      calendar: tiebaCheckInTestCalendar()
+    )
+    defer { store.cancel() }
+    store.loadIfNeeded()
+    try await waitForFollowedCheckInState { store.state == .ready }
+    XCTAssertNotNil(store.snapshot)
+    var finished = 0
+    let first = Task { @MainActor in
+      await store.refresh()
+      finished += 1
+    }
+    defer { first.cancel() }
+    try await waitForFollowedCheckInState { await loader.requestedRevisions().count == 2 }
+    clock.set(afterMidnight)
+    var joined = false
+    let second = Task { @MainActor in
+      joined = true
+      await store.refresh()
+      finished += 1
+    }
+    defer { second.cancel() }
+    try await waitForFollowedCheckInState { joined }
+    XCTAssertNil(store.snapshot)
+    XCTAssertEqual(finished, 0)
+    await loader.releaseSuspendedRequest()
+    try await waitForFollowedCheckInState { finished == 2 && store.state == .ready }
+    XCTAssertEqual(store.snapshot?.loadedAt, afterMidnight)
+    let requests = await loader.requestedRevisions()
+    XCTAssertEqual(requests.count, 3)
+  }
 }
 
 @MainActor
@@ -773,13 +1032,18 @@ private struct FollowedCheckInTestFailure: Error {
 
 private actor FollowedCheckInVaultSpy: AccountVault {
   private var session: StoredAccountSession?
+  private var sessionReads = 0
 
   init(session: StoredAccountSession?) {
     self.session = session
   }
 
   func accountSummaries() async throws -> [AccountSummary] { [] }
-  func activeSession() async throws -> StoredAccountSession? { session }
+  func activeSession() async throws -> StoredAccountSession? {
+    sessionReads += 1
+    return session
+  }
+  func activeSessionReadCount() -> Int { sessionReads }
   func upsert(_ session: StoredAccountSession) async throws { self.session = session }
   func switchActive(to userID: Int64) async throws {}
   func remove(userID: Int64) async throws { session = nil }
@@ -811,20 +1075,28 @@ private actor FollowedCheckInCatalogLoaderSpy {
 
 private actor SuspendedFollowedCheckInCatalogLoader {
   private let suspendedRevision: UUID
+  private let suspendedRequestNumber: Int
   private let catalogs: [UUID: ForumCheckInCatalogData]
   private var revisions = [UUID]()
   private var continuation: CheckedContinuation<Void, Never>?
   private var didSuspend = false
   private var waiters = [CheckedContinuation<Void, Never>]()
 
-  init(suspendedRevision: UUID, catalogs: [UUID: ForumCheckInCatalogData]) {
+  init(
+    suspendedRevision: UUID,
+    suspendedRequestNumber: Int = 1,
+    catalogs: [UUID: ForumCheckInCatalogData]
+  ) {
     self.suspendedRevision = suspendedRevision
+    self.suspendedRequestNumber = suspendedRequestNumber
     self.catalogs = catalogs
   }
 
   func load(session: StoredAccountSession) async throws -> ForumCheckInCatalogData {
     revisions.append(session.sessionRevision)
-    if session.sessionRevision == suspendedRevision, !didSuspend {
+    if session.sessionRevision == suspendedRevision,
+      revisions.count == suspendedRequestNumber, !didSuspend
+    {
       didSuspend = true
       let waiters = waiters
       self.waiters = []

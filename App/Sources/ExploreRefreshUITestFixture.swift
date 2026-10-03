@@ -17,6 +17,10 @@
         arguments[AppPreferenceKey.homeShowsRecentForums] = false
         arguments[AppPreferenceKey.searchSuggestionsEnabled] = false
         arguments[InboxNotificationRuntime.enabledKey] = false
+        if ProcessInfo.processInfo.arguments.contains("--home-refresh-ui-testing") {
+          arguments[AppPreferenceKey.followedForumsLayout] =
+            FollowedForumsLayoutMode.singleColumn.rawValue
+        }
         UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
         ExploreRefreshUITestApp.main()
       } else {
@@ -42,7 +46,7 @@
           accountService: dependencies.service,
           personalizedFeedbackService: dependencies.service,
           contentFilterRepository: dependencies.contentFilters,
-          startDestination: .discovery,
+          startDestination: dependencies.homeProbe == nil ? .discovery : .home,
           showsExploreTab: true
         )
         .environment(\.accountAccess, dependencies.accountAccess)
@@ -58,8 +62,13 @@
         .environmentObject(dependencies.externalWeb)
         .environmentObject(dependencies.sceneDelegate)
         .overlay(alignment: .topLeading) {
-          ExploreRefreshUITestProbeView(probe: dependencies.probe)
-            .allowsHitTesting(false)
+          VStack(alignment: .leading, spacing: 1) {
+            ExploreRefreshUITestProbeView(probe: dependencies.probe)
+            if let homeProbe = dependencies.homeProbe {
+              HomeRefreshUITestProbeView(probe: homeProbe)
+            }
+          }
+          .allowsHitTesting(false)
         }
       }
     }
@@ -68,7 +77,8 @@
   @MainActor
   private final class ExploreRefreshUITestDependencies: ObservableObject {
     let probe = ExploreRefreshUITestProbe()
-    let vault = ExploreRefreshUITestVault()
+    let homeProbe: HomeRefreshUITestProbe?
+    let vault: ExploreRefreshUITestVault
     let repositories = ExploreRefreshUITestRepositories()
     let contentFilters = EmptyContentFilterRepository()
     let mediaPlayback = MediaPlaybackCoordinator()
@@ -84,7 +94,12 @@
     let checkIns: FollowedForumCheckInStore
 
     init() {
-      let service = ExploreRefreshUITestService(probe: probe)
+      let arguments = ProcessInfo.processInfo.arguments
+      let testsHome = arguments.contains("--home-refresh-ui-testing")
+      homeProbe = testsHome ? HomeRefreshUITestProbe() : nil
+      vault = ExploreRefreshUITestVault(
+        isSignedOut: testsHome && arguments.contains("--home-refresh-signed-out"))
+      let service = ExploreRefreshUITestService(probe: probe, homeProbe: homeProbe)
       self.service = service
       accountAccess = AccountAccess(vault: vault, service: service)
       voicePlayback = VoicePlaybackController(coordinator: mediaPlayback)
@@ -122,6 +137,33 @@
           ExploreRefreshLifecycleProbeView(diagnostics: diagnostics)
         }
       }
+    }
+  }
+
+  /// Kept separate so the original Explore fixture's observable contract and
+  /// request counts remain unchanged when its tests briefly visit Home.
+  @MainActor
+  private final class HomeRefreshUITestProbe: ObservableObject {
+    @Published private var counts: [String: Int] = [:]
+
+    func record(_ key: String) -> Int {
+      counts[key, default: 0] += 1
+      return counts[key, default: 0]
+    }
+
+    var summary: String {
+      ["page1", "page2", "catalog", "unexpected"]
+        .map { "\($0)=\(counts[$0, default: 0])" }.joined(separator: " ")
+    }
+  }
+
+  private struct HomeRefreshUITestProbeView: View {
+    @ObservedObject var probe: HomeRefreshUITestProbe
+
+    var body: some View {
+      Text(probe.summary)
+        .font(.system(size: 9, design: .monospaced))
+        .accessibilityIdentifier("home-refresh-request-counts")
     }
   }
 
@@ -202,21 +244,27 @@
   /// All credentials are inert generated values retained only by this actor.
   /// The mock service below is the sole consumer; no authenticated client exists.
   private actor ExploreRefreshUITestVault: AccountVault, AccountSessionLookup {
+    private let isSignedOut: Bool
     private let account = StoredAccountSession(
       id: 7, username: "offline-fixture", displayName: "离线测试账号", portrait: "",
       bduss: String(repeating: "b", count: 192), stoken: String(repeating: "s", count: 64),
       createdAt: Date(timeIntervalSince1970: 1), updatedAt: Date(timeIntervalSince1970: 1)
     )
 
+    init(isSignedOut: Bool = false) { self.isSignedOut = isSignedOut }
+
     func accountSummaries() -> [AccountSummary] {
-      [
+      guard !isSignedOut else { return [] }
+      return [
         AccountSummary(
           id: account.id, username: account.username, displayName: account.displayName,
           portraitURL: nil, isActive: true, hasFullCredentials: true, updatedAt: account.updatedAt)
       ]
     }
-    func activeSession() -> StoredAccountSession? { account }
-    func session(userID: Int64) -> StoredAccountSession? { userID == account.id ? account : nil }
+    func activeSession() -> StoredAccountSession? { isSignedOut ? nil : account }
+    func session(userID: Int64) -> StoredAccountSession? {
+      !isSignedOut && userID == account.id ? account : nil
+    }
     func upsert(_ session: StoredAccountSession) throws {
       throw ExploreRefreshUITestService.unsupported
     }
@@ -263,9 +311,14 @@
   {
     static var unsupported: BrowseError { .unavailable("离线界面测试不提供此操作。") }
     private let probe: ExploreRefreshUITestProbe
+    private let homeProbe: HomeRefreshUITestProbe?
+    private var homeGeneration = 0
     private var threadsByID: [Int64: BrowseThread] = [:]
 
-    init(probe: ExploreRefreshUITestProbe) { self.probe = probe }
+    init(probe: ExploreRefreshUITestProbe, homeProbe: HomeRefreshUITestProbe?) {
+      self.probe = probe
+      self.homeProbe = homeProbe
+    }
 
     private func thread(channel: String, title: String, id: Int64) async -> BrowseThread {
       let count = await probe.record(channel)
@@ -323,16 +376,45 @@
         totalPages: 1, totalCount: 1, firstPost: post)
     }
 
-    func followedForums(session: StoredAccountSession, page: Int, pageSize: Int)
+    func followedForums(session: StoredAccountSession, page: Int, pageSize: Int) async throws
       -> FollowedForumPageData
-    { FollowedForumPageData(forums: [], currentPage: page, hasMore: false) }
+    {
+      guard let homeProbe else {
+        return FollowedForumPageData(forums: [], currentPage: page, hasMore: false)
+      }
+      guard session.id == 7, (1...2).contains(page), pageSize > 0 else {
+        _ = await homeProbe.record("unexpected")
+        throw Self.unsupported
+      }
+      if page == 1 { homeGeneration += 1 }
+      let generation = homeGeneration
+      _ = await homeProbe.record("page\(page)")
+      let forum = FollowedForumItem(
+        id: Int64(200 + page), name: page == 1 ? "离线首页甲" : "离线首页乙",
+        level: page + 1, experience: generation * 100 + page,
+        slogan: "首页第\(generation)轮·第\(page)页")
+      return FollowedForumPageData(forums: [forum], currentPage: page, hasMore: page == 1)
+    }
 
     func inboxUnreadSummary(session: StoredAccountSession) -> InboxUnreadSummary {
       InboxUnreadSummary(userID: session.id, replyCount: 0, mentionCount: 0, fanCount: 0)
     }
 
-    func checkInCatalog(session: StoredAccountSession) -> ForumCheckInCatalogData {
-      ForumCheckInCatalogData(userID: session.id, targets: [], officialBatchPolicy: nil)
+    func checkInCatalog(session: StoredAccountSession) async throws -> ForumCheckInCatalogData {
+      guard let homeProbe else {
+        return ForumCheckInCatalogData(userID: session.id, targets: [], officialBatchPolicy: nil)
+      }
+      guard session.id == 7 else {
+        _ = await homeProbe.record("unexpected")
+        throw Self.unsupported
+      }
+      let count = await homeProbe.record("catalog")
+      let targets = (1...2).map { page in
+        ForumCheckInCatalogTarget(
+          forumID: Int64(200 + page), forumName: page == 1 ? "离线首页甲" : "离线首页乙",
+          level: page + 1, status: count > 1 ? .checkedIn : .pending, isForbidden: false)
+      }
+      return ForumCheckInCatalogData(userID: session.id, targets: targets, officialBatchPolicy: nil)
     }
 
     func searchForums(query: String) -> ForumSearchData {

@@ -114,7 +114,8 @@ final class AccountViewModelTests: XCTestCase {
     XCTAssertTrue(notificationRecorder.snapshot().isEmpty)
   }
 
-  func testSwitchAccountRejectsConcurrentTargetAndDoesNotRestoreInvalidatedSnapshot() async
+  func testSwitchAccountRejectsConcurrentTargetAndDoesNotRestoreInvalidatedSnapshot()
+    async
     throws
   {
     let activeID: Int64 = 88_022
@@ -402,6 +403,324 @@ final class AccountViewModelTests: XCTestCase {
     let activeSessionReads = await vault.activeSessionReadCount()
     XCTAssertEqual(activeSessionReads, 4)
     viewModel.completeIndexSurfaceDidDisappear(id: surfaceID)
+  }
+
+  func testHomeRefreshCommitsCompleteCatalogAndLaterPagePinsTogether() async throws {
+    let active = session(userID: 7, name: "active")
+    let vault = AccountVaultSpy(sessions: [active], activeUserID: 7)
+    let old = forum(id: 90, name: "old")
+    let service = AccountServiceSpy(followedPages: [
+      1: .success(.init(forums: [old], currentPage: 1, hasMore: false))
+    ])
+    let pins = TransientFollowedForumPinsStore()
+    let model = FollowedForumsViewModel(service: service, vault: vault, pinRepository: pins)
+    await model.refreshHome()
+    await service.setFollowedPageResult(
+      .success(
+        .init(
+          forums: (1...6).map { forum(id: Int64($0), name: "bar\($0)") },
+          currentPage: 1, hasMore: true)), for: 1)
+    await service.setFollowedPageResult(
+      .success(.init(forums: [forum(id: 7, name: "later")], currentPage: 2, hasMore: false)),
+      for: 2)
+    await service.suspendFollowedRequest(number: 3)
+    addTeardownBlock { await service.releaseSuspendedFollowedRequest() }
+
+    let first = Task { await model.refreshHome() }
+    try await waitForAccountState { await service.followedRequestSnapshot().count == 3 }
+    XCTAssertEqual(model.forums, [old], "Page one must not replace a complete old snapshot.")
+    XCTAssertEqual(model.loadedSessionLease, AccountSessionLease(active))
+    try await pins.setPin(accountID: 7, forumID: 7, forumName: "later")
+    var waiterEntered = false
+    var waiterFinished = false
+    let waiter = Task {
+      waiterEntered = true
+      await model.refreshHome()
+      waiterFinished = true
+    }
+    try await waitForAccountState { waiterEntered }
+    XCTAssertFalse(waiterFinished)
+    first.cancel()
+    await service.releaseSuspendedFollowedRequest()
+    await first.value
+    await waiter.value
+
+    XCTAssertEqual(model.forums.map(\.id), Array(1...7).map(Int64.init))
+    XCTAssertEqual(model.homeForums.map(\.id), [7, 1, 2, 3, 4, 5])
+    XCTAssertEqual(model.state, .loaded)
+    XCTAssertNil(model.loadMoreError)
+    XCTAssertEqual(
+      model.indexState,
+      .ready(
+        .init(
+          lease: AccountSessionLease(active),
+          forumIDs: Set(1...7))))
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 1, 2])
+    XCTAssertTrue(requests.allSatisfy { $0.pageSize == 50 })
+  }
+
+  func testHomeRefreshCannotOverwritePinChangedDuringFinalSessionValidation() async throws {
+    for pinReadFails in [false, true] {
+      let active = session(userID: 7, name: "active")
+      // Each single-page Home transaction reads the lease before/after the
+      // request and once after the pin read. Hold the second transaction there.
+      let vault = SuspendedActiveSessionReadVault(session: active, suspendedReadNumber: 6)
+      addTeardownBlock { _ = await vault.releaseSuspendedRead() }
+      let first = forum(id: 1, name: "one")
+      let second = forum(id: 2, name: "two")
+      let service = AccountServiceSpy(followedPages: [
+        1: .success(.init(forums: [first, second], currentPage: 1, hasMore: false))
+      ])
+      let pins = SuspendedFollowedForumPinsRepository(
+        failingReadNumbers: pinReadFails ? [2] : [])
+      let model = FollowedForumsViewModel(service: service, vault: vault, pinRepository: pins)
+      await model.refreshHome()
+      let updated = FollowedForumItem(id: 1, name: "one", level: 10, experience: 100)
+      await service.setFollowedPageResult(
+        .success(.init(forums: [updated, second], currentPage: 1, hasMore: false)), for: 1)
+      let refresh = Task { await model.refreshHome() }
+      try await waitForAccountState { await vault.hasSuspendedRead() }
+
+      model.setPinned(second, isPinned: true)
+      try await waitForAccountState { model.isPinned(second) }
+      XCTAssertNil(model.pinOperationError)
+      let released = await vault.releaseSuspendedRead()
+      XCTAssertTrue(released)
+      await refresh.value
+
+      XCTAssertEqual(model.forums, [updated, second])
+      XCTAssertEqual(model.homeForums.map(\.id), [2, 1])
+      XCTAssertTrue(model.isPinned(second), "pin-read failure: \(pinReadFails)")
+      XCTAssertNil(model.pinOperationError, "A superseded read failure must not replace success.")
+      let stored = try await pins.pins(accountID: active.id)
+      XCTAssertEqual(model.followedForumPins, stored)
+    }
+  }
+
+  func testFailedHomeReplacementKeepsRowsPinsAndRetriesFromFirstPage() async throws {
+    let active = session(userID: 7, name: "active")
+    let old = forum(id: 90, name: "old")
+    let pins = TransientFollowedForumPinsStore()
+    try await pins.setPin(accountID: 7, forumID: old.id, forumName: old.name)
+    let service = AccountServiceSpy(followedPages: [
+      1: .success(.init(forums: [old], currentPage: 1, hasMore: false))
+    ])
+    let model = FollowedForumsViewModel(
+      service: service, vault: AccountVaultSpy(sessions: [active], activeUserID: 7),
+      pinRepository: pins)
+    await model.refreshHome()
+    let savedPins = model.followedForumPins
+    await service.setFollowedPageResult(
+      .success(.init(forums: [forum(id: 1, name: "new")], currentPage: 1, hasMore: true)),
+      for: 1)
+    await service.setFollowedPageResult(.failure(.init(message: "page two failed")), for: 2)
+    await model.refreshHome()
+
+    XCTAssertEqual(model.forums, [old])
+    XCTAssertEqual(model.followedForumPins, savedPins)
+    XCTAssertEqual(model.loadedSessionLease, AccountSessionLease(active))
+    XCTAssertTrue(model.isPinned(old))
+    XCTAssertEqual(model.state, .loaded)
+    XCTAssertEqual(model.loadMoreError, "page two failed")
+    await service.setFollowedPageResult(
+      .success(.init(forums: [forum(id: 2, name: "second")], currentPage: 2, hasMore: false)),
+      for: 2)
+    model.retryLoadMore()
+    try await waitForAccountState { model.forums.map(\.id) == [1, 2] && !model.isLoadingMore }
+    XCTAssertNil(model.loadMoreError)
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 1, 2, 1, 2])
+  }
+
+  func testHomeRefreshRejectsRepeatedUnexpectedAndUnboundedCatalogsWithoutPartialCommit()
+    async throws
+  {
+    let active = session(userID: 7, name: "active")
+    let old = forum(id: 9_999, name: "old")
+    for scenario in 0..<4 {
+      let service = AccountServiceSpy(followedPages: [
+        1: .success(.init(forums: [old], currentPage: 1, hasMore: false))
+      ])
+      let model = FollowedForumsViewModel(
+        service: service, vault: AccountVaultSpy(sessions: [active], activeUserID: 7))
+      await model.refreshHome()
+      if scenario < 2 {
+        await service.setFollowedPageResult(
+          .success(.init(forums: [forum(id: 1, name: "one")], currentPage: 1, hasMore: true)),
+          for: 1)
+        await service.setFollowedPageResult(
+          .success(
+            .init(
+              forums: [forum(id: 1, name: "one")],
+              currentPage: scenario == 0 ? 2 : 1, hasMore: false)), for: 2)
+      } else {
+        // Hit page-count and retained-count bounds independently.
+        let count = scenario == 2 ? 1 : 100
+        for page in 1...100 {
+          let rows = (1...count).map { offset in
+            let id = Int64((page - 1) * count + offset)
+            return forum(id: id, name: "bar\(id)")
+          }
+          await service.setFollowedPageResult(
+            .success(.init(forums: rows, currentPage: page, hasMore: true)), for: page)
+        }
+      }
+      await model.refreshHome()
+      XCTAssertEqual(model.forums, [old], "scenario \(scenario)")
+      XCTAssertEqual(model.loadedSessionLease, AccountSessionLease(active))
+      XCTAssertNotNil(model.loadMoreError)
+      let requests = await service.followedRequestSnapshot()
+      XCTAssertEqual(requests.count, [3, 3, 101, 51][scenario])
+    }
+  }
+
+  func testHomeAndGenericRefreshJoinInitialLoadThroughCompleteIndexContinuation() async throws {
+    let active = session(userID: 7, name: "active")
+    let service = AccountServiceSpy(followedPages: [
+      1: .success(.init(forums: [forum(id: 1, name: "one")], currentPage: 1, hasMore: true)),
+      2: .success(.init(forums: [forum(id: 2, name: "two")], currentPage: 2, hasMore: false)),
+    ])
+    await service.suspendFollowedRequest(number: 1)
+    addTeardownBlock { await service.releaseSuspendedFollowedRequest() }
+    let model = FollowedForumsViewModel(
+      service: service, vault: AccountVaultSpy(sessions: [active], activeUserID: 7))
+    let surface = UUID()
+    model.completeIndexSurfaceDidAppear(id: surface)
+    defer { model.completeIndexSurfaceDidDisappear(id: surface) }
+    try await waitForAccountState { await service.followedRequestSnapshot().count == 1 }
+    var entered = 0
+    let home = Task {
+      entered += 1
+      await model.refreshHome()
+    }
+    let generic = Task {
+      entered += 1
+      await model.refresh()
+    }
+    try await waitForAccountState { entered == 2 }
+    await service.releaseSuspendedFollowedRequest()
+    await home.value
+    await generic.value
+    XCTAssertEqual(model.forums.map(\.id), [1, 2])
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2])
+  }
+
+  func testHomeRefreshJoinsExistingPaginationWithoutRestartingFirstPage() async throws {
+    let active = session(userID: 7, name: "active")
+    let service = AccountServiceSpy(followedPages: [
+      1: .success(.init(forums: [forum(id: 1, name: "one")], currentPage: 1, hasMore: true)),
+      2: .success(.init(forums: [forum(id: 2, name: "two")], currentPage: 2, hasMore: false)),
+    ])
+    let model = FollowedForumsViewModel(
+      service: service, vault: AccountVaultSpy(sessions: [active], activeUserID: 7))
+    await model.refresh()
+    await service.suspendFollowedRequest(number: 2)
+    addTeardownBlock { await service.releaseSuspendedFollowedRequest() }
+    let fullList = UUID()
+    model.fullListSurfaceDidAppear(id: fullList)
+    defer { model.fullListSurfaceDidDisappear(id: fullList) }
+    model.loadNextPage()
+    try await waitForAccountState { await service.followedRequestSnapshot().count == 2 }
+    var entered = false
+    let refresh = Task {
+      entered = true
+      await model.refreshHome()
+    }
+    try await waitForAccountState { entered }
+    await service.releaseSuspendedFollowedRequest()
+    await refresh.value
+    XCTAssertEqual(model.forums.map(\.id), [1, 2])
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2])
+  }
+
+  func testHomeRefreshAccountChangeClearsRowsAndLateOldResponseCannotOverwriteNewAccount()
+    async throws
+  {
+    let oldSession = session(userID: 7, name: "old")
+    let newSession = session(userID: 8, name: "new")
+    let vault = AccountVaultSpy(sessions: [oldSession, newSession], activeUserID: 7)
+    let service = AccountServiceSpy(followedPages: [
+      1: .success(.init(forums: [forum(id: 1, name: "old")], currentPage: 1, hasMore: false))
+    ])
+    let model = FollowedForumsViewModel(service: service, vault: vault)
+    await model.refreshHome()
+    await service.suspendFollowedRequest(number: 2)
+    addTeardownBlock { await service.releaseSuspendedFollowedRequest() }
+    let oldRefresh = Task { await model.refreshHome() }
+    try await waitForAccountState { await service.followedRequestSnapshot().count == 2 }
+    try await vault.switchActive(to: 8)
+    await service.setFollowedPageResult(
+      .success(.init(forums: [forum(id: 8, name: "new")], currentPage: 1, hasMore: false)),
+      for: 1)
+    model.accountSessionDidChange(loadImmediately: true)
+    XCTAssertTrue(model.forums.isEmpty)
+    XCTAssertNil(model.loadedSessionLease)
+    await model.refreshHome()
+    await service.releaseSuspendedFollowedRequest()
+    await oldRefresh.value
+    XCTAssertEqual(model.forums.map(\.id), [8])
+    XCTAssertEqual(model.loadedSessionLease, AccountSessionLease(newSession))
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests.map(\.userID), [7, 7, 8])
+  }
+
+  func testHomeRefreshRetriesFailedInitialLoadAndCancelledCallerDoesNotStart() async throws {
+    let active = session(userID: 7, name: "active")
+    let service = AccountServiceSpy(followedPages: [1: .failure(.init(message: "offline"))])
+    let model = FollowedForumsViewModel(
+      service: service, vault: AccountVaultSpy(sessions: [active], activeUserID: 7))
+    await model.refreshHome()
+    XCTAssertEqual(model.state, .failed("offline"))
+    await service.setFollowedPageResult(
+      .success(.init(forums: [forum(id: 1, name: "recovered")], currentPage: 1, hasMore: false)),
+      for: 1)
+    await model.refreshHome()
+    XCTAssertEqual(model.state, .loaded)
+    let cancelled = Task {
+      withUnsafeCurrentTask { $0?.cancel() }
+      await model.refreshHome()
+      await model.refresh()
+    }
+    await cancelled.value
+    XCTAssertEqual(model.forums.map(\.id), [1])
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 1])
+  }
+
+  func testFailedHomeRefreshCannotRetainRowsAfterUnnotifiedRevisionChangeOrSignOut()
+    async throws
+  {
+    for signsOut in [false, true] {
+      let active = session(userID: 7, name: "old")
+      let vault = AccountVaultSpy(sessions: [active], activeUserID: 7)
+      let service = AccountServiceSpy(followedPages: [
+        1: .success(.init(forums: [forum(id: 1, name: "old")], currentPage: 1, hasMore: false))
+      ])
+      let model = FollowedForumsViewModel(service: service, vault: vault)
+      await model.refreshHome()
+      await service.setFollowedPageResult(.failure(.init(message: "network failed")), for: 1)
+      await service.suspendFollowedRequest(number: 2)
+      addTeardownBlock { await service.releaseSuspendedFollowedRequest() }
+      let refresh = Task { await model.refreshHome() }
+      try await waitForAccountState { await service.followedRequestSnapshot().count == 2 }
+      if signsOut {
+        await vault.removeAll()
+      } else {
+        await vault.upsert(session(userID: 7, name: "rotated"))
+      }
+      await service.releaseSuspendedFollowedRequest()
+      await refresh.value
+      XCTAssertTrue(model.forums.isEmpty)
+      XCTAssertTrue(model.followedForumPins.isEmpty)
+      XCTAssertNil(model.loadedSessionLease)
+      XCTAssertEqual(model.isSignedOut, signsOut)
+      XCTAssertEqual(model.indexState, signsOut ? .signedOut : .idle)
+      let requests = await service.followedRequestSnapshot()
+      XCTAssertEqual(requests.count, 2, "The old operation must not retry under a new lease.")
+    }
   }
 
   func testFollowedForumsWithoutActiveSessionNeverCallsService() async throws {
@@ -2017,6 +2336,8 @@ private enum FollowedForumPinsMutation: Equatable, Sendable {
 
 private actor SuspendedFollowedForumPinsRepository: FollowedForumPinsRepository {
   private var storedPins: [FollowedForumPin]
+  private let failingReadNumbers: Set<Int>
+  private var readCount = 0
   private var suspendsFirstSet: Bool
   private var suspendsFirstRemove: Bool
   private var mutations: [FollowedForumPinsMutation] = []
@@ -2030,15 +2351,21 @@ private actor SuspendedFollowedForumPinsRepository: FollowedForumPinsRepository 
   init(
     initialPins: [FollowedForumPin] = [],
     suspendsFirstSet: Bool = false,
-    suspendsFirstRemove: Bool = false
+    suspendsFirstRemove: Bool = false,
+    failingReadNumbers: Set<Int> = []
   ) {
     storedPins = initialPins
     self.suspendsFirstSet = suspendsFirstSet
     self.suspendsFirstRemove = suspendsFirstRemove
+    self.failingReadNumbers = failingReadNumbers
   }
 
   func pins(accountID: Int64) async throws -> [FollowedForumPin] {
-    storedPins
+    readCount += 1
+    guard !failingReadNumbers.contains(readCount) else {
+      throw AccountTestFailure(message: "pin read failed")
+    }
+    return storedPins
       .filter { $0.accountID == accountID }
       .sorted {
         if $0.pinnedAt != $1.pinnedAt { return $0.pinnedAt > $1.pinnedAt }
@@ -2121,6 +2448,8 @@ private actor AccountServiceSpy: AccountService {
   private var validatedBDUSSLength: Int?
   private var validatedSTOKENLength: Int?
   private var followedRequests: [FollowedRequest] = []
+  private var suspendedFollowedRequestNumber: Int?
+  private var suspendedFollowedRequest: CheckedContinuation<Void, Never>?
   private var forumMembershipRequestCountValue = 0
   private var forumMembershipMutationCountValue = 0
 
@@ -2152,6 +2481,9 @@ private actor AccountServiceSpy: AccountService {
     followedRequests.append(FollowedRequest(userID: session.id, page: page, pageSize: pageSize))
     guard let result = followedPages[page] else {
       throw AccountTestFailure(message: "unexpected followed-forum page")
+    }
+    if followedRequests.count == suspendedFollowedRequestNumber {
+      await withCheckedContinuation { suspendedFollowedRequest = $0 }
     }
     return try result.get()
   }
@@ -2210,6 +2542,11 @@ private actor AccountServiceSpy: AccountService {
   }
 
   func followedRequestSnapshot() -> [FollowedRequest] { followedRequests }
+  func suspendFollowedRequest(number: Int) { suspendedFollowedRequestNumber = number }
+  func releaseSuspendedFollowedRequest() {
+    suspendedFollowedRequest?.resume()
+    suspendedFollowedRequest = nil
+  }
   func forumMembershipRequestCount() -> Int { forumMembershipRequestCountValue }
   func forumMembershipMutationCount() -> Int { forumMembershipMutationCountValue }
 }
@@ -2378,6 +2715,8 @@ private actor SuspendedActiveSessionReadVault: AccountVault {
       suspendedReadWaiters.append(continuation)
     }
   }
+
+  func hasSuspendedRead() -> Bool { suspendedReadContinuation != nil }
 
   func releaseSuspendedRead() -> Bool {
     guard let continuation = suspendedReadContinuation else { return false }
