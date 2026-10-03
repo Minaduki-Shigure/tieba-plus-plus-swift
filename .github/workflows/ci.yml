@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, ci/home-reselection-refresh-1004]
+    branches: [main, ci/home-reselection-refresh-1004, ci/home-refresh-native-1004]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
