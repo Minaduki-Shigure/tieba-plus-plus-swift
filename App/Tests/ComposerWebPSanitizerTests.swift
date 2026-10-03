@@ -348,6 +348,97 @@ final class ComposerWebPSanitizerTests: XCTestCase {
     }
   }
 
+  func testStandaloneStaticFramesKeepRealCodecAndAlphaChunksWithoutCopyingMetadata() throws {
+    for source in [Fixture.lossy, Fixture.lossless, Fixture.alphaLossless, Fixture.alphaLossy] {
+      let inspection = try sanitize(source)
+      let frame = try inspection.standaloneFrame(at: 0)
+      XCTAssertEqual(frame.data, source)
+      XCTAssertEqual(frame.width, 8)
+      XCTAssertEqual(frame.height, 6)
+      XCTAssertFalse(try sanitize(frame.data).isAnimated)
+      XCTAssertThrowsError(try inspection.standaloneFrame(at: -1))
+      XCTAssertThrowsError(try inspection.standaloneFrame(at: 1))
+    }
+  }
+
+  func testStandaloneAnimationFramesUseTheirOwnRectanglesCodecOrderAndCanonicalProfile() throws {
+    var source = Fixture.chunks(
+      Fixture.withMetadata(Fixture.animated(), orientation: 6, icc: profile(marker: 0x55)))
+    // The canonical profile grows, EXIF moves, and a private frame chunk is removed.
+    // Frame descriptors must refer into the rebuilt output, never the input offsets.
+    let exif = source.remove(at: source.firstIndex { $0.type == "EXIF" }!)
+    source.insert(exif, at: 1)
+    for index in source.indices where source[index].type == "ANMF" {
+      source[index].payload.append(Chunk("PRIV", Data("frame-private".utf8)).encoded)
+    }
+    var canonicalProfile = profile(marker: 0x66) + Data(repeating: 0, count: 128)
+    canonicalProfile[2] = 1
+    canonicalProfile[3] = 0
+    let inspection = try ComposerWebPSanitizer.sanitize(Fixture.container(source)) { _ in
+      canonicalProfile
+    }
+    let sourceFrames = Fixture.chunks(Fixture.animated()).filter { $0.type == "ANMF" }
+    for index in 0..<2 {
+      let frame = try inspection.standaloneFrame(at: index)
+      XCTAssertEqual(frame.width, index == 0 ? 8 : 4)
+      XCTAssertEqual(frame.height, index == 0 ? 6 : 2)
+      let chunks = Fixture.chunks(frame.data)
+      XCTAssertEqual(chunks.map(\.type), ["VP8X", "ICCP", "VP8L"])
+      XCTAssertEqual(chunks[1].payload, canonicalProfile)
+      XCTAssertEqual(chunks[2].encoded, Data(sourceFrames[index].payload.dropFirst(16)))
+      let still = try sanitize(frame.data)
+      XCTAssertEqual(still.width, frame.width)
+      XCTAssertEqual(still.height, frame.height)
+      XCTAssertEqual(still.orientation, 1)
+      XCTAssertFalse(still.isAnimated)
+      XCTAssertEqual(still.frameCount, 1)
+      XCTAssertEqual(still.frameDurationsMilliseconds, [])
+      XCTAssertNil(still.loopCount)
+      XCTAssertEqual(try still.standaloneFrame(at: 0).data, frame.data)
+    }
+    XCTAssertEqual(inspection.orientation, 6)
+    XCTAssertThrowsError(try inspection.standaloneFrame(at: 2))
+  }
+
+  func testStandaloneAnimatedLossyAlphaPreservesAllCodecChunks() throws {
+    let stillChunks = Fixture.chunks(Fixture.alphaLossy)
+    var animation = Fixture.chunks(Fixture.animated(frameCount: 1))
+    animation[0].payload[0] |= 0x10
+    animation[2].payload =
+      Data(animation[2].payload.prefix(16))
+      + stillChunks[1].encoded + stillChunks[2].encoded
+    let inspection = try sanitize(Fixture.container(animation))
+    XCTAssertEqual(try inspection.standaloneFrame(at: 0).data, Fixture.alphaLossy)
+    XCTAssertEqual(inspection.frameDurationsMilliseconds, [70])
+  }
+
+  func testStandaloneBrokenFrameDoesNotReusePreviousValidBitstream() throws {
+    var chunks = Fixture.chunks(Fixture.animated())
+    let previousCodec = Fixture.chunks(Fixture.lossless)[0]
+    let codecHeader = Data(chunks[3].payload.dropFirst(24).prefix(5))
+    let brokenCodec = Chunk("VP8L", codecHeader + Data([0]))
+    chunks[3].payload = Data(chunks[3].payload.prefix(16)) + brokenCodec.encoded
+    let inspection = try sanitize(Fixture.container(chunks))
+    XCTAssertEqual(Fixture.chunks(try inspection.standaloneFrame(at: 0).data), [previousCodec])
+    XCTAssertEqual(Fixture.chunks(try inspection.standaloneFrame(at: 1).data), [brokenCodec])
+    // The container remains valid; native ImageIO tests must reject this isolated
+    // broken codec instead of accepting a canvas the animation compositor reports as complete.
+    XCTAssertEqual(try inspection.standaloneFrame(at: 1).width, 4)
+    XCTAssertEqual(try inspection.standaloneFrame(at: 1).height, 2)
+  }
+
+  func testStandaloneFrameChecksCancellationBeforeBuildingOutput() async throws {
+    let inspection = try sanitize(Fixture.animated())
+    let task = Task.detached {
+      withUnsafeCurrentTask { $0?.cancel() }
+      return try inspection.standaloneFrame(at: 0)
+    }
+    do {
+      _ = try await task.value
+      XCTFail("Expected a cancelled caller to stop before frame construction")
+    } catch is CancellationError {}
+  }
+
   private func sanitize(_ data: Data) throws -> ComposerWebPSanitizer.Inspection {
     try ComposerWebPSanitizer.sanitize(data, canonicalColorProfile: { $0 })
   }

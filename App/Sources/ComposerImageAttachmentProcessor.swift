@@ -493,12 +493,24 @@ struct ComposerImageAttachmentProcessor: Sendable {
       : ComposerImageProcessingPolicy.maximumSourceDecodedByteCount
     for index in 0..<inspection.frameCount {
       try Task.checkCancellation()
-      // ImageIO can composite partial animation frames into a full canvas. Keep
-      // only one decoded frame alive, and remove its decoder cache immediately.
+      beforeValidatedWebPFrameDecode(index)
+      try Task.checkCancellation()
+      if inspection.isAnimated {
+        // An animation decoder can report a composed canvas as complete even
+        // when a frame's bitstream is invalid. Decode the ANMF codec payload as
+        // an independent still image first, without animation composition.
+        // Construct and release only one frame at a time.
+        try autoreleasepool {
+          let frame = try inspection.standaloneFrame(at: index)
+          try Self.validateStandaloneWebPFrame(
+            frame, maximumDecodedBytes: maximumFrameDecodedBytes)
+        }
+      }
+      try Task.checkCancellation()
+      // Also validate the original composed representation, preserving its
+      // canvas, frame rectangles, timing, blending, disposal and color profile.
       try autoreleasepool {
         defer { CGImageSourceRemoveCacheAtIndex(source, index) }
-        beforeValidatedWebPFrameDecode(index)
-        try Task.checkCancellation()
         guard let decoded = CGImageSourceCreateImageAtIndex(
           source, index, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary),
           CGImageSourceGetStatusAtIndex(source, index) == .statusComplete,
@@ -513,6 +525,29 @@ struct ComposerImageAttachmentProcessor: Sendable {
         else { throw ComposerImageProcessingError.decodeFailed }
       }
     }
+    try Task.checkCancellation()
+  }
+
+  private static func validateStandaloneWebPFrame(
+    _ frame: ComposerWebPSanitizer.FrameImage, maximumDecodedBytes: Int
+  ) throws {
+    try Task.checkCancellation()
+    guard let source = CGImageSourceCreateWithData(
+      frame.data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+      CGImageSourceGetType(source) as String? == UTType.webP.identifier,
+      CGImageSourceGetCount(source) == 1,
+      CGImageSourceGetStatus(source) == .statusComplete
+    else { throw ComposerImageProcessingError.decodeFailed }
+    defer { CGImageSourceRemoveCacheAtIndex(source, 0) }
+    guard let decoded = CGImageSourceCreateImageAtIndex(
+      source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary),
+      CGImageSourceGetStatusAtIndex(source, 0) == .statusComplete,
+      decoded.width == frame.width, decoded.height == frame.height,
+      decoded.bitsPerComponent > 0, decoded.bitsPerComponent <= 8,
+      decoded.bytesPerRow > 0, decoded.height > 0,
+      decoded.bytesPerRow <= maximumDecodedBytes / decoded.height,
+      hasSupportedOriginalColorModel(decoded.colorSpace)
+    else { throw ComposerImageProcessingError.decodeFailed }
     try Task.checkCancellation()
   }
 
