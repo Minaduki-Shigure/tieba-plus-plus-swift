@@ -48,6 +48,7 @@ final class WallpaperThemeUITests: XCTestCase {
     let blur = app.sliders["wallpaper-theme-blur"]
     try reveal(blur, app: app)
     blur.adjust(toNormalizedSliderPosition: 0.3)
+    try requireAdjustmentValues(app)
     try waitUntilEnabled(app.buttons["wallpaper-theme-save"])
     attachScreenshot("Unsaved wallpaper preview", app: app)
     try tap(app.buttons["wallpaper-theme-save"], app: app)
@@ -63,6 +64,7 @@ final class WallpaperThemeUITests: XCTestCase {
     let restoredAppearance = app.segmentedControls["wallpaper-theme-appearance"]
     try reveal(restoredAppearance, app: app)
     XCTAssertTrue(restoredAppearance.buttons["深色"].isSelected)
+    try requireAdjustmentValues(app)
     attachScreenshot("Wallpaper restored after relaunch", app: app)
 
     XCUIDevice.shared.orientation = .landscapeLeft
@@ -137,6 +139,17 @@ final class WallpaperThemeUITests: XCTestCase {
   }
 
   @MainActor
+  private func requireAdjustmentValues(_ app: XCUIApplication) throws {
+    // These labels reflect the editor model, so a successful slider gesture
+    // alone cannot pass if the intended value was never applied or restored.
+    for label in ["图片不透明度 100%", "模糊 9"] {
+      try wait(
+        NSPredicate(format: "exists == true AND label == %@", label),
+        element: app.staticTexts[label])
+    }
+  }
+
+  @MainActor
   private func tap(_ element: XCUIElement, app: XCUIApplication) throws {
     try reveal(element, app: app)
     try wait(NSPredicate(format: "hittable == true AND enabled == true"), element: element)
@@ -148,7 +161,11 @@ final class WallpaperThemeUITests: XCTestCase {
     guard element.waitForExistence(timeout: interfaceTimeout) else {
       throw WallpaperUITestError.unavailable("Missing element: \(element.identifier)")
     }
-    if element.isHittable { return }
+    // Sliders can be hittable while their thumb/track is partly under a bar.
+    // Their adjustment gesture needs the entire track inside the viewport;
+    // navigation buttons and potentially oversized content retain normal reveal.
+    let requiresFullVisibility = element.elementType == .slider
+    if !requiresFullVisibility, element.isHittable { return }
     let editorScrollView = app.scrollViews["wallpaper-theme-editor-scroll"]
     let scrollView = editorScrollView.exists
       ? editorScrollView
@@ -179,10 +196,16 @@ final class WallpaperThemeUITests: XCTestCase {
         throw WallpaperUITestError.unavailable(
           "Element has no layout frame: \(element.identifier)")
       }
+      let usable = visible.insetBy(dx: 0, dy: 8)
+      if element.isHittable,
+        !requiresFullVisibility || usable.contains(targetFrame)
+      { return }
       let distance = visible.height * (targetFrame.midY > visible.midY ? -0.5 : 0.5)
       try dragScrollableContent(
         app, scroll: scrollView, tracking: element, visible: visible, distance: distance)
-      if element.isHittable { return }
+      if element.isHittable,
+        !requiresFullVisibility || usable.contains(element.frame)
+      { return }
     }
     throw WallpaperUITestError.unavailable(
       "Element is not visible: \(element.identifier), target: \(element.frame), container: \(scrollView.frame)")

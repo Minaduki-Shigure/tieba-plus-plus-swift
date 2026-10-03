@@ -16,7 +16,7 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
-The next discovery iteration closes TiebaLite `9701bfb6`'s selected-channel and
+Alpha.37 closes TiebaLite `9701bfb6`'s selected-channel and
 selected-Explore-tab refresh workflow (`MainPage` and `ExplorePage` refresh
 events). Reselecting a visible channel refreshes that channel; reselecting the
 bottom Explore tab refreshes its visible root channel. Ordinary tab switches,
@@ -27,24 +27,17 @@ initial load, refresh or pagination request without cancelling it or queueing
 another read; account, persona, filter and category changes still invalidate
 obsolete work. Initial failures can be retried through the same entry points.
 The pager waits for the initial account result before mounting stable channel
-identities, avoiding an interrupted first load as the followed channel appears.
-The root layout reserves the native tab bar's height so the last scroll item is
-reachable above it. Wallpaper cropping reads the attached window's full size
-rather than the content area reduced by navigation chrome or the keyboard.
-The candidate aligns live wallpaper surfaces in the same window coordinate
-space across content and navigation/tab backgrounds; the editor's crop preview
-keeps its local coordinates.
+identities. The root layout reserves the native tab bar's height so final scroll
+items stay reachable. Wallpaper cropping and live backgrounds use the attached
+window's size and shared coordinates across content and navigation/tab surfaces;
+the editor's crop preview keeps its local coordinates.
 
-[Focused CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37136737831)
-passed 83 relevant App tests. The
-[follow-up CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37139324444)
-passed seven focused native regressions, the three actual-tap Explore UI flows
-and the system icon UI flow, but the wallpaper rotation flow did not pass.
-Updated wallpaper tests use slow content drags with a brief end hold to suppress
-inertia, retaining geometry, visible-area, stable-orientation and final-control
-visibility assertions. The shared-window rendering fix and final native release
-validation remain pending for this next iteration. The public alpha.36/build 114
-and weighted parity estimate are unchanged.
+The [candidate CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37141396085)
+passed 14 focused native tests and all five UI flows: icon persistence, three
+actual-tap discovery/navigation/keyboard flows, and wallpaper save/relaunch/reset
+with rotation geometry and final-control visibility checks. Full tagged tests
+remain publication gates, and physical-device behavior requires separate
+validation. Alpha.37/build 115 preserves the 80–82% weighted estimate.
 
 The implementation adds list-level cloud-favorite record cleanup against
 TiebaLite `9701bfb6`'s `rmstore` workflow, including deleted records for which no
@@ -165,7 +158,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-serves `v0.65.0-alpha.36` (build 114) after publication, whose app-code snapshot includes
+serves `v0.65.0-alpha.37` (build 115) after publication, whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -273,7 +266,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.65.0-alpha.36` app-code snapshot is at 80–82%; all experimental
+The public `v0.65.0-alpha.37` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
