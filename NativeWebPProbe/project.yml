@@ -1,0 +1,39 @@
+name: WebPDecodeProbe
+options:
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    CODE_SIGNING_ALLOWED: NO
+    GENERATE_INFOPLIST_FILE: YES
+targets:
+  WebPDecodeProbe:
+    type: application
+    platform: iOS
+    sources:
+      - App.swift
+      - ../App/Sources/ComposerWebPSanitizer.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.minaduki.webp-probe
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+  WebPDecodeProbeTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - ProbeTests.swift
+      - ../App/Tests/ComposerWebPTestFixture.swift
+    dependencies:
+      - target: WebPDecodeProbe
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.minaduki.webp-probe-tests
+schemes:
+  WebPDecodeProbe:
+    build:
+      targets:
+        WebPDecodeProbe: all
+        WebPDecodeProbeTests: [test]
+    test:
+      targets: [WebPDecodeProbeTests]

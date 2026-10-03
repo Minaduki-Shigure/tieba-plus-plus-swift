@@ -1,0 +1,24 @@
+name: WebP native decoder probe
+on:
+  push:
+    branches: [ci/webp-decoder-probe-1004]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+      - run: brew install xcodegen
+      - run: xcodegen generate --spec NativeWebPProbe/project.yml
+      - name: Probe iOS decoder behavior
+        run: |
+          set -o pipefail
+          device_id="$(xcrun simctl list devices available -j | jq -r '[.devices[][] | select(.isAvailable == true and (.name | startswith("iPhone")))][0].udid')"
+          xcodebuild -project NativeWebPProbe/WebPDecodeProbe.xcodeproj -scheme WebPDecodeProbe -destination "platform=iOS Simulator,id=$device_id" CODE_SIGNING_ALLOWED=NO test 2>&1 | tee webp-probe.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: webp-native-probe
+          path: webp-probe.log
