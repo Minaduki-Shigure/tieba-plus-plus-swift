@@ -147,7 +147,7 @@ private struct InlineCommentPreviewRow: View {
   var body: some View {
     HStack(alignment: .center, spacing: 8) {
       Button(action: action) {
-        previewText
+        previewContent
           .font(.subheadline)
           .foregroundStyle(.primary)
           .lineLimit(showsBothNames ? 5 : 4)
@@ -201,7 +201,23 @@ private struct InlineCommentPreviewRow: View {
     }
   }
 
-  private var previewText: Text {
+  @ViewBuilder
+  private var previewContent: some View {
+    let plan = InlineClassicEmoticonPlan([.text(item.bodyText)])
+    if plan.containsImages {
+      InlineClassicEmoticonText(
+        plan: plan,
+        prefix: authorPrefix,
+        accentColor: appAccentColor.color,
+        relativeTo: .subheadline,
+        imageSide: 20
+      )
+    } else {
+      authorPrefix + Text(item.bodyText)
+    }
+  }
+
+  private var authorPrefix: Text {
     var result = Text(displayedAuthorName)
       .foregroundColor(appAccentColor.color)
       .bold()
@@ -210,7 +226,7 @@ private struct InlineCommentPreviewRow: View {
         .foregroundColor(appAccentColor.color)
         .fontWeight(.semibold)
     }
-    return result + Text("：\(item.bodyText)")
+    return result + Text("：")
   }
 
   private var displayedAuthorName: String {

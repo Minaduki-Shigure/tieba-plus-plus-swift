@@ -25,6 +25,17 @@ and its verified metadata enters the public app source.
 
 ### Release and validation
 
+- **Current main — inline classic emoticons:** Post bodies, full nested replies,
+  and inline reply previews display known classic faces inside the text line.
+  Structured faces and exact `#(name)` text markers use the same compiled official
+  image catalog. Mentions and links retain their existing navigation, and tapping
+  a preview still opens the reply rather than an image viewer. Unknown, ambiguous
+  or unavailable artwork keeps its text. Copy/filter/submission models retain
+  their original text tokens. Pure text keeps its native fast path; image batches
+  share the bounded thumbnail cache, respect media/network settings, and update
+  each paragraph once. Automated rendering, cancellation and network-policy tests
+  plus paired offline emoticon-heavy scroll profiles cover this path; results and
+  physical-device performance must be checked before claiming release readiness.
 - **`v0.65.0-alpha.32` alternate app icons:** Settings → 外观与布局 → 应用图标
   offers Classic Blue, Light and Dark variants of this project's own artwork.
   The choice is independent of in-app appearance. A shared coordinator reads

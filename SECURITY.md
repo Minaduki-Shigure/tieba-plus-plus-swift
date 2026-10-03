@@ -673,7 +673,7 @@ protobuf `309731` endpoint for topic, ordinary-floor, and nested-reply targets.
 Current `main` uses client version `12.52.1.0` for this endpoint; this does not
 change the endpoint-specific versions of unrelated account reads or writes.
 The composer accepts ordinary text plus exact `#(name)` tokens from the compiled
-50-name catalog; unknown, malformed, nested, image, `reply`, and every other
+126-name catalog; unknown, malformed, nested, image, `reply`, and every other
 user-supplied rich marker fail closed before a request is built. A visible inline
 nested-reply preview can open the same composer only after the current post
 snapshot rebinds one unique visible comment to its thread and parent IDs. For a
@@ -683,6 +683,20 @@ invalidate the response rather than being interpolated. A positive receipt is
 confirmed by one exact-ID readback whose text bytes and type-2/type-11 emoticon
 tokens match the frozen submission; text that merely resembles an emoticon is
 not equivalent. No dispatched write is automatically retried.
+
+Inline classic-emoticon rendering is a display-only projection of the original
+post/reply data. Only byte-exact names in the compiled catalog can resolve an
+image URL, including when a known marker occurs inside ordinary text. Unknown,
+nested or unfinished markers stay literal; a post-supplied emoticon URL never
+overrides that mapping. The existing classic-emoticon URL/redirect policy,
+credential-free transport, 120-pixel decode bound and media/network restrictions
+also apply here. The batch loader deduplicates each paragraph, runs at most four
+requests at a time, and drops results from cancelled or superseded view tasks.
+Failure leaves text available and never authorizes a broader network retry.
+Text attachments are not written into copy/filter/draft/submission models; the
+write parser remains strict even though unknown display text stays readable.
+Offline performance fixtures use a separate repository compiled only into the
+Profile harness and cannot register server-provided artwork in the real app.
 
 Poll voting requires a complete validated BDUSS/STOKEN session and a separate
 authenticated PB Page read. That response, rather than the anonymous result card,

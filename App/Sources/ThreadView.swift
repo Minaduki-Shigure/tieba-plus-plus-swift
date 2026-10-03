@@ -1720,12 +1720,20 @@ struct ThreadView: View {
           return
         }
         let backwardTargets = Array(forwardTargets.dropLast().reversed())
+        let frameRecorder = ThreadScrollFrameRecorder()
+        frameRecorder.start()
+        defer { _ = frameRecorder.stop() }
         for targetID in forwardTargets + backwardTargets + forwardTargets {
           try Task.checkCancellation()
           withAnimation(.linear(duration: 0.22)) {
             proxy.scrollTo(targetID, anchor: .top)
           }
           try await Task.sleep(for: .milliseconds(260))
+        }
+        let frameMetrics = frameRecorder.stop()
+        guard ThreadScrollPerformanceScenario.writeFrameMetrics(frameMetrics) else {
+          assertionFailure("Could not write thread frame metrics")
+          return
         }
         guard ThreadScrollPerformanceScenario.writeSelfDrivenProfileMarker(phase: "completed") else {
           assertionFailure("Could not mark the performance autoscroll as completed")

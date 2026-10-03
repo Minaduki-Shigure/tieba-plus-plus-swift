@@ -16,6 +16,19 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
+Current `main` adds native inline classic-emoticon images to post bodies, full
+nested replies and their compact inline previews, matching TiebaLite's
+`EmoticonText`/`PbContentRender` reading workflow. It recognizes structured faces
+and exact known text markers without rewriting source content, links or mentions.
+Unknown names, ambiguous artwork and failed/cache-only misses stay readable as
+text; copying, filtering and write visibility proofs retain their original meaning.
+Pure-text rows keep their existing renderer. One Text per paragraph and shared,
+bounded, cancellable image batches avoid a view or animation timer for every face.
+New offline paired profiles must prove actual cached image rendering on both
+long-thread and dense nested-reply fixtures; previous profiles used an unknown
+face and could not validate this path. Device scrolling/VoiceOver remain gates;
+the coarse weighted estimate is unchanged pending validation.
+
 Current `main` adds the application-icon choice available in TiebaLite's
 `CustomSettingsPage`, using three color variants of this project's existing
 artwork. Settings → 外观与布局 → 应用图标 uses UIKit's system-reported current
@@ -35,9 +48,9 @@ arbitrary post content. Only compiled official HTTPS thumbnail URLs are allowed,
 including redirects, and cache-only/economical-network policies still apply.
 Unknown artwork stays a selectable text entry. Structured sending/readback
 checks stay exact, including old/new names whose artwork may overlap. This
-improves the existing creation workflow without adding a weighted point or
-claiming full in-body graphical-emoticon rendering. Account/device validation
-remains outstanding.
+improves the existing creation workflow without adding a weighted point. The
+picker's release did not include the newer inline reading renderer described
+above. Account/device validation remains outstanding.
 
 Current `main` extends original-image creation to GIF in new topics and direct
 topic replies, matching TiebaLite's original-byte upload path. A bounded container

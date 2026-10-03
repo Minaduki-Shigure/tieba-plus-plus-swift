@@ -7,3 +7,11 @@ ordinal	profile_id	comparison	variant	replicate	scenario	experiment
 6	gallery-cover-control-r2	gallery-cover	control	2	nested-comments	control
 7	comments-container-control-r2	comments-container	control	2	mixed-nested-comments	skip-empty-image-gallery-cover
 8	comments-container-candidate-r2	comments-container	candidate	2	mixed-nested-comments	lazy-comments-container
+9	emoticon-comments-control-r1	emoticon-comments	control	1	emoticon-nested-comments	emoticon-text-baseline
+10	emoticon-comments-candidate-r1	emoticon-comments	candidate	1	emoticon-nested-comments	emoticon-images
+11	emoticon-thread-candidate-r1	emoticon-thread	candidate	1	emoticon-long-text	emoticon-images
+12	emoticon-thread-control-r1	emoticon-thread	control	1	emoticon-long-text	emoticon-text-baseline
+13	emoticon-comments-candidate-r2	emoticon-comments	candidate	2	emoticon-nested-comments	emoticon-images
+14	emoticon-comments-control-r2	emoticon-comments	control	2	emoticon-nested-comments	emoticon-text-baseline
+15	emoticon-thread-control-r2	emoticon-thread	control	2	emoticon-long-text	emoticon-text-baseline
+16	emoticon-thread-candidate-r2	emoticon-thread	candidate	2	emoticon-long-text	emoticon-images

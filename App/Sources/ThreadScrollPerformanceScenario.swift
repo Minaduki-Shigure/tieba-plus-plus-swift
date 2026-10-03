@@ -2,6 +2,8 @@
   import Foundation
   import QuartzCore
   import SwiftUI
+  import TiebaCore
+  import UIKit
 
   struct ThreadScrollFrameMetrics: Codable, Equatable, Sendable {
     let frameCount: Int
@@ -71,6 +73,8 @@
     case omitLongTextFixedSize = "omit-long-text-fixed-size"
     case skipEmptyImageGalleryCover = "skip-empty-image-gallery-cover"
     case lazyCommentsContainer = "lazy-comments-container"
+    case emoticonTextBaseline = "emoticon-text-baseline"
+    case emoticonImages = "emoticon-images"
 
     static let requested: Self = {
       guard
@@ -90,6 +94,8 @@
     case manyFloors = "many-floors"
     case nestedComments = "nested-comments"
     case mixedNestedComments = "mixed-nested-comments"
+    case emoticonNestedComments = "emoticon-nested-comments"
+    case emoticonLongText = "emoticon-long-text"
 
     static let requested: Self? = {
       guard
@@ -118,16 +124,85 @@
 
     static var installsLegacyEmptyImageGalleryCovers: Bool {
       guard requested?.isCommentsScenario == true else { return false }
+      guard requested?.usesInlineEmoticonFixture != true else { return false }
       return ThreadScrollPerformanceExperiment.requested == .control
     }
 
     static var usesLegacyCommentsList: Bool {
       guard requested?.isCommentsScenario == true else { return false }
+      guard requested?.usesInlineEmoticonFixture != true else { return false }
       return ThreadScrollPerformanceExperiment.requested != .lazyCommentsContainer
     }
 
     var isCommentsScenario: Bool {
-      self == .nestedComments || self == .mixedNestedComments
+      self == .nestedComments || self == .mixedNestedComments || self == .emoticonNestedComments
+    }
+
+    var usesInlineEmoticonFixture: Bool {
+      self == .emoticonNestedComments || self == .emoticonLongText
+    }
+
+    static var rendersInlineEmoticonImages: Bool {
+      ThreadScrollPerformanceExperiment.requested != .emoticonTextBaseline
+    }
+
+    // This repository, its generated artwork and its transport exist only in Profile.
+    // Never seed user caches, load an account or use a live image endpoint here.
+    static let inlineEmoticonImageRepository = DownsampledImageRepository(
+      downloader: ThreadScrollEmoticonFixtureDownloader()
+    )
+
+    @MainActor private static var seededEmoticonCount = 0
+    @MainActor private static var verifiedEmoticonCacheHitCount = 0
+    @MainActor private static var renderedEmoticonCount = 0
+
+    @MainActor
+    static func recordInlineEmoticonRendering(imageCount: Int) {
+      guard requested?.usesInlineEmoticonFixture == true else { return }
+      renderedEmoticonCount += max(imageCount, 0)
+    }
+
+    @MainActor
+    static func prepareInlineEmoticonFixture() async throws {
+      seededEmoticonCount = 0
+      verifiedEmoticonCacheHitCount = 0
+      renderedEmoticonCount = 0
+      await inlineEmoticonImageRepository.clearMemoryCache()
+      for url in ThreadScrollEmoticonFixture.urls {
+        let decoded = try await inlineEmoticonImageRepository.image(
+          at: url, maxPixelSize: 120, fetchPolicy: .allowNetwork(.preview),
+          urlPolicy: .classicEmoticon, onProgress: nil
+        )
+        guard decoded.image.cgImage?.width == 64, decoded.image.cgImage?.height == 64 else {
+          throw ThreadScrollPerformanceError.unexpectedRequest("emoticon-fixture-decode")
+        }
+        seededEmoticonCount += 1
+        _ = try await inlineEmoticonImageRepository.image(
+          at: url, maxPixelSize: 120, fetchPolicy: .cacheOnly(.preview),
+          urlPolicy: .classicEmoticon, onProgress: nil
+        )
+        verifiedEmoticonCacheHitCount += 1
+      }
+    }
+
+    @MainActor
+    private static func writeInlineEmoticonFixtureProof() throws {
+      guard let scenario = requested, scenario.usesInlineEmoticonFixture,
+        let url = profileMarkerURL(phase: "emoticons.json")
+      else { return }
+      let proof: [String: Any] = [
+        "scenario": scenario.rawValue,
+        "experiment": ThreadScrollPerformanceExperiment.requested.rawValue,
+        "fixtureNames": ThreadScrollEmoticonFixture.names,
+        "seededImageCount": seededEmoticonCount,
+        "verifiedCacheHitCount": verifiedEmoticonCacheHitCount,
+        "rendersImages": rendersInlineEmoticonImages,
+        "renderedImageCount": renderedEmoticonCount,
+        "offlineFixture": true,
+        "maximumPixelSize": 120,
+      ]
+      try JSONSerialization.data(withJSONObject: proof, options: [.sortedKeys])
+        .write(to: url, options: .atomic)
     }
 
     static var isSelfDrivenProfileRequested: Bool {
@@ -166,6 +241,7 @@
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(metrics).write(to: metricsURL, options: .atomic)
+        try writeInlineEmoticonFixtureProof()
         return true
       } catch {
         return false
@@ -225,8 +301,33 @@
   @MainActor
   struct ThreadScrollPerformanceRootView: View {
     let scenario: ThreadScrollPerformanceScenario
+    @State private var preparedEmoticons = false
+    @State private var preparationFailed = false
 
     var body: some View {
+      Group {
+        if !scenario.usesInlineEmoticonFixture || preparedEmoticons {
+          fixtureContent
+        } else if preparationFailed {
+          Text("PERF-FAILED: offline emoticon fixture")
+        } else {
+          ProgressView()
+        }
+      }
+      .environment(\.contentMediaLoadPolicy, .tapToLoad)
+      .environment(\.contentMediaLoadBehavior, .userInitiated)
+      .task {
+        guard scenario.usesInlineEmoticonFixture, !preparedEmoticons else { return }
+        do {
+          try await ThreadScrollPerformanceScenario.prepareInlineEmoticonFixture()
+          preparedEmoticons = true
+        } catch {
+          preparationFailed = true
+        }
+      }
+    }
+
+    private var fixtureContent: some View {
       NavigationStack {
         if scenario.isCommentsScenario {
           CommentsView(
@@ -247,6 +348,80 @@
             searchHistoryRepository: ThreadScrollPerformanceSearchHistoryRepository()
           )
         }
+      }
+    }
+  }
+
+  private enum ThreadScrollEmoticonFixture {
+    static let names = ["滑稽", "泪", "笑眼", "吃瓜", "捂嘴笑", "菜狗"]
+    static let urls: [URL] = names.map { name in
+      guard let url = TiebaClassicEmoticonCatalog.entries.first(where: { $0.name == name })?.thumbnailURL,
+        TiebaClassicEmoticonCatalog.allowsThumbnailURL(url)
+      else { preconditionFailure("Performance fixture requires a compiled emoticon image: \(name)") }
+      return url
+    }
+
+    static func contents(index: Int, paragraphCount: Int) -> [BrowseContent] {
+      var result: [BrowseContent] = []
+      for paragraph in 0..<paragraphCount {
+        if paragraph > 0 { result.append(.text("\n")) }
+        result.append(.text("固定第 \(index) 条，第 \(paragraph + 1) 段。表情和中文段落连续换行，图形应跟随正文的字号并保持基线对齐。"))
+        for offset in names.indices {
+          let name = names[(index + paragraph + offset) % names.count]
+          if offset.isMultiple(of: 2) {
+            result.append(.emoticon(name: name, url: nil))
+          } else {
+            result.append(.text("#(\(name))"))
+          }
+          result.append(.text("这是相同的固定文本，比较两种渲染路径。"))
+        }
+      }
+      return result
+    }
+
+    @MainActor
+    static func pngData(index: Int) -> Data {
+      // Independent, deterministic test artwork, not a network download or production asset.
+      let format = UIGraphicsImageRendererFormat()
+      format.scale = 1
+      format.opaque = false
+      return UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64), format: format).pngData { _ in
+        UIColor(hue: CGFloat(index) / CGFloat(names.count), saturation: 0.65, brightness: 0.95, alpha: 1).setFill()
+        UIBezierPath(ovalIn: CGRect(x: 2, y: 2, width: 60, height: 60)).fill()
+        UIColor.black.setFill()
+        UIBezierPath(ovalIn: CGRect(x: 17, y: 20, width: 7, height: 9)).fill()
+        UIBezierPath(ovalIn: CGRect(x: 40, y: 20, width: 7, height: 9)).fill()
+        UIColor.black.setStroke()
+        let mouth = UIBezierPath()
+        mouth.move(to: CGPoint(x: 18, y: 39))
+        mouth.addQuadCurve(to: CGPoint(x: 46, y: 39), controlPoint: CGPoint(x: 32, y: CGFloat(58 - index)))
+        mouth.lineWidth = 3
+        mouth.stroke()
+      }
+    }
+  }
+
+  private struct ThreadScrollEmoticonFixtureDownloader: RemoteImageDownloading {
+    func download(
+      from url: URL, kind: RemoteImageDownloadKind, networkAccess: RemoteImageNetworkAccess
+    ) async throws -> RemoteImageFileLease {
+      guard kind == .preview, let index = ThreadScrollEmoticonFixture.urls.firstIndex(of: url) else {
+        throw ThreadScrollPerformanceError.unexpectedRequest("nonfixture-image")
+      }
+      let data = await ThreadScrollEmoticonFixture.pngData(index: index)
+      let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("tieba-profile-emoticon-\(UUID().uuidString)", isDirectory: true)
+      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+      do {
+        let file = directory.appendingPathComponent("fixture.png")
+        try data.write(to: file, options: .atomic)
+        return RemoteImageFileLease(
+          fileURL: file, cleanupDirectoryURL: directory, sourceURL: url,
+          mimeType: "image/png", suggestedFilename: nil, byteCount: Int64(data.count)
+        )
+      } catch {
+        try? FileManager.default.removeItem(at: directory)
+        throw error
       }
     }
   }
@@ -397,12 +572,17 @@
       case .longPlainText:
         contents = [.text(text(floor: floor, targetLength: 900, paragraphCount: 6))]
         inlineComments = []
+      case .emoticonLongText:
+        contents = ThreadScrollEmoticonFixture.contents(index: floor, paragraphCount: 6)
+        inlineComments = (1...4).map { reply in
+          comment(postID: postID, floor: floor, reply: reply, includesEmoticons: true)
+        }
       case .inlineReplies:
         contents = [.text(text(floor: floor, targetLength: 120, paragraphCount: 1))]
         inlineComments = (1...4).map { reply in
           comment(postID: postID, floor: floor, reply: reply)
         }
-      case .nestedComments, .mixedNestedComments:
+      case .nestedComments, .mixedNestedComments, .emoticonNestedComments:
         contents = [.text(text(floor: floor, targetLength: 120, paragraphCount: 1))]
         inlineComments = []
       }
@@ -424,14 +604,18 @@
       )
     }
 
-    private static func comment(postID: Int64, floor: Int, reply: Int) -> BrowseComment {
+    private static func comment(
+      postID: Int64, floor: Int, reply: Int, includesEmoticons: Bool = false
+    ) -> BrowseComment {
       BrowseComment(
         id: postID * 100 + Int64(reply),
         authorID: 20_000 + Int64(floor * 100 + reply),
         authorName: "回复用户 \(reply)",
         authorPortraitURL: nil,
         createdAt: nil,
-        contents: [.text(text(floor: floor + reply, targetLength: 80, paragraphCount: 1))],
+        contents: includesEmoticons
+          ? ThreadScrollEmoticonFixture.contents(index: floor + reply, paragraphCount: 1)
+          : [.text(text(floor: floor + reply, targetLength: 80, paragraphCount: 1))],
         authorLevel: reply + 1,
         agreeScore: reply,
         threadID: threadID,
@@ -513,7 +697,9 @@
         authorName: "楼中楼测试用户 \(index) 的较长昵称",
         authorPortraitURL: nil,
         createdAt: Date(timeIntervalSince1970: 1_700_000_000 + TimeInterval(index)),
-        contents: detailCommentContents(index: index),
+        contents: scenario == .emoticonNestedComments
+          ? ThreadScrollEmoticonFixture.contents(index: index, paragraphCount: index.isMultiple(of: 7) ? 4 : 1)
+          : detailCommentContents(index: index),
         authorLevel: (index % 18) + 1,
         authorIPLocation: "测试环境",
         agreeScore: index % 97,

@@ -97,7 +97,7 @@ report = ["# Thread scroll performance profile", ""]
 report << "## Scenarios"
 report << ""
 if profile_plan
-  report << "This run performs two isolated Profile-only A/B comparisons. Each side is recorded " \
+  report << "This run performs #{profile_plan.map { |row| row.fetch('comparison') }.uniq.length} isolated Profile-only A/B comparisons. Each side is recorded " \
             "twice, and the order is reversed for the second replicate."
   report << ""
   report << "CommentsView loads, lays out, and prepositions before recording begins. Each A/B " \
@@ -106,6 +106,10 @@ if profile_plan
   report << ""
   report << "- `gallery-cover`: 240 production-like replies; the candidate avoids installing an image gallery cover on rows without images."
   report << "- `comments-container`: 600 production-like visible, placeholder, and hidden replies; both sides use the gallery guard, while the candidate replaces List with ScrollView plus LazyVStack."
+  report << "- `emoticon-comments`: 240 replies with six fixed-catalog emoticons per paragraph, including longer replies; both sides use the current lazy container and gallery guard."
+  report << "- `emoticon-thread`: 30 long-body floors with six emoticon-rich paragraphs and four retained inline replies each; the production UI previews three replies."
+  report << "- Both emoticon comparisons use identical structured fragments and literal tokens. Only the candidate renders image fragments; the control keeps the original text projection. Text and image widths can differ, so the paired scroll targets match but total pixel distance need not."
+  report << "- Six deterministic, generated 64 px PNG faces are decoded through the production image repository before either emoticon variant opens. Rendering is cache-only with an offline fixture transport; the recording fails unless all six cache hits are verified and the candidate actually renders images (the baseline must render none). This is a warm-cache scrolling comparison, not a live CDN or cold-download benchmark."
   report << ""
   report << "| Order | Profile | Comparison | Variant | Replicate | Scenario | Experiment |"
   report << "| ---: | --- | --- | --- | ---: | --- | --- |"
@@ -215,24 +219,17 @@ if profile_plan
             "descriptive only and is not a statistical significance claim."
   report << ""
 
-  comparison_metrics = {
-    "gallery-cover" => [
-      ["Main-thread running", ->(analysis) { analysis.dig("totals", "main weight ms").to_f }],
-      ["SwiftUI layout/view graph", ->(analysis) { category_weight(analysis, "SwiftUI layout and view graph") }],
-      ["Text shaping/measurement", ->(analysis) { category_weight(analysis, "Text shaping and measurement") }],
-      ["Core Animation/drawing", ->(analysis) { category_weight(analysis, "Core Animation and drawing") }],
-      ["App implementation frames", ->(analysis) { category_weight(analysis, "App implementation frames") }],
-      ["Scaled-text layout", ->(analysis) { category_weight(analysis, "Scaled-text layout") }],
-    ],
-    "comments-container" => [
-      ["Main-thread running", ->(analysis) { analysis.dig("totals", "main weight ms").to_f }],
-      ["SwiftUI layout/view graph", ->(analysis) { category_weight(analysis, "SwiftUI layout and view graph") }],
-      ["Text shaping/measurement", ->(analysis) { category_weight(analysis, "Text shaping and measurement") }],
-      ["Core Animation/drawing", ->(analysis) { category_weight(analysis, "Core Animation and drawing") }],
-      ["App implementation frames", ->(analysis) { category_weight(analysis, "App implementation frames") }],
-      ["Scaled-text layout", ->(analysis) { category_weight(analysis, "Scaled-text layout") }],
-    ],
-  }
+  shared_metrics = [
+    ["Main-thread running", ->(analysis) { analysis.dig("totals", "main weight ms").to_f }],
+    ["SwiftUI layout/view graph", ->(analysis) { category_weight(analysis, "SwiftUI layout and view graph") }],
+    ["Text shaping/measurement", ->(analysis) { category_weight(analysis, "Text shaping and measurement") }],
+    ["Core Animation/drawing", ->(analysis) { category_weight(analysis, "Core Animation and drawing") }],
+    ["App implementation frames", ->(analysis) { category_weight(analysis, "App implementation frames") }],
+    ["Scaled-text layout", ->(analysis) { category_weight(analysis, "Scaled-text layout") }],
+  ]
+  comparison_metrics = profile_plan.map { |row| row.fetch("comparison") }.uniq.to_h do |comparison|
+    [comparison, shared_metrics]
+  end
 
   comparison_metrics.each do |comparison, metrics|
     report << "### `#{comparison}`"

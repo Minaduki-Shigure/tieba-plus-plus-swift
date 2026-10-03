@@ -10,10 +10,10 @@ plan_path, results_path = ARGV
 plan = CSV.read(plan_path, headers: true, col_sep: "\t")
 expected_headers = %w[ordinal profile_id comparison variant replicate scenario experiment]
 abort "Unexpected profile plan headers" unless plan.headers == expected_headers
-abort "Profile plan must contain exactly 8 rows" unless plan.length == 8
+abort "Profile plan must contain exactly 16 rows" unless plan.length == 16
 
 ordinals = plan.map { |row| Integer(row.fetch("ordinal"), 10) }
-abort "Profile plan ordinals must be 1 through 8" unless ordinals == (1..8).to_a
+abort "Profile plan ordinals must be 1 through 16" unless ordinals == (1..16).to_a
 
 profile_ids = plan.map { |row| row.fetch("profile_id") }
 abort "Profile IDs must be unique" unless profile_ids.uniq.length == profile_ids.length
@@ -24,6 +24,10 @@ expected_experiments = {
   ["gallery-cover", "candidate"] => ["nested-comments", "skip-empty-image-gallery-cover"],
   ["comments-container", "control"] => ["mixed-nested-comments", "skip-empty-image-gallery-cover"],
   ["comments-container", "candidate"] => ["mixed-nested-comments", "lazy-comments-container"],
+  ["emoticon-comments", "control"] => ["emoticon-nested-comments", "emoticon-text-baseline"],
+  ["emoticon-comments", "candidate"] => ["emoticon-nested-comments", "emoticon-images"],
+  ["emoticon-thread", "control"] => ["emoticon-long-text", "emoticon-text-baseline"],
+  ["emoticon-thread", "candidate"] => ["emoticon-long-text", "emoticon-images"],
 }
 
 expected_experiments.each do |(comparison, variant), (scenario, experiment)|
@@ -39,7 +43,7 @@ expected_experiments.each do |(comparison, variant), (scenario, experiment)|
     end
 end
 
-%w[gallery-cover comments-container].each do |comparison|
+%w[gallery-cover comments-container emoticon-comments emoticon-thread].each do |comparison|
   comparison_rows = plan.select { |row| row.fetch("comparison") == comparison }
   control_ordinals = comparison_rows.filter_map do |row|
     Integer(row.fetch("ordinal"), 10) if row.fetch("variant") == "control"

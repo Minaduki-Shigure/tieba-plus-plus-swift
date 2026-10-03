@@ -12,6 +12,8 @@ on:
       - App/Sources/CommentsViewModel.swift
       - App/Sources/ContentAgreementStore.swift
       - App/Sources/InlineCommentPreview.swift
+      - App/Sources/InlineClassicEmoticonText.swift
+      - App/Sources/InlineEmoticonImageLoader.swift
       - App/Sources/PostMetadataView.swift
       - App/Sources/ReplyModels.swift
       - App/Sources/ThreadScrollPerformanceScenario.swift
@@ -22,6 +24,8 @@ on:
       - Scripts/summarize_thread_scroll_profile.rb
       - Scripts/thread_scroll_profile_plan.tsv
       - Scripts/validate_thread_scroll_profile_plan.rb
+      - Scripts/validate_thread_scroll_emoticon_fixture.rb
+      - Scripts/test_thread_scroll_emoticon_fixture.rb
       - project.yml
 
 permissions:
@@ -44,6 +48,9 @@ jobs:
       BUNDLE_ID: io.github.minaduki.tieba-plus-plus
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Validate offline emoticon profile contracts
+        run: ruby Scripts/test_thread_scroll_emoticon_fixture.rb
 
       - name: Install XcodeGen
         run: |
@@ -136,7 +143,9 @@ jobs:
         id: time_profiler
         if: ${{ steps.build_profile.outcome == 'success' }}
         continue-on-error: true
-        timeout-minutes: 20
+        # Sixteen 24-second recordings, paired in both orders, plus bounded
+        # attach/export retries on a shared macOS runner.
+        timeout-minutes: 25
         run: |
           set -euo pipefail
           app_path="$(find "$DERIVED_DATA/Build/Products/Profile-iphonesimulator" \

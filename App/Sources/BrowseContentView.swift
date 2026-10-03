@@ -102,7 +102,18 @@ struct BrowseContentView: View {
 
   @ViewBuilder
   private func inlineContent(_ contents: [BrowseContent]) -> some View {
-    if let plainText = Self.plainInlineText(contents) {
+    let emoticonPlan = InlineClassicEmoticonPlan(contents)
+    if emoticonPlan.containsImages {
+      InlineClassicEmoticonText(
+        plan: emoticonPlan,
+        linksUserMentions: onUserMention != nil || onTiebaLink != nil,
+        accentColor: appAccentColor.color
+      )
+      .modifier(InlineEmoticonCopyModifier(
+        isEnabled: allowsDirectTextSelection, contents: contents
+      ))
+      .environment(\.openURL, contentOpenURLAction)
+    } else if let plainText = Self.plainInlineText(contents) {
       Text(plainText)
         .modifier(DirectTextSelectionModifier(isEnabled: allowsDirectTextSelection))
         #if PERFORMANCE_HARNESS

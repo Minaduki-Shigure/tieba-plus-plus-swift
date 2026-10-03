@@ -46,6 +46,7 @@ record_profile() {
   local samples_path="$artifact_dir/time-profiler-$profile_id-samples.xml"
   local recorder_log="$artifact_dir/xctrace-$profile_id.log"
   local frame_metrics_path="$artifact_dir/frame-metrics-$profile_id.json"
+  local emoticon_proof_path="$artifact_dir/emoticon-fixture-$profile_id.json"
   local launch_output
   local app_pid
   local recorder_ready=0
@@ -60,13 +61,15 @@ record_profile() {
   rm -f \
     "$samples_path" \
     "$recorder_log" \
-    "$frame_metrics_path"
+    "$frame_metrics_path" \
+    "$emoticon_proof_path"
   rm -f \
     "$marker_prefix-ready" \
     "$marker_prefix-go" \
     "$marker_prefix-started" \
     "$marker_prefix-completed" \
-    "$marker_prefix-frames.json"
+    "$marker_prefix-frames.json" \
+    "$marker_prefix-emoticons.json"
   xcrun simctl terminate "$simulator_id" "$bundle_id" 2>/dev/null || true
 
   if ! launch_output="$({
@@ -152,6 +155,18 @@ record_profile() {
     return 1
   fi
   cp "$marker_prefix-frames.json" "$frame_metrics_path"
+  if [[ "$scenario" == "emoticon-nested-comments" || "$scenario" == "emoticon-long-text" ]]; then
+    if [[ ! -s "$marker_prefix-emoticons.json" ]]; then
+      echo "$profile_id: emoticon rendering proof was not written" >> "$log_path"
+      return 1
+    fi
+    cp "$marker_prefix-emoticons.json" "$emoticon_proof_path"
+    if ! ruby "$script_dir/validate_thread_scroll_emoticon_fixture.rb" \
+      "$emoticon_proof_path" "$scenario" "$experiment" >> "$log_path" 2>&1; then
+      echo "$profile_id: candidate or baseline did not exercise the required image path" >> "$log_path"
+      return 1
+    fi
+  fi
 
   if ! xcrun xctrace export \
     --input "$trace_path" \
