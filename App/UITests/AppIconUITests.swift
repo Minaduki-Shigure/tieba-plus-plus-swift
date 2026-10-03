@@ -1,6 +1,10 @@
 import XCTest
 
 final class AppIconUITests: XCTestCase {
+  // A cold CI simulator can spend several seconds on a single AX snapshot.
+  // Leave time for all readiness properties to resolve without skipping them.
+  private let interfaceTimeout: TimeInterval = 30
+
   @MainActor
   func testAlternateIconsRoundTripAndPersistAcrossLaunches() throws {
     let app = XCUIApplication()
@@ -46,8 +50,7 @@ final class AppIconUITests: XCTestCase {
 
   @MainActor
   private func openIconSettings(in app: XCUIApplication) throws {
-    let settings = app.descendants(matching: .any)
-      .matching(identifier: "home-settings-entry").firstMatch
+    let settings = app.buttons["home-settings-entry"].firstMatch
     try tap(settings, description: "Home settings button")
     let appearance = app.descendants(matching: .any)
       .matching(identifier: "settings-category-appearance-and-layout").firstMatch
@@ -56,7 +59,7 @@ final class AppIconUITests: XCTestCase {
       .matching(identifier: "settings-app-icon").firstMatch
     try tap(icons, description: "App icon settings")
     try require(
-      option("classic", in: app).waitForExistence(timeout: 10),
+      option("classic", in: app).waitForExistence(timeout: interfaceTimeout),
       "The app icon settings page did not appear."
     )
   }
@@ -151,7 +154,7 @@ final class AppIconUITests: XCTestCase {
     description: String
   ) throws {
     let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
-    let result = XCTWaiter.wait(for: [expectation], timeout: 10)
+    let result = XCTWaiter.wait(for: [expectation], timeout: interfaceTimeout)
     if result != .completed {
       let exists = element.exists
       throw IconUITestFailure(
