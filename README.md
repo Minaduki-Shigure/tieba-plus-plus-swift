@@ -33,8 +33,10 @@ and its verified metadata enters the public app source.
   retained. Animated WebP requires original mode rather than silently becoming
   a still picture. The format has the same ordered drafts, upload receipts and
   recovery behavior as existing attachments. Container limits are checked before
-  decoding, and every original frame is decoded again when stored bytes are
-  validated. Original uploads are capped at 10 MiB; animations additionally have
+  decoding. Each animation frame is also decoded independently, because a
+  successful composed-image decode can conceal a damaged frame. These checks
+  run again when stored bytes are validated. Original uploads are capped at
+  10 MiB; animations additionally have
   canvas, frame-count, cumulative-pixel and duration bounds. Native ImageIO,
   mixed-format persistence and offline upload tests are required before release;
   real-account acceptance and server-side animation retention still need device

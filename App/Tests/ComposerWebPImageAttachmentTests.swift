@@ -216,6 +216,113 @@ final class ComposerWebPImageAttachmentTests: XCTestCase {
     }
   }
 
+  func testBrokenMiddleFrameCannotBeHiddenByHealthySurroundingFrames() throws {
+    var chunks = Fixture.chunks(Fixture.animated(frameCount: 3))
+    let frameIndices = chunks.indices.filter { chunks[$0].type == "ANMF" }
+    XCTAssertEqual(frameIndices.count, 3)
+    let index = frameIndices[1]
+    let frameHeader = Data(chunks[index].payload.prefix(16))
+    let codecHeader = Data(chunks[index].payload.dropFirst(24).prefix(5))
+    // This is the same truncated codec used by the original failing last-frame
+    // regression. A later healthy frame must not mask the intervening damage.
+    chunks[index].payload = frameHeader + Fixture.Chunk("VP8L", codecHeader + Data([0])).encoded
+    let broken = Fixture.container(chunks)
+    let inspection = try ComposerWebPSanitizer.sanitize(broken) { $0 }
+    XCTAssertEqual(inspection.frameCount, 3)
+    let counter = WebPDecodeCounter()
+    let processor = ComposerImageAttachmentProcessor(beforeValidatedWebPFrameDecode: counter.record)
+    XCTAssertThrowsError(try processor.process(data: broken, quality: .original)) {
+      XCTAssertEqual($0 as? ComposerImageProcessingError, .decodeFailed)
+    }
+    XCTAssertFalse(counter.indices.contains(2), "Stop before validating later frames after damage")
+    XCTAssertThrowsError(try processor.validateStoredData(broken, matching: attachment(
+      data: broken, width: 8, height: 6, encoding: .webp))) {
+      XCTAssertEqual($0 as? ComposerImageProcessingError, .decodeFailed)
+    }
+  }
+
+  func testBrokenStandaloneBitstreamFailsOriginalImportAndStoredValidation() throws {
+    let original = try XCTUnwrap(Fixture.chunks(Fixture.lossless).first)
+    let broken = Fixture.container([
+      Fixture.Chunk("VP8L", Data(original.payload.prefix(5)) + Data([0]))
+    ])
+    let inspection = try ComposerWebPSanitizer.sanitize(broken) { $0 }
+    XCTAssertFalse(inspection.isAnimated)
+    XCTAssertEqual(inspection.frameCount, 1)
+    let processor = ComposerImageAttachmentProcessor()
+    XCTAssertThrowsError(try processor.process(data: broken, quality: .original)) {
+      XCTAssertEqual($0 as? ComposerImageProcessingError, .decodeFailed)
+    }
+    XCTAssertThrowsError(try processor.validateStoredData(broken, matching: attachment(
+      data: broken, width: 8, height: 6, encoding: .webp))) {
+      XCTAssertEqual($0 as? ComposerImageProcessingError, .decodeFailed)
+    }
+  }
+
+  func testCorruptCompressedAlphaFailsStaticAndAnimatedImportAndStoredValidation() throws {
+    var imageChunks = Fixture.chunks(Fixture.alphaLossy)
+    let alphaIndex = try XCTUnwrap(imageChunks.firstIndex { $0.type == "ALPH" })
+    // Compressed-alpha method 1 with a truncated lossless stream: libwebp's
+    // header inspection accepts it, but its actual RGBA decode fails. Keep the
+    // healthy VP8 color bitstream, so silently discarding alpha cannot pass.
+    imageChunks[alphaIndex].payload = Data([1, 0])
+    let brokenStatic = Fixture.container(imageChunks)
+
+    var animation = Fixture.chunks(Fixture.animated())
+    animation[0].payload[0] |= 0x10
+    let frameIndex = try XCTUnwrap(animation.lastIndex { $0.type == "ANMF" })
+    var frame = Data([0, 0, 0, 0, 0, 0, 7, 0, 0, 5, 0, 0, 130, 0, 0, 0])
+    for chunk in imageChunks where chunk.type != "VP8X" { frame.append(chunk.encoded) }
+    animation[frameIndex].payload = frame
+    let brokenAnimation = Fixture.container(animation)
+
+    let processor = ComposerImageAttachmentProcessor()
+    for (data, frameCount) in [(brokenStatic, 1), (brokenAnimation, 2)] {
+      let inspected = try ComposerWebPSanitizer.sanitize(data) { $0 }
+      XCTAssertEqual(inspected.frameCount, frameCount)
+      XCTAssertThrowsError(try processor.process(data: data, quality: .original)) {
+        XCTAssertEqual($0 as? ComposerImageProcessingError, .decodeFailed)
+      }
+      XCTAssertThrowsError(try processor.validateStoredData(data, matching: attachment(
+        data: data, width: 8, height: 6, encoding: .webp))) {
+        XCTAssertEqual($0 as? ComposerImageProcessingError, .decodeFailed)
+      }
+    }
+  }
+
+  func testIndependentAnimationFrameValidationPreservesAlphaAndColorProfile() throws {
+    let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.displayP3))
+    let profile = try XCTUnwrap(space.copyICCData()) as Data
+    for alpha in [Fixture.alphaLossy, Fixture.alphaLossless] {
+      var chunks = Fixture.chunks(Fixture.animated())
+      chunks[0].payload[0] |= 0x10
+      let frameIndex = try XCTUnwrap(chunks.lastIndex { $0.type == "ANMF" })
+      // A full 8x6 transparent second frame blends with the red first frame.
+      var frame = Data([0, 0, 0, 0, 0, 0, 7, 0, 0, 5, 0, 0, 130, 0, 0, 0])
+      for chunk in Fixture.chunks(alpha) where chunk.type != "VP8X" {
+        frame.append(chunk.encoded)
+      }
+      chunks[frameIndex].payload = frame
+      let input = Fixture.withMetadata(Fixture.container(chunks), orientation: 1, icc: profile)
+      let counter = WebPDecodeCounter()
+      let processor = ComposerImageAttachmentProcessor(beforeValidatedWebPFrameDecode: counter.record)
+      let result = try processor.process(data: input, quality: .original)
+      XCTAssertEqual(displayChunks(result.data), displayChunks(input))
+      XCTAssertEqual(counter.indices, [0, 1])
+      let inspection = try ComposerWebPSanitizer.sanitize(result.data) { $0 }
+      let standalone = try inspection.standaloneFrame(at: 1)
+      XCTAssertEqual(standalone.width, 8)
+      XCTAssertEqual(standalone.height, 6)
+      let independentPixels = try pixels(standalone.data)
+      XCTAssertTrue(stride(from: 3, to: independentPixels.count, by: 4).contains {
+        independentPixels[$0] == 0
+      })
+      let standaloneProfile = try XCTUnwrap(Fixture.chunks(standalone.data).first { $0.type == "ICCP" })
+      XCTAssertEqual(standaloneProfile.payload, profile)
+      try processor.validateStoredData(result.data, matching: attachment(result))
+    }
+  }
+
   func testAnimationResourceLimitsRejectBeforeFullFrameDecode() throws {
     let counter = WebPDecodeCounter()
     let processor = ComposerImageAttachmentProcessor(beforeValidatedWebPFrameDecode: counter.record)

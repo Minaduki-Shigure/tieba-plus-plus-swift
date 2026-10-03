@@ -29,6 +29,12 @@ enum ComposerWebPSanitizer {
   static let maximumTotalFramePixels = 100_000_000
   static let maximumDurationMilliseconds = 120_000
 
+  struct FrameImage: Sendable, Equatable {
+    let data: Data
+    let width: Int
+    let height: Int
+  }
+
   struct Inspection: Sendable, Equatable {
     let data: Data
     let width: Int
@@ -41,6 +47,52 @@ enum ComposerWebPSanitizer {
     let loopCount: Int?
     /// TIFF Orientation, defaulting to 1 when no EXIF orientation is present.
     let orientation: Int
+    fileprivate let frameDescriptors: [FrameDescriptor]
+    fileprivate let colorProfileChunkRange: Range<Int>?
+
+    /// Build only the requested frame, without animation composition or EXIF transforms.
+    /// ImageIO's animation compositor can report a complete canvas even when a frame
+    /// bitstream is invalid. Require a separately decodable still image for each frame.
+    /// Descriptors refer into `data`; no array of copied frames/profiles stays resident.
+    func standaloneFrame(at index: Int) throws -> FrameImage {
+      try Task.checkCancellation()
+      guard frameDescriptors.indices.contains(index) else {
+        throw ComposerWebPSanitizerError.invalidWebP
+      }
+      let frame = frameDescriptors[index]
+      let extended = frame.hasAlpha || colorProfileChunkRange != nil
+      let bodySize =
+        4 + (extended ? 18 : 0)
+        + (colorProfileChunkRange?.count ?? 0) + frame.codecRange.count
+      var output = Data("RIFF".utf8)
+      output.reserveCapacity(bodySize + 8)
+      output.append(contentsOf: littleEndian(bodySize, count: 4))
+      output.append(contentsOf: "WEBP".utf8)
+      if extended {
+        let flags: UInt8 = (frame.hasAlpha ? 0x10 : 0) | (colorProfileChunkRange != nil ? 0x20 : 0)
+        var header = Data([flags, 0, 0, 0])
+        header.append(contentsOf: littleEndian(frame.width - 1, count: 3))
+        header.append(contentsOf: littleEndian(frame.height - 1, count: 3))
+        output.append(makeChunk("VP8X", header))
+      }
+      if let colorProfileChunkRange { output.append(contentsOf: data[colorProfileChunkRange]) }
+      output.append(contentsOf: data[frame.codecRange])
+      try Task.checkCancellation()
+      return FrameImage(data: output, width: frame.width, height: frame.height)
+    }
+  }
+
+  fileprivate struct FrameDescriptor: Sendable, Equatable {
+    let width: Int
+    let height: Int
+    let hasAlpha: Bool
+    let codecRange: Range<Int>
+
+    func offset(by offset: Int) -> Self {
+      Self(
+        width: width, height: height, hasAlpha: hasAlpha,
+        codecRange: (codecRange.lowerBound + offset)..<(codecRange.upperBound + offset))
+    }
   }
 
   static func sanitize(
@@ -84,6 +136,7 @@ enum ComposerWebPSanitizer {
     var stillAlpha: Chunk?
     var sawAlpha = false
     var sawLossless = false
+    var frameDescriptors = [FrameDescriptor]()
 
     var isAnimated: Bool { flags.map { $0 & 0x02 != 0 } ?? false }
 
@@ -179,7 +232,12 @@ enum ComposerWebPSanitizer {
           throw ComposerWebPSanitizerError.invalidWebP
         }
       } else {
-        guard stillBitmap != nil else { throw ComposerWebPSanitizerError.invalidWebP }
+        guard let stillBitmap else { throw ComposerWebPSanitizerError.invalidWebP }
+        frameDescriptors.append(
+          FrameDescriptor(
+            width: width, height: height,
+            hasAlpha: stillAlpha != nil || (stillBitmap.isLossless && (flags ?? 0) & 0x10 != 0),
+            codecRange: 0..<imageBody.count))
       }
       if let flags {
         guard (flags & 0x20 != 0) == (profile != nil),
@@ -198,8 +256,14 @@ enum ComposerWebPSanitizer {
         header.append(contentsOf: littleEndian(height - 1, count: 3))
         body.append(makeChunk("VP8X", header))
       }
-      if let profile { body.append(makeChunk("ICCP", profile)) }
+      var colorProfileChunkRange: Range<Int>?
+      if let profile {
+        let start = 12 + body.count
+        body.append(makeChunk("ICCP", profile))
+        colorProfileChunkRange = start..<(12 + body.count)
+      }
       if let animationControl { body.append(animationControl) }
+      let imageBodyOffset = 12 + body.count
       body.append(imageBody)
       if sawEXIF { body.append(makeChunk("EXIF", minimalEXIF(orientation: orientation))) }
       var output = Data("RIFF".utf8)
@@ -209,7 +273,9 @@ enum ComposerWebPSanitizer {
       return Inspection(
         data: output, width: width, height: height,
         frameCount: isAnimated ? durations.count : 1, isAnimated: isAnimated,
-        frameDurationsMilliseconds: durations, loopCount: loopCount, orientation: orientation
+        frameDurationsMilliseconds: durations, loopCount: loopCount, orientation: orientation,
+        frameDescriptors: frameDescriptors.map { $0.offset(by: imageBodyOffset) },
+        colorProfileChunkRange: colorProfileChunkRange
       )
     }
 
@@ -288,9 +354,17 @@ enum ComposerWebPSanitizer {
           break
         }
       }
-      guard bitmap != nil else { throw ComposerWebPSanitizerError.invalidWebP }
+      guard let bitmap else { throw ComposerWebPSanitizerError.invalidWebP }
       durations.append(delay)
       duration += budgetedDelay
+      // ANMF has an 8-byte chunk header and 16-byte frame header; only the
+      // sanitized ALPH/VP8/VP8L chunks after those headers form a still image.
+      let codecStart = imageBody.count + 8 + 16
+      frameDescriptors.append(
+        FrameDescriptor(
+          width: frameWidth, height: frameHeight,
+          hasAlpha: alpha != nil || (bitmap.isLossless && (flags ?? 0) & 0x10 != 0),
+          codecRange: codecStart..<(imageBody.count + 8 + frame.count)))
       imageBody.append(makeChunk("ANMF", frame))
     }
 
