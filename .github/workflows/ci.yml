@@ -167,7 +167,7 @@ jobs:
           xcrun simctl list runtimes
           xcrun simctl list devices available
           exit 1
-      - name: Test native tab control and window geometry
+      - name: Test native tab control and wallpaper geometry
         id: app_tests
         continue-on-error: true
         run: >-
@@ -178,6 +178,8 @@ jobs:
           -configuration Debug
           -only-testing:TiebaPlusPlusTests/RootTabBarTests
           -only-testing:TiebaPlusPlusTests/WallpaperWindowSizeReaderTests
+          -only-testing:TiebaPlusPlusTests/WallpaperLiveCanvasTests
+          -only-testing:TiebaPlusPlusTests/WallpaperThemeSurfaceTests
           -derivedDataPath build/DerivedData
           -resultBundlePath app-test-results.xcresult
           -destination "$IOS_SIMULATOR_DESTINATION"
