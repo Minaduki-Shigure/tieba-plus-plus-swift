@@ -167,7 +167,7 @@ jobs:
           xcrun simctl list runtimes
           xcrun simctl list devices available
           exit 1
-      - name: Build and test app
+      - name: Test native tab control and window geometry
         id: app_tests
         continue-on-error: true
         run: >-
@@ -176,10 +176,8 @@ jobs:
           -project TiebaPlusPlus.xcodeproj
           -scheme TiebaPlusPlus
           -configuration Debug
-          -only-testing:TiebaPlusPlusTests/ConcernFeedViewModelTests
-          -only-testing:TiebaPlusPlusTests/PersonalizedFeedViewModelTests
-          -only-testing:TiebaPlusPlusTests/HotThreadViewModelTests
           -only-testing:TiebaPlusPlusTests/RootTabBarTests
+          -only-testing:TiebaPlusPlusTests/WallpaperWindowSizeReaderTests
           -derivedDataPath build/DerivedData
           -resultBundlePath app-test-results.xcresult
           -destination "$IOS_SIMULATOR_DESTINATION"
@@ -237,7 +235,7 @@ jobs:
           icon_device_id="$(xcrun simctl create "Tieba icon UI $GITHUB_RUN_ID" "$icon_device_type" "$icon_runtime")"
           echo "ICON_UI_SIMULATOR_ID=$icon_device_id" >> "$GITHUB_ENV"
           echo "ICON_UI_SIMULATOR_DESTINATION=platform=iOS Simulator,id=$icon_device_id" >> "$GITHUB_ENV"
-      - name: Test app icon and wallpaper workflows
+      - name: Test app icon, discovery and wallpaper workflows
         id: icon_ui_tests
         continue-on-error: true
         run: >-
