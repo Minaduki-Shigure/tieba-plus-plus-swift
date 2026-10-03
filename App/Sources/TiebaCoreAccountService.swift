@@ -585,12 +585,20 @@ struct TiebaCoreAccountService: AccountService {
     await forumWriteCoordinator.conflictWaiterCount()
   }
 
+  func forumWriteSharedWaiterCount() async -> Int {
+    await forumWriteCoordinator.sharedWaiterCount()
+  }
+
   func threadCloudFavoriteWriteConflictWaiterCount() async -> Int {
     await threadCloudFavoriteWriteCoordinator.conflictWaiterCount()
   }
 
   func threadAgreementWriteConflictWaiterCount() async -> Int {
     await threadAgreementWriteCoordinator.conflictWaiterCount()
+  }
+
+  func threadAgreementWriteSharedWaiterCount() async -> Int {
+    await threadAgreementWriteCoordinator.sharedWaiterCount()
   }
 
   func contentAgreementWriteConflictWaiterCount() async -> Int {
@@ -3255,6 +3263,7 @@ private actor ThreadAgreementWriteCoordinator {
   private let client: any TiebaAuthenticatedAccountClient
   private var inFlight: [Key: Entry] = [:]
   private var conflictWaiters = 0
+  private var sharedWaiters = 0
 
   init(client: any TiebaAuthenticatedAccountClient) {
     self.client = client
@@ -3279,6 +3288,8 @@ private actor ThreadAgreementWriteCoordinator {
     )
     if let entry = inFlight[key] {
       if entry.identity == identity, entry.targetAgreed == isAgreed {
+        sharedWaiters += 1
+        defer { sharedWaiters -= 1 }
         return try await entry.task.value
       }
       conflictWaiters += 1
@@ -3315,6 +3326,10 @@ private actor ThreadAgreementWriteCoordinator {
 
   func conflictWaiterCount() -> Int {
     conflictWaiters
+  }
+
+  func sharedWaiterCount() -> Int {
+    sharedWaiters
   }
 
   private func clearEntry(for key: Key, id: UUID) {
@@ -3545,6 +3560,7 @@ private actor ForumAccountWriteCoordinator {
     Int64: [UUID: CheckedContinuation<OfficialBatchWaitOutcome, Never>]
   ]()
   private var conflictWaiters = 0
+  private var sharedWaiters = 0
 
   init(client: any TiebaAuthenticatedAccountClient) {
     self.client = client
@@ -3576,6 +3592,8 @@ private actor ForumAccountWriteCoordinator {
     }
     if let entry = inFlight[key] {
       if entry.identity == identity, entry.operation == operation {
+        sharedWaiters += 1
+        defer { sharedWaiters -= 1 }
         return try await entry.task.value
       }
       conflictWaiters += 1
@@ -3703,6 +3721,10 @@ private actor ForumAccountWriteCoordinator {
 
   func conflictWaiterCount() -> Int {
     conflictWaiters
+  }
+
+  func sharedWaiterCount() -> Int {
+    sharedWaiters
   }
 
   private func clearEntry(for key: Key, id: UUID) {

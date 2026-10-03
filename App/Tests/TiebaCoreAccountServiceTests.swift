@@ -1422,7 +1422,16 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
         isAgreed: true
       )
     }
-    for _ in 0..<50 { await Task.yield() }
+    do {
+      try await waitForAccountServiceTest {
+        await service.threadAgreementWriteSharedWaiterCount() == 1
+      }
+    } catch {
+      await client.releaseThreadAgreementMutation()
+      _ = try? await first.value
+      _ = try? await second.value
+      throw error
+    }
 
     let requestCountBeforeRelease = await client.threadAgreementMutationRequestCount()
     XCTAssertEqual(requestCountBeforeRelease, 1)
@@ -1435,6 +1444,8 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     XCTAssertEqual(firstResult.agreeScore, 18)
     let finalRequestCount = await client.threadAgreementMutationRequestCount()
     XCTAssertEqual(finalRequestCount, 1)
+    let finalSharedWaiterCount = await service.threadAgreementWriteSharedWaiterCount()
+    XCTAssertEqual(finalSharedWaiterCount, 0)
   }
 
   func testOppositeThreadAgreementTargetWaitsThenReturnsSettledConflictWithoutSecondWrite()
@@ -1669,7 +1680,18 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
         isFollowed: true
       )
     }
-    for _ in 0..<50 { await Task.yield() }
+    // Wait for the second caller to join the suspended operation. Yielding a
+    // fixed number of times does not guarantee that the caller has started.
+    do {
+      try await waitForAccountServiceTest {
+        await service.forumWriteSharedWaiterCount() == 1
+      }
+    } catch {
+      await client.releaseMutation()
+      _ = try? await first.value
+      _ = try? await second.value
+      throw error
+    }
 
     let requestCountBeforeRelease = await client.mutationRequestCount()
     XCTAssertEqual(requestCountBeforeRelease, 1)
@@ -1681,6 +1703,8 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     XCTAssertTrue(firstResult.isFollowed)
     let finalRequestCount = await client.mutationRequestCount()
     XCTAssertEqual(finalRequestCount, 1)
+    let finalSharedWaiterCount = await service.forumWriteSharedWaiterCount()
+    XCTAssertEqual(finalSharedWaiterCount, 0)
   }
 
   func testOppositeForumWriteWaitsForFirstWriteBeforeReturningSettledConflict() async throws {
@@ -2029,7 +2053,16 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
         forumName: "swift"
       )
     }
-    for _ in 0..<50 { await Task.yield() }
+    do {
+      try await waitForAccountServiceTest {
+        await service.forumWriteSharedWaiterCount() == 1
+      }
+    } catch {
+      await client.releaseCheckIn()
+      _ = try? await first.value
+      _ = try? await second.value
+      throw error
+    }
 
     let requestCountBeforeRelease = await client.checkInRequestCount()
     XCTAssertEqual(requestCountBeforeRelease, 1)
@@ -2041,6 +2074,8 @@ final class TiebaCoreAccountServiceTests: XCTestCase {
     XCTAssertEqual(firstResult.checkIn?.consecutiveDays, 5)
     let finalRequestCount = await client.checkInRequestCount()
     XCTAssertEqual(finalRequestCount, 1)
+    let finalSharedWaiterCount = await service.forumWriteSharedWaiterCount()
+    XCTAssertEqual(finalSharedWaiterCount, 0)
   }
 
   func testCheckInWaitsForFollowWriteBeforeReturningSettledConflict() async throws {
