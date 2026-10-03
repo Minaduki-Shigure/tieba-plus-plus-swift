@@ -148,6 +148,11 @@ final class AppIconUITests: XCTestCase {
 
   @MainActor
   private func tap(_ element: XCUIElement, description: String) throws {
+    // A cold accessibility existence lookup can consume most of one wait.
+    // Resolve it separately before requiring all three readiness properties.
+    guard element.waitForExistence(timeout: interfaceTimeout) else {
+      throw IconUITestFailure(message: "Timed out waiting for \(description) to exist.")
+    }
     try wait(
       for: NSPredicate(format: "exists == true AND hittable == true AND enabled == true"),
       on: element,
