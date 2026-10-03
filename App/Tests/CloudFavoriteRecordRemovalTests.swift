@@ -483,6 +483,71 @@ final class CloudFavoriteRecordRemovalTests: XCTestCase {
       }
     }
   }
+
+  func testRollbackRetryMustSyncEvenWhenBothPrepareAndRemovalWereAlreadyRenamed() async throws {
+    let session = cleanupSession()
+    let target = try cleanupTarget(session)
+    let ledger = CleanupTransitionFaultLedger(
+      transitionFailures: 0, removalFailuresAfterCommit: 2)
+    await ledger.failNextPreparation(afterCommit: true)
+    let client = CleanupClient(ledger: ledger)
+    let service = TiebaCoreAccountService(
+      client: client, cloudFavoriteMutationGate: .init(ledger: ledger),
+      cloudFavoriteVault: CleanupVault(session))
+    do {
+      _ = try await service.removeCloudFavoriteRecord(session: session, target: target)
+      XCTFail("The prepare and rollback both failed durability")
+    } catch {}
+    let diskRecord = try await ledger.record(for: target.key)
+    XCTAssertNil(diskRecord)
+    do {
+      _ = try await service.setThreadCloudFavorite(
+        session: session, target: cleanupNormalTarget(), markedPostID: 99)
+      XCTFail("An empty archive does not prove its final sync succeeded")
+    } catch {}
+    let blocked = await client.ordinaryWrites
+    XCTAssertEqual(blocked, 0)
+    _ = try await service.setThreadCloudFavorite(
+      session: session, target: cleanupNormalTarget(), markedPostID: 99)
+    let writes = await client.ordinaryWrites
+    let removals = await client.dispatches
+    XCTAssertEqual(writes, 1)
+    XCTAssertEqual(removals, 0)
+  }
+
+  func testAbsenceAfterRenameFailureKeepsVerificationVisibleUntilDurableRecovery() async throws {
+    let session = cleanupSession()
+    let target = try cleanupTarget(session)
+    let ledger = CleanupTransitionFaultLedger(
+      transitionFailures: 0, absenceFailuresAfterCommit: 2)
+    let client = CleanupClient(ledger: ledger, observation: .observedAbsent)
+    let service = TiebaCoreAccountService(
+      client: client, cloudFavoriteMutationGate: .init(ledger: ledger),
+      cloudFavoriteVault: CleanupVault(session))
+    let initial = try await service.removeCloudFavoriteRecord(session: session, target: target)
+    XCTAssertEqual(initial.phase, .acceptedAwaitingVerification)
+    let diskRecord = try await ledger.record(for: target.key)
+    XCTAssertEqual(diskRecord?.phase, .observedAbsent)
+    let statuses = try await service.cloudFavoriteRecordRemovalStatuses(session: session)
+    XCTAssertEqual(statuses.map(\.threadID), [target.threadID])
+    XCTAssertTrue(statuses[0].requiresVerification)
+    do {
+      _ = try await service.verifyCloudFavoriteRecordRemoval(session: session, target: target)
+      XCTFail("The second directory sync still fails")
+    } catch {}
+    let stillPending = try await service.cloudFavoriteRecordRemovalStatuses(session: session)
+    XCTAssertEqual(stillPending.count, 1)
+    let result = try await service.verifyCloudFavoriteRecordRemoval(
+      session: session, target: target)
+    XCTAssertEqual(result.phase, .observedAbsent)
+    XCTAssertTrue(result.receiptAcknowledged)
+    let finished = try await service.cloudFavoriteRecordRemovalStatuses(session: session)
+    XCTAssertTrue(finished.isEmpty)
+    _ = try await service.setThreadCloudFavorite(
+      session: session, target: cleanupNormalTarget(), markedPostID: 99)
+    let writes = await client.dispatches
+    XCTAssertEqual(writes, 1, "Recovery must not resend cleanup")
+  }
 }
 
 private func cleanupSession(userID: Int64 = 7) -> StoredAccountSession {
@@ -641,9 +706,16 @@ private actor CleanupTransitionFaultLedger: CloudFavoriteMutationLedgerRepositor
   private var transitionFailures: Int
   private var removalFailures: Int
   private var preparationFailureAfterCommit: Bool?
-  init(transitionFailures: Int = 1, removalFailures: Int = 0) {
+  private var removalFailuresAfterCommit: Int
+  private var absenceFailuresAfterCommit: Int
+  init(
+    transitionFailures: Int = 1, removalFailures: Int = 0,
+    removalFailuresAfterCommit: Int = 0, absenceFailuresAfterCommit: Int = 0
+  ) {
     self.transitionFailures = transitionFailures
     self.removalFailures = removalFailures
+    self.removalFailuresAfterCommit = removalFailuresAfterCommit
+    self.absenceFailuresAfterCommit = absenceFailuresAfterCommit
   }
   func failNextPreparation(afterCommit: Bool) { preparationFailureAfterCommit = afterCommit }
   func records() async throws -> [CloudFavoriteMutationLedgerRecord] { try await storage.records() }
@@ -671,7 +743,13 @@ private actor CleanupTransitionFaultLedger: CloudFavoriteMutationLedgerRepositor
       transitionFailures -= 1
       throw CloudFavoriteMutationLedgerError.writeFailed
     }
-    return try await storage.transition(key: key, operationID: operationID, phase: phase, now: now)
+    let result = try await storage.transition(
+      key: key, operationID: operationID, phase: phase, now: now)
+    if phase == .observedAbsent, absenceFailuresAfterCommit > 0 {
+      absenceFailuresAfterCommit -= 1
+      throw CloudFavoriteMutationLedgerError.writeFailed
+    }
+    return result
   }
   func removeAfterDefiniteFailure(key: CloudFavoriteMutationLedgerKey, operationID: UUID)
     async throws
@@ -681,6 +759,10 @@ private actor CleanupTransitionFaultLedger: CloudFavoriteMutationLedgerRepositor
       throw CloudFavoriteMutationLedgerError.writeFailed
     }
     try await storage.removeAfterDefiniteFailure(key: key, operationID: operationID)
+    if removalFailuresAfterCommit > 0 {
+      removalFailuresAfterCommit -= 1
+      throw CloudFavoriteMutationLedgerError.writeFailed
+    }
   }
 }
 
