@@ -2,9 +2,14 @@ name: WebPDecodeProbe
 options:
   deploymentTarget:
     iOS: "16.0"
+packages:
+  libwebp:
+    url: https://github.com/SDWebImage/libwebp-Xcode.git
+    revision: 2b5256c29ff4e20f2a0d5ee863b62b1a22144434
 settings:
   base:
-    SWIFT_VERSION: "5.9"
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
     CODE_SIGNING_ALLOWED: NO
     GENERATE_INFOPLIST_FILE: YES
 targets:
@@ -13,19 +18,31 @@ targets:
     platform: iOS
     sources:
       - App.swift
+      - ../App/Sources/ComposerImageAttachment.swift
+      - ../App/Sources/ComposerImageAttachmentProcessor.swift
+      - ../App/Sources/ComposerOriginalImageSanitizer.swift
+      - ../App/Sources/ComposerGIFSanitizer.swift
       - ../App/Sources/ComposerWebPSanitizer.swift
+      - ../App/Sources/ComposerWebPBitstreamValidator.swift
+    dependencies:
+      - package: libwebp
+        product: libwebp
     settings:
       base:
+        PRODUCT_MODULE_NAME: TiebaPlusPlus
         PRODUCT_BUNDLE_IDENTIFIER: io.github.minaduki.webp-probe
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
   WebPDecodeProbeTests:
     type: bundle.unit-test
     platform: iOS
     sources:
-      - ProbeTests.swift
+      - ../App/Tests/ComposerWebPSanitizerTests.swift
+      - ../App/Tests/ComposerWebPImageAttachmentTests.swift
       - ../App/Tests/ComposerWebPTestFixture.swift
     dependencies:
       - target: WebPDecodeProbe
+      - package: libwebp
+        product: libwebp
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.minaduki.webp-probe-tests
