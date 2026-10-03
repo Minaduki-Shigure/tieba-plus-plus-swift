@@ -35,8 +35,24 @@ and its verified metadata enters the public app source.
   ongoing load or pagination operation, without cancelling it or queueing a
   second refresh. The app owns a native tab selection control while SwiftUI
   retains the independent navigation stacks; no private tab-controller delegate
-  is replaced. Native validation is pending. The overall parity estimate stays
-  unchanged.
+  is replaced. The discovery pager mounts after the initial account lookup
+  resolves, with stable channel identities, to avoid interrupting its first
+  load when the followed channel becomes available. The root layout reserves
+  the tab bar's actual height so final scroll items remain above it. Wallpaper
+  cropping uses the attached window's full size, independent of the content
+  area reduced by the tab bar or keyboard. The candidate also aligns live
+  wallpaper surfaces in that window's shared coordinate space, keeping content
+  and navigation/tab backgrounds aligned while the editor preview stays local.
+  [Focused CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37136737831)
+  passed 83 relevant App tests. The
+  [follow-up CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37139324444)
+  passed seven focused native regressions, all three actual-tap Explore UI flows
+  and the system icon UI flow, but its wallpaper rotation flow did not pass.
+  The updated wallpaper test uses slow content drags with a brief end hold to
+  suppress scroll inertia; geometry, visible-area, stable-orientation and
+  final-control visibility assertions remain. The shared-window rendering fix
+  and final native release validation are pending; the public version and
+  overall parity estimate stay unchanged.
 - **`v0.65.0-alpha.36` nested-reply deletion:** The full reply list and
   inline reply previews offer an explicitly confirmed action to delete one's own
   child reply, or another author's child reply in one's own topic. The exact
@@ -53,11 +69,12 @@ and its verified metadata enters the public app source.
   account deletion has been performed by automated tests.
   The [candidate CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37129317909)
   passed Core and all 2,509 iOS App tests (zero failed or skipped). This includes
-  22 new App tests and 16 new Core deletion tests. The wallpaper UI test now
-  scrolls inside the editor's actual content padding after rotation: the previous
-  fixed screen-edge coordinate could miss the landscape scroll area. All crop
-  geometry, visibility and stable-orientation assertions remain in place; tag
-  CI verifies the corrected UI interaction before IPA publication.
+  22 new App tests and 16 new Core deletion tests. At that stage, the wallpaper
+  UI test moved its rotation-scroll target into the editor's content padding
+  because a fixed screen-edge coordinate could miss the landscape scroll area.
+  The current regression drags actual editor content and checks that the final
+  control clears the tab bar, alongside crop geometry, visibility and stable
+  orientation. These strengthened checks remain release gates.
 - **`v0.65.0-alpha.35` transparent image themes:** Settings → 外观与布局 → 透明图片主题
   offers local Photos import, drag/zoom cropping to the current window, blur and
   opacity previews, light/dark reading colors, colors extracted from the image,
