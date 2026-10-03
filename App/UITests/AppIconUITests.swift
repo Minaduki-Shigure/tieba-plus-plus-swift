@@ -7,6 +7,8 @@ final class AppIconUITests: XCTestCase {
     app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
     let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
     defer {
+      attachHierarchy(name: "Final app accessibility hierarchy", from: app)
+      attachHierarchy(name: "Final SpringBoard accessibility hierarchy", from: springboard)
       attachScreenshot(name: "Final app icon state", from: app)
       let screen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
       screen.name = "Final simulator screen"
@@ -44,7 +46,8 @@ final class AppIconUITests: XCTestCase {
 
   @MainActor
   private func openIconSettings(in app: XCUIApplication) throws {
-    let settings = app.buttons["设置"].firstMatch
+    let settings = app.descendants(matching: .any)
+      .matching(identifier: "home-settings-entry").firstMatch
     try tap(settings, description: "Home settings button")
     let appearance = app.descendants(matching: .any)
       .matching(identifier: "settings-category-appearance-and-layout").firstMatch
@@ -149,7 +152,21 @@ final class AppIconUITests: XCTestCase {
   ) throws {
     let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
     let result = XCTWaiter.wait(for: [expectation], timeout: 10)
-    try require(result == .completed, "Timed out waiting for \(description).")
+    if result != .completed {
+      let exists = element.exists
+      throw IconUITestFailure(
+        message: "Timed out waiting for \(description): exists=\(exists), "
+          + "hittable=\(exists && element.isHittable), enabled=\(exists && element.isEnabled)."
+      )
+    }
+  }
+
+  @MainActor
+  private func attachHierarchy(name: String, from app: XCUIApplication) {
+    let attachment = XCTAttachment(string: app.debugDescription)
+    attachment.name = name
+    attachment.lifetime = .deleteOnSuccess
+    add(attachment)
   }
 
   @MainActor

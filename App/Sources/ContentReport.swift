@@ -153,6 +153,7 @@ enum ContentReportCoordinatorState: Equatable {
   case resolvingPage(ContentReportTarget)
   case ready
   case signedOut
+  case sessionUnavailable
   case failed(String)
 }
 
@@ -276,6 +277,11 @@ final class ContentReportCoordinator: ObservableObject {
     }
   }
 
+  func refreshSessionAvailabilityIfNeeded() {
+    guard state == .sessionUnavailable else { return }
+    refreshSessionAvailability()
+  }
+
   func accountSessionDidChange() {
     dismissOwnedPage()
     generation &+= 1
@@ -339,7 +345,10 @@ final class ContentReportCoordinator: ObservableObject {
         guard let self, self.generation == currentGeneration else { return }
         self.task = nil
         self.activeSessionLease = nil
-        self.state = .failed("未能确认当前登录账户，请稍后重试。")
+        // Availability is checked passively at launch and after account changes.
+        // A vault failure disables reporting but is not a failed user request;
+        // only a confirmed report request may trigger the global error alert.
+        self.state = .sessionUnavailable
       }
     }
   }
@@ -622,6 +631,7 @@ private struct ContentReportObservedTopicMenu: View {
 }
 
 private struct ContentReportPresentationModifier: ViewModifier {
+  @Environment(\.scenePhase) private var scenePhase
   @ObservedObject var coordinator: ContentReportCoordinator
 
   func body(content: Content) -> some View {
@@ -646,6 +656,9 @@ private struct ContentReportPresentationModifier: ViewModifier {
         }
       } message: {
         Text(coordinator.errorMessage ?? "无法打开贴吧官方举报页面。")
+      }
+      .onChange(of: scenePhase) { phase in
+        if phase == .active { coordinator.refreshSessionAvailabilityIfNeeded() }
       }
       .onChange(of: coordinator.isPresentingReportPage) { isPresenting in
         if isPresenting {

@@ -223,6 +223,7 @@ jobs:
           -scheme TiebaPlusPlusIconsUI
           -configuration Debug
           -derivedDataPath build/DerivedData
+          -enableCodeCoverage YES
           -destination "$ICON_UI_SIMULATOR_DESTINATION"
           -parallel-testing-enabled NO
           -resultBundlePath icon-ui-results.xcresult

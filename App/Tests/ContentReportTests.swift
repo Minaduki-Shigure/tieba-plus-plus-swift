@@ -101,6 +101,229 @@ final class ContentReportTests: XCTestCase {
     XCTAssertNil(presentation.page)
   }
 
+  func testStartupVaultFailureDisablesReportingWithoutPresentingAnErrorOrRetrying() async throws {
+    let vault = ContentReportVaultSpy(session: nil, readFailure: .keychain(-25308))
+    let service = ContentReportServiceSpy()
+    let presentation = ExternalWebPresentationModel()
+    let coordinator = ContentReportCoordinator(
+      vault: vault,
+      service: service,
+      presentation: presentation,
+      observesAccountSessionChanges: false,
+      observesPresentationChanges: false
+    )
+
+    try await waitForReportTest { coordinator.state == .sessionUnavailable }
+    XCTAssertFalse(coordinator.isAvailable)
+    XCTAssertNil(coordinator.errorMessage)
+    coordinator.request(try XCTUnwrap(reportTarget()), scopeID: reportUUID(20))
+    coordinator.confirmPendingRequest()
+    coordinator.dismissError()
+
+    XCTAssertEqual(coordinator.state, .sessionUnavailable)
+    XCTAssertNil(coordinator.pendingTarget)
+    XCTAssertNil(presentation.page)
+    let requestedPostIDs = await service.requestedPostIDs()
+    let sessionReads = await vault.sessionReadCount()
+    XCTAssertEqual(requestedPostIDs, [])
+    XCTAssertEqual(sessionReads, 1)
+  }
+
+  func testAccountRefreshFailureCancelsPendingReportAndRecoveryRequiresANewRequest() async throws {
+    let vault = ContentReportVaultSpy(session: reportSession(revision: reportUUID(21)))
+    let service = ContentReportServiceSpy(url: try reportURL(postID: 101))
+    let presentation = ExternalWebPresentationModel()
+    let coordinator = ContentReportCoordinator(
+      vault: vault,
+      service: service,
+      presentation: presentation,
+      observesAccountSessionChanges: false,
+      observesPresentationChanges: false
+    )
+    try await waitForReportTest { coordinator.isAvailable }
+    let target = try XCTUnwrap(reportTarget())
+    coordinator.request(target, scopeID: reportUUID(22))
+    XCTAssertEqual(coordinator.pendingTarget, target)
+
+    await vault.setReadFailure(.keychain(-25308))
+    coordinator.accountSessionDidChange()
+    try await waitForReportTest { coordinator.state == .sessionUnavailable }
+    coordinator.confirmPendingRequest()
+
+    XCTAssertNil(coordinator.errorMessage)
+    XCTAssertNil(coordinator.pendingTarget)
+    XCTAssertNil(presentation.page)
+    var requestedPostIDs = await service.requestedPostIDs()
+    XCTAssertEqual(requestedPostIDs, [])
+
+    await vault.setReadFailure(nil)
+    coordinator.accountSessionDidChange()
+    try await waitForReportTest { coordinator.isAvailable }
+    XCTAssertNil(coordinator.pendingTarget)
+    XCTAssertNil(presentation.page)
+    requestedPostIDs = await service.requestedPostIDs()
+    XCTAssertEqual(requestedPostIDs, [])
+
+    coordinator.request(target, scopeID: reportUUID(23))
+    coordinator.confirmPendingRequest()
+    try await waitForReportTest { coordinator.isPresentingReportPage }
+    requestedPostIDs = await service.requestedPostIDs()
+    XCTAssertEqual(requestedPostIDs, [101])
+  }
+
+  func testForegroundRetryStaysSilentOnFailureAndRecoversWhenTheVaultIsAvailable() async throws {
+    let vault = ContentReportVaultSpy(
+      session: reportSession(revision: reportUUID(30)),
+      readFailure: .keychain(-25308)
+    )
+    let service = ContentReportServiceSpy()
+    let presentation = ExternalWebPresentationModel()
+    let coordinator = ContentReportCoordinator(
+      vault: vault,
+      service: service,
+      presentation: presentation,
+      observesAccountSessionChanges: false,
+      observesPresentationChanges: false
+    )
+    // An activation during the initial check must not start a second check.
+    coordinator.refreshSessionAvailabilityIfNeeded()
+    try await waitForReportTest { coordinator.state == .sessionUnavailable }
+    var sessionReads = await vault.sessionReadCount()
+    XCTAssertEqual(sessionReads, 1)
+
+    coordinator.refreshSessionAvailabilityIfNeeded()
+    try await waitForReportTest { coordinator.state == .sessionUnavailable }
+    sessionReads = await vault.sessionReadCount()
+    XCTAssertEqual(sessionReads, 2)
+    XCTAssertNil(coordinator.errorMessage)
+    XCTAssertFalse(coordinator.isAvailable)
+
+    await vault.setReadFailure(nil)
+    coordinator.refreshSessionAvailabilityIfNeeded()
+    try await waitForReportTest { coordinator.isAvailable }
+    sessionReads = await vault.sessionReadCount()
+    XCTAssertEqual(sessionReads, 3)
+    XCTAssertNil(coordinator.errorMessage)
+    XCTAssertNil(coordinator.pendingTarget)
+    XCTAssertNil(presentation.page)
+    let requestedPostIDs = await service.requestedPostIDs()
+    XCTAssertEqual(requestedPostIDs, [])
+  }
+
+  func testForegroundRetryDoesNotInterruptPendingOrActiveReportRequests() async throws {
+    let vault = ContentReportVaultSpy(session: reportSession(revision: reportUUID(31)))
+    let service = ContentReportServiceSpy(url: try reportURL(postID: 101), suspends: true)
+    let presentation = ExternalWebPresentationModel()
+    let coordinator = ContentReportCoordinator(
+      vault: vault,
+      service: service,
+      presentation: presentation,
+      observesAccountSessionChanges: false,
+      observesPresentationChanges: false
+    )
+    try await waitForReportTest { coordinator.isAvailable }
+    let target = try XCTUnwrap(reportTarget())
+    coordinator.request(target, scopeID: reportUUID(32))
+
+    coordinator.refreshSessionAvailabilityIfNeeded()
+    XCTAssertEqual(coordinator.pendingTarget, target)
+    var sessionReads = await vault.sessionReadCount()
+    XCTAssertEqual(sessionReads, 1)
+    coordinator.confirmPendingRequest()
+    try await waitForReportTest { await service.requestedPostIDs() == [101] }
+
+    coordinator.refreshSessionAvailabilityIfNeeded()
+    XCTAssertEqual(coordinator.state, .resolvingPage(target))
+    await service.release()
+    try await waitForReportTest { coordinator.isPresentingReportPage }
+    let pageID = try XCTUnwrap(presentation.page?.id)
+    coordinator.refreshSessionAvailabilityIfNeeded()
+    XCTAssertEqual(presentation.page?.id, pageID)
+    XCTAssertTrue(coordinator.isPresentingReportPage)
+    XCTAssertNil(coordinator.errorMessage)
+    sessionReads = await vault.sessionReadCount()
+    XCTAssertEqual(sessionReads, 3)
+  }
+
+  func testAccountRefreshFailureDismissesAnOwnedReportPageWithoutAnErrorAlert() async throws {
+    let vault = ContentReportVaultSpy(session: reportSession(revision: reportUUID(24)))
+    let service = ContentReportServiceSpy(url: try reportURL(postID: 101))
+    let presentation = ExternalWebPresentationModel()
+    let coordinator = ContentReportCoordinator(
+      vault: vault,
+      service: service,
+      presentation: presentation,
+      observesAccountSessionChanges: false,
+      observesPresentationChanges: false
+    )
+    try await waitForReportTest { coordinator.isAvailable }
+    coordinator.request(try XCTUnwrap(reportTarget()), scopeID: reportUUID(25))
+    coordinator.confirmPendingRequest()
+    try await waitForReportTest { coordinator.isPresentingReportPage }
+
+    await vault.setReadFailure(.keychain(-25308))
+    coordinator.accountSessionDidChange()
+
+    XCTAssertNil(presentation.page)
+    try await waitForReportTest { coordinator.state == .sessionUnavailable }
+    XCTAssertNil(coordinator.errorMessage)
+    XCTAssertFalse(coordinator.isAvailable)
+    XCTAssertFalse(coordinator.isPresentingReportPage)
+  }
+
+  func testConfirmedRequestStillReportsVaultFailureWithoutOpeningThePage() async throws {
+    let vault = ContentReportVaultSpy(session: reportSession(revision: reportUUID(26)))
+    let service = ContentReportServiceSpy(url: try reportURL(postID: 101))
+    let presentation = ExternalWebPresentationModel()
+    let coordinator = ContentReportCoordinator(
+      vault: vault,
+      service: service,
+      presentation: presentation,
+      observesAccountSessionChanges: false,
+      observesPresentationChanges: false
+    )
+    try await waitForReportTest { coordinator.isAvailable }
+    coordinator.request(try XCTUnwrap(reportTarget()), scopeID: reportUUID(27))
+    await vault.setReadFailure(.keychain(-25308))
+    coordinator.confirmPendingRequest()
+
+    try await waitForReportTest { coordinator.errorMessage != nil }
+    XCTAssertEqual(
+      coordinator.errorMessage, AccountVaultError.keychain(-25308).localizedDescription)
+    XCTAssertNil(presentation.page)
+    let requestedPostIDs = await service.requestedPostIDs()
+    XCTAssertEqual(requestedPostIDs, [])
+  }
+
+  func testDismissingAReportErrorDoesNotReopenAlertWhenPassiveSessionRefreshFails() async throws {
+    let vault = ContentReportVaultSpy(session: reportSession(revision: reportUUID(28)))
+    let service = ContentReportServiceSpy(url: try reportURL(postID: 101))
+    let presentation = ExternalWebPresentationModel()
+    let coordinator = ContentReportCoordinator(
+      vault: vault,
+      service: service,
+      presentation: presentation,
+      observesAccountSessionChanges: false,
+      observesPresentationChanges: false
+    )
+    try await waitForReportTest { coordinator.isAvailable }
+    coordinator.request(try XCTUnwrap(reportTarget()), scopeID: reportUUID(29))
+    await vault.setSession(nil)
+    coordinator.confirmPendingRequest()
+    try await waitForReportTest { coordinator.errorMessage != nil }
+    XCTAssertEqual(coordinator.errorMessage, "当前账户已变化，未打开举报页面。")
+
+    await vault.setReadFailure(.keychain(-25308))
+    coordinator.dismissError()
+
+    try await waitForReportTest { coordinator.state == .sessionUnavailable }
+    XCTAssertNil(coordinator.errorMessage)
+    XCTAssertNil(presentation.page)
+    XCTAssertFalse(coordinator.isAvailable)
+    let requestedPostIDs = await service.requestedPostIDs()
+    XCTAssertEqual(requestedPostIDs, [])
+  }
+
   func testConfirmedRequestOpensOnlyCanonicalServiceURLForStableLease() async throws {
     let session = reportSession(revision: reportUUID(1))
     let vault = ContentReportVaultSpy(session: session)
@@ -325,18 +548,27 @@ final class ContentReportTests: XCTestCase {
 
 private actor ContentReportVaultSpy: AccountVault {
   private var session: StoredAccountSession?
+  private var readFailure: AccountVaultError?
+  private var sessionReads = 0
 
-  init(session: StoredAccountSession?) {
+  init(session: StoredAccountSession?, readFailure: AccountVaultError? = nil) {
     self.session = session
+    self.readFailure = readFailure
   }
 
   func accountSummaries() async throws -> [AccountSummary] { [] }
-  func activeSession() async throws -> StoredAccountSession? { session }
+  func activeSession() async throws -> StoredAccountSession? {
+    sessionReads += 1
+    if let readFailure { throw readFailure }
+    return session
+  }
   func upsert(_ session: StoredAccountSession) async throws { self.session = session }
   func switchActive(to userID: Int64) async throws {}
   func remove(userID: Int64) async throws { session = nil }
   func removeAll() async throws { session = nil }
   func setSession(_ session: StoredAccountSession?) { self.session = session }
+  func setReadFailure(_ error: AccountVaultError?) { readFailure = error }
+  func sessionReadCount() -> Int { sessionReads }
 }
 
 private actor ContentReportServiceSpy: ContentReportService {

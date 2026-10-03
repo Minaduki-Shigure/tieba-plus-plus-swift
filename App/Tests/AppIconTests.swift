@@ -30,29 +30,52 @@ final class AppIconTests: XCTestCase {
   }
 
   @MainActor
-  func testBuiltBundleDeclaresPrimaryAndAlternateIconsForPhoneAndPad() throws {
+  func testBuiltBundleDeclaresPrimaryAndAlternateIconsWithValidDeviceOverrides() throws {
     // Inspect actool's compiled declarations. Modern alternates may name only
     // an asset in Assets.car; CI inspects those compiled icon renditions with
     // assetutil, and the UI suite actually switches them through UIKit.
     let bundle = Bundle.main
     XCTAssertEqual(bundle.bundleIdentifier, "io.github.minaduki.tieba-plus-plus")
-    for (manifestKey, idiom) in [
-      ("CFBundleIcons", UIUserInterfaceIdiom.phone),
-      ("CFBundleIcons~ipad", UIUserInterfaceIdiom.pad),
-    ] {
+    // Bundle resolves device-qualified keys for this runtime and removes the
+    // suffixes from its in-memory dictionary. Inspect the file to validate
+    // any iPad override even when these tests are running on an iPhone.
+    let info = try XCTUnwrap(
+      PropertyListSerialization.propertyList(
+        from: Data(contentsOf: bundle.bundleURL.appendingPathComponent("Info.plist")),
+        options: [], format: nil
+      ) as? [String: Any]
+    )
+    for manifestKey in ["CFBundleIcons", "CFBundleIcons~ipad"] {
+      // iPad uses the generic dictionary when there is no device-specific
+      // override. If an override exists it must be complete: UIKit does not
+      // merge missing alternate entries from the generic dictionary.
+      if manifestKey == "CFBundleIcons~ipad", info[manifestKey] == nil { continue }
       let manifest = try XCTUnwrap(
-        bundle.object(forInfoDictionaryKey: manifestKey) as? [String: Any], manifestKey
+        info[manifestKey] as? [String: Any], manifestKey
       )
-      let primary = try XCTUnwrap(manifest["CFBundlePrimaryIcon"] as? [String: Any])
-      try assertIconDeclaration(primary, assetName: "AppIcon", idiom: idiom, bundle: bundle)
+      _ = try assertIconManifest(manifest, label: manifestKey)
+    }
+  }
 
-      let alternates = try XCTUnwrap(manifest["CFBundleAlternateIcons"] as? [String: Any])
-      XCTAssertEqual(Set(alternates.keys), ["AppIconLight", "AppIconDark"], manifestKey)
-      for choice in [AppIconChoice.light, .dark] {
-        let name = try XCTUnwrap(choice.alternateIconName)
-        let icon = try XCTUnwrap(alternates[name] as? [String: Any], "\(manifestKey).\(name)")
-        try assertIconDeclaration(icon, assetName: name, idiom: idiom, bundle: bundle)
-      }
+  @MainActor
+  func testRuntimeBundleResolvesLoadableIconsForCurrentDevice() throws {
+    let bundle = Bundle.main
+    let manifest = try XCTUnwrap(
+      bundle.object(forInfoDictionaryKey: "CFBundleIcons") as? [String: Any]
+    )
+    let files = try assertIconManifest(manifest, label: "Resolved CFBundleIcons")
+    let idiom = UIDevice.current.userInterfaceIdiom
+    let traits = UITraitCollection(userInterfaceIdiom: idiom)
+    // Only load legacy PNGs selected for this device. An iPhone process does
+    // not need to resolve standalone iPad resources from the raw override.
+    for iconFile in files {
+      let image = try XCTUnwrap(
+        UIImage(named: iconFile, in: bundle, compatibleWith: traits),
+        "Missing bundled icon: \(iconFile) (\(idiom.rawValue))"
+      )
+      let cgImage = try XCTUnwrap(image.cgImage, iconFile)
+      XCTAssertEqual(cgImage.width, cgImage.height, iconFile)
+      XCTAssertGreaterThan(cgImage.width, 0, iconFile)
     }
   }
 
@@ -78,35 +101,47 @@ final class AppIconTests: XCTestCase {
     XCTAssertEqual(Set(previewPixels).count, 3, "Each picker option must show its own artwork")
   }
 
-  @MainActor
+  private func assertIconManifest(
+    _ manifest: [String: Any],
+    label: String,
+    file: StaticString = #filePath,
+    line: UInt = #line
+  ) throws -> [String] {
+    let primary = try XCTUnwrap(
+      manifest["CFBundlePrimaryIcon"] as? [String: Any], label, file: file, line: line
+    )
+    var files = try assertIconDeclaration(primary, assetName: "AppIcon", file: file, line: line)
+    let alternates = try XCTUnwrap(
+      manifest["CFBundleAlternateIcons"] as? [String: Any], label, file: file, line: line
+    )
+    XCTAssertEqual(
+      Set(alternates.keys), ["AppIconLight", "AppIconDark"], label, file: file, line: line)
+    for choice in [AppIconChoice.light, .dark] {
+      let name = try XCTUnwrap(choice.alternateIconName, file: file, line: line)
+      let icon = try XCTUnwrap(
+        alternates[name] as? [String: Any], "\(label).\(name)", file: file, line: line
+      )
+      files.append(
+        contentsOf: try assertIconDeclaration(icon, assetName: name, file: file, line: line))
+    }
+    return files
+  }
+
   private func assertIconDeclaration(
     _ declaration: [String: Any],
     assetName: String,
-    idiom: UIUserInterfaceIdiom,
-    bundle: Bundle,
     file: StaticString = #filePath,
     line: UInt = #line
-  ) throws {
+  ) throws -> [String] {
     XCTAssertEqual(declaration["CFBundleIconName"] as? String, assetName, file: file, line: line)
-    guard declaration["CFBundleIconFiles"] != nil else { return }
+    guard declaration["CFBundleIconFiles"] != nil else { return [] }
     let files = try XCTUnwrap(
       declaration["CFBundleIconFiles"] as? [String], assetName, file: file, line: line
     )
     XCTAssertFalse(files.isEmpty, assetName, file: file, line: line)
     XCTAssertEqual(Set(files).count, files.count, assetName, file: file, line: line)
-    let traits = UITraitCollection(traitsFrom: [
-      UITraitCollection(userInterfaceIdiom: idiom), UITraitCollection(displayScale: 2),
-    ])
-    for iconFile in files {
-      let image = try XCTUnwrap(
-        UIImage(named: iconFile, in: bundle, compatibleWith: traits),
-        "Missing bundled icon \(assetName): \(iconFile) (\(idiom.rawValue))",
-        file: file, line: line
-      )
-      let cgImage = try XCTUnwrap(image.cgImage, iconFile, file: file, line: line)
-      XCTAssertEqual(cgImage.width, cgImage.height, iconFile, file: file, line: line)
-      XCTAssertGreaterThan(cgImage.width, 0, iconFile, file: file, line: line)
-    }
+    XCTAssertTrue(files.allSatisfy { !$0.isEmpty }, assetName, file: file, line: line)
+    return files
   }
 
   private func rgbaPixels(_ image: CGImage) throws -> Data {

@@ -37,6 +37,9 @@ and its verified metadata enters the public app source.
   LiveContainer home-screen behavior still require validation. The weighted
   parity estimate is unchanged. Configuration follows
   [Apple's alternate app icon guide](https://developer.apple.com/documentation/xcode/configuring-your-app-to-use-alternate-app-icons).
+  This release also fixes an unsolicited report-error alert when the initial
+  account lookup fails: background availability checks now leave reporting
+  unavailable quietly, while failures of a user-requested report still show an error.
 - **`v0.65.0-alpha.27` visual classic-emoticon picker:** New-topic and all three
   reply composers share a searchable grid of 126 fixed names, including 吃瓜,
   捂嘴笑 and 菜狗. Existing 50-name drafts keep their exact wire tokens. Small

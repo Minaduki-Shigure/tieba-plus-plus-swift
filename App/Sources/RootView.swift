@@ -324,6 +324,7 @@ struct RootView: View {
             Image(systemName: "gearshape")
           }
           .accessibilityLabel("设置")
+          .accessibilityIdentifier("home-settings-entry")
           .help("设置")
 
           Button {
