@@ -63,8 +63,8 @@ final class TiebaTextReplyTests: XCTestCase, @unchecked Sendable {
       "生气", "惊讶", "喷", "爱心", "心碎", "玫瑰", "礼物", "彩虹", "星星月亮", "太阳",
       "钱币", "灯泡", "茶杯", "蛋糕", "音乐", "haha", "胜利", "大拇指", "弱", "OK",
     ]
-    XCTAssertEqual(TiebaClassicEmoticonCatalog.names, expectedNames)
-    for name in expectedNames {
+    XCTAssertEqual(Array(TiebaClassicEmoticonCatalog.names.prefix(50)), expectedNames)
+    for name in TiebaClassicEmoticonCatalog.names {
       let token = "#(\(name))"
       XCTAssertEqual(TiebaClassicEmoticonCatalog.token(for: name), token)
       XCTAssertTrue(TiebaTextReplyContentPolicy.isValid("前\(token)后"))
@@ -950,6 +950,209 @@ final class TiebaTextReplyTests: XCTestCase, @unchecked Sendable {
         content: "body"
       )
     ) { XCTAssertEqual($0 as? TiebaClientError, .invalidAuthenticatedResponse) }
+  }
+
+  func testExpandedEmoticonsPreserveWireContentAndSignatureForEveryReplyTarget() throws {
+    let content = "前e\u{301}#(吃瓜)#(捂嘴笑)#(菜狗)#(小姐姐来啦)#(哼)后 +%&=🙂"
+    let targets: [TiebaTextReplyTarget] = [
+      .thread(firstPostID: firstPostID),
+      .post(postID: parentPostID),
+      .subpost(parentPostID: parentPostID, subpostID: targetSubpostID),
+    ]
+    let legacy = try parseMultipart(
+      makeRequest(submission: makeSubmission(target: targets[0], content: "#(生气)"))
+    )
+    for target in targets {
+      let metadata: (userID: Int64?, name: String?, portrait: String?) =
+        switch target {
+        case .thread: (nil, nil, nil)
+        case .post: (9_009, nil, nil)
+        case .subpost: (9_009, "Target User", "portrait-token")
+        }
+      let parsed = try parseMultipart(
+        makeRequest(
+          submission: makeSubmission(target: target, content: content),
+          replyUserID: metadata.userID,
+          replyUserDisplayName: metadata.name,
+          replyUserPortrait: metadata.portrait
+        )
+      )
+      let message = try AddPostReqIdl(serializedBytes: parsed.protobuf)
+      let expected: String
+      switch target {
+      case .thread:
+        expected = content
+        XCTAssertFalse(message.data.hasReplyUid)
+        XCTAssertFalse(message.data.hasQuoteID)
+      case .post:
+        expected = content
+        XCTAssertEqual(message.data.replyUid, "9009")
+        XCTAssertEqual(message.data.quoteID, String(parentPostID))
+        XCTAssertFalse(message.data.hasSubPostID)
+      case .subpost:
+        expected = "回复 #(reply, portrait-token, Target User) :\(content)"
+        XCTAssertEqual(message.data.replyUid, "9009")
+        XCTAssertEqual(message.data.quoteID, String(parentPostID))
+        XCTAssertEqual(message.data.subPostID, String(targetSubpostID))
+      }
+      XCTAssertEqual(Array(message.data.content.utf8), Array(expected.utf8))
+      assertSignature(parsed.fields)
+      XCTAssertEqual(parsed.fields["sign"], legacy.fields["sign"])
+    }
+  }
+
+  func testExpandedEmoticonsRequireStructuredExactTopicReplyReadback() throws {
+    let content = "前#(吃瓜)#(小姐姐来啦)#(哼)后"
+    var response = pageResponse(
+      locatedPostID: createdPostID,
+      locatedFloor: 3,
+      locatedAuthorID: userID,
+      locatedContent: "unused"
+    )
+    let fragments = [
+      contentFragment(type: 0, text: "前"),
+      contentFragment(type: 2, c: "吃瓜"),
+      contentFragment(type: 11, c: "小姐姐来啦"),
+      contentFragment(type: 2, c: "哼"),
+      contentFragment(type: 0, text: "后"),
+    ]
+    response.data.postList[0].content = fragments
+    XCTAssertEqual(
+      try TiebaAuthenticatedDecoder.verifiedTextReplyPost(
+        from: response,
+        expectedUserID: userID,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        postID: createdPostID,
+        content: content
+      ),
+      .post(postID: createdPostID, floor: 3)
+    )
+    for (index, replacement) in [
+      (1, contentFragment(type: 0, text: "#(吃瓜)")),
+      (1, contentFragment(type: 2, c: "捂嘴笑")),
+      (2, contentFragment(type: 11, c: "小姐姐来拉")),
+      (3, contentFragment(type: 2, c: "生气")),
+    ] {
+      response.data.postList[0].content = fragments
+      response.data.postList[0].content[index] = replacement
+      XCTAssertThrowsError(
+        try TiebaAuthenticatedDecoder.verifiedTextReplyPost(
+          from: response,
+          expectedUserID: userID,
+          forumID: forumID,
+          forumName: forumName,
+          threadID: threadID,
+          postID: createdPostID,
+          content: content
+        )
+      ) { XCTAssertEqual($0 as? TiebaClientError, .invalidAuthenticatedResponse) }
+    }
+  }
+
+  func testExpandedEmoticonsReadBackForFloorAndNestedRepliesWithoutAcceptingTextImitations() throws
+  {
+    let content = "前#(菜狗)#(捂嘴笑)后"
+    for nested in [false, true] {
+      let parent = try TiebaAuthenticatedDecoder.textReplyPageContext(
+        from: pageResponse(
+          locatedPostID: parentPostID,
+          locatedFloor: 2,
+          locatedAuthorID: 8_008,
+          locatedContent: "parent"
+        ),
+        expectedUserID: userID,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        target: nested
+          ? .subpost(parentPostID: parentPostID, subpostID: targetSubpostID)
+          : .post(postID: parentPostID)
+      )
+      let context: TiebaTextReplyContext
+      if nested {
+        context = try TiebaAuthenticatedDecoder.textReplySubpostContext(
+          from: floorResponse(
+            subpostID: targetSubpostID,
+            subpostAuthorID: 9_009,
+            subpostAuthorName: "Target User",
+            subpostAuthorPortrait: "portrait-token",
+            subpostContent: "target"
+          ),
+          parentContext: parent,
+          subpostID: targetSubpostID
+        )
+      } else {
+        context = parent
+      }
+      var response = floorResponse(
+        subpostID: createdPostID,
+        subpostAuthorID: userID,
+        subpostAuthorName: "Current User",
+        subpostAuthorPortrait: "current-portrait",
+        subpostContent: "unused",
+        replyMentionUserID: nested ? 9_009 : nil
+      )
+      let prefix = nested ? Array(response.data.subpostList[0].content.prefix(2)) : []
+      let suffix = [
+        contentFragment(type: 0, text: nested ? " :前" : "前"),
+        contentFragment(type: 11, c: "菜狗"),
+        contentFragment(type: 2, c: "捂嘴笑"),
+        contentFragment(type: 0, text: "后"),
+      ]
+      response.data.subpostList[0].content = prefix + suffix
+      XCTAssertEqual(
+        try TiebaAuthenticatedDecoder.verifiedTextReplySubpost(
+          from: response,
+          context: context,
+          newSubpostID: createdPostID,
+          content: content
+        ),
+        .subpost(parentPostID: parentPostID, subpostID: createdPostID)
+      )
+      for replacement in [
+        contentFragment(type: 0, text: "#(菜狗)"),
+        contentFragment(type: 11, c: "吃瓜"),
+        contentFragment(type: 11, c: "未知表情"),
+      ] {
+        response.data.subpostList[0].content = prefix + suffix
+        response.data.subpostList[0].content[prefix.count + 1] = replacement
+        XCTAssertThrowsError(
+          try TiebaAuthenticatedDecoder.verifiedTextReplySubpost(
+            from: response,
+            context: context,
+            newSubpostID: createdPostID,
+            content: content
+          )
+        ) { XCTAssertEqual($0 as? TiebaClientError, .invalidAuthenticatedResponse) }
+      }
+    }
+  }
+
+  func testExpandedReplyCatalogStillRejectsUnknownOrInjectedMarkers() {
+    for target: TiebaTextReplyTarget in [
+      .thread(firstPostID: firstPostID), .post(postID: parentPostID),
+      .subpost(parentPostID: parentPostID, subpostID: targetSubpostID),
+    ] {
+      for content in [
+        "#(小姐姐来拉)", "#(吃瓜,extra)", "#(吃瓜)#(未知表情)",
+        "#(吃瓜)#(pic,1,2,3)", "#(吃瓜)#(reply, portrait, name)",
+      ] {
+        XCTAssertThrowsError(
+          try makeRequest(
+            submission: makeSubmission(target: target, content: content),
+            replyUserID: 9_009,
+            replyUserDisplayName: "Target User",
+            replyUserPortrait: "portrait-token"
+          )
+        ) {
+          guard case .invalidArgument = $0 as? TiebaClientError else {
+            return XCTFail("Unexpected error for \(content): \($0)")
+          }
+        }
+      }
+    }
   }
 
   private func credential() -> TiebaSessionCredential {

@@ -25,6 +25,18 @@ and its verified metadata enters the public app source.
 
 ### Release and validation
 
+- **Current `main` visual classic-emoticon picker:** New-topic and all three
+  reply composers share a searchable grid of 126 fixed names, including 吃瓜,
+  捂嘴笑 and 菜狗. Existing 50-name drafts keep their exact wire tokens. Small
+  previews come only from compiled official HTTPS image addresses and follow
+  the current media/network policy; names remain selectable offline or when
+  previews cannot load. No remote catalog, arbitrary marker or account credential
+  is involved in preview loading. Submission/readback still compares exact structured
+  tokens; legacy 生气 and current 哼 are not silently treated as the same token.
+  The old 生气 entry retains a text fallback because its artwork mapping is
+  ambiguous. Posted content retains the existing text rendering in this change.
+  Real-account sending and small-screen/device picker validation remain gates;
+  the overall parity estimate is unchanged.
 - **`v0.65.0-alpha.25` original GIF creation:** New-topic and direct-topic-reply
   composers accept GIF in 原图 mode, with a GIF badge on its thumbnail. The
   importer retains image data, palettes, frame timing, transparency, disposal,
@@ -564,8 +576,10 @@ and its verified metadata enters the public app source.
   topic, an ordinary floor, or a specific nested reply. A visible inline
   nested-reply preview can open the same exact-target composer without first
   opening the full reply page. The body supports ordinary text plus a fixed,
-  bundled catalog of 50 classic Tieba emoticon tokens selected at the current
-  text selection; it does not download or bundle remote emoticon artwork. The write is sent
+  compiled catalog of 126 classic Tieba emoticon tokens selected at the current
+  text selection. The searchable picker loads bounded previews from fixed
+  official HTTPS addresses under the media/network policy; artwork is not
+  bundled, and names remain usable without downloads. The write is sent
   at most once, a valid server PID is read back by exact identity, and challenge,
   accepted-but-not-yet-visible, and unknown outcomes remain distinct. Inbox reply
   actions first relocate the exact ordinary post or child reply and recheck the
@@ -1204,7 +1218,7 @@ and its verified metadata enters the public app source.
   or a specific nested reply, including one under the canonical first floor,
   from native, draft-backed composers. A visible inline nested-reply preview has
   a direct exact-target reply action. The pure-text path accepts only ordinary
-  text and the fixed 50-name classic-emoticon catalog. Direct topic replies on
+  text and the fixed 126-name classic-emoticon catalog. Direct topic replies on
   current `main` may additionally use the bounded static-image workflow described
   above; ordinary-floor, nested-reply, and all other rich markers remain invalid.
   Replying to the first-floor parent itself

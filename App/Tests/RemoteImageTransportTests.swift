@@ -1,9 +1,52 @@
 import Foundation
+import TiebaCore
 import XCTest
 
 @testable import TiebaPlusPlus
 
 final class RemoteImageTransportTests: XCTestCase {
+  func testEmoticonRedirectCannotLeaveFixedCatalogOrCarryCredentials() throws {
+    let url = try XCTUnwrap(URL(string: "https://tb3.bdstatic.com/emoji/image_emoticon25@2x.png"))
+    let session = URLSession(configuration: .ephemeral)
+    let task = session.downloadTask(with: url)
+    defer {
+      task.cancel()
+      session.invalidateAndCancel()
+    }
+    let response = try XCTUnwrap(
+      HTTPURLResponse(url: url, statusCode: 302, httpVersion: nil, headerFields: nil))
+    for target in [
+      url.absoluteString,
+      "https://example.com/emoji/image_emoticon25@2x.png",
+      "https://tb3.bdstatic.com/emoji/unknown.png",
+      url.absoluteString + "?tracking=1",
+      "http://tb3.bdstatic.com/emoji/image_emoticon25@2x.png",
+    ] {
+      let delegate = BoundedHTTPSRemoteImageTaskDelegate(
+        maximumResponseBytes: 100,
+        networkAccess: .economicalOnly,
+        redirectURLValidator: TiebaClassicEmoticonCatalog.allowsThumbnailURL,
+        onProgress: { _ in })
+      var request = URLRequest(url: try XCTUnwrap(URL(string: target)))
+      request.setValue("private", forHTTPHeaderField: "Cookie")
+      request.setValue("private", forHTTPHeaderField: "Authorization")
+      let recorder = RemoteImageRedirectCompletionRecorder()
+      delegate.urlSession(
+        session, task: task, willPerformHTTPRedirection: response, newRequest: request,
+        completionHandler: { recorder.record($0, for: "redirect") })
+      XCTAssertEqual(recorder.completionCount(for: "redirect"), 1)
+      if target == url.absoluteString {
+        let redirected = try XCTUnwrap(recorder.request(for: "redirect"))
+        XCTAssertNil(redirected.value(forHTTPHeaderField: "Cookie"))
+        XCTAssertNil(redirected.value(forHTTPHeaderField: "Authorization"))
+        XCTAssertFalse(redirected.allowsExpensiveNetworkAccess)
+        XCTAssertFalse(redirected.allowsConstrainedNetworkAccess)
+      } else {
+        XCTAssertNil(recorder.request(for: "redirect"), target)
+      }
+    }
+  }
+
   func testDownloadProgressComputesDeterminateValuesAndFloorsPercentage() throws {
     let empty = RemoteImageDownloadProgress(
       receivedByteCount: 0,
@@ -727,9 +770,11 @@ private final class RemoteImageRequestRecorder: @unchecked Sendable {
 private final class RemoteImageRedirectCompletionRecorder: @unchecked Sendable {
   private let lock = NSLock()
   private var requests = [String: URLRequest?]()
+  private var completionCounts = [String: Int]()
 
   func record(_ request: URLRequest?, for key: String) {
     lock.lock()
+    completionCounts[key, default: 0] += 1
     requests[key] = request
     lock.unlock()
   }
@@ -738,5 +783,11 @@ private final class RemoteImageRedirectCompletionRecorder: @unchecked Sendable {
     lock.lock()
     defer { lock.unlock() }
     return requests[key] ?? nil
+  }
+
+  func completionCount(for key: String) -> Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return completionCounts[key, default: 0]
   }
 }

@@ -16,6 +16,18 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
+Current `main` expands the fixed classic-emoticon catalog from 50 to 126 names
+and gives the shared new-topic/reply picker image previews and name search.
+The original 50 tokens and their order remain unchanged; the additional names
+come from Tieba's fixed official web catalog, not runtime registration from
+arbitrary post content. Only compiled official HTTPS thumbnail URLs are allowed,
+including redirects, and cache-only/economical-network policies still apply.
+Unknown artwork stays a selectable text entry. Structured sending/readback
+checks stay exact, including old/new names whose artwork may overlap. This
+improves the existing creation workflow without adding a weighted point or
+claiming full in-body graphical-emoticon rendering. Account/device validation
+remains outstanding.
+
 Current `main` extends original-image creation to GIF in new topics and direct
 topic replies, matching TiebaLite's original-byte upload path. A bounded container
 rewrite preserves animation data and removes metadata before ImageIO; all frames
@@ -397,6 +409,9 @@ They reuse the existing three write targets and add no endpoint: only exact,
 compiled `#(name)` tokens are accepted. Voice, arbitrary markers, and remotely
 supplied sending choices remain unsupported; image support is limited to the
 current-main workflow described next.
+The catalog now includes 126 fixed names and a searchable preview grid. Its
+fixed official image requests are anonymous and follow the media/network policy;
+they neither register new sendable tokens nor affect account-session binding.
 The current-main static-image composer closes another bounded part of that gap
 for new topics and direct topic replies and receives one partial weighted point.
 It includes the picker, nine-image drafts, ordered upload proof, immutable final
@@ -869,7 +884,7 @@ disposable-account and physical-device validation gates.
 11. Disposable-account validation of all three text/classic-emoticon reply targets,
    including minimum-field deletion, missing/random/expired/cross-account
    STOKEN and TBS, challenge and permission failures, post-dispatch loss,
-   exact-PID visibility, all 50 fixed catalog tokens, type-2/type-11 readback,
+   exact-PID visibility, all 126 fixed catalog tokens, type-2/type-11 readback,
    inline-preview entry, account rotation, and duplicate-send prevention
 12. Disposable-account validation of text/classic-emoticon new-topic creation and
    the current-main static-image workflow for new topics and direct topic replies:

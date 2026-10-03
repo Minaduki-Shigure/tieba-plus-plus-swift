@@ -243,6 +243,31 @@ final class DownsampledRemoteImageTests: XCTestCase {
     XCTAssertTrue(recordedKinds.isEmpty)
   }
 
+  func testEmoticonPolicyRejectsForgedFinalResponseBeforeDecodingOrCaching() async throws {
+    let initialURL = try XCTUnwrap(
+      URL(string: "https://tb3.bdstatic.com/emoji/image_emoticon25@2x.png"))
+    let foreignURL = try XCTUnwrap(URL(string: "https://example.com/substituted.png"))
+    let downloader = SubstitutingEmoticonDownloader(
+      imageData: try makeJPEGData(), responseURL: foreignURL)
+    let repository = DownsampledImageRepository(downloader: downloader)
+    do {
+      _ = try await repository.image(
+        at: initialURL, maxPixelSize: 120, fetchPolicy: .allowNetwork(.preview),
+        urlPolicy: .classicEmoticon, onProgress: nil)
+      XCTFail("The final response must retain the fixed catalog URL policy")
+    } catch DownsampledImageError.invalidResponse {}
+    let requests = await downloader.requestCount
+    XCTAssertEqual(requests, 1)
+    do {
+      _ = try await repository.image(
+        at: initialURL, maxPixelSize: 120, fetchPolicy: .cacheOnly(.preview),
+        urlPolicy: .classicEmoticon, onProgress: nil)
+      XCTFail("A rejected response must not enter the image cache")
+    } catch DownsampledImageError.cacheMiss {}
+    let finalRequests = await downloader.requestCount
+    XCTAssertEqual(finalRequests, 1)
+  }
+
   func testPersistentCacheOnlyHitSurvivesRepositoryRecreationWithoutNetwork() async throws {
     let environment = try makeDiskCacheEnvironment()
     defer { try? FileManager.default.removeItem(at: environment.rootURL) }
@@ -1716,6 +1741,34 @@ private actor GatedPersistentImageCache: RemoteImagePersistentCacheProviding {
     clearReleased = true
     clearContinuation?.resume()
     clearContinuation = nil
+  }
+}
+
+private actor SubstitutingEmoticonDownloader: RemoteImageDownloading {
+  let imageData: Data
+  let responseURL: URL
+  private(set) var requestCount = 0
+
+  init(imageData: Data, responseURL: URL) {
+    self.imageData = imageData
+    self.responseURL = responseURL
+  }
+
+  func download(
+    from url: URL, kind: RemoteImageDownloadKind, networkAccess: RemoteImageNetworkAccess
+  ) async throws -> RemoteImageFileLease {
+    requestCount += 1
+    return try makeLease(imageData: imageData, sourceURL: responseURL)
+  }
+
+  func download(
+    from url: URL, kind: RemoteImageDownloadKind, networkAccess: RemoteImageNetworkAccess,
+    redirectURLValidator: @escaping @Sendable (URL) -> Bool,
+    onProgress: @escaping @Sendable (RemoteImageDownloadProgress) -> Void
+  ) async throws -> RemoteImageFileLease {
+    // Deliberately bypass the transport validator to exercise the repository's
+    // independent final-response check, rather than the protocol default.
+    try await download(from: url, kind: kind, networkAccess: networkAccess)
   }
 }
 

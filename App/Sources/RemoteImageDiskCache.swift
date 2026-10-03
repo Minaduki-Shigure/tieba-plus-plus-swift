@@ -132,7 +132,7 @@ extension RemoteImagePersistentCacheProviding {
     switch DownsampledImageURLPolicy(rawValue: namespace) {
     case .some(.remoteImage):
       return try await cachedDownload(from: url, kind: kind)
-    case .some(.forumAvatar), .none:
+    case .some(.forumAvatar), .some(.classicEmoticon), .none:
       return nil
     }
   }
@@ -152,7 +152,7 @@ extension RemoteImagePersistentCacheProviding {
         kind: kind,
         generationToken: generationToken
       )
-    case .some(.forumAvatar), .none:
+    case .some(.forumAvatar), .some(.classicEmoticon), .none:
       return
     }
   }

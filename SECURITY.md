@@ -744,8 +744,19 @@ control characters and all markers; bodies preserve CR, LF, and tab while reject
 unsupported controls. Only the fixed compiled classic-emoticon catalog may emit
 complete `#(name)` tokens. Unknown, malformed, nested, image, `reply`, and every
 other user-supplied rich-content marker are rejected without normalization. The
-catalog contains names only: no remote or copied emoticon artwork is bundled or
-downloaded. An identical submission
+catalog contains 126 compiled names, preserving all original 50 wire tokens
+without alias normalization. It never adds sendable choices from a downloaded
+catalog or arbitrary content fragments. The picker may download small previews
+only from its compiled exact `https://tb3.bdstatic.com/emoji/…@2x.png` addresses.
+The scoped URL policy validates the initial URL, every redirect, and final
+response URL; query/fragment/credential/foreign-host variants are rejected.
+Preview requests use the existing anonymous bounded image transport, independent
+cache namespace, and media/network policy. Cache-only mode does not authorize a
+download when an emoticon is selected. One outer button handles insertion;
+thumbnails never create nested load/gallery actions. Artwork is not bundled and
+the name remains usable when its preview is unavailable. Unknown/ambiguous
+artwork uses text; it does not relax the compiled sendable-name list or exact
+structured-token readback. An identical submission
 UUID shares one owner, conflicting reuse fails, and all new-topic writes for one
 UID are serialized. Cancellation before dispatch performs no write. Once the
 write is dispatched, it is never automatically retried: an unparseable receipt,
@@ -1969,14 +1980,14 @@ nominal success followed by mandatory readback, identical-operation sharing,
 conflicting-operation read-only reconciliation, logout, same-UID session
   rotation, and a switch to another UID while either read or write is in flight.
 Text/classic-emoticon new-topic validation must additionally cover titled and untitled
-topics, Chinese/Unicode/newline/form-reserved characters, all 50 catalog names,
+topics, Chinese/Unicode/newline/form-reserved characters, all 126 catalog names,
 type-2/type-11 structured readback, exact forum and author
 binding, server-generated untitled display titles, challenge and moderation
 delay, pre-dispatch cancellation, post-dispatch transport loss, foreground and
 background transitions, same-UID credential rotation, account switching, and
 proof that every submission dispatches at most one write.
 Text/classic-emoticon reply validation must cover all three targets, the inline
-preview entry, current-snapshot rebinding, all 50 catalog names, type-2/type-11
+preview entry, current-snapshot rebinding, all 126 catalog names, type-2/type-11
 structured readback, type-0 lookalikes, unsafe reply-marker identity fields,
 pre-dispatch cancellation, uncertain transport failure followed by exactly one
 readback and no second write, session rotation, and account switching.

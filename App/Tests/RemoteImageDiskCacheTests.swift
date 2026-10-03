@@ -96,18 +96,20 @@ final class RemoteImageDiskCacheTests: XCTestCase {
     let url = try XCTUnwrap(URL(string: "https://imgsrc.baidu.com/forum/avatar.jpg"))
     try await store(Data("default-policy".utf8), for: url, in: cache, environment: environment)
 
-    let scopedHit = try await cache.cachedDownload(
-      from: url,
-      kind: .preview,
-      namespace: DownsampledImageURLPolicy.forumAvatar.id
-    )
+    for scope in [DownsampledImageURLPolicy.forumAvatar, .classicEmoticon] {
+      let scopedHit = try await cache.cachedDownload(
+        from: url,
+        kind: .preview,
+        namespace: scope.id
+      )
+      XCTAssertNil(scopedHit, scope.id)
+    }
     let defaultHit = try await cache.cachedDownload(
       from: url,
       kind: .preview,
       namespace: DownsampledImageURLPolicy.remoteImage.id
     )
 
-    XCTAssertNil(scopedHit)
     XCTAssertNotNil(defaultHit)
   }
 

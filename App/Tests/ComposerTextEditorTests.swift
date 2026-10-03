@@ -103,4 +103,24 @@ final class ComposerTextEditorTests: XCTestCase {
       TiebaClassicEmoticonCatalog.names.count
     )
   }
+
+  func testExpandedCatalogTokensInsertWithoutChangingAdjacentComposedCharacters() throws {
+    let text = "👩🏽‍💻前选中e\u{301}后"
+    let selection = ComposerTextSelection(NSRange(try XCTUnwrap(text.range(of: "选中")), in: text))
+    for name in ["沙发", "吃瓜"] {
+      let token = try XCTUnwrap(TiebaClassicEmoticonCatalog.token(for: name))
+      let result = try XCTUnwrap(
+        ComposerTextInsertionPolicy.replacingSelection(
+          in: text,
+          selection: selection,
+          with: token
+        )
+      )
+
+      XCTAssertTrue(result.text.utf8.elementsEqual("👩🏽‍💻前\(token)e\u{301}后".utf8))
+      XCTAssertTrue(result.selection.isValid(for: result.text))
+      XCTAssertEqual(result.selection.location, selection.location + token.utf16.count)
+      XCTAssertTrue(TextReplyContentPolicy.isValid(result.text))
+    }
+  }
 }

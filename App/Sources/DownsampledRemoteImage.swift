@@ -1,6 +1,7 @@
 import Foundation
 import ImageIO
 import SwiftUI
+import TiebaCore
 import UIKit
 
 enum DownsampledRemoteImagePhase {
@@ -29,6 +30,7 @@ enum DownsampledImageFetchPolicy: Hashable, Sendable {
 enum DownsampledImageURLPolicy: String, Hashable, Sendable {
   case remoteImage = "remote-image"
   case forumAvatar = "forum-avatar"
+  case classicEmoticon = "classic-emoticon"
 
   var id: String { rawValue }
 
@@ -38,6 +40,8 @@ enum DownsampledImageURLPolicy: String, Hashable, Sendable {
       RemoteImageURLPolicy.allows(url)
     case .forumAvatar:
       ForumAvatarDisplayPolicy.allows(url)
+    case .classicEmoticon:
+      TiebaClassicEmoticonCatalog.allowsThumbnailURL(url)
     }
   }
 }

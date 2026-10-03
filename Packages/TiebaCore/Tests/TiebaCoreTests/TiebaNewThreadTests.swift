@@ -656,6 +656,85 @@ final class TiebaNewThreadTests: XCTestCase {
     )
   }
 
+  func testExpandedEmoticonsSurviveNewThreadWireEncodingAndSignature() throws {
+    let content = "前e\u{301}#(吃瓜)#(捂嘴笑)#(菜狗)#(小姐姐来啦)#(哼)后 +%&=🙂"
+    let submission = makeSubmission(content: content)
+    let parsed = try newThreadMultipart(makeRequest(submission: submission))
+    let message = try AddThreadReqIdl(serializedBytes: parsed.protobuf)
+
+    XCTAssertEqual(Array(message.data.content.utf8), Array(content.utf8))
+    XCTAssertEqual(
+      parsed.fields["sign"],
+      TiebaAuthenticatedRequestFactory.signature(
+        for: parsed.fields.filter { $0.key != "sign" }.map { ($0.key, $0.value) }
+      )
+    )
+    let legacy = try newThreadMultipart(makeRequest(submission: makeSubmission(content: "#(生气)")))
+    XCTAssertEqual(parsed.fields["sign"], legacy.fields["sign"])
+    XCTAssertNotEqual(parsed.protobuf, legacy.protobuf)
+  }
+
+  func testExpandedEmoticonsRequireStructuredExactNewThreadReadback() throws {
+    let receipt = TiebaNewThreadReceipt(threadID: threadID, firstPostID: firstPostID)
+    for name in ["吃瓜", "捂嘴笑", "菜狗", "小姐姐来啦", "哼", "生气"] {
+      let submission = makeSubmission(content: "前#(\(name))后")
+      for type: UInt32 in [2, 11] {
+        let fragments = [
+          contentFragment(type: 0, text: "前"),
+          contentFragment(type: type, c: name),
+          contentFragment(type: 0, text: "后"),
+        ]
+        XCTAssertEqual(
+          try TiebaAuthenticatedDecoder.verifiedNewThread(
+            from: newThreadPageResponse(
+              title: submission.title, content: "unused", contentFragments: fragments
+            ),
+            context: newThreadContext(),
+            submission: submission,
+            receipt: receipt
+          ),
+          receipt,
+          "\(name), type \(type)"
+        )
+      }
+      let wrongName = name == "生气" ? "哼" : "生气"
+      for fragment in [
+        contentFragment(type: 0, text: "#(\(name))"),
+        contentFragment(type: 2, c: wrongName),
+        contentFragment(type: 11, c: "小姐姐来拉"),
+      ] {
+        XCTAssertThrowsError(
+          try TiebaAuthenticatedDecoder.verifiedNewThread(
+            from: newThreadPageResponse(
+              title: submission.title,
+              content: "unused",
+              contentFragments: [
+                contentFragment(type: 0, text: "前"), fragment,
+                contentFragment(type: 0, text: "后"),
+              ]
+            ),
+            context: newThreadContext(),
+            submission: submission,
+            receipt: receipt
+          )
+        ) { XCTAssertEqual($0 as? TiebaClientError, .invalidAuthenticatedResponse) }
+      }
+    }
+  }
+
+  func testExpandedNewThreadCatalogDoesNotPermitUnknownOrInjectedMarkers() {
+    for content in [
+      "#(小姐姐来拉)", "#(吃瓜,extra)", "#(吃瓜)#(未知表情)",
+      "#(吃瓜)#(pic,1,2,3)", "#(吃瓜)#(reply, portrait, name)",
+    ] {
+      XCTAssertThrowsError(try makeRequest(submission: makeSubmission(content: content))) {
+        guard case .invalidArgument = $0 as? TiebaClientError else {
+          return XCTFail("Unexpected error for \(content): \($0)")
+        }
+      }
+    }
+  }
+
   private func credential() -> TiebaSessionCredential {
     TiebaSessionCredential(
       bduss: String(repeating: "b", count: 192),

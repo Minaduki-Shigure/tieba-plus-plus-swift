@@ -115,10 +115,21 @@ fall back to the former mini-program form endpoint after dispatch. The static
 image upload client version also follows this commit's `OfficialTiebaApi`
 configuration change to `12.52.1.0`; its upload endpoint, chunk layout, and
 image-marker protocol are unchanged.
-The fixed 50-name classic-emoticon wire catalog and `#(name)` insertion behavior
+The original 50-name classic-emoticon wire catalog and `#(name)` insertion behavior
 are adapted from TiebaLite's `EmoticonManager.kt` and `ReplyPage.kt` at commit
 `268f388c7824ae2c8f6ed549827a943ec8a7f352`.
-No TiebaLite or Baidu emoticon bitmap is copied or downloaded. Unknown,
+The expanded 126-name catalog preserves those original tokens and appends
+fixed names independently checked against Baidu's official web mapping:
+`https://tb3.bdstatic.com/tb/wise/hybrid-usergrow-base/static/js/util.d8d2afea.js`
+(verified 2026-10-03, SHA-256
+`19a200f4f87474759b3e21419e33c3fb61919db61d75e8a965a103bbfe2b432a`).
+The official `image_emoticon` names are used; the editor-only alternate spelling
+`小姐姐来拉` is not substituted for `小姐姐来啦`. Legacy `生气` is retained
+separately from `哼`, and repeated `吃瓜` identifiers produce one name entry.
+No TiebaLite or Baidu emoticon bitmap is bundled. The picker fetches previews
+from fixed official `https://tb3.bdstatic.com/emoji/` addresses under its media
+policy; artwork remains Baidu's and is used for service interoperability.
+Unknown,
 malformed, nested, image, `reply`, and every other user-supplied rich-content
 marker are rejected; the nested-reply prefix remains protocol-owned and is
 derived only from the freshly read target user. A valid server receipt is
