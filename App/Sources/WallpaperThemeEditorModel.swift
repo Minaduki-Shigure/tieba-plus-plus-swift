@@ -70,6 +70,7 @@ final class WallpaperThemeEditorModel: ObservableObject {
   private var previewID = UUID()
   private var renderedMatchesDraft = false
   private var isActive = true
+  private var pendingRestoration: WallpaperThemeDocument?
 
   init(
     processing: WallpaperThemeEditorProcessing = .live,
@@ -121,16 +122,27 @@ final class WallpaperThemeEditorModel: ObservableObject {
   }
 
   func restore(document: WallpaperThemeDocument) {
-    importImage(restoring: document.record) { document.sourceJPEG }
+    guard isActive, !isSaving, source == nil, !isImporting else { return }
+    pendingRestoration = document
+    beginImport(restoring: document.record) { document.sourceJPEG }
   }
 
   /// The loader can be Photos or an explicit anonymous recommendation request.
   /// A failed replacement preserves the previous draft and its editable settings.
   func importImage(
-    restoring record: WallpaperThemeRecord? = nil,
     load: @escaping @MainActor () async throws -> Data
   ) {
     guard isActive, !isSaving else { return }
+    // An explicit replacement supersedes the initial restore even if loading
+    // the new choice later fails or is cancelled while the page is hidden.
+    pendingRestoration = nil
+    beginImport(restoring: nil, load: load)
+  }
+
+  private func beginImport(
+    restoring record: WallpaperThemeRecord?,
+    load: @escaping @MainActor () async throws -> Data
+  ) {
     importTask?.cancel()
     invalidatePreview()
     let requestID = UUID()
@@ -145,6 +157,7 @@ final class WallpaperThemeEditorModel: ObservableObject {
         let prepared = try await processing.prepare(data)
         try Task.checkCancellation()
         guard let self, self.isActive, self.importID == requestID else { return }
+        self.pendingRestoration = nil
         // A restored source is already sanitized and verified by the repository.
         // Keep its encoded bytes so repeated settings edits do not recompress JPEGs.
         self.source = record == nil
@@ -159,6 +172,9 @@ final class WallpaperThemeEditorModel: ObservableObject {
         self.schedulePreview()
       } catch {
         guard let self, self.isActive, self.importID == requestID else { return }
+        // Only disappearance preserves a pending restore. A real load failure
+        // stays visible and is not retried automatically on every appearance.
+        self.pendingRestoration = nil
         self.isImporting = false
         self.importTask = nil
         if !(error is CancellationError) {
@@ -226,7 +242,11 @@ final class WallpaperThemeEditorModel: ObservableObject {
   func resume() {
     guard !isActive else { return }
     isActive = true
-    schedulePreview()
+    if let pendingRestoration {
+      restore(document: pendingRestoration)
+    } else {
+      schedulePreview()
+    }
   }
 
   // Awaitable handles make the state transitions testable without wall-clock sleeps.
