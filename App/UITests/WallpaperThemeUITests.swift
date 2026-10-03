@@ -138,16 +138,52 @@ final class WallpaperThemeUITests: XCTestCase {
       throw WallpaperUITestError.unavailable("Missing element: \(element.identifier)")
     }
     if element.isHittable { return }
-    let scrollView = app.scrollViews.firstMatch
-    for _ in 0..<8 {
-      scrollView.swipeUp()
+    let editorScrollView = app.scrollViews["wallpaper-theme-editor-scroll"]
+    let scrollView = editorScrollView.exists
+      ? editorScrollView
+      : app.scrollViews.containing(.any, identifier: element.identifier).firstMatch
+    guard scrollView.exists else {
+      throw WallpaperUITestError.unavailable(
+        "No scroll container for element: \(element.identifier)")
+    }
+    for _ in 0..<12 {
+      let scrollFrame = scrollView.frame
+      var visible = scrollFrame.intersection(app.frame)
+      let navigationBar = app.navigationBars.firstMatch
+      if navigationBar.exists, navigationBar.frame.intersects(visible) {
+        let top = max(visible.minY, navigationBar.frame.maxY)
+        visible = CGRect(x: visible.minX, y: top, width: visible.width,
+          height: max(0, visible.maxY - top))
+      }
+      let tabBar = app.tabBars.firstMatch
+      if tabBar.exists, tabBar.frame.intersects(visible) {
+        visible.size.height = max(0, min(visible.maxY, tabBar.frame.minY) - visible.minY)
+      }
+      guard visible.width > 16, visible.height > 64 else {
+        throw WallpaperUITestError.unavailable(
+          "Scroll container has no usable viewport: \(scrollFrame)")
+      }
+      let targetFrame = element.frame
+      guard !targetFrame.isEmpty, !targetFrame.isNull else {
+        throw WallpaperUITestError.unavailable(
+          "Element has no layout frame: \(element.identifier)")
+      }
+      let movesUp = targetFrame.midY > visible.midY
+      let upperY = visible.minY + visible.height * 0.25
+      let lowerY = visible.minY + visible.height * 0.75
+      // The editor has 16pt content padding. Its center contains the crop's
+      // drag gesture and sliders, so scroll through the empty leading margin.
+      let origin = scrollView.coordinate(withNormalizedOffset: .zero)
+      let marginX = visible.minX + 8 - scrollFrame.minX
+      let start = origin.withOffset(CGVector(
+        dx: marginX, dy: (movesUp ? lowerY : upperY) - scrollFrame.minY))
+      let end = origin.withOffset(CGVector(
+        dx: marginX, dy: (movesUp ? upperY : lowerY) - scrollFrame.minY))
+      start.press(forDuration: 0.05, thenDragTo: end)
       if element.isHittable { return }
     }
-    for _ in 0..<8 {
-      scrollView.swipeDown()
-      if element.isHittable { return }
-    }
-    throw WallpaperUITestError.unavailable("Element is not visible: \(element.identifier)")
+    throw WallpaperUITestError.unavailable(
+      "Element is not visible: \(element.identifier), target: \(element.frame), container: \(scrollView.frame)")
   }
 
   @MainActor
