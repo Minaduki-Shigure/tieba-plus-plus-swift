@@ -162,18 +162,18 @@ final class RootTabBarTests: XCTestCase {
       rootView: RootTabBarTestHost(visibility: visibility, layout: layout))
     let context = try makeWindow(root: host)
     defer { closeWindow(context) }
-    @MainActor func height() -> CGFloat {
+    let height: @MainActor @Sendable () -> CGFloat = {
       // Read the mounted bar's outer region, not the whole hosting controller's
       // sizeThatFits result (which also participates in window safe-area layout).
       layout.region?.bounds.height ?? .nan
     }
-    @MainActor func diagnostics() -> String {
-      let bar = nativeBar(in: host.view)
+    let diagnostics: @MainActor @Sendable () -> String = {
+      let bar = self.nativeBar(in: host.view)
       return "visible=\(visibility.isVisible) region=\(String(describing: layout.region?.frame)) "
         + "window=\(context.window.bounds) safeArea=\(context.window.safeAreaInsets) "
         + "host=\(host.view.bounds) bar=\(String(describing: bar?.frame)) "
         + "attached=\(bar?.window === context.window)\n"
-        + nativeViewDiagnostics(host.view)
+        + self.nativeViewDiagnostics(host.view)
     }
     try await waitUntil(phase: "initial mounted bar", diagnostics: diagnostics) {
       self.nativeBar(in: host.view) != nil && height() > 1
