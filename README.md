@@ -37,7 +37,11 @@ and its verified metadata enters the public app source.
   when the row has disappeared from the list. Verification requires two matching
   complete scans, ending at an empty page; short pages do not count as completion.
   Duplicate/changing pages, errors, 2,000-record/100-page limits and a 30-second
-  scan budget leave the result unconfirmed. These are bounded observations, not
+  absolute scan deadline leave the result unconfirmed. Cancellation before the
+  transport runs clears the prepared intent. A received acknowledgement or
+  definite rejection survives transient storage failures within the shared
+  coordinator gate; recovery retries journal persistence without resending.
+  These are bounded observations, not
   an atomic server snapshot. Real-account compatibility and physical-device
   validation remain outstanding; no account writes were used to develop tests.
 - **`v0.65.0-alpha.33` inline classic emoticons:** Post bodies, full nested replies,

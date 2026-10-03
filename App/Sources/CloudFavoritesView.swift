@@ -697,7 +697,7 @@ struct CloudFavoritesView: View {
       }
     } message: {
       if let intent = viewModel.pendingRemoval {
-        Text("将从当前贴吧账户移除“\(intent.title)”（主题 \(intent.thread.id)）的收藏记录。操作前会核对账号和云收藏列表；不会删除帖子正文。")
+        Text("将从当前贴吧账户移除“\(intent.title)”（主题 \(intent.thread.id)）的收藏记录。帖子正文会保留。")
       }
     }
     .alert(

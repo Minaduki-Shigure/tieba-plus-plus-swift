@@ -212,6 +212,9 @@ private struct CloudFavoriteMutationLedgerArchive: Codable {
   mutating func removeAfterDefiniteFailure(key: CloudFavoriteMutationLedgerKey, operationID: UUID)
     throws
   {
+    // A previous removal may have reached rename before directory fsync failed.
+    // Repeating it is safe only when absent or still the exact pending operation.
+    guard records.contains(where: { $0.key == key }) else { return }
     let index = try index(key: key, operationID: operationID)
     guard records[index].phase == .dispatchPending else {
       throw CloudFavoriteMutationLedgerError.invalidTransition
@@ -377,10 +380,11 @@ actor FileCloudFavoriteMutationLedger: CloudFavoriteMutationLedgerRepository {
   ) async throws -> CloudFavoriteMutationLedgerRecord {
     try await withExclusiveLock {
       var archive = try loadArchive()
-      let previous = archive.records.first { $0.key == key }
       let record = try archive.transition(
         key: key, operationID: operationID, phase: phase, now: now)
-      if record != previous { try commit(archive) }
+      // Re-sync even an identical result: a previous commit could have renamed
+      // the file successfully but failed its final durability sync.
+      try commit(archive)
       return record
     }
   }

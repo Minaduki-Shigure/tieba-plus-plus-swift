@@ -103,9 +103,7 @@ final class CloudFavoriteMutationLedgerTests: XCTestCase {
     try await ledger.removeAfterDefiniteFailure(key: key(), operationID: pending.operationID)
     let absent = try await ledger.record(for: key())
     XCTAssertNil(absent)
-    await assertError(.missingRecord) {
-      try await ledger.removeAfterDefiniteFailure(key: key(), operationID: pending.operationID)
-    }
+    try await ledger.removeAfterDefiniteFailure(key: key(), operationID: pending.operationID)
     for phase in [
       CloudFavoriteMutationLedgerPhase.outcomeUnknown, .acceptedAwaitingVerification,
       .observedAbsent,
@@ -320,6 +318,43 @@ final class CloudFavoriteMutationLedgerTests: XCTestCase {
     let recovered = try await fixture.ledger().record(for: key())
     XCTAssertEqual(recovered?.restoredPhase, .outcomeUnknown)
     XCTAssertEqual(recovered?.blocksWrites, true)
+  }
+
+  func testFinalizationRetryRepeatsDirectorySyncEvenWhenResultWasAlreadyRenamed() async throws {
+    for removesRecord in [false, true] {
+      let fixture = try Fixture()
+      defer { fixture.remove() }
+      let pending = try await fixture.ledger().prepare(
+        key: key(), operationID: UUID(), sessionRevision: UUID(), now: date)
+      let failing = FileCloudFavoriteMutationLedger(
+        fileURL: fixture.file, testingKey: testingKey,
+        beforeDurabilitySync: { if $0 == .parentDirectory { throw TestFailure.injected } })
+      // Both attempts must report the durability failure. Merely finding the
+      // desired bytes on disk after rename is not a successful fsync retry.
+      for _ in 0..<2 {
+        await assertError(.writeFailed) {
+          if removesRecord {
+            try await failing.removeAfterDefiniteFailure(
+              key: key(), operationID: pending.operationID)
+          } else {
+            _ = try await failing.transition(
+              key: key(), operationID: pending.operationID, phase: .acceptedAwaitingVerification,
+              now: date)
+          }
+        }
+      }
+      if removesRecord {
+        try await fixture.ledger().removeAfterDefiniteFailure(
+          key: key(), operationID: pending.operationID)
+        let record = try await fixture.ledger().record(for: key())
+        XCTAssertNil(record)
+      } else {
+        let record = try await fixture.ledger().transition(
+          key: key(), operationID: pending.operationID, phase: .acceptedAwaitingVerification,
+          now: date)
+        XCTAssertTrue(record.receiptAcknowledged)
+      }
+    }
   }
 
   func testTwoInstancesSerializeSameAndDifferentResourcesWithoutLosingRecords() async throws {
