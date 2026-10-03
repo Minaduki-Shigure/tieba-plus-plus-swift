@@ -24,8 +24,8 @@ Unknown names, ambiguous artwork and failed/cache-only misses stay readable as
 text; copying, filtering and write visibility proofs retain their original meaning.
 Pure-text rows keep their existing renderer. One Text per paragraph and shared,
 bounded, cancellable image batches avoid a view or animation timer for every face.
-New offline paired profiles must prove actual cached image rendering on both
-long-thread and dense nested-reply fixtures; previous profiles used an unknown
+New offline paired profiles prove actual cached image rendering on both
+long-thread and dense nested-reply fixtures; older profiles used an unknown
 face and could not validate this path. Device scrolling/VoiceOver remain gates;
 the coarse weighted estimate is unchanged pending validation.
 
@@ -36,9 +36,19 @@ combined six paragraphs into one image-rich Text and still laid out text tokens
 before asynchronously rereading already-decoded images. The follow-up separates
 body paragraphs within one shared loading view and reads the existing bounded
 memory cache synchronously for first layout; no extra cache or network access
-is introduced. Reply previews retain their overall line limit. The same sixteen
-recordings must be rerun before releasing this feature; simulator frame intervals
-are not physical-device frame-rate claims.
+is introduced. Reply previews retain their overall line limit.
+
+The [optimized rerun](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37116977402)
+at `6b10716a` completed all sixteen recordings with verified warm-cache image
+rendering. Long-thread main-thread samples fell 22.0%/4.5%, text measurement fell
+39.0%/21.8%, p95 intervals fell 24.1%/3.3%, and p99 fell 17.5%/7.4% versus the
+same-run text-token baseline. Dense emoticon replies remain mixed: sampled work
+changed +15.4%/-9.2% (mean +3.1%), p95 +6.4%/-0.5%, p99 +27.9%/-29.8%, and
+over-budget interval rate increased 4.4%/7.6% relatively. The older lazy-comments
+container benefit remains clear in both replicates (sampled work -47.6%/-57.1%).
+These two-replicate results support the alpha.33 long-body fix, not a statistical
+claim of a universal speedup. They cover generated offline artwork in a warm
+cache, not cold downloads, live CDN behavior, or physical-device frame rates.
 
 Current `main` adds the application-icon choice available in TiebaLite's
 `CustomSettingsPage`, using three color variants of this project's existing
@@ -91,7 +101,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-serves `v0.65.0-alpha.32` (build 110) after publication, whose app-code snapshot includes
+serves `v0.65.0-alpha.33` (build 111) after publication, whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -199,7 +209,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.65.0-alpha.32` app-code snapshot is at 80–82%; all experimental
+The public `v0.65.0-alpha.33` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
