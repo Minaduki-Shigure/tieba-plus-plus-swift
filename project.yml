@@ -14,6 +14,10 @@ configs:
 packages:
   TiebaCore:
     path: Packages/TiebaCore
+  libwebp:
+    url: https://github.com/SDWebImage/libwebp-Xcode.git
+    # 1.6.0; includes the matching official libwebp v1.6.0 submodule.
+    revision: 2b5256c29ff4e20f2a0d5ee863b62b1a22144434
 
 settings:
   base:
@@ -80,6 +84,8 @@ targets:
           - UIInterfaceOrientationLandscapeRight
     dependencies:
       - package: TiebaCore
+      - package: libwebp
+        product: libwebp
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.minaduki.tieba-plus-plus
@@ -105,6 +111,8 @@ targets:
     dependencies:
       - target: TiebaPlusPlus
       - package: TiebaCore
+      - package: libwebp
+        product: libwebp
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.minaduki.tieba-plus-plus.tests

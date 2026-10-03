@@ -51,8 +51,8 @@ enum ComposerWebPSanitizer {
     fileprivate let colorProfileChunkRange: Range<Int>?
 
     /// Build only the requested frame, without animation composition or EXIF transforms.
-    /// ImageIO's animation compositor can report a complete canvas even when a frame
-    /// bitstream is invalid. Require a separately decodable still image for each frame.
+    /// Each codec payload is validated by libwebp separately: ImageIO can return
+    /// a complete, blank bitmap for invalid static or animated frame bitstreams.
     /// Descriptors refer into `data`; no array of copied frames/profiles stays resident.
     func standaloneFrame(at index: Int) throws -> FrameImage {
       try Task.checkCancellation()
