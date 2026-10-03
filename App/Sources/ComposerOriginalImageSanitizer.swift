@@ -111,8 +111,10 @@ enum ComposerOriginalImageSanitizer {
     case .png:
       return try png(data, orientation: orientation, colorProfile: canonicalColorProfile)
     case .gif:
-      // GIF has a separate container and per-frame verification path.
+      // GIF and WebP have separate container and per-frame verification paths.
       throw ComposerImageProcessingError.unsupportedGIF
+    case .webp:
+      throw ComposerImageProcessingError.unsupportedWebP
     }
   }
 

@@ -49,7 +49,7 @@ final class ComposerOriginalImageAttachmentTests: XCTestCase {
       attachment.relativePrivateFilename.uppercased(),
       "../" + attachment.relativePrivateFilename,
       attachment.relativePrivateFilename + ".jpg",
-      attachment.id.uuidString.lowercased() + ".webp",
+      attachment.id.uuidString.lowercased() + ".avif",
     ] {
       XCTAssertFalse(ComposerImageAttachment.isValidRelativePrivateFilename(invalid), invalid)
     }

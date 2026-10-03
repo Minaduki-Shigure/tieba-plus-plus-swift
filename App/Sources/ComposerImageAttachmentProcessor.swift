@@ -13,6 +13,9 @@ enum ComposerImageProcessingError: Error, Equatable, LocalizedError, Sendable {
   case gifRequiresOriginal
   case unsupportedGIF
   case gifResourceLimit
+  case webPRequiresOriginal
+  case unsupportedWebP
+  case webPResourceLimit
   case invalidDimensions
   case sourcePixelCountTooLarge
   case decodedImageTooLarge
@@ -28,17 +31,23 @@ enum ComposerImageProcessingError: Error, Equatable, LocalizedError, Sendable {
     case .sourceTooLarge:
       "选择的图片文件过大。"
     case .unsupportedFormat:
-      "仅支持静态 JPEG、PNG、HEIC 图片，以及原图模式下的 GIF。"
+      "支持静态 JPEG、PNG、HEIC、WebP 图片；GIF 和 WebP 动图请使用原图模式。"
     case .unsupportedOriginal:
-      "原图模式仅支持普通静态 JPEG/PNG，以及可验证的 sRGB、Display P3 色彩；HDR、特殊格式或自定义色彩请改用标准或高清模式。"
+      "原图模式支持 JPEG、PNG、GIF、WebP，以及可验证的 sRGB、Display P3 色彩；HDR、特殊格式或自定义色彩请改用标准或高清模式。"
     case .animatedImage:
-      "暂不支持此格式的动画或多帧图片；GIF 请使用原图模式。"
+      "暂不支持此格式的动画或多帧图片；GIF 和 WebP 动图请使用原图模式。"
     case .gifRequiresOriginal:
       "GIF 图片请先选择原图模式，以保留动画。"
     case .unsupportedGIF:
       "这张 GIF 包含暂不支持的图像数据或扩展，无法保证原图效果。"
     case .gifResourceLimit:
       "GIF 超过安全处理限制：最多 10 MB、单边 4096 像素、500 帧和单次播放 120 秒，并受累计像素限制。"
+    case .webPRequiresOriginal:
+      "WebP 动图请先选择原图模式，以保留动画。"
+    case .unsupportedWebP:
+      "这张 WebP 包含暂不支持的图像数据、色彩或动画控制，无法保证原图效果。"
+    case .webPResourceLimit:
+      "WebP 超过图片处理限制；静态图最多单边 16384 像素、约 1258 万像素；动图最多单边 4096 像素、500 帧和单次播放 120 秒，并受累计像素限制。"
     case .invalidDimensions:
       "图片尺寸无效。"
     case .sourcePixelCountTooLarge:
@@ -177,13 +186,16 @@ struct ComposerProcessedImage: Equatable, Sendable {
 struct ComposerImageAttachmentProcessor: Sendable {
   private let beforeValidatedJPEGFullDecode: @Sendable () -> Void
   private let beforeValidatedGIFFrameDecode: @Sendable (Int) -> Void
+  private let beforeValidatedWebPFrameDecode: @Sendable (Int) -> Void
 
   init(
     beforeValidatedJPEGFullDecode: @escaping @Sendable () -> Void = {},
-    beforeValidatedGIFFrameDecode: @escaping @Sendable (Int) -> Void = { _ in }
+    beforeValidatedGIFFrameDecode: @escaping @Sendable (Int) -> Void = { _ in },
+    beforeValidatedWebPFrameDecode: @escaping @Sendable (Int) -> Void = { _ in }
   ) {
     self.beforeValidatedJPEGFullDecode = beforeValidatedJPEGFullDecode
     self.beforeValidatedGIFFrameDecode = beforeValidatedGIFFrameDecode
+    self.beforeValidatedWebPFrameDecode = beforeValidatedWebPFrameDecode
   }
 
   func process(
@@ -238,9 +250,31 @@ struct ComposerImageAttachmentProcessor: Sendable {
       else { throw ComposerImageProcessingError.invalidDimensions }
       return result
     }
-    let inspectionData =
-      quality == .original
-      ? try ComposerOriginalImageSanitizer.preflight(data) : data
+    let inspectionData: Data
+    if Self.hasWebPSignature(data) {
+      // Validate canvas/frame limits before ImageIO sees any WebP bytes. Quality
+      // modes may convert a custom color space, while originals require a
+      // recognized canonical profile because their codec payload is preserved.
+      let inspection = try Self.sanitizedWebP(data, original: quality == .original)
+      guard !inspection.isAnimated || quality == .original else {
+        throw ComposerImageProcessingError.webPRequiresOriginal
+      }
+      if quality == .original {
+        guard Int64(inspection.data.count) <= maximumByteCount else {
+          throw ComposerImageProcessingError.encodedImageTooLarge
+        }
+        try validateWebPFrames(inspection)
+        guard let result = ComposerProcessedImage(
+          data: inspection.data, pixelWidth: inspection.width, pixelHeight: inspection.height,
+          encoding: .webp, quality: .original
+        ) else { throw ComposerImageProcessingError.invalidDimensions }
+        return result
+      }
+      inspectionData = inspection.data
+    } else {
+      inspectionData = quality == .original
+        ? try ComposerOriginalImageSanitizer.preflight(data) : data
+    }
     guard
       let source = CGImageSourceCreateWithData(
         inspectionData as CFData,
@@ -341,6 +375,7 @@ struct ComposerImageAttachmentProcessor: Sendable {
     _ data: Data,
     matching attachment: ComposerImageAttachment
   ) throws {
+    try Task.checkCancellation()
     guard
       !data.isEmpty,
       Int64(data.count) == attachment.byteCount,
@@ -358,6 +393,20 @@ struct ComposerImageAttachmentProcessor: Sendable {
         inspection.height == attachment.pixelHeight
       else { throw ComposerImageProcessingError.invalidDimensions }
       try validateGIFFrames(inspection)
+      return
+    }
+    if attachment.encoding == .webp || Self.hasWebPSignature(data) {
+      guard attachment.encoding == .webp, attachment.quality == .original else {
+        throw ComposerImageProcessingError.invalidSource
+      }
+      let inspection = try Self.sanitizedWebP(data, original: true)
+      guard inspection.data == data else {
+        throw ComposerImageProcessingError.metadataWasNotRemoved
+      }
+      guard inspection.width == attachment.pixelWidth,
+        inspection.height == attachment.pixelHeight
+      else { throw ComposerImageProcessingError.invalidDimensions }
+      try validateWebPFrames(inspection)
       return
     }
     if attachment.quality == .original {
@@ -406,6 +455,65 @@ struct ComposerImageAttachmentProcessor: Sendable {
       case .resourceLimit: throw ComposerImageProcessingError.gifResourceLimit
       }
     }
+  }
+
+  private static func hasWebPSignature(_ data: Data) -> Bool {
+    data.starts(with: Data("RIFF".utf8))
+      || (data.count >= 12 && data.dropFirst(8).starts(with: Data("WEBP".utf8)))
+  }
+
+  private static func sanitizedWebP(
+    _ data: Data, original: Bool
+  ) throws -> ComposerWebPSanitizer.Inspection {
+    do {
+      return try ComposerWebPSanitizer.sanitize(data) { profile in
+        if original { return try canonicalOriginalColorProfile(profile) }
+        return profile
+      }
+    } catch let error as ComposerWebPSanitizerError {
+      switch error {
+      case .invalidWebP: throw ComposerImageProcessingError.invalidSource
+      case .unsupportedWebP: throw ComposerImageProcessingError.unsupportedWebP
+      case .resourceLimit: throw ComposerImageProcessingError.webPResourceLimit
+      }
+    }
+  }
+
+  private func validateWebPFrames(_ inspection: ComposerWebPSanitizer.Inspection) throws {
+    try Task.checkCancellation()
+    guard let source = CGImageSourceCreateWithData(
+      inspection.data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+      CGImageSourceGetType(source) as String? == UTType.webP.identifier,
+      CGImageSourceGetCount(source) == inspection.frameCount,
+      CGImageSourceGetStatus(source) == .statusComplete
+    else { throw ComposerImageProcessingError.decodeFailed }
+
+    let maximumFrameDecodedBytes = inspection.isAnimated
+      ? ComposerWebPSanitizer.maximumAnimatedPixels * 8
+      : ComposerImageProcessingPolicy.maximumSourceDecodedByteCount
+    for index in 0..<inspection.frameCount {
+      try Task.checkCancellation()
+      // ImageIO can composite partial animation frames into a full canvas. Keep
+      // only one decoded frame alive, and remove its decoder cache immediately.
+      try autoreleasepool {
+        defer { CGImageSourceRemoveCacheAtIndex(source, index) }
+        beforeValidatedWebPFrameDecode(index)
+        try Task.checkCancellation()
+        guard let decoded = CGImageSourceCreateImageAtIndex(
+          source, index, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary),
+          CGImageSourceGetStatusAtIndex(source, index) == .statusComplete,
+          decoded.width > 0, decoded.width <= inspection.width,
+          decoded.height > 0, decoded.height <= inspection.height,
+          inspection.isAnimated
+            || (decoded.width == inspection.width && decoded.height == inspection.height),
+          decoded.bitsPerComponent > 0, decoded.bitsPerComponent <= 8,
+          decoded.bytesPerRow > 0,
+          decoded.bytesPerRow <= maximumFrameDecodedBytes / decoded.height,
+          Self.hasSupportedOriginalColorModel(decoded.colorSpace)
+        else { throw ComposerImageProcessingError.decodeFailed }
+      }
+    }
+    try Task.checkCancellation()
   }
 
   private func validateGIFFrames(_ inspection: ComposerGIFSanitizer.Inspection) throws {
@@ -700,6 +808,7 @@ struct ComposerImageAttachmentProcessor: Sendable {
       || identifier == UTType.png.identifier
       || identifier == UTType.heic.identifier
       || identifier == UTType.heif.identifier
+      || identifier == UTType.webP.identifier
       || identifier == "public.heif-standard"
   }
 

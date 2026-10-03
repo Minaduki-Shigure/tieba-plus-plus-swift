@@ -40,6 +40,7 @@ enum ComposerImageAttachmentEncoding: String, Codable, Sendable {
   case jpeg
   case png
   case gif
+  case webp
 
   var filenameExtension: String {
     switch self {
@@ -49,6 +50,8 @@ enum ComposerImageAttachmentEncoding: String, Codable, Sendable {
       "png"
     case .gif:
       "gif"
+    case .webp:
+      "webp"
     }
   }
 }
@@ -213,10 +216,10 @@ struct ComposerImageAttachment:
       !value.contains("..")
     else { return false }
     guard
-      let id = UUID(uuidString: String(value.dropLast(4))),
-      let encoding = [ComposerImageAttachmentEncoding.jpeg, .png, .gif].first(where: {
+      let encoding = [ComposerImageAttachmentEncoding.jpeg, .png, .gif, .webp].first(where: {
         value.hasSuffix(".\($0.filenameExtension)")
-      })
+      }),
+      let id = UUID(uuidString: String(value.dropLast(encoding.filenameExtension.count + 1)))
     else { return false }
     return value == privateFilename(for: id, encoding: encoding)
   }

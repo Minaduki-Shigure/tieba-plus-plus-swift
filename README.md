@@ -25,6 +25,21 @@ and its verified metadata enters the public app source.
 
 ### Release and validation
 
+- **WebP image creation:** New topics and direct topic replies can import static
+  WebP in standard/high-quality mode as a metadata-stripped JPEG, or preserve
+  static and animated WebP in original mode. Original mode keeps encoded image
+  data, transparency, frame rectangles, timing, blend/disposal and looping;
+  private metadata is removed while orientation and supported display color are
+  retained. Animated WebP requires original mode rather than silently becoming
+  a still picture. The format has the same ordered drafts, upload receipts and
+  recovery behavior as existing attachments. Container limits are checked before
+  decoding, and every original frame is decoded again when stored bytes are
+  validated. Original uploads are capped at 10 MiB; animations additionally have
+  canvas, frame-count, cumulative-pixel and duration bounds. Native ImageIO,
+  mixed-format persistence and offline upload tests are required before release;
+  real-account acceptance and server-side animation retention still need device
+  validation. This extends the existing creation workflow without changing the
+  weighted parity estimate.
 - **`v0.65.0-alpha.38` Home reselection refresh:** Tapping the selected 首页 tab
   refreshes Home only for a logged-in account while its root page is visible in
   the foreground. Ordinary tab switches retain navigation without requesting a

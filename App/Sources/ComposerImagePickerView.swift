@@ -75,6 +75,17 @@ enum ComposerImagePickerPolicy {
       "无水印"
     }
   }
+
+  static func formatBadge(for encoding: ComposerImageAttachmentEncoding) -> String? {
+    switch encoding {
+    case .jpeg, .png:
+      nil
+    case .gif:
+      "GIF"
+    case .webp:
+      "WebP"
+    }
+  }
 }
 
 struct ComposerImageCleanupCandidates: Equatable {
@@ -237,7 +248,7 @@ struct ComposerImagePickerView: View {
       optionControls
 
       if quality == .original {
-        Text("仅影响新添加的图片。原图支持 JPEG、PNG 和 GIF，保留尺寸与格式并移除隐私信息，每张最多 10 MB。GIF 按原动画上传；HEIC 请选标准或高清。")
+        Text("仅影响新添加的图片。原图支持 JPEG、PNG、GIF 和 WebP，保留尺寸与格式并移除隐私信息，每张最多 10 MB。GIF 和动态 WebP 保留动画；HEIC 请选标准或高清。")
           .font(.caption)
           .foregroundStyle(.secondary)
       }
@@ -350,8 +361,8 @@ struct ComposerImagePickerView: View {
           .padding(4)
       }
       .overlay(alignment: .bottomTrailing) {
-        if attachment.encoding == .gif {
-          Text("GIF")
+        if let format = ComposerImagePickerPolicy.formatBadge(for: attachment.encoding) {
+          Text(format)
             .font(.caption2.bold())
             .padding(.horizontal, 4)
             .padding(.vertical, 2)
@@ -679,7 +690,8 @@ struct ComposerImagePickerView: View {
     at index: Int
   ) -> String {
     let qualityLabel = ComposerImagePickerPolicy.label(for: attachment.quality)
-    let formatLabel = attachment.encoding == .gif ? "GIF，" : ""
+    let formatLabel = ComposerImagePickerPolicy.formatBadge(for: attachment.encoding)
+      .map { "\($0)，" } ?? ""
     return
       "第 \(index + 1) 张图片，\(formatLabel)\(attachment.pixelWidth) 乘 \(attachment.pixelHeight) 像素，\(qualityLabel)"
   }

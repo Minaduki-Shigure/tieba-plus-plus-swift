@@ -8,13 +8,28 @@ This audit was last compared with TiebaLite `4.0-dev` at commit
 [`268f388c`](https://github.com/zzc10086/TiebaLite/tree/268f388c7824ae2c8f6ed549827a943ec8a7f352).
 The current-main automatic preview-quality, creation-transport, batch literal
 keyword entry, thread-list like entry, thread-owner ordinary-floor deletion, and
-original image/GIF selection, optional daily check-in, and authenticated
+original image/GIF/WebP selection, optional daily check-in, and authenticated
 own-topic/reply activity workflows were
 separately checked against
 [`9701bfb6`](https://github.com/zzc10086/TiebaLite/tree/9701bfb6aaf261cc37b20b5793a8404261077f49).
 That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
+
+WebP creation closes a format gap in TiebaLite `9701bfb6`'s `ReplyPage` →
+`ImagePicker` → `ImageUploader` flow: its image picker accepts WebP and its
+original upload path retains the selected bytes. Tieba++ now accepts static
+WebP for standard/high-quality JPEG conversion and static or animated WebP for
+original-mode preservation in new topics and direct topic replies. Animation
+requires original mode, so it cannot silently flatten. Bounded RIFF inspection
+preserves VP8/VP8L/alpha payloads and animation controls, removes private metadata,
+and retains only orientation and recognized canonical display profiles. Every
+original frame is decoded before admission and during stored-file validation.
+Mixed JPEG/PNG/GIF/WebP drafts retain ordered attachment identities and existing
+authenticated upload-receipt recovery. No upload endpoint or automatic resend
+behavior changes. Native decoding, persistence and offline pipeline regressions
+remain release gates; live server acceptance and animation retention require
+disposable-account/device validation. The 80–82% weighted estimate is unchanged.
 
 Alpha.38 matches TiebaLite `9701bfb6`'s `MainPage` →
 `HomePage` → `HomeUiIntent.Refresh` workflow: reselecting Home refreshes a
@@ -875,7 +890,7 @@ background row until delivery is validated, so the overall 80–82% estimate sta
 
 Current `main` now connects the security-sensitive static-image foundation to
 the new-topic and direct-topic-reply composers. Standard/high-quality normalizes a selected
-single-frame JPEG, PNG, HEIC, or HEIF into a bounded, metadata-stripped JPEG;
+single-frame JPEG, PNG, HEIC, HEIF, or WebP into a bounded, metadata-stripped JPEG;
 stores up to nine ordered attachments under private random filenames with file
 protection, backup exclusion, and digest validation; and persists account-scoped
 draft and upload state. Core validates the complete session, serializes
