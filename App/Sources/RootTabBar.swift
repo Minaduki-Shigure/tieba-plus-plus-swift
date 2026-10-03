@@ -79,7 +79,7 @@ struct RootTabBarControl: UIViewRepresentable {
   ) -> CGSize? {
     guard let width = proposal.width, width.isFinite, width > 0 else { return nil }
     let fitting = uiView.sizeThatFits(CGSize(width: width, height: 0))
-    // The safeAreaInset owns the home-indicator inset. Only reserve UIKit's
+    // The outer layout respects the home-indicator inset. Only reserve UIKit's
     // measured control height; never add the window's bottom inset again.
     return CGSize(width: width, height: max(0, fitting.height - uiView.safeAreaInsets.bottom))
   }

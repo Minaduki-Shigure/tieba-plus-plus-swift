@@ -468,8 +468,12 @@ struct RootView: View {
   }
 
   var body: some View {
-    primaryTabs
-    .safeAreaInset(edge: .bottom, spacing: 0) {
+    // Reserve the bar's measured height in layout. An outer safeAreaInset can
+    // be swallowed by TabView's UIKit container, leaving the last scroll row
+    // underneath the bar even when the page has reached its bottom.
+    VStack(spacing: 0) {
+      primaryTabs
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
       RootTabBar(
         selectedTab: rootTabSelection.wrappedValue,
         showsExploreTab: showsExploreTab,

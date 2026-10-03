@@ -18,20 +18,21 @@ struct WallpaperThemeSettingsView: View {
   @State private var recommendationRequestID = UUID()
   @State private var isLoadingRecommendations = false
   @State private var recommendationError: String?
+  @State private var attachedWindowSize = CGSize.zero
 
   init(controller: WallpaperThemeController = .shared) {
     self.controller = controller
   }
 
   var body: some View {
-    GeometryReader { window in
+    GeometryReader { contentGeometry in
       ScrollView {
         VStack(alignment: .leading, spacing: 24) {
           imageSelection
           if let source = model.source {
-            cropSection(source: source, availableWidth: max(1, window.size.width - 32))
+            cropSection(source: source, availableWidth: max(1, contentGeometry.size.width - 32))
             appearanceSection
-            previewSection(availableWidth: max(1, window.size.width - 32))
+            previewSection(availableWidth: max(1, contentGeometry.size.width - 32))
           }
           errorSection
           resetSection
@@ -45,10 +46,16 @@ struct WallpaperThemeSettingsView: View {
       .background(Color(uiColor: .systemGroupedBackground))
       .onAppear {
         model.resume()
-        updateWindowSize(window)
+        model.updateViewportSize(attachedWindowSize)
       }
-      .onChange(of: window.size) { _ in updateWindowSize(window) }
-      .onChange(of: window.safeAreaInsets) { _ in updateWindowSize(window) }
+    }
+    .background {
+      WallpaperWindowSizeReader { size in
+        attachedWindowSize = size
+        model.updateViewportSize(size)
+      }
+      .allowsHitTesting(false)
+      .accessibilityHidden(true)
     }
     .navigationTitle("透明图片主题")
     .navigationBarTitleDisplayMode(.inline)
@@ -388,16 +395,6 @@ struct WallpaperThemeSettingsView: View {
         settings[keyPath: keyPath] = value
         model.updateSettings(settings)
       }
-    )
-  }
-
-  private func updateWindowSize(_ geometry: GeometryProxy) {
-    model.updateViewportSize(
-      CGSize(
-        width: geometry.size.width + geometry.safeAreaInsets.leading
-          + geometry.safeAreaInsets.trailing,
-        height: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom
-      )
     )
   }
 
