@@ -40,6 +40,7 @@ struct WallpaperThemeSettingsView: View {
         .frame(maxWidth: 680)
         .frame(maxWidth: .infinity)
       }
+      .accessibilityIdentifier("wallpaper-theme-editor-scroll")
       .appScrollableSurface()
       .background(Color(uiColor: .systemGroupedBackground))
       .onAppear {
