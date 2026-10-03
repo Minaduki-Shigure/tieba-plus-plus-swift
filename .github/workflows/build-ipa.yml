@@ -287,11 +287,14 @@ jobs:
             fi
           else
             echo "Creating draft release for $RELEASE_TAG"
+            # The existing remote tag was verified against RELEASE_SHA above.
+            # target_commitish is unused for an existing tag, but supplying a
+            # SHA with workflow changes not yet on main can require a workflow
+            # write permission that GITHUB_TOKEN cannot have.
             release_json="$(gh api \
               --method POST \
               "repos/$GITHUB_REPOSITORY/releases" \
               -f tag_name="$RELEASE_TAG" \
-              -f target_commitish="$RELEASE_SHA" \
               -f name="Tieba++ $RELEASE_TAG" \
               -f body='Unsigned IPA for SideStore or LiveContainer self-signing. See README for supported features and security boundaries.' \
               -F draft=true \
