@@ -33,6 +33,7 @@ final class RootAdaptiveNavigationTests: XCTestCase {
   func testContinuousResizeKeepsSwiftUIStateNativeViewsAndScrollPosition() async throws {
     let harness = try AdaptiveNavigationHostHarness()
     defer { harness.close() }
+    await fulfillment(of: [harness.appearanceCompleted], timeout: 3)
     harness.resize(width: 390, height: 720)
     await harness.settleLayout()
     let content = try XCTUnwrap(harness.recorder.contentViews.first)
@@ -71,6 +72,7 @@ final class RootAdaptiveNavigationTests: XCTestCase {
   func testTraitChangesAndRTLKeepContentIdentityAndReserveTheCorrectEdge() async throws {
     let harness = try AdaptiveNavigationHostHarness()
     defer { harness.close() }
+    await fulfillment(of: [harness.appearanceCompleted], timeout: 3)
     harness.resize(width: 1024, height: 650)
     await harness.settleLayout()
     let content = try XCTUnwrap(harness.recorder.contentViews.first)
@@ -81,14 +83,13 @@ final class RootAdaptiveNavigationTests: XCTestCase {
     for (horizontal, vertical): (UIUserInterfaceSizeClass, UIUserInterfaceSizeClass) in [
       (.compact, .regular), (.regular, .compact),
     ] {
-      harness.setTraits(horizontal: horizontal, vertical: vertical)
-      await harness.settleLayout()
+      await applyTraits(horizontal: horizontal, vertical: vertical, to: harness, content: content)
       assertRegions(
         harness, content: content, bottom: bottom,
         size: CGSize(width: 1024, height: 650), sideWidth: 0, bottomHeight: 49)
     }
 
-    harness.setTraits(horizontal: .regular, vertical: .regular)
+    await applyTraits(horizontal: .regular, vertical: .regular, to: harness, content: content)
     harness.configuration.layoutDirection = .rightToLeft
     await harness.settleLayout()
     assertRegions(
@@ -109,6 +110,7 @@ final class RootAdaptiveNavigationTests: XCTestCase {
   func testLargeTypeSideNavigationCanScrollInAShortRegularWindow() async throws {
     let harness = try AdaptiveNavigationHostHarness()
     defer { harness.close() }
+    await fulfillment(of: [harness.appearanceCompleted], timeout: 3)
     harness.configuration.dynamicTypeSize = .accessibility5
     harness.resize(width: 900, height: 180)
     await harness.settleLayout()
@@ -155,6 +157,41 @@ final class RootAdaptiveNavigationTests: XCTestCase {
     XCTAssertEqual(bottomRect.width, contentRect.width, accuracy: 1, file: file, line: line)
   }
 
+  private func applyTraits(
+    horizontal: UIUserInterfaceSizeClass,
+    vertical: UIUserInterfaceSizeClass,
+    to harness: AdaptiveNavigationHostHarness,
+    content: AdaptiveNavigationProbeView
+  ) async {
+    let expectedHorizontal: UserInterfaceSizeClass = horizontal == .compact ? .compact : .regular
+    let expectedVertical: UserInterfaceSizeClass = vertical == .compact ? .compact : .regular
+    let target = "horizontal=\(horizontal.rawValue), vertical=\(vertical.rawValue)"
+    let observed = expectation(description: "SwiftUI observes \(target)")
+    var didObserve = false
+    harness.recorder.onEnvironmentUpdated = { actualHorizontal, actualVertical in
+      guard !didObserve, actualHorizontal == expectedHorizontal, actualVertical == expectedVertical
+      else { return }
+      didObserve = true
+      observed.fulfill()
+    }
+    print("Adaptive traits BEFORE \(target): \(harness.traitDiagnostics(content: content))")
+    harness.setTraits(horizontal: horizontal, vertical: vertical)
+    // UIKit's trait propagation is a layout transaction, not a fixed count of
+    // main-queue turns. Wait for the actual SwiftUI environment used by layout.
+    await harness.settleLayout()
+    await fulfillment(of: [observed], timeout: 3)
+    harness.recorder.onEnvironmentUpdated = nil
+    await harness.settleLayout()
+    let diagnostics = "target \(target): \(harness.traitDiagnostics(content: content))"
+    print("Adaptive traits AFTER \(diagnostics)")
+    XCTAssertEqual(harness.host.traitCollection.horizontalSizeClass, horizontal, diagnostics)
+    XCTAssertEqual(harness.host.traitCollection.verticalSizeClass, vertical, diagnostics)
+    XCTAssertEqual(content.traitCollection.horizontalSizeClass, horizontal, diagnostics)
+    XCTAssertEqual(content.traitCollection.verticalSizeClass, vertical, diagnostics)
+    XCTAssertEqual(content.swiftUIHorizontalSizeClass, expectedHorizontal, diagnostics)
+    XCTAssertEqual(content.swiftUIVerticalSizeClass, expectedVertical, diagnostics)
+  }
+
   private func descendantScrollViews(in view: UIView) -> [UIScrollView] {
     let ownScrollView = (view as? UIScrollView).map { [$0] } ?? []
     return ownScrollView + view.subviews.flatMap { descendantScrollViews(in: $0) }
@@ -166,9 +203,11 @@ private final class AdaptiveNavigationHostHarness {
   let recorder = AdaptiveNavigationProbeRecorder()
   let configuration = AdaptiveNavigationTestConfiguration()
   let host: UIHostingController<AdaptiveNavigationTestRoot>
-  private let parent = UIViewController()
+  private let parent = AdaptiveNavigationParentViewController()
   private let window: UIWindow
   private let previousKeyWindow: UIWindow?
+
+  var appearanceCompleted: XCTestExpectation { parent.appearanceCompleted }
 
   init() throws {
     let scene = try XCTUnwrap(
@@ -216,6 +255,18 @@ private final class AdaptiveNavigationHostHarness {
     host.view.layoutIfNeeded()
   }
 
+  func traitDiagnostics(content: AdaptiveNavigationProbeView) -> String {
+    func traits(_ value: UITraitCollection) -> String {
+      "h\(value.horizontalSizeClass.rawValue)/v\(value.verticalSizeClass.rawValue)"
+    }
+    return "host=\(traits(host.traitCollection)), hostView=\(traits(host.view.traitCollection)), "
+      + "content=\(traits(content.traitCollection)), SwiftUI="
+      + "\(String(describing: content.swiftUIHorizontalSizeClass))/"
+      + "\(String(describing: content.swiftUIVerticalSizeClass)), "
+      + "contentFrame=\(content.convert(content.bounds, to: host.view)), "
+      + "parentAppeared=\(parent.hasAppeared)"
+  }
+
   func close() {
     window.isHidden = true
     host.willMove(toParent: nil)
@@ -223,6 +274,19 @@ private final class AdaptiveNavigationHostHarness {
     host.removeFromParent()
     window.rootViewController = nil
     previousKeyWindow?.makeKey()
+  }
+}
+
+@MainActor
+private final class AdaptiveNavigationParentViewController: UIViewController {
+  let appearanceCompleted = XCTestExpectation(description: "Native test container appeared")
+  private(set) var hasAppeared = false
+
+  override func viewDidAppear(_ animated: Bool) {
+    super.viewDidAppear(animated)
+    guard !hasAppeared else { return }
+    hasAppeared = true
+    appearanceCompleted.fulfill()
   }
 }
 
@@ -283,6 +347,7 @@ private final class AdaptiveNavigationProbeRecorder {
   var bottomViews: [AdaptiveNavigationProbeView] = []
   var selections: [RootMainTab] = []
   var changeContentState: (@MainActor () -> Void)?
+  var onEnvironmentUpdated: (@MainActor (UserInterfaceSizeClass?, UserInterfaceSizeClass?) -> Void)?
 }
 
 private struct AdaptiveNavigationNativeProbe: UIViewRepresentable {
@@ -292,6 +357,8 @@ private struct AdaptiveNavigationNativeProbe: UIViewRepresentable {
   let recorder: AdaptiveNavigationProbeRecorder
   var stateID: UUID?
   var stateValue = 0
+  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+  @Environment(\.verticalSizeClass) private var verticalSizeClass
 
   func makeUIView(context: Context) -> AdaptiveNavigationProbeView {
     let view = AdaptiveNavigationProbeView()
@@ -305,6 +372,11 @@ private struct AdaptiveNavigationNativeProbe: UIViewRepresentable {
   func updateUIView(_ view: AdaptiveNavigationProbeView, context: Context) {
     view.stateID = stateID
     view.stateValue = stateValue
+    view.swiftUIHorizontalSizeClass = horizontalSizeClass
+    view.swiftUIVerticalSizeClass = verticalSizeClass
+    if role == .content {
+      recorder.onEnvironmentUpdated?(horizontalSizeClass, verticalSizeClass)
+    }
   }
 }
 
@@ -313,6 +385,8 @@ private final class AdaptiveNavigationProbeView: UIView {
   let scrollView = UIScrollView()
   var stateID: UUID?
   var stateValue = 0
+  var swiftUIHorizontalSizeClass: UserInterfaceSizeClass?
+  var swiftUIVerticalSizeClass: UserInterfaceSizeClass?
 
   override init(frame: CGRect) {
     super.init(frame: frame)
