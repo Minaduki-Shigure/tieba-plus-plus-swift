@@ -251,6 +251,7 @@ struct ComposerImageAttachmentProcessor: Sendable {
       return result
     }
     let inspectionData: Data
+    var validatedWebPSource = false
     if Self.hasWebPSignature(data) {
       // Validate canvas/frame limits before ImageIO sees any WebP bytes. Quality
       // modes may convert a custom color space, while originals require a
@@ -270,6 +271,10 @@ struct ComposerImageAttachmentProcessor: Sendable {
         ) else { throw ComposerImageProcessingError.invalidDimensions }
         return result
       }
+      try validateWebPBitstream(
+        inspection, at: 0,
+        maximumDecodedBytes: ComposerImageProcessingPolicy.maximumSourceDecodedByteCount)
+      validatedWebPSource = true
       inspectionData = inspection.data
     } else {
       inspectionData = quality == .original
@@ -281,6 +286,11 @@ struct ComposerImageAttachmentProcessor: Sendable {
         [kCGImageSourceShouldCache: false] as CFDictionary
       )
     else {
+      throw ComposerImageProcessingError.invalidSource
+    }
+    // ImageIO may recognize bare codec data as WebP. Only RIFF containers that
+    // passed the bounded parser and strict pixel decode can enter conversion.
+    guard CGImageSourceGetType(source) as String? != UTType.webP.identifier || validatedWebPSource else {
       throw ComposerImageProcessingError.invalidSource
     }
 
@@ -492,21 +502,8 @@ struct ComposerImageAttachmentProcessor: Sendable {
       ? ComposerWebPSanitizer.maximumAnimatedPixels * 8
       : ComposerImageProcessingPolicy.maximumSourceDecodedByteCount
     for index in 0..<inspection.frameCount {
-      try Task.checkCancellation()
-      beforeValidatedWebPFrameDecode(index)
-      try Task.checkCancellation()
-      if inspection.isAnimated {
-        // An animation decoder can report a composed canvas as complete even
-        // when a frame's bitstream is invalid. Decode the ANMF codec payload as
-        // an independent still image first, without animation composition.
-        // Construct and release only one frame at a time.
-        try autoreleasepool {
-          let frame = try inspection.standaloneFrame(at: index)
-          try Self.validateStandaloneWebPFrame(
-            frame, maximumDecodedBytes: maximumFrameDecodedBytes)
-        }
-      }
-      try Task.checkCancellation()
+      try validateWebPBitstream(
+        inspection, at: index, maximumDecodedBytes: maximumFrameDecodedBytes)
       // Also validate the original composed representation, preserving its
       // canvas, frame rectangles, timing, blending, disposal and color profile.
       try autoreleasepool {
@@ -528,26 +525,19 @@ struct ComposerImageAttachmentProcessor: Sendable {
     try Task.checkCancellation()
   }
 
-  private static func validateStandaloneWebPFrame(
-    _ frame: ComposerWebPSanitizer.FrameImage, maximumDecodedBytes: Int
+  private func validateWebPBitstream(
+    _ inspection: ComposerWebPSanitizer.Inspection, at index: Int,
+    maximumDecodedBytes: Int
   ) throws {
     try Task.checkCancellation()
-    guard let source = CGImageSourceCreateWithData(
-      frame.data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
-      CGImageSourceGetType(source) as String? == UTType.webP.identifier,
-      CGImageSourceGetCount(source) == 1,
-      CGImageSourceGetStatus(source) == .statusComplete
-    else { throw ComposerImageProcessingError.decodeFailed }
-    defer { CGImageSourceRemoveCacheAtIndex(source, 0) }
-    guard let decoded = CGImageSourceCreateImageAtIndex(
-      source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary),
-      CGImageSourceGetStatusAtIndex(source, 0) == .statusComplete,
-      decoded.width == frame.width, decoded.height == frame.height,
-      decoded.bitsPerComponent > 0, decoded.bitsPerComponent <= 8,
-      decoded.bytesPerRow > 0, decoded.height > 0,
-      decoded.bytesPerRow <= maximumDecodedBytes / decoded.height,
-      hasSupportedOriginalColorModel(decoded.colorSpace)
-    else { throw ComposerImageProcessingError.decodeFailed }
+    beforeValidatedWebPFrameDecode(index)
+    try Task.checkCancellation()
+    // Decode one independent frame at a time. Releasing this buffer before the
+    // ImageIO display check keeps pixel allocations independent of frame count.
+    try autoreleasepool {
+      let frame = try inspection.standaloneFrame(at: index)
+      try ComposerWebPBitstreamValidator.validate(frame, maximumDecodedBytes: maximumDecodedBytes)
+    }
     try Task.checkCancellation()
   }
 

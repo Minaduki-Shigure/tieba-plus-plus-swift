@@ -259,6 +259,56 @@ final class ComposerWebPImageAttachmentTests: XCTestCase {
     }
   }
 
+  func testStaticQualityConversionCannotTurnBrokenColorOrAlphaIntoBlankJPEG() throws {
+    let codec = try XCTUnwrap(Fixture.chunks(Fixture.lossless).first)
+    let brokenColor = Fixture.container([
+      Fixture.Chunk("VP8L", Data(codec.payload.prefix(5)) + Data([0]))
+    ])
+    var alphaChunks = Fixture.chunks(Fixture.alphaLossy)
+    let alphaIndex = try XCTUnwrap(alphaChunks.firstIndex { $0.type == "ALPH" })
+    alphaChunks[alphaIndex].payload = Data([1, 0])
+    let brokenAlpha = Fixture.container(alphaChunks)
+    let processor = ComposerImageAttachmentProcessor()
+    for source in [brokenColor, brokenAlpha] {
+      XCTAssertEqual(try ComposerWebPSanitizer.sanitize(source) { $0 }.frameCount, 1)
+      for quality in [ComposerImageAttachmentQuality.standard, .highQuality] {
+        XCTAssertThrowsError(try processor.process(data: source, quality: quality)) {
+          XCTAssertEqual($0 as? ComposerImageProcessingError, .decodeFailed)
+        }
+      }
+    }
+  }
+
+  func testBareWebPCodecDataCannotBypassContainerValidation() throws {
+    let codec = try XCTUnwrap(Fixture.chunks(Fixture.lossless).first)
+    let processor = ComposerImageAttachmentProcessor()
+    for source in [codec.payload, codec.encoded] {
+      for quality in ComposerImageAttachmentQuality.allCases {
+        XCTAssertThrowsError(try processor.process(data: source, quality: quality))
+      }
+    }
+  }
+
+  func testStrictBitstreamDecodeChecksBudgetAndDeclaredFrameDimensions() throws {
+    let inspection = try ComposerWebPSanitizer.sanitize(Fixture.lossless) { $0 }
+    let frame = try inspection.standaloneFrame(at: 0)
+    try ComposerWebPBitstreamValidator.validate(frame, maximumDecodedBytes: 8 * 6 * 4)
+    XCTAssertThrowsError(try ComposerWebPBitstreamValidator.validate(
+      frame, maximumDecodedBytes: 8 * 6 * 4 - 1)) {
+      XCTAssertEqual($0 as? ComposerImageProcessingError, .decodedImageTooLarge)
+    }
+    let mismatch = ComposerWebPSanitizer.FrameImage(data: frame.data, width: 7, height: 6)
+    XCTAssertThrowsError(try ComposerWebPBitstreamValidator.validate(
+      mismatch, maximumDecodedBytes: 8 * 6 * 4)) {
+      XCTAssertEqual($0 as? ComposerImageProcessingError, .decodeFailed)
+    }
+    let overflow = ComposerWebPSanitizer.FrameImage(data: frame.data, width: Int.max, height: 6)
+    XCTAssertThrowsError(try ComposerWebPBitstreamValidator.validate(
+      overflow, maximumDecodedBytes: Int.max)) {
+      XCTAssertEqual($0 as? ComposerImageProcessingError, .decodedImageTooLarge)
+    }
+  }
+
   func testCorruptCompressedAlphaFailsStaticAndAnimatedImportAndStoredValidation() throws {
     var imageChunks = Fixture.chunks(Fixture.alphaLossy)
     let alphaIndex = try XCTUnwrap(imageChunks.firstIndex { $0.type == "ALPH" })
