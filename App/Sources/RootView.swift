@@ -473,13 +473,21 @@ struct RootView: View {
   // Separate opaque view boundaries keep SwiftUI's generic type checking
   // bounded without changing the modifier order or introducing type erasure.
   private var rootLayout: some View {
-    // Reserve the bar's measured height in layout. An outer safeAreaInset can
-    // be swallowed by TabView's UIKit container, leaving the last scroll row
-    // underneath the bar even when the page has reached its bottom.
-    VStack(spacing: 0) {
+    // Only navigation chrome adapts. The content stays in one structural slot,
+    // retaining each tab's NavigationStack, reading state and presentations.
+    RootAdaptiveNavigation(
+      selectedTab: rootTabSelection.wrappedValue,
+      showsExploreTab: showsExploreTab,
+      notificationBadge: homeUnreadBadgePresentation?.badgeText,
+      allowsExploreRefresh: rootTabIsActive(.explore),
+      allowsHomeRefresh: canReselectHome,
+      onSelect: selectRootTabFromBar
+    ) {
       primaryTabs
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    } bottomBar: { isVisible in
       RootTabBar(
+        isVisible: isVisible,
         selectedTab: rootTabSelection.wrappedValue,
         showsExploreTab: showsExploreTab,
         notificationBadge: homeUnreadBadgePresentation?.badgeText,

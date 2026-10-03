@@ -25,6 +25,18 @@ and its verified metadata enters the public app source.
 
 ### Release and validation
 
+- **Adaptive primary navigation:** The existing Home, Explore, Messages and My
+  destinations adapt to the actual window width. Regular-width windows with
+  noncompact height use a narrow rail from 600 pt and a full sidebar from
+  840 pt; smaller or compact-height layouts retain the native bottom bar.
+  The four navigation stacks keep the same structural position while resizing,
+  so adaptation itself neither resets navigation nor requests a refresh.
+  Side controls share the existing selection, reselection, hidden-Explore and
+  unread-badge behavior. Hidden bottom controls remain mounted to retain their
+  keyboard observation, while hit testing and accessibility are disabled.
+  iPad simulator navigation/resize regressions are required before release;
+  Stage Manager, external displays and floating keyboards still need device
+  validation.
 - **`v0.65.0-alpha.39` WebP image creation:** New topics and direct topic replies can import static
   WebP in standard/high-quality mode as a metadata-stripped JPEG, or preserve
   static and animated WebP in original mode. Original mode keeps encoded image

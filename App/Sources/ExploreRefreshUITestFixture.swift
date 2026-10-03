@@ -35,42 +35,99 @@
 
     var body: some Scene {
       WindowGroup {
-        RootView(
-          service: dependencies.service,
-          historyRepository: dependencies.repositories,
-          favoritesRepository: dependencies.repositories,
-          searchHistoryRepository: dependencies.repositories,
-          globalSearchHistoryRepository: dependencies.repositories,
-          accountVault: dependencies.vault,
-          accountSessionLookup: dependencies.vault,
-          accountService: dependencies.service,
-          personalizedFeedbackService: dependencies.service,
-          contentFilterRepository: dependencies.contentFilters,
-          startDestination: dependencies.homeProbe == nil ? .discovery : .home,
-          showsExploreTab: true
-        )
-        .environment(\.accountAccess, dependencies.accountAccess)
-        .environment(\.contentFilterRepository, dependencies.contentFilters)
-        .environment(\.contentMediaLoadPolicy, .tapToLoad)
-        .environment(\.contentMediaLoadBehavior, .userInitiated)
-        .environment(\.hidesReplyEntryPoints, true)
-        .environmentObject(dependencies.mediaPlayback)
-        .environmentObject(dependencies.voicePlayback)
-        .environmentObject(dependencies.videoPlayback)
-        .environmentObject(dependencies.followedForums)
-        .environmentObject(dependencies.checkIns)
-        .environmentObject(dependencies.externalWeb)
-        .environmentObject(dependencies.sceneDelegate)
-        .overlay(alignment: .topLeading) {
-          VStack(alignment: .leading, spacing: 1) {
-            ExploreRefreshUITestProbeView(probe: dependencies.probe)
-            if let homeProbe = dependencies.homeProbe {
-              HomeRefreshUITestProbeView(probe: homeProbe)
-            }
+        ExploreRefreshUITestRoot(dependencies: dependencies)
+      }
+    }
+  }
+
+  @MainActor
+  private struct ExploreRefreshUITestRoot: View {
+    @ObservedObject var dependencies: ExploreRefreshUITestDependencies
+    @State private var selectedWidth: Int = 390
+    @State private var showsExplore = true
+    @State private var largeText = false
+
+    var body: some View {
+      if dependencies.testsAdaptiveNavigation {
+        GeometryReader { geometry in
+          VStack(spacing: 0) {
+            adaptiveControls
+            // Keep one RootView at this exact structural position. The controls
+            // alter its real layout proposal, never its mode, traits or identity.
+            root
+              .environment(\.dynamicTypeSize, largeText ? .accessibility1 : .large)
+              .frame(
+                width: selectedWidth == 0
+                  ? geometry.size.width
+                  : min(CGFloat(selectedWidth), geometry.size.width)
+              )
+              .frame(maxWidth: .infinity, maxHeight: .infinity)
           }
-          .allowsHitTesting(false)
+        }
+      } else {
+        root.overlay(alignment: .topLeading) { probes.allowsHitTesting(false) }
+      }
+    }
+
+    private var root: some View {
+      RootView(
+        service: dependencies.service,
+        historyRepository: dependencies.repositories,
+        favoritesRepository: dependencies.repositories,
+        searchHistoryRepository: dependencies.repositories,
+        globalSearchHistoryRepository: dependencies.repositories,
+        accountVault: dependencies.vault,
+        accountSessionLookup: dependencies.vault,
+        accountService: dependencies.service,
+        personalizedFeedbackService: dependencies.service,
+        contentFilterRepository: dependencies.contentFilters,
+        startDestination: dependencies.homeProbe == nil ? .discovery : .home,
+        showsExploreTab: showsExplore
+      )
+      .environment(\.accountAccess, dependencies.accountAccess)
+      .environment(\.contentFilterRepository, dependencies.contentFilters)
+      .environment(\.contentMediaLoadPolicy, .tapToLoad)
+      .environment(\.contentMediaLoadBehavior, .userInitiated)
+      .environment(\.hidesReplyEntryPoints, true)
+      .environmentObject(dependencies.mediaPlayback)
+      .environmentObject(dependencies.voicePlayback)
+      .environmentObject(dependencies.videoPlayback)
+      .environmentObject(dependencies.followedForums)
+      .environmentObject(dependencies.checkIns)
+      .environmentObject(dependencies.externalWeb)
+      .environmentObject(dependencies.sceneDelegate)
+    }
+
+    private var probes: some View {
+      VStack(alignment: .leading, spacing: 1) {
+        ExploreRefreshUITestProbeView(probe: dependencies.probe)
+        if let homeProbe = dependencies.homeProbe {
+          HomeRefreshUITestProbeView(probe: homeProbe)
         }
       }
+    }
+
+    private var adaptiveControls: some View {
+      VStack(alignment: .leading, spacing: 2) {
+        ScrollView(.horizontal, showsIndicators: false) {
+          HStack(spacing: 8) {
+            ForEach([390, 599, 600, 839, 840, 1024, 0], id: \.self) { width in
+              Button(width == 0 ? "可用宽度" : "\(width)") { selectedWidth = width }
+                .accessibilityIdentifier("adaptive-width-\(width)")
+            }
+            Button(showsExplore ? "隐藏发现" : "显示发现") { showsExplore.toggle() }
+              .accessibilityIdentifier("adaptive-toggle-explore")
+            Button(largeText ? "标准字体" : "大字体") { largeText.toggle() }
+              .accessibilityIdentifier("adaptive-toggle-text")
+          }
+          .buttonStyle(.bordered)
+        }
+        ExploreRefreshRequestCountsUITestView(probe: dependencies.probe)
+      }
+      .dynamicTypeSize(.medium)
+      .padding(.horizontal, 8)
+      .frame(height: 60)
+      .background(.bar)
     }
   }
 
@@ -78,6 +135,7 @@
   private final class ExploreRefreshUITestDependencies: ObservableObject {
     let probe = ExploreRefreshUITestProbe()
     let homeProbe: HomeRefreshUITestProbe?
+    let testsAdaptiveNavigation: Bool
     let vault: ExploreRefreshUITestVault
     let repositories = ExploreRefreshUITestRepositories()
     let contentFilters = EmptyContentFilterRepository()
@@ -96,10 +154,13 @@
     init() {
       let arguments = ProcessInfo.processInfo.arguments
       let testsHome = arguments.contains("--home-refresh-ui-testing")
+      testsAdaptiveNavigation = arguments.contains("--adaptive-root-ui-testing")
       homeProbe = testsHome ? HomeRefreshUITestProbe() : nil
       vault = ExploreRefreshUITestVault(
         isSignedOut: testsHome && arguments.contains("--home-refresh-signed-out"))
-      let service = ExploreRefreshUITestService(probe: probe, homeProbe: homeProbe)
+      let service = ExploreRefreshUITestService(
+        probe: probe, homeProbe: homeProbe,
+        unreadReplyCount: testsAdaptiveNavigation ? 7 : 0)
       self.service = service
       accountAccess = AccountAccess(vault: vault, service: service)
       voicePlayback = VoicePlaybackController(coordinator: mediaPlayback)
@@ -130,13 +191,21 @@
 
     var body: some View {
       VStack(alignment: .leading, spacing: 1) {
-        Text(probe.summary)
-          .font(.system(size: 9, design: .monospaced))
-          .accessibilityIdentifier("explore-refresh-request-counts")
+        ExploreRefreshRequestCountsUITestView(probe: probe)
         if let diagnostics = ExploreRefreshLifecycleDiagnostics.active {
           ExploreRefreshLifecycleProbeView(diagnostics: diagnostics)
         }
       }
+    }
+  }
+
+  private struct ExploreRefreshRequestCountsUITestView: View {
+    @ObservedObject var probe: ExploreRefreshUITestProbe
+
+    var body: some View {
+      Text(probe.summary)
+        .font(.system(size: 9, design: .monospaced))
+        .accessibilityIdentifier("explore-refresh-request-counts")
     }
   }
 
@@ -206,7 +275,8 @@
 
     func recordExplore(selection: ExploreSection, sections: [ExploreSection], ready: Bool) {
       sequence += 1
-      explore = "explore#\(sequence) selected=\(selection.rawValue) ready=\(ready) "
+      explore =
+        "explore#\(sequence) selected=\(selection.rawValue) ready=\(ready) "
         + "pages=\(sections.map(\.rawValue).joined(separator: ","))"
       publish()
     }
@@ -215,7 +285,8 @@
       sequence += 1
       if event == "appear" { appearances += 1 }
       if event == "disappear" { disappearances += 1 }
-      personal = "personal#\(sequence) \(event) appear=\(appearances) disappear=\(disappearances) "
+      personal =
+        "personal#\(sequence) \(event) appear=\(appearances) disappear=\(disappearances) "
         + "active=\(active) visible=\(visible) load=\(active && visible)"
       publish()
     }
@@ -231,7 +302,8 @@
       case .loaded: stateName = "loaded"
       case .failed: stateName = "failed"
       }
-      model = "model#\(sequence) \(event) state=\(stateName) generation=\(generation) "
+      model =
+        "model#\(sequence) \(event) state=\(stateName) generation=\(generation) "
         + "starts=\(starts) cancels=\(cancellations)"
       publish()
     }
@@ -312,12 +384,16 @@
     static var unsupported: BrowseError { .unavailable("离线界面测试不提供此操作。") }
     private let probe: ExploreRefreshUITestProbe
     private let homeProbe: HomeRefreshUITestProbe?
+    private let unreadReplyCount: Int
     private var homeGeneration = 0
     private var threadsByID: [Int64: BrowseThread] = [:]
 
-    init(probe: ExploreRefreshUITestProbe, homeProbe: HomeRefreshUITestProbe?) {
+    init(
+      probe: ExploreRefreshUITestProbe, homeProbe: HomeRefreshUITestProbe?, unreadReplyCount: Int
+    ) {
       self.probe = probe
       self.homeProbe = homeProbe
+      self.unreadReplyCount = unreadReplyCount
     }
 
     private func thread(channel: String, title: String, id: Int64) async -> BrowseThread {
@@ -397,7 +473,8 @@
     }
 
     func inboxUnreadSummary(session: StoredAccountSession) -> InboxUnreadSummary {
-      InboxUnreadSummary(userID: session.id, replyCount: 0, mentionCount: 0, fanCount: 0)
+      InboxUnreadSummary(
+        userID: session.id, replyCount: unreadReplyCount, mentionCount: 0, fanCount: 0)
     }
 
     func checkInCatalog(session: StoredAccountSession) async throws -> ForumCheckInCatalogData {

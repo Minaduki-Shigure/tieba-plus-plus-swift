@@ -8,13 +8,29 @@ This audit was last compared with TiebaLite `4.0-dev` at commit
 [`268f388c`](https://github.com/zzc10086/TiebaLite/tree/268f388c7824ae2c8f6ed549827a943ec8a7f352).
 The current-main automatic preview-quality, creation-transport, batch literal
 keyword entry, thread-list like entry, thread-owner ordinary-floor deletion, and
-original image/GIF/WebP selection, optional daily check-in, and authenticated
+original image/GIF/WebP selection, adaptive primary navigation, optional daily check-in, and authenticated
 own-topic/reply activity workflows were
 separately checked against
 [`9701bfb6`](https://github.com/zzc10086/TiebaLite/tree/9701bfb6aaf261cc37b20b5793a8404261077f49).
 That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
+
+Adaptive primary navigation follows TiebaLite `9701bfb6`'s reachable `MainPage`
+and `NavigationWrapper`: bottom navigation for compact width, a rail for medium
+width and a permanent drawer for expanded width. On iOS the 600/840 pt boundaries
+use the actual root container width, with compact size classes preserving the
+bottom bar. The implementation adapts navigation controls around the existing
+four retained stacks; it does not infer a list/detail split from the Android
+implementation. Width changes do not emit selection or refresh actions, and
+side controls reuse account-bound Home refresh, Explore refresh, hidden-tab and
+unread-badge policies. Fixed content and native-bottom-bar slots preserve view
+identity and keyboard observations through resizing. Keyboard notifications
+are associated with the attached window's screen before coordinate conversion.
+Hosted-state/layout checks, existing iPhone workflows and dedicated offline iPad
+navigation/resize workflows are release gates. Real Split View/Stage Manager
+resizing, external displays and floating keyboards remain device-validation
+requirements. This extends an existing credited area; the 80–82% estimate stays.
 
 Alpha.39/build 117 WebP creation closes a format gap in TiebaLite `9701bfb6`'s `ReplyPage` →
 `ImagePicker` → `ImageUploader` flow: its image picker accepts WebP and its
@@ -1097,7 +1113,11 @@ disposable-account and physical-device validation gates.
    Home Screen actions; reply/mention badge `99+` and VoiceOver output; account
    switching in every tab; inactive-root request cancellation; active voice/video
    revocation; Dynamic Type and keyboard safe areas; and interactive-pop
-   completion and cancellation without corrupting another tab's stack.
+   completion and cancellation without corrupting another tab's stack. For the
+   adaptive shell, also cover live Split View/Stage Manager widths across the
+   bottom/rail/sidebar boundaries with a pushed page, open presentation and
+   focused text field; verify external-display keyboard ownership, floating and
+   hardware keyboards, large accessibility text and retained reading position.
 
 The foreground inbox deliberately does not copy TiebaLite's cleartext JSON
 transport or its Android hardware parameters. ReplyMe uses the current HTTPS

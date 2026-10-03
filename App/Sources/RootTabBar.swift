@@ -5,6 +5,7 @@ import UIKit
 /// Owns only the native selection control. SwiftUI continues to own the four
 /// navigation stacks, their environment, presentations, and retained state.
 struct RootTabBar: View {
+  var isVisible: Bool = true
   let selectedTab: RootMainTab
   let showsExploreTab: Bool
   let notificationBadge: String?
@@ -19,6 +20,9 @@ struct RootTabBar: View {
   @State private var keyboardCoversBottom = false
 
   var body: some View {
+    let showsBar = isVisible && !keyboardCoversBottom
+    // Keep the representable attached even in a wide layout. Recreating it on
+    // a width change would lose the current keyboard frame and subscription.
     RootTabBarControl(
       selectedTab: selectedTab,
       showsExploreTab: showsExploreTab,
@@ -33,12 +37,12 @@ struct RootTabBar: View {
       onKeyboardCoverageChanged: { keyboardCoversBottom = $0 }
     )
     .fixedSize(horizontal: false, vertical: true)
-    .frame(height: keyboardCoversBottom ? 0 : nil)
-    .opacity(keyboardCoversBottom ? 0 : 1)
-    .allowsHitTesting(!keyboardCoversBottom)
-    .accessibilityHidden(keyboardCoversBottom)
+    .frame(height: showsBar ? nil : 0)
+    .opacity(showsBar ? 1 : 0)
+    .allowsHitTesting(showsBar)
+    .accessibilityHidden(!showsBar)
     .background {
-      if wallpaper == nil, !keyboardCoversBottom {
+      if wallpaper == nil, showsBar {
         // SwiftUI extends this material through the bottom safe area. The
         // native bar itself is transparent, so there is only one backdrop.
         Rectangle().fill(.bar)
@@ -169,7 +173,9 @@ final class RootNativeTabBar: UITabBar {
   var onKeyboardCoverageChanged: ((Bool) -> Void)?
   private var keyboardObservation: AnyCancellable?
   private var keyboardFrameInScreen: CGRect?
+  private var keyboardFrameScreen: UIScreen?
   private var reportedKeyboardCoverage = false
+  private var keyboardCoverageRevision: UInt64 = 0
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -180,15 +186,21 @@ final class RootNativeTabBar: UITabBar {
     .receive(on: RunLoop.main)
     .sink { [weak self] notification in
       MainActor.assumeIsolated {
-        guard let self else { return }
-        if let isLocal = notification.userInfo?[UIResponder.keyboardIsLocalUserInfoKey] as? Bool,
-          !isLocal
-        { return }
+        guard let self, let window = self.window,
+          RootTabBarKeyboardPolicy.acceptsNotification(
+            notificationScreen: notification.object as AnyObject?,
+            windowScreen: window.screen,
+            isLocal: notification.userInfo?[UIResponder.keyboardIsLocalUserInfoKey] as? Bool)
+        else { return }
         if notification.name == UIResponder.keyboardWillHideNotification {
           self.keyboardFrameInScreen = nil
+          self.keyboardFrameScreen = nil
         } else {
           self.keyboardFrameInScreen =
             (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+          // iOS 16.1+ supplies a UIScreen as the notification object. A nil
+          // object on earlier systems refers to the receiving window's screen.
+          self.keyboardFrameScreen = window.screen
         }
         self.updateKeyboardCoverage()
       }
@@ -209,7 +221,7 @@ final class RootNativeTabBar: UITabBar {
 
   private func updateKeyboardCoverage() {
     let coversBottom: Bool
-    if let window, let frame = keyboardFrameInScreen {
+    if let window, let frame = keyboardFrameInScreen, keyboardFrameScreen === window.screen {
       coversBottom = RootTabBarKeyboardPolicy.coversBottom(
         keyboardFrame: window.convert(frame, from: window.screen.coordinateSpace),
         windowBounds: window.bounds,
@@ -220,16 +232,27 @@ final class RootNativeTabBar: UITabBar {
     }
     guard coversBottom != reportedKeyboardCoverage else { return }
     reportedKeyboardCoverage = coversBottom
+    keyboardCoverageRevision &+= 1
+    let revision = keyboardCoverageRevision
     // Layout can run during a SwiftUI update. Publish only after that update,
     // and drop an obsolete result if the keyboard moved again in the meantime.
     DispatchQueue.main.async { [weak self] in
-      guard let self, reportedKeyboardCoverage == coversBottom else { return }
+      guard let self, keyboardCoverageRevision == revision else { return }
       onKeyboardCoverageChanged?(coversBottom)
     }
   }
 }
 
 enum RootTabBarKeyboardPolicy {
+  static func acceptsNotification(
+    notificationScreen: AnyObject?, windowScreen: AnyObject?, isLocal: Bool?
+  ) -> Bool {
+    guard isLocal != false, let windowScreen else { return false }
+    // Identity matters: equal coordinates on another display do not describe
+    // this window. Nil preserves compatibility with iOS 16.0 notifications.
+    return notificationScreen == nil || notificationScreen === windowScreen
+  }
+
   static func coversBottom(
     keyboardFrame: CGRect,
     windowBounds: CGRect,

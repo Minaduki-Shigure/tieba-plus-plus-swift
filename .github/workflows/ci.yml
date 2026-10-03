@@ -246,6 +246,7 @@ jobs:
           -enableCodeCoverage YES
           -destination "$ICON_UI_SIMULATOR_DESTINATION"
           -parallel-testing-enabled NO
+          -skip-testing:TiebaPlusPlusUITests/AdaptiveRootNavigationUITests
           -resultBundlePath icon-ui-results.xcresult
           -skipPackagePluginValidation
           CODE_SIGNING_ALLOWED=NO
@@ -270,11 +271,78 @@ jobs:
             icon-assets.json
             ui-test-attachments/
           retention-days: 7
+      - name: Create clean iPad simulator for adaptive navigation
+        id: adaptive_simulator
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          read -r adaptive_device_type adaptive_runtime < <(
+            xcrun simctl list devices available -j | jq -r '
+              [.devices | to_entries[] | .key as $runtime | .value[]
+                | select(.isAvailable == true and (.name | contains("iPad"))
+                    and (.name | contains("11-inch")))
+                | {type: .deviceTypeIdentifier, runtime: $runtime, name: .name}]
+              | sort_by(if .name == "iPad Pro 11-inch (M4)" then 0 else 1 end)
+              | .[0] | [.type // "", .runtime // ""] | @tsv
+            '
+          )
+          test -n "$adaptive_device_type"
+          test -n "$adaptive_runtime"
+          adaptive_device_id="$(xcrun simctl create "Tieba adaptive UI $GITHUB_RUN_ID" "$adaptive_device_type" "$adaptive_runtime")"
+          echo "ADAPTIVE_UI_SIMULATOR_ID=$adaptive_device_id" >> "$GITHUB_ENV"
+          echo "ADAPTIVE_UI_SIMULATOR_DESTINATION=platform=iOS Simulator,id=$adaptive_device_id" >> "$GITHUB_ENV"
+      - name: Test iPad adaptive root navigation
+        id: adaptive_ui_tests
+        if: ${{ steps.adaptive_simulator.outcome == 'success' }}
+        continue-on-error: true
+        run: >-
+          set -o pipefail;
+          xcodebuild
+          -project TiebaPlusPlus.xcodeproj
+          -scheme TiebaPlusPlusIconsUI
+          -configuration Debug
+          -derivedDataPath build/DerivedData
+          -enableCodeCoverage YES
+          -destination "$ADAPTIVE_UI_SIMULATOR_DESTINATION"
+          -parallel-testing-enabled NO
+          -only-testing:TiebaPlusPlusUITests/AdaptiveRootNavigationUITests
+          -resultBundlePath adaptive-ui-results.xcresult
+          -skipPackagePluginValidation
+          CODE_SIGNING_ALLOWED=NO
+          test 2>&1 | tee adaptive-ui-test.log
+      - name: Report adaptive UI diagnostics
+        if: ${{ always() && steps.adaptive_ui_tests.outcome == 'failure' }}
+        run: ruby Scripts/report_xcode_errors.rb adaptive-ui-test.log
+      - name: Export adaptive UI test attachments
+        if: ${{ always() && (steps.adaptive_ui_tests.outcome == 'success' || steps.adaptive_ui_tests.outcome == 'failure') }}
+        run: |
+          set -euo pipefail
+          xcrun xcresulttool export attachments \
+            --path adaptive-ui-results.xcresult \
+            --output-path adaptive-ui-test-attachments
+          xcrun xcresulttool get test-results summary \
+            --path adaptive-ui-results.xcresult --compact > adaptive-ui-test-summary.json
+      - name: Upload adaptive UI results
+        if: ${{ always() && (steps.adaptive_ui_tests.outcome == 'success' || steps.adaptive_ui_tests.outcome == 'failure') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: adaptive-ui-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            adaptive-ui-test.log
+            adaptive-ui-results.xcresult
+            adaptive-ui-test-attachments/
+            adaptive-ui-test-summary.json
+          retention-days: 7
       - name: Fail when app validation fails
-        if: ${{ always() && (steps.app_tests.outcome == 'failure' || steps.icon_assets.outcome == 'failure' || steps.icon_ui_tests.outcome == 'failure') }}
+        if: ${{ always() && (steps.app_tests.outcome == 'failure' || steps.icon_assets.outcome == 'failure' || steps.icon_ui_tests.outcome == 'failure' || steps.adaptive_simulator.outcome == 'failure' || steps.adaptive_ui_tests.outcome == 'failure') }}
         run: exit 1
       - name: Remove UI test simulator
         if: ${{ always() && env.ICON_UI_SIMULATOR_ID != '' }}
         run: |
           xcrun simctl shutdown "$ICON_UI_SIMULATOR_ID" || true
           xcrun simctl delete "$ICON_UI_SIMULATOR_ID"
+      - name: Remove adaptive UI test simulator
+        if: ${{ always() && env.ADAPTIVE_UI_SIMULATOR_ID != '' }}
+        run: |
+          xcrun simctl shutdown "$ADAPTIVE_UI_SIMULATOR_ID" || true
+          xcrun simctl delete "$ADAPTIVE_UI_SIMULATOR_ID"
