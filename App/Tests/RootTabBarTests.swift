@@ -162,12 +162,12 @@ final class RootTabBarTests: XCTestCase {
       rootView: RootTabBarTestHost(visibility: visibility, layout: layout))
     let context = try makeWindow(root: host)
     defer { closeWindow(context) }
-    func height() -> CGFloat {
+    @MainActor func height() -> CGFloat {
       // Read the mounted bar's outer region, not the whole hosting controller's
       // sizeThatFits result (which also participates in window safe-area layout).
       layout.region?.bounds.height ?? .nan
     }
-    func diagnostics() -> String {
+    @MainActor func diagnostics() -> String {
       let bar = nativeBar(in: host.view)
       return "visible=\(visibility.isVisible) region=\(String(describing: layout.region?.frame)) "
         + "window=\(context.window.bounds) safeArea=\(context.window.safeAreaInsets) "
