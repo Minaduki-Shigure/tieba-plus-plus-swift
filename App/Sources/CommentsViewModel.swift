@@ -64,6 +64,9 @@ final class CommentsViewModel: ObservableObject {
   private var lockedParentPostID: Int64?
   private var activeAnchor: CommentsAnchor
   private var commentIDs = Set<Int64>()
+  private var commentsByID: [Int64: BrowseComment] = [:]
+  private var acceptedDeletionTargets: [Int64: OwnedContentDeletionTarget] = [:]
+  private var stagedAcceptedDeletionTargets: [Int64: OwnedContentDeletionTarget] = [:]
   private var indexedParentAgreementTarget: ContentAgreementTarget?
   private var agreementTargetsByCommentID: [Int64: ContentAgreementTarget] = [:]
   private var indexedAgreementContext: CommentAgreementIndexContext?
@@ -163,8 +166,14 @@ final class CommentsViewModel: ObservableObject {
   }
 
   func loadMoreIfNeeded(current comment: BrowseComment) {
+    guard comment.id == comments.last?.id else { return }
+    loadMore()
+  }
+
+  var canLoadMore: Bool { hasMore && state == .loaded }
+
+  func loadMore() {
     guard
-      comment.id == comments.last?.id,
       hasMore,
       !isLoadingMore,
       !isLoadingPrevious,
@@ -262,6 +271,60 @@ final class CommentsViewModel: ObservableObject {
     agreementTargetsByCommentID[commentID]
   }
 
+  func comment(withID commentID: Int64) -> BrowseComment? {
+    commentsByID[commentID]
+  }
+
+  /// Only call for an accepted receipt or an authenticated accepted ledger record.
+  /// Deferred records are bound to live forum/parent/author identity before projection.
+  @discardableResult
+  func stageAcceptedContentDeletion(
+    _ target: OwnedContentDeletionTarget,
+    allowsUnresolvedThreadIdentity: Bool = false
+  ) -> Bool {
+    guard
+      state == .idle || state == .loading,
+      target.kind == .subpost,
+      target.threadID == threadID,
+      let parentID = target.parentPostID,
+      parentID > 0,
+      lockedParentPostID.map({ $0 == parentID }) ?? true
+    else { return false }
+    if let existing = acceptedDeletionTargets[target.objectID]
+      ?? stagedAcceptedDeletionTargets[target.objectID]
+    {
+      return existing == target
+    }
+    stagedAcceptedDeletionTargets[target.objectID] = target
+    return true
+  }
+
+  @discardableResult
+  func applyAcceptedContentDeletion(_ target: OwnedContentDeletionTarget) -> Bool {
+    guard
+      let thread, let parentPost,
+      matchesDeletionContext(target, thread: thread, parentPost: parentPost)
+    else { return false }
+    if let existing = acceptedDeletionTargets[target.objectID] {
+      return existing == target
+    }
+    if let comment = commentsByID[target.objectID], !matchesDeletionComment(target, comment) {
+      return false
+    }
+    acceptedDeletionTargets[target.objectID] = target
+    stagedAcceptedDeletionTargets.removeValue(forKey: target.objectID)
+    if commentsByID[target.objectID] != nil {
+      let retained = comments.filter { $0.id != target.objectID }
+      replaceCommentSnapshot(thread: thread, parentPost: parentPost, comments: retained)
+    }
+    replaceAgreementDescriptors(
+      with: agreementReadDescriptors, retainingOnlyIndexedTargets: true
+    )
+    if scrollTargetCommentID == target.objectID { scrollTargetCommentID = nil }
+    if prependRestoreCommentID == target.objectID { prependRestoreCommentID = nil }
+    return true
+  }
+
   var paginationTail: BrowseComment? {
     hasMore ? comments.last : nil
   }
@@ -318,7 +381,7 @@ final class CommentsViewModel: ObservableObject {
             page: page
           )
         case .comment(let postID, let commentID):
-          if (placement == .before || placement == .after), let lockedParentPostID {
+          if placement == .before || placement == .after, let lockedParentPostID {
             response = try await service.comments(
               threadID: threadID,
               postID: lockedParentPostID,
@@ -333,7 +396,7 @@ final class CommentsViewModel: ObservableObject {
             )
           }
         case .resolvingComment(let commentID):
-          if (placement == .before || placement == .after), let lockedParentPostID {
+          if placement == .before || placement == .after, let lockedParentPostID {
             response = try await service.comments(
               threadID: threadID,
               postID: lockedParentPostID,
@@ -356,7 +419,17 @@ final class CommentsViewModel: ObservableObject {
           throw BrowseError.unavailable("贴吧返回的楼中楼归属异常，未显示该响应。")
         }
         try validateThreadContext(response.thread, placement: placement)
-        let pageComments = normalized(response.comments)
+        let rawPageComments = normalized(response.comments)
+        let responseThread =
+          (placement == .before || placement == .after)
+          ? resolvedPaginationThread(response.thread) : response.thread
+        let responseParent =
+          (placement == .before || placement == .after)
+          ? resolvedPaginationParentPost(response.parentPost) : response.parentPost
+        let pageComments = try projectAcceptedDeletions(
+          rawPageComments, thread: responseThread, parentPost: responseParent
+        )
+        let removedAcceptedComments = pageComments.count < rawPageComments.count
         var agreementContextChanged = false
         switch placement {
         case .replacing, .refreshing:
@@ -400,7 +473,14 @@ final class CommentsViewModel: ObservableObject {
                 commentsChanged: false
               )
             }
-            canLoadPrevious = false
+            // A stale page containing only accepted deletions is still a real page.
+            // Preserve navigation so filtering cannot strand surviving earlier replies.
+            if removedAcceptedComments {
+              lowestLoadedPage = response.currentPage
+              canLoadPrevious = response.hasPrevious && lowestLoadedPage > 1
+            } else {
+              canLoadPrevious = false
+            }
           } else {
             if let changedContext {
               agreementContextChanged = true
@@ -444,7 +524,12 @@ final class CommentsViewModel: ObservableObject {
                 commentsChanged: false
               )
             }
-            hasMore = false
+            if removedAcceptedComments {
+              highestLoadedPage = response.currentPage
+              hasMore = response.hasMore
+            } else {
+              hasMore = false
+            }
           } else {
             if let changedContext {
               agreementContextChanged = true
@@ -468,20 +553,22 @@ final class CommentsViewModel: ObservableObject {
         }
         if placement == .replacing {
           replaceAgreementDescriptors(
-            with: response.agreementReadDescriptor.map { [$0] } ?? []
+            with: response.agreementReadDescriptor.map { [$0] } ?? [],
+            retainingOnlyIndexedTargets: !acceptedDeletionTargets.isEmpty
           )
         } else if placement == .refreshing {
           replaceAgreementDescriptors(
             with: response.agreementReadDescriptor.map { [$0] } ?? [],
-            forceReadIfUnchanged: true
+            forceReadIfUnchanged: true,
+            retainingOnlyIndexedTargets: !acceptedDeletionTargets.isEmpty
           )
         } else {
           upsertAgreementDescriptor(
             response.agreementReadDescriptor,
-            pruningAll: agreementContextChanged
+            pruningAll: agreementContextChanged || !acceptedDeletionTargets.isEmpty
           )
         }
-        if (placement == .replacing || placement == .refreshing),
+        if placement == .replacing || placement == .refreshing,
           let commentID = anchor.targetCommentID
         {
           if let target = comments.first(where: { $0.id == commentID }) {
@@ -522,6 +609,71 @@ final class CommentsViewModel: ObservableObject {
   private func normalized(_ items: [BrowseComment]) -> [BrowseComment] {
     var seen = Set<Int64>()
     return items.filter { $0.id > 0 && seen.insert($0.id).inserted }
+  }
+
+  private func matchesDeletionContext(
+    _ target: OwnedContentDeletionTarget,
+    thread: BrowseThread,
+    parentPost: CommentParentPostContext
+  ) -> Bool {
+    target.kind == .subpost && target.threadID == threadID
+      && thread.id == threadID && target.forumID == thread.forumID
+      && target.forumName == normalizedForumName(thread.forumName)
+      && target.parentPostID == parentPost.id && parentPost.threadID == threadID
+      && target.floor == parentPost.floor
+      && (target.threadOwnerID == nil || target.threadOwnerID == thread.authorID)
+  }
+
+  private func matchesDeletionComment(
+    _ target: OwnedContentDeletionTarget, _ comment: BrowseComment
+  ) -> Bool {
+    comment.id == target.objectID && comment.threadID == target.threadID
+      && comment.parentPostID == target.parentPostID && comment.authorID == target.authorID
+  }
+
+  private func projectAcceptedDeletions(
+    _ items: [BrowseComment],
+    thread: BrowseThread?,
+    parentPost: CommentParentPostContext
+  ) throws -> [BrowseComment] {
+    // A child-only route cannot know its parent until the first response. Ledger
+    // records belonging to other parents must neither filter nor block that page.
+    stagedAcceptedDeletionTargets = stagedAcceptedDeletionTargets.filter {
+      $0.value.parentPostID == parentPost.id
+    }
+    guard !acceptedDeletionTargets.isEmpty || !stagedAcceptedDeletionTargets.isEmpty else {
+      return items
+    }
+    guard let thread, thread.forumID > 0, !normalizedForumName(thread.forumName).isEmpty,
+      parentPost.floor > 0
+    else {
+      throw BrowseError.unavailable("贴吧返回的楼中楼身份不足，无法安全恢复已删除回复。")
+    }
+    // Do not activate a restored record solely because its numeric child ID appears.
+    // Every response (including an already in-flight refresh) binds all target identity.
+    var completed = Set<Int64>()
+    for item in items {
+      guard let target = stagedAcceptedDeletionTargets[item.id] else { continue }
+      if matchesDeletionContext(target, thread: thread, parentPost: parentPost)
+        && matchesDeletionComment(target, item)
+      {
+        acceptedDeletionTargets[item.id] = target
+      }
+      completed.insert(item.id)
+    }
+    for (id, target) in stagedAcceptedDeletionTargets
+    where
+      !matchesDeletionContext(target, thread: thread, parentPost: parentPost)
+    {
+      completed.insert(id)
+    }
+    for id in completed { stagedAcceptedDeletionTargets.removeValue(forKey: id) }
+    return items.filter { item in
+      guard let target = acceptedDeletionTargets[item.id] else { return true }
+      return
+        !(matchesDeletionContext(target, thread: thread, parentPost: parentPost)
+        && matchesDeletionComment(target, item))
+    }
   }
 
   private func unique(_ newItems: [BrowseComment]) -> [BrowseComment] {
@@ -619,6 +771,7 @@ final class CommentsViewModel: ObservableObject {
       hasDisplayableComments = false
     }
     commentIDs.removeAll(keepingCapacity: true)
+    commentsByID.removeAll(keepingCapacity: true)
     indexedParentAgreementTarget = nil
     agreementTargetsByCommentID.removeAll(keepingCapacity: true)
     indexedAgreementContext = nil
@@ -747,14 +900,17 @@ final class CommentsViewModel: ObservableObject {
       ContentAgreementTarget(thread: thread, parentPost: parentPost)
     }
     var ids = Set<Int64>()
+    var lookup: [Int64: BrowseComment] = [:]
     var targets: [Int64: ContentAgreementTarget] = [:]
     var displayable: [BrowseComment] = []
     ids.reserveCapacity(comments.count)
+    lookup.reserveCapacity(comments.count)
     targets.reserveCapacity(comments.count)
     displayable.reserveCapacity(comments.count)
     var containsDisplayableComment = false
     for comment in comments {
       ids.insert(comment.id)
+      lookup[comment.id] = comment
       if comment.localVisibility != .hidden {
         displayable.append(comment)
         containsDisplayableComment = true
@@ -771,6 +927,7 @@ final class CommentsViewModel: ObservableObject {
       }
     }
     commentIDs = ids
+    commentsByID = lookup
     displayableComments = displayable
     if hasDisplayableComments != containsDisplayableComment {
       hasDisplayableComments = containsDisplayableComment
@@ -786,7 +943,9 @@ final class CommentsViewModel: ObservableObject {
     var discoveredDisplayableComment = false
     for comment in newComments {
       commentIDs.insert(comment.id)
-      discoveredDisplayableComment = discoveredDisplayableComment
+      commentsByID[comment.id] = comment
+      discoveredDisplayableComment =
+        discoveredDisplayableComment
         || comment.localVisibility != .hidden
       if
         let indexedThread,

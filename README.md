@@ -25,6 +25,17 @@ and its verified metadata enters the public app source.
 
 ### Release and validation
 
+- **Development candidate — nested-reply deletion:** The full reply list and
+  inline reply previews offer an explicitly confirmed action to delete one's own
+  child reply, or another author's child reply in one's own topic. The exact
+  child ID is sent to `delpost`; a fresh authenticated parent-page read and an
+  exact-child read bind the account, topic, forum, parent and child author first.
+  A clear server acknowledgement removes only that reply from the local views.
+  It does not assert a separately observed server-side absence. Unknown outcomes
+  retain the reply and survive relaunch without resending. Existing signed
+  deletion records keep their encoding, and changing a parent hint cannot bypass
+  the lock for the same child. Native regressions and disposable-account/device
+  validation are required before calling this workflow fully validated.
 - **`v0.65.0-alpha.35` transparent image themes:** Settings → 外观与布局 → 透明图片主题
   offers local Photos import, drag/zoom cropping to the current window, blur and
   opacity previews, light/dark reading colors, colors extracted from the image,
@@ -475,9 +486,8 @@ and its verified metadata enters the public app source.
   deletions instead of being overwritten or evicted. The archive is an
   ordinary-crash recovery journal, not a monotonic rollback anchor against an
   app reinstall or restored device backup.
-  Nested-reply deletion is intentionally still unavailable because TiebaLite's
-  current abstract and concrete `isfloor`/`src` calls disagree and no disposable-
-  account capture has established the irreversible wire contract.
+  The later nested-reply implementation uses TiebaLite's actual child-ID call
+  path; the interface's misleading boolean comment is not a second wire contract.
   Cloud-favorite rows with consistent update metadata still open at the saved
   PID first, then expose one dismissible action to load the server-provided
   latest PID while preserving an ascending or descending sort and the selected
@@ -1411,8 +1421,8 @@ and its verified metadata enters the public app source.
   rows, bulk cloud/local synchronization, disagreement and other remaining
   reaction types, image creation for ordinary-floor and nested replies,
   voice and arbitrary rich-media topic/reply creation, content
-  deletion beyond the active account's own loaded topic or ordinary floor and
-  other authors' ordinary floors in its own topic,
+  deletion beyond the active account's own loaded topic, ordinary floor or nested
+  reply and other authors' ordinary floors or nested replies in its own topic,
   native or credential-injected reporting,
   explicit notification mark-read/unread writes, and moderation remain
   unavailable until their request contracts and recovery paths have been

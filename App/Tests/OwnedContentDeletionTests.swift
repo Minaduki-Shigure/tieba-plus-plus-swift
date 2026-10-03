@@ -4,6 +4,91 @@ import XCTest
 @testable import TiebaPlusPlus
 
 final class OwnedContentDeletionTargetTests: XCTestCase {
+  func testSubpostTargetsBindChildAndParentWithoutPromotingFirstFloorToTopic() throws {
+    let thread = deletionThread()
+    for floor in [1, 2] {
+      let parentID: Int64 = floor == 1 ? 101 : 102
+      let parent = deletionPost(id: parentID, threadID: thread.id, floor: floor, authorID: 7)
+      let child = deletionComment(parentPostID: parentID)
+      let own = try XCTUnwrap(
+        OwnedContentDeletionTarget(thread: thread, parentPost: parent, comment: child)
+      )
+      let managed = try XCTUnwrap(
+        OwnedContentDeletionTarget(
+          thread: thread, parentPost: parent, comment: child, asThreadOwner: true
+        )
+      )
+      XCTAssertEqual(own.kind, .subpost)
+      XCTAssertEqual(own.objectID, child.id)
+      XCTAssertEqual(own.parentPostID, parentID)
+      XCTAssertEqual(own.floor, floor)
+      XCTAssertEqual(own.deletionAccountID, child.authorID)
+      XCTAssertEqual(managed.deletionAccountID, thread.authorID)
+      XCTAssertEqual(managed.authorID, child.authorID)
+      let parentContext = CommentParentPostContext(
+        id: parent.id, threadID: parent.threadID, floor: floor, authorID: parent.authorID,
+        authorName: parent.authorName, authorPortraitURL: nil, createdAt: nil,
+        isThreadAuthor: true, contents: parent.contents
+      )
+      XCTAssertEqual(
+        OwnedContentDeletionTarget(thread: thread, parentPost: parentContext, comment: child), own
+      )
+    }
+  }
+
+  func testSubpostTargetsRejectMissingConflictingHiddenOrParentAsChildIdentities() {
+    let thread = deletionThread()
+    let parent = deletionPost(id: 102, threadID: thread.id, floor: 2, authorID: 9)
+    for child in [
+      deletionComment(id: 0), deletionComment(id: 101), deletionComment(id: 102),
+      deletionComment(authorID: 0), deletionComment(threadID: 11),
+      deletionComment(parentPostID: 103), deletionComment(visibility: .hidden),
+    ] {
+      XCTAssertNil(OwnedContentDeletionTarget(thread: thread, parentPost: parent, comment: child))
+    }
+    for invalidParent in [
+      deletionPost(id: 102, threadID: 11, floor: 2, authorID: 9),
+      deletionPost(id: 102, threadID: 10, floor: 0, authorID: 9),
+      deletionPost(id: 102, threadID: 10, floor: 1, authorID: 9),
+      deletionPost(id: 102, threadID: 10, floor: 2, authorID: 0),
+      deletionPost(id: 102, threadID: 10, floor: 2, authorID: 9, visibility: .placeholder),
+    ] {
+      XCTAssertNil(
+        OwnedContentDeletionTarget(
+          thread: thread, parentPost: invalidParent, comment: deletionComment()
+        )
+      )
+    }
+    XCTAssertNil(OwnedContentDeletionTarget(
+      thread: thread, parentPost: parent, comment: deletionComment(authorID: 7),
+      asThreadOwner: true
+    ))
+    for invalidThread in [
+      deletionThread(visibility: .hidden), deletionThread(firstPostID: 0),
+      deletionThread(authorID: 0), deletionThread(isServerHidden: true),
+    ] {
+      XCTAssertNil(OwnedContentDeletionTarget(
+        thread: invalidThread, parentPost: parent, comment: deletionComment(), asThreadOwner: true
+      ))
+    }
+    for parentID: Int64? in [nil, 0, -1, 301] {
+      XCTAssertNil(OwnedContentDeletionTarget(
+        kind: .subpost, forumID: 42, forumName: "swift", threadID: 10,
+        objectID: 301, authorID: 8, floor: 1, parentPostID: parentID
+      ))
+    }
+    for kind in [OwnedContentDeletionKind.topic, .post] {
+      XCTAssertNil(OwnedContentDeletionTarget(
+        kind: kind, forumID: 42, forumName: "swift", threadID: 10,
+        objectID: 301, authorID: 8, floor: kind == .topic ? 1 : 2, parentPostID: 102
+      ))
+    }
+    XCTAssertNil(OwnedContentDeletionTarget(
+      kind: .subpost, forumID: 42, forumName: "swift", threadID: 10,
+      objectID: 301, authorID: 8, floor: 0, parentPostID: 102
+    ))
+  }
+
   func testThreadOwnerTargetKeepsTheOtherAuthorsIdentityAndSeparateDeletingAccount() throws {
     let thread = deletionThread()
     let reply = deletionPost(id: 102, threadID: thread.id, floor: 2, authorID: 8)
@@ -153,6 +238,205 @@ final class OwnedContentDeletionTargetTests: XCTestCase {
 
 @MainActor
 final class OwnedContentDeletionStoreTests: XCTestCase {
+  func testRestoredSubpostProjectionSelectsUnknownAndAcceptedFromTheRequestedParent() async throws {
+    let session = deletionSession(revisionComponent: 74, userID: 7)
+    let ledger = TransientOwnedContentDeletionLedger()
+    let firstChild = try XCTUnwrap(OwnedContentDeletionTarget(
+      kind: .subpost, forumID: 42, forumName: "swift", threadID: 10,
+      objectID: 301, authorID: 7, floor: 1, parentPostID: 101
+    ))
+    let secondChild = try XCTUnwrap(OwnedContentDeletionTarget(
+      kind: .subpost, forumID: 42, forumName: "swift", threadID: 10,
+      objectID: 302, authorID: 7, floor: 2, parentPostID: 102
+    ))
+    let acceptedChild = try XCTUnwrap(OwnedContentDeletionTarget(
+      kind: .subpost, forumID: 42, forumName: "swift", threadID: 10,
+      objectID: 303, authorID: 7, floor: 2, parentPostID: 102
+    ))
+    let acceptedParent = deletionTarget(authorID: 7)
+    for target in [firstChild, secondChild, acceptedChild, acceptedParent] {
+      let record = try await ledger.prepare(
+        target: target, accountID: session.id, sessionRevision: session.sessionRevision,
+        operationID: UUID(), at: Date(timeIntervalSince1970: 100)
+      )
+      _ = try await ledger.transition(
+        for: record.key, operationID: record.operationID,
+        to: target == firstChild || target == secondChild ? .outcomeUnknown : .accepted,
+        at: Date(timeIntervalSince1970: 101)
+      )
+    }
+    let store = OwnedContentDeletionStore(
+      access: AccountAccess(
+        vault: OwnedContentDeletionVaultSpy(session: session),
+        service: OwnedContentDeletionServiceSpy()
+      ),
+      ledger: ledger, observesAccountSessionChanges: false
+    )
+    let thread = await store.restoredTargets(threadID: 10)
+    XCTAssertEqual(Set(thread.accepted), [acceptedChild, acceptedParent])
+    XCTAssertEqual(thread.outcomeUnknown, firstChild)
+    let first = await store.restoredTargets(threadID: 10, parentPostID: 101)
+    XCTAssertEqual(first.accepted, [])
+    XCTAssertEqual(first.outcomeUnknown, firstChild)
+    let second = await store.restoredTargets(threadID: 10, parentPostID: 102)
+    XCTAssertEqual(second.accepted, [acceptedChild])
+    XCTAssertEqual(second.outcomeUnknown, secondChild)
+    let unrelated = await store.restoredTargets(threadID: 11, parentPostID: 102)
+    XCTAssertEqual(unrelated.accepted, [])
+    XCTAssertNil(unrelated.outcomeUnknown)
+  }
+
+  func testSubpostTerminalNotificationsPublishExactTargetAfterPersistenceOnlyOnce() async throws {
+    let session = deletionSession(revisionComponent: 72, userID: 7)
+    let target = try XCTUnwrap(OwnedContentDeletionTarget(
+      kind: .subpost, forumID: 42, forumName: "swift", threadID: 10,
+      objectID: 301, authorID: 7, floor: 1, parentPostID: 101
+    ))
+    for behavior in [OwnedContentDeletionServiceBehavior.accepted, .outcomeUnknown, .definiteFailure] {
+      let recorder = OwnedContentDeletionNotificationRecorder()
+      let observer = NotificationCenter.default.addObserver(
+        forName: .ownedContentDeletionDidChange, object: nil, queue: nil
+      ) { notification in
+        if let target = notification.object as? OwnedContentDeletionTarget {
+          recorder.record(target)
+        }
+      }
+      defer { NotificationCenter.default.removeObserver(observer) }
+      let ledger = TransientOwnedContentDeletionLedger()
+      let store = OwnedContentDeletionStore(
+        access: AccountAccess(
+          vault: OwnedContentDeletionVaultSpy(session: session),
+          service: OwnedContentDeletionServiceSpy(behavior: behavior)
+        ),
+        ledger: ledger, observesAccountSessionChanges: false
+      )
+      await store.reloadActiveSession()
+      let pending = try XCTUnwrap(store.pendingRequest(for: target))
+      _ = try? await store.delete(pending)
+      let records = try await ledger.records()
+      if behavior == .definiteFailure {
+        XCTAssertEqual(recorder.targets, [])
+        XCTAssertEqual(records, [])
+      } else {
+        XCTAssertEqual(recorder.targets, [target])
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records.first?.phase, behavior == .accepted ? .accepted : .outcomeUnknown)
+        _ = try? await store.delete(pending)
+        await store.reloadActiveSession()
+        XCTAssertEqual(recorder.targets, [target])
+      }
+    }
+  }
+
+  func testSubpostConfirmationAndAcceptedRestorationStayBoundToOnlyTheChild() async throws {
+    let session = deletionSession(revisionComponent: 70, userID: 7)
+    for authorID: Int64 in [7, 8] {
+      let target = try XCTUnwrap(OwnedContentDeletionTarget(
+        kind: .subpost, forumID: 42, forumName: "swift", threadID: 10,
+        objectID: 301, authorID: authorID, floor: 1,
+        threadOwnerID: authorID == 7 ? nil : 7, parentPostID: 101
+      ))
+      let service = OwnedContentDeletionServiceSpy()
+      let ledger = TransientOwnedContentDeletionLedger()
+      let access = AccountAccess(vault: OwnedContentDeletionVaultSpy(session: session), service: service)
+      let store = OwnedContentDeletionStore(
+        access: access, ledger: ledger, observesAccountSessionChanges: false
+      )
+      await store.reloadActiveSession()
+      let pending = try XCTUnwrap(store.pendingRequest(for: target))
+      XCTAssertEqual(pending.confirmationTitle, "删除这条楼中楼回复？")
+      XCTAssertEqual(pending.actionTitle, "删除此条回复")
+      XCTAssertTrue(pending.confirmationMessage.contains("保留父楼和其他回复"))
+      let receipt = try await store.delete(pending)
+      XCTAssertEqual(receipt.target, target)
+      let restored = OwnedContentDeletionStore(
+        access: access, ledger: ledger, observesAccountSessionChanges: false
+      )
+      await restored.reloadActiveSession()
+      let projection = await restored.restoredTargets(threadID: target.threadID)
+      XCTAssertEqual(projection.accepted, [target])
+      XCTAssertNil(restored.pendingRequest(for: target))
+      XCTAssertNotNil(restored.pendingRequest(for: deletionTarget(authorID: session.id)))
+      let writes = await service.writeCount()
+      XCTAssertEqual(writes, 1)
+    }
+  }
+
+  func testUnknownSubpostCannotBeReissuedWithAnotherParentOrOwnershipModeAfterRestart()
+    async throws
+  {
+    let session = deletionSession(revisionComponent: 71, userID: 7)
+    let targets = try [
+      (parent: Int64(101), floor: 1, author: Int64(8), owner: Int64?(7)),
+      (parent: Int64(102), floor: 2, author: Int64(8), owner: Int64?(7)),
+      (parent: Int64(102), floor: 2, author: Int64(7), owner: Int64?.none),
+    ].map { value in
+      try XCTUnwrap(OwnedContentDeletionTarget(
+        kind: .subpost, forumID: 42, forumName: "swift", threadID: 10,
+        objectID: 301, authorID: value.author, floor: value.floor,
+        threadOwnerID: value.owner, parentPostID: value.parent
+      ))
+    }
+    let service = OwnedContentDeletionServiceSpy(behavior: .outcomeUnknown)
+    let ledger = TransientOwnedContentDeletionLedger()
+    let access = AccountAccess(vault: OwnedContentDeletionVaultSpy(session: session), service: service)
+    let store = OwnedContentDeletionStore(
+      access: access, ledger: ledger, observesAccountSessionChanges: false
+    )
+    await store.reloadActiveSession()
+    let pending = try XCTUnwrap(store.pendingRequest(for: targets[0]))
+    do { _ = try await store.delete(pending); XCTFail("Expected unknown") } catch {}
+    let restored = OwnedContentDeletionStore(
+      access: access, ledger: ledger, observesAccountSessionChanges: false
+    )
+    await restored.reloadActiveSession()
+    for target in targets {
+      XCTAssertNil(restored.pendingRequest(for: target))
+      do {
+        _ = try await restored.delete(
+          PendingOwnedContentDeletion(target: target, lease: AccountSessionLease(session))
+        )
+        XCTFail("A changed parent or authority must not unlock the same child")
+      } catch {}
+    }
+    let writes = await service.writeCount()
+    XCTAssertEqual(writes, 1)
+  }
+
+  func testConcurrentSubpostConfirmationRejectsChangedParentBeforeASecondServiceWrite()
+    async throws
+  {
+    let session = deletionSession(revisionComponent: 73, userID: 7)
+    let target = try XCTUnwrap(OwnedContentDeletionTarget(
+      kind: .subpost, forumID: 42, forumName: "swift", threadID: 10,
+      objectID: 301, authorID: 7, floor: 1, parentPostID: 101
+    ))
+    let conflicting = try XCTUnwrap(OwnedContentDeletionTarget(
+      kind: .subpost, forumID: 42, forumName: "swift", threadID: 10,
+      objectID: 301, authorID: 7, floor: 2, parentPostID: 102
+    ))
+    let service = OwnedContentDeletionServiceSpy(behavior: .suspendedAccepted)
+    let store = OwnedContentDeletionStore(
+      access: AccountAccess(vault: OwnedContentDeletionVaultSpy(session: session), service: service),
+      ledger: TransientOwnedContentDeletionLedger(), observesAccountSessionChanges: false
+    )
+    await store.reloadActiveSession()
+    let pending = try XCTUnwrap(store.pendingRequest(for: target))
+    let first = Task { try await store.delete(pending) }
+    try await waitForOwnedContentDeletionTest { await service.writeCount() == 1 }
+    do {
+      _ = try await store.delete(
+        PendingOwnedContentDeletion(target: conflicting, lease: AccountSessionLease(session))
+      )
+      XCTFail("Changing the parent must not create or join another child deletion")
+    } catch {}
+    await service.releaseWrites()
+    let receipt = try await first.value
+    XCTAssertEqual(receipt.target, target)
+    let writes = await service.writeCount()
+    XCTAssertEqual(writes, 1)
+  }
+
   func testThreadOwnerPermissionAndConfirmationStayBoundToInitiatingAccount() async throws {
     let owner = deletionSession(revisionComponent: 50, userID: 7)
     let target = deletionTarget(authorID: 8, threadOwnerID: owner.id)
@@ -1183,6 +1467,23 @@ private enum OwnedContentDeletionTestError: LocalizedError, Sendable {
   var errorDescription: String? { "unexpected test request" }
 }
 
+private final class OwnedContentDeletionNotificationRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var recorded: [OwnedContentDeletionTarget] = []
+
+  func record(_ target: OwnedContentDeletionTarget) {
+    lock.lock()
+    defer { lock.unlock() }
+    recorded.append(target)
+  }
+
+  var targets: [OwnedContentDeletionTarget] {
+    lock.lock()
+    defer { lock.unlock() }
+    return recorded
+  }
+}
+
 private actor OwnedContentDeletionVaultSpy: AccountVault {
   private var session: StoredAccountSession?
 
@@ -1653,6 +1954,20 @@ private func deletionTarget(
     floor: 2,
     threadOwnerID: threadOwnerID
   )!
+}
+
+private func deletionComment(
+  id: Int64 = 301,
+  authorID: Int64 = 8,
+  threadID: Int64 = 10,
+  parentPostID: Int64 = 102,
+  visibility: LocalContentVisibility = .visible
+) -> BrowseComment {
+  BrowseComment(
+    id: id, authorID: authorID, authorName: "child author", authorPortraitURL: nil,
+    createdAt: nil, contents: [.text("one child reply")], localVisibility: visibility,
+    threadID: threadID, parentPostID: parentPostID
+  )
 }
 
 @MainActor

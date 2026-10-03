@@ -1,6 +1,10 @@
 import Combine
 import SwiftUI
 
+extension Notification.Name {
+  static let ownedContentDeletionDidChange = Notification.Name("ownedContentDeletionDidChange")
+}
+
 enum OwnedContentDeletionEntryState: Equatable {
   case resolvingAccount
   case signedOut
@@ -36,6 +40,8 @@ struct PendingOwnedContentDeletion: Equatable, Sendable {
       "删除这个主题？"
     case .post:
       "删除第 \(target.floor) 楼？"
+    case .subpost:
+      "删除这条楼中楼回复？"
     }
   }
 
@@ -43,6 +49,7 @@ struct PendingOwnedContentDeletion: Equatable, Sendable {
     switch target.kind {
     case .topic: "删除主题"
     case .post: "删除本楼"
+    case .subpost: "删除此条回复"
     }
   }
 
@@ -54,6 +61,10 @@ struct PendingOwnedContentDeletion: Equatable, Sendable {
       target.threadOwnerID == nil
         ? "将永久删除你发布的第 \(target.floor) 楼及其楼中楼回复。此操作无法撤销。"
         : "将以楼主身份永久删除自己主题中他人发布的第 \(target.floor) 楼及其楼中楼回复。此操作无法撤销。"
+    case .subpost:
+      target.threadOwnerID == nil
+        ? "将永久删除你在第 \(target.floor) 楼中发布的这一条回复，保留父楼和其他回复。此操作无法撤销。"
+        : "将以楼主身份永久删除自己主题中第 \(target.floor) 楼内的这一条回复，保留父楼和其他回复。此操作无法撤销。"
     }
   }
 }
@@ -152,8 +163,20 @@ final class OwnedContentDeletionStore {
   }
 
   func outcomeUnknownTarget(threadID: Int64) -> OwnedContentDeletionTarget? {
+    outcomeUnknownTarget(threadID: threadID, parentPostID: nil)
+  }
+
+  private func outcomeUnknownTarget(
+    threadID: Int64,
+    parentPostID: Int64?
+  ) -> OwnedContentDeletionTarget? {
     terminals.values.compactMap { terminal -> OwnedContentDeletionTarget? in
       guard terminal.target.threadID == threadID else { return nil }
+      if let parentPostID {
+        guard terminal.target.kind == .subpost, terminal.target.parentPostID == parentPostID else {
+          return nil
+        }
+      }
       if case .outcomeUnknown(let target, _) = terminal { return target }
       return nil
     }
@@ -165,17 +188,23 @@ final class OwnedContentDeletionStore {
   }
 
   func restoredTargets(
-    threadID: Int64
+    threadID: Int64,
+    parentPostID: Int64? = nil
   ) async -> (accepted: [OwnedContentDeletionTarget], outcomeUnknown: OwnedContentDeletionTarget?) {
     await restoreLedgerIfNeeded()
     guard ledgerIsAvailable else { return ([], nil) }
     let accepted = terminals.values.compactMap { terminal -> OwnedContentDeletionTarget? in
       guard terminal.target.threadID == threadID else { return nil }
+      if let parentPostID {
+        guard terminal.target.kind == .subpost, terminal.target.parentPostID == parentPostID else {
+          return nil
+        }
+      }
       if case .accepted(let target) = terminal { return target }
       return nil
     }
     .sorted(by: Self.targetAppearsEarlier)
-    return (accepted, outcomeUnknownTarget(threadID: threadID))
+    return (accepted, outcomeUnknownTarget(threadID: threadID, parentPostID: parentPostID))
   }
 
   @discardableResult
@@ -441,6 +470,17 @@ final class OwnedContentDeletionStore {
 
     flights.removeValue(forKey: resourceKey)
     applyCurrentStateToEntries(for: resourceKey)
+    switch finalized {
+    case .accepted, .outcomeUnknown:
+      // Subscribers restore the committed terminal projection rather than inferring
+      // acceptance from a notification. Publish only after the shared state changes.
+      NotificationCenter.default.post(
+        name: .ownedContentDeletionDidChange,
+        object: pending.target
+      )
+    case .retryAllowed:
+      break
+    }
     return finalized
   }
 
@@ -806,6 +846,10 @@ private struct OwnedContentDeletionObservedMenuItem: View {
       entry.target.threadOwnerID == nil
         ? "删除第 \(entry.target.floor) 楼"
         : "作为楼主删除第 \(entry.target.floor) 楼"
+    case .subpost:
+      entry.target.threadOwnerID == nil
+        ? "删除此条回复"
+        : "作为楼主删除此条回复"
     }
   }
 }

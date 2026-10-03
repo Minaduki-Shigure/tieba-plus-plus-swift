@@ -142,11 +142,13 @@ enum OwnedContentDeletionLedgerPhase: String, Codable, Hashable, Sendable {
 private enum OwnedContentDeletionLedgerStoredKind: String, Codable, Sendable {
   case topic
   case post
+  case subpost
 
   init(_ kind: OwnedContentDeletionKind) {
     switch kind {
     case .topic: self = .topic
     case .post: self = .post
+    case .subpost: self = .subpost
     }
   }
 
@@ -154,6 +156,7 @@ private enum OwnedContentDeletionLedgerStoredKind: String, Codable, Sendable {
     switch self {
     case .topic: .topic
     case .post: .post
+    case .subpost: .subpost
     }
   }
 }
@@ -256,6 +259,7 @@ struct OwnedContentDeletionLedgerTargetSnapshot: Hashable, Codable, Sendable {
   let authorID: Int64
   let floor: Int
   let threadOwnerID: Int64?
+  let parentPostID: Int64?
 
   init?(_ target: OwnedContentDeletionTarget) {
     guard
@@ -267,7 +271,8 @@ struct OwnedContentDeletionLedgerTargetSnapshot: Hashable, Codable, Sendable {
         objectID: target.objectID,
         authorID: target.authorID,
         floor: target.floor,
-        threadOwnerID: target.threadOwnerID
+        threadOwnerID: target.threadOwnerID,
+        parentPostID: target.parentPostID
       ),
       validated == target
     else { return nil }
@@ -279,6 +284,7 @@ struct OwnedContentDeletionLedgerTargetSnapshot: Hashable, Codable, Sendable {
     authorID = validated.authorID
     floor = validated.floor
     threadOwnerID = validated.threadOwnerID
+    parentPostID = validated.parentPostID
   }
 
   var target: OwnedContentDeletionTarget? {
@@ -290,7 +296,8 @@ struct OwnedContentDeletionLedgerTargetSnapshot: Hashable, Codable, Sendable {
       objectID: objectID,
       authorID: authorID,
       floor: floor,
-      threadOwnerID: threadOwnerID
+      threadOwnerID: threadOwnerID,
+      parentPostID: parentPostID
     )
   }
 
@@ -303,19 +310,23 @@ struct OwnedContentDeletionLedgerTargetSnapshot: Hashable, Codable, Sendable {
     case authorID
     case floor
     case threadOwnerID
+    case parentPostID
   }
 
   init(from decoder: any Decoder) throws {
     try requireOwnedContentDeletionLedgerKeys(
       decoder,
       CodingKeys.self,
-      optionalKeys: [CodingKeys.threadOwnerID.stringValue]
+      optionalKeys: [CodingKeys.threadOwnerID.stringValue, CodingKeys.parentPostID.stringValue]
     )
     let container = try decoder.container(keyedBy: CodingKeys.self)
     // Absence is the original author-only schema-1 representation. Explicit
     // null is not another canonical spelling of that authority.
     let threadOwnerID = try container.contains(.threadOwnerID)
       ? container.decode(Int64.self, forKey: .threadOwnerID)
+      : nil
+    let parentPostID = try container.contains(.parentPostID)
+      ? container.decode(Int64.self, forKey: .parentPostID)
       : nil
     guard
       let target = OwnedContentDeletionTarget(
@@ -329,7 +340,8 @@ struct OwnedContentDeletionLedgerTargetSnapshot: Hashable, Codable, Sendable {
         objectID: try container.decode(Int64.self, forKey: .objectID),
         authorID: try container.decode(Int64.self, forKey: .authorID),
         floor: try container.decode(Int.self, forKey: .floor),
-        threadOwnerID: threadOwnerID
+        threadOwnerID: threadOwnerID,
+        parentPostID: parentPostID
       ),
       let value = Self(target)
     else {
@@ -363,6 +375,7 @@ struct OwnedContentDeletionLedgerTargetSnapshot: Hashable, Codable, Sendable {
     try container.encode(floor, forKey: .floor)
     // Omitting nil preserves every authenticated byte of existing archives.
     try container.encodeIfPresent(threadOwnerID, forKey: .threadOwnerID)
+    try container.encodeIfPresent(parentPostID, forKey: .parentPostID)
   }
 }
 

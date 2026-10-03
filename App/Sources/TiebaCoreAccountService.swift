@@ -2004,7 +2004,7 @@ struct TiebaCoreAccountService: AccountService {
       let credentials = session.credentials
     else {
       throw OwnedContentDeletionError.definitelyNotAccepted(
-        "只能删除本人发布的内容或本人主题中的普通楼层；请重新登录或切换账户后再试。"
+        "只能删除本人发布的内容或本人主题中的楼层及楼中楼回复；请重新登录或切换账户后再试。"
       )
     }
     let coreTarget: TiebaOwnedContentDeletionTarget = switch target.kind {
@@ -2019,6 +2019,21 @@ struct TiebaCoreAccountService: AccountService {
         )
       } else {
         .post(postID: target.objectID)
+      }
+    case .subpost:
+      if let parentPostID = target.parentPostID {
+        if target.threadOwnerID != nil {
+          .subpostInOwnedThread(
+            parentPostID: parentPostID,
+            subpostID: target.objectID,
+            subpostAuthorID: target.authorID,
+            floor: target.floor
+          )
+        } else {
+          .subpost(parentPostID: parentPostID, subpostID: target.objectID)
+        }
+      } else {
+        throw OwnedContentDeletionError.definitelyNotAccepted("楼中楼回复缺少父楼信息。")
       }
     }
     do {

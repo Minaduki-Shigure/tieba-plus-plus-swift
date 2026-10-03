@@ -24,6 +24,7 @@ final class OwnedContentDeletionLedgerTests: XCTestCase {
     XCTAssertEqual(records.count, 1)
     XCTAssertEqual(try record.reconstructedTarget(), target)
     XCTAssertNil(record.targetSnapshot.threadOwnerID)
+    XCTAssertNil(record.targetSnapshot.parentPostID)
     XCTAssertEqual(record.restoredTerminal, .outcomeUnknown)
     XCTAssertEqual(FileOwnedContentDeletionLedger.schemaVersion, 1)
 
@@ -97,6 +98,118 @@ final class OwnedContentDeletionLedgerTests: XCTestCase {
       let record = try XCTUnwrap(candidate)
       XCTAssertEqual(record.phase, phase)
       XCTAssertEqual(try record.reconstructedTarget(), target)
+    }
+  }
+
+  func testSubpostLedgerRoundTripsParentRelationshipAndLocksOnlyTheExactChildResource()
+    async throws
+  {
+    for ownerID: Int64? in [nil, 7] {
+      let target = try ownedContentDeletionLedgerTarget(
+        objectID: 301, floor: 1, userID: ownerID == nil ? 7 : 8,
+        threadOwnerID: ownerID, parentPostID: 101
+      )
+      let variants = try [
+        ownedContentDeletionLedgerTarget(objectID: 301, floor: 1, parentPostID: 101),
+        ownedContentDeletionLedgerTarget(objectID: 301, floor: 2, parentPostID: 102),
+        ownedContentDeletionLedgerTarget(
+          objectID: 301, floor: 2, userID: 8, threadOwnerID: 7, parentPostID: 102
+        ),
+      ]
+      for phase in [OwnedContentDeletionLedgerPhase.dispatchPending, .outcomeUnknown, .accepted] {
+        let location = try makeOwnedContentDeletionLedgerLocation()
+        defer { try? FileManager.default.removeItem(at: location.directory) }
+        let ledger = FileOwnedContentDeletionLedger(
+          fileURL: location.file, testingKey: ownedContentDeletionLedgerTestingKey
+        )
+        let record = try await ledger.prepare(
+          target: target, accountID: 7, sessionRevision: ownedContentDeletionLedgerUUID(1),
+          operationID: ownedContentDeletionLedgerUUID(2), at: Date(timeIntervalSince1970: 100)
+        )
+        if phase != .dispatchPending {
+          _ = try await ledger.transition(
+            for: record.key, operationID: record.operationID, to: phase,
+            at: Date(timeIntervalSince1970: 101)
+          )
+        }
+        let reopened = FileOwnedContentDeletionLedger(
+          fileURL: location.file, testingKey: ownedContentDeletionLedgerTestingKey
+        )
+        let saved = try await reopened.record(for: record.key)
+        let restored = try XCTUnwrap(saved)
+        XCTAssertEqual(restored.phase, phase)
+        XCTAssertEqual(restored.targetSnapshot.parentPostID, 101)
+        XCTAssertEqual(try restored.reconstructedTarget(), target)
+        for variant in variants {
+          XCTAssertEqual(OwnedContentDeletionLedgerKey(userID: 7, target: variant), record.key)
+          await assertOwnedContentDeletionLedgerError(.resourceLocked) {
+            try await reopened.prepare(
+              target: variant, accountID: 7, sessionRevision: ownedContentDeletionLedgerUUID(3),
+              operationID: ownedContentDeletionLedgerUUID(4), at: Date(timeIntervalSince1970: 102)
+            )
+          }
+        }
+        let sibling = try ownedContentDeletionLedgerTarget(
+          objectID: 302, floor: 1, parentPostID: 101
+        )
+        let siblingRecord = try await reopened.prepare(
+          target: sibling, accountID: 7, sessionRevision: ownedContentDeletionLedgerUUID(3),
+          operationID: ownedContentDeletionLedgerUUID(4), at: Date(timeIntervalSince1970: 102)
+        )
+        XCTAssertNotEqual(siblingRecord.key, record.key)
+        let parent = try ownedContentDeletionLedgerTarget(objectID: 102, floor: 2)
+        let parentRecord = try await reopened.prepare(
+          target: parent, accountID: 7, sessionRevision: ownedContentDeletionLedgerUUID(3),
+          operationID: ownedContentDeletionLedgerUUID(5), at: Date(timeIntervalSince1970: 102)
+        )
+        XCTAssertEqual(parentRecord.key.kind, .post)
+      }
+    }
+  }
+
+  func testSignedInvalidSubpostRelationshipsFailClosedWithoutRewritingArchive() async throws {
+    let location = try makeOwnedContentDeletionLedgerLocation()
+    defer { try? FileManager.default.removeItem(at: location.directory) }
+    let target = try ownedContentDeletionLedgerTarget(objectID: 301, floor: 2, parentPostID: 102)
+    let ledger = FileOwnedContentDeletionLedger(
+      fileURL: location.file, testingKey: ownedContentDeletionLedgerTestingKey
+    )
+    _ = try await ledger.prepare(
+      target: target, accountID: 7, sessionRevision: ownedContentDeletionLedgerUUID(1),
+      operationID: ownedContentDeletionLedgerUUID(2), at: Date(timeIntervalSince1970: 100)
+    )
+    let originalArchive = try ownedContentDeletionLedgerJSONObject(at: location.file)
+    let mutations: [(inout [String: Any]) -> Void] = [
+      { $0.removeValue(forKey: "parentPostID") },
+      { $0["parentPostID"] = NSNull() },
+      { $0["parentPostID"] = 0 },
+      { $0["parentPostID"] = -1 },
+      { $0["parentPostID"] = 301 },
+      { $0["parentPostID"] = "102" },
+      { $0["floor"] = 0 },
+      { $0["kind"] = "post" },
+      { $0["kind"] = "topic"; $0["floor"] = 1 },
+    ]
+    for mutate in mutations {
+      var archive = originalArchive
+      var records = try XCTUnwrap(archive["records"] as? [[String: Any]])
+      var snapshot = try XCTUnwrap(records[0]["targetSnapshot"] as? [String: Any])
+      mutate(&snapshot)
+      records[0]["targetSnapshot"] = snapshot
+      archive["records"] = records
+      let payload = try JSONSerialization.data(withJSONObject: archive, options: [.sortedKeys])
+      let invalidArchive = try ownedContentDeletionLedgerEnvelope(canonicalPayload: payload)
+      try invalidArchive.write(to: location.file)
+      let reopened = FileOwnedContentDeletionLedger(
+        fileURL: location.file, testingKey: ownedContentDeletionLedgerTestingKey
+      )
+      await assertOwnedContentDeletionLedgerError(.corruptedArchive) {
+        try await reopened.records()
+      }
+      await assertPrepareDoesNotOverwrite(
+        expectedError: .corruptedArchive, originalData: invalidArchive,
+        location: location, ledger: reopened
+      )
     }
   }
 
@@ -1433,18 +1546,20 @@ private func ownedContentDeletionLedgerTarget(
   objectID: Int64,
   floor: Int,
   userID: Int64 = 7,
-  threadOwnerID: Int64? = nil
+  threadOwnerID: Int64? = nil,
+  parentPostID: Int64? = nil
 ) throws -> OwnedContentDeletionTarget {
   try XCTUnwrap(
     OwnedContentDeletionTarget(
-      kind: .post,
+      kind: parentPostID == nil ? .post : .subpost,
       forumID: 42,
       forumName: forumName,
       threadID: 100,
       objectID: objectID,
       authorID: userID,
       floor: floor,
-      threadOwnerID: threadOwnerID
+      threadOwnerID: threadOwnerID,
+      parentPostID: parentPostID
     )
   )
 }

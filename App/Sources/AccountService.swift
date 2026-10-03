@@ -927,6 +927,7 @@ enum ContentAgreementMutationError: LocalizedError, Equatable, Sendable {
 enum OwnedContentDeletionKind: Hashable, Sendable {
   case topic
   case post
+  case subpost
 }
 
 struct OwnedContentDeletionTarget: Hashable, Sendable {
@@ -937,8 +938,11 @@ struct OwnedContentDeletionTarget: Hashable, Sendable {
   let objectID: Int64
   let authorID: Int64
   let floor: Int
+  // For a subpost, objectID is the child PID and floor is its parent's floor.
+  // This relationship never changes the object sent to the deletion endpoint.
+  let parentPostID: Int64?
   // nil preserves the original author-only deletion contract. A non-nil
-  // identity authorizes only another author's ordinary floor in this thread.
+  // identity authorizes another author's floor or child reply in this thread.
   let threadOwnerID: Int64?
 
   var deletionAccountID: Int64 { threadOwnerID ?? authorID }
@@ -951,7 +955,8 @@ struct OwnedContentDeletionTarget: Hashable, Sendable {
     objectID: Int64,
     authorID: Int64,
     floor: Int,
-    threadOwnerID: Int64? = nil
+    threadOwnerID: Int64? = nil,
+    parentPostID: Int64? = nil
   ) {
     let forumName = forumName.trimmingCharacters(in: .whitespacesAndNewlines)
       .precomposedStringWithCanonicalMapping
@@ -966,9 +971,13 @@ struct OwnedContentDeletionTarget: Hashable, Sendable {
     else { return nil }
     switch kind {
     case .topic:
-      guard floor == 1, threadOwnerID == nil else { return nil }
+      guard floor == 1, threadOwnerID == nil, parentPostID == nil else { return nil }
     case .post:
-      guard floor > 1 else { return nil }
+      guard floor > 1, parentPostID == nil else { return nil }
+    case .subpost:
+      guard let parentPostID, parentPostID > 0, parentPostID != objectID, floor >= 1 else {
+        return nil
+      }
     }
     if let threadOwnerID {
       guard threadOwnerID > 0, threadOwnerID != authorID else { return nil }
@@ -981,6 +990,7 @@ struct OwnedContentDeletionTarget: Hashable, Sendable {
     self.authorID = authorID
     self.floor = floor
     self.threadOwnerID = threadOwnerID
+    self.parentPostID = parentPostID
   }
 
   init?(thread: BrowseThread, post: BrowsePost, asThreadOwner: Bool = false) {
@@ -1027,6 +1037,92 @@ struct OwnedContentDeletionTarget: Hashable, Sendable {
         threadOwnerID: asThreadOwner ? thread.authorID : nil
       )
     }
+  }
+
+  init?(
+    thread: BrowseThread,
+    parentPost: BrowsePost,
+    comment: BrowseComment,
+    asThreadOwner: Bool = false
+  ) {
+    self.init(
+      thread: thread,
+      parentPostID: parentPost.id,
+      parentThreadID: parentPost.threadID,
+      parentFloor: parentPost.floor,
+      parentAuthorID: parentPost.authorID,
+      parentVisibility: parentPost.localVisibility,
+      comment: comment,
+      asThreadOwner: asThreadOwner
+    )
+  }
+
+  init?(
+    thread: BrowseThread,
+    parentPost: CommentParentPostContext,
+    comment: BrowseComment,
+    asThreadOwner: Bool = false
+  ) {
+    self.init(
+      thread: thread,
+      parentPostID: parentPost.id,
+      parentThreadID: parentPost.threadID,
+      parentFloor: parentPost.floor,
+      parentAuthorID: parentPost.authorID,
+      parentVisibility: parentPost.localVisibility,
+      comment: comment,
+      asThreadOwner: asThreadOwner
+    )
+  }
+
+  private init?(
+    thread: BrowseThread,
+    parentPostID: Int64,
+    parentThreadID: Int64,
+    parentFloor: Int,
+    parentAuthorID: Int64,
+    parentVisibility: LocalContentVisibility,
+    comment: BrowseComment,
+    asThreadOwner: Bool
+  ) {
+    guard
+      thread.id > 0,
+      parentPostID > 0,
+      parentThreadID == thread.id,
+      parentAuthorID > 0,
+      parentVisibility == .visible,
+      thread.localVisibility == .visible,
+      comment.localVisibility == .visible,
+      comment.threadID == thread.id,
+      comment.parentPostID == parentPostID,
+      comment.id != thread.firstPostID
+    else { return nil }
+    if parentFloor == 1 {
+      guard parentPostID == thread.firstPostID, parentAuthorID == thread.authorID else {
+        return nil
+      }
+    } else {
+      guard parentFloor > 1, parentPostID != thread.firstPostID else { return nil }
+    }
+    if asThreadOwner {
+      guard
+        thread.firstPostID > 0,
+        thread.authorID > 0,
+        !thread.isServerHidden,
+        thread.authorID != comment.authorID
+      else { return nil }
+    }
+    self.init(
+      kind: .subpost,
+      forumID: thread.forumID,
+      forumName: thread.forumName,
+      threadID: thread.id,
+      objectID: comment.id,
+      authorID: comment.authorID,
+      floor: parentFloor,
+      threadOwnerID: asThreadOwner ? thread.authorID : nil,
+      parentPostID: parentPostID
+    )
   }
 }
 

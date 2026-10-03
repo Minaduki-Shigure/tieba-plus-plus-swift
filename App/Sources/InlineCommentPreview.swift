@@ -68,6 +68,9 @@ struct InlineCommentPreviewCard: View {
   let requestReply: (BrowseComment) -> Void
   let reportTarget: (BrowseComment) -> ContentReportTarget?
   let selectText: (String) -> Void
+  var deletionTarget: ((BrowseComment) -> OwnedContentDeletionTarget?)? = nil
+  var threadOwnerDeletionTarget: ((BrowseComment) -> OwnedContentDeletionTarget?)? = nil
+  var requestDeletion: ((PendingOwnedContentDeletion) -> Void)? = nil
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -87,7 +90,10 @@ struct InlineCommentPreviewCard: View {
               ? nil
               : { requestReply(comment) },
             reportTarget: reportTarget(comment),
-            selectText: selectText
+            selectText: selectText,
+            deletionTarget: deletionTarget?(comment),
+            threadOwnerDeletionTarget: threadOwnerDeletionTarget?(comment),
+            requestDeletion: requestDeletion
           )
         case .placeholder:
           Label("已屏蔽此条回复", systemImage: "hand.raised.fill")
@@ -137,9 +143,13 @@ private struct InlineCommentPreviewRow: View {
   let requestReply: (() -> Void)?
   let reportTarget: ContentReportTarget?
   let selectText: (String) -> Void
+  let deletionTarget: OwnedContentDeletionTarget?
+  let threadOwnerDeletionTarget: OwnedContentDeletionTarget?
+  let requestDeletion: ((PendingOwnedContentDeletion) -> Void)?
 
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
   @Environment(\.appAccentColor) private var appAccentColor
+  @Environment(\.ownedContentDeletionStore) private var ownedContentDeletionStore
 
   private var comment: BrowseComment { item.comment }
 
@@ -197,6 +207,14 @@ private struct InlineCommentPreviewRow: View {
         target: reportTarget,
         accessibilityIdentifier: "inline-comment-report-\(comment.id)"
       )
+      if let requestDeletion {
+        OwnedContentDeletionMenuSlot(
+          store: ownedContentDeletionStore,
+          target: deletionTarget,
+          threadOwnerTarget: threadOwnerDeletionTarget,
+          requestDeletion: requestDeletion
+        )
+      }
     }
   }
 

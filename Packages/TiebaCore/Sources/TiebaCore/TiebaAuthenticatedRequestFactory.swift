@@ -1976,9 +1976,12 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
         ("delete_my_thread", "1"),
         ("is_frs_mask", "0"),
       ])
-    case .post(let postID):
+    case .post(let postID), .subpost(_, let postID):
       try validatePositiveID(postID, name: "Post ID")
       path = "/c/c/bawu/delpost"
+      // TiebaLite's SubPostsViewModel passes the child PID and isFloor=false
+      // into delPostFlow, just like its ordinary-floor deletion caller. The
+      // abstract isFloor comment does not describe that executed call path.
       fields.append(contentsOf: [
         ("pid", String(postID)),
         ("isfloor", "0"),
@@ -1987,7 +1990,7 @@ struct TiebaAuthenticatedRequestFactory: Sendable {
         ("delete_my_post", "1"),
         ("tbs", tbs),
       ])
-    case .postInOwnedThread(let postID, _, _):
+    case .postInOwnedThread(let postID, _, _), .subpostInOwnedThread(_, let postID, _, _):
       path = "/c/c/bawu/delpost"
       fields.append(contentsOf: [
         ("pid", String(postID)),

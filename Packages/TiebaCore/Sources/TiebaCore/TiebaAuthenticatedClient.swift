@@ -450,6 +450,10 @@ private struct TiebaOwnedContentDeletionResourceKey: Hashable, Sendable {
       self.target = target
     case .postInOwnedThread(let postID, _, _):
       self.target = .post(postID: postID)
+    case .subpost(_, let subpostID), .subpostInOwnedThread(_, let subpostID, _, _):
+      // The actual delpost resource is the child PID. Neither a different
+      // parent hint nor an ownership-mode change can unlock a second write.
+      self.target = .post(postID: subpostID)
     }
   }
 }
@@ -3370,6 +3374,8 @@ public actor TiebaAuthenticatedClient {
       targetPostID = firstPostID
     case .post(let postID), .postInOwnedThread(let postID, _, _):
       targetPostID = postID
+    case .subpost(let parentPostID, _), .subpostInOwnedThread(let parentPostID, _, _, _):
+      targetPostID = parentPostID
     }
     let pageRequest = try requestFactory.agreementPage(
       credential: credential.bdussCredential,
@@ -3389,14 +3395,46 @@ public actor TiebaAuthenticatedClient {
       pageRequest,
       maximumBodyBytes: Self.agreementPageResponseMaximumBytes
     )
-    let context = try TiebaAuthenticatedDecoder.ownedContentDeletionContext(
-      from: pageResponse,
-      expectedUserID: expectedUserID,
-      forumID: forumID,
-      forumName: forumName,
-      threadID: threadID,
-      target: target
-    )
+    let context: TiebaOwnedContentDeletionContext
+    switch target {
+    case .subpost(let parentPostID, let subpostID),
+      .subpostInOwnedThread(let parentPostID, let subpostID, _, _):
+      let parentContext = try TiebaAuthenticatedDecoder.subpostDeletionParentContext(
+        from: pageResponse,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        target: target
+      )
+      try Task.checkCancellation()
+      let floorRequest = try requestFactory.subpostAgreementPage(
+        credential: credential.bdussCredential,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        threadID: threadID,
+        parentPostID: parentPostID,
+        aroundSubpostID: subpostID,
+        page: 1
+      )
+      let floorResponse: PbFloorResIdl = try await sendProtobuf(
+        floorRequest,
+        maximumBodyBytes: Self.subpostAgreementPageResponseMaximumBytes
+      )
+      context = try TiebaAuthenticatedDecoder.ownedSubpostDeletionContext(
+        from: floorResponse,
+        parent: parentContext
+      )
+    case .thread, .post, .postInOwnedThread:
+      context = try TiebaAuthenticatedDecoder.ownedContentDeletionContext(
+        from: pageResponse,
+        expectedUserID: expectedUserID,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        target: target
+      )
+    }
     try Task.checkCancellation()
 
     let writeRequest = try requestFactory.deleteOwnedContent(

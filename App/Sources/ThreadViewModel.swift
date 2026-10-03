@@ -73,6 +73,8 @@ final class ThreadViewModel: ObservableObject {
   private var postsByID: [Int64: BrowsePost] = [:]
   private var acceptedDeletionPostIDs = Set<Int64>()
   private var stagedAcceptedDeletionTargets: [Int64: OwnedContentDeletionTarget] = [:]
+  private var acceptedSubpostDeletionTargets: [Int64: OwnedContentDeletionTarget] = [:]
+  private var stagedAcceptedSubpostDeletionTargets: [Int64: OwnedContentDeletionTarget] = [:]
   private(set) var scrollTargetsByPostID: [Int64: ThreadScrollTargetDescriptor] = [:]
   private(set) var resolvedThreadAuthorAvatarURL: URL?
   private(set) var firstDisplayableReplyPostID: Int64?
@@ -1082,6 +1084,19 @@ final class ThreadViewModel: ObservableObject {
       && forumName.isEmpty
       && thread.authorID == 0
       && thread.firstPostID == 0
+    if target.kind == .subpost {
+      guard state == .idle || state == .loading, target.threadID == thread.id,
+        hasMatchingResolvedIdentity || hasAllowedUnresolvedIdentity,
+        target.parentPostID != nil
+      else { return false }
+      if let existing = acceptedSubpostDeletionTargets[target.objectID]
+        ?? stagedAcceptedSubpostDeletionTargets[target.objectID]
+      {
+        return existing == target
+      }
+      stagedAcceptedSubpostDeletionTargets[target.objectID] = target
+      return true
+    }
     guard
       state == .idle,
       target.kind == .post,
@@ -1101,6 +1116,9 @@ final class ThreadViewModel: ObservableObject {
 
   @discardableResult
   func applyAcceptedContentDeletion(_ target: OwnedContentDeletionTarget) -> Bool {
+    if target.kind == .subpost {
+      return applyAcceptedSubpostDeletion(target)
+    }
     guard
       target.kind == .post,
       target.threadID == thread.id,
@@ -1124,6 +1142,96 @@ final class ThreadViewModel: ObservableObject {
     }
     replaceAgreementDescriptors(with: agreementReadDescriptors)
     return true
+  }
+
+  private func applyAcceptedSubpostDeletion(_ target: OwnedContentDeletionTarget) -> Bool {
+    guard matchesSubpostDeletionThread(target, thread: thread),
+      let parentID = target.parentPostID
+    else { return false }
+    if let existing = acceptedSubpostDeletionTargets[target.objectID] {
+      return existing == target
+    }
+    if let parent = postsByID[parentID] {
+      guard parent.threadID == target.threadID, parent.floor == target.floor,
+        parent.inlineComments.filter({ $0.id == target.objectID }).allSatisfy({
+          matchesSubpostDeletionComment(target, comment: $0)
+        })
+      else { return false }
+    }
+    acceptedSubpostDeletionTargets[target.objectID] = target
+    stagedAcceptedSubpostDeletionTargets.removeValue(forKey: target.objectID)
+    let projectedFirst = firstPost.map { projectAcceptedSubpostDeletions($0, thread: thread) }
+    let projectedPosts = posts.map { projectAcceptedSubpostDeletions($0, thread: thread) }
+    // The parent floor, its own agreement descriptor and server nested-reply count
+    // remain intact. Only a matching child preview is removed.
+    _ = replacePostSnapshot(firstPost: projectedFirst, posts: projectedPosts)
+    return true
+  }
+
+  private func matchesSubpostDeletionThread(
+    _ target: OwnedContentDeletionTarget, thread: BrowseThread
+  ) -> Bool {
+    target.kind == .subpost && target.threadID == thread.id
+      && target.forumID == thread.forumID
+      && target.forumName
+        == thread.forumName.trimmingCharacters(in: .whitespacesAndNewlines)
+        .precomposedStringWithCanonicalMapping
+      && (target.threadOwnerID == nil || target.threadOwnerID == thread.authorID)
+  }
+
+  private func matchesSubpostDeletionComment(
+    _ target: OwnedContentDeletionTarget, comment: BrowseComment
+  ) -> Bool {
+    comment.id == target.objectID && comment.threadID == target.threadID
+      && comment.parentPostID == target.parentPostID && comment.authorID == target.authorID
+  }
+
+  private func projectAcceptedSubpostDeletions(
+    _ post: BrowsePost, thread: BrowseThread
+  ) -> BrowsePost {
+    guard !acceptedSubpostDeletionTargets.isEmpty, !post.inlineComments.isEmpty else { return post }
+    let retained = post.inlineComments.filter { comment in
+      guard let target = acceptedSubpostDeletionTargets[comment.id] else { return true }
+      return
+        !(matchesSubpostDeletionThread(target, thread: thread)
+        && target.parentPostID == post.id && target.floor == post.floor
+        && post.threadID == target.threadID
+        && matchesSubpostDeletionComment(target, comment: comment))
+    }
+    guard retained.count != post.inlineComments.count else { return post }
+    return post.withLocalPresentation(visibility: post.localVisibility, inlineComments: retained)
+  }
+
+  private func activateStagedAcceptedSubpostDeletions(
+    thread: BrowseThread, posts: [BrowsePost]
+  ) throws {
+    guard !stagedAcceptedSubpostDeletionTargets.isEmpty else { return }
+    guard thread.forumID > 0,
+      !thread.forumName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else {
+      throw BrowseError.unavailable("贴吧返回的主题身份不足，无法安全恢复已删除回复。")
+    }
+    var completed = Set<Int64>()
+    for (id, target) in stagedAcceptedSubpostDeletionTargets
+    where
+      !matchesSubpostDeletionThread(target, thread: thread)
+    {
+      completed.insert(id)
+    }
+    for post in posts {
+      for comment in post.inlineComments {
+        guard let target = stagedAcceptedSubpostDeletionTargets[comment.id] else { continue }
+        if matchesSubpostDeletionThread(target, thread: thread)
+          && target.parentPostID == post.id && target.floor == post.floor
+          && post.threadID == target.threadID
+          && matchesSubpostDeletionComment(target, comment: comment)
+        {
+          acceptedSubpostDeletionTargets[comment.id] = target
+        }
+        completed.insert(comment.id)
+      }
+    }
+    for id in completed { stagedAcceptedSubpostDeletionTargets.removeValue(forKey: id) }
   }
 
   func agreementTarget(forPostID postID: Int64) -> ContentAgreementTarget? {
@@ -1345,9 +1453,13 @@ final class ThreadViewModel: ObservableObject {
       responseFirstPostID: resolvedFirstPost?.id ?? expectedFirstPostID,
       responsePosts: validatedReplies
     )
+    try activateStagedAcceptedSubpostDeletions(
+      thread: page.thread, posts: (resolvedFirstPost.map { [$0] } ?? []) + validatedReplies
+    )
     return NormalizedPostPage(
-      firstPost: resolvedFirstPost,
+      firstPost: resolvedFirstPost.map { projectAcceptedSubpostDeletions($0, thread: page.thread) },
       replies: validatedReplies.filter { !acceptedDeletionPostIDs.contains($0.id) }
+        .map { projectAcceptedSubpostDeletions($0, thread: page.thread) }
     )
   }
 

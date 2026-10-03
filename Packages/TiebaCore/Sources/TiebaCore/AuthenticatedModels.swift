@@ -804,6 +804,12 @@ public enum TiebaOwnedContentDeletionTarget: Sendable, Hashable {
   case thread(firstPostID: Int64)
   case post(postID: Int64)
   case postInOwnedThread(postID: Int64, postAuthorID: Int64, floor: Int)
+  case subpost(parentPostID: Int64, subpostID: Int64)
+  // `floor` is the parent post's floor, including the first floor, not the
+  // subpost's position within the nested-reply list.
+  case subpostInOwnedThread(
+    parentPostID: Int64, subpostID: Int64, subpostAuthorID: Int64, floor: Int
+  )
 
   func validate(expectedUserID: Int64) throws {
     guard expectedUserID > 0 else {
@@ -821,6 +827,17 @@ public enum TiebaOwnedContentDeletionTarget: Sendable, Hashable {
     case .postInOwnedThread(let postID, let postAuthorID, let floor):
       guard postID > 0, postAuthorID > 0, postAuthorID != expectedUserID, floor > 1 else {
         throw TiebaClientError.invalidArgument("Invalid thread-owner deletion target.")
+      }
+    case .subpost(let parentPostID, let subpostID):
+      guard parentPostID > 0, subpostID > 0, parentPostID != subpostID else {
+        throw TiebaClientError.invalidArgument("Invalid nested-reply deletion target.")
+      }
+    case .subpostInOwnedThread(let parentPostID, let subpostID, let authorID, let floor):
+      guard
+        parentPostID > 0, subpostID > 0, parentPostID != subpostID,
+        authorID > 0, authorID != expectedUserID, floor >= 1
+      else {
+        throw TiebaClientError.invalidArgument("Invalid thread-owner nested-reply deletion target.")
       }
     }
   }

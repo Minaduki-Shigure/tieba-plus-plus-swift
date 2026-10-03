@@ -19,6 +19,17 @@ final class OwnedContentDeletionAccountServiceTests: XCTestCase {
         try deletionAccountTarget(authorID: 8, threadOwnerID: 7),
         .postInOwnedThread(postID: 102, postAuthorID: 8, floor: 2)
       ),
+      (
+        try deletionAccountTarget(kind: .subpost, objectID: 301, floor: 1, parentPostID: 101),
+        .subpost(parentPostID: 101, subpostID: 301)
+      ),
+      (
+        try deletionAccountTarget(
+          kind: .subpost, objectID: 302, floor: 2, authorID: 8, threadOwnerID: 7,
+          parentPostID: 102
+        ),
+        .subpostInOwnedThread(parentPostID: 102, subpostID: 302, subpostAuthorID: 8, floor: 2)
+      ),
     ]
 
     for (index, mapping) in cases.enumerated() {
@@ -76,17 +87,24 @@ final class OwnedContentDeletionAccountServiceTests: XCTestCase {
   }
 
   func testThreadOwnerDeletionCannotBeInvokedByTheFloorAuthorOrAnotherAccount() async throws {
-    let target = try deletionAccountTarget(authorID: 8, threadOwnerID: 7)
-    for userID: Int64 in [8, 9] {
-      let spy = OwnedContentDeletionAccountClientSpy()
-      let service = TiebaCoreAccountService(client: spy)
-      await assertDeletionAccountError(.definitelyNotAccepted, message: "wrong actor \(userID)") {
-        try await service.deleteOwnedContent(
-          session: deletionAccountSession(userID: userID), target: target
-        )
+    for target in [
+      try deletionAccountTarget(authorID: 8, threadOwnerID: 7),
+      try deletionAccountTarget(
+        kind: .subpost, objectID: 301, floor: 1, authorID: 8, threadOwnerID: 7,
+        parentPostID: 101
+      ),
+    ] {
+      for userID: Int64 in [8, 9] {
+        let spy = OwnedContentDeletionAccountClientSpy()
+        let service = TiebaCoreAccountService(client: spy)
+        await assertDeletionAccountError(.definitelyNotAccepted, message: "wrong actor \(userID)") {
+          try await service.deleteOwnedContent(
+            session: deletionAccountSession(userID: userID), target: target
+          )
+        }
+        let requests = await spy.requestCount()
+        XCTAssertEqual(requests, 0)
       }
-      let requests = await spy.requestCount()
-      XCTAssertEqual(requests, 0)
     }
   }
 
@@ -146,18 +164,23 @@ final class OwnedContentDeletionAccountServiceTests: XCTestCase {
   }
 
   func testEveryReceiptBindingMismatchBecomesOutcomeUnknown() async throws {
-    for mismatch in OwnedContentDeletionReceiptMismatch.allCases {
-      let spy = OwnedContentDeletionAccountClientSpy(mismatch: mismatch)
-      let service = TiebaCoreAccountService(client: spy)
-
-      await assertDeletionAccountError(.outcomeUnknown, message: "\(mismatch)") {
-        try await service.deleteOwnedContent(
-          session: deletionAccountSession(),
-          target: try deletionAccountTarget()
-        )
+    for target in [
+      try deletionAccountTarget(),
+      try deletionAccountTarget(kind: .subpost, objectID: 301, floor: 1, parentPostID: 101),
+      try deletionAccountTarget(
+        kind: .subpost, objectID: 302, floor: 2, authorID: 8, threadOwnerID: 7,
+        parentPostID: 102
+      ),
+    ] {
+      for mismatch in OwnedContentDeletionReceiptMismatch.allCases {
+        let spy = OwnedContentDeletionAccountClientSpy(mismatch: mismatch)
+        let service = TiebaCoreAccountService(client: spy)
+        await assertDeletionAccountError(.outcomeUnknown, message: "\(mismatch)") {
+          try await service.deleteOwnedContent(session: deletionAccountSession(), target: target)
+        }
+        let requestCount = await spy.requestCount()
+        XCTAssertEqual(requestCount, 1, "\(mismatch)")
       }
-      let requestCount = await spy.requestCount()
-      XCTAssertEqual(requestCount, 1, "\(mismatch)")
     }
   }
 }
@@ -330,6 +353,14 @@ private func mismatchedDeletionTarget(
     .post(postID: postID + 1)
   case .postInOwnedThread(let postID, let postAuthorID, let floor):
     .postInOwnedThread(postID: postID + 1, postAuthorID: postAuthorID, floor: floor)
+  case .subpost(let parentPostID, let subpostID):
+    // An exact child ID is insufficient if the parent relationship changes.
+    .subpost(parentPostID: parentPostID + 1, subpostID: subpostID)
+  case .subpostInOwnedThread(let parentPostID, let subpostID, let authorID, let floor):
+    .subpostInOwnedThread(
+      parentPostID: parentPostID + 1, subpostID: subpostID,
+      subpostAuthorID: authorID, floor: floor
+    )
   }
 }
 
@@ -338,7 +369,8 @@ private func deletionAccountTarget(
   objectID: Int64 = 102,
   floor: Int = 2,
   authorID: Int64 = 7,
-  threadOwnerID: Int64? = nil
+  threadOwnerID: Int64? = nil,
+  parentPostID: Int64? = nil
 ) throws -> OwnedContentDeletionTarget {
   try XCTUnwrap(
     OwnedContentDeletionTarget(
@@ -349,7 +381,8 @@ private func deletionAccountTarget(
       objectID: objectID,
       authorID: authorID,
       floor: floor,
-      threadOwnerID: threadOwnerID
+      threadOwnerID: threadOwnerID,
+      parentPostID: parentPostID
     )
   )
 }

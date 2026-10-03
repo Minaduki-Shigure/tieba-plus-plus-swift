@@ -293,11 +293,9 @@ account-session lifetimes without automatic eviction; unreadable, future, unsafe
 or full storage fails closed. Restored accepted content is projected before the
 thread starts history or network loading, while unknown targets cannot be
 automatically resent. This remains inside the existing server-write point until
-disposable-account testing validates the minimum field set. Nested-reply deletion
-remains unimplemented because the compared TiebaLite source contains
-contradictory concrete parameters for that irreversible request. An endpoint-
-specific authoritative absence proof also remains before this workflow can
-leave disposable-account validation.
+disposable-account testing validates the minimum field set. An endpoint-specific
+authoritative absence proof also remains before this workflow can leave
+disposable-account validation.
 Alpha.17 extends that workflow to the topic author's deletion of another
 author's loaded ordinary floor. The target separately records the true floor
 author and the initiating thread owner. Core revalidates the exact account,
@@ -309,6 +307,24 @@ change nor changed author metadata can bypass an uncertain prior deletion.
 Schema-1 signed records without the optional owner identity retain their exact
 canonical encoding. This adds no weighted point before disposable-account
 validation and does not claim forum moderation or nested-reply deletion parity.
+The next candidate adds the actual nested-reply deletion workflow from TiebaLite
+`9701bfb6`: `SubPostsPage` identifies the selected child and the account's author
+or topic-owner role; `SubPostsViewModel` passes `subPostId ?: postId` and
+`isFloor=false` to `delPostFlow`. That concrete call yields `isfloor=0`, `src=1`,
+with self flags `is_vipdel=0`, `delete_my_post=1`, or topic-owner flags `1`, `0`.
+The `ITiebaApi` boolean comment is inconsistent with that caller; it does not
+make the emitted child-ID request ambiguous. The iOS implementation follows the
+actual request and adds a fresh authenticated parent-page probe followed by an
+exact-child probe, rejecting wrong or contradictory topic/forum/parent/author
+identities before any write. Child replies under the first floor remain child
+targets and cannot become topic deletions. The parent PID is durable target
+metadata, while the child PID is the stable deletion resource. Existing signed
+records without that new field retain the same authenticated bytes. A clear ACK
+projects only the child out of the complete list and inline previews; stale
+refreshes and pagination cannot reintroduce it. An unknown result remains locked
+across relaunch and credential renewal. No automatic resend or absence inference
+is added. Native regressions and disposable-account/device validation remain
+required, with no weighted parity increase claimed yet.
 The explicitly confirmed followed-list unfollow action closes a TiebaLite workflow
 gap while reusing the already credited forum-membership endpoint and shared list
 snapshot. It therefore adds no weighted point by itself.

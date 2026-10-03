@@ -570,6 +570,642 @@ final class TiebaOwnedContentDeletionTests: XCTestCase, @unchecked Sendable {
     ])
   }
 
+  func testNestedReplyRequestsFollowTheActualTiebaLiteChildPIDContract() throws {
+    for (target, management) in [(subpostTarget, false), (managedSubpostTarget, true)] {
+      let request = try factory().deleteOwnedContent(
+        credential: credential().bdussCredential,
+        expectedUserID: userID,
+        forumID: forumID,
+        forumName: forumName,
+        threadID: threadID,
+        target: target,
+        tbs: tbs
+      )
+      let fields = try formFields(request)
+      assertCommonWriteRequest(request, path: "/c/c/bawu/delpost")
+      XCTAssertEqual(
+        Set(fields.keys),
+        [
+          "BDUSS", "_client_version", "delete_my_post", "fid", "is_vipdel", "isfloor",
+          "pid", "sign", "src", "tbs", "word", "z",
+        ])
+      XCTAssertEqual(fields["pid"], String(subpostID))
+      XCTAssertEqual(fields["fid"], String(forumID))
+      XCTAssertEqual(fields["z"], String(threadID))
+      XCTAssertEqual(fields["word"], forumName)
+      XCTAssertEqual(fields["isfloor"], "0")
+      XCTAssertEqual(fields["src"], "1")
+      XCTAssertEqual(fields["is_vipdel"], management ? "1" : "0")
+      XCTAssertEqual(fields["delete_my_post"], management ? "0" : "1")
+      XCTAssertEqual(fields["tbs"], tbs)
+      XCTAssertEqual(fields["sign"], signature(for: fields))
+    }
+  }
+
+  func testMalformedNestedTargetsDoNotReadOrWrite() async throws {
+    let targets: [TiebaOwnedContentDeletionTarget] = [
+      .subpost(parentPostID: 0, subpostID: subpostID),
+      .subpost(parentPostID: -1, subpostID: subpostID),
+      .subpost(parentPostID: postID, subpostID: 0),
+      .subpost(parentPostID: postID, subpostID: -1),
+      .subpost(parentPostID: postID, subpostID: postID),
+      .subpostInOwnedThread(
+        parentPostID: 0, subpostID: subpostID, subpostAuthorID: userID + 1, floor: 2),
+      .subpostInOwnedThread(
+        parentPostID: postID, subpostID: 0, subpostAuthorID: userID + 1, floor: 2),
+      .subpostInOwnedThread(
+        parentPostID: postID, subpostID: postID, subpostAuthorID: userID + 1, floor: 2),
+      .subpostInOwnedThread(
+        parentPostID: postID, subpostID: subpostID, subpostAuthorID: 0, floor: 2),
+      .subpostInOwnedThread(
+        parentPostID: postID, subpostID: subpostID, subpostAuthorID: -1, floor: 2),
+      .subpostInOwnedThread(
+        parentPostID: postID, subpostID: subpostID, subpostAuthorID: userID, floor: 2),
+      .subpostInOwnedThread(
+        parentPostID: postID, subpostID: subpostID, subpostAuthorID: userID + 1, floor: 0),
+      .subpostInOwnedThread(
+        parentPostID: postID, subpostID: subpostID, subpostAuthorID: userID + 1, floor: -1),
+    ]
+    let transport = OwnedContentDeletionTransport(steps: [])
+    let client = TiebaAuthenticatedClient(transport: transport)
+    for target in targets {
+      do {
+        _ = try await deletePost(using: client, target: target)
+        XCTFail("Expected malformed nested-reply target to fail")
+      } catch TiebaClientError.invalidArgument {
+      } catch {
+        XCTFail("Unexpected error: \(error)")
+      }
+    }
+    let snapshot = await transport.snapshot()
+    XCTAssertTrue(snapshot.paths.isEmpty)
+  }
+
+  func testSelfNestedDeletionBindsTheChildNotTheParentOrThreadAuthor() async throws {
+    for parentIsFirstFloor in [false, true] {
+      var page = nestedParentResponse()
+      page.data.thread.authorID = userID + 9
+      page.data.thread.author.id = userID + 9
+      page.data.firstFloorPost.authorID = userID + 9
+      page.data.firstFloorPost.author.id = userID + 9
+      let parentID = parentIsFirstFloor ? firstPostID : postID
+      let target = TiebaOwnedContentDeletionTarget.subpost(
+        parentPostID: parentID, subpostID: subpostID
+      )
+      let floor = nestedFloorResponse(parent: page, parentIsFirstFloor: parentIsFirstFloor)
+      let transport = OwnedContentDeletionTransport(steps: [
+        .response(try page.serializedData()),
+        .response(try floor.serializedData()),
+        .response(Data(#"{"error_code":0}"#.utf8)),
+      ])
+      let receipt = try await deletePost(
+        using: TiebaAuthenticatedClient(transport: transport), target: target
+      )
+      XCTAssertEqual(receipt.target, target)
+      let snapshot = await transport.snapshot()
+      XCTAssertEqual(snapshot.paths, ["/c/f/pb/page", "/c/f/pb/floor", "/c/c/bawu/delpost"])
+      let pageRead = try PbPageReqIdl(
+        serializedBytes: deletionProtobufPayload(from: XCTUnwrap(snapshot.requests.first))
+      )
+      XCTAssertEqual(pageRead.data.pid, parentID)
+      XCTAssertEqual(pageRead.data.withFloor, 0)
+      XCTAssertEqual(pageRead.data.common.bduss, credential().bduss)
+      let floorRead = try PbFloorReqIdl(
+        serializedBytes: deletionProtobufPayload(from: snapshot.requests[1])
+      )
+      XCTAssertEqual(floorRead.data.kz, threadID)
+      XCTAssertEqual(floorRead.data.pid, parentID)
+      XCTAssertEqual(floorRead.data.spid, subpostID)
+      XCTAssertEqual(floorRead.data.forumID, forumID)
+      XCTAssertEqual(floorRead.data.common.bduss, credential().bduss)
+      XCTAssertEqual(try formFields(snapshot.requests[2])["pid"], String(subpostID))
+      XCTAssertEqual(
+        snapshot.maximumBodyBytes,
+        [
+          TiebaAuthenticatedClient.agreementPageResponseMaximumBytes,
+          TiebaAuthenticatedClient.subpostAgreementPageResponseMaximumBytes,
+          TiebaAuthenticatedClient.ownedContentDeletionWriteResponseMaximumBytes,
+        ])
+    }
+  }
+
+  func testThreadOwnerCanDeleteNestedReplyInFirstOrAnotherAuthorsFloor() async throws {
+    for parentIsFirstFloor in [false, true] {
+      let page = nestedParentResponse()
+      let target = TiebaOwnedContentDeletionTarget.subpostInOwnedThread(
+        parentPostID: parentIsFirstFloor ? firstPostID : postID,
+        subpostID: subpostID,
+        subpostAuthorID: userID + 1,
+        floor: parentIsFirstFloor ? 1 : 2
+      )
+      let transport = OwnedContentDeletionTransport(steps: [
+        .response(try page.serializedData()),
+        .response(
+          try nestedFloorResponse(
+            parent: page, management: true, parentIsFirstFloor: parentIsFirstFloor
+          ).serializedData()),
+        .response(Data(#"{"error_code":0}"#.utf8)),
+      ])
+      let receipt = try await deletePost(
+        using: TiebaAuthenticatedClient(transport: transport), target: target
+      )
+      XCTAssertEqual(receipt.target, target)
+      let snapshot = await transport.snapshot()
+      XCTAssertEqual(snapshot.paths.count, 3)
+      XCTAssertEqual(try formFields(XCTUnwrap(snapshot.requests.last))["is_vipdel"], "1")
+      XCTAssertEqual(try formFields(XCTUnwrap(snapshot.requests.last))["delete_my_post"], "0")
+    }
+  }
+
+  func testUnverifiedNestedParentContextNeverRequestsChildOrDispatchesWrite() async throws {
+    for (name, page) in invalidNestedParentResponses() {
+      for target in [subpostTarget, managedSubpostTarget] {
+        let transport = OwnedContentDeletionTransport(steps: [.response(try page.serializedData())])
+        await assertError(.invalidAuthenticatedResponse) {
+          _ = try await self.deletePost(
+            using: TiebaAuthenticatedClient(transport: transport), target: target
+          )
+        }
+        let snapshot = await transport.snapshot()
+        XCTAssertEqual(snapshot.paths, ["/c/f/pb/page"], name)
+      }
+    }
+  }
+
+  func testParentAuthorDoesNotGrantThreadOwnerAuthority() async throws {
+    var page = nestedParentResponse()
+    page.data.thread.authorID = userID + 9
+    page.data.thread.author.id = userID + 9
+    page.data.firstFloorPost.authorID = userID + 9
+    page.data.firstFloorPost.author.id = userID + 9
+    page.data.postList[0].authorID = userID
+    page.data.postList[0].author.id = userID
+    let transport = OwnedContentDeletionTransport(steps: [.response(try page.serializedData())])
+    await assertError(.invalidAuthenticatedResponse) {
+      _ = try await self.deletePost(
+        using: TiebaAuthenticatedClient(transport: transport), target: self.managedSubpostTarget
+      )
+    }
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.paths, ["/c/f/pb/page"])
+  }
+
+  func testManagedNestedDeletionRejectsChangedParentFloorAndChildMasqueradingAsFirstFloor()
+    async throws
+  {
+    for target in [
+      TiebaOwnedContentDeletionTarget.subpostInOwnedThread(
+        parentPostID: postID, subpostID: subpostID, subpostAuthorID: userID + 1, floor: 3
+      ),
+      .subpost(parentPostID: postID, subpostID: firstPostID),
+      .subpostInOwnedThread(
+        parentPostID: postID, subpostID: firstPostID, subpostAuthorID: userID + 1, floor: 2
+      ),
+    ] {
+      let transport = OwnedContentDeletionTransport(steps: [
+        .response(try nestedParentResponse().serializedData())
+      ])
+      await assertError(.invalidAuthenticatedResponse) {
+        _ = try await self.deletePost(
+          using: TiebaAuthenticatedClient(transport: transport), target: target
+        )
+      }
+      let snapshot = await transport.snapshot()
+      XCTAssertEqual(snapshot.paths, ["/c/f/pb/page"])
+    }
+  }
+
+  func testNestedChildPreflightRejectsMissingAmbiguousOrChangedIdentitiesBeforeWrite() async throws
+  {
+    for management in [false, true] {
+      let target = management ? managedSubpostTarget : subpostTarget
+      for (name, floor) in invalidNestedFloorResponses(management: management) {
+        let transport = OwnedContentDeletionTransport(steps: [
+          .response(try nestedParentResponse().serializedData()),
+          .response(try floor.serializedData()),
+        ])
+        await assertError(.invalidAuthenticatedResponse) {
+          _ = try await self.deletePost(
+            using: TiebaAuthenticatedClient(transport: transport), target: target
+          )
+        }
+        let snapshot = await transport.snapshot()
+        XCTAssertEqual(snapshot.paths, ["/c/f/pb/page", "/c/f/pb/floor"], name)
+      }
+    }
+  }
+
+  func testNestedIdentityAllowsConsistentSingleAuthorRepresentationAndMissingOptionalTBS()
+    throws
+  {
+    var page = nestedParentResponse()
+    page.data.clearFirstFloorPost()
+    page.data.thread.clearAuthor()
+    page.data.postList[0].clearAuthor()
+    let parent = try nestedParentContext(page, target: subpostTarget)
+    var floor = nestedFloorResponse(parent: page)
+    floor.data.clearAnti()
+    floor.data.subpostList[0].authorID = 0
+    let context = try TiebaAuthenticatedDecoder.ownedSubpostDeletionContext(
+      from: floor, parent: parent)
+    XCTAssertEqual(context.tbs, tbs)
+    XCTAssertEqual(context.target, subpostTarget)
+    floor.data.subpostList[0].authorID = userID
+    floor.data.subpostList[0].clearAuthor()
+    XCTAssertNoThrow(
+      try TiebaAuthenticatedDecoder.ownedSubpostDeletionContext(from: floor, parent: parent))
+  }
+
+  func testNestedDeletionUsesFreshExactChildTBSWhenProvided() async throws {
+    var floor = nestedFloorResponse()
+    let freshTBS = "abcdef0123456789abcdef0123"
+    floor.data.anti.tbs = freshTBS
+    let transport = OwnedContentDeletionTransport(steps: [
+      .response(try nestedParentResponse().serializedData()),
+      .response(try floor.serializedData()),
+      .response(Data(#"{"error_code":0}"#.utf8)),
+    ])
+    _ = try await deletePost(
+      using: TiebaAuthenticatedClient(transport: transport), target: subpostTarget)
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(try formFields(XCTUnwrap(snapshot.requests.last))["tbs"], freshTBS)
+  }
+
+  func testNestedFloorCanOmitRepeatedParentMetadataWithoutWeakeningChildOwnership() throws {
+    for management in [false, true] {
+      let target = management ? managedSubpostTarget : subpostTarget
+      let parent = try nestedParentContext(nestedParentResponse(), target: target)
+      var floor = nestedFloorResponse(management: management)
+      floor.data.thread.firstPostID = 0
+      floor.data.thread.authorID = 0
+      floor.data.thread.clearAuthor()
+      floor.data.post.authorID = 0
+      floor.data.post.clearAuthor()
+      let context = try TiebaAuthenticatedDecoder.ownedSubpostDeletionContext(from: floor, parent: parent)
+      XCTAssertEqual(context.target, target)
+      floor.data.subpostList[0].authorID = 0
+      floor.data.subpostList[0].clearAuthor()
+      XCTAssertThrowsError(try TiebaAuthenticatedDecoder.ownedSubpostDeletionContext(from: floor, parent: parent))
+    }
+  }
+
+  func testUnknownNestedWriteCannotBeResentThroughChangedParentModeOrPostKind() async throws {
+    for initialTarget in [subpostTarget, managedSubpostTarget] {
+      for finalStep in [
+        OwnedContentDeletionStep.failure(.transportFailure),
+        .response(Data(#"{}"#.utf8)),
+      ] {
+        let transport = OwnedContentDeletionTransport(steps: [
+          .response(try nestedParentResponse().serializedData()),
+          .response(
+            try nestedFloorResponse(management: initialTarget == managedSubpostTarget)
+              .serializedData()),
+          finalStep,
+        ])
+        let client = TiebaAuthenticatedClient(transport: transport)
+        await assertError(.ownedContentDeletionOutcomeUnknown) {
+          _ = try await self.deletePost(using: client, target: initialTarget)
+        }
+        for target in conflictingSubpostTargets + [subpostTarget, managedSubpostTarget] {
+          await assertError(.ownedContentDeletionOutcomeUnknown) {
+            _ = try await self.deletePost(using: client, target: target)
+          }
+        }
+        let snapshot = await transport.snapshot()
+        XCTAssertEqual(snapshot.paths, ["/c/f/pb/page", "/c/f/pb/floor", "/c/c/bawu/delpost"])
+      }
+    }
+  }
+
+  func testAcceptedNestedWriteReturnsReceiptWithoutResendAndRejectsRetargeting() async throws {
+    let transport = OwnedContentDeletionTransport(steps: [
+      .response(try nestedParentResponse().serializedData()),
+      .response(try nestedFloorResponse().serializedData()),
+      .response(Data(#"{"error_code":0}"#.utf8)),
+    ])
+    let client = TiebaAuthenticatedClient(transport: transport)
+    let receipt = try await deletePost(using: client, target: subpostTarget)
+    let repeated = try await deletePost(using: client, target: subpostTarget)
+    XCTAssertEqual(receipt, repeated)
+    XCTAssertEqual(receipt.target, subpostTarget)
+    for target in conflictingSubpostTargets + [managedSubpostTarget] {
+      await assertError(.ownedContentDeletionWriteConflict) {
+        _ = try await self.deletePost(using: client, target: target)
+      }
+    }
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.paths, ["/c/f/pb/page", "/c/f/pb/floor", "/c/c/bawu/delpost"])
+  }
+
+  func testEquivalentConcurrentNestedCallsCoalesceAndMetadataChangesConflict() async throws {
+    let transport = OwnedContentDeletionTransport(
+      steps: [
+        .response(try nestedParentResponse().serializedData()),
+        .response(try nestedFloorResponse().serializedData()),
+        .response(Data(#"{"error_code":0}"#.utf8)),
+      ],
+      blockedRequestIndex: 2
+    )
+    let client = TiebaAuthenticatedClient(transport: transport)
+    let first = Task { try await self.deletePost(using: client, target: self.subpostTarget) }
+    guard await transport.waitUntilRequestCount(3) else {
+      await transport.releaseBlockedRequest()
+      first.cancel()
+      _ = await first.result
+      return XCTFail("Nested deletion write did not dispatch")
+    }
+    let second = Task { try await self.deletePost(using: client, target: self.subpostTarget) }
+    for target in conflictingSubpostTargets + [managedSubpostTarget] {
+      await assertError(.ownedContentDeletionWriteConflict) {
+        _ = try await self.deletePost(using: client, target: target)
+      }
+    }
+    await transport.releaseBlockedRequest()
+    let firstReceipt = try await first.value
+    let secondReceipt = try await second.value
+    XCTAssertEqual(firstReceipt, secondReceipt)
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(snapshot.paths, ["/c/f/pb/page", "/c/f/pb/floor", "/c/c/bawu/delpost"])
+  }
+
+  func testNestedReadFailureRemainsRetryableWithoutBeingClassifiedAsDispatched() async throws {
+    let page = try nestedParentResponse().serializedData()
+    let transport = OwnedContentDeletionTransport(steps: [
+      .response(page), .failure(.transportFailure),
+      .response(page), .response(try nestedFloorResponse().serializedData()),
+      .response(Data(#"{"error_code":0}"#.utf8)),
+    ])
+    let client = TiebaAuthenticatedClient(transport: transport)
+    await assertError(.transportFailure) {
+      _ = try await self.deletePost(using: client, target: self.subpostTarget)
+    }
+    _ = try await deletePost(using: client, target: subpostTarget)
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(
+      snapshot.paths,
+      [
+        "/c/f/pb/page", "/c/f/pb/floor",
+        "/c/f/pb/page", "/c/f/pb/floor", "/c/c/bawu/delpost",
+      ])
+  }
+
+  func testNestedExplicitWriteRejectionPreservesServerErrorAndRequiresFreshPreflightOnRetry()
+    async throws
+  {
+    let page = try nestedParentResponse().serializedData()
+    let floor = try nestedFloorResponse().serializedData()
+    let transport = OwnedContentDeletionTransport(steps: [
+      .response(page), .response(floor),
+      .response(Data(#"{"error_code":340006,"error_msg":"denied"}"#.utf8)),
+      .response(page), .response(floor), .response(Data(#"{"error_code":0}"#.utf8)),
+    ])
+    let client = TiebaAuthenticatedClient(transport: transport)
+    await assertError(.server(code: 340_006, message: "denied")) {
+      _ = try await self.deletePost(using: client, target: self.subpostTarget)
+    }
+    _ = try await deletePost(using: client, target: subpostTarget)
+    let snapshot = await transport.snapshot()
+    XCTAssertEqual(
+      snapshot.paths,
+      [
+        "/c/f/pb/page", "/c/f/pb/floor", "/c/c/bawu/delpost",
+        "/c/f/pb/page", "/c/f/pb/floor", "/c/c/bawu/delpost",
+      ])
+  }
+
+  private var subpostID: Int64 { 10_003 }
+
+  private var subpostTarget: TiebaOwnedContentDeletionTarget {
+    .subpost(parentPostID: postID, subpostID: subpostID)
+  }
+
+  private var managedSubpostTarget: TiebaOwnedContentDeletionTarget {
+    .subpostInOwnedThread(
+      parentPostID: postID, subpostID: subpostID, subpostAuthorID: userID + 1, floor: 2
+    )
+  }
+
+  private var conflictingSubpostTargets: [TiebaOwnedContentDeletionTarget] {
+    [
+      .subpost(parentPostID: firstPostID, subpostID: subpostID),
+      .subpostInOwnedThread(
+        parentPostID: firstPostID, subpostID: subpostID, subpostAuthorID: userID + 1, floor: 1
+      ),
+      .subpostInOwnedThread(
+        parentPostID: postID, subpostID: subpostID, subpostAuthorID: userID + 2, floor: 2
+      ),
+      .subpostInOwnedThread(
+        parentPostID: postID, subpostID: subpostID, subpostAuthorID: userID + 1, floor: 3
+      ),
+      .post(postID: subpostID),
+      .postInOwnedThread(postID: subpostID, postAuthorID: userID + 1, floor: 2),
+    ]
+  }
+
+  private func nestedParentResponse() -> PbPageResIdl {
+    var page = pageResponse()
+    page.data.postList[0].authorID = userID + 5
+    page.data.postList[0].author.id = userID + 5
+    return page
+  }
+
+  private func nestedFloorResponse(
+    parent: PbPageResIdl? = nil,
+    management: Bool = false,
+    parentIsFirstFloor: Bool = false
+  ) -> PbFloorResIdl {
+    let page = parent ?? nestedParentResponse()
+    var response = PbFloorResIdl()
+    response.data.forum = page.data.forum
+    response.data.thread = page.data.thread
+    response.data.post = parentIsFirstFloor ? page.data.firstFloorPost : page.data.postList[0]
+    response.data.page = page.data.page
+    response.data.anti = page.data.anti
+    var subpost = SubPostList()
+    subpost.id = subpostID
+    subpost.authorID = management ? userID + 1 : userID
+    subpost.author.id = subpost.authorID
+    subpost.floor = 1
+    response.data.subpostList = [subpost]
+    return response
+  }
+
+  private func nestedParentContext(
+    _ response: PbPageResIdl,
+    target: TiebaOwnedContentDeletionTarget
+  ) throws -> TiebaSubpostDeletionParentContext {
+    try TiebaAuthenticatedDecoder.subpostDeletionParentContext(
+      from: response,
+      expectedUserID: userID,
+      forumID: forumID,
+      forumName: forumName,
+      threadID: threadID,
+      target: target
+    )
+  }
+
+  private func invalidNestedParentResponses() -> [(String, PbPageResIdl)] {
+    let mutations: [(String, (inout PbPageResIdl) -> Void)] = [
+      ("missing data", { $0.clearData() }),
+      ("missing actor", { $0.data.clearUser() }),
+      ("signed out", { $0.data.user.isLogin = 0 }),
+      ("wrong actor", { $0.data.user.id = self.userID + 1 }),
+      ("missing forum", { $0.data.clearForum() }),
+      ("wrong forum", { $0.data.forum.id += 1 }),
+      ("wrong forum name", { $0.data.forum.name = "other" }),
+      ("missing thread", { $0.data.clearThread() }),
+      ("wrong thread", { $0.data.thread.id += 1 }),
+      ("wrong thread forum", { $0.data.thread.fid += 1 }),
+      ("missing first PID", { $0.data.thread.firstPostID = 0 }),
+      ("child masquerading as first PID", { $0.data.thread.firstPostID = self.subpostID }),
+      ("conflicting thread author", { $0.data.thread.author.id += 1 }),
+      (
+        "unknown thread author",
+        {
+          $0.data.thread.authorID = 0
+          $0.data.thread.clearAuthor()
+        }
+      ),
+      (
+        "wrong first post author",
+        {
+          $0.data.firstFloorPost.authorID += 1
+          $0.data.firstFloorPost.author.id += 1
+        }
+      ),
+      ("conflicting first post author", { $0.data.firstFloorPost.author.id += 1 }),
+      (
+        "invalid first record identity",
+        {
+          $0.data.firstFloorPost.id += 10
+          $0.data.firstFloorPost.floor = 2
+        }
+      ),
+      ("wrong first post thread", { $0.data.firstFloorPost.tid += 1 }),
+      ("missing parent", { $0.data.postList = [] }),
+      ("wrong parent", { $0.data.postList[0].id += 10 }),
+      ("duplicate parent", { $0.data.postList.append($0.data.postList[0]) }),
+      (
+        "conflicting first post duplicate",
+        {
+          var duplicate = $0.data.firstFloorPost
+          duplicate.author.id += 1
+          $0.data.postList.append(duplicate)
+        }
+      ),
+      ("wrong parent thread", { $0.data.postList[0].tid += 1 }),
+      ("conflicting parent author", { $0.data.postList[0].author.id += 1 }),
+      (
+        "unknown parent author",
+        {
+          $0.data.postList[0].authorID = 0
+          $0.data.postList[0].clearAuthor()
+        }
+      ),
+      ("parent pretending first floor", { $0.data.postList[0].floor = 1 }),
+      ("invalid parent floor", { $0.data.postList[0].floor = 0 }),
+      (
+        "child is an ordinary floor",
+        {
+          var ordinary = $0.data.postList[0]
+          ordinary.id = self.subpostID
+          ordinary.floor = 3
+          $0.data.postList.append(ordinary)
+        }
+      ),
+      ("missing page", { $0.data.clearPage() }),
+      ("missing anti", { $0.data.clearAnti() }),
+      ("invalid TBS", { $0.data.anti.tbs = "invalid" }),
+    ]
+    return mutations.map { name, mutation in
+      var page = nestedParentResponse()
+      mutation(&page)
+      return (name, page)
+    }
+  }
+
+  private func invalidNestedFloorResponses(management: Bool) -> [(String, PbFloorResIdl)] {
+    let mutations: [(String, (inout PbFloorResIdl) -> Void)] = [
+      ("missing data", { $0.clearData() }),
+      ("missing forum", { $0.data.clearForum() }),
+      ("wrong forum", { $0.data.forum.id += 1 }),
+      ("wrong forum name", { $0.data.forum.name = "other" }),
+      ("missing thread", { $0.data.clearThread() }),
+      ("wrong thread", { $0.data.thread.id += 1 }),
+      ("wrong thread forum", { $0.data.thread.fid += 1 }),
+      ("wrong first PID", { $0.data.thread.firstPostID += 10 }),
+      (
+        "changed thread author",
+        {
+          $0.data.thread.authorID += 10
+          $0.data.thread.author.id += 10
+        }
+      ),
+      ("conflicting thread author", { $0.data.thread.author.id += 1 }),
+      ("missing parent", { $0.data.clearPost() }),
+      ("wrong parent", { $0.data.post.id += 10 }),
+      ("wrong parent thread", { $0.data.post.tid += 1 }),
+      ("changed parent floor", { $0.data.post.floor += 1 }),
+      (
+        "changed parent author",
+        {
+          $0.data.post.authorID += 10
+          $0.data.post.author.id += 10
+        }
+      ),
+      ("conflicting parent author", { $0.data.post.author.id += 1 }),
+      ("missing page", { $0.data.clearPage() }),
+      ("invalid TBS", { $0.data.anti.tbs = "invalid" }),
+      ("missing child", { $0.data.subpostList = [] }),
+      ("different child", { $0.data.subpostList[0].id += 10 }),
+      ("duplicate child", { $0.data.subpostList.append($0.data.subpostList[0]) }),
+      (
+        "conflicting duplicate child",
+        {
+          var duplicate = $0.data.subpostList[0]
+          duplicate.authorID += 10
+          duplicate.author.id += 10
+          $0.data.subpostList.append(duplicate)
+        }
+      ),
+      ("parent masquerading as child", { $0.data.subpostList[0].id = self.postID }),
+      ("first floor masquerading as child", { $0.data.subpostList[0].id = self.firstPostID }),
+      (
+        "changed child author",
+        {
+          $0.data.subpostList[0].authorID += 10
+          $0.data.subpostList[0].author.id += 10
+        }
+      ),
+      ("conflicting child author", { $0.data.subpostList[0].author.id += 1 }),
+      (
+        "unknown child author",
+        {
+          $0.data.subpostList[0].authorID = 0
+          $0.data.subpostList[0].clearAuthor()
+        }
+      ),
+      ("negative child author", { $0.data.subpostList[0].authorID = -1 }),
+    ]
+    return mutations.map { name, mutation in
+      var floor = nestedFloorResponse(management: management)
+      mutation(&floor)
+      return (name, floor)
+    }
+  }
+
+  private func deletionProtobufPayload(from request: URLRequest) throws -> Data {
+    let body = try XCTUnwrap(request.httpBody)
+    let prefix = Data(
+      "---*_r1999\r\nContent-Disposition: form-data; name=\"data\"; filename=\"file\"\r\n\r\n".utf8
+    )
+    let suffix = Data("\r\n---*_r1999--\r\n".utf8)
+    XCTAssertTrue(body.starts(with: prefix))
+    XCTAssertTrue(body.suffix(suffix.count) == suffix)
+    guard body.count >= prefix.count + suffix.count else { throw TiebaClientError.transportFailure }
+    return body.subdata(in: prefix.count..<(body.count - suffix.count))
+  }
+
   private func factory() -> TiebaAuthenticatedRequestFactory {
     TiebaAuthenticatedRequestFactory(configuration: .init())
   }

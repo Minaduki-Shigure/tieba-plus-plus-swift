@@ -567,6 +567,13 @@ struct ThreadView: View {
         pendingOwnedContentDeletion = nil
         ownedContentDeletionErrorMessage = nil
       }
+      .onReceive(NotificationCenter.default.publisher(for: .ownedContentDeletionDidChange)) { notification in
+        guard let target = notification.object as? OwnedContentDeletionTarget,
+          target.kind == .subpost,
+          target.threadID == viewModel.thread.id
+        else { return }
+        Task { @MainActor in await synchronizeDeletionProjections() }
+      }
       .onChange(of: replyComposerContext) { context in
         if context == nil {
           inboxReplyComposerIntent = nil
@@ -835,7 +842,7 @@ struct ThreadView: View {
   ) -> some View {
     HStack(spacing: 10) {
       ProgressView()
-      Text(target.kind == .topic ? "正在删除主题" : "正在删除第 \(target.floor) 楼")
+      Text("正在删除\(deletionObjectTitle(target))")
         .font(.footnote)
       Spacer(minLength: 0)
     }
@@ -852,9 +859,7 @@ struct ThreadView: View {
       Image(systemName: "exclamationmark.triangle.fill")
         .foregroundStyle(.orange)
       Text(
-        target.kind == .topic
-          ? "主题删除结果未确认，请在官方客户端核对，勿立即重试"
-          : "第 \(target.floor) 楼删除结果未确认，请在官方客户端核对，勿立即重试"
+        "\(deletionObjectTitle(target))删除结果未确认，请在官方客户端核对，勿立即重试"
       )
       .font(.footnote)
       Spacer(minLength: 0)
@@ -1516,6 +1521,7 @@ struct ThreadView: View {
 
   private func bootstrapThread() async {
     if deletionProjectionResolved {
+      await synchronizeDeletionProjections()
       guard ownedContentDeletionAcceptedTopic == nil, !Task.isCancelled else { return }
       viewModel.loadIfNeeded()
       return
@@ -1540,7 +1546,7 @@ struct ThreadView: View {
     ownedContentDeletionAcceptedTopic = acceptedTopic
     if acceptedTopic == nil {
       for target in restored.accepted where
-        target.kind == .post && restoredDeletionTargetMatchesInitialThread(target)
+        target.kind != .topic && restoredDeletionTargetMatchesInitialThread(target)
       {
         _ = viewModel.stageAcceptedContentDeletion(
           target,
@@ -1574,6 +1580,34 @@ struct ThreadView: View {
     viewModel.loadIfNeeded()
   }
 
+  private func synchronizeDeletionProjections() async {
+    guard let ownedContentDeletionStore else { return }
+    let restored = await ownedContentDeletionStore.restoredTargets(threadID: viewModel.thread.id)
+    guard !Task.isCancelled else { return }
+    for target in restored.accepted where restoredDeletionTargetMatchesInitialThread(target) {
+      if target.kind == .topic {
+        ownedContentDeletionAcceptedTopic = target
+        replyComposerContext = nil
+        sheetRoute = nil
+      } else if !viewModel.applyAcceptedContentDeletion(target) {
+        _ = viewModel.stageAcceptedContentDeletion(
+          target, allowsUnresolvedThreadIdentity: allowsLedgerIdentityForLinkPlaceholder
+        )
+      }
+    }
+    ownedContentDeletionUnknownTarget = restored.outcomeUnknown.flatMap {
+      restoredDeletionTargetMatchesInitialThread($0) ? $0 : nil
+    }
+  }
+
+  private func deletionObjectTitle(_ target: OwnedContentDeletionTarget) -> String {
+    switch target.kind {
+    case .topic: "主题"
+    case .post: "第 \(target.floor) 楼"
+    case .subpost: "第 \(target.floor) 楼中的这条回复"
+    }
+  }
+
   private func restoredDeletionTargetMatchesInitialThread(
     _ target: OwnedContentDeletionTarget
   ) -> Bool {
@@ -1602,6 +1636,11 @@ struct ThreadView: View {
         && target.authorID == thread.authorID
     case .post:
       return target.floor > 1
+        && (thread.firstPostID <= 0 || target.objectID != thread.firstPostID)
+    case .subpost:
+      return target.floor >= 1
+        && (target.parentPostID ?? 0) > 0
+        && target.objectID != target.parentPostID
         && (thread.firstPostID <= 0 || target.objectID != thread.firstPostID)
     }
   }
@@ -2037,6 +2076,9 @@ struct ThreadView: View {
 
   private func requestOwnedContentDeletion(_ pending: PendingOwnedContentDeletion) {
     guard !isPureReadingMode else { return }
+    guard pending.target.kind != .subpost || inlineDeletionTargetIsCurrent(pending.target) else {
+      return
+    }
     guard ownedContentDeletionInProgress == nil else {
       ownedContentDeletionErrorMessage = "当前已有删除操作正在进行，请等待结果。"
       return
@@ -2047,6 +2089,9 @@ struct ThreadView: View {
 
   private func confirmOwnedContentDeletion(_ pending: PendingOwnedContentDeletion) {
     pendingOwnedContentDeletion = nil
+    guard pending.target.kind != .subpost
+      || (!isPureReadingMode && inlineDeletionTargetIsCurrent(pending.target))
+    else { return }
     guard let ownedContentDeletionStore else {
       ownedContentDeletionErrorMessage = "当前账户服务不支持删除内容。"
       return
@@ -2072,7 +2117,7 @@ struct ThreadView: View {
           replyComposerContext = nil
           sheetRoute = nil
           dismiss()
-        case .post:
+        case .post, .subpost:
           if ownedContentDeletionUnknownTarget == receipt.target {
             ownedContentDeletionUnknownTarget = nil
           }
@@ -2096,11 +2141,27 @@ struct ThreadView: View {
   }
 
   private func commentsSheetTargets(_ target: OwnedContentDeletionTarget) -> Bool {
+    guard target.kind == .post else { return false }
     guard let sheetRoute, case .comments(let route) = sheetRoute else { return false }
     switch route {
     case .post(let threadID, let postID), .comment(let threadID, let postID, _):
       return threadID == target.threadID && postID == target.objectID
     }
+  }
+
+  private func inlineDeletionTargetIsCurrent(_ target: OwnedContentDeletionTarget) -> Bool {
+    guard
+      target.kind == .subpost,
+      let parentID = target.parentPostID,
+      let parent = viewModel.post(withID: parentID),
+      let child = parent.inlineComments.first(where: { $0.id == target.objectID })
+    else { return false }
+    return OwnedContentDeletionTarget(
+      thread: viewModel.thread,
+      parentPost: parent,
+      comment: child,
+      asThreadOwner: target.threadOwnerID != nil
+    ) == target
   }
 
   private func requestFloorCloudFavoriteAction(_ action: ThreadCloudFavoritePendingAction) {
@@ -2593,6 +2654,8 @@ private struct PostView: View, Equatable {
       && lhs.reportThread.forumID == rhs.reportThread.forumID
       && lhs.reportThread.forumName == rhs.reportThread.forumName
       && lhs.reportThread.firstPostID == rhs.reportThread.firstPostID
+      && lhs.reportThread.authorID == rhs.reportThread.authorID
+      && lhs.reportThread.isServerHidden == rhs.reportThread.isServerHidden
       && lhs.reportThread.localVisibility == rhs.reportThread.localVisibility
       && lhs.reportTarget == rhs.reportTarget
       && lhs.deletionTarget == rhs.deletionTarget
@@ -2684,7 +2747,16 @@ private struct PostView: View, Equatable {
               comment: comment
             )
           },
-          selectText: selectText
+          selectText: selectText,
+          deletionTarget: { comment in
+            OwnedContentDeletionTarget(thread: reportThread, parentPost: post, comment: comment)
+          },
+          threadOwnerDeletionTarget: { comment in
+            OwnedContentDeletionTarget(
+              thread: reportThread, parentPost: post, comment: comment, asThreadOwner: true
+            )
+          },
+          requestDeletion: requestDeletion
         )
       }
     }

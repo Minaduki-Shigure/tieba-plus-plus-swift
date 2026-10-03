@@ -67,6 +67,7 @@ struct CommentsView: View {
   @Environment(\.accountAccess) private var accountAccess
   @Environment(\.contentAgreementStore) private var contentAgreementStore
   @Environment(\.contentReportCoordinator) private var contentReportCoordinator
+  @Environment(\.ownedContentDeletionStore) private var ownedContentDeletionStore
   @Environment(\.hidesReplyEntryPoints) private var hidesReplyEntryPoints
   @StateObject private var viewModel: CommentsViewModel
   @State private var linkedTarget: TiebaLinkTarget?
@@ -84,6 +85,11 @@ struct CommentsView: View {
   @State private var inboxReplyNotice: String?
   @State private var inboxReplyComposerIntent: InboxReplyIntent?
   @State private var selectableTextPresentation: SelectableTextPresentation?
+  @State private var deletionProjectionResolved = false
+  @State private var pendingDeletion: PendingOwnedContentDeletion?
+  @State private var deletingTarget: OwnedContentDeletionTarget?
+  @State private var unknownDeletionTarget: OwnedContentDeletionTarget?
+  @State private var deletionErrorMessage: String?
   #if PERFORMANCE_HARNESS
     @State private var performanceVisibilityTracker = PerformanceCommentVisibilityTracker()
   #endif
@@ -230,7 +236,29 @@ struct CommentsView: View {
       Text(agreementErrorMessage ?? "无法完成点赞操作。")
     }
     .safeAreaInset(edge: .bottom, spacing: 0) {
-      commentsBottomInset
+      VStack(spacing: 0) {
+        deletionStatus
+        commentsBottomInset
+      }
+    }
+    .confirmationDialog(
+      pendingDeletion?.confirmationTitle ?? "删除此条楼中楼回复？",
+      isPresented: deletionConfirmationIsPresented,
+      titleVisibility: .visible
+    ) {
+      if let pendingDeletion {
+        Button(pendingDeletion.actionTitle, role: .destructive) {
+          confirmDeletion(pendingDeletion)
+        }
+      }
+      Button("取消", role: .cancel) { pendingDeletion = nil }
+    } message: {
+      Text(pendingDeletion?.confirmationMessage ?? "")
+    }
+    .alert("无法删除回复", isPresented: deletionErrorIsPresented) {
+      Button("好", role: .cancel) { deletionErrorMessage = nil }
+    } message: {
+      Text(deletionErrorMessage ?? "无法完成删除操作。")
     }
     .navigationDestination(isPresented: linkedTargetPresented) {
       if let linkedTarget {
@@ -279,7 +307,7 @@ struct CommentsView: View {
         }
       }
     }
-    .task { viewModel.loadIfNeeded() }
+    .task { await bootstrapComments() }
     .task(
       id: InboxReplyIntentResolutionTaskID(
         loadState: viewModel.state,
@@ -289,6 +317,7 @@ struct CommentsView: View {
       await consumeInboxReplyIntentIfReady()
     }
     .task(id: viewModel.state) {
+      if viewModel.state == .loaded { await synchronizeDeletions() }
       await recordDirectVisitIfNeeded()
     }
     .task(id: viewModel.agreementDescriptorEpoch) {
@@ -302,17 +331,31 @@ struct CommentsView: View {
       contentReportCoordinator?.invalidate(scopeID: reportScopeID)
       invalidateAgreementRequests()
       selectableTextPresentation = nil
+      pendingDeletion = nil
+      deletionErrorMessage = nil
       contentAgreementStore?.removeScope(agreementScopeID)
       viewModel.cancel()
     }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
       invalidateInboxReplyIntentForAccountChange()
       invalidateAgreementRequests()
+      pendingDeletion = nil
+      deletionErrorMessage = nil
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .ownedContentDeletionDidChange)) { notification in
+      guard
+        let target = notification.object as? OwnedContentDeletionTarget,
+        target.kind == .subpost,
+        target.threadID == viewModel.threadID
+      else { return }
+      Task { @MainActor in await synchronizeDeletions() }
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       selectableTextPresentation = nil
       contentReportCoordinator?.invalidate(scopeID: reportScopeID)
-      Task { @MainActor in viewModel.reload() }
+      if deletionProjectionResolved {
+        Task { @MainActor in viewModel.reload() }
+      }
     }
     .onChange(of: hidesReplyEntryPoints) { isHidden in
       if isHidden {
@@ -535,6 +578,8 @@ struct CommentsView: View {
       } else if let message = viewModel.loadMoreError {
         LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
           .listRowSeparator(.hidden)
+      } else if !viewModel.hasDisplayableComments, viewModel.canLoadMore {
+        loadMoreCommentsButton
       }
     }
   #endif
@@ -560,6 +605,141 @@ struct CommentsView: View {
       LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
+    } else if !viewModel.hasDisplayableComments, viewModel.canLoadMore {
+      loadMoreCommentsButton
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    }
+  }
+
+  private var loadMoreCommentsButton: some View {
+    Button(action: viewModel.loadMore) {
+      Label("加载更多回复", systemImage: "arrow.down")
+        .frame(maxWidth: .infinity, minHeight: 44)
+    }
+    .buttonStyle(.plain)
+    .accessibilityIdentifier("comments-load-more")
+  }
+
+  private var deletionParentPostID: Int64? {
+    if let id = viewModel.parentPost?.id { return id }
+    switch viewModel.anchor {
+    case .post(let id), .comment(let id, _): return id > 0 ? id : nil
+    case .resolvingComment: return nil
+    }
+  }
+
+  private func bootstrapComments() async {
+    await synchronizeDeletions()
+    guard !Task.isCancelled else { return }
+    deletionProjectionResolved = true
+    viewModel.loadIfNeeded()
+  }
+
+  private func synchronizeDeletions() async {
+    guard let ownedContentDeletionStore else { return }
+    let restored = await ownedContentDeletionStore.restoredTargets(
+      threadID: viewModel.threadID,
+      parentPostID: deletionParentPostID
+    )
+    guard !Task.isCancelled else { return }
+    for target in restored.accepted where target.kind == .subpost {
+      if !viewModel.applyAcceptedContentDeletion(target) {
+        _ = viewModel.stageAcceptedContentDeletion(
+          target, allowsUnresolvedThreadIdentity: true
+        )
+      }
+    }
+    unknownDeletionTarget = restored.outcomeUnknown.flatMap { target in
+      guard target.kind == .subpost else { return nil }
+      if let parentID = deletionParentPostID, target.parentPostID != parentID { return nil }
+      return target
+    }
+  }
+
+  private func deletionTarget(
+    for comment: BrowseComment, asThreadOwner: Bool = false
+  ) -> OwnedContentDeletionTarget? {
+    guard
+      deletionProjectionResolved,
+      let thread = viewModel.thread,
+      let parentPost = viewModel.parentPost
+    else { return nil }
+    return OwnedContentDeletionTarget(
+      thread: thread, parentPost: parentPost, comment: comment, asThreadOwner: asThreadOwner
+    )
+  }
+
+  private func requestDeletion(_ pending: PendingOwnedContentDeletion) {
+    guard
+      deletingTarget == nil,
+      pending.target.kind == .subpost,
+      let comment = viewModel.comment(withID: pending.target.objectID),
+      deletionTarget(for: comment, asThreadOwner: pending.target.threadOwnerID != nil)
+        == pending.target
+    else { return }
+    pendingDeletion = pending
+  }
+
+  private func confirmDeletion(_ pending: PendingOwnedContentDeletion) {
+    pendingDeletion = nil
+    guard
+      deletingTarget == nil,
+      let ownedContentDeletionStore,
+      let comment = viewModel.comment(withID: pending.target.objectID),
+      deletionTarget(for: comment, asThreadOwner: pending.target.threadOwnerID != nil)
+        == pending.target
+    else { return }
+    deletingTarget = pending.target
+    Task { @MainActor in
+      defer { if deletingTarget == pending.target { deletingTarget = nil } }
+      do {
+        let receipt = try await ownedContentDeletionStore.delete(pending)
+        guard receipt.target == pending.target,
+          viewModel.applyAcceptedContentDeletion(receipt.target)
+        else {
+          deletionErrorMessage = "贴吧已受理删除，但页面已变化，请重新加载核对。"
+          return
+        }
+        if unknownDeletionTarget == pending.target { unknownDeletionTarget = nil }
+        selectableTextPresentation = nil
+        contentReportCoordinator?.invalidate(scopeID: reportScopeID)
+      } catch {
+        if (error as? OwnedContentDeletionError) == .outcomeUnknown {
+          unknownDeletionTarget = pending.target
+        }
+        deletionErrorMessage = error.localizedDescription
+      }
+    }
+  }
+
+  private var deletionConfirmationIsPresented: Binding<Bool> {
+    Binding(get: { pendingDeletion != nil }, set: { if !$0 { pendingDeletion = nil } })
+  }
+
+  private var deletionErrorIsPresented: Binding<Bool> {
+    Binding(get: { deletionErrorMessage != nil }, set: { if !$0 { deletionErrorMessage = nil } })
+  }
+
+  @ViewBuilder
+  private var deletionStatus: some View {
+    if deletingTarget != nil {
+      HStack(spacing: 10) {
+        ProgressView()
+        Text("正在删除此条楼中楼回复")
+        Spacer(minLength: 0)
+      }
+      .font(.footnote)
+      .padding(12)
+      .appRegularMaterialSurface()
+      .accessibilityIdentifier("comments-deletion-progress")
+    } else if unknownDeletionTarget != nil {
+      Label("回复删除结果未确认，请在官方客户端核对，勿立即重试", systemImage: "exclamationmark.triangle")
+        .font(.footnote)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .appRegularMaterialSurface()
+        .accessibilityIdentifier("comments-deletion-unknown")
     }
   }
 
@@ -1173,13 +1353,17 @@ struct CommentsView: View {
   }
 
   private func commentRowContent(_ comment: BrowseComment) -> some View {
-    StableRenderBoundary(
+    let ownDeletionTarget = deletionTarget(for: comment)
+    let threadOwnerDeletionTarget = deletionTarget(for: comment, asThreadOwner: true)
+    return StableRenderBoundary(
       key: CommentsRowRenderKey(
         comment: comment,
         thread: viewModel.thread,
         parentPostID: viewModel.parentPost?.id,
         agreementTarget: viewModel.agreementTarget(forCommentID: comment.id),
-        replyEntriesVisible: replyEntriesVisible
+        replyEntriesVisible: replyEntriesVisible,
+        deletionTarget: ownDeletionTarget,
+        threadOwnerDeletionTarget: threadOwnerDeletionTarget
       )
     ) {
       VStack(alignment: .leading, spacing: 7) {
@@ -1250,6 +1434,12 @@ struct CommentsView: View {
         ContentReportMenuItem(
           target: reportTarget(for: comment),
           accessibilityIdentifier: "comments-report-subpost-\(comment.id)"
+        )
+        OwnedContentDeletionMenuSlot(
+          store: ownedContentDeletionStore,
+          target: ownDeletionTarget,
+          threadOwnerTarget: threadOwnerDeletionTarget,
+          requestDeletion: requestDeletion
         )
       }
     }
@@ -1435,6 +1625,8 @@ private struct CommentsRowRenderKey: Equatable, Sendable {
   let parentPostID: Int64?
   let agreementTarget: ContentAgreementTarget?
   let replyEntriesVisible: Bool
+  let deletionTarget: OwnedContentDeletionTarget?
+  let threadOwnerDeletionTarget: OwnedContentDeletionTarget?
 }
 
 private struct CommentHighlightToken: Equatable {
