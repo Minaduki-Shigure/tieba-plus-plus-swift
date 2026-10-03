@@ -184,8 +184,7 @@ struct TiebaPlusPlusApp: App {
     let wallpaperSeed = wallpaperSnapshot?.settings.accentRGB.flatMap(AppAccentColorSeed.init(rgb:))
     let resolvedAccentColor = AppAccentColorStyle(
       selection: wallpaperSeed.map(AppAccentColorSelection.custom)
-        ?? AppAccentColorSelection.resolved(accentColor),
-      usesWallpaperContrast: wallpaperSnapshot != nil
+        ?? AppAccentColorSelection.resolved(accentColor)
     )
     let resolvedAppearance = wallpaperSnapshot?.settings.appearance.colorScheme
       ?? AppAppearance.resolved(appearance).colorScheme

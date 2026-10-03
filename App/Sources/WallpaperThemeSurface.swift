@@ -28,32 +28,46 @@ extension WallpaperThemeAppearance {
 }
 
 enum WallpaperThemeSurfacePolicy {
-  // The worst-case canvas is #D6D6D6 in light and #292929 in dark. Wallpaper
-  // accents use the existing high-contrast palette, retaining >= 4.5 contrast
-  // even over a solid black/white image. No image analysis is needed while scrolling.
-  static let normalCanvasOpacity = 0.84
-
   static func canvasOpacity(highContrast: Bool, reducesTransparency: Bool) -> Double {
-    highContrast || reducesTransparency ? 1 : normalCanvasOpacity
+    highContrast || reducesTransparency ? 1 : 0
   }
 
   static func surfaceOpacity(
     for role: AppSurfaceRole,
+    appearance: WallpaperThemeAppearance,
     highContrast: Bool,
     reducesTransparency: Bool
   ) -> Double {
     if highContrast || reducesTransparency { return 1 }
+    // TiebaLite applies small, local foreground tints to cards/floors. Its
+    // translucent_light name denotes light text, equivalent to our dark reading.
     switch role {
-    case .canvas, .content, .floor: return 0
-    case .card: return 0.20
-    case .control: return 0.35
-    case .divider: return 0.40
-    case .bar: return 0.25
+    case .canvas, .content: return 0
+    case .card, .control: return appearance == .dark ? 16.0 / 255 : 32.0 / 255
+    case .floor: return appearance == .dark ? 21.0 / 255 : 42.0 / 255
+    case .divider: return appearance == .dark ? 16.0 / 255 : 21.0 / 255
+    // Reply/action panes retain a readable window surface. Native navigation
+    // and tab bars are independently transparent in AppNavigationSurfaceModifier.
+    case .bar: return 1
     }
+  }
+
+  static func surfaceColor(
+    for role: AppSurfaceRole,
+    appearance: WallpaperThemeAppearance,
+    highContrast: Bool,
+    reducesTransparency: Bool
+  ) -> Color {
+    if highContrast || reducesTransparency { return appearance.surfaceColor }
+    if role == .bar {
+      let component = appearance == .dark ? 32.0 / 255 : 248.0 / 255
+      return Color(red: component, green: component, blue: component)
+    }
+    return appearance == .dark ? .white : .black
   }
 }
 
-/// Shared by editor and live pages, so opacity and readability match after Save.
+/// Shared by editor and live pages, so image opacity matches after Save.
 /// The CGImage is already oriented, cropped and blurred off the main actor.
 struct WallpaperThemePreview: View {
   let image: CGImage
@@ -62,10 +76,24 @@ struct WallpaperThemePreview: View {
   @Environment(\.accessibilityReduceTransparency) private var reducesTransparency
 
   var body: some View {
+    WallpaperThemeCanvas(
+      image: image, settings: settings,
+      highContrast: contrast == .increased, reducesTransparency: reducesTransparency)
+  }
+}
+
+/// The actual canvas renderer receives accessibility values from the live wrapper.
+struct WallpaperThemeCanvas: View {
+  let image: CGImage
+  let settings: WallpaperThemeSettings
+  let highContrast: Bool
+  let reducesTransparency: Bool
+
+  var body: some View {
     GeometryReader { geometry in
       ZStack {
         settings.appearance.surfaceColor
-        if contrast != .increased && !reducesTransparency {
+        if !highContrast && !reducesTransparency {
           Image(decorative: image, scale: 1)
             .resizable()
             .scaledToFill()
@@ -76,7 +104,7 @@ struct WallpaperThemePreview: View {
         settings.appearance.surfaceColor
           .opacity(
             WallpaperThemeSurfacePolicy.canvasOpacity(
-              highContrast: contrast == .increased,
+              highContrast: highContrast,
               reducesTransparency: reducesTransparency
             ))
       }
@@ -109,9 +137,15 @@ struct WallpaperSemanticSurface: View {
   @Environment(\.accessibilityReduceTransparency) private var reducesTransparency
 
   var body: some View {
-    settings.appearance.surfaceColor.opacity(
+    WallpaperThemeSurfacePolicy.surfaceColor(
+      for: role,
+      appearance: settings.appearance,
+      highContrast: contrast == .increased,
+      reducesTransparency: reducesTransparency
+    ).opacity(
       WallpaperThemeSurfacePolicy.surfaceOpacity(
         for: role,
+        appearance: settings.appearance,
         highContrast: contrast == .increased,
         reducesTransparency: reducesTransparency
       )

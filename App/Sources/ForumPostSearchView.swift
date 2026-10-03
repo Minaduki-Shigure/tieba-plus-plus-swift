@@ -614,8 +614,7 @@ private struct ForumPostSearchContextRow: View {
     }
     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
     .padding(8)
-    .appSurfaceBackground(.card)
-    .background(Color(uiColor: .secondarySystemBackground))
+    .appSurfaceBackground(.card, fallback: Color(uiColor: .secondarySystemBackground))
     .clipShape(RoundedRectangle(cornerRadius: 6))
   }
 

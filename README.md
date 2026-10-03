@@ -33,8 +33,10 @@ and its verified metadata enters the public app source.
   accent preferences. One bounded, preprocessed image is shared by semantic page,
   list, floor and navigation/tab surfaces; scrolling performs no image decoding or
   live blur. The original preferences, content identities, routes and media cache
-  keys are unchanged. High contrast and Reduce Transparency use opaque readable
-  surfaces. Wallpaper files live separately from disposable image caches.
+  keys are unchanged. Image opacity covers the full 0–100% range without a fixed
+  canvas mask; cards and reply controls use local theme surfaces. High contrast
+  and Reduce Transparency use opaque readable surfaces. Wallpaper files live
+  separately from disposable image caches.
   Recommended wallpapers use anonymous bounded HTTPS downloads with an explicit
   retry and local-photo fallback. The original catalog currently redirects to
   HTTP, which is refused; the fallback is the same author's verified
