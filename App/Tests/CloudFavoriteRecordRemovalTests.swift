@@ -331,13 +331,100 @@ final class CloudFavoriteRecordRemovalTests: XCTestCase {
     let verified = try await service.verifyCloudFavoriteRecordRemoval(
       session: session, target: target)
     XCTAssertEqual(verified.phase, .observedAbsent)
-    XCTAssertFalse(
-      verified.receiptAcknowledged, "An unpersisted ACK must not be invented on recovery")
+    XCTAssertTrue(
+      verified.receiptAcknowledged, "A received ACK must survive a transient persistence failure")
     let count = await client.dispatches
     XCTAssertEqual(count, 1)
     _ = try await service.setThreadCloudFavorite(
       session: session, target: cleanupNormalTarget(), markedPostID: 99
     )
+    let ordinary = await client.ordinaryWrites
+    XCTAssertEqual(ordinary, 1)
+  }
+
+  func testReceivedACKSurvivesRepeatedDiskFailureAndCoordinatorRecreation() async throws {
+    let session = cleanupSession()
+    let ledger = CleanupTransitionFaultLedger(transitionFailures: 2)
+    let gate = CloudFavoriteMutationGate(ledger: ledger)
+    let client = CleanupClient(ledger: ledger, observation: .observedAbsent)
+    let vault = CleanupVault(session)
+    let first = CloudFavoriteRecordRemovalCoordinator(client: client, gate: gate, vault: vault)
+    let target = try cleanupTarget(session)
+    do {
+      _ = try await first.remove(session: session, target: target)
+      XCTFail("The receipt cannot yet be persisted")
+    } catch {}
+    let restored = CloudFavoriteRecordRemovalCoordinator(client: client, gate: gate, vault: vault)
+    do {
+      _ = try await restored.verify(session: session, target: target)
+      XCTFail("A second disk failure must still retain the actual receipt")
+    } catch {}
+    let result = try await restored.verify(session: session, target: target)
+    XCTAssertTrue(result.receiptAcknowledged)
+    XCTAssertEqual(result.phase, .observedAbsent)
+    let writes = await client.dispatches
+    let reads = await client.verifications
+    XCTAssertEqual(writes, 1)
+    XCTAssertEqual(reads, 1, "Retrying receipt persistence does not need a network request")
+  }
+
+  func testDefiniteRejectionCleanupRetriesOnlyDiskAndReleasesOrdinaryWriter() async throws {
+    let session = cleanupSession()
+    let ledger = CleanupTransitionFaultLedger(transitionFailures: 0, removalFailures: 1)
+    let gate = CloudFavoriteMutationGate(ledger: ledger)
+    let client = CleanupClient(ledger: ledger, outcome: .rejected(code: 4, message: "Rejected"))
+    let service = TiebaCoreAccountService(
+      client: client, cloudFavoriteMutationGate: gate, cloudFavoriteVault: CleanupVault(session))
+    let target = try cleanupTarget(session)
+    do {
+      _ = try await service.removeCloudFavoriteRecord(session: session, target: target)
+      XCTFail("Failed journal removal must remain locked")
+    } catch {}
+    let pending = try await ledger.record(for: target.key)
+    XCTAssertEqual(pending?.phase, .dispatchPending)
+    _ = try await service.setThreadCloudFavorite(
+      session: session, target: cleanupNormalTarget(), markedPostID: 99)
+    let writes = await client.dispatches
+    let reads = await client.verifications
+    let ordinary = await client.ordinaryWrites
+    let record = try await ledger.record(for: target.key)
+    XCTAssertEqual(writes, 1)
+    XCTAssertEqual(reads, 0)
+    XCTAssertEqual(ordinary, 1)
+    XCTAssertNil(record)
+  }
+
+  func testCancellationAfterSuccessfulHookButBeforeTransportDoesNotLockFavorite() async throws {
+    let session = cleanupSession()
+    let ledger = CleanupCancellationAwareLedger()
+    let pause = CleanupTestGate()
+    let client = CleanupClient(
+      ledger: ledger, outcome: .notDispatched, afterHook: { await pause.wait() })
+    let service = TiebaCoreAccountService(
+      client: client, cloudFavoriteMutationGate: .init(ledger: ledger),
+      cloudFavoriteVault: CleanupVault(session))
+    let target = try cleanupTarget(session)
+    let task = Task {
+      try await service.removeCloudFavoriteRecord(session: session, target: target)
+    }
+    for _ in 0..<1_000 {
+      if await client.prepared == 1 { break }
+      await Task.yield()
+    }
+    let prepared = await client.prepared
+    XCTAssertEqual(prepared, 1, "The hook must have returned before cancelling")
+    task.cancel()
+    await pause.release()
+    do {
+      _ = try await task.value
+      XCTFail("A non-dispatch must not produce a success result")
+    } catch is CancellationError {} catch { XCTFail("\(error)") }
+    let pending = try await ledger.records()
+    XCTAssertTrue(pending.isEmpty)
+    let writes = await client.dispatches
+    XCTAssertEqual(writes, 0)
+    _ = try await service.setThreadCloudFavorite(
+      session: session, target: cleanupNormalTarget(), markedPostID: 99)
     let ordinary = await client.ordinaryWrites
     XCTAssertEqual(ordinary, 1)
   }
@@ -413,6 +500,7 @@ private actor CleanupClient: TiebaAuthenticatedAccountClient {
   var observation: TiebaCloudFavoriteRecordObservation
   let beforeHook: @Sendable () async -> Void
   let afterHook: @Sendable () async -> Void
+  private(set) var prepared = 0
   private(set) var dispatches = 0
   private(set) var verifications = 0
   private(set) var ordinaryWrites = 0
@@ -443,7 +531,8 @@ private actor CleanupClient: TiebaAuthenticatedAccountClient {
       CloudFavoriteMutationLedgerKey(userID: expectedUserID, threadID: threadID))
     let record = try await ledger.record(for: key)
     XCTAssertEqual(record?.phase, .dispatchPending, "Persistence must precede dispatch")
-    dispatches += 1
+    prepared += 1
+    if outcome != .notDispatched { dispatches += 1 }
     await afterHook()
     return .init(target: .init(userID: expectedUserID, threadID: threadID), outcome: outcome)
   }
@@ -514,7 +603,12 @@ private actor CleanupFailingLedger: CloudFavoriteMutationLedgerRepository {
 
 private actor CleanupTransitionFaultLedger: CloudFavoriteMutationLedgerRepository {
   private let storage = TransientCloudFavoriteMutationLedger()
-  private var failsNextTransition = true
+  private var transitionFailures: Int
+  private var removalFailures: Int
+  init(transitionFailures: Int = 1, removalFailures: Int = 0) {
+    self.transitionFailures = transitionFailures
+    self.removalFailures = removalFailures
+  }
   func records() async throws -> [CloudFavoriteMutationLedgerRecord] { try await storage.records() }
   func record(for key: CloudFavoriteMutationLedgerKey) async throws
     -> CloudFavoriteMutationLedgerRecord?
@@ -531,8 +625,8 @@ private actor CleanupTransitionFaultLedger: CloudFavoriteMutationLedgerRepositor
     key: CloudFavoriteMutationLedgerKey, operationID: UUID,
     phase: CloudFavoriteMutationLedgerPhase, now: Date
   ) async throws -> CloudFavoriteMutationLedgerRecord {
-    if failsNextTransition {
-      failsNextTransition = false
+    if transitionFailures > 0 {
+      transitionFailures -= 1
       throw CloudFavoriteMutationLedgerError.writeFailed
     }
     return try await storage.transition(key: key, operationID: operationID, phase: phase, now: now)
@@ -540,6 +634,10 @@ private actor CleanupTransitionFaultLedger: CloudFavoriteMutationLedgerRepositor
   func removeAfterDefiniteFailure(key: CloudFavoriteMutationLedgerKey, operationID: UUID)
     async throws
   {
+    if removalFailures > 0 {
+      removalFailures -= 1
+      throw CloudFavoriteMutationLedgerError.writeFailed
+    }
     try await storage.removeAfterDefiniteFailure(key: key, operationID: operationID)
   }
 }

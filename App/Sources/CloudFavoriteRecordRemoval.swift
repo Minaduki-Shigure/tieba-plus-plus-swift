@@ -38,8 +38,8 @@ struct CloudFavoriteRecordRemovalStatus: Equatable, Sendable, Identifiable {
     switch phase {
     case .observedAbsent:
       return receiptAcknowledged
-        ? "贴吧已接受移除请求；两轮完整列表中均未再找到这条收藏。"
-        : "两轮完整列表中均未再找到这条收藏；此前写入是否被接受仍无回执。"
+        ? "贴吧已接受移除请求，刷新云收藏后已找不到这条记录。"
+        : "刷新云收藏后未找到这条记录，但无法确认此前请求是否成功。"
     case .acceptedAwaitingVerification:
       return "贴吧已接受移除请求，但尚未确认列表中已移除。可以继续只读核验，不会重发请求。"
     case .dispatchPending, .outcomeUnknown:
@@ -75,6 +75,14 @@ actor CloudFavoriteMutationGate {
   let ledger: any CloudFavoriteMutationLedgerRepository
   private var active: [CloudFavoriteMutationLedgerKey: UUID] = [:]
   private var failedClosed: Set<CloudFavoriteMutationLedgerKey> = []
+  private enum Finalization: Sendable {
+    case receipt(CloudFavoriteMutationLedgerPhase)
+    case definiteFailure
+  }
+  // Protocol evidence must survive a transient disk failure and coordinator
+  // recreation. Retain only the journal identity/result, never credentials.
+  private var pendingFinalizations:
+    [CloudFavoriteMutationLedgerKey: (operationID: UUID, result: Finalization)] = [:]
 
   init(ledger: any CloudFavoriteMutationLedgerRepository) {
     self.ledger = ledger
@@ -85,12 +93,13 @@ actor CloudFavoriteMutationGate {
     allowsVerification: Bool = false
   ) async throws -> UUID {
     guard active[key] == nil else { throw CloudFavoriteRecordRemovalError.busy }
-    guard allowsVerification || !failedClosed.contains(key) else {
-      throw CloudFavoriteRecordRemovalError.unavailable
-    }
     let token = UUID()
     active[key] = token
     do {
+      try await persistPendingFinalization(key)
+      guard allowsVerification || !failedClosed.contains(key) else {
+        throw CloudFavoriteRecordRemovalError.unavailable
+      }
       if let record = try await ledger.record(for: key), record.blocksWrites,
         !allowsVerification
       {
@@ -118,6 +127,47 @@ actor CloudFavoriteMutationGate {
 
   func didPersistVerifiedAbsence(_ key: CloudFavoriteMutationLedgerKey) {
     failedClosed.remove(key)
+  }
+
+  func persistReceipt(
+    key: CloudFavoriteMutationLedgerKey, operationID: UUID,
+    phase: CloudFavoriteMutationLedgerPhase
+  ) async throws -> CloudFavoriteMutationLedgerRecord {
+    pendingFinalizations[key] = (operationID, .receipt(phase))
+    try await persistPendingFinalization(key)
+    guard let record = try await ledger.record(for: key), record.operationID == operationID else {
+      throw CloudFavoriteMutationLedgerError.operationMismatch
+    }
+    return record
+  }
+
+  func persistDefiniteFailure(
+    key: CloudFavoriteMutationLedgerKey, operationID: UUID
+  ) async throws {
+    pendingFinalizations[key] = (operationID, .definiteFailure)
+    try await persistPendingFinalization(key)
+  }
+
+  private func persistPendingFinalization(_ key: CloudFavoriteMutationLedgerKey) async throws {
+    guard let pending = pendingFinalizations[key] else { return }
+    let ledger = ledger
+    do {
+      // Cancellation may stop network/UI work, but must not discard a receipt
+      // already received, or leave a known non-dispatch permanently locked.
+      try await Task.detached {
+        switch pending.result {
+        case .receipt(let phase):
+          _ = try await ledger.transition(key: key, operationID: pending.operationID, phase: phase)
+        case .definiteFailure:
+          try await ledger.removeAfterDefiniteFailure(key: key, operationID: pending.operationID)
+        }
+      }.value
+      pendingFinalizations.removeValue(forKey: key)
+      if case .definiteFailure = pending.result { failedClosed.remove(key) }
+    } catch {
+      failedClosed.insert(key)
+      throw error
+    }
   }
 
   func performOrdinaryWrite<Value: Sendable>(
@@ -210,6 +260,10 @@ actor CloudFavoriteRecordRemovalCoordinator {
       throw CloudFavoriteRecordRemovalError.unavailable
     }
     switch receipt.outcome {
+    case .notDispatched:
+      try await removePreparedOperation(key: target.key, operationID: operationID)
+      try await requireCurrent(session, target: target)
+      throw CancellationError()
     case .rejected(let code, _):
       do {
         try await removePreparedOperation(key: target.key, operationID: operationID)
@@ -225,13 +279,8 @@ actor CloudFavoriteRecordRemovalCoordinator {
         ? .acceptedAwaitingVerification : .outcomeUnknown
       let record: CloudFavoriteMutationLedgerRecord
       do {
-        let ledger = gate.ledger
-        // Keep already-received protocol evidence even if the presenting task
-        // was cancelled. This task retains only the journal key and receipt
-        // phase, never session credentials, and is always awaited to completion.
-        record = try await Task.detached {
-          try await ledger.transition(key: target.key, operationID: operationID, phase: phase)
-        }.value
+        record = try await gate.persistReceipt(
+          key: target.key, operationID: operationID, phase: phase)
       } catch {
         // The persisted dispatchPending record remains a restart-safe lock.
         await gate.failClosed(target.key)
@@ -256,11 +305,11 @@ actor CloudFavoriteRecordRemovalCoordinator {
     session: StoredAccountSession, target: CloudFavoriteRecordTarget, operationID: UUID
   ) async throws {
     try await requireCurrent(session, target: target)
-    _ = try await gate.ledger.prepare(
-      key: target.key, operationID: operationID,
-      sessionRevision: session.sessionRevision, now: Date()
-    )
     do {
+      _ = try await gate.ledger.prepare(
+        key: target.key, operationID: operationID,
+        sessionRevision: session.sessionRevision, now: Date()
+      )
       try await requireCurrent(session, target: target)
     } catch {
       do {
@@ -276,12 +325,7 @@ actor CloudFavoriteRecordRemovalCoordinator {
   private func removePreparedOperation(
     key: CloudFavoriteMutationLedgerKey, operationID: UUID
   ) async throws {
-    let ledger = gate.ledger
-    // A definite non-dispatch/rejection must also survive parent cancellation;
-    // otherwise a harmless cancelled confirmation could become an unknown lock.
-    try await Task.detached {
-      try await ledger.removeAfterDefiniteFailure(key: key, operationID: operationID)
-    }.value
+    try await gate.persistDefiniteFailure(key: key, operationID: operationID)
   }
 
   private func verifyWhileReserved(
