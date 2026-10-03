@@ -16,6 +16,32 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
+This change completes list-level cloud-favorite record cleanup against
+TiebaLite `9701bfb6`'s `rmstore` workflow, including deleted records for which no
+forum or original post can be recovered. It uses a separate positive UID/TID
+target, explicitly confirmed against the current session revision. The normal
+forum/PID favorite contracts are unchanged. Fresh app/web account validation,
+TBS and an exact saved-list presence read precede the single dispatch; presence
+can be confirmed as soon as the target TID appears on a valid page.
+The App persists dispatch intent before sending and retains separate unknown,
+acknowledged-awaiting-verification and observed-absent states; an absence read
+does not manufacture a missing acknowledgement. A pending record survives
+restart and credential renewal and shares a UID/TID gate with ordinary favorite
+add/update/remove. The cloud-list page restores a read-only verification entry
+even when the corresponding row is no longer visible. Ledger failures stop
+writes rather than erasing uncertain intent.
+
+Verification follows fixed 20-record offsets through a required empty terminal
+page, for up to 100 nonempty pages / 2,000 records per scan and 30 seconds across
+both scans. Short pages continue; duplicate IDs, differing ordered scans,
+unreadable pages and exhausted limits are inconclusive. Offset pagination has no
+server snapshot token, so stable absence is an observation rather than an atomic
+proof of deletion. HMAC protects persisted journal integrity, but does not
+detect rollback to an older authentic archive. Protocol, persistence, concurrency
+and UI model regressions are covered by automated tests; live account acceptance,
+slow/changing large lists and iOS confirmation/relaunch behavior remain validation
+gates. The weighted parity estimate is unchanged pending those checks.
+
 Current `main` adds native inline classic-emoticon images to post bodies, full
 nested replies and their compact inline previews, matching TiebaLite's
 `EmoticonText`/`PbContentRender` reading workflow. It recognizes structured faces
