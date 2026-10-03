@@ -13,6 +13,9 @@ public struct TiebaCloudFavoriteRecordTarget: Sendable, Hashable, Codable {
 }
 
 public enum TiebaCloudFavoriteRecordCleanupOutcome: Sendable, Hashable, Codable {
+  /// The dispatch hook completed, but cancellation was observed before the
+  /// transport was invoked. The caller may safely discard its prepared intent.
+  case notDispatched
   /// The server acknowledged the request; membership must still be read back.
   case acceptedAwaitingVerification
   case rejected(code: Int32, message: String)

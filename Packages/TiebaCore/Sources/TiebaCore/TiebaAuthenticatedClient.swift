@@ -978,6 +978,7 @@ public actor TiebaAuthenticatedClient {
 
   private let requestFactory: TiebaAuthenticatedRequestFactory
   private let transport: any TiebaTransport
+  private let cloudFavoriteRecordScanTimeout: Duration
   private let staticImageUploadLeaseAcquired: (@Sendable (UUID) async -> Void)?
   private var selfProfileEditFlights = [
     TiebaSelfProfileEditResourceKey: TiebaSelfProfileEditFlight
@@ -1099,16 +1100,19 @@ public actor TiebaAuthenticatedClient {
   public init(configuration: TiebaClientConfiguration = .init()) {
     self.requestFactory = TiebaAuthenticatedRequestFactory(configuration: configuration)
     self.transport = URLSessionTiebaTransport(redirectPolicy: .rejectAll)
+    self.cloudFavoriteRecordScanTimeout = .seconds(30)
     self.staticImageUploadLeaseAcquired = nil
   }
 
   init(
     configuration: TiebaClientConfiguration = .init(),
     transport: any TiebaTransport,
-    staticImageUploadLeaseAcquired: (@Sendable (UUID) async -> Void)? = nil
+    staticImageUploadLeaseAcquired: (@Sendable (UUID) async -> Void)? = nil,
+    cloudFavoriteRecordScanTimeout: Duration = .seconds(30)
   ) {
     self.requestFactory = TiebaAuthenticatedRequestFactory(configuration: configuration)
     self.transport = transport
+    self.cloudFavoriteRecordScanTimeout = cloudFavoriteRecordScanTimeout
     self.staticImageUploadLeaseAcquired = staticImageUploadLeaseAcquired
   }
 
@@ -2010,9 +2014,16 @@ public actor TiebaAuthenticatedClient {
     // A throwing hook is still a preflight failure, never an unknown dispatch.
     try await beforeDispatch()
 
+    // No transport has been invoked yet. Return definite non-dispatch so the
+    // caller can remove its durable intent even though its task is cancelled.
+    guard !Task.isCancelled else {
+      return TiebaCloudFavoriteRecordCleanupReceipt(
+        target: .init(userID: expectedUserID, threadID: threadID), outcome: .notDispatched
+      )
+    }
+
     let outcome: TiebaCloudFavoriteRecordCleanupOutcome
     do {
-      try Task.checkCancellation()
       let body = try await send(
         request, maximumBodyBytes: Self.threadCloudFavoriteWriteResponseMaximumBytes)
       try TiebaAuthenticatedDecoder.checkCloudFavoriteRecordCleanupResponse(body)
@@ -2058,6 +2069,9 @@ public actor TiebaAuthenticatedClient {
     let observation = try await observeCloudFavoriteRecord(
       credential: credential, expectedUserID: expectedUserID, threadID: threadID
     )
+    // Inconclusive reads cannot release a terminal or authorize a write. In
+    // particular, an expired scan must not start more network work afterwards.
+    if case .inconclusive = observation { return observation }
     let finalAccount = try await validateSession(credential: credential)
     guard finalAccount.userID == expectedUserID else {
       throw TiebaClientError.invalidAuthenticatedResponse
@@ -2089,7 +2103,7 @@ public actor TiebaAuthenticatedClient {
     expectedUserID: Int64,
     threadID: Int64
   ) async throws -> TiebaCloudFavoriteRecordObservation {
-    let deadline = ContinuousClock.now.advanced(by: .seconds(30))
+    let deadline = ContinuousClock.now.advanced(by: cloudFavoriteRecordScanTimeout)
     do {
       let firstScan = try await scanCloudFavoriteRecordIDs(
         credential: credential, expectedUserID: expectedUserID,
@@ -2115,6 +2129,88 @@ public actor TiebaAuthenticatedClient {
 
   private struct CloudFavoriteRecordScanFailure: Swift.Error {
     let issue: TiebaCloudFavoriteRecordScanIssue
+  }
+
+  /// URLRequest.timeoutInterval only limits idle time. A separate deadline
+  /// cancels a slowly streaming download and resumes the reader immediately.
+  /// These unstructured tasks perform reads only; a late response cannot change
+  /// operation locks or terminal receipts. Unlike a task group, completion does
+  /// not wait for a transport that fails to cooperate with cancellation.
+  private final class CloudFavoriteRecordPageRead: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: Result<Data, Swift.Error>?
+    private var continuation: CheckedContinuation<Data, Swift.Error>?
+    private var tasks: [Task<Void, Never>] = []
+
+    func value(
+      until deadline: ContinuousClock.Instant,
+      operation: @escaping @Sendable () async throws -> Data
+    ) async throws -> Data {
+      try Task.checkCancellation()
+      return try await withTaskCancellationHandler {
+        try await withCheckedThrowingContinuation { continuation in
+          guard install(continuation) else { return }
+          let read = Task.detached { [self] in
+            do {
+              try Task.checkCancellation()
+              finish(.success(try await operation()))
+            } catch {
+              finish(.failure(error))
+            }
+          }
+          let timer = Task.detached { [self] in
+            do {
+              try await Task.sleep(until: deadline, clock: .continuous)
+              finish(.failure(CloudFavoriteRecordScanFailure(issue: .deadlineExceeded)))
+            } catch {
+              // The read or its caller already completed this one-shot result.
+            }
+          }
+          install([read, timer])
+        }
+      } onCancel: {
+        self.finish(.failure(CancellationError()))
+      }
+    }
+
+    private func install(_ continuation: CheckedContinuation<Data, Swift.Error>) -> Bool {
+      lock.lock()
+      if let result {
+        lock.unlock()
+        continuation.resume(with: result)
+        return false
+      }
+      self.continuation = continuation
+      lock.unlock()
+      return true
+    }
+
+    private func install(_ tasks: [Task<Void, Never>]) {
+      lock.lock()
+      if result != nil {
+        lock.unlock()
+        for task in tasks { task.cancel() }
+        return
+      }
+      self.tasks = tasks
+      lock.unlock()
+    }
+
+    private func finish(_ result: Result<Data, Swift.Error>) {
+      lock.lock()
+      guard self.result == nil else {
+        lock.unlock()
+        return
+      }
+      self.result = result
+      let continuation = self.continuation
+      self.continuation = nil
+      let tasks = self.tasks
+      self.tasks = []
+      lock.unlock()
+      for task in tasks { task.cancel() }
+      continuation?.resume(with: result)
+    }
   }
 
   private enum CloudFavoriteRecordScanResult {
@@ -2146,7 +2242,10 @@ public actor TiebaAuthenticatedClient {
         Double(remaining.components.seconds)
         + Double(remaining.components.attoseconds) / 1e18
       request.timeoutInterval = min(request.timeoutInterval, seconds)
-      let body = try await send(request, maximumBodyBytes: Self.cloudFavoritesResponseMaximumBytes)
+      let pageRead = CloudFavoriteRecordPageRead()
+      let body = try await pageRead.value(until: deadline) { [self, request] in
+        try await send(request, maximumBodyBytes: Self.cloudFavoritesResponseMaximumBytes)
+      }
       guard ContinuousClock.now < deadline else {
         throw CloudFavoriteRecordScanFailure(issue: .deadlineExceeded)
       }
@@ -2156,6 +2255,9 @@ public actor TiebaAuthenticatedClient {
         from: body, expectedUserID: expectedUserID,
         offset: pageIndex * pageSize, pageSize: pageSize
       )
+      guard ContinuousClock.now < deadline else {
+        throw CloudFavoriteRecordScanFailure(issue: .deadlineExceeded)
+      }
       // Positive membership needs only one exact record. It remains useful for
       // very large lists or when later pages cannot be read. Only absence needs
       // complete, duplicate-free, bounded and stable scans.
