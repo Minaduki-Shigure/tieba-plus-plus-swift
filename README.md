@@ -34,6 +34,9 @@ and its verified metadata enters the public app source.
   Side controls share the existing selection, reselection, hidden-Explore and
   unread-badge behavior. Hidden bottom controls remain mounted to retain their
   keyboard observation, while hit testing and accessibility are disabled.
+  The [focused native validation](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37162548322)
+  passed 17 tests covering mounted layout, state and scroll retention, propagated
+  size classes, right-to-left layout and keyboard/window lifecycle.
   iPad simulator navigation/resize regressions are required before release;
   Stage Manager, external displays and floating keyboards still need device
   validation.

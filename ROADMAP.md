@@ -27,6 +27,9 @@ side controls reuse account-bound Home refresh, Explore refresh, hidden-tab and
 unread-badge policies. Fixed content and native-bottom-bar slots preserve view
 identity and keyboard observations through resizing. Keyboard notifications
 are associated with the attached window's screen before coordinate conversion.
+The [focused native validation](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37162548322)
+passed all 17 navigation/layout/keyboard tests, including actual mounted geometry,
+view and scroll identity, settled size-class changes and stale-screen rejection.
 Hosted-state/layout checks, existing iPhone workflows and dedicated offline iPad
 navigation/resize workflows are release gates. Real Split View/Stage Manager
 resizing, external displays and floating keyboards remain device-validation
