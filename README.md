@@ -25,6 +25,19 @@ and its verified metadata enters the public app source.
 
 ### Release and validation
 
+- **Home reselection refresh (next iteration):** Tapping the selected 首页 tab
+  refreshes Home only for a logged-in account while its root page is visible in
+  the foreground. Ordinary tab switches retain navigation without requesting a
+  refresh; pushed pages keep their stack. Refresh reads local favorites/history,
+  the complete followed-forum catalog and today's check-in marks. The bounded
+  catalog replaces the previous same-session list only after every page passes
+  validation; failures preserve existing rows and pins with a retry from page
+  one. Pin version checks prevent an in-flight refresh from overwriting a newer
+  local pin change. Repeated refreshes share current reads without cancellation
+  or queueing, while account changes still invalidate old results. This request
+  sharing is an iOS improvement over TiebaLite's queued Home refreshes. Native
+  validation is pending; the published alpha.37/build 115 and parity estimate
+  are unchanged.
 - **`v0.65.0-alpha.37` discovery reselection refresh:** Tapping the selected
   关注/推荐/热门 channel, or tapping the selected bottom 发现 tab while its root
   page is visible, requests that channel again. Channel/tab changes, page swipes

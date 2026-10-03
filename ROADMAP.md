@@ -16,6 +16,19 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
+The next Home iteration matches TiebaLite `9701bfb6`'s `MainPage` →
+`HomePage` → `HomeUiIntent.Refresh` workflow: reselecting Home refreshes a
+logged-in account's visible foreground root page. Ordinary tab switches retain
+navigation without requesting refresh, and pushed pages keep their stack.
+The refresh reads local favorites/history, the complete followed-forum catalog
+and today's check-in marks. A bounded, validated catalog replaces the previous
+same-session snapshot atomically; failures preserve rows and pins and retry from
+page one. Pin version checks preserve newer local changes during asynchronous
+reads. Busy refreshes share current reads; this improves on upstream's queued
+`flatMapConcat` refreshes. Account changes retain their forced invalidation and
+late-result isolation. Native validation remains pending. The published
+alpha.37/build 115 and 80–82% weighted estimate are unchanged.
+
 Alpha.37 closes TiebaLite `9701bfb6`'s selected-channel and
 selected-Explore-tab refresh workflow (`MainPage` and `ExplorePage` refresh
 events). Reselecting a visible channel refreshes that channel; reselecting the
