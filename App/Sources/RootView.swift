@@ -500,6 +500,10 @@ struct RootView: View {
       )
     }
     .onAppear {
+      #if DEBUG
+        ExploreRefreshLifecycleDiagnostics.active?.recordRoot(
+          phase: String(describing: scenePhase), tab: navigation.selectedTab)
+      #endif
       favoritesViewModel.reload()
       recentForumsViewModel.reload()
       if RootFollowedForumsActivationPolicy.isActive(navigation: navigation) {
@@ -532,6 +536,10 @@ struct RootView: View {
       )
     }
     .onChange(of: scenePhase) {
+      #if DEBUG
+        ExploreRefreshLifecycleDiagnostics.active?.recordRoot(
+          phase: String(describing: $0), tab: navigation.selectedTab)
+      #endif
       mediaPlaybackCoordinator.setSceneActive($0 == .active)
       linkPreviewViewModel.sceneActivityDidChange(isActive: $0 == .active)
       followedForumCheckInStore.sceneActivityDidChange(
@@ -554,6 +562,10 @@ struct RootView: View {
       mediaPlaybackCoordinator.activeSurfaceDidChange()
     }
     .onChange(of: navigation) { navigation in
+      #if DEBUG
+        ExploreRefreshLifecycleDiagnostics.active?.recordRoot(
+          phase: String(describing: scenePhase), tab: navigation.selectedTab)
+      #endif
       pendingFollowedForumUnfollow = nil
       searchSuggestionViewModel.cancelAndClear()
       recentForumsViewModel.reload()

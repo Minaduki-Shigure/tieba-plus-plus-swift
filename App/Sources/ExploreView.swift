@@ -111,6 +111,11 @@ struct ExploreView: View {
     }
     .onAppear {
       isVisible = true
+      #if DEBUG
+        ExploreRefreshLifecycleDiagnostics.active?.recordExplore(
+          selection: selectedSection, sections: channelsViewModel.visibleSections,
+          ready: channelsViewModel.hasResolvedInitialSession)
+      #endif
       if isActive { channelsViewModel.reload() }
     }
     .onChange(of: refreshRequestID) { _ in refreshCurrentChannel() }
@@ -136,6 +141,11 @@ struct ExploreView: View {
       if !sections.contains(selectedSection) {
         selectedSection = .personalized
       }
+      #if DEBUG
+        ExploreRefreshLifecycleDiagnostics.active?.recordExplore(
+          selection: selectedSection, sections: sections,
+          ready: channelsViewModel.hasResolvedInitialSession)
+      #endif
     }
   }
 
@@ -196,6 +206,11 @@ struct ExploreView: View {
       set: { section in
         guard channelsViewModel.visibleSections.contains(section) else { return }
         selectedSection = section
+        #if DEBUG
+          ExploreRefreshLifecycleDiagnostics.active?.recordExplore(
+            selection: selectedSection, sections: channelsViewModel.visibleSections,
+            ready: channelsViewModel.hasResolvedInitialSession)
+        #endif
       }
     )
   }
