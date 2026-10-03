@@ -176,6 +176,7 @@ jobs:
           -project TiebaPlusPlus.xcodeproj
           -scheme TiebaPlusPlus
           -configuration Debug
+          -derivedDataPath build/DerivedData
           -destination "$IOS_SIMULATOR_DESTINATION"
           -skipPackagePluginValidation
           CODE_SIGNING_ALLOWED=NO
@@ -190,9 +191,13 @@ jobs:
           name: xcodebuild-failure-${{ github.run_id }}-${{ github.run_attempt }}
           path: xcodebuild.log
           retention-days: 7
-      - name: Fail when app tests fail
-        if: ${{ always() && steps.app_tests.outcome == 'failure' }}
-        run: exit 1
+      - name: Verify compiled app icon assets
+        id: icon_assets
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          xcrun assetutil --info build/DerivedData/Build/Products/Debug-iphonesimulator/TiebaPlusPlus.app/Assets.car > icon-assets.json
+          ruby Scripts/validate_compiled_app_icons.rb icon-assets.json
       - name: Create clean simulator for app icon UI tests
         run: |
           set -euo pipefail
@@ -217,6 +222,7 @@ jobs:
           -project TiebaPlusPlus.xcodeproj
           -scheme TiebaPlusPlusIconsUI
           -configuration Debug
+          -derivedDataPath build/DerivedData
           -destination "$ICON_UI_SIMULATOR_DESTINATION"
           -parallel-testing-enabled NO
           -resultBundlePath icon-ui-results.xcresult
@@ -234,9 +240,10 @@ jobs:
           path: |
             icon-ui-test.log
             icon-ui-results.xcresult
+            icon-assets.json
           retention-days: 7
-      - name: Fail when icon UI tests fail
-        if: ${{ always() && steps.icon_ui_tests.outcome == 'failure' }}
+      - name: Fail when app validation fails
+        if: ${{ always() && (steps.app_tests.outcome == 'failure' || steps.icon_assets.outcome == 'failure' || steps.icon_ui_tests.outcome == 'failure') }}
         run: exit 1
       - name: Remove app icon test simulator
         if: ${{ always() && env.ICON_UI_SIMULATOR_ID != '' }}

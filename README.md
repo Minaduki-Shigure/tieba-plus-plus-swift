@@ -32,7 +32,7 @@ and its verified metadata enters the public app source.
   success, failure or foreground return; it never marks an unconfirmed choice
   as selected or writes a second local preference. Unsupported installations
   show a disabled picker. Build tests inspect the actual iPhone/iPad icon
-  declarations and images, and a separate clean-simulator UI test changes all
+  declarations and compiled catalog images, and a separate clean-simulator UI test changes all
   three icons and checks persistence after relaunch. Physical-device and
   LiveContainer home-screen behavior still require validation. The weighted
   parity estimate is unchanged. Configuration follows

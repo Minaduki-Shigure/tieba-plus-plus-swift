@@ -30,9 +30,10 @@ final class AppIconTests: XCTestCase {
   }
 
   @MainActor
-  func testBuiltBundleDeclaresLoadablePrimaryAndAlternateIconsForPhoneAndPad() throws {
-    // Inspect actool's compiled product, so a correct catalog paired with missing
-    // build settings or excluded icon files cannot pass this test.
+  func testBuiltBundleDeclaresPrimaryAndAlternateIconsForPhoneAndPad() throws {
+    // Inspect actool's compiled declarations. Modern alternates may name only
+    // an asset in Assets.car; CI inspects those compiled icon renditions with
+    // assetutil, and the UI suite actually switches them through UIKit.
     let bundle = Bundle.main
     XCTAssertEqual(bundle.bundleIdentifier, "io.github.minaduki.tieba-plus-plus")
     for (manifestKey, idiom) in [
@@ -43,14 +44,14 @@ final class AppIconTests: XCTestCase {
         bundle.object(forInfoDictionaryKey: manifestKey) as? [String: Any], manifestKey
       )
       let primary = try XCTUnwrap(manifest["CFBundlePrimaryIcon"] as? [String: Any])
-      try assertLoadableIcon(primary, assetName: "AppIcon", idiom: idiom, bundle: bundle)
+      try assertIconDeclaration(primary, assetName: "AppIcon", idiom: idiom, bundle: bundle)
 
       let alternates = try XCTUnwrap(manifest["CFBundleAlternateIcons"] as? [String: Any])
       XCTAssertEqual(Set(alternates.keys), ["AppIconLight", "AppIconDark"], manifestKey)
       for choice in [AppIconChoice.light, .dark] {
         let name = try XCTUnwrap(choice.alternateIconName)
         let icon = try XCTUnwrap(alternates[name] as? [String: Any], "\(manifestKey).\(name)")
-        try assertLoadableIcon(icon, assetName: name, idiom: idiom, bundle: bundle)
+        try assertIconDeclaration(icon, assetName: name, idiom: idiom, bundle: bundle)
       }
     }
   }
@@ -78,7 +79,7 @@ final class AppIconTests: XCTestCase {
   }
 
   @MainActor
-  private func assertLoadableIcon(
+  private func assertIconDeclaration(
     _ declaration: [String: Any],
     assetName: String,
     idiom: UIUserInterfaceIdiom,
@@ -87,6 +88,7 @@ final class AppIconTests: XCTestCase {
     line: UInt = #line
   ) throws {
     XCTAssertEqual(declaration["CFBundleIconName"] as? String, assetName, file: file, line: line)
+    guard declaration["CFBundleIconFiles"] != nil else { return }
     let files = try XCTUnwrap(
       declaration["CFBundleIconFiles"] as? [String], assetName, file: file, line: line
     )
