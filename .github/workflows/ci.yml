@@ -176,6 +176,10 @@ jobs:
           -project TiebaPlusPlus.xcodeproj
           -scheme TiebaPlusPlus
           -configuration Debug
+          -only-testing:TiebaPlusPlusTests/ConcernFeedViewModelTests
+          -only-testing:TiebaPlusPlusTests/PersonalizedFeedViewModelTests
+          -only-testing:TiebaPlusPlusTests/HotThreadViewModelTests
+          -only-testing:TiebaPlusPlusTests/RootTabBarTests
           -derivedDataPath build/DerivedData
           -resultBundlePath app-test-results.xcresult
           -destination "$IOS_SIMULATOR_DESTINATION"
