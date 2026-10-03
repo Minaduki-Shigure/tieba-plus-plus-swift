@@ -24,7 +24,7 @@ final class AppIconUITests: XCTestCase {
     try openIconSettings(in: app)
     try requireSelected("classic", in: app)
     try require(
-      option("light", in: app).isEnabled && option("dark", in: app).isEnabled,
+      optionButton("light", in: app).isEnabled && optionButton("dark", in: app).isEnabled,
       "The fresh simulator installation must support both alternate app icons."
     )
 
@@ -70,7 +70,7 @@ final class AppIconUITests: XCTestCase {
     in app: XCUIApplication,
     springboard: XCUIApplication
   ) throws {
-    let selectedOption = option(name, in: app)
+    let selectedOption = optionButton(name, in: app)
     try tap(selectedOption, description: "App icon option \(name)")
 
     // This is an expected part of the workflow, not an unrelated interruption.
@@ -134,7 +134,16 @@ final class AppIconUITests: XCTestCase {
 
   @MainActor
   private func option(_ name: String, in app: XCUIApplication) -> XCUIElement {
-    app.buttons["app-icon-option-\(name)"].firstMatch
+    // SwiftUI exposes the row's custom label/value on an accessibility group;
+    // its actual enabled button is a child. Read selection from the group.
+    app.descendants(matching: .any)
+      .matching(identifier: "app-icon-option-\(name)").firstMatch
+  }
+
+  @MainActor
+  private func optionButton(_ name: String, in app: XCUIApplication) -> XCUIElement {
+    let row = option(name, in: app)
+    return row.elementType == .button ? row : row.buttons.firstMatch
   }
 
   @MainActor
