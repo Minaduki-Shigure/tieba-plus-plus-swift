@@ -173,7 +173,7 @@ actor CloudFavoriteMutationGate {
           let current = try await ledger.record(for: key)
           // A failed prepare may not have replaced the prior completed record.
           // Preserve that exact snapshot; all other records still require CAS.
-          if current != previous || previous?.blocksWrites == true {
+          if previous == nil || current != previous || previous?.blocksWrites == true {
             try await ledger.removeAfterDefiniteFailure(key: key, operationID: pending.operationID)
           }
         }
@@ -181,7 +181,8 @@ actor CloudFavoriteMutationGate {
       pendingFinalizations.removeValue(forKey: key)
       switch pending.result {
       case .definiteFailure, .failedPreparation: failedClosed.remove(key)
-      case .receipt: break
+      case .receipt(let phase):
+        if phase == .observedAbsent { failedClosed.remove(key) }
       }
     } catch {
       failedClosed.insert(key)
@@ -218,8 +219,22 @@ actor CloudFavoriteRecordRemovalCoordinator {
     try await requireCurrent(session)
     let records = try await gate.ledger.records()
     try await requireCurrent(session)
-    return records.filter { $0.key.userID == session.id && $0.blocksWrites }
-      .map { Self.status($0) }.sorted { $0.threadID < $1.threadID }
+    var statuses: [CloudFavoriteRecordRemovalStatus] = []
+    for record in records where record.key.userID == session.id {
+      if await gate.requiresReadOnlyRecovery(record.key), !record.blocksWrites {
+        // Rename can succeed before the final fsync fails. Keep the recovery
+        // entry visible until the observed absence has been durably persisted.
+        statuses.append(
+          .init(
+            threadID: record.key.threadID,
+            phase: record.receiptAcknowledged ? .acceptedAwaitingVerification : .outcomeUnknown,
+            receiptAcknowledged: record.receiptAcknowledged, observation: nil))
+      } else if record.blocksWrites {
+        statuses.append(Self.status(record))
+      }
+    }
+    try await requireCurrent(session)
+    return statuses.sorted { $0.threadID < $1.threadID }
   }
 
   func remove(
@@ -373,7 +388,7 @@ actor CloudFavoriteRecordRemovalCoordinator {
       return Self.status(record, observation: observation)
     }
     do {
-      let observed = try await gate.ledger.transition(
+      let observed = try await gate.persistReceipt(
         key: target.key, operationID: record.operationID, phase: .observedAbsent
       )
       await gate.didPersistVerifiedAbsence(target.key)
