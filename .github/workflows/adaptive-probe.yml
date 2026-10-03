@@ -16,7 +16,7 @@ jobs:
         run: |
           set -o pipefail
           device_id="$(xcrun simctl list devices available -j | jq -r '[.devices[][] | select(.isAvailable == true and (.name | startswith("iPhone")))][0].udid')"
-          xcodebuild -project NativeNavigationProbe/NavigationProbe.xcodeproj -scheme NavigationProbe -destination "platform=iOS Simulator,id=$device_id" CODE_SIGNING_ALLOWED=NO test 2>&1 | tee navigation-probe.log
+          xcodebuild -project NativeNavigationProbe/NavigationProbe.xcodeproj -scheme NavigationProbe -destination "platform=iOS Simulator,id=$device_id" -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO test 2>&1 | tee navigation-probe.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
