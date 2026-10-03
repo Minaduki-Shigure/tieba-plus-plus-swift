@@ -404,13 +404,16 @@ final class ConcernFeedViewModelTests: XCTestCase {
     let vault = ConcernVaultSpy(session: nil)
     let viewModel = ExploreChannelsViewModel(vault: vault)
 
+    XCTAssertFalse(viewModel.hasResolvedInitialSession)
     viewModel.reload()
     try await waitForConcernTest {
-      viewModel.visibleSections == [.personalized, .hot]
+      viewModel.hasResolvedInitialSession
     }
+    XCTAssertEqual(viewModel.visibleSections, [.personalized, .hot])
 
     await vault.replaceActive(with: concernSession(userID: 7, stoken: nil))
     viewModel.reload()
+    XCTAssertTrue(viewModel.hasResolvedInitialSession)
     try await waitForConcernTest {
       viewModel.visibleSections == [.concern, .personalized, .hot]
     }
@@ -421,6 +424,85 @@ final class ConcernFeedViewModelTests: XCTestCase {
       viewModel.visibleSections == [.personalized, .hot]
     }
   }
+
+  func testExplorePagerWaitsForInitialAccountLookupBeforePublishingReadyPages() async throws {
+    let vault = ExploreChannelLookupVault()
+    let viewModel = ExploreChannelsViewModel(vault: vault)
+    viewModel.reload()
+    try await waitForConcernTest { await vault.requestCount() == 1 }
+    XCTAssertFalse(viewModel.hasResolvedInitialSession)
+
+    await vault.resume(1, session: concernSession(userID: 7))
+    try await waitForConcernTest { viewModel.hasResolvedInitialSession }
+    XCTAssertEqual(viewModel.visibleSections, [.concern, .personalized, .hot])
+
+    // Subsequent lookups preserve the mounted pages until a new result arrives.
+    viewModel.reload()
+    try await waitForConcernTest { await vault.requestCount() == 2 }
+    XCTAssertTrue(viewModel.hasResolvedInitialSession)
+    XCTAssertEqual(viewModel.visibleSections, [.concern, .personalized, .hot])
+    await vault.resume(2, session: nil)
+    try await waitForConcernTest { viewModel.visibleSections == [.personalized, .hot] }
+    XCTAssertTrue(viewModel.hasResolvedInitialSession)
+  }
+
+  func testCancelledInitialAccountLookupCannotOpenPagerAndCanBeRetried() async throws {
+    let vault = ExploreChannelLookupVault()
+    let viewModel = ExploreChannelsViewModel(vault: vault)
+    viewModel.reload()
+    try await waitForConcernTest { await vault.requestCount() == 1 }
+    viewModel.cancel()
+    await vault.resume(1, session: concernSession(userID: 7))
+    for _ in 0..<20 { await Task<Never, Never>.yield() }
+    XCTAssertFalse(viewModel.hasResolvedInitialSession)
+    XCTAssertEqual(viewModel.visibleSections, [.personalized, .hot])
+
+    viewModel.reload()
+    try await waitForConcernTest { await vault.requestCount() == 2 }
+    await vault.resume(2, session: concernSession(userID: 8))
+    try await waitForConcernTest { viewModel.hasResolvedInitialSession }
+    XCTAssertEqual(viewModel.visibleSections, [.concern, .personalized, .hot])
+  }
+
+  func testOnlyCurrentAccountLookupCanPublishReadyAndReadFailureAllowsAnonymousPages() async throws {
+    let vault = ExploreChannelLookupVault()
+    let viewModel = ExploreChannelsViewModel(vault: vault)
+    viewModel.reload()
+    try await waitForConcernTest { await vault.requestCount() == 1 }
+    viewModel.reload()
+    try await waitForConcernTest { await vault.requestCount() == 2 }
+    await vault.resume(1, session: concernSession(userID: 7))
+    for _ in 0..<20 { await Task<Never, Never>.yield() }
+    XCTAssertFalse(viewModel.hasResolvedInitialSession)
+
+    await vault.fail(2)
+    try await waitForConcernTest { viewModel.hasResolvedInitialSession }
+    XCTAssertEqual(viewModel.visibleSections, [.personalized, .hot])
+  }
+}
+
+private actor ExploreChannelLookupVault: AccountVault {
+  private var calls = 0
+  private var pending: [Int: CheckedContinuation<StoredAccountSession?, any Error>] = [:]
+
+  func requestCount() -> Int { calls }
+  func activeSession() async throws -> StoredAccountSession? {
+    calls += 1
+    let request = calls
+    return try await withCheckedThrowingContinuation { pending[request] = $0 }
+  }
+  func resume(_ request: Int, session: StoredAccountSession?) {
+    pending.removeValue(forKey: request)?.resume(returning: session)
+  }
+  func fail(_ request: Int) {
+    pending.removeValue(forKey: request)?.resume(
+      throwing: ConcernTestFailure(message: "Account read unavailable"))
+  }
+  func accountSummaries() -> [AccountSummary] { [] }
+  func upsert(_ session: StoredAccountSession) {}
+  func switchActive(to userID: Int64) {}
+  func remove(userID: Int64) {}
+  func removeAll() {}
 }
 
 private struct ConcernRequest: Hashable, Sendable {

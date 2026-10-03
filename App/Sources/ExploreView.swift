@@ -73,64 +73,41 @@ struct ExploreView: View {
   }
 
   var body: some View {
-    TabView(selection: selectedSectionBinding) {
-      if channelsViewModel.visibleSections.contains(.concern) {
-        ConcernFeedView(
-          isActive: isActive && selectedSection == .concern,
-          refreshRequestID: channelRefreshRequests[.concern, default: 0],
-          browseService: service,
-          accountService: accountService,
-          vault: accountVault,
-          historyRepository: historyRepository,
-          favoritesRepository: favoritesRepository,
-          searchHistoryRepository: searchHistoryRepository
-        )
-        .tag(ExploreSection.concern)
+    Group {
+      if channelsViewModel.hasResolvedInitialSession {
+        TabView(selection: selectedSectionBinding) {
+          ForEach(channelsViewModel.visibleSections) { section in
+            channel(section).tag(section)
+          }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+      } else {
+        // Resolve the initial page set before mounting the pager. Inserting an
+        // authenticated page ahead of an appearing selection can cancel that
+        // page's first load during UIKit's page-controller reconfiguration.
+        ProgressView()
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
-
-      PersonalizedFeedView(
-        isActive: isActive && selectedSection == .personalized,
-        refreshRequestID: channelRefreshRequests[.personalized, default: 0],
-        service: service,
-        accountService: accountService,
-        feedbackService: feedbackService,
-        vault: accountVault,
-        accountSessionLookup: accountSessionLookup,
-        historyRepository: historyRepository,
-        favoritesRepository: favoritesRepository,
-        searchHistoryRepository: searchHistoryRepository
-      )
-      .tag(ExploreSection.personalized)
-
-      HotThreadListView(
-        isActive: isActive && selectedSection == .hot,
-        refreshRequestID: channelRefreshRequests[.hot, default: 0],
-        service: service,
-        historyRepository: historyRepository,
-        favoritesRepository: favoritesRepository,
-        searchHistoryRepository: searchHistoryRepository,
-        showsNavigationTitle: false
-      )
-      .tag(ExploreSection.hot)
     }
-    .tabViewStyle(.page(indexDisplayMode: .never))
     .appPageSurface(.canvas)
     .navigationTitle("发现")
     .navigationBarTitleDisplayMode(.inline)
     .safeAreaInset(edge: .top, spacing: 0) {
-      ExploreChannelSelector(
-        sections: channelsViewModel.visibleSections,
-        selection: selectedSectionBinding.wrappedValue
-      ) { section in
-        if section == selectedSectionBinding.wrappedValue {
-          refreshCurrentChannel()
-        } else {
-          selectedSectionBinding.wrappedValue = section
+      if channelsViewModel.hasResolvedInitialSession {
+        ExploreChannelSelector(
+          sections: channelsViewModel.visibleSections,
+          selection: selectedSectionBinding.wrappedValue
+        ) { section in
+          if section == selectedSectionBinding.wrappedValue {
+            refreshCurrentChannel()
+          } else {
+            selectedSectionBinding.wrappedValue = section
+          }
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .appBarMaterialSurface()
       }
-      .padding(.horizontal, 16)
-      .padding(.vertical, 8)
-      .appBarMaterialSurface()
     }
     .onAppear {
       isVisible = true
@@ -162,8 +139,48 @@ struct ExploreView: View {
     }
   }
 
+  @ViewBuilder
+  private func channel(_ section: ExploreSection) -> some View {
+    switch section {
+    case .concern:
+      ConcernFeedView(
+        isActive: isActive && selectedSection == .concern,
+        refreshRequestID: channelRefreshRequests[.concern, default: 0],
+        browseService: service,
+        accountService: accountService,
+        vault: accountVault,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository
+      )
+    case .personalized:
+      PersonalizedFeedView(
+        isActive: isActive && selectedSection == .personalized,
+        refreshRequestID: channelRefreshRequests[.personalized, default: 0],
+        service: service,
+        accountService: accountService,
+        feedbackService: feedbackService,
+        vault: accountVault,
+        accountSessionLookup: accountSessionLookup,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository
+      )
+    case .hot:
+      HotThreadListView(
+        isActive: isActive && selectedSection == .hot,
+        refreshRequestID: channelRefreshRequests[.hot, default: 0],
+        service: service,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository,
+        showsNavigationTitle: false
+      )
+    }
+  }
+
   private func refreshCurrentChannel() {
-    guard isVisible, isActive,
+    guard isVisible, isActive, channelsViewModel.hasResolvedInitialSession,
       channelsViewModel.visibleSections.contains(selectedSection)
     else { return }
     channelRefreshRequests[selectedSection, default: 0] &+= 1
