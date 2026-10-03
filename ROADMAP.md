@@ -1815,8 +1815,56 @@ at the preference level and keeps the previous native surface modifiers. Theme
 selection is not part of content identity, pagination, media requests, decoding,
 or cache keys, and no per-row geometry or overlay measurement was introduced.
 
-Wallpaper and dynamic color extraction, translucent themes, Android toolbar
-backgrounds, and status-bar text controls are not imported. Root SwiftUI tint
+The unreleased transparent-image theme workflow imports a local static JPEG,
+PNG or HEIF through Photos, crops with pan/zoom at the current window's ratio,
+previews blur and opacity, and offers light/dark reading colors plus bounded
+image-palette extraction or a custom accent. Save atomically installs a new
+version; Cancel does not write, and Restore Default removes the image theme
+without changing the preexisting appearance, OLED or accent preferences. A
+failed save retains the prior in-memory snapshot and attempts to restore its
+manifest; immutable prior assets remain available for recovery. Corrupt storage
+exposes recovery instead of silently overwriting it.
+
+Image input is limited to 32 MiB and 100 million declared pixels, with a 16,384
+pixel dimension limit. ImageIO downsamples before drawing; prepared images are
+at most 2,048 pixels per side and four million pixels, and each metadata-stripped
+JPEG is capped at 8 MiB. Cropping and finite-extent blur happen off the main actor
+before publication. Reading pages share the decoded result; semantic modifiers
+clear native scroll/row/bar backgrounds as needed and retain bounded readability
+overlays. The normal canvas uses an 84% light/dark readability layer, so the
+image contributes at most 16% to the resulting canvas; cards and bars can add
+their own semantic layer. This is intentionally more muted than TiebaLite's
+unrestricted background and is visible in the same editor preview. Its worst
+black/white image composites are bounded by `#D6D6D6` / `#292929`, allowing the
+existing high-contrast accent palette to retain normal 4.5:1 contrast. Actual
+usefulness and visual strength remain screenshot/device review items. High
+contrast and Reduce Transparency use opaque surfaces. Rotation
+and split-view changes use aspect-fill for the installed image and re-clamp the
+editor crop to the new window. Wallpaper storage is separate from normal image
+caches, with two immutable versions and a recovery manifest.
+
+The optional recommendation picker preserves TiebaLite's public wallpaper
+catalog and visual selection flow. Catalogs are limited to 64 KiB/64 entries,
+images to 32 MiB, and each anonymous resource transfer to 60 seconds; catalog
+lookup makes at most two sequential attempts. HTTP downgrades, credentials and
+unrecognized destinations are rejected. The original URL redirected to HTTP on
+2026-10-03; the verified HTTPS fallback is the original author's GitHub Pages
+repository (`HuanCheng65/huancheng65.github.io`, `TiebaLite/wallpapers.json`). Its
+current seven-image catalog and first image were reachable that day. Failures
+can be retried and do not block local selection. No unrelated image feed is used.
+
+Geometry, cancellation/generation, disk failure/recovery, contrast and real
+UIKit-hosted List/NavigationStack/TabView rendering regressions accompany the
+change. A UI workflow exercises the real editor/processor/storage through a
+DEBUG-only generated image, including cancellation, relaunch and restoration;
+it does not exercise the system Photos picker. Linux parser and portable checks
+are not substitutes for the required iOS Actions run. Photos lifecycle, real
+memory/scroll performance, high contrast, Reduce Transparency, large text and
+iPad split view still require physical-device validation. No weighted parity
+increase is claimed.
+
+Android dynamic system colors, toolbar-specific color overrides and status-bar
+text controls remain platform-specific. Root SwiftUI tint
 covers native controls and tint shape styles, while the matching environment
 supplies the concrete color needed by attributed strings, comment highlights,
 badges, and progress fills. System Safari, Web login, share sheets, semantic

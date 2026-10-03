@@ -156,6 +156,7 @@ struct AppSettingsView: View {
           .accessibilityIdentifier(category.accessibilityIdentifier)
         }
       }
+      .appListRowSurface(.card)
 
       Section("应用") {
         NavigationLink {
@@ -172,6 +173,7 @@ struct AppSettingsView: View {
         }
         .accessibilityIdentifier("settings-about")
       }
+      .appListRowSurface(.card)
     }
     .listStyle(.insetGrouped)
     .appScrollableSurface()
@@ -217,6 +219,13 @@ struct AppSettingsView: View {
         }
         .pickerStyle(.menu)
         .accessibilityIdentifier("settings-dark-surface-style")
+
+        NavigationLink {
+          WallpaperThemeSettingsView(controller: .shared)
+        } label: {
+          Label("透明图片主题", systemImage: "photo.on.rectangle.angled")
+        }
+        .accessibilityIdentifier("settings-wallpaper-theme")
 
         NavigationLink {
           AppAccentColorSettingsView(
@@ -600,7 +609,7 @@ struct AppSettingsView: View {
     @ViewBuilder content: () -> Content
   ) -> some View {
     List {
-      content()
+      content().appListRowSurface(.card)
     }
     .listStyle(.insetGrouped)
     .appScrollableSurface()

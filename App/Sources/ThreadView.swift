@@ -2188,8 +2188,7 @@ private struct ThreadCloudFavoriteUpdateBanner: View {
       .padding(.horizontal, 14)
       .padding(.vertical, 10)
     }
-    .appSurfaceBackground(.card)
-    .background(Color(uiColor: .secondarySystemBackground))
+    .appSurfaceBackground(.card, fallback: Color(uiColor: .secondarySystemBackground))
     .accessibilityIdentifier("thread-cloud-favorite-update")
   }
 
@@ -3210,8 +3209,7 @@ private struct PollVoteControl: View {
       }
     }
     .padding(12)
-    .appSurfaceBackground(.card)
-    .background(Color(uiColor: .secondarySystemGroupedBackground))
+    .appSurfaceBackground(.card, fallback: Color(uiColor: .secondarySystemGroupedBackground))
     .clipShape(RoundedRectangle(cornerRadius: 6))
     .overlay {
       RoundedRectangle(cornerRadius: 6)
@@ -3520,8 +3518,7 @@ private struct PollResultsCard: View {
       }
     }
     .padding(12)
-    .appSurfaceBackground(.card)
-    .background(Color(uiColor: .secondarySystemGroupedBackground))
+    .appSurfaceBackground(.card, fallback: Color(uiColor: .secondarySystemGroupedBackground))
     .clipShape(RoundedRectangle(cornerRadius: 6))
     .overlay {
       RoundedRectangle(cornerRadius: 6)
@@ -3657,8 +3654,7 @@ private struct OriginThreadCard: View {
       }
     }
     .padding(12)
-    .appSurfaceBackground(.card)
-    .background(Color(uiColor: .secondarySystemGroupedBackground))
+    .appSurfaceBackground(.card, fallback: Color(uiColor: .secondarySystemGroupedBackground))
     .clipShape(RoundedRectangle(cornerRadius: 6))
     .overlay {
       RoundedRectangle(cornerRadius: 6)

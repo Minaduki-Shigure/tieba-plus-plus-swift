@@ -377,6 +377,7 @@ struct RootView: View {
         Text(followedForumsViewModel.presentedOperationError?.message ?? "未知错误")
       }
       }
+      .appNavigationSurface()
       .tag(RootMainTab.home)
       .tabItem {
         Label(RootMainTab.home.title, systemImage: RootMainTab.home.systemImage)
@@ -401,6 +402,7 @@ struct RootView: View {
             rootDestination(destination, in: .explore)
           }
         }
+        .appNavigationSurface()
         .tag(RootMainTab.explore)
         .tabItem {
           Label(RootMainTab.explore.title, systemImage: RootMainTab.explore.systemImage)
@@ -424,6 +426,7 @@ struct RootView: View {
           rootDestination(destination, in: .notifications)
         }
       }
+      .appNavigationSurface()
       .tag(RootMainTab.notifications)
       .tabItem {
         Label(
@@ -450,6 +453,7 @@ struct RootView: View {
           rootDestination(destination, in: .account)
         }
       }
+      .appNavigationSurface()
       .tag(RootMainTab.account)
       .tabItem {
         Label(RootMainTab.account.title, systemImage: RootMainTab.account.systemImage)
