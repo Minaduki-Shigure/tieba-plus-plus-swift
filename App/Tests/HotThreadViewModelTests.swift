@@ -141,6 +141,113 @@ final class HotThreadViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testRepeatedRefreshWaitsForInitialLoadOrCategoryReplacementWithoutQueueing() async throws {
+    for isCategoryReplacement in [false, true] {
+      let service = ScriptedHotThreadService()
+      let category = HotThreadFixtures.category(serverID: 37, code: "future-37", title: "分类")
+      if isCategoryReplacement {
+        await service.enqueue(
+          .value(
+            HotThreadFixtures.feed(
+              categories: [category], items: [HotThreadFixtures.item(id: 1)]
+            )))
+      }
+      await service.enqueue(.suspended(901))
+      let viewModel = HotThreadListViewModel(service: service)
+      viewModel.loadIfNeeded()
+      if isCategoryReplacement {
+        try await hotThreadWaitUntil { viewModel.state == .loaded }
+        viewModel.selectCategory(category)
+      }
+      let expectedRequests = isCategoryReplacement ? ["all", category.code] : ["all"]
+      try await hotThreadWaitUntil { await service.requestCount() == expectedRequests.count }
+
+      var started = 0
+      var completed = 0
+      let refreshes = (0..<4).map { _ in
+        Task { @MainActor in
+          started += 1
+          await viewModel.refresh()
+          completed += 1
+        }
+      }
+      try await hotThreadWaitUntil { started == refreshes.count }
+      await hotThreadDrainMainActor()
+      XCTAssertEqual(completed, 0, "Refresh must await the existing load")
+      let requestsWhileBusy = await service.requestSnapshot()
+      XCTAssertEqual(requestsWhileBusy, expectedRequests)
+
+      let resumed = await service.resume(
+        id: 901,
+        returning: HotThreadFixtures.feed(items: [HotThreadFixtures.item(id: 2)])
+      )
+      XCTAssertTrue(resumed)
+      for refresh in refreshes { await refresh.value }
+      XCTAssertEqual(viewModel.items.map(\.id), [2])
+      XCTAssertEqual(viewModel.state, .loaded)
+      XCTAssertEqual(viewModel.selectedCategory, isCategoryReplacement ? category : .all)
+      let requestsAfterCompletion = await service.requestSnapshot()
+      XCTAssertEqual(requestsAfterCompletion, expectedRequests, "No queued refresh may start")
+
+      await service.enqueue(.value(HotThreadFixtures.feed(items: [HotThreadFixtures.item(id: 3)])))
+      await viewModel.refresh()
+      let requestsAfterNextRefresh = await service.requestSnapshot()
+      XCTAssertEqual(
+        requestsAfterNextRefresh,
+        expectedRequests + [isCategoryReplacement ? category.code : "all"]
+      )
+      XCTAssertEqual(viewModel.items.map(\.id), [3])
+      XCTAssertEqual(viewModel.state, .loaded)
+    }
+  }
+
+  @MainActor
+  func testRepeatedRefreshSharesInFlightRefreshAndAllowsNextRefresh() async throws {
+    let service = ScriptedHotThreadService()
+    await service.enqueue(.value(HotThreadFixtures.feed(items: [HotThreadFixtures.item(id: 1)])))
+    await service.enqueue(.suspended(902))
+    let viewModel = HotThreadListViewModel(service: service)
+    viewModel.loadIfNeeded()
+    try await hotThreadWaitUntil { viewModel.state == .loaded }
+    let originalRefresh = Task { await viewModel.refresh() }
+    try await hotThreadWaitUntil { await service.requestCount() == 2 }
+
+    var started = 0
+    var completed = 0
+    let refreshes = (0..<4).map { _ in
+      Task { @MainActor in
+        started += 1
+        await viewModel.refresh()
+        completed += 1
+      }
+    }
+    try await hotThreadWaitUntil { started == refreshes.count }
+    await hotThreadDrainMainActor()
+    XCTAssertEqual(completed, 0)
+    XCTAssertEqual(viewModel.items.map(\.id), [1])
+    let requestsWhileBusy = await service.requestSnapshot()
+    XCTAssertEqual(requestsWhileBusy, ["all", "all"])
+
+    let resumed = await service.resume(
+      id: 902,
+      returning: HotThreadFixtures.feed(items: [HotThreadFixtures.item(id: 2)])
+    )
+    XCTAssertTrue(resumed)
+    await originalRefresh.value
+    for refresh in refreshes { await refresh.value }
+    XCTAssertEqual(viewModel.items.map(\.id), [2])
+    XCTAssertEqual(viewModel.state, .loaded)
+    let requestsAfterCompletion = await service.requestSnapshot()
+    XCTAssertEqual(requestsAfterCompletion, ["all", "all"])
+
+    await service.enqueue(.value(HotThreadFixtures.feed(items: [HotThreadFixtures.item(id: 3)])))
+    await viewModel.refresh()
+    let requestsAfterNextRefresh = await service.requestSnapshot()
+    XCTAssertEqual(requestsAfterNextRefresh, ["all", "all", "all"])
+    XCTAssertEqual(viewModel.items.map(\.id), [3])
+  }
+
+  @MainActor
   func testInitialFailureCanRetryCurrentCategory() async throws {
     let service = ScriptedHotThreadService()
     await service.enqueue(.failure(HotThreadStubFailure(message: "initial failed")))
@@ -159,6 +266,38 @@ final class HotThreadViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.state, .loaded)
     let requests = await service.requestSnapshot()
     XCTAssertEqual(requests, ["all", "all"])
+  }
+
+  @MainActor
+  func testRefreshCanStartIdleFeedAndRecoverInitialOrSelectedCategoryFailure() async throws {
+    for selectsCategory in [false, true] {
+      let service = ScriptedHotThreadService()
+      let sports = HotThreadFixtures.category(serverID: 2, code: "sports", title: "体育")
+      if selectsCategory {
+        await service.enqueue(.value(HotThreadFixtures.feed(categories: [sports])))
+      }
+      await service.enqueue(.failure(HotThreadStubFailure(message: "load failed")))
+      await service.enqueue(
+        .value(HotThreadFixtures.feed(items: [HotThreadFixtures.item(id: 2)]))
+      )
+      let viewModel = HotThreadListViewModel(service: service)
+
+      await viewModel.refresh()
+      if selectsCategory {
+        viewModel.selectCategory(sports)
+        try await hotThreadWaitUntil { viewModel.state == .failed("load failed") }
+      }
+      XCTAssertEqual(viewModel.state, .failed("load failed"))
+
+      await viewModel.refresh()
+      XCTAssertEqual(viewModel.state, .loaded)
+      XCTAssertTrue(viewModel.hasLoadedInitialSnapshot)
+      XCTAssertEqual(viewModel.items.map(\.id), [2])
+      XCTAssertEqual(viewModel.selectedCategory, selectsCategory ? sports : .all)
+      XCTAssertNil(viewModel.refreshError)
+      let requests = await service.requestSnapshot()
+      XCTAssertEqual(requests, selectsCategory ? ["all", "sports", "sports"] : ["all", "all"])
+    }
   }
 
   @MainActor
@@ -226,6 +365,12 @@ final class HotThreadViewModelTests: XCTestCase {
 
     viewModel.selectCategory(first)
     try await hotThreadWaitUntil { await service.requestCount() == 2 }
+    var joined = false
+    let joinedRefresh = Task { @MainActor in
+      joined = true
+      await viewModel.refresh()
+    }
+    try await hotThreadWaitUntil { joined }
     viewModel.selectCategory(second)
     try await hotThreadWaitUntil { viewModel.items.map(\.id) == [20] }
 
@@ -237,6 +382,7 @@ final class HotThreadViewModelTests: XCTestCase {
       )
     )
     XCTAssertTrue(resumed)
+    await joinedRefresh.value
     await hotThreadDrainMainActor()
 
     XCTAssertEqual(viewModel.selectedCategory, second)

@@ -48,8 +48,18 @@ final class HotThreadListViewModel: ObservableObject {
   }
 
   func refresh() async {
-    guard hasLoadedInitialSnapshot, state == .loaded else { return }
-    startRequest(kind: .refresh)
+    if let loadTask {
+      await loadTask.value
+      return
+    }
+    switch state {
+    case .loaded:
+      startRequest(kind: .refresh)
+    case .idle, .failed:
+      startRequest(kind: .replacement)
+    case .loading:
+      return
+    }
     await loadTask?.value
   }
 

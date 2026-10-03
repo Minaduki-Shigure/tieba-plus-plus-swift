@@ -25,6 +25,7 @@ enum ExploreSection: String, CaseIterable, Hashable, Identifiable, Sendable {
 
 struct ExploreView: View {
   let isActive: Bool
+  let refreshRequestID: UInt64
   let service:
     any BrowseService & ForumPostSearchService & HotTopicService & HotThreadService
       & PersonalizedFeedService & UserProfileService & ForumInformationService
@@ -37,11 +38,14 @@ struct ExploreView: View {
   let accountSessionLookup: any AccountSessionLookup
 
   @State private var selectedSection: ExploreSection
+  @State private var isVisible = false
+  @State private var channelRefreshRequests: [ExploreSection: UInt64] = [:]
   @StateObject private var channelsViewModel: ExploreChannelsViewModel
 
   init(
     initialSection: ExploreSection = .personalized,
     isActive: Bool = true,
+    refreshRequestID: UInt64 = 0,
     service: any BrowseService & ForumPostSearchService & HotTopicService & HotThreadService
       & PersonalizedFeedService & UserProfileService & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
@@ -53,6 +57,7 @@ struct ExploreView: View {
     accountSessionLookup: any AccountSessionLookup
   ) {
     self.isActive = isActive
+    self.refreshRequestID = refreshRequestID
     self.service = service
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
@@ -72,6 +77,7 @@ struct ExploreView: View {
       if channelsViewModel.visibleSections.contains(.concern) {
         ConcernFeedView(
           isActive: isActive && selectedSection == .concern,
+          refreshRequestID: channelRefreshRequests[.concern, default: 0],
           browseService: service,
           accountService: accountService,
           vault: accountVault,
@@ -84,6 +90,7 @@ struct ExploreView: View {
 
       PersonalizedFeedView(
         isActive: isActive && selectedSection == .personalized,
+        refreshRequestID: channelRefreshRequests[.personalized, default: 0],
         service: service,
         accountService: accountService,
         feedbackService: feedbackService,
@@ -97,6 +104,7 @@ struct ExploreView: View {
 
       HotThreadListView(
         isActive: isActive && selectedSection == .hot,
+        refreshRequestID: channelRefreshRequests[.hot, default: 0],
         service: service,
         historyRepository: historyRepository,
         favoritesRepository: favoritesRepository,
@@ -110,19 +118,25 @@ struct ExploreView: View {
     .navigationTitle("发现")
     .navigationBarTitleDisplayMode(.inline)
     .safeAreaInset(edge: .top, spacing: 0) {
-      Picker("发现频道", selection: selectedSectionBinding) {
-        ForEach(channelsViewModel.visibleSections) { section in
-          Text(section.title).tag(section)
+      ExploreChannelSelector(
+        sections: channelsViewModel.visibleSections,
+        selection: selectedSectionBinding.wrappedValue
+      ) { section in
+        if section == selectedSectionBinding.wrappedValue {
+          refreshCurrentChannel()
+        } else {
+          selectedSectionBinding.wrappedValue = section
         }
       }
-      .pickerStyle(.segmented)
       .padding(.horizontal, 16)
       .padding(.vertical, 8)
       .appBarMaterialSurface()
     }
     .onAppear {
+      isVisible = true
       if isActive { channelsViewModel.reload() }
     }
+    .onChange(of: refreshRequestID) { _ in refreshCurrentChannel() }
     .onChange(of: isActive) { active in
       if active {
         channelsViewModel.reload()
@@ -130,7 +144,10 @@ struct ExploreView: View {
         channelsViewModel.cancel()
       }
     }
-    .onDisappear(perform: channelsViewModel.cancel)
+    .onDisappear {
+      isVisible = false
+      channelsViewModel.cancel()
+    }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
       if isActive {
         channelsViewModel.reload()
@@ -145,6 +162,13 @@ struct ExploreView: View {
     }
   }
 
+  private func refreshCurrentChannel() {
+    guard isVisible, isActive,
+      channelsViewModel.visibleSections.contains(selectedSection)
+    else { return }
+    channelRefreshRequests[selectedSection, default: 0] &+= 1
+  }
+
   private var selectedSectionBinding: Binding<ExploreSection> {
     Binding(
       get: {
@@ -157,5 +181,45 @@ struct ExploreView: View {
         selectedSection = section
       }
     )
+  }
+}
+
+/// Selection and reselection are distinct actions. A Picker's selection binding
+/// only represents the selected value and cannot express a repeated selection.
+private struct ExploreChannelSelector: View {
+  let sections: [ExploreSection]
+  let selection: ExploreSection
+  let onSelect: (ExploreSection) -> Void
+
+  var body: some View {
+    HStack(spacing: 2) {
+      ForEach(sections) { section in
+        Button {
+          onSelect(section)
+        } label: {
+          Text(section.title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity)
+            .background {
+              if section == selection {
+                RoundedRectangle(cornerRadius: 6)
+                  .fill(Color(uiColor: .secondarySystemGroupedBackground))
+                  .shadow(color: .black.opacity(0.12), radius: 2, y: 1)
+              }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("explore-channel-\(section.rawValue)")
+        .accessibilityAddTraits(section == selection ? [.isSelected] : [])
+        .accessibilityHint(section == selection ? "再次点击刷新当前频道" : "切换发现频道")
+      }
+    }
+    .padding(2)
+    .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 8))
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel("发现频道")
   }
 }

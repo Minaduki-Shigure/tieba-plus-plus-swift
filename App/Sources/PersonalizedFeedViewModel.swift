@@ -143,10 +143,23 @@ final class PersonalizedFeedViewModel: ObservableObject {
   }
 
   func refresh() async {
-    guard state == .loaded, !isLoadingMore, scope.isReady, !scope.hasNoAllowedForums else {
+    // Join the current load without canceling it or scheduling a second refresh.
+    // Its generation-checked defer clears loadTask before these waiters resume.
+    if let loadTask {
+      await loadTask.value
       return
     }
-    startRequest(.refresh)
+    guard scope.isReady, !scope.hasNoAllowedForums else {
+      return
+    }
+    switch state {
+    case .loaded:
+      startRequest(.refresh)
+    case .idle, .failed:
+      startRequest(.replacement)
+    case .loading:
+      return
+    }
     await loadTask?.value
   }
 

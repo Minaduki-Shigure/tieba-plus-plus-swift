@@ -31,6 +31,7 @@ struct RootView: View {
 
   @State private var query = ""
   @State private var navigation: RootMainNavigationState
+  @State private var exploreRefreshRequestID: UInt64 = 0
   @State private var showsAllSearchHistory = false
   @State private var showsRecentForums = true
   @State private var showsQuickAccountLogin = false
@@ -378,6 +379,7 @@ struct RootView: View {
       }
       }
       .appNavigationSurface()
+      .toolbar(.hidden, for: .tabBar)
       .tag(RootMainTab.home)
       .tabItem {
         Label(RootMainTab.home.title, systemImage: RootMainTab.home.systemImage)
@@ -388,6 +390,7 @@ struct RootView: View {
           ExploreView(
             initialSection: navigation.exploreSection,
             isActive: rootTabIsActive(.explore),
+            refreshRequestID: exploreRefreshRequestID,
             service: service,
             historyRepository: historyRepository,
             favoritesRepository: favoritesRepository,
@@ -403,6 +406,7 @@ struct RootView: View {
           }
         }
         .appNavigationSurface()
+        .toolbar(.hidden, for: .tabBar)
         .tag(RootMainTab.explore)
         .tabItem {
           Label(RootMainTab.explore.title, systemImage: RootMainTab.explore.systemImage)
@@ -427,6 +431,7 @@ struct RootView: View {
         }
       }
       .appNavigationSurface()
+      .toolbar(.hidden, for: .tabBar)
       .tag(RootMainTab.notifications)
       .tabItem {
         Label(
@@ -454,6 +459,7 @@ struct RootView: View {
         }
       }
       .appNavigationSurface()
+      .toolbar(.hidden, for: .tabBar)
       .tag(RootMainTab.account)
       .tabItem {
         Label(RootMainTab.account.title, systemImage: RootMainTab.account.systemImage)
@@ -463,6 +469,15 @@ struct RootView: View {
 
   var body: some View {
     primaryTabs
+    .safeAreaInset(edge: .bottom, spacing: 0) {
+      RootTabBar(
+        selectedTab: rootTabSelection.wrappedValue,
+        showsExploreTab: showsExploreTab,
+        notificationBadge: homeUnreadBadgePresentation?.badgeText,
+        allowsExploreRefresh: rootTabIsActive(.explore),
+        onSelect: selectRootTabFromBar
+      )
+    }
     .appNavigationSurface()
     .threadSummaryImageGallery(threadSummaryImageGalleryCoordinator)
     .sheet(isPresented: $showsQuickAccountLogin) {
@@ -713,6 +728,22 @@ struct RootView: View {
         )
       }
     )
+  }
+
+  private func selectRootTabFromBar(_ tab: RootMainTab) {
+    switch RootTabSelectionPolicy.action(
+      selecting: tab,
+      navigation: effectiveNavigation,
+      showsExploreTab: showsExploreTab,
+      sceneIsActive: scenePhase == .active
+    ) {
+    case .select(let tab):
+      rootTabSelection.wrappedValue = tab
+    case .refreshExplore:
+      exploreRefreshRequestID &+= 1
+    case .none:
+      break
+    }
   }
 
   private var effectiveNavigation: RootMainNavigationState {

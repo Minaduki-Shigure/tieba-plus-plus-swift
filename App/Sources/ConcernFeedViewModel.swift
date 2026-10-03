@@ -73,6 +73,12 @@ final class ConcernFeedViewModel: ObservableObject {
 
   func refresh() async {
     guard isActive else { return }
+    // Initial loads, pagination and another refresh share this completion.
+    // Active account/filter changes still invalidate through their own paths.
+    if let loadTask {
+      await loadTask.value
+      return
+    }
     if state == .loaded, loadedLease != nil, requestUnix != nil {
       startRequest(.refresh)
     } else {

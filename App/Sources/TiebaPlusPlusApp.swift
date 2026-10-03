@@ -2,7 +2,9 @@ import Foundation
 import SwiftUI
 import TiebaCore
 
+#if !DEBUG
 @main
+#endif
 @MainActor
 struct TiebaPlusPlusApp: App {
   @UIApplicationDelegateAdaptor(TiebaApplicationDelegate.self)

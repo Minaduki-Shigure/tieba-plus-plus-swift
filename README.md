@@ -25,6 +25,18 @@ and its verified metadata enters the public app source.
 
 ### Release and validation
 
+- **Discovery reselection refresh (next iteration):** Tapping the selected
+  关注/推荐/热门 channel, or tapping the selected bottom 发现 tab while its root
+  page is visible, requests that channel again. Channel/tab changes, page swipes
+  and programmatic routes remain selection actions. Refresh retains the current
+  recommendation persona, followed-forum scope and hot category; pushed threads
+  retain their navigation state. Initial load failures can be retried this way,
+  including a failed followed-forum prerequisite. Repeated requests share an
+  ongoing load or pagination operation, without cancelling it or queueing a
+  second refresh. The app owns a native tab selection control while SwiftUI
+  retains the independent navigation stacks; no private tab-controller delegate
+  is replaced. Native validation is pending. The overall parity estimate stays
+  unchanged.
 - **`v0.65.0-alpha.36` nested-reply deletion:** The full reply list and
   inline reply previews offer an explicitly confirmed action to delete one's own
   child reply, or another author's child reply in one's own topic. The exact

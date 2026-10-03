@@ -538,6 +538,140 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
   }
 
   @MainActor
+  func testRefreshCanStartIdleFeedAndRecoverInitialFailure() async {
+    let service = ScriptedPersonalizedFeedService()
+    await service.enqueue(.failure(PersonalizedFeedStubFailure(message: "initial failed")))
+    await service.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [2], page: 1, hasMore: false))
+    )
+    let viewModel = PersonalizedFeedViewModel(service: service)
+
+    await viewModel.refresh()
+    XCTAssertEqual(viewModel.state, .failed("initial failed"))
+    XCTAssertTrue(viewModel.items.isEmpty)
+
+    await viewModel.refresh()
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.items.map(\.id), [2])
+    XCTAssertFalse(viewModel.hasMore)
+    XCTAssertNil(viewModel.refreshError)
+    let requests = await service.requestSnapshot()
+    XCTAssertEqual(requests, [1, 1])
+  }
+
+  @MainActor
+  func testRepeatedRefreshWaitsForInitialLoadOrPaginationWithoutRestartingOrQueueing() async throws
+  {
+    for isPagination in [false, true] {
+      let service = ScriptedPersonalizedFeedService()
+      if isPagination {
+        await service.enqueue(
+          .value(PersonalizedFeedFixtures.page(ids: [1], page: 1, hasMore: true))
+        )
+      }
+      await service.enqueue(.suspended(901))
+      let viewModel = PersonalizedFeedViewModel(service: service)
+      viewModel.loadIfNeeded()
+      if isPagination {
+        try await personalizedFeedWaitUntil { viewModel.state == .loaded }
+        viewModel.loadMore()
+      }
+      let busyRequestCount = isPagination ? 2 : 1
+      try await personalizedFeedWaitUntil { await service.requestCount() == busyRequestCount }
+
+      var started = 0
+      var completed = 0
+      let refreshes = (0..<4).map { _ in
+        Task { @MainActor in
+          started += 1
+          await viewModel.refresh()
+          completed += 1
+        }
+      }
+      try await personalizedFeedWaitUntil { started == refreshes.count }
+      await personalizedFeedDrainMainActor()
+      XCTAssertEqual(completed, 0, "Refresh must await the existing load")
+      let requestsWhileBusy = await service.requestSnapshot()
+      XCTAssertEqual(requestsWhileBusy, isPagination ? [1, 2] : [1])
+      XCTAssertEqual(viewModel.isLoadingMore, isPagination)
+
+      let resumed = await service.resume(
+        id: 901,
+        returning: PersonalizedFeedFixtures.page(
+          ids: [isPagination ? 2 : 1], page: isPagination ? 2 : 1, hasMore: true
+        )
+      )
+      XCTAssertTrue(resumed)
+      for refresh in refreshes { await refresh.value }
+      XCTAssertEqual(viewModel.items.map(\.id), isPagination ? [1, 2] : [1])
+      XCTAssertEqual(viewModel.state, .loaded)
+      XCTAssertFalse(viewModel.isLoadingMore)
+      let requestsAfterCompletion = await service.requestSnapshot()
+      XCTAssertEqual(requestsAfterCompletion, requestsWhileBusy, "No queued refresh may start")
+
+      await service.enqueue(
+        .value(PersonalizedFeedFixtures.page(ids: [3], page: 1, hasMore: true))
+      )
+      await viewModel.refresh()
+      let requestsAfterNextRefresh = await service.requestSnapshot()
+      XCTAssertEqual(requestsAfterNextRefresh, requestsWhileBusy + [1])
+      XCTAssertEqual(viewModel.items.first?.id, 3)
+      XCTAssertFalse(viewModel.isRefreshing)
+    }
+  }
+
+  @MainActor
+  func testRepeatedRefreshSharesInFlightRefreshAndAllowsNextRefresh() async throws {
+    let service = ScriptedPersonalizedFeedService()
+    await service.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [1], page: 1, hasMore: true))
+    )
+    await service.enqueue(.suspended(902))
+    let viewModel = PersonalizedFeedViewModel(service: service)
+    viewModel.loadIfNeeded()
+    try await personalizedFeedWaitUntil { viewModel.state == .loaded }
+    let originalRefresh = Task { await viewModel.refresh() }
+    try await personalizedFeedWaitUntil { await service.requestCount() == 2 }
+
+    var started = 0
+    var completed = 0
+    let refreshes = (0..<4).map { _ in
+      Task { @MainActor in
+        started += 1
+        await viewModel.refresh()
+        completed += 1
+      }
+    }
+    try await personalizedFeedWaitUntil { started == refreshes.count }
+    await personalizedFeedDrainMainActor()
+    XCTAssertEqual(completed, 0)
+    XCTAssertTrue(viewModel.isRefreshing)
+    XCTAssertEqual(viewModel.items.map(\.id), [1])
+    let requestsWhileBusy = await service.requestSnapshot()
+    XCTAssertEqual(requestsWhileBusy, [1, 1])
+
+    let resumed = await service.resume(
+      id: 902,
+      returning: PersonalizedFeedFixtures.page(ids: [2], page: 1, hasMore: true)
+    )
+    XCTAssertTrue(resumed)
+    await originalRefresh.value
+    for refresh in refreshes { await refresh.value }
+    XCTAssertEqual(viewModel.items.map(\.id), [2, 1])
+    XCTAssertFalse(viewModel.isRefreshing)
+    let requestsAfterCompletion = await service.requestSnapshot()
+    XCTAssertEqual(requestsAfterCompletion, [1, 1])
+
+    await service.enqueue(
+      .value(PersonalizedFeedFixtures.page(ids: [3], page: 1, hasMore: true))
+    )
+    await viewModel.refresh()
+    let requestsAfterNextRefresh = await service.requestSnapshot()
+    XCTAssertEqual(requestsAfterNextRefresh, [1, 1, 1])
+    XCTAssertEqual(viewModel.items.map(\.id), [3, 2, 1])
+  }
+
+  @MainActor
   func testRefreshFailurePreservesSnapshotAndCanRetryByRefreshingAgain() async throws {
     let service = ScriptedPersonalizedFeedService()
     let original = PersonalizedFeedFixtures.item(id: 1, title: "Original")
@@ -665,12 +799,14 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
     let viewModel = PersonalizedFeedViewModel(service: service)
 
     viewModel.setScope(.waitingForFollowedForumIndex, loadIfNeeded: true)
+    await viewModel.refresh()
     XCTAssertEqual(viewModel.scope, .waitingForFollowedForumIndex)
     XCTAssertEqual(viewModel.state, .idle)
     XCTAssertTrue(viewModel.items.isEmpty)
 
     let emptyScope = PersonalizedFeedFixtures.followedScope(forumIDs: [])
     viewModel.setScope(emptyScope, loadIfNeeded: true)
+    await viewModel.refresh()
     XCTAssertEqual(viewModel.scope, emptyScope)
     XCTAssertEqual(viewModel.state, .loaded)
     XCTAssertTrue(viewModel.items.isEmpty)
@@ -1322,6 +1458,12 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
 
     viewModel.setPersona(.account(userID: 7), loadIfNeeded: true)
     try await personalizedFeedWaitUntil { await service.accountSessionIDSnapshot() == [7] }
+    var joined = false
+    let joinedRefresh = Task { @MainActor in
+      joined = true
+      await viewModel.refresh()
+    }
+    try await personalizedFeedWaitUntil { joined }
     viewModel.setPersona(.account(userID: 8), loadIfNeeded: true)
     try await personalizedFeedWaitUntil { viewModel.items.map(\.id) == [2] }
 
@@ -1330,6 +1472,7 @@ final class PersonalizedFeedViewModelTests: XCTestCase {
       returning: PersonalizedFeedFixtures.page(ids: [1], page: 1, hasMore: false)
     )
     XCTAssertTrue(resumed)
+    await joinedRefresh.value
     await personalizedFeedDrainMainActor()
 
     XCTAssertEqual(viewModel.persona, .account(userID: 8))

@@ -16,6 +16,19 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
+The next discovery iteration closes TiebaLite `9701bfb6`'s selected-channel and
+selected-Explore-tab refresh workflow (`MainPage` and `ExplorePage` refresh
+events). Reselecting a visible channel refreshes that channel; reselecting the
+bottom Explore tab refreshes its visible root channel. Ordinary tab switches,
+page swipes and programmatic routing do not become reselections, and a pushed
+thread retains its navigation state. Refresh keeps the recommendation persona,
+followed-forum filter and selected hot category. Busy refreshes join the current
+initial load, refresh or pagination request without cancelling it or queueing
+another read; account, persona, filter and category changes still invalidate
+obsolete work. Initial failures can be retried through the same entry points.
+Native unit and actual-tap UI validation are pending for this iteration. This
+improves existing discovery workflows without increasing the weighted estimate.
+
 The implementation adds list-level cloud-favorite record cleanup against
 TiebaLite `9701bfb6`'s `rmstore` workflow, including deleted records for which no
 forum or original post can be recovered. It uses a separate positive UID/TID

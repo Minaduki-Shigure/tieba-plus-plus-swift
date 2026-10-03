@@ -1756,6 +1756,45 @@ final class AccountViewModelTests: XCTestCase {
     XCTAssertEqual(activeAfterLoad?.id, 8)
   }
 
+  func testPersonalizedFollowedIndexRecoversFailureWithoutChangingSelectedAccount() async throws {
+    let selected = session(userID: 7, name: "selected")
+    let active = session(userID: 8, name: "active")
+    let vault = AccountVaultSpy(sessions: [selected, active], activeUserID: 8)
+    let service = AccountServiceSpy(
+      followedPages: [1: .failure(AccountTestFailure(message: "index unavailable"))]
+    )
+    let viewModel = PersonalizedFollowedForumIndexViewModel(
+      service: service, vault: vault, lookup: vault
+    )
+    viewModel.setPersona(.account(userID: selected.id), loadIfNeeded: true)
+    try await waitForAccountState { viewModel.state == .failed("index unavailable") }
+
+    await service.setFollowedPageResult(
+      .success(
+        FollowedForumPageData(
+          forums: [forum(id: 70, name: "selected-forum")], currentPage: 1, hasMore: false
+        )
+      ),
+      for: 1
+    )
+    viewModel.retry()
+    XCTAssertEqual(viewModel.state, .loading, "Retry must leave failed synchronously")
+    viewModel.setPersona(.account(userID: selected.id), loadIfNeeded: true)
+    try await waitForAccountState {
+      if case .ready = viewModel.state { return true }
+      return false
+    }
+
+    XCTAssertEqual(
+      viewModel.state,
+      .ready(FollowedForumIndexSnapshot(lease: FollowedForumsSessionLease(selected), forumIDs: [70]))
+    )
+    let requests = await service.followedRequestSnapshot()
+    XCTAssertEqual(requests, Array(repeating: FollowedRequest(userID: 7, page: 1, pageSize: 50), count: 2))
+    let activeAfterRetry = try await vault.activeSession()
+    XCTAssertEqual(activeAfterRetry?.id, active.id)
+  }
+
   func testPersonalizedFollowedIndexCancelsBeforeTransportWhenPersonaChangesDuringLookup()
     async throws
   {

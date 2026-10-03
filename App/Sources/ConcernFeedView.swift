@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ConcernFeedView: View {
   let isActive: Bool
+  let refreshRequestID: UInt64
   let browseService:
     any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
   let accountService: any AccountService
@@ -12,10 +13,12 @@ struct ConcernFeedView: View {
 
   @StateObject private var viewModel: ConcernFeedViewModel
   @State private var showsLogin = false
+  @State private var isVisible = false
   @State private var threadNavigationRequest: ThreadSummaryNavigationRequest?
 
   init(
     isActive: Bool,
+    refreshRequestID: UInt64 = 0,
     browseService: any BrowseService & ForumPostSearchService & UserProfileService
       & ForumInformationService,
     accountService: any AccountService,
@@ -25,6 +28,7 @@ struct ConcernFeedView: View {
     searchHistoryRepository: any ForumSearchHistoryRepository
   ) {
     self.isActive = isActive
+    self.refreshRequestID = refreshRequestID
     self.browseService = browseService
     self.accountService = accountService
     self.vault = vault
@@ -57,9 +61,21 @@ struct ConcernFeedView: View {
         feedList
       }
     }
-    .onAppear { viewModel.setActive(isActive) }
-    .onChange(of: isActive) { viewModel.setActive($0) }
-    .onDisappear(perform: viewModel.cancel)
+    .onAppear {
+      isVisible = true
+      viewModel.setActive(isActive)
+    }
+    .onChange(of: isActive) { viewModel.setActive(isVisible && $0) }
+    .onChange(of: refreshRequestID) { _ in
+      Task { @MainActor in
+        guard isVisible, isActive, threadNavigationRequest == nil else { return }
+        await viewModel.refresh()
+      }
+    }
+    .onDisappear {
+      isVisible = false
+      viewModel.cancel()
+    }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
       viewModel.accountSessionDidChange()
     }

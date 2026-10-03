@@ -3,6 +3,7 @@ import SwiftUI
 
 struct HotThreadListView: View {
   let isActive: Bool
+  let refreshRequestID: UInt64
   let service:
     any BrowseService & ForumPostSearchService & HotTopicService & HotThreadService
       & UserProfileService & ForumInformationService
@@ -15,11 +16,13 @@ struct HotThreadListView: View {
   @State private var threadNavigationRequest: ThreadSummaryNavigationRequest?
   @State private var needsContentFilterReload = false
   @State private var isPresented = false
+  @State private var refreshTask: Task<Void, Never>?
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   @Environment(\.appAccentColor) private var appAccentColor
 
   init(
     isActive: Bool = true,
+    refreshRequestID: UInt64 = 0,
     service: any BrowseService & ForumPostSearchService & HotTopicService & HotThreadService
       & UserProfileService & ForumInformationService,
     historyRepository: any BrowsingHistoryRepository,
@@ -28,6 +31,7 @@ struct HotThreadListView: View {
     showsNavigationTitle: Bool = true
   ) {
     self.isActive = isActive
+    self.refreshRequestID = refreshRequestID
     self.service = service
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
@@ -56,8 +60,19 @@ struct HotThreadListView: View {
       synchronizeActivation()
     }
     .onChange(of: isActive) { _ in synchronizeActivation() }
+    .onChange(of: refreshRequestID) { _ in
+      refreshTask?.cancel()
+      refreshTask = Task { @MainActor in
+        guard !Task.isCancelled, acceptsAutomaticRequests, threadNavigationRequest == nil else {
+          return
+        }
+        await viewModel.refresh()
+      }
+    }
     .onDisappear {
       isPresented = false
+      refreshTask?.cancel()
+      refreshTask = nil
       viewModel.cancel()
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
@@ -93,6 +108,8 @@ struct HotThreadListView: View {
 
   private func synchronizeActivation() {
     guard acceptsAutomaticRequests else {
+      refreshTask?.cancel()
+      refreshTask = nil
       viewModel.cancel()
       return
     }

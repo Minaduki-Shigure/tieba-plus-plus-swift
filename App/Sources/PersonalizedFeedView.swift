@@ -3,6 +3,7 @@ import SwiftUI
 
 struct PersonalizedFeedView: View {
   let isActive: Bool
+  let refreshRequestID: UInt64
   let service:
     any BrowseService & ForumPostSearchService & HotTopicService & HotThreadService
       & PersonalizedFeedService & UserProfileService & ForumInformationService
@@ -22,11 +23,13 @@ struct PersonalizedFeedView: View {
   @State private var threadNavigationRequest: ThreadSummaryNavigationRequest?
   @State private var isVisible = false
   @State private var personaReloadTask: Task<Void, Never>?
+  @State private var refreshTask: Task<Void, Never>?
   @AppStorage(AppPreferenceKey.personalizedFollowedForumsOnly)
   private var followedForumsOnly = AppPreferenceDefaults.personalizedFollowedForumsOnly
 
   init(
     isActive: Bool,
+    refreshRequestID: UInt64 = 0,
     service: any BrowseService & ForumPostSearchService & HotTopicService & HotThreadService
       & PersonalizedFeedService & UserProfileService & ForumInformationService,
     accountService: any AccountService,
@@ -38,6 +41,7 @@ struct PersonalizedFeedView: View {
     searchHistoryRepository: any ForumSearchHistoryRepository
   ) {
     self.isActive = isActive
+    self.refreshRequestID = refreshRequestID
     self.service = service
     self.accountService = accountService
     self.feedbackService = feedbackService
@@ -84,6 +88,21 @@ struct PersonalizedFeedView: View {
     }
     .task { await personaViewModel.loadIfNeeded() }
     .onChange(of: isActive) { _ in synchronizeActivation() }
+    .onChange(of: refreshRequestID) { _ in
+      refreshTask?.cancel()
+      refreshTask = Task { @MainActor in
+        guard !Task.isCancelled, isVisible, isActive, threadNavigationRequest == nil else {
+          return
+        }
+        if followedForumsOnly, case .failed = followedForumIndexViewModel.state {
+          // A failed prerequisite has no feed to refresh yet. Its successful
+          // retry will activate the scoped feed through synchronizeScope().
+          followedForumIndexViewModel.retry()
+          return
+        }
+        await viewModel.refresh()
+      }
+    }
     .onChange(of: followedForumsOnly) { _ in synchronizeActivation() }
     .onChange(of: personaViewModel.selection) { _ in
       feedbackPrompt = nil
@@ -92,6 +111,8 @@ struct PersonalizedFeedView: View {
     .onChange(of: followedForumIndexViewModel.state) { _ in synchronizeScope() }
     .onDisappear {
       isVisible = false
+      refreshTask?.cancel()
+      refreshTask = nil
       personaReloadTask?.cancel()
       personaReloadTask = nil
       followedForumIndexViewModel.cancel()
@@ -410,6 +431,8 @@ struct PersonalizedFeedView: View {
     if shouldLoad {
       viewModel.reloadDeferredContentFilterIfNeeded()
     } else {
+      refreshTask?.cancel()
+      refreshTask = nil
       viewModel.cancel()
     }
   }

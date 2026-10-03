@@ -141,13 +141,151 @@ final class ConcernFeedViewModelTests: XCTestCase {
     XCTAssertEqual(requestedPageTags, [nil, "page-a", "page-b"])
   }
 
+  func testRepeatedRefreshWaitsForInitialLoadOrPaginationWithoutRestartingOrQueueing() async throws
+  {
+    for isPagination in [false, true] {
+      let vault = ConcernVaultSpy(session: concernSession(userID: 7))
+      let initialRequest = ConcernRequest(userID: 7, pageTag: nil, requestUnix: 0)
+      let pageRequest = ConcernRequest(userID: 7, pageTag: "page-a", requestUnix: 10)
+      let refreshRequest = ConcernRequest(userID: 7, pageTag: nil, requestUnix: 10)
+      let service = ConcernServiceSpy(scripts: [
+        initialRequest: isPagination
+          ? [
+            .page(
+              concernPage(
+                userID: 7, ids: [1], nextPageTag: "page-a", hasMore: true, requestUnix: 10
+              ))
+          ]
+          : [.suspended(901)],
+        pageRequest: [.suspended(901)],
+        refreshRequest: [
+          .page(
+            concernPage(
+              userID: 7, ids: [3], nextPageTag: nil, hasMore: false, requestUnix: 20
+            ))
+        ],
+      ])
+      let viewModel = ConcernFeedViewModel(service: service, vault: vault)
+      viewModel.setActive(true)
+      if isPagination {
+        try await waitForConcernTest { viewModel.state == .loaded }
+        viewModel.loadMore()
+      }
+      let expectedRequests = isPagination ? [initialRequest, pageRequest] : [initialRequest]
+      try await waitForConcernTest { await service.requestCount() == expectedRequests.count }
+
+      var started = 0
+      var completed = 0
+      let refreshes = (0..<4).map { _ in
+        Task { @MainActor in
+          started += 1
+          await viewModel.refresh()
+          completed += 1
+        }
+      }
+      try await waitForConcernTest { started == refreshes.count }
+      for _ in 0..<20 { await Task<Never, Never>.yield() }
+      XCTAssertEqual(completed, 0, "Refresh must await the existing load")
+      let requestsWhileBusy = await service.requestsSnapshot()
+      XCTAssertEqual(requestsWhileBusy, expectedRequests)
+      XCTAssertEqual(viewModel.isLoadingMore, isPagination)
+
+      let resumed = await service.resume(
+        id: 901,
+        returning: concernPage(
+          userID: 7, ids: [isPagination ? 2 : 1], nextPageTag: "page-b",
+          hasMore: true, requestUnix: isPagination ? 999 : 10
+        )
+      )
+      XCTAssertTrue(resumed)
+      for refresh in refreshes { await refresh.value }
+      XCTAssertEqual(viewModel.threads.map(\.id), isPagination ? [1, 2] : [1])
+      XCTAssertEqual(viewModel.state, .loaded)
+      XCTAssertFalse(viewModel.isLoadingMore)
+      let requestsAfterCompletion = await service.requestsSnapshot()
+      XCTAssertEqual(requestsAfterCompletion, expectedRequests, "No queued refresh may start")
+
+      await viewModel.refresh()
+      let requestsAfterNextRefresh = await service.requestsSnapshot()
+      XCTAssertEqual(requestsAfterNextRefresh, expectedRequests + [refreshRequest])
+      XCTAssertEqual(viewModel.threads.map(\.id), [3])
+      XCTAssertFalse(viewModel.isRefreshing)
+    }
+  }
+
+  func testRepeatedRefreshSharesInFlightRefreshAndAllowsNextRefresh() async throws {
+    let vault = ConcernVaultSpy(session: concernSession(userID: 7))
+    let initialRequest = ConcernRequest(userID: 7, pageTag: nil, requestUnix: 0)
+    let refreshRequest = ConcernRequest(userID: 7, pageTag: nil, requestUnix: 10)
+    let nextRefreshRequest = ConcernRequest(userID: 7, pageTag: nil, requestUnix: 20)
+    let service = ConcernServiceSpy(scripts: [
+      initialRequest: [
+        .page(
+          concernPage(
+            userID: 7, ids: [1], nextPageTag: nil, hasMore: false, requestUnix: 10
+          ))
+      ],
+      refreshRequest: [.suspended(902)],
+      nextRefreshRequest: [
+        .page(
+          concernPage(
+            userID: 7, ids: [3], nextPageTag: nil, hasMore: false, requestUnix: 30
+          ))
+      ],
+    ])
+    let viewModel = ConcernFeedViewModel(service: service, vault: vault)
+    viewModel.setActive(true)
+    try await waitForConcernTest { viewModel.state == .loaded }
+    let originalRefresh = Task { await viewModel.refresh() }
+    try await waitForConcernTest { await service.requestCount() == 2 }
+
+    var started = 0
+    var completed = 0
+    let refreshes = (0..<4).map { _ in
+      Task { @MainActor in
+        started += 1
+        await viewModel.refresh()
+        completed += 1
+      }
+    }
+    try await waitForConcernTest { started == refreshes.count }
+    for _ in 0..<20 { await Task<Never, Never>.yield() }
+    XCTAssertEqual(completed, 0)
+    XCTAssertTrue(viewModel.isRefreshing)
+    XCTAssertEqual(viewModel.threads.map(\.id), [1])
+    let requestsWhileBusy = await service.requestsSnapshot()
+    XCTAssertEqual(requestsWhileBusy, [initialRequest, refreshRequest])
+
+    let resumed = await service.resume(
+      id: 902,
+      returning: concernPage(
+        userID: 7, ids: [2], nextPageTag: nil, hasMore: false, requestUnix: 20
+      )
+    )
+    XCTAssertTrue(resumed)
+    await originalRefresh.value
+    for refresh in refreshes { await refresh.value }
+    XCTAssertEqual(viewModel.threads.map(\.id), [2])
+    XCTAssertFalse(viewModel.isRefreshing)
+    let requestsAfterCompletion = await service.requestsSnapshot()
+    XCTAssertEqual(requestsAfterCompletion, requestsWhileBusy)
+
+    await viewModel.refresh()
+    let requestsAfterNextRefresh = await service.requestsSnapshot()
+    XCTAssertEqual(requestsAfterNextRefresh, [initialRequest, refreshRequest, nextRefreshRequest])
+    XCTAssertEqual(viewModel.threads.map(\.id), [3])
+  }
+
   func testRefreshFailurePreservesExistingSnapshot() async throws {
     let vault = ConcernVaultSpy(session: concernSession(userID: 7))
     let service = ConcernServiceSpy(scripts: [
       .init(userID: 7, pageTag: nil, requestUnix: 0): [
         .page(concernPage(userID: 7, ids: [1], nextPageTag: nil, hasMore: false, requestUnix: 10))
       ],
-      .init(userID: 7, pageTag: nil, requestUnix: 10): [.failure("刷新失败")],
+      .init(userID: 7, pageTag: nil, requestUnix: 10): [
+        .failure("刷新失败"),
+        .page(concernPage(userID: 7, ids: [2], nextPageTag: nil, hasMore: false, requestUnix: 20)),
+      ],
     ])
     let viewModel = ConcernFeedViewModel(service: service, vault: vault)
     viewModel.setActive(true)
@@ -158,6 +296,13 @@ final class ConcernFeedViewModelTests: XCTestCase {
     XCTAssertEqual(viewModel.state, .loaded)
     XCTAssertEqual(viewModel.threads.map(\.id), [1])
     XCTAssertEqual(viewModel.refreshError, "刷新失败")
+
+    await viewModel.refresh()
+    XCTAssertEqual(viewModel.state, .loaded)
+    XCTAssertEqual(viewModel.threads.map(\.id), [2])
+    XCTAssertNil(viewModel.refreshError)
+    let requests = await service.requestCount()
+    XCTAssertEqual(requests, 3)
   }
 
   func testAccountSwitchClearsImmediatelyAndLateResponseCannotOverwrite() async throws {
@@ -166,10 +311,7 @@ final class ConcernFeedViewModelTests: XCTestCase {
     let vault = ConcernVaultSpy(session: oldSession)
     let service = ConcernServiceSpy(scripts: [
       .init(userID: 7, pageTag: nil, requestUnix: 0): [
-        .page(
-          concernPage(userID: 7, ids: [71], nextPageTag: nil, hasMore: false, requestUnix: 10),
-          delayNanoseconds: 120_000_000
-        )
+        .suspended(903)
       ],
       .init(userID: 8, pageTag: nil, requestUnix: 0): [
         .page(concernPage(userID: 8, ids: [81], nextPageTag: nil, hasMore: false, requestUnix: 20))
@@ -178,13 +320,26 @@ final class ConcernFeedViewModelTests: XCTestCase {
     let viewModel = ConcernFeedViewModel(service: service, vault: vault)
     viewModel.setActive(true)
     try await waitForConcernTest { await service.requestCount() == 1 }
+    var joined = false
+    let joinedRefresh = Task { @MainActor in
+      joined = true
+      await viewModel.refresh()
+    }
+    try await waitForConcernTest { joined }
 
     await vault.replaceActive(with: newSession)
     viewModel.accountSessionDidChange()
 
     XCTAssertTrue(viewModel.threads.isEmpty)
     try await waitForConcernTest { viewModel.threads.map(\.id) == [81] }
-    try await Task.sleep(nanoseconds: 150_000_000)
+    let resumed = await service.resume(
+      id: 903,
+      returning: concernPage(
+        userID: 7, ids: [71], nextPageTag: nil, hasMore: false, requestUnix: 10
+      )
+    )
+    XCTAssertTrue(resumed)
+    await joinedRefresh.value
     XCTAssertEqual(viewModel.threads.map(\.id), [81])
     let switchRequests = await service.requestsSnapshot()
     let requestedUserIDs = switchRequests.map(\.userID)
@@ -277,6 +432,7 @@ private struct ConcernRequest: Hashable, Sendable {
 private enum ConcernScript: Sendable {
   case page(ConcernFeedPageData, delayNanoseconds: UInt64 = 0)
   case failure(String)
+  case suspended(Int)
 }
 
 private struct ConcernTestFailure: LocalizedError, Sendable {
@@ -287,6 +443,7 @@ private struct ConcernTestFailure: LocalizedError, Sendable {
 private actor ConcernServiceSpy: AccountService {
   private var scripts: [ConcernRequest: [ConcernScript]]
   private var requests = [ConcernRequest]()
+  private var suspended: [Int: CheckedContinuation<ConcernFeedPageData, any Error>] = [:]
 
   init(scripts: [ConcernRequest: [ConcernScript]]) {
     self.scripts = scripts
@@ -316,6 +473,10 @@ private actor ConcernServiceSpy: AccountService {
       return page
     case .failure(let message):
       throw ConcernTestFailure(message: message)
+    case .suspended(let identifier):
+      return try await withCheckedThrowingContinuation { continuation in
+        suspended[identifier] = continuation
+      }
     }
   }
 
@@ -366,6 +527,12 @@ private actor ConcernServiceSpy: AccountService {
 
   func requestCount() -> Int { requests.count }
   func requestsSnapshot() -> [ConcernRequest] { requests }
+
+  func resume(id: Int, returning value: ConcernFeedPageData) -> Bool {
+    guard let continuation = suspended.removeValue(forKey: id) else { return false }
+    continuation.resume(returning: value)
+    return true
+  }
 }
 
 private actor ConcernVaultSpy: AccountVault {
