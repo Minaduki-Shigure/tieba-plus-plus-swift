@@ -135,7 +135,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-serves `v0.65.0-alpha.34` (build 112) after publication, whose app-code snapshot includes
+serves `v0.65.0-alpha.35` (build 113) after publication, whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -243,7 +243,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.65.0-alpha.34` app-code snapshot is at 80–82%; all experimental
+The public `v0.65.0-alpha.35` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
@@ -1848,7 +1848,7 @@ at the preference level and keeps the previous native surface modifiers. Theme
 selection is not part of content identity, pagination, media requests, decoding,
 or cache keys, and no per-row geometry or overlay measurement was introduced.
 
-The unreleased transparent-image theme workflow imports a local static JPEG,
+The alpha.35 transparent-image theme workflow imports a local static JPEG,
 PNG or HEIF through Photos, crops with pan/zoom at the current window's ratio,
 previews blur and opacity, and offers light/dark reading colors plus bounded
 image-palette extraction or a custom accent. Save atomically installs a new
@@ -1890,10 +1890,25 @@ UIKit-hosted List/NavigationStack/TabView rendering regressions accompany the
 change. A UI workflow exercises the real editor/processor/storage through a
 DEBUG-only generated image, including cancellation, relaunch and restoration;
 it does not exercise the system Photos picker. Linux parser and portable checks
-are not substitutes for the required iOS Actions run. Photos lifecycle, real
-memory/scroll performance, high contrast, Reduce Transparency, large text and
+are not substitutes for the required iOS Actions run. Candidate CI
+`37123383195` passed all 2,486 App tests, including native full-range opacity,
+opaque accessibility canvas, and List/NavigationStack/TabView rendering checks.
+Both icon and wallpaper UI flows also passed. Focused CI `37125096719` passed
+58 App tests and the strengthened wallpaper UI flow, including stable landscape
+geometry, landscape save, portrait reopening, relaunch and reset. Exported screen
+and window captures were visually checked in both orientations. Tagged release
+tests remain publication gates. Photos lifecycle, real memory/scroll performance,
+high contrast, Reduce Transparency, large text and
 iPad split view still require physical-device validation. No weighted parity
 increase is claimed.
+
+Alpha.35 also removes the four-line truncation of returned activity-reply text,
+matching TiebaLite `9701bfb6`'s `UserPostPage` reading behavior. Both own activity
+and the existing public reply surface reuse this row. Reply-position and original-
+topic navigation remain separate, and local filtering and non-text placeholders
+are unchanged. Native height checks cover narrow widths and the largest Dynamic
+Type setting. This exposes only text already returned by the server, adds no
+account request, and remains inside the existing reading credit.
 
 Android dynamic system colors, toolbar-specific color overrides and status-bar
 text controls remain platform-specific. Root SwiftUI tint

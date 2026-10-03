@@ -20,11 +20,47 @@ and its verified metadata enters the public app source.
 | Local features | Available with TiebaLite-aligned Home, Explore, Messages, and My primary tabs backed by independent system navigation stacks; an independent default-on preference can remove only Explore from the tab bar without changing the Home discovery-section preference or saved startup destination. My groups local favorites, history, an inline appearance choice, settings, and About, while Messages exposes global search in its own stack. History, favorites, filtering, appearance with an independent system/OLED dark-surface choice, media preferences, explicit standard/pure/only-author immersive thread-reading modes, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, a next-launch destination including personalized discovery and the inbox, and ordered iOS Home Screen quick actions for existing destinations are also available. The primary-tab shell and reply notice's system handoff attempt remain pending physical-device validation |
 | Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary and guarded native nickname/sex/biography/avatar editor, a credential-free handoff to Baidu's fixed official username-management page, followed forums with validated level-up progress and account-bound today-check-in marks where the server supplies them, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with a shared Home-toolbar/account-page message badge, separate optional fan-reminder badge, and authoritative reply actions, Tieba cloud favorites with a saved-position-to-latest-update handoff, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded profile text and avatar edits, forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies plus explicitly confirmed deletion of the active account's own topic or ordinary floor, or another author's ordinary floor in its own topic; these newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
-| TiebaLite parity | Current `main` and public `v0.65.0-alpha.34`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
-| Distribution | The public SideStore/LiveContainer source serves `v0.65.0-alpha.34` (build 112) after its tested IPA is published |
+| TiebaLite parity | Current `main` and public `v0.65.0-alpha.35`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
+| Distribution | The public SideStore/LiveContainer source serves `v0.65.0-alpha.35` (build 113) after its tested IPA is published |
 
 ### Release and validation
 
+- **`v0.65.0-alpha.35` transparent image themes:** Settings → 外观与布局 → 透明图片主题
+  offers local Photos import, drag/zoom cropping to the current window, blur and
+  opacity previews, light/dark reading colors, colors extracted from the image,
+  and a custom accent. Only Save enables the draft; Cancel preserves the installed
+  theme, and Restore Default returns to the user's existing appearance, OLED and
+  accent preferences. One bounded, preprocessed image is shared by semantic page,
+  list, floor and navigation/tab surfaces; scrolling performs no image decoding or
+  live blur. The original preferences, content identities, routes and media cache
+  keys are unchanged. Image opacity covers the full 0–100% range without a fixed
+  canvas mask; cards and reply controls use local theme surfaces. High contrast
+  and Reduce Transparency use opaque readable surfaces. Wallpaper files live
+  separately from disposable image caches.
+  Recommended wallpapers use anonymous bounded HTTPS downloads with an explicit
+  retry and local-photo fallback. The original catalog currently redirects to
+  HTTP, which is refused; the fallback is the same author's verified
+  [Pages repository catalog](https://github.com/HuanCheng65/huancheng65.github.io/blob/master/TiebaLite/wallpapers.json).
+  On 2026-10-03 its HTTPS static copy returned seven entries and the first image
+  returned HTTP 200; this does not establish availability of every image.
+  Geometry, draft races, durable-storage faults and native surface-rendering tests
+  are added, with a UI save/relaunch/reset flow using a generated image and the
+  real processor and repository. The [candidate CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37123383195)
+  passed all 2,486 App tests, including the real opacity, accessibility and
+  List/NavigationStack/TabView rendering checks, plus both icon and wallpaper UI
+  flows. A [focused follow-up CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37125096719)
+  passed 58 App tests and the strengthened wallpaper UI flow: stable landscape
+  geometry, landscape save, portrait reopening, relaunch and reset. Exported
+  screen and window captures were visually checked in both orientations.
+  Tagged release tests remain publication gates; Photos authorization, iPad split
+  view, accessibility and physical-device memory/scroll behavior remain separate
+  validation gates. The
+  parity estimate is unchanged.
+  Activity replies also show all text returned by Tieba instead of truncating it
+  after four lines. The reply-position and original-topic controls keep their
+  separate destinations, and filtering and non-text placeholders are unchanged.
+  A passing native layout regression covers narrow widths and the largest
+  accessibility text size; it does not claim to recover text omitted by the server.
 - **`v0.65.0-alpha.34` cloud-favorite record cleanup:** My → 贴吧收藏 can explicitly remove an
   exact saved-list record even when its thread has been deleted, its forum name
   is missing, or the original post can no longer be resolved. The separate
@@ -47,30 +83,6 @@ and its verified metadata enters the public app source.
   [Core and iOS CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37119608002)
   passed, including account rotation, dispatch cancellation, delayed or unknown
   outcomes, repeated journal failures and recovery after a completed file rename.
-- **Unreleased transparent image themes:** Settings → 外观与布局 → 透明图片主题
-  offers local Photos import, drag/zoom cropping to the current window, blur and
-  opacity previews, light/dark reading colors, colors extracted from the image,
-  and a custom accent. Only Save enables the draft; Cancel preserves the installed
-  theme, and Restore Default returns to the user's existing appearance, OLED and
-  accent preferences. One bounded, preprocessed image is shared by semantic page,
-  list, floor and navigation/tab surfaces; scrolling performs no image decoding or
-  live blur. The original preferences, content identities, routes and media cache
-  keys are unchanged. Image opacity covers the full 0–100% range without a fixed
-  canvas mask; cards and reply controls use local theme surfaces. High contrast
-  and Reduce Transparency use opaque readable surfaces. Wallpaper files live
-  separately from disposable image caches.
-  Recommended wallpapers use anonymous bounded HTTPS downloads with an explicit
-  retry and local-photo fallback. The original catalog currently redirects to
-  HTTP, which is refused; the fallback is the same author's verified
-  [Pages repository catalog](https://github.com/HuanCheng65/huancheng65.github.io/blob/master/TiebaLite/wallpapers.json).
-  On 2026-10-03 its HTTPS static copy returned seven entries and the first image
-  returned HTTP 200; this does not establish availability of every image.
-  Geometry, draft races, durable-storage faults and native surface-rendering tests
-  are added, with a UI save/relaunch/reset flow using a generated image and the
-  real processor and repository. Apple-platform compilation and these iOS tests
-  require Actions; Photos authorization, iPad split view, accessibility and
-  physical-device memory/scroll behavior remain separate validation gates. The
-  parity estimate is unchanged.
 - **`v0.65.0-alpha.33` inline classic emoticons:** Post bodies, full nested replies,
   and inline reply previews display known classic faces inside the text line.
   Structured faces and exact `#(name)` text markers use the same compiled official
@@ -913,7 +925,7 @@ and its verified metadata enters the public app source.
   IPA and checks it against the published source. The public source therefore
   never exposes the release-preparation commit by itself; version, graph, or
   concurrent-source mismatches fail closed.
-  The source distributes the verified `v0.65.0-alpha.34` IPA (build 112) after publication.
+  The source distributes the verified `v0.65.0-alpha.35` IPA (build 113) after publication.
 - **Login hotfix:** `v0.54.0-alpha.1` can reach Tieba's account page without
   completing because its callback and Cookie matching are too strict.
   `v0.54.1-alpha.1` made that failure explicit and confirmed that iOS 18.7.2
@@ -1411,7 +1423,7 @@ and its verified metadata enters the public app source.
   about 18–20%; its anonymous reading and media subtotal remains about 91–95%.
   This measures implemented end-to-end workflows with partial credit for
   device-validation gates; it is not a claim that every path is release-ready.
-  The public `v0.65.0-alpha.34` app-code snapshot has the same 80–82% weighted
+  The public `v0.65.0-alpha.35` app-code snapshot has the same 80–82% weighted
   estimate and includes the configurable primary shell, My/Messages shortcuts,
   search highlighting, cloud-favorite author links, guarded profile text and
   avatar editing, authoritative content-approval readback, and optional background
