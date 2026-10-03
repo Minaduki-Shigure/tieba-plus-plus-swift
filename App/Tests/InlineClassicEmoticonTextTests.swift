@@ -60,6 +60,65 @@ final class InlineClassicEmoticonTextTests: XCTestCase {
       ])
   }
 
+  func testDisplayParagraphsPreserveEmptyLinesAndAttributedFragments() throws {
+    let url = try XCTUnwrap(InlineClassicEmoticonPlan.thumbnailURL(exactName: "笑眼"))
+    let linkURL = try XCTUnwrap(URL(string: "https://tieba.baidu.com/p/123"))
+    let link: BrowseContent = .link(label: "跨\n行链接", url: linkURL)
+    let mention: BrowseContent = .mention(name: "读者", userID: 42)
+    let contents: [BrowseContent] = [
+      .text("\r\n第一段#(笑眼)\n\n"), mention, link, .text("\r\n末段\n"),
+    ]
+    let plan = InlineClassicEmoticonPlan(contents)
+    XCTAssertEqual(
+      plan.paragraphs,
+      [
+        [],
+        [.text([.text("第一段")]), .emoticon(name: "笑眼", url: url)],
+        [],
+        [.text([mention, link])],
+        [.text([.text("末段")])],
+        [],
+      ])
+    // Splitting is a display projection, never a rewrite of source/copy text.
+    XCTAssertEqual(
+      BrowseContentCopyText.text(contents),
+      "第一段#(笑眼)\n\n@读者跨\n行链接\r\n末段"
+    )
+    XCTAssertEqual(plan.urls, [url], "Paragraphs must share one request batch")
+  }
+
+  func testLongImageRichBodyIsMeasuredAsSeparateParagraphs() {
+    var contents: [BrowseContent] = []
+    for paragraph in 0..<6 {
+      if paragraph > 0 { contents.append(.text("\n")) }
+      for index in 0..<6 {
+        contents += [.text("第\(paragraph)段第\(index)个表情。"), .emoticon(name: "笑眼", url: nil)]
+      }
+    }
+    let plan = InlineClassicEmoticonPlan(contents)
+    XCTAssertEqual(plan.paragraphs.count, 6)
+    for paragraph in plan.paragraphs {
+      XCTAssertEqual(
+        paragraph.filter {
+          if case .emoticon = $0 { return true }
+          return false
+        }.count, 6)
+    }
+    XCTAssertEqual(plan.urls.count, 1)
+    XCTAssertEqual(
+      plan.segments.filter {
+        if case .emoticon = $0 { return true }
+        return false
+      }.count, 36, "Compact previews still retain the complete single-Text plan")
+  }
+
+  func testSingleParagraphAndPureTextKeepTheirExistingStructure() {
+    let single = InlineClassicEmoticonPlan([.text("#(笑眼)同一段正文")])
+    XCTAssertEqual(single.paragraphs, [single.segments])
+    let plain = InlineClassicEmoticonPlan([.text("没有图片\n仍走原生纯文字快路径")])
+    XCTAssertEqual(plain.paragraphs, [plain.segments])
+  }
+
   @MainActor
   func testLinksMentionsAndCopyTextRetainOriginalMeaningAcrossImages() throws {
     let link = try XCTUnwrap(URL(string: "https://tieba.baidu.com/p/123"))
@@ -94,6 +153,38 @@ final class InlineClassicEmoticonTextTests: XCTestCase {
     XCTAssertEqual(rendered.size.width, 280, accuracy: 1)
     let fallback = try render(plan, assets: [:], side: 22, width: 280)
     XCTAssertEqual(try redPixelCount(fallback), 0)
+  }
+
+  @MainActor
+  func testWarmCacheRendersImagesOnFirstLayoutAndRetainsBlankParagraphHeight() async throws {
+    let url = try XCTUnwrap(InlineClassicEmoticonPlan.thumbnailURL(exactName: "笑眼"))
+    let transport = InlineEmoticonImageTestTransport(imageData: try XCTUnwrap(redImage().pngData()))
+    let repository = DownsampledImageRepository(downloader: transport)
+    let loader = DefaultInlineEmoticonImageLoader(repository: repository)
+    _ = try await loader.image(at: url, fetchPolicy: .allowNetwork(.preview))
+
+    func firstLayout(_ text: String) throws -> UIImage {
+      let renderer = ImageRenderer(
+        content: InlineClassicEmoticonText(
+          plan: InlineClassicEmoticonPlan([.text(text)]),
+          splitsParagraphs: true, imageLoader: loader
+        ).font(.body).foregroundColor(.black).frame(width: 180, alignment: .leading)
+          .background(Color.white))
+      renderer.proposedSize = ProposedViewSize(width: 180, height: nil)
+      renderer.scale = 1
+      return try XCTUnwrap(renderer.uiImage)
+    }
+
+    // ImageRenderer reads the initial view synchronously: no task can first
+    // populate this view's @State. Both paragraphs must already contain pixels.
+    let compact = try firstLayout("首段#(笑眼)\n末段#(笑眼)")
+    let spaced = try firstLayout("首段#(笑眼)\n\n末段#(笑眼)")
+    XCTAssertGreaterThan(try redPixelCount(compact), 500)
+    XCTAssertGreaterThan(try redPixelCount(spaced), 500)
+    XCTAssertEqual(spaced.size.width, 180, accuracy: 1)
+    XCTAssertGreaterThan(spaced.size.height, compact.size.height)
+    let requests = await transport.recordedRequests()
+    XCTAssertEqual(requests.count, 1, "Rendering must reuse the decoded memory entry")
   }
 
   @MainActor

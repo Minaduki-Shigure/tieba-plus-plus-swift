@@ -36,6 +36,9 @@ and its verified metadata enters the public app source.
   each paragraph once. Automated rendering, cancellation and network-policy tests
   plus paired offline emoticon-heavy scroll profiles cover this path; results and
   physical-device performance must be checked before claiming release readiness.
+  Long bodies are split at displayed paragraph boundaries while sharing one
+  image batch; cached images participate in the first layout without a temporary
+  text-only pass. Compact reply previews retain their single overall line limit.
 - **`v0.65.0-alpha.32` alternate app icons:** Settings → 外观与布局 → 应用图标
   offers Classic Blue, Light and Dark variants of this project's own artwork.
   The choice is independent of in-app appearance. A shared coordinator reads

@@ -12,6 +12,7 @@ struct InlineClassicEmoticonPlan: Equatable, Sendable {
 
   let segments: [Segment]
   let urls: [URL]
+  let paragraphs: [[Segment]]
 
   private static let entriesByName = Dictionary(
     uniqueKeysWithValues: TiebaClassicEmoticonCatalog.entries.map { ($0.name, $0) }
@@ -68,6 +69,48 @@ struct InlineClassicEmoticonPlan: Equatable, Sendable {
     if !pendingText.isEmpty { segments.append(.text(pendingText)) }
     self.segments = segments
     self.urls = urls.sorted { $0.absoluteString < $1.absoluteString }
+    self.paragraphs = urls.isEmpty ? [segments] : Self.splitParagraphs(segments)
+  }
+
+  private static func splitParagraphs(_ segments: [Segment]) -> [[Segment]] {
+    var result: [[Segment]] = []
+    var paragraph: [Segment] = []
+    var text: [BrowseContent] = []
+
+    func flushText() {
+      guard !text.isEmpty else { return }
+      paragraph.append(.text(text))
+      text.removeAll(keepingCapacity: true)
+    }
+
+    for segment in segments {
+      switch segment {
+      case .emoticon:
+        flushText()
+        paragraph.append(segment)
+      case .text(let contents):
+        for content in contents {
+          guard case .text(let value) = content else {
+            // Keep attributed links/mentions intact, including their labels.
+            text.append(content)
+            continue
+          }
+          for (index, line) in value.split(
+            omittingEmptySubsequences: false, whereSeparator: \.isNewline
+          ).enumerated() {
+            if index > 0 {
+              flushText()
+              result.append(paragraph)
+              paragraph.removeAll(keepingCapacity: true)
+            }
+            if !line.isEmpty { text.append(.text(String(line))) }
+          }
+        }
+      }
+    }
+    flushText()
+    result.append(paragraph)
+    return result
   }
 
   static func thumbnailURL(exactName name: String) -> URL? {
@@ -92,6 +135,8 @@ struct InlineClassicEmoticonText: View {
   let prefix: Text
   let linksUserMentions: Bool
   let accentColor: Color
+  let splitsParagraphs: Bool
+  let imageLoader: DefaultInlineEmoticonImageLoader
 
   @Environment(\.contentMediaLoadPolicy) private var mediaLoadPolicy
   @Environment(\.contentMediaLoadBehavior) private var mediaLoadBehavior
@@ -107,12 +152,16 @@ struct InlineClassicEmoticonText: View {
     linksUserMentions: Bool = false,
     accentColor: Color = AppAccentColor.defaultValue.color,
     relativeTo textStyle: Font.TextStyle = .body,
-    imageSide: CGFloat = 22
+    imageSide: CGFloat = 22,
+    splitsParagraphs: Bool = false,
+    imageLoader: DefaultInlineEmoticonImageLoader = .init()
   ) {
     self.plan = plan
     self.prefix = prefix
     self.linksUserMentions = linksUserMentions
     self.accentColor = accentColor
+    self.splitsParagraphs = splitsParagraphs
+    self.imageLoader = imageLoader
     _imageSide = ScaledMetric(wrappedValue: imageSide, relativeTo: textStyle)
     _baselineOffset = ScaledMetric(wrappedValue: -3, relativeTo: textStyle)
   }
@@ -132,19 +181,53 @@ struct InlineClassicEmoticonText: View {
   }
 
   var body: some View {
-    Self.text(
-      plan: plan, assets: assets, prefix: prefix,
-      linksUserMentions: linksUserMentions, accentColor: accentColor,
-      imageSide: imageSide, baselineOffset: baselineOffset
+    let currentRequest = request
+    let cached = imageLoader.cachedImages(for: currentRequest)
+    let available = assets.merging(cached) { _, cached in cached }
+    let missing = InlineEmoticonImageRequest(
+      urls: currentRequest.urls.filter { available[$0] == nil },
+      fetchPolicy: currentRequest.fetchPolicy
     )
-    .task(id: request) {
-      let attempt = UUID()
-      activeAttempt = attempt
-      let loaded = await InlineEmoticonImageLoader.load(request)
-      guard !Task.isCancelled, activeAttempt == attempt else { return }
-      // Publish once for the entire paragraph, avoiding repeated text relayout
-      // as each distinct face finishes. The repository shares downloads/cache.
-      assets = loaded
+    if missing.urls.isEmpty {
+      // The normal warm-cache scrolling path has no placeholder layout or task.
+      renderedContent(assets: available)
+    } else {
+      renderedContent(assets: available)
+        .task(id: currentRequest) {
+          let attempt = UUID()
+          activeAttempt = attempt
+          let loaded = await InlineEmoticonImageLoader.load(missing, using: imageLoader)
+          guard !Task.isCancelled, activeAttempt == attempt, !loaded.isEmpty else { return }
+          // One batch/state update for the entire inline block, even when the
+          // display has several paragraphs. Text-only/failed batches do not
+          // invalidate layout a second time.
+          assets = available.merging(loaded) { _, loaded in loaded }
+        }
+    }
+  }
+
+  @ViewBuilder
+  private func renderedContent(assets: [URL: DownsampledImageAsset]) -> some View {
+    if splitsParagraphs, plan.paragraphs.count > 1 {
+      VStack(alignment: .leading, spacing: 0) {
+        ForEach(Array(plan.paragraphs.enumerated()), id: \.offset) { index, segments in
+          if segments.isEmpty {
+            Text(" ").accessibilityHidden(true)
+          } else {
+            Self.text(
+              segments: segments, assets: assets, prefix: index == 0 ? prefix : Text(""),
+              linksUserMentions: linksUserMentions, accentColor: accentColor,
+              imageSide: imageSide, baselineOffset: baselineOffset
+            )
+          }
+        }
+      }
+    } else {
+      Self.text(
+        plan: plan, assets: assets, prefix: prefix,
+        linksUserMentions: linksUserMentions, accentColor: accentColor,
+        imageSide: imageSide, baselineOffset: baselineOffset
+      )
     }
   }
 
@@ -157,7 +240,23 @@ struct InlineClassicEmoticonText: View {
     imageSide: CGFloat = 22,
     baselineOffset: CGFloat = -3
   ) -> Text {
-    plan.segments.reduce(prefix) { result, segment in
+    text(
+      segments: plan.segments, assets: assets, prefix: prefix,
+      linksUserMentions: linksUserMentions, accentColor: accentColor,
+      imageSide: imageSide, baselineOffset: baselineOffset
+    )
+  }
+
+  private static func text(
+    segments: [InlineClassicEmoticonPlan.Segment],
+    assets: [URL: DownsampledImageAsset],
+    prefix: Text,
+    linksUserMentions: Bool,
+    accentColor: Color,
+    imageSide: CGFloat,
+    baselineOffset: CGFloat
+  ) -> Text {
+    segments.reduce(prefix) { result, segment in
       switch segment {
       case .text(let contents):
         if let plain = BrowseContentView.plainInlineText(contents) {

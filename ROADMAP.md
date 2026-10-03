@@ -29,6 +29,17 @@ long-thread and dense nested-reply fixtures; previous profiles used an unknown
 face and could not validate this path. Device scrolling/VoiceOver remain gates;
 the coarse weighted estimate is unchanged pending validation.
 
+The first [inline-emoticon profile](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37113976058)
+at `cc555439` detected a long-body regression in both replicates: sampled main-thread
+work rose 39–67% and text shaping/measurement rose 61–80%. The initial renderer
+combined six paragraphs into one image-rich Text and still laid out text tokens
+before asynchronously rereading already-decoded images. The follow-up separates
+body paragraphs within one shared loading view and reads the existing bounded
+memory cache synchronously for first layout; no extra cache or network access
+is introduced. Reply previews retain their overall line limit. The same sixteen
+recordings must be rerun before releasing this feature; simulator frame intervals
+are not physical-device frame-rate claims.
+
 Current `main` adds the application-icon choice available in TiebaLite's
 `CustomSettingsPage`, using three color variants of this project's existing
 artwork. Settings → 外观与布局 → 应用图标 uses UIKit's system-reported current

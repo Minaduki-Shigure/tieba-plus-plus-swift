@@ -243,6 +243,68 @@ final class DownsampledRemoteImageTests: XCTestCase {
     XCTAssertTrue(recordedKinds.isEmpty)
   }
 
+  func testSynchronousMemoryMissDoesNotReadDiskOrStartDownload() async throws {
+    let persistentCache = GatedPersistentImageCache(imageData: try makeJPEGData())
+    let downloader = RecordingRemoteImageDownloader(imageData: Data())
+    let repository = DownsampledImageRepository(
+      downloader: downloader, persistentCache: persistentCache)
+    let url = try XCTUnwrap(URL(string: "https://img.example/disk-only.jpg"))
+
+    let snapshot = await Task.detached {
+      repository.cachedImage(at: url, maxPixelSize: 320)
+    }.value
+
+    XCTAssertNil(snapshot)
+    let diskReads = await persistentCache.cachedReadCount()
+    let recordedKinds = await downloader.recordedKinds()
+    XCTAssertEqual(diskReads, 0)
+    XCTAssertTrue(recordedKinds.isEmpty)
+  }
+
+  func testSynchronousMemorySnapshotReusesIdentityAndNormalizedPixelSize() async throws {
+    let downloader = RecordingRemoteImageDownloader(imageData: try makeJPEGData())
+    let repository = DownsampledImageRepository(downloader: downloader)
+    let url = try XCTUnwrap(URL(string: "https://img.example/synchronous-cache.jpg"))
+    let loaded = try await repository.image(
+      at: url, maxPixelSize: 32, fetchPolicy: .allowNetwork(.preview))
+
+    let snapshot = await Task.detached {
+      repository.cachedImage(at: url, maxPixelSize: 64)
+    }.value
+    XCTAssertTrue(try XCTUnwrap(snapshot).image === loaded.image)
+    XCTAssertNil(repository.cachedImage(at: url, maxPixelSize: 65))
+
+    await repository.clearMemoryCache()
+    XCTAssertNil(repository.cachedImage(at: url, maxPixelSize: 64))
+    let recordedKinds = await downloader.recordedKinds()
+    XCTAssertEqual(recordedKinds, [.preview])
+  }
+
+  func testSynchronousMemorySnapshotKeepsURLPolicyNamespacesSeparate() async throws {
+    let downloader = RecordingRemoteImageDownloader(imageData: try makeJPEGData())
+    let repository = DownsampledImageRepository(downloader: downloader)
+    let url = try XCTUnwrap(
+      URL(string: "https://tb3.bdstatic.com/emoji/image_emoticon25@2x.png"))
+    let genericAsset = try await repository.image(
+      at: url, maxPixelSize: 120, fetchPolicy: .allowNetwork(.preview))
+
+    XCTAssertTrue(repository.cachedImage(at: url, maxPixelSize: 120)?.image === genericAsset.image)
+    XCTAssertNil(repository.cachedImage(at: url, maxPixelSize: 120, urlPolicy: .classicEmoticon))
+    let scopedAsset = try await repository.image(
+      at: url, maxPixelSize: 120, fetchPolicy: .allowNetwork(.preview),
+      urlPolicy: .classicEmoticon, onProgress: nil)
+    XCTAssertTrue(
+      repository.cachedImage(at: url, maxPixelSize: 120, urlPolicy: .classicEmoticon)?.image
+        === scopedAsset.image)
+    XCTAssertTrue(repository.cachedImage(at: url, maxPixelSize: 120)?.image === genericAsset.image)
+    XCTAssertNil(repository.cachedImage(at: url, maxPixelSize: 121, urlPolicy: .classicEmoticon))
+    let rejectedURL = try XCTUnwrap(URL(string: url.absoluteString + "?tracking=1"))
+    XCTAssertNil(
+      repository.cachedImage(at: rejectedURL, maxPixelSize: 120, urlPolicy: .classicEmoticon))
+    let recordedKinds = await downloader.recordedKinds()
+    XCTAssertEqual(recordedKinds.count, 2)
+  }
+
   func testEmoticonPolicyRejectsForgedFinalResponseBeforeDecodingOrCaching() async throws {
     let initialURL = try XCTUnwrap(
       URL(string: "https://tb3.bdstatic.com/emoji/image_emoticon25@2x.png"))
@@ -494,6 +556,7 @@ final class DownsampledRemoteImageTests: XCTestCase {
     let didEnterClear = await persistentCache.waitUntilClearStarted()
     XCTAssertTrue(didEnterClear)
 
+    XCTAssertNil(repository.cachedImage(at: url, maxPixelSize: 320))
     await expectCacheMiss(repository, url: url, maxPixelSize: 320)
     let readsDuringClear = await persistentCache.cachedReadCount()
     XCTAssertEqual(readsDuringClear, readsBeforeClear)
@@ -501,6 +564,7 @@ final class DownsampledRemoteImageTests: XCTestCase {
     await persistentCache.releaseClear()
     let result = await clearTask.value
     XCTAssertTrue(result.removedAllEntries)
+    XCTAssertNil(repository.cachedImage(at: url, maxPixelSize: 320))
     let networkKinds = await downloader.recordedKinds()
     XCTAssertTrue(networkKinds.isEmpty)
   }
@@ -528,6 +592,7 @@ final class DownsampledRemoteImageTests: XCTestCase {
     await downloader.releaseAll()
     _ = try await request.value
 
+    XCTAssertNil(repository.cachedImage(at: url, maxPixelSize: 320))
     await expectCacheMiss(repository, url: url, maxPixelSize: 320)
     let requestCount = await downloader.requestCount()
     XCTAssertEqual(requestCount, 1)
@@ -573,6 +638,7 @@ final class DownsampledRemoteImageTests: XCTestCase {
     await downloader.releaseAll()
     _ = try await oldGenerationRequest.value
     _ = try await newGenerationRequest.value
+    XCTAssertNotNil(repository.cachedImage(at: url, maxPixelSize: 320))
     _ = try await repository.image(
       at: url,
       maxPixelSize: 320,
@@ -632,6 +698,7 @@ final class DownsampledRemoteImageTests: XCTestCase {
       XCTAssertTrue(error is CancellationError)
     }
 
+    XCTAssertNil(repository.cachedImage(at: url, maxPixelSize: 320))
     await expectCacheMiss(repository, url: url, maxPixelSize: 320)
     let requestCount = await downloader.requestCount()
     XCTAssertEqual(requestCount, 1)

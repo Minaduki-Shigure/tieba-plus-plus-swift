@@ -138,6 +138,36 @@ final class InlineEmoticonImageLoaderTests: XCTestCase {
     XCTAssertTrue(requests.isEmpty)
   }
 
+  func testSynchronousSnapshotContainsOnlyWarmCatalogImagesAndRetainsImageIdentity() async throws {
+    let urls = try catalogURLs(count: 2)
+    let renderer = UIGraphicsImageRenderer(size: CGSize(width: 24, height: 24))
+    let data = renderer.pngData { context in
+      UIColor.systemYellow.setFill()
+      context.fill(CGRect(x: 0, y: 0, width: 24, height: 24))
+    }
+    let transport = InlineEmoticonImageTestTransport(imageData: data)
+    let repository = DownsampledImageRepository(downloader: transport)
+    let loader = DefaultInlineEmoticonImageLoader(repository: repository)
+    let cached = try await loader.image(at: urls[0], fetchPolicy: .allowNetwork(.preview))
+
+    for policy: DownsampledImageFetchPolicy in [
+      .cacheOnly(.preview), .allowEconomicalNetwork(.preview), .allowNetwork(.preview),
+    ] {
+      let request = InlineEmoticonImageRequest(urls: urls, fetchPolicy: policy)
+      let snapshot = loader.cachedImages(for: request)
+      XCTAssertEqual(Set(snapshot.keys), [urls[0]])
+      XCTAssertTrue(try XCTUnwrap(snapshot[urls[0]]).image === cached.image)
+    }
+    let requests = await transport.recordedRequests()
+    XCTAssertEqual(requests.count, 1, "Taking a snapshot must never fetch the cold second image")
+
+    await repository.clearMemoryCache()
+    XCTAssertTrue(
+      loader.cachedImages(for: .init(urls: urls, fetchPolicy: .allowNetwork(.preview))).isEmpty)
+    let requestsAfterClear = await transport.recordedRequests()
+    XCTAssertEqual(requestsAfterClear.count, 1)
+  }
+
   func testAtMostFourImagesRunConcurrentlyAndCompletionRefillsOneSlot() async throws {
     let urls = try catalogURLs(count: 9)
     let firstWave = expectation(description: "Four distinct image loads reached the gate")
@@ -310,7 +340,7 @@ private actor InlineEmoticonTestGate {
   }
 }
 
-private actor InlineEmoticonImageTestTransport: RemoteImageDownloading {
+actor InlineEmoticonImageTestTransport: RemoteImageDownloading {
   struct Request: Equatable, Sendable {
     let url: URL
     let kind: RemoteImageDownloadKind

@@ -38,6 +38,18 @@ struct DefaultInlineEmoticonImageLoader: InlineEmoticonImageLoading {
     self.repository = .shared
   }
 
+  func cachedImages(for request: InlineEmoticonImageRequest) -> [URL: DownsampledImageAsset] {
+    var result: [URL: DownsampledImageAsset] = [:]
+    for url in request.urls {
+      if let asset = repository.cachedImage(
+        at: url, maxPixelSize: 120, urlPolicy: .classicEmoticon
+      ) {
+        result[url] = asset
+      }
+    }
+    return result
+  }
+
   func image(
     at url: URL,
     fetchPolicy: DownsampledImageFetchPolicy

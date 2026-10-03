@@ -107,7 +107,8 @@ struct BrowseContentView: View {
       InlineClassicEmoticonText(
         plan: emoticonPlan,
         linksUserMentions: onUserMention != nil || onTiebaLink != nil,
-        accentColor: appAccentColor.color
+        accentColor: appAccentColor.color,
+        splitsParagraphs: true
       )
       .modifier(InlineEmoticonCopyModifier(
         isEnabled: allowsDirectTextSelection, contents: contents

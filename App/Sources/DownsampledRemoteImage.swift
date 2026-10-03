@@ -346,6 +346,31 @@ private final class DownsampledImageAssetBox: NSObject {
   }
 }
 
+/// NSCache synchronizes its own entry reads, insertions and evictions. The
+/// repository still owns all mutations and generation checks; this wrapper only
+/// allows immutable, already-decoded assets to be read without an actor hop.
+private final class DownsampledImageMemoryCache: @unchecked Sendable {
+  private let entries = NSCache<NSString, DownsampledImageAssetBox>()
+
+  init() {
+    entries.totalCostLimit = 96 * 1_024 * 1_024
+    entries.countLimit = 80
+  }
+
+  func asset(forKey key: NSString) -> DownsampledImageAsset? {
+    entries.object(forKey: key)?.asset
+  }
+
+  func insert(_ asset: DownsampledImageAsset, forKey key: NSString) {
+    entries.setObject(
+      DownsampledImageAssetBox(asset), forKey: key, cost: asset.decodedByteCost)
+  }
+
+  func removeAllObjects() {
+    entries.removeAllObjects()
+  }
+}
+
 enum DownsampledImageError: Error, Equatable {
   case cacheMiss
   case invalidResponse
@@ -406,7 +431,7 @@ actor DownsampledImageRepository {
     DownsampledRemoteImageLoadProgress,
     Bool
   ) -> Void
-  private let cache = NSCache<NSString, DownsampledImageAssetBox>()
+  private nonisolated let cache = DownsampledImageMemoryCache()
   private var cacheGeneration: UInt64 = 0
   private var activeCacheClearCount = 0
   private var inFlight: [InFlightKey: InFlightRequest] = [:]
@@ -432,8 +457,23 @@ actor DownsampledImageRepository {
     self.beforeDecoding = beforeDecoding
     self.inFlightWaiterCountDidChange = inFlightWaiterCountDidChange
     self.inFlightProgressEventDidProcess = inFlightProgressEventDidProcess
-    cache.totalCostLimit = 96 * 1_024 * 1_024
-    cache.countLimit = 80
+  }
+
+  /// A memory-only snapshot for the first layout of an already-cached image.
+  /// A miss never consults disk, creates work, or changes network permissions.
+  /// URL scope and normalized pixel size match the asynchronous load exactly.
+  nonisolated func cachedImage(
+    at url: URL,
+    maxPixelSize requestedSize: Int,
+    urlPolicy: DownsampledImageURLPolicy = .remoteImage
+  ) -> DownsampledImageAsset? {
+    guard RemoteImageURLPolicy.allows(url), urlPolicy.allows(url) else { return nil }
+    let key = CacheKey(
+      urlString: url.absoluteString,
+      maxPixelSize: ImageDownsampler.normalizedRequestedPixelSize(requestedSize),
+      urlPolicyID: urlPolicy.id
+    )
+    return cache.asset(forKey: key.storageKey)
   }
 
   func clearMemoryCache() {
@@ -500,8 +540,8 @@ actor DownsampledImageRepository {
       maxPixelSize: maxPixelSize,
       urlPolicyID: urlPolicy.id
     )
-    if !isClearingAllCaches, let cached = cache.object(forKey: cacheKey.storageKey) {
-      return cached.asset
+    if !isClearingAllCaches, let cached = cache.asset(forKey: cacheKey.storageKey) {
+      return cached
     }
     let downloadKind: RemoteImageDownloadKind
     let networkAccess: RemoteImageNetworkAccess?
@@ -525,8 +565,8 @@ actor DownsampledImageRepository {
       persistentGenerationToken = nil
     }
 
-    if !isClearingAllCaches, let cached = cache.object(forKey: cacheKey.storageKey) {
-      return cached.asset
+    if !isClearingAllCaches, let cached = cache.asset(forKey: cacheKey.storageKey) {
+      return cached
     }
 
     let inFlightKey = InFlightKey(
@@ -692,11 +732,7 @@ actor DownsampledImageRepository {
       }
       try Task.checkCancellation()
       if !isClearingAllCaches, waiterCacheGeneration == cacheGeneration {
-        cache.setObject(
-          DownsampledImageAssetBox(loaded.asset),
-          forKey: cacheKey.storageKey,
-          cost: loaded.asset.decodedByteCost
-        )
+        cache.insert(loaded.asset, forKey: cacheKey.storageKey)
       }
       return loaded.asset
     } onCancel: {
