@@ -42,6 +42,14 @@ and UI model regressions are covered by automated tests; live account acceptance
 slow/changing large lists and iOS confirmation/relaunch behavior remain validation
 gates. The weighted parity estimate is unchanged pending those checks.
 
+The [cloud-cleanup CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37119608002)
+passed the complete Core and iOS App suites plus the real system icon UI test.
+Recovery coverage includes preserving an already received acknowledgement across
+disk errors, cancelled non-dispatch, old completed records surviving a failed
+new preparation, repeated post-rename sync failures, and retaining the visible
+verification entry until an absence result is durably saved. Alpha.34 packages
+this workflow; these automated fixtures do not establish live account acceptance.
+
 Current `main` adds native inline classic-emoticon images to post bodies, full
 nested replies and their compact inline previews, matching TiebaLite's
 `EmoticonText`/`PbContentRender` reading workflow. It recognizes structured faces
@@ -127,7 +135,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-serves `v0.65.0-alpha.33` (build 111) after publication, whose app-code snapshot includes
+serves `v0.65.0-alpha.34` (build 112) after publication, whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -235,7 +243,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.65.0-alpha.33` app-code snapshot is at 80–82%; all experimental
+The public `v0.65.0-alpha.34` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
