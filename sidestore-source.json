@@ -24,6 +24,17 @@
       "versions": [
         {
           "version": "0.65.0",
+          "buildVersion": "110",
+          "buildNumber": "110",
+          "date": "2026-10-03",
+          "localizedDescription": "Tieba++ v0.65.0-alpha.32 已通过核心测试、iOS 模拟器测试、匿名集成门禁和 IPA 完整性检查。此版本为无签名 IPA，供 SideStore 或 LiveContainer 自签名安装；详细功能与安全边界请参阅仓库文档。",
+          "downloadURL": "https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/releases/download/v0.65.0-alpha.32/TiebaPlusPlus-SideStore.ipa",
+          "size": 6904741,
+          "sha256": "125dac746bd4e50b7bcb16f9a04a604d65650880b4fd855384f3d7da4ec61f5a",
+          "minOSVersion": "16.0"
+        },
+        {
+          "version": "0.65.0",
           "buildVersion": "105",
           "buildNumber": "105",
           "date": "2026-10-03",
