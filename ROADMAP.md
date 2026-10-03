@@ -16,7 +16,7 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
-The next Home iteration matches TiebaLite `9701bfb6`'s `MainPage` →
+Alpha.38 matches TiebaLite `9701bfb6`'s `MainPage` →
 `HomePage` → `HomeUiIntent.Refresh` workflow: reselecting Home refreshes a
 logged-in account's visible foreground root page. Ordinary tab switches retain
 navigation without requesting refresh, and pushed pages keep their stack.
@@ -26,8 +26,15 @@ same-session snapshot atomically; failures preserve rows and pins and retry from
 page one. Pin version checks preserve newer local changes during asynchronous
 reads. Busy refreshes share current reads; this improves on upstream's queued
 `flatMapConcat` refreshes. Account changes retain their forced invalidation and
-late-result isolation. Native validation remains pending. The published
-alpha.37/build 115 and 80–82% weighted estimate are unchanged.
+late-result isolation. Home catalog activation uses incoming lifecycle and
+navigation values, so the cold-launch transition to the foreground starts the
+complete catalog without another user action.
+
+The [candidate CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37149709054)
+passed 90 focused native tests and all seven UI flows with zero failures or skips,
+including Home cold launch, reselection, retained navigation and signed-out
+behavior. Full tagged release tests remain publication gates, and physical-device
+validation is separate. Alpha.38/build 116 preserves the 80–82% weighted estimate.
 
 Alpha.37 closes TiebaLite `9701bfb6`'s selected-channel and
 selected-Explore-tab refresh workflow (`MainPage` and `ExplorePage` refresh
@@ -171,7 +178,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-serves `v0.65.0-alpha.37` (build 115) after publication, whose app-code snapshot includes
+serves `v0.65.0-alpha.38` (build 116) after publication, whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -279,7 +286,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.65.0-alpha.37` app-code snapshot is at 80–82%; all experimental
+The public `v0.65.0-alpha.38` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
