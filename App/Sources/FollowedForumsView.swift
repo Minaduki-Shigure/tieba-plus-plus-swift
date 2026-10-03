@@ -46,6 +46,9 @@ struct FollowedForumsView: View {
         forumList
       }
     }
+    .appScrollableSurface(.canvas)
+    // This destination owns its canvas even when opened from a themed list row.
+    .environment(\.wallpaperCanvasInstalled, false)
     .alert(
       viewModel.presentedOperationError?.title ?? "无法更新关注的贴吧",
       isPresented: Binding(
@@ -158,7 +161,7 @@ struct FollowedForumsView: View {
         }
       }
     }
-    .background(Color(uiColor: .systemGroupedBackground))
+    .appSurfaceBackground(.canvas, fallback: Color(uiColor: .systemGroupedBackground))
     .refreshable {
       async let forums: Void = viewModel.refresh()
       async let checkIns: Void = followedForumCheckInStore.refresh()

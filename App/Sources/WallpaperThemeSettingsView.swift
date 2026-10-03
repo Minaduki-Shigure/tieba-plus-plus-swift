@@ -331,7 +331,7 @@ struct WallpaperThemeSettingsView: View {
       .environment(\.colorScheme, model.settings.appearance == .dark ? .dark : .light)
       .accessibilityIdentifier("wallpaper-theme-preview")
       .frame(maxWidth: .infinity)
-      Text("为保持文字清晰，阅读背景会加明暗遮罩；预览与保存后的效果一致。提高对比度或降低透明度时使用纯色阅读表面。")
+      Text("图片不透明度可从 0% 调至 100%。搭配模糊、浅色或深色阅读配色，调整喜欢的效果。")
         .font(.footnote)
         .foregroundStyle(.secondary)
       if model.isRendering { ProgressView("正在生成预览…") }
@@ -374,7 +374,7 @@ struct WallpaperThemeSettingsView: View {
   }
 
   private var previewAccentStyle: AppAccentColorStyle {
-    AppAccentColorStyle(selection: accentSelection, usesWallpaperContrast: true)
+    AppAccentColorStyle(selection: accentSelection)
   }
 
   private func settingsBinding<Value>(

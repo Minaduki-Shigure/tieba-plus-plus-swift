@@ -113,10 +113,11 @@ struct FollowedForumCard: View {
       minHeight: layout == .grid ? 116 : 68,
       alignment: .leading
     )
-    .background(
-      cardSurfaceColor,
-      in: RoundedRectangle(cornerRadius: 8)
-    )
+    .background {
+      Color.clear
+        .appSurfaceBackground(.card, fallback: Color(uiColor: .secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
     .overlay {
       RoundedRectangle(cornerRadius: 8)
         .stroke(cardDividerColor, lineWidth: 0.5)
@@ -261,12 +262,6 @@ struct FollowedForumCard: View {
       style: appDarkSurfaceStyle,
       colorScheme: colorScheme
     )
-  }
-
-  private var cardSurfaceColor: Color {
-    usesOLEDSurfaces
-      ? appDarkSurfaceStyle.color(for: .card)
-      : Color(uiColor: .secondarySystemGroupedBackground)
   }
 
   private var cardDividerColor: Color {

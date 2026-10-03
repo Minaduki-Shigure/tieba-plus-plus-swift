@@ -1863,15 +1863,14 @@ pixel dimension limit. ImageIO downsamples before drawing; prepared images are
 at most 2,048 pixels per side and four million pixels, and each metadata-stripped
 JPEG is capped at 8 MiB. Cropping and finite-extent blur happen off the main actor
 before publication. Reading pages share the decoded result; semantic modifiers
-clear native scroll/row/bar backgrounds as needed and retain bounded readability
-overlays. The normal canvas uses an 84% light/dark readability layer, so the
-image contributes at most 16% to the resulting canvas; cards and bars can add
-their own semantic layer. This is intentionally more muted than TiebaLite's
-unrestricted background and is visible in the same editor preview. Its worst
-black/white image composites are bounded by `#D6D6D6` / `#292929`, allowing the
-existing high-contrast accent palette to retain normal 4.5:1 contrast. Actual
-usefulness and visual strength remain screenshot/device review items. High
-contrast and Reduce Transparency use opaque surfaces. Rotation
+clear native scroll/row/bar backgrounds as needed. Image opacity directly spans
+0–100% with no fixed global mask in the editor or installed canvas. Ordinary
+content and native navigation/tab bars remain transparent; local card and floor
+tints follow TiebaLite's small foreground-color overlays, while reply/action
+panes retain opaque window surfaces. Light/dark reading uses iOS appearance
+semantics and the existing accent palette; unrestricted wallpaper pixels do not
+have a guaranteed text contrast ratio. High contrast and Reduce Transparency
+use opaque surfaces. Rotation
 and split-view changes use aspect-fill for the installed image and re-clamp the
 editor crop to the new window. Wallpaper storage is separate from normal image
 caches, with two immutable versions and a recovery manifest.
