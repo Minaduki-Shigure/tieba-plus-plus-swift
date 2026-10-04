@@ -5,6 +5,92 @@ import XCTest
 
 @MainActor
 final class ForumSectionsViewModelTests: XCTestCase {
+  func testInitialMetadataKeepsOnlyLatestPresentedWithoutLoadingPreconstructedPages() async throws {
+    let service = ForumSectionService()
+    await service.enqueue(.suspended(81), for: .latest)
+    let coordinator = makeCoordinator(service)
+    let latest = coordinator.currentModel
+    let featured = try XCTUnwrap(coordinator.model(for: .featured))
+    XCTAssertEqual(coordinator.sections.map(\.id), [.latest, .featured])
+    XCTAssertEqual(coordinator.presentedSections.map(\.id), [.latest])
+
+    coordinator.activate()
+    try await waitUntil { await service.isPending(81) }
+    XCTAssertEqual(latest.state, .loading)
+    XCTAssertEqual(coordinator.forum.id, 0)
+    XCTAssertEqual(coordinator.presentedSections.map(\.id), [.latest])
+    XCTAssertEqual(featured.state, .idle)
+    let pendingRequests = await service.requests
+    XCTAssertEqual(pendingRequests.map(\.section), [.latest])
+
+    await service.resume(81, with: .threads(ForumSectionFixtures.page()))
+    try await loaded(latest)
+    XCTAssertEqual(coordinator.forum.id, 123)
+    XCTAssertEqual(
+      coordinator.presentedSections.map(\.id),
+      [.latest, .featured, .channel(71), .channel(72)])
+    XCTAssertTrue(coordinator.model(for: .featured) === featured)
+    XCTAssertEqual(featured.state, .idle)
+    let completedRequests = await service.requests
+    XCTAssertEqual(completedRequests.map(\.section), [.latest])
+  }
+
+  func testInitialFailureKeepsLatestPresentedAndItsRetryCanResolveMetadata() async throws {
+    let service = ForumSectionService()
+    await service.enqueue(.failure("首次读取失败"), for: .latest)
+    let coordinator = makeCoordinator(service)
+    let latest = coordinator.currentModel
+    coordinator.activate()
+    try await waitUntil { latest.state == .failed("首次读取失败") }
+    XCTAssertEqual(coordinator.presentedSections.map(\.id), [.latest])
+    XCTAssertEqual(coordinator.forum.id, 0)
+
+    await service.enqueue(.suspended(82), for: .latest)
+    // This is the existing visible page's error-retry action; the presentation
+    // gate must not replace that page or block its recovery.
+    latest.reload()
+    try await waitUntil { await service.isPending(82) }
+    XCTAssertEqual(coordinator.presentedSections.map(\.id), [.latest])
+    await service.resume(82, with: .threads(ForumSectionFixtures.page(channels: [])))
+    try await loaded(latest)
+    XCTAssertEqual(coordinator.forum.id, 123)
+    XCTAssertEqual(coordinator.presentedSections.map(\.id), [.latest, .featured])
+    let requests = await service.requests
+    XCTAssertEqual(requests.map(\.section), [.latest, .latest])
+  }
+
+  func testResolvedMetadataKeepsPresentedPagesDuringRefreshFailureAndRetry() async throws {
+    let service = ForumSectionService()
+    let coordinator = makeCoordinator(service)
+    coordinator.activate()
+    let latest = coordinator.currentModel
+    try await loaded(latest)
+    let featured = try XCTUnwrap(coordinator.model(for: .featured))
+    let channel = try XCTUnwrap(coordinator.model(for: .channel(71)))
+    let presented = coordinator.presentedSections
+    let metadata = coordinator.metadata
+
+    await service.enqueue(.suspended(83), for: .latest)
+    coordinator.reload()
+    try await waitUntil { await service.isPending(83) }
+    XCTAssertEqual(latest.state, .loading)
+    XCTAssertEqual(coordinator.presentedSections, presented)
+    await service.resume(83, with: .failure("刷新失败"))
+    try await waitUntil { latest.state == .failed("刷新失败") }
+    XCTAssertEqual(coordinator.metadata, metadata)
+    XCTAssertEqual(coordinator.presentedSections, presented)
+    XCTAssertTrue(coordinator.model(for: .featured) === featured)
+    XCTAssertTrue(coordinator.model(for: .channel(71)) === channel)
+
+    await coordinator.refresh()
+    XCTAssertEqual(latest.state, .loaded)
+    XCTAssertEqual(coordinator.presentedSections, presented)
+    XCTAssertTrue(coordinator.model(for: .featured) === featured)
+    XCTAssertTrue(coordinator.model(for: .channel(71)) === channel)
+    let requests = await service.requests
+    XCTAssertEqual(requests.map(\.section), [.latest, .latest, .latest])
+  }
+
   func testPageConstructionIsLazyAndSwitchingBackRetainsIdentityAndLoadedRows() async throws {
     let service = ForumSectionService()
     let coordinator = makeCoordinator(service)
