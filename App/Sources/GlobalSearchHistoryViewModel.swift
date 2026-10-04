@@ -8,8 +8,8 @@ final class GlobalSearchHistoryViewModel: ObservableObject {
   @Published private(set) var errorMessage: String?
 
   private let repository: any GlobalSearchHistoryRepository
+  private let operations = SearchHistoryOperationQueue()
   private var initialLoadTask: Task<Void, Never>?
-  private var recordTask: Task<Void, Never>?
   private var hasLoaded = false
   private var lastRecordTimestamp: Date?
 
@@ -24,13 +24,14 @@ final class GlobalSearchHistoryViewModel: ObservableObject {
       return
     }
 
-    let task = Task { [weak self] in
-      guard let self else { return }
+    let task = operations.enqueue { [self] in
+      defer { initialLoadTask = nil }
+      // A previously queued record or reset may have already loaded the owner.
+      guard !hasLoaded else { return }
       await self.reload()
     }
     initialLoadTask = task
     await task.value
-    initialLoadTask = nil
   }
 
   func record(_ rawQuery: String) {
@@ -38,65 +39,65 @@ final class GlobalSearchHistoryViewModel: ObservableObject {
     let queryKey = GlobalSearchHistoryEntry.normalizedIdentityComponent(query)
     guard !queryKey.isEmpty, queryKey.count <= 100 else { return }
 
-    let previousTask = recordTask
     let repository = repository
     let timestamp = nextRecordTimestamp()
-    recordTask = Task { [weak self] in
-      await previousTask?.value
+    operations.enqueue { [self] in
       do {
         try await repository.record(query: query, at: timestamp)
-        await self?.reload()
+        await reload()
       } catch is CancellationError {
         return
       } catch {
-        self?.errorMessage = error.localizedDescription
+        errorMessage = error.localizedDescription
       }
     }
   }
 
   func delete(id: String) async {
-    await recordTask?.value
-    do {
-      try await repository.delete(id: id)
-      entries.removeAll { $0.id == id }
-      errorMessage = nil
-    } catch is CancellationError {
-      return
-    } catch {
-      errorMessage = error.localizedDescription
-    }
+    await operations.enqueue { [self] in
+      do {
+        try await repository.delete(id: id)
+        entries.removeAll { $0.id == id }
+        errorMessage = nil
+      } catch is CancellationError {
+        return
+      } catch {
+        errorMessage = error.localizedDescription
+      }
+    }.value
   }
 
   func deleteAll() async {
-    await recordTask?.value
-    do {
-      try await repository.deleteAll()
-      entries = []
-      errorMessage = nil
-    } catch is CancellationError {
-      return
-    } catch {
-      errorMessage = error.localizedDescription
-    }
+    await operations.enqueue { [self] in
+      do {
+        try await repository.deleteAll()
+        entries = []
+        errorMessage = nil
+      } catch is CancellationError {
+        return
+      } catch {
+        errorMessage = error.localizedDescription
+      }
+    }.value
   }
 
   func retry() async {
-    await recordTask?.value
-    await reload()
+    await operations.enqueue { [self] in await reload() }.value
   }
 
   func reset() async {
-    await recordTask?.value
-    do {
-      try await repository.reset()
-      entries = []
-      hasLoaded = true
-      errorMessage = nil
-    } catch is CancellationError {
-      return
-    } catch {
-      errorMessage = error.localizedDescription
-    }
+    await operations.enqueue { [self] in
+      do {
+        try await repository.reset()
+        entries = []
+        hasLoaded = true
+        errorMessage = nil
+      } catch is CancellationError {
+        return
+      } catch {
+        errorMessage = error.localizedDescription
+      }
+    }.value
   }
 
   private func reload() async {
