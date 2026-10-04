@@ -1,0 +1,77 @@
+name: Profile activity candidate
+on:
+  push:
+    branches: [ci/profile-activity-native-1004]
+permissions:
+  contents: read
+jobs:
+  profile-activity:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Select iPhone simulator
+        run: |
+          set -euo pipefail
+          device_id="$(xcrun simctl list devices available -j | jq -r '
+            [.devices[][] | select(.isAvailable == true and (.name | startswith("iPhone")))] as $phones
+            | (($phones | map(select(.name == "iPhone 16 Pro"))) + $phones | .[0].udid // empty)
+          ')"
+          test -n "$device_id"
+          echo "PROFILE_SIMULATOR_DESTINATION=platform=iOS Simulator,id=$device_id" >> "$GITHUB_ENV"
+      - name: Verify profile state and account lifecycle
+        id: models
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild -project TiebaPlusPlus.xcodeproj -scheme TiebaPlusPlus \
+            -configuration Debug -derivedDataPath build/DerivedData \
+            -destination "$PROFILE_SIMULATOR_DESTINATION" -parallel-testing-enabled NO \
+            -only-testing:TiebaPlusPlusTests/UserProfileActivityViewModelTests \
+            -only-testing:TiebaPlusPlusTests/UserProfileViewModelTests \
+            -only-testing:TiebaPlusPlusTests/UserRepliesViewModelTests \
+            -only-testing:TiebaPlusPlusTests/UserRelationshipViewModelTests \
+            -only-testing:TiebaPlusPlusTests/UserActivityReplyRowTests \
+            -only-testing:TiebaPlusPlusTests/UserProfileAccountIdentityViewModelTests \
+            -resultBundlePath profile-model-results.xcresult \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO \
+            test 2>&1 | tee profile-model-test.log
+      - name: Verify native activity paging and destinations
+        id: ui
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild -project TiebaPlusPlus.xcodeproj -scheme TiebaPlusPlusIconsUI \
+            -configuration Debug -derivedDataPath build/DerivedData -enableCodeCoverage YES \
+            -destination "$PROFILE_SIMULATOR_DESTINATION" -parallel-testing-enabled NO \
+            -only-testing:TiebaPlusPlusUITests/UserProfileActivityUITests \
+            -resultBundlePath profile-ui-results.xcresult \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO \
+            test 2>&1 | tee profile-ui-test.log
+      - name: Export model results
+        if: always()
+        run: |
+          xcrun xcresulttool get test-results summary \
+            --path profile-model-results.xcresult --compact > profile-model-summary.json
+      - name: Export UI evidence
+        if: always()
+        run: |
+          xcrun xcresulttool get test-results summary \
+            --path profile-ui-results.xcresult --compact > profile-ui-summary.json
+          xcrun xcresulttool export attachments \
+            --path profile-ui-results.xcresult --output-path profile-ui-attachments
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: profile-activity-candidate
+          path: |
+            profile-model-test.log
+            profile-model-summary.json
+            profile-ui-test.log
+            profile-ui-summary.json
+            profile-ui-attachments/
+      - name: Enforce both validations
+        if: ${{ always() && (steps.models.outcome != 'success' || steps.ui.outcome != 'success') }}
+        run: exit 1
