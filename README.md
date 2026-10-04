@@ -20,11 +20,31 @@ and its verified metadata enters the public app source.
 | Local features | Available with TiebaLite-aligned Home, Explore, Messages, and My primary tabs backed by independent system navigation stacks; an independent default-on preference can remove only Explore from the tab bar without changing the Home discovery-section preference or saved startup destination. My groups local favorites, history, an inline appearance choice, settings, and About, while Messages exposes global search in its own stack. History, favorites, filtering, appearance with an independent system/OLED dark-surface choice, media preferences, explicit standard/pure/only-author immersive thread-reading modes, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, a next-launch destination including personalized discovery and the inbox, and ordered iOS Home Screen quick actions for existing destinations are also available. The primary-tab shell and reply notice's system handoff attempt remain pending physical-device validation |
 | Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary and guarded native nickname/sex/biography/avatar editor, a credential-free handoff to Baidu's fixed official username-management page, followed forums with validated level-up progress and account-bound today-check-in marks where the server supplies them, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with a shared Home-toolbar/account-page message badge, separate optional fan-reminder badge, and authoritative reply actions, Tieba cloud favorites with a saved-position-to-latest-update handoff, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded profile text and avatar edits, forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies plus explicitly confirmed deletion of the active account's own topic, ordinary floor or nested reply, or another author's ordinary floor or nested reply in its own topic; these newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
-| TiebaLite parity | Current `main` and public `v0.65.0-alpha.40`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
-| Distribution | The public SideStore/LiveContainer source serves `v0.65.0-alpha.40` (build 118) after its tested IPA is published |
+| TiebaLite parity | Current `main` and public `v0.65.0-alpha.41`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
+| Distribution | The public SideStore/LiveContainer source serves `v0.65.0-alpha.41` (build 119) after its tested IPA is published |
 
 ### Release and validation
 
+- **`v0.65.0-alpha.41` retained forum sections:** Latest, Featured and general
+  channels have separate lists, reading positions, sorting, featured categories,
+  pagination and retry state. Tapping a section or swiping between pages keeps
+  its loaded content; only the visible page starts reads. The initial Latest
+  response resolves the forum and channel catalog before other sections become
+  available. Later catalog changes reconcile stable section IDs and reject old
+  responses. Filter changes and confirmed topic creation invalidate cached lists
+  while reloading only the active page. The forum shares one account-bound
+  check-in state, and return-to-top targets only the current list.
+  Native tests found that a page-style `TabView` could recreate distant lists;
+  the pager instead keeps stable native lists mounted, with row virtualization
+  preserved. It also restores native paging after SwiftUI reconfigures the same
+  scroll view during layout-direction changes.
+  The [focused candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37167883443)
+  passed all 20 section-model tests and both actual forum UI flows, covering
+  four retained positions, pagination, detail navigation, horizontal swipes and
+  edge-back navigation. Its separate native RTL failure led to the paging fix;
+  native regression and full tagged CI remain publication gates. Physical-device
+  scrolling and gesture behavior still need validation. The weighted parity
+  estimate is unchanged.
 - **`v0.65.0-alpha.40` adaptive primary navigation:** The existing Home, Explore, Messages and My
   destinations adapt to the actual window width. Regular-width windows with
   noncompact height use a narrow rail from 600 pt and a full sidebar from
@@ -1026,7 +1046,7 @@ and its verified metadata enters the public app source.
   IPA and checks it against the published source. The public source therefore
   never exposes the release-preparation commit by itself; version, graph, or
   concurrent-source mismatches fail closed.
-  The source distributes the verified `v0.65.0-alpha.40` IPA (build 118) after publication.
+  The source distributes the verified `v0.65.0-alpha.41` IPA (build 119) after publication.
 - **Login hotfix:** `v0.54.0-alpha.1` can reach Tieba's account page without
   completing because its callback and Cookie matching are too strict.
   `v0.54.1-alpha.1` made that failure explicit and confirmed that iOS 18.7.2
@@ -1059,7 +1079,9 @@ and its verified metadata enters the public app source.
   never interprets user text as a regular expression.
 - **Forum browsing:** Forum and channel lists support pagination, refresh,
   reply-time or creation-time sorting, server-defined classifications, and
-  bounded channel menus with independent cursors. The forum toolbar's primary
+  bounded channel menus. Latest, Featured and general channels retain separate
+  lists, reading positions, sorting and cursors while switching or swiping;
+  only the visible section starts reads. The forum toolbar's primary
   action can be set locally to publish, refresh, return to top, or hidden; the
   complete refresh, return-to-top, share, and available publish actions remain
   reachable from the More menu. A loaded forum offers an
@@ -1524,7 +1546,7 @@ and its verified metadata enters the public app source.
   about 18–20%; its anonymous reading and media subtotal remains about 91–95%.
   This measures implemented end-to-end workflows with partial credit for
   device-validation gates; it is not a claim that every path is release-ready.
-  The public `v0.65.0-alpha.40` app-code snapshot has the same 80–82% weighted
+  The public `v0.65.0-alpha.41` app-code snapshot has the same 80–82% weighted
   estimate and includes the adaptive configurable primary shell, My/Messages shortcuts,
   search highlighting, cloud-favorite author links, guarded profile text and
   avatar editing, authoritative content-approval readback, and optional background

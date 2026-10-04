@@ -16,6 +16,21 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
+Alpha.41/build 119 retains independent Latest, Featured and general-channel
+pages, following TiebaLite `9701bfb6`'s reachable `ForumPage`. The coordinator
+preserves each page's list, sort, featured classification, cursor and retry
+state; a stable native pager also retains reading positions across distant
+selections. Only the active section loads. Initial forum metadata gates channel
+availability, and subsequent catalog changes atomically reconcile identities.
+Check-in state belongs to the forum, and return-to-top uses the active list.
+The [focused candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37167883443)
+passed 20 model tests and both actual forum UI workflows. Its native RTL test
+exposed SwiftUI resetting paging on the same scroll view; the bridge now
+restores that configuration after layout updates. Native regression and full
+tagged CI remain publication gates. Physical-device behavior remains a separate
+validation requirement, and this improves an already credited area without
+changing the 80–82% weighted estimate.
+
 Alpha.40/build 118 adaptive primary navigation follows TiebaLite `9701bfb6`'s reachable `MainPage`
 and `NavigationWrapper`: bottom navigation for compact width, a rail for medium
 width and a permanent drawer for expanded width. On iOS the 600/840 pt boundaries
@@ -226,7 +241,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-serves `v0.65.0-alpha.40` (build 118) after publication, whose app-code snapshot includes
+serves `v0.65.0-alpha.41` (build 119) after publication, whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -334,7 +349,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.65.0-alpha.40` app-code snapshot is at 80–82%; all experimental
+The public `v0.65.0-alpha.41` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
@@ -1861,7 +1876,7 @@ first advertised entry; a missing menu sends the protocol's `-1` sentinel.
 with both the page number and the final valid thread ID. Missing, duplicate, or
 stalled cursors terminate pagination instead of repeatedly loading one page.
 
-The forum-section development branch follows the reachable `ForumPage` in
+The retained forum sections follow the reachable `ForumPage` in
 TiebaLite `9701bfb6`: Latest, Featured and general channels are separate pages
 with independent lists and pagination. The iOS coordinator keeps each visited
 section's model, sorting, featured classification, cursor and retry state for
@@ -1882,9 +1897,10 @@ new forum pager keeps stable pages in one eager horizontal stack with native
 paging, preserving the existing navigation environment and each List's row
 virtualization. Return-to-top requests target only the current page's local
 scroll reader, and account-bound check-in state is shared by the forum instead
-of reloaded for each page. Model, native-view and actual swipe/navigation UI
-regressions are required before this development branch can be published;
-these changes are not part of the currently published alpha.40 release.
+of reloaded for each page. The bridge restores its public paging configuration
+after layout updates because SwiftUI can reset it on the same native scroll
+view. Model, native-view and actual swipe/navigation UI regressions remain
+release gates; device scrolling and gesture validation is separate.
 
 Thread-list mapping preserves the public topic kind, first-post ID, server state
 flags, author portrait, and available read-only counters through the application
