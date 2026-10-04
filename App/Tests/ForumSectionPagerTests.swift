@@ -67,6 +67,106 @@ final class ForumSectionPagerTests: XCTestCase {
     }
   }
 
+  func testNativeHorizontalSettlementUpdatesSelectionAndKeepsVerticalPosition() async throws {
+    let harness = try ForumSectionPagerTestHarness(sections: [0, 1, 2, 3])
+    defer { harness.close() }
+    let first = try await visiblePage(0, in: harness)
+    first.setContentOffset(CGPoint(x: 0, y: 321), animated: false)
+    let pager = try XCTUnwrap(pagingScroll(containing: first))
+    XCTAssertTrue(pager.isPagingEnabled)
+    XCTAssertNotNil(pager.delegate, "SwiftUI keeps its own scroll delegate.")
+    let originalDelegate = pager.delegate
+
+    // Drive UIKit's content offset, not the binding. The bridge must report the
+    // settled native page back to the caller. Actual swipes belong to UI tests.
+    pager.setContentOffset(CGPoint(x: pager.bounds.width * 3, y: 0), animated: false)
+    try await waitForSelection(3, in: harness)
+    _ = try await visiblePage(3, in: harness)
+    XCTAssertTrue(pager.delegate === originalDelegate)
+    pager.setContentOffset(CGPoint(x: pager.bounds.width * 1.2, y: 0), animated: false)
+    try await waitForSelection(1, in: harness)
+    _ = try await visiblePage(1, in: harness)
+    XCTAssertEqual(pager.contentOffset.x, pager.bounds.width, accuracy: 0.5)
+    pager.setContentOffset(.zero, animated: false)
+    try await waitForSelection(0, in: harness)
+    let returned = try await visiblePage(0, in: harness)
+    XCTAssertTrue(returned === first)
+    XCTAssertEqual(returned.contentOffset.y, 321, accuracy: 0.5)
+  }
+
+  func testWidthChangesKeepSelectedPageAlignedWithoutRebuildingItsList() async throws {
+    let harness = try ForumSectionPagerTestHarness(sections: [0, 1, 2, 3])
+    defer { harness.close() }
+    harness.selection.value = 3
+    let original = try await visiblePage(3, in: harness)
+    original.setContentOffset(CGPoint(x: 0, y: 411), animated: false)
+    let pager = try XCTUnwrap(pagingScroll(containing: original))
+    for width: CGFloat in [220, 300, 260] {
+      harness.selection.width = width
+      try await harness.settleLayout()
+      let scroll = try await visiblePage(3, in: harness)
+      XCTAssertEqual(harness.selection.value, 3)
+      XCTAssertTrue(scroll === original)
+      XCTAssertEqual(scroll.bounds.width, width, accuracy: 0.5)
+      XCTAssertEqual(pager.contentOffset.x, width * 3, accuracy: 0.5)
+      XCTAssertEqual(scroll.contentOffset.y, 411, accuracy: 0.5)
+    }
+    // The parent chooses the fallback when the current section disappears.
+    harness.selection.value = 1
+    harness.selection.sections = [0, 1, 2]
+    _ = try await visiblePage(1, in: harness)
+    XCTAssertEqual(harness.selection.value, 1)
+  }
+
+  func testRightToLeftPagesPreserveIdentityAndMapNativeSettlementBackToSection() async throws {
+    let harness = try ForumSectionPagerTestHarness(sections: [0, 1, 2, 3])
+    defer { harness.close() }
+    let first = try await visiblePage(0, in: harness)
+    first.setContentOffset(CGPoint(x: 0, y: 233), animated: false)
+    harness.selection.layoutDirection = .rightToLeft
+    try await harness.settleLayout()
+    let sameFirst = try await visiblePage(0, in: harness)
+    XCTAssertTrue(sameFirst === first)
+    XCTAssertEqual(sameFirst.contentOffset.y, 233, accuracy: 0.5)
+    let pager = try XCTUnwrap(pagingScroll(containing: sameFirst))
+    XCTAssertEqual(pager.contentOffset.x, pager.bounds.width * 3, accuracy: 0.5)
+    pager.setContentOffset(.zero, animated: false)
+    try await waitForSelection(3, in: harness)
+    _ = try await visiblePage(3, in: harness)
+    harness.selection.layoutDirection = .leftToRight
+    try await harness.settleLayout()
+    _ = try await visiblePage(3, in: harness)
+    XCTAssertEqual(harness.selection.value, 3)
+    XCTAssertEqual(pager.contentOffset.x, pager.bounds.width * 3, accuracy: 0.5)
+  }
+
+  private func pagingScroll(containing view: UIView) -> UIScrollView? {
+    var ancestor = view.superview
+    while let current = ancestor {
+      if let scroll = current as? UIScrollView,
+        scroll.accessibilityIdentifier == "forum-section-pager-scroll"
+      {
+        return scroll
+      }
+      ancestor = current.superview
+    }
+    return nil
+  }
+
+  private func waitForSelection(
+    _ selection: Int, in harness: ForumSectionPagerTestHarness,
+    file: StaticString = #filePath, line: UInt = #line
+  ) async throws {
+    for _ in 0..<150 {
+      if harness.selection.value == selection { return }
+      try await Task.sleep(for: .milliseconds(20))
+    }
+    XCTFail(
+      "Native settlement did not select \(selection). \(harness.diagnostics())", file: file,
+      line: line)
+    throw ForumSectionPagerTestError.timeout
+  }
+
   private func visiblePage(
     _ section: Int,
     in harness: ForumSectionPagerTestHarness,
@@ -91,7 +191,8 @@ final class ForumSectionPagerTests: XCTestCase {
       }
       try await Task.sleep(for: .milliseconds(20))
     }
-    XCTFail("Page \(section) did not become visible. \(harness.diagnostics())", file: file, line: line)
+    XCTFail(
+      "Page \(section) did not become visible. \(harness.diagnostics())", file: file, line: line)
     throw ForumSectionPagerTestError.timeout
   }
 
@@ -106,7 +207,8 @@ final class ForumSectionPagerTests: XCTestCase {
       if harness.recorder.views[section]?.last?.localValue == expected { return }
       try await Task.sleep(for: .milliseconds(20))
     }
-    XCTFail("Page \(section) state did not update. \(harness.diagnostics())", file: file, line: line)
+    XCTFail(
+      "Page \(section) state did not update. \(harness.diagnostics())", file: file, line: line)
     throw ForumSectionPagerTestError.timeout
   }
 }
@@ -168,6 +270,8 @@ private final class ForumSectionPagerTestHarness {
 private final class ForumSectionPagerTestSelection: ObservableObject {
   @Published var sections: [Int]
   @Published var value: Int
+  @Published var width: CGFloat?
+  @Published var layoutDirection: LayoutDirection = .leftToRight
 
   init(sections: [Int]) {
     self.sections = sections
@@ -191,6 +295,8 @@ private struct ForumSectionPagerTestRoot: View {
       ForumSectionPagerTestPage(
         section: section, sections: selection.sections, recorder: recorder)
     }
+    .frame(width: selection.width)
+    .environment(\.layoutDirection, selection.layoutDirection)
   }
 }
 
@@ -210,10 +316,11 @@ private struct ForumSectionPagerTestPage: View {
   var body: some View {
     ForumSectionPagerNativeProbe(
       section: section, sections: sections, recorder: recorder,
-      stateID: identity.id, localValue: localValue)
-      .onAppear {
-        recorder.changeState[section] = { localValue += 1 }
-      }
+      stateID: identity.id, localValue: localValue
+    )
+    .onAppear {
+      recorder.changeState[section] = { localValue += 1 }
+    }
   }
 }
 
