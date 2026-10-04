@@ -173,23 +173,65 @@ final class HistoryScopesUITests: XCTestCase {
 
   @MainActor
   private func anchor(prefix: String, app: XCUIApplication) throws -> Anchor {
-    var previous: Anchor?
+    let kind = app.buttons["history-kind-thread"].isSelected ? "thread" : "forum"
+    let list = historyList(kind, app: app)
+    let appFrame = app.frame
+    var element: XCUIElement?
+    var title = ""
+    var previousY: CGFloat?
+    var lastFrame = CGRect.null
+    var samples: [CGFloat] = []
     var stable = 0
-    try wait("Stable history anchor") {
-      guard
-        let element = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", prefix))
-          .allElementsBoundByIndex.first(where: { self.fullyVisible($0, app: app) })
-      else { return false }
-      let current = Anchor(title: element.label, y: element.frame.minY)
-      if let previous, previous.title == current.title, abs(previous.y - current.y) < 1 {
-        stable += 1
-      } else {
-        stable = 0
-      }
-      previous = current
-      return stable >= 2
-    }
-    return try XCTUnwrap(previous)
+    try wait(
+      "Stable history anchor",
+      diagnostics: {
+        // continueAfterFailure=false can abort before the test's defer runs.
+        self.attachState(app)
+        let selected = app.buttons["history-kind-thread"].isSelected ? "thread" : "forum"
+        return "kind=\(kind) selected=\(selected) title=\(title) frame=\(lastFrame) "
+          + "samples=\(samples) stable=\(stable)"
+      },
+      until: {
+        if element == nil {
+          // Enumerate only this category, once. A global scan also visits hidden
+          // rows and metadata; repeating it can exhaust the stability deadline.
+          let candidates = list.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH %@", prefix))
+          for candidate in candidates.allElementsBoundByIndex {
+            let frame = candidate.frame
+            guard frame.minY > appFrame.height * 0.3, frame.maxY < appFrame.height * 0.9,
+              candidate.isHittable
+            else { continue }
+            title = candidate.label
+            element = list.staticTexts[title].firstMatch
+            lastFrame = frame
+            previousY = frame.minY
+            samples.append(frame.minY)
+            stable = 1
+            break
+          }
+          return false
+        }
+        guard let element else { return false }
+        let frame = element.frame
+        lastFrame = frame
+        guard frame.minY > appFrame.height * 0.3, frame.maxY < appFrame.height * 0.9,
+          element.isHittable
+        else {
+          previousY = nil
+          stable = 0
+          return false
+        }
+        samples.append(frame.minY)
+        if let previousY, abs(previousY - frame.minY) < 1 {
+          stable += 1
+        } else {
+          stable = 1
+        }
+        previousY = frame.minY
+        return stable >= 3
+      })
+    return Anchor(title: title, y: try XCTUnwrap(previousY))
   }
 
   @MainActor
