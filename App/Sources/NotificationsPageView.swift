@@ -26,7 +26,7 @@ struct NotificationsPageView<Row: View>: View {
       .alert(
         "刷新失败",
         isPresented: Binding(
-          get: { isActive && model.refreshError != nil },
+          get: { acceptsActions && model.refreshError != nil },
           set: { if !$0 { model.clearRefreshError() } })
       ) {
         Button("好", role: .cancel) { model.clearRefreshError() }
