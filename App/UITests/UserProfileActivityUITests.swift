@@ -135,10 +135,38 @@ final class UserProfileActivityUITests: XCTestCase {
       app.buttons[title].firstMatch, y: y, context: "Other page after successful refresh")
   }
 
+  @MainActor
+  func testInitialProfileFailureDefersPaginationUntilRetryMakesThePageVisible() throws {
+    let app = try launchFixture(failsInitialProfile: true)
+    defer { attachState(app) }
+    try wait("Initial profile error covers the retained pages") {
+      app.staticTexts["离线资料首次读取失败"].firstMatch.isHittable
+    }
+    try counts(
+      "profile=1 threads=1 replies=0 relationship=0 posts=0 comments=0 unexpected=0", app: app)
+    XCTAssertFalse(app.staticTexts["公开主题·帖子1"].firstMatch.isHittable)
+
+    try tap(app.buttons["重试"].firstMatch)
+    try wait("Retry reveals the retained activity page") {
+      app.buttons["user-profile-section-threads"].isHittable
+    }
+    // The profile header may fill the initial viewport. Reveal the actual last
+    // row before expecting pagination, rather than requiring a hidden read.
+    try reveal(app.staticTexts["公开主题·帖子1"].firstMatch, app: app)
+    try counts(
+      "profile=2 threads=2 replies=0 relationship=1 posts=0 comments=0 unexpected=0", app: app)
+    let secondPage = app.staticTexts["公开主题·帖子21"].firstMatch
+    try reveal(secondPage, app: app)
+    try counts(
+      "profile=2 threads=2 replies=0 relationship=1 posts=0 comments=0 unexpected=0", app: app)
+  }
+
   private enum Activity: String { case threads, replies }
 
   @MainActor
-  private func launchFixture(failsFirstRefresh: Bool = false) throws -> XCUIApplication {
+  private func launchFixture(
+    failsFirstRefresh: Bool = false, failsInitialProfile: Bool = false
+  ) throws -> XCUIApplication {
     continueAfterFailure = false
     XCUIDevice.shared.orientation = .portrait
     let app = XCUIApplication()
@@ -149,10 +177,15 @@ final class UserProfileActivityUITests: XCTestCase {
     if failsFirstRefresh {
       app.launchArguments.append("--profile-activity-refresh-failure")
     }
+    if failsInitialProfile {
+      app.launchArguments.append("--profile-activity-initial-failure")
+    }
     app.launch()
     try tap(app.buttons["进入离线用户主页"])
-    try counts(
-      "profile=1 threads=1 replies=0 relationship=1 posts=0 comments=0 unexpected=0", app: app)
+    if !failsInitialProfile {
+      try counts(
+        "profile=1 threads=1 replies=0 relationship=1 posts=0 comments=0 unexpected=0", app: app)
+    }
     return app
   }
 

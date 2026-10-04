@@ -445,12 +445,15 @@ struct UserProfileView: View {
         .listRowSeparator(.hidden)
 
         likedForumPreview(profile)
-      }
 
-      if section == .threads {
-        publicThreadsSection
-      } else {
-        publicRepliesSection
+        // Retain the List itself during initial profile loading, but do not
+        // mount activity rows behind its invisible overlay. Their real first
+        // appearance after the header is laid out starts visible-tail paging.
+        if section == .threads {
+          publicThreadsSection
+        } else {
+          publicRepliesSection
+        }
       }
     }
     .environment(\.defaultMinListRowHeight, 1)
@@ -691,11 +694,12 @@ struct UserProfileView: View {
   }
 
   private func isActive(_ section: UserProfileActivitySection) -> Bool {
-    activityViewModel.isActive && activityViewModel.selectedSection == section
+    viewModel.profile != nil
+      && activityViewModel.isActive && activityViewModel.selectedSection == section
   }
 
   private func resumeVisiblePagination() {
-    guard activityViewModel.isActive else { return }
+    guard viewModel.profile != nil, activityViewModel.isActive else { return }
     switch activityViewModel.selectedSection {
     case .threads:
       if let last = viewModel.threads.last,
