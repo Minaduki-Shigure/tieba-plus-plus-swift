@@ -72,7 +72,7 @@ final class ForumSectionPagerTests: XCTestCase {
     defer { harness.close() }
     let first = try await visiblePage(0, in: harness)
     first.setContentOffset(CGPoint(x: 0, y: 321), animated: false)
-    let pager = try XCTUnwrap(pagingScroll(containing: first))
+    let pager = try await pagingScroll(containing: first, in: harness)
     XCTAssertTrue(pager.isPagingEnabled)
     XCTAssertNotNil(pager.delegate, "SwiftUI keeps its own scroll delegate.")
     let originalDelegate = pager.delegate
@@ -100,7 +100,7 @@ final class ForumSectionPagerTests: XCTestCase {
     harness.selection.value = 3
     let original = try await visiblePage(3, in: harness)
     original.setContentOffset(CGPoint(x: 0, y: 411), animated: false)
-    let pager = try XCTUnwrap(pagingScroll(containing: original))
+    let pager = try await pagingScroll(containing: original, in: harness)
     for width: CGFloat in [220, 300, 260] {
       harness.selection.width = width
       try await harness.settleLayout()
@@ -128,7 +128,7 @@ final class ForumSectionPagerTests: XCTestCase {
     let sameFirst = try await visiblePage(0, in: harness)
     XCTAssertTrue(sameFirst === first)
     XCTAssertEqual(sameFirst.contentOffset.y, 233, accuracy: 0.5)
-    let pager = try XCTUnwrap(pagingScroll(containing: sameFirst))
+    let pager = try await pagingScroll(containing: sameFirst, in: harness)
     XCTAssertEqual(pager.contentOffset.x, pager.bounds.width * 3, accuracy: 0.5)
     pager.setContentOffset(.zero, animated: false)
     try await waitForSelection(3, in: harness)
@@ -140,17 +140,27 @@ final class ForumSectionPagerTests: XCTestCase {
     XCTAssertEqual(pager.contentOffset.x, pager.bounds.width * 3, accuracy: 0.5)
   }
 
-  private func pagingScroll(containing view: UIView) -> UIScrollView? {
-    var ancestor = view.superview
-    while let current = ancestor {
-      if let scroll = current as? UIScrollView,
-        scroll.accessibilityIdentifier == "forum-section-pager-scroll"
-      {
-        return scroll
+  private func pagingScroll(
+    containing view: UIView, in harness: ForumSectionPagerTestHarness,
+    file: StaticString = #filePath, line: UInt = #line
+  ) async throws -> UIScrollView {
+    // SwiftUI can display the initial page before the bridge's deferred UIKit
+    // configuration. Page visibility alone does not prove pager readiness.
+    for _ in 0..<150 {
+      var ancestor = view.superview
+      while let current = ancestor {
+        if let scroll = current as? UIScrollView,
+          scroll.accessibilityIdentifier == "forum-section-pager-scroll",
+          scroll.isPagingEnabled
+        {
+          return scroll
+        }
+        ancestor = current.superview
       }
-      ancestor = current.superview
+      try await Task.sleep(for: .milliseconds(20))
     }
-    return nil
+    XCTFail("Native pager bridge did not attach. \(harness.diagnostics())", file: file, line: line)
+    throw ForumSectionPagerTestError.timeout
   }
 
   private func waitForSelection(
