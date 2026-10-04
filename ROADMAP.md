@@ -864,7 +864,8 @@ the source metadata is updated to that tested IPA.
 - Local pinned-forum ordering and explicit forum-favorite context actions
 - Saved-thread reading-position and browse-mode restoration
 - Default-off only-author and descending overrides for locally saved threads
-- Home-screen shortcuts for locally saved forums
+- Pinned entries on the App's Home page for locally saved forums; an individual
+  forum icon on the iOS Home Screen remains a separate platform-parity gap
 - HTTPS-only anonymous requests with no account credentials or hardware-derived identifiers
 - Ephemeral, HTTPS-only Baidu Web login with an exact host allowlist
 - Same-snapshot BDUSS/STOKEN capture, independent same-UID session binding,
