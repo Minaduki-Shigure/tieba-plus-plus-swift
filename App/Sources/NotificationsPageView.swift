@@ -117,17 +117,24 @@ struct NotificationsPageView<Row: View>: View {
         .listRowSeparator(.hidden)
       }
 
-      if model.isLoadingMore {
-        HStack {
-          Spacer()
-          ProgressView()
-          Spacer()
+      if !model.messages.isEmpty {
+        // Keep the measured footer row between requests, including when a
+        // completed page contains only hidden messages. Removing and inserting
+        // the spinner row changes List's content size at its visible tail and
+        // can move the reading position before the next page arrives.
+        VStack {
+          if let message = model.loadMoreError {
+            LoadMoreErrorView(message: message) {
+              if acceptsActions { model.retryLoadMore() }
+            }
+          } else {
+            ProgressView()
+              .opacity(model.isLoadingMore ? 1 : 0)
+          }
         }
-        .listRowSeparator(.hidden)
-      } else if let message = model.loadMoreError {
-        LoadMoreErrorView(message: message) {
-          if acceptsActions { model.retryLoadMore() }
-        }
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .allowsHitTesting(acceptsActions && model.loadMoreError != nil)
+        .accessibilityHidden(!model.isLoadingMore && model.loadMoreError == nil)
         .listRowSeparator(.hidden)
       }
     }
