@@ -40,11 +40,16 @@ preserving record identities. Local delete, clear and recording-setting writes
 are serialized and survive navigation; cancelled or outdated reads cannot
 restore removed entries, and an older failed setting write cannot revert a
 newer choice. Refresh failures preserve the existing snapshot for retry.
-The [native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37178097669)
-is running 24 history model tests and three UI workflows, including real Thread
-and Forum destinations, scroll positions, swipe-delete/pager arbitration, clear
-confirmation, recording changes and independent reopening of a temporary file
-archive. These validations are pending; this candidate is not a published IPA.
+The [first native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37178097669)
+passed all 24 history model tests and the position/detail-return UI flow, but
+failed the other two UI workflows. Video and disk readback showed the outer
+pager taking the row's left swipe instead of revealing Delete; a toolbar menu's
+outer accessibility element was also not hittable. History now separates those
+interactions: two permanently mounted pages use category taps or a swipe on the
+category strip, while row swipes remain owned by the native List. The standard
+menu label names its actual control. Follow-up native validation is required for
+swipe deletion, clear confirmation, recording changes and independent reopening
+of a temporary file archive. This candidate is not a published IPA.
 No account operation or endpoint is added, and the weighted estimate is unchanged.
 
 Alpha.43/build 121 follows TiebaLite `9701bfb6`'s reachable forum/thread/user
