@@ -15,7 +15,8 @@ struct NotificationsView: View {
   let isActive: Bool
 
   @Environment(\.hidesReplyEntryPoints) private var hidesReplyEntryPoints
-  @StateObject private var viewModel: NotificationsViewModel
+  @Environment(\.scenePhase) private var scenePhase
+  @StateObject private var viewModel: NotificationsActivityViewModel
   @State private var replyRouteState = NotificationsReplyRouteState()
   @State private var replyNotice: String?
   @State private var isPresented = false
@@ -40,7 +41,7 @@ struct NotificationsView: View {
     self.searchHistoryRepository = searchHistoryRepository
     self.isActive = isActive
     _viewModel = StateObject(
-      wrappedValue: NotificationsViewModel(
+      wrappedValue: NotificationsActivityViewModel(
         service: accountService,
         vault: vault,
         contentFilterRepository: contentFilterRepository,
@@ -56,13 +57,11 @@ struct NotificationsView: View {
     VStack(spacing: 0) {
       Picker(
         "消息类型",
-        selection: Binding(
-          get: { viewModel.selectedKind },
-          set: { viewModel.select($0) }
-        )
+        selection: selectedKind
       ) {
         ForEach(InboxKind.allCases) { kind in
           Text(kind.title).tag(kind)
+            .accessibilityIdentifier("inbox-kind-\(kind.rawValue)")
         }
       }
       .pickerStyle(.segmented)
@@ -71,7 +70,15 @@ struct NotificationsView: View {
 
       Divider()
 
-      content
+      ForumSectionPager(sections: InboxKind.allCases, selection: selectedKind) { kind in
+        NotificationsPageView(
+          model: viewModel.model(for: kind),
+          isActive: viewModel.isActive(kind),
+          onRefresh: { await viewModel.refresh(kind: kind) }
+        ) { presentation in
+          interactiveMessageRow(presentation, kind: kind)
+        }
+      }
     }
     .navigationTitle("消息")
     .navigationBarTitleDisplayMode(.inline)
@@ -99,12 +106,14 @@ struct NotificationsView: View {
       synchronizeActivation()
     }
     .onChange(of: isActive) { _ in synchronizeActivation() }
+    .onChange(of: scenePhase) { _ in synchronizeActivation() }
     .onChange(of: hidesReplyEntryPoints) { hidden in
       if hidden { invalidatePendingReplyRouteForHiddenPreference() }
     }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
       invalidatePendingReplyRouteForAccountChange()
-      viewModel.accountSessionDidChange(loadImmediately: acceptsAutomaticRequests)
+      if !acceptsAutomaticRequests { viewModel.deactivate() }
+      viewModel.accountSessionDidChange()
     }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       invalidatePendingReplyRouteForContentFilterChange()
@@ -113,20 +122,30 @@ struct NotificationsView: View {
     .onDisappear {
       isPresented = false
       invalidatePendingReplyRouteForInactiveTab()
-      viewModel.cancel()
+      viewModel.deactivate()
     }
   }
 
   private var acceptsAutomaticRequests: Bool {
-    isPresented && isActive
+    isPresented && isActive && scenePhase == .active
+  }
+
+  private var selectedKind: Binding<InboxKind> {
+    Binding(
+      get: { viewModel.selectedKind },
+      set: { kind in
+        guard acceptsAutomaticRequests else { return }
+        invalidatePendingReplyRouteForInactiveTab()
+        viewModel.select(kind)
+      })
   }
 
   private func synchronizeActivation() {
     if acceptsAutomaticRequests {
-      viewModel.loadIfNeeded()
+      viewModel.activate()
     } else {
       invalidatePendingReplyRouteForInactiveTab()
-      viewModel.cancel()
+      viewModel.deactivate()
     }
   }
 
@@ -135,92 +154,9 @@ struct NotificationsView: View {
     replyNotice = nil
   }
 
-  @ViewBuilder
-  private var content: some View {
-    if viewModel.isResolvingContentFilter {
-      ProgressView()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    } else if viewModel.messages.isEmpty {
-      switch viewModel.state {
-      case .idle, .loading:
-        ProgressView()
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-      case .failed(let message):
-        ErrorStateView(message: message, retry: viewModel.reload)
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-      case .loaded:
-        EmptyStateView(
-          title: viewModel.selectedKind == .replies ? "暂无回复消息" : "暂无提及消息",
-          systemImage: viewModel.selectedKind == .replies ? "bubble.left" : "at"
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-      }
-    } else {
-      messageList
-    }
-  }
-
-  private var messageList: some View {
-    List {
-      if viewModel.displayableMessages.isEmpty {
-        Label(filteredEmptyTitle, systemImage: "eye.slash")
-          .font(.callout)
-          .foregroundStyle(.secondary)
-          .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
-          .padding(.vertical, 8)
-          .listRowSeparator(.hidden)
-          .accessibilityElement(children: .combine)
-      } else {
-        ForEach(viewModel.displayableMessages) { presentation in
-          LocallyFilteredContent(
-            visibility: presentation.visibility,
-            placeholder: "已屏蔽此消息"
-          ) {
-            interactiveMessageRow(presentation)
-          }
-          .frame(minHeight: 44)
-        }
-      }
-
-      if viewModel.requiresExplicitPagination {
-        Button(action: viewModel.continuePagination) {
-          Label("继续加载", systemImage: "arrow.down.circle")
-            .frame(maxWidth: .infinity, minHeight: 44)
-        }
-        .disabled(viewModel.isLoadingMore || viewModel.loadMoreError != nil)
-        .listRowSeparator(.hidden)
-      } else if viewModel.hasNextPage, let rawTail = viewModel.paginationTail {
-        Color.clear
-          .frame(height: 1)
-          .id(
-            "notifications-\(viewModel.selectedKind.rawValue)-pagination-"
-              + "\(rawTail.id)-\(viewModel.messages.count)"
-              + "-\(viewModel.paginationEpoch)"
-          )
-          .listRowInsets(EdgeInsets())
-          .listRowSeparator(.hidden)
-          .accessibilityHidden(true)
-          .onAppear { viewModel.loadMoreIfNeeded(current: rawTail) }
-      }
-
-      if viewModel.isLoadingMore {
-        HStack {
-          Spacer()
-          ProgressView()
-          Spacer()
-        }
-        .listRowSeparator(.hidden)
-      } else if let message = viewModel.loadMoreError {
-        LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
-          .listRowSeparator(.hidden)
-      }
-    }
-    .listStyle(.plain)
-    .appScrollableSurface()
-    .refreshable { await viewModel.refresh() }
-  }
-
-  private func interactiveMessageRow(_ presentation: InboxMessagePresentation) -> some View {
+  private func interactiveMessageRow(
+    _ presentation: InboxMessagePresentation, kind: InboxKind
+  ) -> some View {
     let message = presentation.message
     let senderRoute = NotificationSenderProfileRoute(presentation: presentation)
 
@@ -247,7 +183,7 @@ struct NotificationsView: View {
       if replyEntriesVisible {
         Button {
           guard replyEntriesVisible else { return }
-          prepareReply(to: message)
+          prepareReply(to: message, kind: kind)
         } label: {
           Image(systemName: "arrowshape.turn.up.left")
             .foregroundStyle(.tint)
@@ -345,10 +281,6 @@ struct NotificationsView: View {
     }
   }
 
-  private var filteredEmptyTitle: String {
-    viewModel.selectedKind == .replies ? "暂无可显示的回复消息" : "暂无可显示的提及消息"
-  }
-
   @ViewBuilder
   private func notificationDestination(for message: InboxMessage) -> some View {
     switch message.navigationTarget {
@@ -435,12 +367,15 @@ struct NotificationsView: View {
     ).showsReplyEntry
   }
 
-  private func prepareReply(to message: InboxMessage) {
-    guard replyEntriesVisible, !viewModel.isResolvingContentFilter else { return }
+  private func prepareReply(to message: InboxMessage, kind: InboxKind) {
+    let model = viewModel.model(for: kind)
+    guard acceptsAutomaticRequests, viewModel.isActive(kind), replyEntriesVisible,
+      !model.isResolvingSession, !model.isResolvingContentFilter
+    else { return }
     replyNotice = nil
     guard
       let intent = InboxReplyIntentAdmissionPolicy.admittedIntent(
-        viewModel.replyIntent(for: message),
+        model.replyIntent(for: message),
         hidesReplyEntryPoints: hidesReplyEntryPoints
       )
     else {
