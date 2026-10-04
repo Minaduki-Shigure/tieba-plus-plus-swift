@@ -17,6 +17,9 @@
         arguments[AppPreferenceKey.homeShowsRecentForums] = false
         arguments[AppPreferenceKey.searchSuggestionsEnabled] = false
         arguments[InboxNotificationRuntime.enabledKey] = false
+        if ProcessInfo.processInfo.arguments.contains("--forum-sections-ui-testing") {
+          arguments[AppPreferenceKey.forumPrimaryAction] = ForumPrimaryAction.scrollToTop.rawValue
+        }
         if ProcessInfo.processInfo.arguments.contains("--home-refresh-ui-testing") {
           arguments[AppPreferenceKey.followedForumsLayout] =
             FollowedForumsLayoutMode.singleColumn.rawValue
@@ -35,20 +38,35 @@
 
     var body: some Scene {
       WindowGroup {
-        RootView(
-          service: dependencies.service,
-          historyRepository: dependencies.repositories,
-          favoritesRepository: dependencies.repositories,
-          searchHistoryRepository: dependencies.repositories,
-          globalSearchHistoryRepository: dependencies.repositories,
-          accountVault: dependencies.vault,
-          accountSessionLookup: dependencies.vault,
-          accountService: dependencies.service,
-          personalizedFeedbackService: dependencies.service,
-          contentFilterRepository: dependencies.contentFilters,
-          startDestination: dependencies.homeProbe == nil ? .discovery : .home,
-          showsExploreTab: true
-        )
+        Group {
+          if dependencies.forumProbe != nil {
+            NavigationStack {
+              NavigationLink("进入离线贴吧") {
+                ForumView(
+                  forumName: "离线分区", service: dependencies.service,
+                  historyRepository: dependencies.repositories,
+                  favoritesRepository: dependencies.repositories,
+                  searchHistoryRepository: dependencies.repositories)
+              }
+              .navigationTitle("离线测试入口")
+            }
+          } else {
+            RootView(
+              service: dependencies.service,
+              historyRepository: dependencies.repositories,
+              favoritesRepository: dependencies.repositories,
+              searchHistoryRepository: dependencies.repositories,
+              globalSearchHistoryRepository: dependencies.repositories,
+              accountVault: dependencies.vault,
+              accountSessionLookup: dependencies.vault,
+              accountService: dependencies.service,
+              personalizedFeedbackService: dependencies.service,
+              contentFilterRepository: dependencies.contentFilters,
+              startDestination: dependencies.homeProbe == nil ? .discovery : .home,
+              showsExploreTab: true
+            )
+          }
+        }
         .environment(\.accountAccess, dependencies.accountAccess)
         .environment(\.contentFilterRepository, dependencies.contentFilters)
         .environment(\.contentMediaLoadPolicy, .tapToLoad)
@@ -67,6 +85,9 @@
             if let homeProbe = dependencies.homeProbe {
               HomeRefreshUITestProbeView(probe: homeProbe)
             }
+            if let forumProbe = dependencies.forumProbe {
+              ForumSectionsUITestProbeView(probe: forumProbe)
+            }
           }
           .allowsHitTesting(false)
         }
@@ -78,6 +99,7 @@
   private final class ExploreRefreshUITestDependencies: ObservableObject {
     let probe = ExploreRefreshUITestProbe()
     let homeProbe: HomeRefreshUITestProbe?
+    let forumProbe: ForumSectionsUITestProbe?
     let vault: ExploreRefreshUITestVault
     let repositories = ExploreRefreshUITestRepositories()
     let contentFilters = EmptyContentFilterRepository()
@@ -97,9 +119,12 @@
       let arguments = ProcessInfo.processInfo.arguments
       let testsHome = arguments.contains("--home-refresh-ui-testing")
       homeProbe = testsHome ? HomeRefreshUITestProbe() : nil
+      forumProbe =
+        arguments.contains("--forum-sections-ui-testing") ? ForumSectionsUITestProbe() : nil
       vault = ExploreRefreshUITestVault(
         isSignedOut: testsHome && arguments.contains("--home-refresh-signed-out"))
-      let service = ExploreRefreshUITestService(probe: probe, homeProbe: homeProbe)
+      let service = ExploreRefreshUITestService(
+        probe: probe, homeProbe: homeProbe, forumProbe: forumProbe)
       self.service = service
       accountAccess = AccountAccess(vault: vault, service: service)
       voicePlayback = VoicePlaybackController(coordinator: mediaPlayback)
@@ -167,6 +192,28 @@
     }
   }
 
+  @MainActor
+  private final class ForumSectionsUITestProbe: ObservableObject {
+    @Published private var counts: [String: Int] = [:]
+
+    func record(_ key: String) { counts[key, default: 0] += 1 }
+
+    var summary: String {
+      ["latest", "featured", "channel71", "channel72", "account", "unexpected"]
+        .map { "\($0)=\(counts[$0, default: 0])" }.joined(separator: " ")
+    }
+  }
+
+  private struct ForumSectionsUITestProbeView: View {
+    @ObservedObject var probe: ForumSectionsUITestProbe
+
+    var body: some View {
+      Text(probe.summary)
+        .font(.system(size: 8, design: .monospaced))
+        .accessibilityIdentifier("forum-section-request-counts")
+    }
+  }
+
   private struct ExploreRefreshLifecycleProbeView: View {
     @ObservedObject var diagnostics: ExploreRefreshLifecycleDiagnostics
 
@@ -206,7 +253,8 @@
 
     func recordExplore(selection: ExploreSection, sections: [ExploreSection], ready: Bool) {
       sequence += 1
-      explore = "explore#\(sequence) selected=\(selection.rawValue) ready=\(ready) "
+      explore =
+        "explore#\(sequence) selected=\(selection.rawValue) ready=\(ready) "
         + "pages=\(sections.map(\.rawValue).joined(separator: ","))"
       publish()
     }
@@ -215,7 +263,8 @@
       sequence += 1
       if event == "appear" { appearances += 1 }
       if event == "disappear" { disappearances += 1 }
-      personal = "personal#\(sequence) \(event) appear=\(appearances) disappear=\(disappearances) "
+      personal =
+        "personal#\(sequence) \(event) appear=\(appearances) disappear=\(disappearances) "
         + "active=\(active) visible=\(visible) load=\(active && visible)"
       publish()
     }
@@ -231,7 +280,8 @@
       case .loaded: stateName = "loaded"
       case .failed: stateName = "failed"
       }
-      model = "model#\(sequence) \(event) state=\(stateName) generation=\(generation) "
+      model =
+        "model#\(sequence) \(event) state=\(stateName) generation=\(generation) "
         + "starts=\(starts) cancels=\(cancellations)"
       publish()
     }
@@ -312,12 +362,17 @@
     static var unsupported: BrowseError { .unavailable("离线界面测试不提供此操作。") }
     private let probe: ExploreRefreshUITestProbe
     private let homeProbe: HomeRefreshUITestProbe?
+    private let forumProbe: ForumSectionsUITestProbe?
     private var homeGeneration = 0
     private var threadsByID: [Int64: BrowseThread] = [:]
 
-    init(probe: ExploreRefreshUITestProbe, homeProbe: HomeRefreshUITestProbe?) {
+    init(
+      probe: ExploreRefreshUITestProbe, homeProbe: HomeRefreshUITestProbe?,
+      forumProbe: ForumSectionsUITestProbe?
+    ) {
       self.probe = probe
       self.homeProbe = homeProbe
+      self.forumProbe = forumProbe
     }
 
     private func thread(channel: String, title: String, id: Int64) async -> BrowseThread {
@@ -433,9 +488,66 @@
     func searchSuggestions(query: String) -> [String] { [] }
     func preview(for target: TiebaLinkTarget) -> TiebaLinkPreviewMetadata? { nil }
 
-    func threads(forumName: String, page: Int, pageSize: Int, options: ForumBrowseOptions) throws
+    func threads(forumName: String, page: Int, pageSize: Int, options: ForumBrowseOptions)
+      async throws
       -> ThreadPageData
-    { throw Self.unsupported }
+    {
+      guard let forumProbe else { throw Self.unsupported }
+      guard forumName == "离线分区", (1...2).contains(page), pageSize == 30,
+        options.featuredClassificationID == nil
+      else {
+        await forumProbe.record("unexpected")
+        throw Self.unsupported
+      }
+      await forumProbe.record(options.featuredOnly ? "featured" : "latest")
+      return ThreadPageData(
+        forum: fixtureForum,
+        threads: forumThreads(section: options.featuredOnly ? 2 : 1, page: page),
+        currentPage: page, hasMore: page == 1,
+        channels: [71, 72].map {
+          BrowseForumChannel(id: $0, name: $0 == 71 ? "讨论" : "图集", isDefault: false)
+        })
+    }
+
+    func forumChannelThreads(
+      forumID: Int64, forumName: String, channel: BrowseForumChannel,
+      page: Int, pageSize: Int, sort: ForumChannelSort, lastThreadID: Int64?
+    ) async throws -> ForumChannelPageData {
+      guard let forumProbe else { throw Self.unsupported }
+      guard forumID == 100, forumName == "离线分区", [71, 72].contains(channel.id),
+        (1...2).contains(page), pageSize == 30, sort == .unspecified,
+        page == 1 ? lastThreadID == nil : lastThreadID == Int64(channel.id * 10_000 + 30)
+      else {
+        await forumProbe.record("unexpected")
+        throw Self.unsupported
+      }
+      let rows = forumThreads(section: channel.id, page: page)
+      await forumProbe.record("channel\(channel.id)")
+      return ForumChannelPageData(
+        threads: rows, currentPage: page, hasMore: page == 1, nextPageCursor: rows.last?.id)
+    }
+
+    private var fixtureForum: BrowseForum {
+      BrowseForum(
+        id: 100, name: "离线分区", category: "", subcategory: "", memberCount: 100,
+        threadCount: 120, postCount: 120, avatarURL: nil, slogan: "离线分区测试",
+        hasModerators: false, hasRules: false, featuredClassifications: [])
+    }
+
+    private func forumThreads(section: Int, page: Int) -> [BrowseThread] {
+      let title = [1: "最新", 2: "精华", 71: "讨论", 72: "图集"][section]!
+      return (1...30).map { index in
+        let number = (page - 1) * 30 + index
+        let id = Int64(section * 10_000 + number)
+        let thread = BrowseThread(
+          id: id, forumID: 100, forumName: "离线分区", title: "\(title)·帖子\(number)",
+          excerpt: "保留此条目的阅读位置，切换频道后可继续阅读。",
+          authorName: "离线作者", replyCount: 3, viewCount: 20, createdAt: nil,
+          lastReplyAt: nil, contents: [], authorID: 8, firstPostID: id + 1_000_000)
+        threadsByID[id] = thread
+        return thread
+      }
+    }
     func comments(threadID: Int64, postID: Int64, page: Int) throws -> CommentPageData {
       throw Self.unsupported
     }
@@ -473,10 +585,25 @@
     }
     func forumMembership(session: StoredAccountSession, forumID: Int64, forumName: String) throws
       -> ForumMembershipData
-    { throw Self.unsupported }
-    func forumAccountState(session: StoredAccountSession, forumID: Int64, forumName: String) throws
+    {
+      guard forumProbe != nil, forumID == 100 else { throw Self.unsupported }
+      return ForumMembershipData(
+        userID: session.id, forumID: forumID, forumName: forumName, isFollowed: true)
+    }
+    func forumAccountState(session: StoredAccountSession, forumID: Int64, forumName: String)
+      async throws
       -> ForumAccountStateData
-    { throw Self.unsupported }
+    {
+      guard let forumProbe else { throw Self.unsupported }
+      guard session.id == 7, forumID == 100, forumName == "离线分区" else {
+        await forumProbe.record("unexpected")
+        throw Self.unsupported
+      }
+      await forumProbe.record("account")
+      return ForumAccountStateData(
+        membership: try forumMembership(session: session, forumID: forumID, forumName: forumName),
+        checkIn: ForumCheckInData(isCheckedIn: true, consecutiveDays: 3, rank: 0))
+    }
     func setForumFollowed(
       session: StoredAccountSession, forumID: Int64, forumName: String, isFollowed: Bool
     ) throws -> ForumMembershipData { throw Self.unsupported }

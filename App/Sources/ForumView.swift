@@ -152,10 +152,13 @@ struct ForumView: View {
       .onDisappear {
         isVisible = false
         sectionsViewModel.deactivate()
+        let hasPendingCheckInUpdate = !checkInUpdateTasks.isEmpty
         cancelCheckInUpdates()
         // A cancelled read may not return immediately. Never reuse its loading
         // state on a quick return; already loaded and in-flight writes survive.
-        if checkInViewModel?.state == .loading { checkInViewModel = nil }
+        if checkInViewModel?.state == .loading || hasPendingCheckInUpdate {
+          checkInViewModel = nil
+        }
       }
       .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
         sectionsViewModel.invalidateContentFilters()
