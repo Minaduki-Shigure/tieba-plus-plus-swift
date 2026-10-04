@@ -74,7 +74,21 @@
 
     private var root: some View {
       Group {
-        if dependencies.profileProbe != nil {
+        if dependencies.searchProbe != nil {
+          NavigationStack {
+            NavigationLink("进入离线搜索") {
+              SearchView(
+                query: "测试", browseService: dependencies.service,
+                searchService: dependencies.service,
+                historyRepository: dependencies.repositories,
+                favoritesRepository: dependencies.repositories,
+                searchHistoryRepository: dependencies.repositories,
+                globalSearchHistoryViewModel: dependencies.globalSearchHistory,
+                onSearchSubmitted: { dependencies.globalSearchHistory.record($0) })
+            }
+            .navigationTitle("离线搜索入口")
+          }
+        } else if dependencies.profileProbe != nil {
           NavigationStack {
             NavigationLink("进入离线用户主页") {
               UserProfileView(
@@ -139,6 +153,9 @@
         if let profileProbe = dependencies.profileProbe {
           ProfileActivityUITestProbeView(probe: profileProbe)
         }
+        if let searchProbe = dependencies.searchProbe {
+          SearchScopesUITestProbeView(probe: searchProbe)
+        }
       }
     }
 
@@ -173,6 +190,8 @@
     let testsAdaptiveNavigation: Bool
     let forumProbe: ForumSectionsUITestProbe?
     let profileProbe: ProfileActivityUITestProbe?
+    let searchProbe: SearchScopesUITestProbe?
+    let globalSearchHistory: GlobalSearchHistoryViewModel
     let vault: ExploreRefreshUITestVault
     let repositories = ExploreRefreshUITestRepositories()
     let contentFilters = EmptyContentFilterRepository()
@@ -200,10 +219,14 @@
         ? ProfileActivityUITestProbe(
           failsFirstRefresh: arguments.contains("--profile-activity-refresh-failure"),
           failsInitialProfile: arguments.contains("--profile-activity-initial-failure")) : nil
+      searchProbe =
+        arguments.contains("--search-scopes-ui-testing") ? SearchScopesUITestProbe() : nil
+      globalSearchHistory = GlobalSearchHistoryViewModel(repository: repositories)
       vault = ExploreRefreshUITestVault(
         isSignedOut: testsHome && arguments.contains("--home-refresh-signed-out"))
       let service = ExploreRefreshUITestService(
         probe: probe, homeProbe: homeProbe, forumProbe: forumProbe, profileProbe: profileProbe,
+        searchProbe: searchProbe,
         unreadReplyCount: testsAdaptiveNavigation ? 7 : 0)
       self.service = service
       accountAccess = AccountAccess(vault: vault, service: service)
@@ -332,6 +355,40 @@
       Text(probe.summary)
         .font(.system(size: 8, design: .monospaced))
         .accessibilityIdentifier("profile-activity-request-counts")
+    }
+  }
+
+  @MainActor
+  private final class SearchScopesUITestProbe: ObservableObject {
+    @Published private var counts: [String: Int] = [:]
+    @Published private(set) var requests: [String] = []
+
+    func record(_ key: String, query: String? = nil, page: Int? = nil, sort: String? = nil) {
+      counts[key, default: 0] += 1
+      if let query {
+        requests.append("\(key):\(query):\(page ?? 1):\(sort ?? "none")")
+      }
+    }
+
+    var summary: String {
+      ["forums", "threads", "users", "posts", "unexpected"]
+        .map { "\($0)=\(counts[$0, default: 0])" }.joined(separator: " ")
+    }
+  }
+
+  private struct SearchScopesUITestProbeView: View {
+    @ObservedObject var probe: SearchScopesUITestProbe
+
+    var body: some View {
+      VStack(alignment: .leading, spacing: 1) {
+        Text(probe.summary)
+          .accessibilityIdentifier("search-scope-request-counts")
+        Text(probe.requests.joined(separator: " | "))
+          .lineLimit(1)
+          .accessibilityLabel(probe.requests.joined(separator: " | "))
+          .accessibilityIdentifier("search-scope-request-log")
+      }
+      .font(.system(size: 7, design: .monospaced))
     }
   }
 
@@ -486,12 +543,14 @@
     private let unreadReplyCount: Int
     private let forumProbe: ForumSectionsUITestProbe?
     private let profileProbe: ProfileActivityUITestProbe?
+    private let searchProbe: SearchScopesUITestProbe?
     private var homeGeneration = 0
     private var threadsByID: [Int64: BrowseThread] = [:]
 
     init(
       probe: ExploreRefreshUITestProbe, homeProbe: HomeRefreshUITestProbe?,
       forumProbe: ForumSectionsUITestProbe?, profileProbe: ProfileActivityUITestProbe?,
+      searchProbe: SearchScopesUITestProbe?,
       unreadReplyCount: Int
     ) {
       self.probe = probe
@@ -499,6 +558,7 @@
       self.unreadReplyCount = unreadReplyCount
       self.forumProbe = forumProbe
       self.profileProbe = profileProbe
+      self.searchProbe = searchProbe
     }
 
     private func thread(channel: String, title: String, id: Int64) async -> BrowseThread {
@@ -546,7 +606,17 @@
       threadID: Int64, page: Int, pageSize: Int, options: ThreadBrowseOptions,
       location: ThreadPostLocation?
     ) async throws -> PostPageData {
-      guard let thread = threadsByID[threadID] else { throw Self.unsupported }
+      guard let thread = threadsByID[threadID] else {
+        await searchProbe?.record("unexpected")
+        throw Self.unsupported
+      }
+      if let searchProbe {
+        guard page == 1, location == nil, options == ThreadBrowseOptions() else {
+          await searchProbe.record("unexpected")
+          throw Self.unsupported
+        }
+        await searchProbe.record("posts")
+      }
       _ = await probe.record("posts")
       let post = BrowsePost(
         id: thread.firstPostID, threadID: threadID, floor: 1, authorID: thread.authorID,
@@ -616,15 +686,65 @@
       return ForumCheckInCatalogData(userID: session.id, targets: targets, officialBatchPolicy: nil)
     }
 
-    func searchForums(query: String) -> ForumSearchData {
-      ForumSearchData(exactMatch: nil, related: [])
+    func searchForums(query: String) async throws -> ForumSearchData {
+      guard let searchProbe else { return ForumSearchData(exactMatch: nil, related: []) }
+      guard ["测试", "next"].contains(query) else {
+        await searchProbe.record("unexpected")
+        throw Self.unsupported
+      }
+      await searchProbe.record("forums", query: query)
+      return ForumSearchData(
+        exactMatch: nil,
+        related: (1...30).map { number in
+          ForumSearchItem(
+            id: Int64(20_000 + number), name: "\(query)·贴吧\(number)",
+            displayName: "\(query)·贴吧\(number)", avatarURL: nil,
+            postCount: 120, memberCount: 80, summary: "离线贴吧结果，切换分类后保留阅读位置。")
+        })
     }
-    func searchUsers(query: String) -> UserSearchData {
-      UserSearchData(exactMatch: nil, related: [])
+    func searchUsers(query: String) async throws -> UserSearchData {
+      guard let searchProbe else { return UserSearchData(exactMatch: nil, related: []) }
+      guard ["测试", "next"].contains(query) else {
+        await searchProbe.record("unexpected")
+        throw Self.unsupported
+      }
+      await searchProbe.record("users", query: query)
+      return UserSearchData(
+        exactMatch: nil,
+        related: (1...30).map { number in
+          UserSearchItem(
+            id: Int64(30_000 + number), username: "\(query)·用户\(number)",
+            displayName: "\(query)·用户\(number)", portraitURL: nil,
+            introduction: "离线用户结果，切换分类后保留阅读位置。")
+        })
     }
     func searchThreads(query: String, page: Int, pageSize: Int, sort: GlobalThreadSearchSort)
-      -> ThreadSearchPageData
-    { ThreadSearchPageData(threads: [], currentPage: page, hasMore: false) }
+      async throws -> ThreadSearchPageData
+    {
+      guard let searchProbe else {
+        return ThreadSearchPageData(threads: [], currentPage: page, hasMore: false)
+      }
+      guard ["测试", "next"].contains(query), (1...2).contains(page), pageSize == 20 else {
+        await searchProbe.record("unexpected")
+        throw Self.unsupported
+      }
+      await searchProbe.record("threads", query: query, page: page, sort: sort.rawValue)
+      let queryOffset = query == "测试" ? 0 : 10_000
+      let sortOffset = GlobalThreadSearchSort.allCases.firstIndex(of: sort)! * 1_000
+      let rows = (1...pageSize).map { index in
+        let number = (page - 1) * pageSize + index
+        let id = Int64(950_000 + queryOffset + sortOffset + number)
+        let thread = BrowseThread(
+          id: id, forumID: 100, forumName: "离线搜索",
+          title: "\(query)·\(sort.title)·帖子\(number)",
+          excerpt: "离线帖子结果，可进入帖子并返回原阅读位置。", authorName: "离线作者",
+          replyCount: 3, viewCount: 20, createdAt: nil, lastReplyAt: nil, contents: [],
+          authorID: 8, firstPostID: id + 1_000_000)
+        threadsByID[id] = thread
+        return thread
+      }
+      return ThreadSearchPageData(threads: rows, currentPage: page, hasMore: page == 1)
+    }
     func searchSuggestions(query: String) -> [String] { [] }
     func preview(for target: TiebaLinkTarget) -> TiebaLinkPreviewMetadata? { nil }
 
