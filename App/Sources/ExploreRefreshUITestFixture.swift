@@ -11,6 +11,7 @@
     static func main() {
       if ProcessInfo.processInfo.arguments.contains("--explore-refresh-ui-testing")
         || ProcessInfo.processInfo.arguments.contains("--inbox-scopes-ui-testing")
+        || ProcessInfo.processInfo.arguments.contains("--history-scopes-ui-testing")
       {
         var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
         arguments[AppPreferenceKey.personalizedRecommendationPersona] = "anonymous"
@@ -76,7 +77,10 @@
 
     private var root: some View {
       Group {
-        if dependencies.searchProbe != nil {
+        if dependencies.testsHistory {
+          HistoryScopesUITestRoot(
+            service: dependencies.service, auxiliaryRepository: dependencies.repositories)
+        } else if dependencies.searchProbe != nil {
           NavigationStack {
             NavigationLink("进入离线搜索") {
               SearchView(
@@ -194,6 +198,7 @@
     let probe = ExploreRefreshUITestProbe()
     let homeProbe: HomeRefreshUITestProbe?
     let testsAdaptiveNavigation: Bool
+    let testsHistory: Bool
     let forumProbe: ForumSectionsUITestProbe?
     let profileProbe: ProfileActivityUITestProbe?
     let searchProbe: SearchScopesUITestProbe?
@@ -218,6 +223,7 @@
       let arguments = ProcessInfo.processInfo.arguments
       let testsHome = arguments.contains("--home-refresh-ui-testing")
       testsAdaptiveNavigation = arguments.contains("--adaptive-root-ui-testing")
+      testsHistory = arguments.contains("--history-scopes-ui-testing")
       homeProbe = testsHome ? HomeRefreshUITestProbe() : nil
       forumProbe =
         arguments.contains("--forum-sections-ui-testing") ? ForumSectionsUITestProbe() : nil
@@ -237,7 +243,7 @@
         isSignedOut: testsHome && arguments.contains("--home-refresh-signed-out"))
       let service = ExploreRefreshUITestService(
         probe: probe, homeProbe: homeProbe, forumProbe: forumProbe, profileProbe: profileProbe,
-        searchProbe: searchProbe, inboxProbe: inboxProbe,
+        searchProbe: searchProbe, inboxProbe: inboxProbe, testsHistory: testsHistory,
         unreadReplyCount: testsAdaptiveNavigation ? 7 : 0)
       self.service = service
       accountAccess = AccountAccess(vault: vault, service: service)
@@ -596,6 +602,7 @@
     private let profileProbe: ProfileActivityUITestProbe?
     private let searchProbe: SearchScopesUITestProbe?
     private let inboxProbe: InboxScopesUITestProbe?
+    private let testsHistory: Bool
     private var inboxFirstPageReads: [InboxKind: Int] = [:]
     private var homeGeneration = 0
     private var threadsByID: [Int64: BrowseThread] = [:]
@@ -604,6 +611,7 @@
       probe: ExploreRefreshUITestProbe, homeProbe: HomeRefreshUITestProbe?,
       forumProbe: ForumSectionsUITestProbe?, profileProbe: ProfileActivityUITestProbe?,
       searchProbe: SearchScopesUITestProbe?, inboxProbe: InboxScopesUITestProbe?,
+      testsHistory: Bool,
       unreadReplyCount: Int
     ) {
       self.probe = probe
@@ -613,6 +621,17 @@
       self.profileProbe = profileProbe
       self.searchProbe = searchProbe
       self.inboxProbe = inboxProbe
+      self.testsHistory = testsHistory
+      if testsHistory {
+        for number in 1...30 {
+          let snapshot = HistoryScopesUITestRoot.threadSnapshot(number)
+          threadsByID[snapshot.threadID] = BrowseThread(
+            id: snapshot.threadID, forumID: snapshot.forumID, forumName: snapshot.forumName,
+            title: snapshot.title, excerpt: snapshot.excerpt, authorName: snapshot.authorName,
+            replyCount: 3, viewCount: 20, createdAt: nil, lastReplyAt: nil, contents: [],
+            authorID: 8, firstPostID: snapshot.threadID + 1_000_000)
+        }
+      }
     }
 
     private func thread(channel: String, title: String, id: Int64) async -> BrowseThread {
@@ -862,6 +881,14 @@
       async throws
       -> ThreadPageData
     {
+      if testsHistory {
+        guard page == 1, (1...30).contains(where: { "历史贴吧·\($0)" == forumName }) else {
+          throw Self.unsupported
+        }
+        return ThreadPageData(
+          forum: BrowseForum.placeholder(name: forumName), threads: [], currentPage: 1,
+          hasMore: false)
+      }
       guard let forumProbe else { throw Self.unsupported }
       guard forumName == "离线分区", (1...2).contains(page), pageSize == 30,
         options.featuredClassificationID == nil
