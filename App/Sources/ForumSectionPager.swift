@@ -146,11 +146,6 @@ private final class ForumSectionPagingAttachment: UIView {
     if scrollView !== scroll {
       detach()
       scrollView = scroll
-      scroll.isPagingEnabled = true
-      scroll.isDirectionalLockEnabled = true
-      scroll.bounces = false
-      scroll.contentInsetAdjustmentBehavior = .never
-      scroll.accessibilityIdentifier = "forum-section-pager-scroll"
       offsetObservation = scroll.observe(\.contentOffset, options: []) { [weak self] _, _ in
         MainActor.assumeIsolated { self?.scheduleSettlement() }
       }
@@ -169,6 +164,17 @@ private final class ForumSectionPagingAttachment: UIView {
         responder = current.next
       }
     }
+    // SwiftUI can reconfigure the same UIScrollView when layout direction
+    // changes and reset paging without replacing the view or its delegate.
+    // Restore our public configuration on each attachment/layout update; only
+    // a different scroll view needs new observations and gesture precedence.
+    if !scroll.isPagingEnabled { scroll.isPagingEnabled = true }
+    if !scroll.isDirectionalLockEnabled { scroll.isDirectionalLockEnabled = true }
+    if scroll.bounces { scroll.bounces = false }
+    if scroll.contentInsetAdjustmentBehavior != .never {
+      scroll.contentInsetAdjustmentBehavior = .never
+    }
+    scroll.accessibilityIdentifier = "forum-section-pager-scroll"
     guard needsAlignment, let selectedIndex, sectionIDs.indices.contains(selectedIndex) else {
       return
     }
