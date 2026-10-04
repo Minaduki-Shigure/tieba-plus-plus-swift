@@ -25,9 +25,20 @@ retained list or completing account/filter validation reevaluates its visible
 tail. All-hidden or explicitly paused pagination still requires its existing
 Continue control; it cannot automatically drain hidden pages.
 
-The unchanged InboxScopes UI suite is running against this candidate in
-[native pagination CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37189588806).
-Its result is required before treating the structural change as a verified fix.
+The unchanged InboxScopes UI suite passed all three tests with zero failures or
+skips in [native pagination CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37189588806).
+The recording/logs show title 21 actually becoming visible; the original less
+than 3 pt position assertions and exact page/refresh counts passed. No retry or
+test adjustment was needed for this inbox result.
+
+Independent review found another boundary: a new page can contain only hidden
+messages while earlier visible messages remain. Its existing visible tail then
+has no new appearance callback. The final candidate also reevaluates pagination
+when loading finishes, subject to the same account/activity/error/has-more
+guards. A separate fixture holds pages two and three at the transport boundary,
+hides page two through the real filter repository, and requires continuation
+without another drag plus a stable page-one tail before reading page three.
+Its dedicated native validation remains pending.
 
 The forum-search cancellation fix restores the pre-request state when leaving,
 including a loaded-empty response and any retry error. Returning resumes an
