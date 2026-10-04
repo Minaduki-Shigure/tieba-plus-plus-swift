@@ -1905,6 +1905,31 @@ after layout updates because SwiftUI can reset it on the same native scroll
 view. Model, native-view and actual swipe/navigation UI regressions remain
 release gates; device scrolling and gesture validation is separate.
 
+The profile-activity development branch follows TiebaLite `9701bfb6`'s reachable
+`ThreadPage` to `UserProfilePage` flow. Its keyed horizontal pager gives each
+`UserPostPage` an independent model and list position. The iOS implementation
+keeps Public Topics and Public Replies in two retained native Lists, preserving
+reading positions, pagination and retry state across selection, horizontal
+swipes and detail navigation. Both pages use one shared profile snapshot and
+one account-bound relationship owner. Initial activity rows remain unmounted
+until the profile loads, preventing invisible pagination behind loading or
+error content while keeping the List containers mounted. Refresh reloads the
+shared profile and the activity selected when refresh begins; the other page
+keeps its cached content and position. Profile-refresh errors have an independent
+retry. Switching cancels only the departing activity read, and generations reject
+late responses. Unlike upstream's self-only Posts tab, iOS retains existing
+public-reply access for other users, subject to server visibility and local
+filtering. This adds no private access or new endpoint; the liked-forum entry
+remains unchanged.
+The [profile candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37170840765)
+passed 61 model tests and three actual UI workflows, with zero failures or skips.
+They cover independent positions, swipes, detail returns, ordinary and nested
+reply destinations, original-topic navigation, pagination, and preservation of
+the other page after a failed refresh, retry and successful refresh. A later
+initial-profile visibility guard and its separate UI regression still need
+native validation. This development work is not part of alpha.41; full tagged
+CI and physical-device validation remain separate requirements.
+
 Thread-list mapping preserves the public topic kind, first-post ID, server state
 flags, author portrait, and available read-only counters through the application
 layer. Bare portraits from ordinary topic responses use the existing portrait
