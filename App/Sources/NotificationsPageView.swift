@@ -22,6 +22,11 @@ struct NotificationsPageView<Row: View>: View {
       .onChange(of: model.isResolvingContentFilter) { _ in resumeVisiblePagination() }
       .onChange(of: model.state) { _ in resumeVisiblePagination() }
       .onChange(of: model.paginationEpoch) { _ in resumeVisiblePagination() }
+      .onChange(of: model.isLoadingMore) { loading in
+        // A page may add only filtered messages. Its old visible tail then
+        // stays mounted, so there is no new row appearance to continue paging.
+        if !loading { resumeVisiblePagination() }
+      }
       .alert(
         "刷新失败",
         isPresented: Binding(
