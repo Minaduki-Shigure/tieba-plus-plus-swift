@@ -4,7 +4,6 @@ import SwiftUI
 /// or checks a cached account lease. Rows remain virtualized by List.
 struct NotificationsPageView<Row: View>: View {
   @ObservedObject var model: NotificationsViewModel
-  let isActive: Bool
   let onRefresh: () async -> Void
   @ViewBuilder let row: (InboxMessagePresentation) -> Row
   @State private var visibleTail: InboxPaginationVisibilityKey?
@@ -15,10 +14,9 @@ struct NotificationsPageView<Row: View>: View {
       // would leave old private content and its accessibility actions exposed.
       .opacity(isValidatingCachedContent ? 0 : 1)
       .allowsHitTesting(acceptsActions)
-      .accessibilityHidden(!isActive || isValidatingCachedContent)
+      .accessibilityHidden(!model.isActive || isValidatingCachedContent)
       .overlay { stateOverlay }
       .onAppear(perform: resumeVisiblePagination)
-      .onChange(of: isActive) { _ in resumeVisiblePagination() }
       .onChange(of: model.isActive) { _ in resumeVisiblePagination() }
       .onChange(of: model.isResolvingSession) { _ in resumeVisiblePagination() }
       .onChange(of: model.isResolvingContentFilter) { _ in resumeVisiblePagination() }
@@ -40,7 +38,10 @@ struct NotificationsPageView<Row: View>: View {
   }
 
   private var acceptsActions: Bool {
-    isActive && model.isActive && !isValidatingCachedContent
+    // Native refresh controls can retain the closure installed when an eager
+    // pager's initially hidden List mounts. Read activity from the shared model
+    // reference rather than a copied View value captured before activation.
+    model.isActive && !isValidatingCachedContent
   }
 
   @ViewBuilder
@@ -139,6 +140,14 @@ struct NotificationsPageView<Row: View>: View {
     .appScrollableSurface()
     .accessibilityIdentifier("inbox-\(model.selectedKind.rawValue)-list")
     .refreshable {
+      #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--inbox-scopes-ui-testing") {
+          print(
+            "Inbox refresh entered kind=\(model.selectedKind.rawValue) active=\(model.isActive) "
+              + "session=\(model.isResolvingSession) filter=\(model.isResolvingContentFilter) "
+              + "cancelled=\(Task.isCancelled)")
+        }
+      #endif
       if acceptsActions, !Task.isCancelled { await onRefresh() }
     }
   }

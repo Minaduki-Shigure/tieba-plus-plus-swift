@@ -58,6 +58,13 @@ final class NotificationsActivityViewModel: ObservableObject {
   }
 
   func refresh(kind: InboxKind) async {
+    #if DEBUG
+      if ProcessInfo.processInfo.arguments.contains("--inbox-scopes-ui-testing") {
+        print(
+          "Inbox refresh coordinator kind=\(kind.rawValue) selected=\(selectedKind.rawValue) "
+            + "active=\(isActive) cancelled=\(Task.isCancelled)")
+      }
+    #endif
     guard isActive(kind), !Task.isCancelled else { return }
     await model(for: kind).refresh()
   }
