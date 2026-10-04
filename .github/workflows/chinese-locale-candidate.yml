@@ -1,0 +1,58 @@
+name: Chinese bundle language candidate
+on:
+  push:
+    branches: [ci/chinese-bundle-locale-1004]
+permissions:
+  contents: read
+jobs:
+  native-language:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Select iPhone simulator
+        run: |
+          set -euo pipefail
+          device_id="$(xcrun simctl list devices available -j | jq -r '
+            [.devices[][] | select(.isAvailable == true and (.name | startswith("iPhone")))] as $phones
+            | (($phones | map(select(.name == "iPhone 16 Pro"))) + $phones | .[0].udid // empty)
+          ')"
+          test -n "$device_id"
+          echo "LOCALE_SIMULATOR_DESTINATION=platform=iOS Simulator,id=$device_id" >> "$GITHUB_ENV"
+      - name: Verify existing Home and Search flows in the declared language
+        id: ui
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild -project TiebaPlusPlus.xcodeproj -scheme TiebaPlusPlusIconsUI \
+            -configuration Debug -derivedDataPath build/DerivedData \
+            -destination "$LOCALE_SIMULATOR_DESTINATION" -parallel-testing-enabled NO \
+            -only-testing:TiebaPlusPlusUITests/HomeRefreshUITests \
+            -only-testing:TiebaPlusPlusUITests/SearchScopesUITests \
+            -resultBundlePath language-ui-results.xcresult \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO \
+            test 2>&1 | tee language-ui-test.log
+      - name: Export native evidence and built language metadata
+        if: always()
+        run: |
+          set -euo pipefail
+          xcrun xcresulttool get test-results summary \
+            --path language-ui-results.xcresult --compact > language-ui-summary.json
+          xcrun xcresulttool export attachments \
+            --path language-ui-results.xcresult --output-path language-ui-attachments
+          plutil -convert xml1 -o built-app-info.plist \
+            build/DerivedData/Build/Products/Debug-iphonesimulator/TiebaPlusPlus.app/Info.plist
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chinese-language-candidate
+          path: |
+            language-ui-test.log
+            language-ui-summary.json
+            language-ui-attachments/
+            built-app-info.plist
+      - name: Enforce UI validation
+        if: ${{ always() && steps.ui.outcome != 'success' }}
+        run: exit 1
