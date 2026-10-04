@@ -34,6 +34,29 @@ final class InboxScopesUITests: XCTestCase {
     try position(reply, context: "Reply position after detail return", app: app)
     try counts(replies: 1, mentions: 1, posts: 1, app: app)
 
+    // Scope the sender control to the same fully visible message used above;
+    // every fixture row has the same sender name, including clipped neighbors.
+    let replyCell = app.cells.containing(.staticText, identifier: reply.title).firstMatch
+    var sender: XCUIElement?
+    try wait("Visible sender control belongs to the retained reply cell") {
+      sender = replyCell.buttons
+        .matching(NSPredicate(format: "label == %@", "查看 离线发送者 的主页"))
+        .allElementsBoundByIndex.first { self.fullyVisible($0, app: app) }
+      return sender != nil
+    }
+    try tap(XCTUnwrap(sender))
+    try wait("Sender route opens the real offline user profile") {
+      app.navigationBars["用户主页"].exists
+        && app.staticTexts["离线界面测试不提供此操作。"].firstMatch.isHittable
+        && app.buttons["重试"].firstMatch.isHittable
+    }
+    edgeBack(app)
+    try wait("One edge-back returns directly from the sender profile to the inbox") {
+      app.navigationBars["消息"].exists && !app.navigationBars["用户主页"].exists
+    }
+    try position(reply, context: "Reply position after sender profile return", app: app)
+    try counts(replies: 1, mentions: 1, posts: 1, app: app)
+
     horizontalSwipe(left: true, app: app)
     try position(mention, context: "Native swipe to retained mentions", app: app)
     horizontalSwipe(left: false, app: app)
