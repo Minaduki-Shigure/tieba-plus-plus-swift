@@ -23,6 +23,19 @@ and its verified metadata enters the public app source.
 | TiebaLite parity | Current `main` and public `v0.65.0-alpha.44`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
 | Distribution | The public SideStore/LiveContainer source serves `v0.65.0-alpha.44` (build 122) after its tested IPA is published |
 
+An **unpublished search-suggestions candidate** follows TiebaLite's reachable
+[SearchPage suggestion picker](https://github.com/zzc10086/TiebaLite/blob/9701bfb6aaf261cc37b20b5793a8404261077f49/app/src/main/java/com/huanchengfly/tieba/post/ui/page/search/SearchPage.kt#L284).
+It reuses the existing anonymous suggestion service and default-off preference
+inside the search page. Only user edits in a visible, active search field request
+suggestions, after a 500 ms debounce; returning to the page does not resend old
+text. Submission, cancellation, navigation away and backgrounding cancel pending
+work and reject late responses. Choosing a suggestion uses the existing scope
+and history submission path, while displaying suggestions keeps the results
+pager mounted. Syntax and focused formatting checks pass, and four additional
+model tests are written. The [native candidate run](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37180968131)
+is in progress; native success and IPA availability are not yet established.
+The 80–82% parity estimate is unchanged.
+
 ### Release and validation
 
 - **`v0.65.0-alpha.44` retained inbox categories:** Replies and Mentions keep

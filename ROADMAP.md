@@ -16,6 +16,22 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
+An unpublished search-suggestions candidate closes the gap between Home's
+existing suggestions and TiebaLite `9701bfb6`'s reachable
+[SearchPage input and suggestion selection](https://github.com/zzc10086/TiebaLite/blob/9701bfb6aaf261cc37b20b5793a8404261077f49/app/src/main/java/com/huanchengfly/tieba/post/ui/page/search/SearchPage.kt#L284).
+The search page reuses the anonymous service, default-off setting, 500 ms
+debounce and bounded result validation. Requests require a user edit while
+searching on the visible foreground page; reactivation alone sends nothing.
+Submission, search cancellation, navigation away and backgrounding invalidate
+pending work and late responses. Suggestions do not replace the mounted results
+pager, and selection preserves the existing scope and history semantics.
+Static syntax and focused formatting checks pass; four lifecycle model tests
+have been added but have not yet completed native validation. The
+[native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37180968131)
+is running, including real suggestion selection and repository-write checks.
+No native pass, release version or additional parity credit is claimed; the
+80–82% estimate is unchanged.
+
 Alpha.44/build 122 follows TiebaLite `9701bfb6`'s reachable ReplyMe/AtMe pager
 with separate retained Replies and Mentions lists. Only the selected foreground
 channel reads. Cached private content stays hidden until its local session and
