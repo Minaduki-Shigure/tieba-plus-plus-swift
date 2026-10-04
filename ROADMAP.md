@@ -26,8 +26,11 @@ Check-in state belongs to the forum, and return-to-top uses the active list.
 The [focused candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37167883443)
 passed 20 model tests and both actual forum UI workflows. Its native RTL test
 exposed SwiftUI resetting paging on the same scroll view; the bridge now
-restores that configuration after layout updates. Native regression and full
-tagged CI remain publication gates. Physical-device behavior remains a separate
+restores that configuration after layout updates. The
+[native follow-up](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37169781842)
+passed all six pager tests, including 20 repeated direction transitions with
+native identity, position and settlement checks. Full tagged CI remains a
+publication gate. Physical-device behavior remains a separate
 validation requirement, and this improves an already credited area without
 changing the 80–82% weighted estimate.
 

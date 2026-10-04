@@ -42,7 +42,10 @@ and its verified metadata enters the public app source.
   passed all 20 section-model tests and both actual forum UI flows, covering
   four retained positions, pagination, detail navigation, horizontal swipes and
   edge-back navigation. Its separate native RTL failure led to the paging fix;
-  native regression and full tagged CI remain publication gates. Physical-device
+  [native follow-up validation](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37169781842)
+  passed all six pager tests, including 20 repeated direction changes with
+  native identity, position and settlement assertions. Full tagged CI remains
+  a publication gate. Physical-device
   scrolling and gesture behavior still need validation. The weighted parity
   estimate is unchanged.
 - **`v0.65.0-alpha.40` adaptive primary navigation:** The existing Home, Explore, Messages and My
