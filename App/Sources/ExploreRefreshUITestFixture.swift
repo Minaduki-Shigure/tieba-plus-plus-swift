@@ -85,6 +85,11 @@
             {
               InboxFilteredPaginationUITestCompletionControl(probe: probe, backend: backend)
             }
+            if let probe = dependencies.searchPaginationAnchorProbe,
+              let backend = dependencies.searchPaginationAnchorBackend
+            {
+              SearchPaginationAnchorUITestCompletionControl(probe: probe, backend: backend)
+            }
           }
       }
     }
@@ -179,6 +184,9 @@
         if let searchProbe = dependencies.searchProbe {
           SearchScopesUITestProbeView(probe: searchProbe)
         }
+        if let probe = dependencies.searchPaginationAnchorProbe {
+          SearchPaginationAnchorUITestProbeView(probe: probe)
+        }
         if let inboxProbe = dependencies.inboxProbe {
           InboxScopesUITestProbeView(probe: inboxProbe)
         }
@@ -224,6 +232,8 @@
     let forumProbe: ForumSectionsUITestProbe?
     let profileProbe: ProfileActivityUITestProbe?
     let searchProbe: SearchScopesUITestProbe?
+    let searchPaginationAnchorProbe: SearchPaginationAnchorUITestProbe?
+    let searchPaginationAnchorBackend: SearchPaginationAnchorUITestBackend?
     let inboxProbe: InboxScopesUITestProbe?
     let inboxFilteredPaginationProbe: InboxFilteredPaginationUITestProbe?
     let inboxFilteredPaginationBackend: InboxFilteredPaginationUITestBackend?
@@ -260,6 +270,12 @@
           failsInitialProfile: arguments.contains("--profile-activity-initial-failure")) : nil
       searchProbe =
         arguments.contains("--search-scopes-ui-testing") ? SearchScopesUITestProbe() : nil
+      searchPaginationAnchorProbe =
+        arguments.contains("--search-pagination-anchor-ui-testing")
+        ? SearchPaginationAnchorUITestProbe() : nil
+      searchPaginationAnchorBackend = searchPaginationAnchorProbe.map {
+        SearchPaginationAnchorUITestBackend(probe: $0)
+      }
       inboxProbe =
         arguments.contains("--inbox-scopes-ui-testing")
         ? InboxScopesUITestProbe(
@@ -289,6 +305,7 @@
       let service = ExploreRefreshUITestService(
         probe: probe, homeProbe: homeProbe, forumProbe: forumProbe, profileProbe: profileProbe,
         searchProbe: searchProbe, inboxProbe: inboxProbe, testsHistory: testsHistory,
+        searchPaginationAnchorBackend: searchPaginationAnchorBackend,
         inboxFilteredPaginationBackend: inboxFilteredPaginationBackend,
         forumSearchResumeBackend: forumSearchResumeBackend,
         unreadReplyCount: testsAdaptiveNavigation ? 7 : 0)
@@ -694,6 +711,7 @@
     private let forumProbe: ForumSectionsUITestProbe?
     private let profileProbe: ProfileActivityUITestProbe?
     private let searchProbe: SearchScopesUITestProbe?
+    private let searchPaginationAnchorBackend: SearchPaginationAnchorUITestBackend?
     private let inboxProbe: InboxScopesUITestProbe?
     private let inboxFilteredPaginationBackend: InboxFilteredPaginationUITestBackend?
     private let testsHistory: Bool
@@ -707,6 +725,7 @@
       forumProbe: ForumSectionsUITestProbe?, profileProbe: ProfileActivityUITestProbe?,
       searchProbe: SearchScopesUITestProbe?, inboxProbe: InboxScopesUITestProbe?,
       testsHistory: Bool,
+      searchPaginationAnchorBackend: SearchPaginationAnchorUITestBackend? = nil,
       inboxFilteredPaginationBackend: InboxFilteredPaginationUITestBackend? = nil,
       forumSearchResumeBackend: ForumSearchResumeUITestBackend? = nil,
       unreadReplyCount: Int
@@ -717,6 +736,7 @@
       self.forumProbe = forumProbe
       self.profileProbe = profileProbe
       self.searchProbe = searchProbe
+      self.searchPaginationAnchorBackend = searchPaginationAnchorBackend
       self.inboxProbe = inboxProbe
       self.inboxFilteredPaginationBackend = inboxFilteredPaginationBackend
       self.testsHistory = testsHistory
@@ -976,7 +996,9 @@
         threadsByID[id] = thread
         return thread
       }
-      return ThreadSearchPageData(threads: rows, currentPage: page, hasMore: page == 1)
+      let response = ThreadSearchPageData(threads: rows, currentPage: page, hasMore: page == 1)
+      try await searchPaginationAnchorBackend?.beforeReturning(response)
+      return response
     }
     func searchSuggestions(query: String) async -> [String] {
       guard let searchProbe else { return [] }
