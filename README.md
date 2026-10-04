@@ -57,8 +57,10 @@ and its verified metadata enters the public app source.
   passed 61 model tests and all four UI workflows, with zero failures or skips.
   They cover retained positions, swipes, detail returns, ordinary and nested
   reply destinations, original-topic navigation, pagination, failed and
-  successful refreshes, retry and initial-profile visibility. Full tagged CI
-  and anonymous integration remain publication gates; physical-device gesture
+  successful refreshes, retry and initial-profile visibility. Its
+  [tagged CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37173417515)
+  subsequently passed 2,645 App tests, all 13 phone UI workflows, all three iPad
+  UI workflows, Core and anonymous integration. Physical-device gesture
   behavior remains a separate validation step. The weighted parity estimate
   is unchanged.
 - **`v0.65.0-alpha.41` retained forum sections:** Latest, Featured and general

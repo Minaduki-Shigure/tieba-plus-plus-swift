@@ -45,8 +45,10 @@ self-only Posts tab. No new endpoint or private access is added.
 The [native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37171843648)
 passed 61 model tests and four actual UI workflows, with zero failures or skips,
 including refresh failure/retry, retained positions and initial-profile failure.
-Full tagged CI and anonymous integration remain publication gates; real-device
-gesture behavior remains separate. The 80–82% weighted estimate is unchanged.
+Its [tagged CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37173417515)
+subsequently passed 2,645 App tests, 13 phone UI workflows, three iPad UI workflows,
+Core and anonymous integration. Real-device gesture behavior remains separate.
+The 80–82% weighted estimate is unchanged.
 
 Alpha.41/build 119 retains independent Latest, Featured and general-channel
 pages, following TiebaLite `9701bfb6`'s reachable `ForumPage`. The coordinator
