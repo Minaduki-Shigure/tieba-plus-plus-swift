@@ -16,6 +16,21 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
+A browsing-history candidate follows TiebaLite `9701bfb6`'s separate Thread and
+Forum history pages. Both native lists stay mounted and share a local archive
+snapshot, retaining independent positions through category changes and detail
+navigation. Returning from a recorded visit rereads the shared archive while
+preserving record identities. Local delete, clear and recording-setting writes
+are serialized and survive navigation; cancelled or outdated reads cannot
+restore removed entries, and an older failed setting write cannot revert a
+newer choice. Refresh failures preserve the existing snapshot for retry.
+The [native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37178097669)
+is running 24 history model tests and three UI workflows, including real Thread
+and Forum destinations, scroll positions, swipe-delete/pager arbitration, clear
+confirmation, recording changes and independent reopening of a temporary file
+archive. These validations are pending; this candidate is not a published IPA.
+No account operation or endpoint is added, and the weighted estimate is unchanged.
+
 Alpha.43/build 121 follows TiebaLite `9701bfb6`'s reachable forum/thread/user
 search pager. Stable native Lists preserve separate reading positions,
 snapshots and retry state across category taps, horizontal swipes and detail
