@@ -9,6 +9,7 @@ final class SearchSuggestionViewModel: ObservableObject {
   private let debounceNanoseconds: UInt64
   private let sleeper: @Sendable (UInt64) async throws -> Void
   private var isEnabled = false
+  private var isInputActive: Bool
   private var currentQuery: String?
   private var isDebouncePending = false
   private var generation = 0
@@ -16,12 +17,14 @@ final class SearchSuggestionViewModel: ObservableObject {
 
   init(
     service: any SearchSuggestionService,
+    isInputActive: Bool = true,
     debounceNanoseconds: UInt64 = 500_000_000,
     sleeper: @escaping @Sendable (UInt64) async throws -> Void = { nanoseconds in
       try await Task.sleep(nanoseconds: nanoseconds)
     }
   ) {
     self.service = service
+    self.isInputActive = isInputActive
     self.debounceNanoseconds = debounceNanoseconds
     self.sleeper = sleeper
   }
@@ -34,8 +37,16 @@ final class SearchSuggestionViewModel: ObservableObject {
     }
   }
 
+  // Restoring a search field or returning from a destination must not send its
+  // old text. Activation permits a subsequent edit; it never starts a request.
+  func setInputActive(_ active: Bool) {
+    guard isInputActive != active else { return }
+    isInputActive = active
+    if !active { cancelAndClear() }
+  }
+
   func inputChanged(_ rawQuery: String) {
-    guard isEnabled else {
+    guard isEnabled, isInputActive else {
       cancelAndClear()
       return
     }
@@ -92,6 +103,7 @@ final class SearchSuggestionViewModel: ObservableObject {
 
   private func isCurrent(_ requestGeneration: Int, query: String) -> Bool {
     isEnabled
+      && isInputActive
       && generation == requestGeneration
       && currentQuery == query
       && !Task.isCancelled
