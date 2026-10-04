@@ -12,6 +12,7 @@
       if ProcessInfo.processInfo.arguments.contains("--explore-refresh-ui-testing")
         || ProcessInfo.processInfo.arguments.contains("--inbox-scopes-ui-testing")
         || ProcessInfo.processInfo.arguments.contains("--history-scopes-ui-testing")
+        || ProcessInfo.processInfo.arguments.contains("--forum-search-resume-ui-testing")
       {
         var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
         arguments[AppPreferenceKey.personalizedRecommendationPersona] = "anonymous"
@@ -73,6 +74,13 @@
         }
       } else {
         root.overlay(alignment: .topLeading) { probes.allowsHitTesting(false) }
+          .overlay(alignment: .bottomTrailing) {
+            if let probe = dependencies.forumSearchResumeProbe,
+              let backend = dependencies.forumSearchResumeBackend
+            {
+              ForumSearchResumeUITestCompletionControl(probe: probe, backend: backend)
+            }
+          }
       }
     }
 
@@ -131,6 +139,7 @@
             personalizedFeedbackService: dependencies.service,
             contentFilterRepository: dependencies.contentFilters,
             startDestination: dependencies.homeProbe == nil && dependencies.inboxProbe == nil
+              && dependencies.forumSearchResumeProbe == nil
               ? .discovery : .home,
             showsExploreTab: showsExplore
           )
@@ -167,6 +176,9 @@
         }
         if let inboxProbe = dependencies.inboxProbe {
           InboxScopesUITestProbeView(probe: inboxProbe)
+        }
+        if let probe = dependencies.forumSearchResumeProbe {
+          ForumSearchResumeUITestProbeView(probe: probe)
         }
       }
     }
@@ -205,6 +217,8 @@
     let profileProbe: ProfileActivityUITestProbe?
     let searchProbe: SearchScopesUITestProbe?
     let inboxProbe: InboxScopesUITestProbe?
+    let forumSearchResumeProbe: ForumSearchResumeUITestProbe?
+    let forumSearchResumeBackend: ForumSearchResumeUITestBackend?
     let globalSearchHistory: GlobalSearchHistoryViewModel
     let vault: ExploreRefreshUITestVault
     let repositories: ExploreRefreshUITestRepositories
@@ -240,13 +254,21 @@
         arguments.contains("--inbox-scopes-ui-testing")
         ? InboxScopesUITestProbe(
           failsFirstRefresh: arguments.contains("--inbox-scopes-refresh-failure")) : nil
-      repositories = ExploreRefreshUITestRepositories(searchProbe: searchProbe)
+      forumSearchResumeProbe =
+        arguments.contains("--forum-search-resume-ui-testing")
+        ? ForumSearchResumeUITestProbe() : nil
+      forumSearchResumeBackend = forumSearchResumeProbe.map {
+        ForumSearchResumeUITestBackend(probe: $0)
+      }
+      repositories = ExploreRefreshUITestRepositories(
+        searchProbe: searchProbe, forumSearchResumeBackend: forumSearchResumeBackend)
       globalSearchHistory = GlobalSearchHistoryViewModel(repository: repositories)
       vault = ExploreRefreshUITestVault(
         isSignedOut: testsHome && arguments.contains("--home-refresh-signed-out"))
       let service = ExploreRefreshUITestService(
         probe: probe, homeProbe: homeProbe, forumProbe: forumProbe, profileProbe: profileProbe,
         searchProbe: searchProbe, inboxProbe: inboxProbe, testsHistory: testsHistory,
+        forumSearchResumeBackend: forumSearchResumeBackend,
         unreadReplyCount: testsAdaptiveNavigation ? 7 : 0)
       self.service = service
       accountAccess = AccountAccess(vault: vault, service: service)
@@ -585,17 +607,28 @@
   {
     private let searchProbe: SearchScopesUITestProbe?
     private var globalSearchEntries: [GlobalSearchHistoryEntry] = []
+    private let forumSearchResumeBackend: ForumSearchResumeUITestBackend?
 
-    init(searchProbe: SearchScopesUITestProbe? = nil) { self.searchProbe = searchProbe }
+    init(
+      searchProbe: SearchScopesUITestProbe? = nil,
+      forumSearchResumeBackend: ForumSearchResumeUITestBackend? = nil
+    ) {
+      self.searchProbe = searchProbe
+      self.forumSearchResumeBackend = forumSearchResumeBackend
+    }
 
     func entries(kind: BrowsingHistoryKind?) -> [BrowsingHistoryEntry] { [] }
     func entries(kind: LocalFavoriteKind?) -> [LocalFavoriteEntry] { [] }
-    func entries(forumName: String) -> [ForumSearchHistoryEntry] { [] }
+    func entries(forumName: String) async -> [ForumSearchHistoryEntry] {
+      await forumSearchResumeBackend?.entries(forumName: forumName) ?? []
+    }
     func entries() -> [GlobalSearchHistoryEntry] { globalSearchEntries }
     func isRecordingEnabled() -> Bool { false }
     func setRecordingEnabled(_ enabled: Bool) {}
     func record(_ target: BrowsingHistoryTarget, at date: Date) {}
-    func record(query: String, forumName: String, at date: Date) {}
+    func record(query: String, forumName: String, at date: Date) async {
+      await forumSearchResumeBackend?.record(query: query, forumName: forumName, at: date)
+    }
     func record(query: String, at date: Date) async {
       let entry = GlobalSearchHistoryEntry(query: query, searchedAt: date)
       globalSearchEntries.removeAll { $0.id == entry.id }
@@ -609,12 +642,20 @@
       threadID: Int64, postID: Int64, floor: Int, options: ThreadBrowseOptions, at date: Date
     ) {}
     func updateThreadOptions(threadID: Int64, options: ThreadBrowseOptions, at date: Date) {}
-    func delete(id: String) { globalSearchEntries.removeAll { $0.id == id } }
+    func delete(id: String) async {
+      globalSearchEntries.removeAll { $0.id == id }
+      await forumSearchResumeBackend?.delete(id: id)
+    }
     func deleteAll(kind: BrowsingHistoryKind?) {}
     func deleteAll(kind: LocalFavoriteKind?) {}
-    func deleteAll(forumName: String) {}
+    func deleteAll(forumName: String) async {
+      await forumSearchResumeBackend?.deleteAll(forumName: forumName)
+    }
     func deleteAll() { globalSearchEntries = [] }
-    func reset() { globalSearchEntries = [] }
+    func reset() async {
+      globalSearchEntries = []
+      await forumSearchResumeBackend?.reset()
+    }
   }
 
   /// Full RootView protocol surface, deliberately without a network transport.
@@ -633,6 +674,7 @@
     private let searchProbe: SearchScopesUITestProbe?
     private let inboxProbe: InboxScopesUITestProbe?
     private let testsHistory: Bool
+    private let forumSearchResumeBackend: ForumSearchResumeUITestBackend?
     private var inboxFirstPageReads: [InboxKind: Int] = [:]
     private var homeGeneration = 0
     private var threadsByID: [Int64: BrowseThread] = [:]
@@ -642,6 +684,7 @@
       forumProbe: ForumSectionsUITestProbe?, profileProbe: ProfileActivityUITestProbe?,
       searchProbe: SearchScopesUITestProbe?, inboxProbe: InboxScopesUITestProbe?,
       testsHistory: Bool,
+      forumSearchResumeBackend: ForumSearchResumeUITestBackend? = nil,
       unreadReplyCount: Int
     ) {
       self.probe = probe
@@ -652,6 +695,7 @@
       self.searchProbe = searchProbe
       self.inboxProbe = inboxProbe
       self.testsHistory = testsHistory
+      self.forumSearchResumeBackend = forumSearchResumeBackend
       if testsHistory {
         for number in 1...30 {
           let snapshot = HistoryScopesUITestRoot.threadSnapshot(number)
@@ -915,6 +959,16 @@
       async throws
       -> ThreadPageData
     {
+      if forumSearchResumeBackend != nil {
+        guard forumName == ForumSearchResumeUITestBackend.forumName, page == 1 else {
+          throw Self.unsupported
+        }
+        let forum = BrowseForum(
+          id: 100, name: forumName, category: "", subcategory: "", memberCount: 0,
+          threadCount: 0, postCount: 0, avatarURL: nil, slogan: "离线搜索恢复测试",
+          hasModerators: false, hasRules: false, featuredClassifications: [])
+        return ThreadPageData(forum: forum, threads: [], currentPage: 1, hasMore: false)
+      }
       if testsHistory {
         guard page == 1, (1...30).contains(where: { "历史贴吧·\($0)" == forumName }) else {
           throw Self.unsupported
@@ -1013,7 +1067,12 @@
     func searchForumPosts(
       query: String, forumName: String, page: Int, pageSize: Int, sort: ForumPostSearchSort,
       filter: ForumPostSearchFilter
-    ) throws -> ForumPostSearchPageData { throw Self.unsupported }
+    ) async throws -> ForumPostSearchPageData {
+      guard let forumSearchResumeBackend else { throw Self.unsupported }
+      return try await forumSearchResumeBackend.searchForumPosts(
+        query: query, forumName: forumName, page: page, pageSize: pageSize, sort: sort,
+        filter: filter)
+    }
     func hotTopics() throws -> [HotTopicItem] { throw Self.unsupported }
     func hotTopic(id: Int64, name: String, page: Int, pageSize: Int, lastID: Int64?) throws
       -> HotTopicPageData
