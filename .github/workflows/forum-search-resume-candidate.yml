@@ -1,0 +1,83 @@
+name: Forum search resume native candidate
+on:
+  push:
+    branches: [ci/forum-search-resume-1004]
+permissions:
+  contents: read
+jobs:
+  forum-search-resume:
+    runs-on: macos-15
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Select iPhone 16 Pro on iOS 18.5
+        run: |
+          set -euo pipefail
+          device_id="$(xcrun simctl list devices available -j | jq -r '
+            .devices["com.apple.CoreSimulator.SimRuntime.iOS-18-5"]
+            | map(select(.isAvailable == true and .name == "iPhone 16 Pro"))
+            | .[0].udid // empty
+          ')"
+          test -n "$device_id"
+          echo "SEARCH_RESUME_DESTINATION=platform=iOS Simulator,id=$device_id" >> "$GITHUB_ENV"
+      - name: Test forum search lifecycle and integrated history ordering
+        id: models
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild -project TiebaPlusPlus.xcodeproj -scheme TiebaPlusPlus \
+            -configuration Debug -derivedDataPath build/DerivedData \
+            -destination "$SEARCH_RESUME_DESTINATION" -parallel-testing-enabled NO \
+            -only-testing:TiebaPlusPlusTests/ForumPostSearchViewModelTests \
+            -only-testing:TiebaPlusPlusTests/ForumSearchHistoryOrderingTests \
+            -resultBundlePath forum-search-model-results.xcresult \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO \
+            test 2>&1 | tee forum-search-model-test.log
+      - name: Test real forum search resume and global search workflows
+        id: ui
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild -project TiebaPlusPlus.xcodeproj -scheme TiebaPlusPlusIconsUI \
+            -configuration Debug -derivedDataPath build/DerivedData \
+            -destination "$SEARCH_RESUME_DESTINATION" -parallel-testing-enabled NO \
+            -only-testing:TiebaPlusPlusUITests/ForumSearchResumeUITests \
+            -only-testing:TiebaPlusPlusUITests/SearchScopesUITests \
+            -only-testing:TiebaPlusPlusUITests/SearchSuggestionsUITests \
+            -resultBundlePath forum-search-ui-results.xcresult \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO \
+            test 2>&1 | tee forum-search-ui-test.log
+      - name: Export actual test results
+        if: always()
+        run: |
+          if [ -d forum-search-model-results.xcresult ]; then
+            xcrun xcresulttool get test-results summary --path forum-search-model-results.xcresult --compact > forum-search-model-summary.json
+          fi
+          if [ -d forum-search-ui-results.xcresult ]; then
+            xcrun xcresulttool get test-results summary --path forum-search-ui-results.xcresult --compact > forum-search-ui-summary.json
+            xcrun xcresulttool export attachments --path forum-search-ui-results.xcresult --output-path forum-search-ui-attachments
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: forum-search-resume-native-candidate
+          path: |
+            forum-search-model-test.log
+            forum-search-model-summary.json
+            forum-search-ui-test.log
+            forum-search-ui-summary.json
+            forum-search-ui-attachments/
+      - name: Enforce actual outcomes and expected counts
+        if: always()
+        env:
+          MODEL_OUTCOME: ${{ steps.models.outcome }}
+          UI_OUTCOME: ${{ steps.ui.outcome }}
+        run: |
+          set -euo pipefail
+          test "$MODEL_OUTCOME" = success
+          test "$UI_OUTCOME" = success
+          jq -e '.passedTests == 35 and .failedTests == 0 and .skippedTests == 0' forum-search-model-summary.json
+          jq -e '.passedTests == 6 and .failedTests == 0 and .skippedTests == 0' forum-search-ui-summary.json
