@@ -74,7 +74,18 @@
 
     private var root: some View {
       Group {
-        if dependencies.forumProbe != nil {
+        if dependencies.profileProbe != nil {
+          NavigationStack {
+            NavigationLink("进入离线用户主页") {
+              UserProfileView(
+                userID: 8, service: dependencies.service,
+                historyRepository: dependencies.repositories,
+                favoritesRepository: dependencies.repositories,
+                searchHistoryRepository: dependencies.repositories)
+            }
+            .navigationTitle("离线资料入口")
+          }
+        } else if dependencies.forumProbe != nil {
           NavigationStack {
             NavigationLink("进入离线贴吧") {
               ForumView(
@@ -125,6 +136,9 @@
         if let forumProbe = dependencies.forumProbe {
           ForumSectionsUITestProbeView(probe: forumProbe)
         }
+        if let profileProbe = dependencies.profileProbe {
+          ProfileActivityUITestProbeView(probe: profileProbe)
+        }
       }
     }
 
@@ -158,6 +172,7 @@
     let homeProbe: HomeRefreshUITestProbe?
     let testsAdaptiveNavigation: Bool
     let forumProbe: ForumSectionsUITestProbe?
+    let profileProbe: ProfileActivityUITestProbe?
     let vault: ExploreRefreshUITestVault
     let repositories = ExploreRefreshUITestRepositories()
     let contentFilters = EmptyContentFilterRepository()
@@ -180,10 +195,12 @@
       homeProbe = testsHome ? HomeRefreshUITestProbe() : nil
       forumProbe =
         arguments.contains("--forum-sections-ui-testing") ? ForumSectionsUITestProbe() : nil
+      profileProbe =
+        arguments.contains("--profile-activity-ui-testing") ? ProfileActivityUITestProbe() : nil
       vault = ExploreRefreshUITestVault(
         isSignedOut: testsHome && arguments.contains("--home-refresh-signed-out"))
       let service = ExploreRefreshUITestService(
-        probe: probe, homeProbe: homeProbe, forumProbe: forumProbe,
+        probe: probe, homeProbe: homeProbe, forumProbe: forumProbe, profileProbe: profileProbe,
         unreadReplyCount: testsAdaptiveNavigation ? 7 : 0)
       self.service = service
       accountAccess = AccountAccess(vault: vault, service: service)
@@ -279,6 +296,28 @@
       Text(probe.summary)
         .font(.system(size: 8, design: .monospaced))
         .accessibilityIdentifier("forum-section-request-counts")
+    }
+  }
+
+  @MainActor
+  private final class ProfileActivityUITestProbe: ObservableObject {
+    @Published private var counts: [String: Int] = [:]
+
+    func record(_ key: String) { counts[key, default: 0] += 1 }
+
+    var summary: String {
+      ["profile", "threads", "replies", "relationship", "posts", "comments", "unexpected"]
+        .map { "\($0)=\(counts[$0, default: 0])" }.joined(separator: " ")
+    }
+  }
+
+  private struct ProfileActivityUITestProbeView: View {
+    @ObservedObject var probe: ProfileActivityUITestProbe
+
+    var body: some View {
+      Text(probe.summary)
+        .font(.system(size: 8, design: .monospaced))
+        .accessibilityIdentifier("profile-activity-request-counts")
     }
   }
 
@@ -432,17 +471,20 @@
     private let homeProbe: HomeRefreshUITestProbe?
     private let unreadReplyCount: Int
     private let forumProbe: ForumSectionsUITestProbe?
+    private let profileProbe: ProfileActivityUITestProbe?
     private var homeGeneration = 0
     private var threadsByID: [Int64: BrowseThread] = [:]
 
     init(
       probe: ExploreRefreshUITestProbe, homeProbe: HomeRefreshUITestProbe?,
-      forumProbe: ForumSectionsUITestProbe?, unreadReplyCount: Int
+      forumProbe: ForumSectionsUITestProbe?, profileProbe: ProfileActivityUITestProbe?,
+      unreadReplyCount: Int
     ) {
       self.probe = probe
       self.homeProbe = homeProbe
       self.unreadReplyCount = unreadReplyCount
       self.forumProbe = forumProbe
+      self.profileProbe = profileProbe
     }
 
     private func thread(channel: String, title: String, id: Int64) async -> BrowseThread {
@@ -496,6 +538,19 @@
         id: thread.firstPostID, threadID: threadID, floor: 1, authorID: thread.authorID,
         authorName: thread.authorName, authorPortraitURL: nil, createdAt: nil,
         nestedReplyCount: 0, isThreadAuthor: true, contents: [.text("离线帖子正文")])
+      if let profileProbe {
+        await profileProbe.record("posts")
+        if case .postID(let postID) = location, postID != thread.firstPostID {
+          let reply = BrowsePost(
+            id: postID, threadID: threadID, floor: 2, authorID: 8,
+            authorName: "离线用户", authorPortraitURL: nil, createdAt: nil,
+            nestedReplyCount: 0, isThreadAuthor: false,
+            contents: [.text("离线普通回复正文")])
+          return PostPageData(
+            thread: thread, posts: [reply], currentPage: 1, hasMore: false,
+            totalPages: 1, totalCount: 2, firstPost: post)
+        }
+      }
       return PostPageData(
         thread: thread, posts: [], currentPage: 1, hasMore: false,
         totalPages: 1, totalCount: 1, firstPost: post)
@@ -625,8 +680,30 @@
     func comments(threadID: Int64, postID: Int64, aroundCommentID: Int64, page: Int) throws
       -> CommentPageData
     { throw Self.unsupported }
-    func comments(threadID: Int64, resolvingCommentID: Int64) throws -> CommentPageData {
-      throw Self.unsupported
+    func comments(threadID: Int64, resolvingCommentID commentID: Int64) async throws
+      -> CommentPageData
+    {
+      guard let profileProbe else { throw Self.unsupported }
+      let number = threadID - 910_000
+      guard (1...40).contains(number), number.isMultiple(of: 2),
+        commentID == 9_000_000 + number, let thread = threadsByID[threadID]
+      else {
+        await profileProbe.record("unexpected")
+        throw Self.unsupported
+      }
+      await profileProbe.record("comments")
+      let parentID = 8_000_000 + number
+      let parent = CommentParentPostContext(
+        id: parentID, threadID: threadID, floor: 3, authorID: 9,
+        authorName: "父楼作者", authorPortraitURL: nil, createdAt: nil,
+        isThreadAuthor: false, contents: [.text("离线回复父楼层")])
+      let comment = BrowseComment(
+        id: commentID, authorID: 8, authorName: "离线用户", authorPortraitURL: nil,
+        createdAt: nil, contents: [.text("离线楼中楼正文")],
+        threadID: threadID, parentPostID: parentID)
+      return CommentPageData(
+        parentPost: parent, comments: [comment], currentPage: 1, hasMore: false,
+        totalPages: 1, totalCount: 1, thread: thread)
     }
     func searchForumPosts(
       query: String, forumName: String, page: Int, pageSize: Int, sort: ForumPostSearchSort,
@@ -636,12 +713,74 @@
     func hotTopic(id: Int64, name: String, page: Int, pageSize: Int, lastID: Int64?) throws
       -> HotTopicPageData
     { throw Self.unsupported }
-    func userProfile(userID: Int64) throws -> BrowseUserProfile { throw Self.unsupported }
-    func userThreads(userID: Int64, page: Int, pageSize: Int) throws -> UserThreadPageData {
-      throw Self.unsupported
+    func userProfile(userID: Int64) async throws -> BrowseUserProfile {
+      guard let profileProbe else { throw Self.unsupported }
+      guard userID == 8 else {
+        await profileProbe.record("unexpected")
+        throw Self.unsupported
+      }
+      await profileProbe.record("profile")
+      return BrowseUserProfile(
+        id: 8, tiebaUID: nil, username: "offline_user", displayName: "离线用户",
+        portraitURL: nil, largePortraitURL: nil, growthLevel: 5, gender: .unknown,
+        ipLocation: "", badges: [], biography: "公开动态独立分页测试", tiebaAge: "3年",
+        threadCount: 40, postCount: 40, followerCount: 10, followingCount: 3,
+        followedForumCount: 0, likedForums: [], totalAgreeCount: 20,
+        isModerator: false, isVIP: false, isVerifiedCreator: false, isBlocked: false)
     }
-    func userReplies(userID: Int64, page: Int, pageSize: Int) throws -> UserReplyPageData {
-      throw Self.unsupported
+    func userThreads(userID: Int64, page: Int, pageSize: Int) async throws -> UserThreadPageData {
+      guard let profileProbe else { throw Self.unsupported }
+      guard userID == 8, (1...2).contains(page), pageSize == 20 else {
+        await profileProbe.record("unexpected")
+        throw Self.unsupported
+      }
+      await profileProbe.record("threads")
+      let rows = (1...20).map { index in
+        let number = (page - 1) * 20 + index
+        return profileThread(id: Int64(810_000 + number), title: "公开主题·帖子\(number)")
+      }
+      return UserThreadPageData(
+        threads: rows, currentPage: page, hasMore: page == 1, isHidden: false)
+    }
+    func userReplies(userID: Int64, page: Int, pageSize: Int) async throws -> UserReplyPageData {
+      guard let profileProbe else { throw Self.unsupported }
+      guard userID == 8, (1...2).contains(page), pageSize == 20 else {
+        await profileProbe.record("unexpected")
+        throw Self.unsupported
+      }
+      await profileProbe.record("replies")
+      let rows = (1...20).map { index in
+        let number = (page - 1) * 20 + index
+        let thread = profileThread(id: Int64(910_000 + number), title: "回复原主题\(number)")
+        return BrowseUserReply(
+          threadID: thread.id, postID: Int64(9_000_000 + number),
+          forumID: 100, forumName: "离线资料", threadTitle: thread.title,
+          excerpt: "公开回复·第\(number)条", createdAt: nil, authorID: 8,
+          authorName: "离线用户", authorUsername: "offline_user",
+          target: number.isMultiple(of: 2) ? .comment : .post)
+      }
+      return UserReplyPageData(
+        replies: rows, currentPage: page, hasMore: page == 1, isHidden: false)
+    }
+    private func profileThread(id: Int64, title: String) -> BrowseThread {
+      let thread = BrowseThread(
+        id: id, forumID: 100, forumName: "离线资料", title: title,
+        excerpt: "保留各自阅读位置，切换公开动态后继续阅读。", authorName: "离线用户",
+        replyCount: 2, viewCount: 20, createdAt: nil, lastReplyAt: nil,
+        contents: [], authorID: 8, firstPostID: id + 1_000_000)
+      threadsByID[id] = thread
+      return thread
+    }
+    func userRelationship(session: StoredAccountSession, targetUserID: Int64) async throws
+      -> UserRelationshipData
+    {
+      guard let profileProbe else { throw Self.unsupported }
+      guard session.id == 7, targetUserID == 8 else {
+        await profileProbe.record("unexpected")
+        throw Self.unsupported
+      }
+      await profileProbe.record("relationship")
+      return UserRelationshipData(userID: session.id, targetUserID: targetUserID, isFollowed: false)
     }
     func userRelations(userID: Int64, kind: UserRelationKind, page: Int) throws
       -> UserRelationPageData
