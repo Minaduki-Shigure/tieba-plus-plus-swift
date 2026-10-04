@@ -1,0 +1,72 @@
+name: Search history native candidate
+on:
+  push:
+    branches: [ci/search-history-native-1004]
+permissions:
+  contents: read
+jobs:
+  history-ordering:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Select iPhone simulator
+        run: |
+          set -euo pipefail
+          device_id="$(xcrun simctl list devices available -j | jq -r '
+            [.devices[][] | select(.isAvailable == true and (.name | startswith("iPhone")))] as $phones
+            | (($phones | map(select(.name == "iPhone 16 Pro"))) + $phones | .[0].udid // empty)
+          ')"
+          test -n "$device_id"
+          echo "HISTORY_SIMULATOR_DESTINATION=platform=iOS Simulator,id=$device_id" >> "$GITHUB_ENV"
+      - name: Test production search and history models
+        id: models
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild -project TiebaPlusPlus.xcodeproj -scheme TiebaPlusPlus \
+            -configuration Debug -derivedDataPath build/DerivedData \
+            -destination "$HISTORY_SIMULATOR_DESTINATION" -parallel-testing-enabled NO \
+            -only-testing:TiebaPlusPlusTests/GlobalSearchHistoryTests \
+            -only-testing:TiebaPlusPlusTests/GlobalSearchHistoryViewModelTests \
+            -only-testing:TiebaPlusPlusTests/SearchHistoryOrderingTests \
+            -only-testing:TiebaPlusPlusTests/ForumSearchHistoryTests \
+            -only-testing:TiebaPlusPlusTests/ForumSearchHistoryOrderingTests \
+            -only-testing:TiebaPlusPlusTests/ForumPostSearchViewModelTests \
+            -only-testing:TiebaPlusPlusTests/SearchViewModelTests \
+            -resultBundlePath history-model-results.xcresult \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO \
+            test 2>&1 | tee history-model-test.log
+      - name: Verify native suggestions still submit and record once
+        id: ui
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild -project TiebaPlusPlus.xcodeproj -scheme TiebaPlusPlusIconsUI \
+            -configuration Debug -derivedDataPath build/DerivedData \
+            -destination "$HISTORY_SIMULATOR_DESTINATION" -parallel-testing-enabled NO \
+            -only-testing:TiebaPlusPlusUITests/SearchSuggestionsUITests \
+            -resultBundlePath history-ui-results.xcresult \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO \
+            test 2>&1 | tee history-ui-test.log
+      - name: Export actual results
+        if: always()
+        run: |
+          xcrun xcresulttool get test-results summary --path history-model-results.xcresult --compact > history-model-summary.json
+          xcrun xcresulttool get test-results summary --path history-ui-results.xcresult --compact > history-ui-summary.json
+          xcrun xcresulttool export attachments --path history-ui-results.xcresult --output-path history-ui-attachments
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: search-history-native-candidate
+          path: |
+            history-model-test.log
+            history-model-summary.json
+            history-ui-test.log
+            history-ui-summary.json
+            history-ui-attachments/
+      - name: Enforce validation
+        if: ${{ always() && (steps.models.outcome != 'success' || steps.ui.outcome != 'success') }}
+        run: exit 1
