@@ -123,8 +123,10 @@ final class ForumSectionPagerTests: XCTestCase {
     defer { harness.close() }
     let first = try await visiblePage(0, in: harness)
     first.setContentOffset(CGPoint(x: 0, y: 233), animated: false)
+    print("FORUM RTL before direction change: \(harness.diagnostics())")
     harness.selection.layoutDirection = .rightToLeft
     try await harness.settleLayout()
+    print("FORUM RTL after direction change: \(harness.diagnostics())")
     let sameFirst = try await visiblePage(0, in: harness)
     XCTAssertTrue(sameFirst === first)
     XCTAssertEqual(sameFirst.contentOffset.y, 233, accuracy: 0.5)
@@ -138,6 +140,32 @@ final class ForumSectionPagerTests: XCTestCase {
     _ = try await visiblePage(3, in: harness)
     XCTAssertEqual(harness.selection.value, 3)
     XCTAssertEqual(pager.contentOffset.x, pager.bounds.width * 3, accuracy: 0.5)
+  }
+
+  func testRepeatedInitialRightToLeftTransitionKeepsPagingBridgeConfigured() async throws {
+    for iteration in 0..<20 {
+      let harness = try ForumSectionPagerTestHarness(sections: [0, 1, 2, 3])
+      defer { harness.close() }
+      let first = try await visiblePage(0, in: harness)
+      first.setContentOffset(CGPoint(x: 0, y: 233), animated: false)
+      print("FORUM RTL iteration \(iteration) before direction change: \(harness.diagnostics())")
+      harness.selection.layoutDirection = .rightToLeft
+      try await harness.settleLayout()
+      print("FORUM RTL iteration \(iteration) after direction change: \(harness.diagnostics())")
+      let sameFirst = try await visiblePage(0, in: harness)
+      XCTAssertTrue(sameFirst === first)
+      XCTAssertEqual(sameFirst.contentOffset.y, 233, accuracy: 0.5)
+      let pager = try await pagingScroll(containing: sameFirst, in: harness)
+      XCTAssertEqual(pager.contentOffset.x, pager.bounds.width * 3, accuracy: 0.5)
+      pager.setContentOffset(.zero, animated: false)
+      try await waitForSelection(3, in: harness)
+      _ = try await visiblePage(3, in: harness)
+      harness.selection.layoutDirection = .leftToRight
+      try await harness.settleLayout()
+      _ = try await visiblePage(3, in: harness)
+      XCTAssertEqual(harness.selection.value, 3)
+      XCTAssertEqual(pager.contentOffset.x, pager.bounds.width * 3, accuracy: 0.5)
+    }
   }
 
   private func pagingScroll(
@@ -159,7 +187,9 @@ final class ForumSectionPagerTests: XCTestCase {
       }
       try await Task.sleep(for: .milliseconds(20))
     }
-    XCTFail("Native pager bridge did not attach. \(harness.diagnostics())", file: file, line: line)
+    XCTFail(
+      "Native pager bridge did not attach. Ancestors: \(harness.ancestorDiagnostics(from: view)) "
+        + harness.diagnostics(), file: file, line: line)
     throw ForumSectionPagerTestError.timeout
   }
 
@@ -266,7 +296,51 @@ private final class ForumSectionPagerTestHarness {
         + "attached=\(last?.window === window)"
     }
     return "selected=\(selection.value) sections=\(selection.sections) host=\(host.view.bounds) "
-      + pages.joined(separator: "; ")
+      + "direction=\(selection.layoutDirection) " + pages.joined(separator: "; ")
+      + "\nNative hierarchy:\n" + nativeHierarchy()
+  }
+
+  func ancestorDiagnostics(from view: UIView) -> String {
+    var result: [String] = []
+    var current: UIView? = view
+    while let ancestor = current {
+      result.append(describe(ancestor))
+      current = ancestor.superview
+    }
+    return result.joined(separator: " -> ")
+  }
+
+  private func nativeHierarchy() -> String {
+    var lines: [String] = []
+    func append(_ view: UIView, depth: Int) {
+      lines.append(String(repeating: "  ", count: depth) + describe(view))
+      for child in view.subviews { append(child, depth: depth + 1) }
+    }
+    append(host.view, depth: 0)
+    return lines.joined(separator: "\n")
+  }
+
+  private func describe(_ view: UIView) -> String {
+    func identity(_ object: AnyObject?) -> String {
+      object.map { String(describing: ObjectIdentifier($0)) } ?? "nil"
+    }
+    var description =
+      "\(String(reflecting: type(of: view))) id=\(identity(view)) "
+      + "super=\(identity(view.superview)) window=\(identity(view.window)) "
+      + "expectedWindow=\(view.window === window) frame=\(view.frame) bounds=\(view.bounds) "
+      + "hidden=\(view.isHidden) alpha=\(view.alpha) "
+      + "semantic=\(view.semanticContentAttribute.rawValue) "
+      + "effectiveDirection=\(view.effectiveUserInterfaceLayoutDirection.rawValue) "
+      + "ax=\(String(describing: view.accessibilityIdentifier))"
+    if let scroll = view as? UIScrollView {
+      description +=
+        " paging=\(scroll.isPagingEnabled) directionalLock=\(scroll.isDirectionalLockEnabled) "
+        + "bounces=\(scroll.bounces) insetBehavior=\(scroll.contentInsetAdjustmentBehavior.rawValue) "
+        + "offset=\(scroll.contentOffset) contentSize=\(scroll.contentSize) "
+        + "tracking=\(scroll.isTracking) dragging=\(scroll.isDragging) decelerating=\(scroll.isDecelerating) "
+        + "delegate=\(identity(scroll.delegate))"
+    }
+    return description
   }
 
   func close() {
