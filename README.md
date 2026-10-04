@@ -56,9 +56,11 @@ and its verified metadata enters the public app source.
   passed all 44 search/history model tests and all three UI flows with zero
   failures or skips. Actual taps, swipes, detail return and keyboard submission
   verify independent positions within 3 pt, pagination, sort isolation and
-  selected-category-only requests. Full tagged CI and anonymous integration
-  remain publication gates, and physical-device gesture behavior remains a
-  separate validation step. No endpoint or credential use is added; the
+  selected-category-only requests. Its
+  [tagged CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37176670412)
+  subsequently passed 2,653 App tests, all 16 phone UI workflows, all three iPad
+  UI workflows, Core and anonymous integration. Physical-device gesture behavior
+  remains a separate validation step. No endpoint or credential use is added; the
   weighted parity estimate is unchanged.
 - **`v0.65.0-alpha.42` retained profile activity:** Public Topics and Public
   Replies have separate native lists and reading positions. Switching or

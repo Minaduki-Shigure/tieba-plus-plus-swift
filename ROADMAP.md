@@ -44,8 +44,10 @@ The [native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift
 passed 44 model tests and all three actual UI workflows, with zero failures or
 skips. Tests cover positions within 3 pt, real keyboard submission, selected-page
 request counts, second-page preservation, sorting, swipes and detail return.
-Full tagged CI and anonymous integration remain publication gates, with
-physical-device behavior a separate validation step. No new endpoints or
+Its [tagged CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37176670412)
+subsequently passed 2,653 App tests, all 16 phone UI workflows, all three iPad
+UI workflows, Core and anonymous integration. Physical-device behavior remains
+a separate validation step. No new endpoints or
 credentials are involved, and the 80–82% weighted estimate is unchanged.
 
 Alpha.42/build 120 follows TiebaLite `9701bfb6`'s reachable user-profile activity
