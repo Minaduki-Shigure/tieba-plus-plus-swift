@@ -38,8 +38,13 @@ and its verified metadata enters the public app source.
   Inbox pagination now uses stable message rows instead of a replaced invisible
   footer. Its loading-status row also stays mounted between requests, preventing
   a hidden-only page from removing and reinserting the list's measured footer.
-  Native validation and tagged publication remain gates; see
-  [the candidate findings](Docs/search-and-inbox-release-validation.md).
+  Focused native candidates passed [90 model tests and two suggestion UI flows](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37188924914),
+  [35 forum-search model tests and six search UI flows](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37189754514),
+  and [all four inbox UI regressions](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37192652980),
+  with zero failures or skips. The inbox tests retain the original 3 pt position
+  limit and exact request counts, including a fully hidden middle page.
+  Alpha.47's full tagged regression, IPA publication and public source verification
+  are still pending; see [the validation record](Docs/search-and-inbox-release-validation.md).
 - **History, search suggestions and Chinese system controls, included in alpha.47:**
   Thread and forum browsing history keep separate native lists and reading
   positions through category changes and real detail returns. Tap or swipe the

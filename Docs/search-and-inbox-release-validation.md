@@ -1,5 +1,10 @@
 # Search and inbox release validation
 
+Alpha.47/build 125 is the replacement release candidate. Its focused native
+checks below have passed; full tagged CI, IPA packaging/publication and final
+public source/asset verification remain pending. No full-suite result or
+published IPA is claimed by these candidate results.
+
 The alpha.45 tag's [full regression](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37184079790)
 passed all 2,677 App tests, three iPad UI workflows, Core and anonymous integration.
 The phone run passed 22 of 24 UI workflows and failed two. Its IPA publication
@@ -55,8 +60,13 @@ passed the unchanged hidden-page regression: one test, zero failures, skips or
 expected failures on iPhone 16 Pro / iOS 18.5. It verifies the original tail stays
 within 3 pt both while page three is pending and after its visible rows append,
 then reads title 41 with exactly pages 1, 2 and 3 requested and no hidden content
-exposed. The three original inbox workflows run separately against the same
-compiled candidate; full tagged regression remains a publication gate.
+exposed. The same runner then reused the compiled candidate to run the three
+original inbox workflows: all three passed, with zero failures, skips or
+expected failures. The two exported summaries independently require 1/0/0 and
+3/0/0 (passed/failed/skipped), so the complete focused result is four passing
+tests. The hidden-page test and all three original tests were unchanged by the
+footer fix. Artifacts `11299479000` and `11300083321` contain the summaries,
+raw logs and final screen/hierarchy attachments.
 
 The alpha.46 tag's [full CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37190889950)
 had passed 2,695 App tests with zero failures or skips, plus Core and anonymous
@@ -79,7 +89,10 @@ The latter include the new resume flow, the three corrected SearchScopes tests
 and both suggestion flows. The held old response did not replace the new result,
 and returning again did not create another request or history write.
 
-The fixture uses offline, in-memory data and no real account. Native candidate
-results, the full new tag's regression, IPA packaging and public source/asset
-verification are still publication gates. Simulator success does not replace
+The fixtures use offline, in-memory data and no real account. The ordered-history
+and suggestion integration also passed [90 model tests and two UI workflows](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37188924914);
+its evidence is recorded in [search history ordering](search-history-ordering.md).
+These focused suites overlap and must not be added together as a full-suite
+test count. Alpha.47's full regression, IPA packaging/publication and public
+source/asset verification remain pending. Simulator success does not replace
 iOS 16, LiveContainer or physical-device checks.

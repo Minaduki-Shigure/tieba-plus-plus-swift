@@ -33,5 +33,9 @@
 [组合 iOS 候选](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37188924914)
 在 iPhone 16 Pro / iOS 18.5 模拟器实际通过 90 项模型测试和两项原生搜索联想
 UI 测试，均零失败、零跳过。UI 记录确认选取联想只写一次历史，返回帖子不重复
-提交；关闭联想时服务未收到联想请求。后续集成的吧内搜索恢复与分页变更仍有
-独立原生回归及完整标签门禁；这些修改尚未随 IPA 发布。
+提交；关闭联想时服务未收到联想请求。后续吧内搜索恢复另通过
+[35 项模型测试和六项搜索 UI 回归](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37189754514)，
+消息分页修复另通过[四项原生 UI 回归](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37192652980)，
+均零失败、零跳过。这些专项测试有重叠，不能相加作为完整测试数量。
+alpha.47/build 125 的完整标签 CI、IPA 发布及公开应用源验证仍在门禁中；
+截至本记录，这些修改尚未随 IPA 发布。详见[发布验证记录](search-and-inbox-release-validation.md)。

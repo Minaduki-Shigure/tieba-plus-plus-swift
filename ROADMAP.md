@@ -24,7 +24,14 @@ pagination jump and a separate search-test viewport error. Neither was bypassed
 by publishing the failed candidate. A further held-response native test exposed
 a smaller reading-position jump when an entirely hidden page finished; alpha.46
 was withheld and the loading footer now remains mounted between requests.
-Details and current validation gates are in
+The [fixed inbox candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37192652980)
+passed all four unchanged UI regressions, including the hidden-page case's
+3 pt position bound before and after page three arrives. Separate candidates
+passed [90 history/search model tests and two suggestion UI flows](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37188924914)
+and [35 forum-search model tests and six search UI flows](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37189754514),
+all with zero failures or skips. These are overlapping focused suites, not
+additional counts to sum into a full regression result. Alpha.47's full tagged
+CI, IPA publication and public source verification are still pending. Details are in
 [the release validation record](Docs/search-and-inbox-release-validation.md).
 These are corrections within credited areas; the 80–82% estimate is unchanged.
 
@@ -67,7 +74,7 @@ UI workflows, Core and anonymous integration. Physical-device/account
 validation remains a separate gate. This extends an existing credited area;
 the 80–82% weighted estimate is unchanged.
 
-Alpha.46 also follows TiebaLite `9701bfb6`'s separate Thread and
+The alpha.47 candidate also follows TiebaLite `9701bfb6`'s separate Thread and
 Forum history pages. Both native lists stay mounted and share a local archive
 snapshot, retaining independent positions through category changes and detail
 navigation. Returning from a recorded visit rereads the shared archive while
@@ -87,7 +94,7 @@ switching and real Thread/Forum returns. Native deletion, clear cancellation and
 confirmation, recording changes and the order of revisited records are checked
 against an independently reopened temporary file archive. The visited record is
 visually first, followed by the old first record, and both identities match disk.
-Alpha.46 also declares the implemented Simplified Chinese bundle language;
+The alpha.47 candidate also declares the implemented Simplified Chinese bundle language;
 [five native Home/Search UI workflows](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37179108351)
 passed and the compiled declaration and Chinese Paste/Cancel controls were
 verified. See [language verification and limits](Docs/chinese-interface-language.md).
