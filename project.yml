@@ -2,6 +2,7 @@ name: TiebaPlusPlus
 
 options:
   minimumXcodeGenVersion: 2.45.4
+  developmentLanguage: zh-Hans
   deploymentTarget:
     iOS: "16.0"
   groupSortPosition: top
@@ -43,6 +44,9 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: "贴吧++"
+        CFBundleDevelopmentRegion: zh-Hans
+        CFBundleLocalizations:
+          - zh-Hans
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSApplicationCategoryType: public.app-category.social-networking
@@ -91,7 +95,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.minaduki.tieba-plus-plus
         PRODUCT_NAME: TiebaPlusPlus
         MARKETING_VERSION: 0.65.0
-        CURRENT_PROJECT_VERSION: 121
+        CURRENT_PROJECT_VERSION: 122
         CODE_SIGN_STYLE: Automatic
         SUPPORTS_MACCATALYST: false
         ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: true

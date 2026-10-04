@@ -230,6 +230,50 @@ struct HistoryView: View {
   }
 
   var body: some View {
+    historyPages
+      .navigationTitle("浏览记录")
+      .navigationBarTitleDisplayMode(.inline)
+      .safeAreaInset(edge: .top, spacing: 0) {
+        categoryPicker
+      }
+      .toolbar {
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
+          historySettingsMenu
+
+          Button(role: .destructive) {
+            showsClearConfirmation = true
+          } label: {
+            Image(systemName: "trash")
+          }
+          .disabled(viewModel.entries.isEmpty)
+          .accessibilityLabel("清空浏览记录")
+          .help("清空浏览记录")
+        }
+      }
+      .confirmationDialog(
+        "清空全部浏览记录？",
+        isPresented: $showsClearConfirmation,
+        titleVisibility: .visible
+      ) {
+        Button("清空全部记录", role: .destructive, action: viewModel.clearAll)
+        Button("取消", role: .cancel) {}
+      }
+      .alert(
+        "无法更新浏览记录",
+        isPresented: Binding(
+          get: { viewModel.operationError != nil },
+          set: { if !$0 { viewModel.dismissOperationError() } }
+        )
+      ) {
+        Button("好", action: viewModel.dismissOperationError)
+      } message: {
+        Text(viewModel.operationError ?? "未知错误")
+      }
+      .onAppear(perform: viewModel.activate)
+      .onDisappear(perform: viewModel.cancel)
+  }
+
+  private var historyPages: some View {
     // Keep both native lists mounted, but leave their horizontal gestures to
     // row swipe actions. Category dragging belongs to the selector above them.
     ZStack {
@@ -242,65 +286,29 @@ struct HistoryView: View {
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .navigationTitle("浏览记录")
-    .navigationBarTitleDisplayMode(.inline)
-    .safeAreaInset(edge: .top, spacing: 0) {
-      categoryPicker
-    }
-    .toolbar {
-      ToolbarItemGroup(placement: .navigationBarTrailing) {
-        Menu {
-          Toggle(
-            "记录浏览历史",
-            isOn: Binding(
-              get: { viewModel.recordingEnabled },
-              set: { viewModel.setRecordingEnabled($0) }
-            )
-          )
-        } label: {
-          Label(
-            "浏览记录设置",
-            systemName: viewModel.recordingEnabled
-              ? "clock.arrow.circlepath"
-              : "clock.badge.xmark"
-          )
-          .labelStyle(.iconOnly)
-          .accessibilityLabel("浏览记录设置")
-          .accessibilityIdentifier("history-recording-menu")
-        }
-        .help("浏览记录设置")
+  }
 
-        Button(role: .destructive) {
-          showsClearConfirmation = true
-        } label: {
-          Image(systemName: "trash")
-        }
-        .disabled(viewModel.entries.isEmpty)
-        .accessibilityLabel("清空浏览记录")
-        .help("清空浏览记录")
-      }
-    }
-    .confirmationDialog(
-      "清空全部浏览记录？",
-      isPresented: $showsClearConfirmation,
-      titleVisibility: .visible
-    ) {
-      Button("清空全部记录", role: .destructive, action: viewModel.clearAll)
-      Button("取消", role: .cancel) {}
-    }
-    .alert(
-      "无法更新浏览记录",
-      isPresented: Binding(
-        get: { viewModel.operationError != nil },
-        set: { if !$0 { viewModel.dismissOperationError() } }
+  private var historySettingsMenu: some View {
+    Menu {
+      Toggle(
+        "记录浏览历史",
+        isOn: Binding(
+          get: { viewModel.recordingEnabled },
+          set: { viewModel.setRecordingEnabled($0) }
+        )
       )
-    ) {
-      Button("好", action: viewModel.dismissOperationError)
-    } message: {
-      Text(viewModel.operationError ?? "未知错误")
+    } label: {
+      Label(
+        "浏览记录设置",
+        systemImage: viewModel.recordingEnabled
+          ? "clock.arrow.circlepath"
+          : "clock.badge.xmark"
+      )
+      .labelStyle(.iconOnly)
+      .accessibilityLabel("浏览记录设置")
+      .accessibilityIdentifier("history-recording-menu")
     }
-    .onAppear(perform: viewModel.activate)
-    .onDisappear(perform: viewModel.cancel)
+    .help("浏览记录设置")
   }
 
   private var categoryPicker: some View {

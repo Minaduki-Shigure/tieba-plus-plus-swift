@@ -16,6 +16,22 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
+Alpha.44/build 122 follows TiebaLite `9701bfb6`'s reachable ReplyMe/AtMe pager
+with separate retained Replies and Mentions lists. Only the selected foreground
+channel reads. Cached private content stays hidden until its local session and
+filtering are validated, and a session change clears both channels. Each page
+preserves its position, messages, retry state and cursor through switching,
+detail return and a failed refresh. Independent message/sender buttons share
+one browse destination, preventing multiple pushes from one List row; refresh
+reads the current model's activity instead of an initially captured value.
+The [native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37176955255)
+passed all 53 model tests and three actual UI workflows, with zero failures or
+skips, covering positions within 3 pt, swipes, single-back destination returns,
+main-tab changes, second pages, both refresh directions, failure and retry.
+Request counts and order show zero unexpected requests. Tagged CI, anonymous
+integration and physical-device/account validation remain separate gates. This
+extends an existing credited area; the 80–82% weighted estimate is unchanged.
+
 A browsing-history candidate follows TiebaLite `9701bfb6`'s separate Thread and
 Forum history pages. Both native lists stay mounted and share a local archive
 snapshot, retaining independent positions through category changes and detail
@@ -48,8 +64,10 @@ The [native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift
 passed 44 model tests and all three actual UI workflows, with zero failures or
 skips. Tests cover positions within 3 pt, real keyboard submission, selected-page
 request counts, second-page preservation, sorting, swipes and detail return.
-Full tagged CI and anonymous integration remain publication gates, with
-physical-device behavior a separate validation step. No new endpoints or
+Its [tagged CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37176670412)
+subsequently passed 2,653 App tests, all 16 phone UI workflows, all three iPad
+UI workflows, Core and anonymous integration. Physical-device behavior remains
+a separate validation step. No new endpoints or
 credentials are involved, and the 80–82% weighted estimate is unchanged.
 
 Alpha.42/build 120 follows TiebaLite `9701bfb6`'s reachable user-profile activity
@@ -298,7 +316,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-serves `v0.65.0-alpha.43` (build 121) after publication, whose app-code snapshot includes
+serves `v0.65.0-alpha.44` (build 122) after publication, whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -406,7 +424,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.65.0-alpha.43` app-code snapshot is at 80–82%; all experimental
+The public `v0.65.0-alpha.44` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
@@ -868,7 +886,8 @@ the source metadata is updated to that tested IPA.
 - Local pinned-forum ordering and explicit forum-favorite context actions
 - Saved-thread reading-position and browse-mode restoration
 - Default-off only-author and descending overrides for locally saved threads
-- Home-screen shortcuts for locally saved forums
+- Pinned entries on the App's Home page for locally saved forums; an individual
+  forum icon on the iOS Home Screen remains a separate platform-parity gap
 - HTTPS-only anonymous requests with no account credentials or hardware-derived identifiers
 - Ephemeral, HTTPS-only Baidu Web login with an exact host allowlist
 - Same-snapshot BDUSS/STOKEN capture, independent same-UID session binding,
@@ -1073,6 +1092,14 @@ disposable-account and physical-device validation gates.
 
 ## Next milestones
 
+The separate per-forum iOS Home Screen icon workflow has a
+[reviewed feasibility note](Docs/forum-shortcut-feasibility.md). Its isolated
+macOS Actions signing experiment confirmed that this runner requires iCloud
+sign-in even for a publicly shareable Shortcuts template. A one-time public
+template export from an already signed-in user device and subsequent import /
+standalone / LiveContainer device checks remain required; no completion credit
+is assigned to the current route-only groundwork.
+
 1. Real-device validation of multi-frame GIF, WebP, and HEIC/HEIF sequences in
    post bodies, list previews, and the zoom gallery on iOS 16 and iOS 18.7.2,
    including single-frame containers, Reduce Motion, backgrounding, rapid and
@@ -1207,7 +1234,7 @@ entirely in memory. A `userID + sessionRevision` lease is checked before and
 after every page request so an account switch cannot display a previous
 account's private response.
 
-A candidate follows TiebaLite `9701bfb6`'s reachable ReplyMe/AtMe pager with
+Alpha.44 follows TiebaLite `9701bfb6`'s reachable ReplyMe/AtMe pager with
 separate native lists, snapshots, cursors and reading positions. Only the
 visible foreground channel may read; leaving it cancels pending work while
 preserving validated content and retry state. Cache activation checks the local
@@ -1219,8 +1246,21 @@ a failed refresh preserves the validated snapshot and pagination cursor.
 Filtering still requires explicit continuation after a rule change or an
 all-hidden page. First-page success retains the existing unread reconciliation
 callback; cached selection neither invokes it nor infers an unread count from
-visible rows. Model and real-Root UI validation is pending, and this candidate
-is not yet in a published IPA. No endpoint or account write is added.
+visible rows.
+The first native run exposed two UI integration bugs: several NavigationLinks
+in one List row could push multiple destinations, and an initially inactive
+page's refresh closure could retain its initial activity value. Message bodies
+and sender controls now use independent borderless buttons with one owned
+browse destination; refresh eligibility is read from the live shared model.
+The [follow-up native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37176955255)
+passed all 53 model tests and three actual UI workflows with zero failures or
+skips. They exercise both channels' positions within 3 pt, horizontal paging,
+single-back returns from real Thread and User Profile destinations, main-tab
+changes, preserved second pages, each channel's pull-to-refresh and a failed
+refresh followed by pagination and explicit retry. Request counts and order
+show only the selected channel reads, with zero unexpected requests. Full
+tagged CI and physical-device validation remain separate gates, and publication
+follows the existing tested-IPA pipeline. No endpoint or account write is added.
 
 The inbox's local filter projection inspects only `message.content` and the
 sender's exact UID, nickname, and username. Message titles, quoted content,
