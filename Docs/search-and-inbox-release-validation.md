@@ -1,14 +1,29 @@
 # Search and inbox release validation
 
-Alpha.48/build 126 is the replacement release candidate. Its earlier focused native
-checks below have passed; full tagged CI, IPA packaging/publication and final
-public source/asset verification remain pending. No full-suite result or
-published IPA is claimed by these candidate results.
+[Alpha.48/build 126](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/releases/tag/v0.65.0-alpha.48)
+was published on 2026-10-04 at 12:54:32 UTC. Its [full tagged run](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37198478997)
+passed all 2,695 App tests, 27 phone UI tests and three iPad UI tests, with zero
+failures or skips, plus Core and anonymous integration. Both jobs in the
+[IPA build and publication run](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37203176210)
+succeeded. The public source now serves alpha.48/build 126 at source commit
+`e457a73dfbe5edfd14318702f320298b92658d1f`.
+
+The published IPA is 7,508,780 bytes, with SHA-256
+`687de314d988caa3280955e6b37bb25ebc3719726201adeccf85f6240ac4c5b1`.
+The downloaded archive passed integrity checks and matches the source's size
+and hash. Its unsigned app has version `0.65.0`, build `126`, minimum iOS `16.0`
+and bundle identifier `io.github.minaduki.tieba-plus-plus`. The subsequent
+[source-validation job](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37203742112/job/111440528389)
+passed both **Validate source metadata** and **Verify published IPA**. This
+confirms those publication checks; the same main workflow's additional repeat
+Core/App jobs were still running at this verification point.
 
 The [alpha.47 full run](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37193998175)
-passed all 2,695 App tests and 25 of 26 phone UI tests, with no skips. All four
+passed all 2,695 App tests, three iPad UI tests and 25 of 26 phone UI tests, with no skips. All four
 inbox regressions passed. The remaining failure was search thread pagination;
-it was a separate real product issue and the candidate was withheld.
+it was a separate real product issue and the candidate was withheld. Its
+[downstream IPA build](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37198311023)
+was skipped by the failed-CI gate.
 
 The search recording shows titles 17–19 at video PTS 73.3 seconds with one thread
 request, then titles 36–39 at 73.8 seconds with two requests. Roughly nineteen
@@ -19,7 +34,7 @@ threshold mistake; extending the swipe loop would not fix the product jump.
 
 Search still used a transparent pagination row whose identity changed with its
 tail, count and request epoch, plus a loading row removed after each request.
-The new candidate removes the transparent row and keeps the loading row mounted.
+Alpha.48 removes the transparent row and keeps the loading row mounted.
 It uses actual visible result rows to request the raw server tail, including a
 hidden raw tail; the existing all-hidden status row retains continuation for
 fully hidden results. Query/result identities, active-scope checks and the model's
@@ -30,7 +45,17 @@ The original three SearchScopes tests remain unchanged. A new native fixture
 holds page two at the service boundary, records title 20's settled position,
 then releases only the service response. Without another gesture, title 20 must
 stay within 3 pt before the test scrolls to title 21. The request log must contain
-exactly pages one and two. This additional candidate validation is pending.
+exactly pages one and two. The [focused alpha.48 candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37198420318)
+passed this test and all three unchanged SearchScopes workflows on iPhone 16 Pro
+/ iOS 18.5: four passed, zero failures or skips. The before/after hierarchy records
+title 20 at Y=568.7 pt in both states, a 0 pt displacement; the test then reads
+title 21 and confirms exactly the two thread requests. Artifact `11301772560`
+contains the summary, raw log and screen/hierarchy evidence. The same candidate's
+three unchanged suggestion/forum-search integration tests also passed without
+a retry; artifact `11302072320` contains their separate summary, log and
+attachments. The two summaries independently report 4/0/0 and 3/0/0
+(passed/failed/skipped): seven focused UI tests passed. These focused counts are
+separate from the complete tagged release result above.
 
 The alpha.45 tag's [full regression](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37184079790)
 passed all 2,677 App tests, three iPad UI workflows, Core and anonymous integration.
@@ -99,8 +124,8 @@ The alpha.46 tag's [full CI](https://github.com/Minaduki-Shigure/tieba-plus-plus
 had passed 2,695 App tests with zero failures or skips, plus Core and anonymous
 integration, when the separate hidden-page failure was confirmed. The still
 running UI gate was cancelled intentionally; alpha.46 is not a passing release
-candidate and no IPA was published for it. The public source remains alpha.44
-until the replacement candidate completes all publication gates.
+candidate and no IPA was published for it. The public source retained alpha.44
+until alpha.48 completed all publication gates.
 
 The forum-search cancellation fix restores the pre-request state when leaving,
 including a loaded-empty response and any retry error. Returning resumes an
@@ -120,6 +145,6 @@ The fixtures use offline, in-memory data and no real account. The ordered-histor
 and suggestion integration also passed [90 model tests and two UI workflows](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37188924914);
 its evidence is recorded in [search history ordering](search-history-ordering.md).
 These focused suites overlap and must not be added together as a full-suite
-test count. Alpha.48's full regression, IPA packaging/publication and public
-source/asset verification remain pending. Simulator success does not replace
-iOS 16, LiveContainer or physical-device checks.
+test count. Alpha.48's complete release and public source/IPA verification are
+recorded above. Simulator success does not replace iOS 16, LiveContainer or
+physical-device checks.

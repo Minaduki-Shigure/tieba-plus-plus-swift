@@ -33,8 +33,16 @@ all with zero failures or skips. These are overlapping focused suites, not
 additional counts to sum into a full regression result. Alpha.47's full phone
 regression exposed an additional real search-results append jump; the search
 list now also uses stable content rows and a persistent loading row, with a
-held-response native position test. Alpha.48's full tagged
-CI, IPA publication and public source verification are still pending. Details are in
+held-response native position test. The [alpha.48 search candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37198420318)
+passed that test and the three unchanged scope workflows, with zero failures
+or skips; the held tail's Y position was 568.7 pt both before and after append.
+Its three unchanged suggestion/forum-search integration workflows also passed
+without a retry: seven focused UI tests passed in total, with zero failures or
+skips. The [full tagged run](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37198478997)
+passed all 2,695 App tests, 27 phone UI tests and three iPad UI tests, with zero
+failures or skips, plus Core and anonymous integration. The [alpha.48 IPA](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/releases/tag/v0.65.0-alpha.48)
+is published and the public source and IPA passed size, SHA-256 and metadata
+verification. Details are in
 [the release validation record](Docs/search-and-inbox-release-validation.md).
 These are corrections within credited areas; the 80–82% estimate is unchanged.
 
@@ -55,8 +63,9 @@ observed at the service boundary and history writes at the repository boundary.
 Selecting a suggestion writes exactly once in the selected scope; cancelling
 or returning from a real thread adds no request, and the disabled setting sends
 none. The native evidence is iOS 18.5 on an iPhone 16 Pro simulator with offline
-responses. iOS 16, native background/tab transitions, full tagged regression
-and publication remain separate gates. The 80–82% estimate is unchanged.
+responses. Full tagged regression and publication subsequently passed for
+alpha.48; iOS 16 and native background/tab transitions remain separate validation
+boundaries. The 80–82% estimate is unchanged.
 
 Alpha.44/build 122 follows TiebaLite `9701bfb6`'s reachable ReplyMe/AtMe pager
 with separate retained Replies and Mentions lists. Only the selected foreground
@@ -77,7 +86,7 @@ UI workflows, Core and anonymous integration. Physical-device/account
 validation remains a separate gate. This extends an existing credited area;
 the 80–82% weighted estimate is unchanged.
 
-The alpha.48 candidate also follows TiebaLite `9701bfb6`'s separate Thread and
+Alpha.48 also follows TiebaLite `9701bfb6`'s separate Thread and
 Forum history pages. Both native lists stay mounted and share a local archive
 snapshot, retaining independent positions through category changes and detail
 navigation. Returning from a recorded visit rereads the shared archive while
@@ -97,12 +106,12 @@ switching and real Thread/Forum returns. Native deletion, clear cancellation and
 confirmation, recording changes and the order of revisited records are checked
 against an independently reopened temporary file archive. The visited record is
 visually first, followed by the old first record, and both identities match disk.
-The alpha.48 candidate also declares the implemented Simplified Chinese bundle language;
+Alpha.48 also declares the implemented Simplified Chinese bundle language;
 [five native Home/Search UI workflows](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37179108351)
 passed and the compiled declaration and Chinese Paste/Cancel controls were
 verified. See [language verification and limits](Docs/chinese-interface-language.md).
-Full tagged regression and publication remain separate gates. No account
-operation or endpoint is added, and the weighted estimate is unchanged.
+These workflows subsequently passed alpha.48's complete release gates. No
+account operation or endpoint is added, and the weighted estimate is unchanged.
 
 Alpha.43/build 121 follows TiebaLite `9701bfb6`'s reachable forum/thread/user
 search pager. Stable native Lists preserve separate reading positions,
@@ -368,7 +377,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-serves `v0.65.0-alpha.48` (build 126) after publication, whose app-code snapshot includes
+serves the published `v0.65.0-alpha.48` (build 126), whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,

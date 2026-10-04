@@ -38,5 +38,14 @@ UI 测试，均零失败、零跳过。UI 记录确认选取联想只写一次�
 消息分页修复另通过[四项原生 UI 回归](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37192652980)，
 均零失败、零跳过。这些专项测试有重叠，不能相加作为完整测试数量。
 alpha.47 的完整界面回归另外发现了搜索结果追加时的真实跳动，未发布。
-修复后的 alpha.48/build 126 的完整标签 CI、IPA 发布及公开应用源验证仍在门禁中；
-截至本记录，这些修改尚未随 IPA 发布。详见[发布验证记录](search-and-inbox-release-validation.md)。
+修复后的 [alpha.48 搜索专项](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37198420318)
+已通过新增的暂停响应位置测试及原有三项分类测试，四项均零失败、零跳过：
+第二页追加前后，第 20 条标题均位于 Y=568.7 pt，随后实际读取第 21 条且只有两次
+帖子请求。同候选随后通过原有三项联想/吧内恢复集成测试，未修改测试或重跑；
+两份独立报告分别为 4/0/0 和 3/0/0（通过/失败/跳过），共七项 UI 测试通过。
+[alpha.48/build 126 完整标签 CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37198478997)
+已通过全部 2,695 项 App 测试、27 项手机 UI 测试和三项 iPad UI 测试，均零失败、
+零跳过，Core 和匿名集成也已通过。这些修改已随
+[alpha.48/build 126](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/releases/tag/v0.65.0-alpha.48)
+发布；公开应用源与 IPA 的大小、SHA-256 和包内版本验证均通过。
+详见[发布验证记录](search-and-inbox-release-validation.md)。
