@@ -73,7 +73,7 @@ struct ForumView: View {
   // the pager and modifier order unchanged; no page is type-erased or rebuilt.
   private var pagerContent: some View {
     ForumSectionPager(
-      sections: sectionsViewModel.sections.map(\.id), selection: selectedSection
+      sections: sectionsViewModel.presentedSections.map(\.id), selection: selectedSection
     ) { section in
       sectionPage(for: section)
     }
@@ -432,7 +432,7 @@ struct ForumView: View {
   private var optionsBar: some View {
     VStack(spacing: 0) {
       ForumSectionSelector(
-        sections: sectionsViewModel.sections,
+        sections: sectionsViewModel.presentedSections,
         selectedSection: sectionsViewModel.selectedSectionID,
         onSelect: sectionsViewModel.select)
 

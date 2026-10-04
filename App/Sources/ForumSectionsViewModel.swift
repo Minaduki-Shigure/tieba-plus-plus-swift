@@ -55,6 +55,13 @@ final class ForumSectionsViewModel: ObservableObject {
       + channels.map { ForumSection(id: .channel($0.id), title: $0.name) }
   }
 
+  /// Only latest publishes the authoritative forum and channel catalog. Let
+  /// that first request finish before the UI can select another page and cancel
+  /// it. Retained metadata keeps all pages available during later refreshes.
+  var presentedSections: [ForumSection] {
+    forum.id > 0 ? sections : sections.filter { $0.id == .latest }
+  }
+
   var currentModel: ForumViewModel {
     // Latest exists from initialization; selection only accepts advertised IDs
     // and creates their model before publishing the selected identity.
