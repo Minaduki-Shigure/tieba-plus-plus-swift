@@ -11,10 +11,13 @@ struct InboxMessagePresentation: Identifiable, Hashable, Sendable {
 @MainActor
 final class NotificationsViewModel: ObservableObject {
   @Published private(set) var selectedKind: InboxKind
+  @Published private(set) var isActive = false
+  @Published private(set) var isResolvingSession = false
   @Published private(set) var messages: [InboxMessage] = []
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var isLoadingMore = false
   @Published private(set) var loadMoreError: String?
+  @Published private(set) var refreshError: String?
   @Published private(set) var contentFilterSnapshot = ContentFilterSnapshot.empty
   @Published private(set) var isResolvingContentFilter = false
   @Published private(set) var paginationEpoch = 0
@@ -28,6 +31,8 @@ final class NotificationsViewModel: ObservableObject {
   private var hasMore = true
   private var loadedLease: InboxSessionLease?
   private var loadTask: Task<Void, Never>?
+  private var activationTask: Task<Void, Never>?
+  private var loadCheckpoint: InboxLoadCheckpoint?
   private var contentFilterTask: Task<Void, Never>?
   private var epoch = 0
   private var contentFilterEpoch = 0
@@ -68,15 +73,17 @@ final class NotificationsViewModel: ObservableObject {
   }
 
   func loadIfNeeded() {
+    guard !Task.isCancelled else { return }
+    isActive = true
+    guard loadTask == nil, activationTask == nil else { return }
+    if let loadedLease {
+      validateCachedSession(loadedLease)
+      return
+    }
     switch state {
     case .idle:
       reload()
-    case .loaded:
-      refreshContentFilter(
-        pausingAutomaticPagination: false,
-        pausingIfSnapshotChanges: true
-      )
-    case .loading, .failed:
+    case .loaded, .loading, .failed:
       break
     }
   }
@@ -84,22 +91,78 @@ final class NotificationsViewModel: ObservableObject {
   func select(_ kind: InboxKind) {
     guard kind != selectedKind else { return }
     selectedKind = kind
-    reload()
+    beginNewEpoch(loadImmediately: isActive)
   }
 
   func reload() {
-    beginNewEpoch(loadImmediately: true)
+    guard isActive, !Task.isCancelled, loadTask == nil, activationTask == nil else { return }
+    load(page: 1, replacing: true)
   }
 
   func refresh() async {
+    guard isActive, !Task.isCancelled else { return }
+    if let activationTask {
+      await activationTask.value
+      return
+    }
     reload()
     let task = loadTask
     await task?.value
   }
 
+  func clearRefreshError() { refreshError = nil }
+
   func accountSessionDidChange(loadImmediately: Bool = true) {
     // Clear synchronously so data from the old account cannot remain visible for one frame.
-    beginNewEpoch(loadImmediately: loadImmediately)
+    beginNewEpoch(loadImmediately: loadImmediately && isActive)
+  }
+
+  private func validateCachedSession(_ lease: InboxSessionLease) {
+    // Keep the native list and its rows, but do not expose or act on private
+    // cached content until the current vault lease has been checked again.
+    isResolvingSession = true
+    let activationEpoch = epoch
+    activationTask = Task {
+      defer {
+        if activationEpoch == epoch {
+          activationTask = nil
+          isResolvingSession = false
+        }
+      }
+      do {
+        let before = try await vault.activeSession()
+        try Task.checkCancellation()
+        guard isActive, activationEpoch == epoch else { return }
+        guard let before, lease.matches(before) else {
+          activationTask = nil
+          beginNewEpoch(loadImmediately: true)
+          return
+        }
+        refreshContentFilter(
+          pausingAutomaticPagination: false,
+          pausingIfSnapshotChanges: true
+        )
+        await contentFilterTask?.value
+        try Task.checkCancellation()
+        let after = try await vault.activeSession()
+        try Task.checkCancellation()
+        guard isActive, activationEpoch == epoch else { return }
+        guard let after, lease.matches(after) else {
+          activationTask = nil
+          beginNewEpoch(loadImmediately: true)
+          return
+        }
+      } catch is CancellationError {
+        return
+      } catch {
+        guard isActive, activationEpoch == epoch, !Task.isCancelled else { return }
+        // A vault error cannot establish that a private cached page still
+        // belongs to the active account. A local filter error is handled above.
+        activationTask = nil
+        beginNewEpoch(loadImmediately: false)
+        state = .failed(error.localizedDescription)
+      }
+    }
   }
 
   func contentFilterDidChange() {
@@ -125,8 +188,7 @@ final class NotificationsViewModel: ObservableObject {
       let snapshot = await Self.readContentFilterSnapshot(from: repository)
       guard requestedEpoch == contentFilterEpoch, !Task.isCancelled else { return }
       if let snapshot {
-        if
-          pausingIfSnapshotChanges,
+        if pausingIfSnapshotChanges,
           snapshot != contentFilterSnapshot,
           hasMore,
           !messages.isEmpty
@@ -142,6 +204,8 @@ final class NotificationsViewModel: ObservableObject {
 
   func replyIntent(for message: InboxMessage) -> InboxReplyIntent? {
     guard
+      isActive,
+      !isResolvingSession,
       state == .loaded,
       let loadedLease,
       messages.contains(message),
@@ -157,6 +221,7 @@ final class NotificationsViewModel: ObservableObject {
 
   func loadMoreIfNeeded(current message: InboxMessage) {
     guard
+      isActive, !Task.isCancelled, !isResolvingSession, loadTask == nil,
       message.id == messages.last?.id,
       hasMore,
       !requiresExplicitPagination,
@@ -170,6 +235,7 @@ final class NotificationsViewModel: ObservableObject {
 
   func continuePagination() {
     guard
+      isActive, !Task.isCancelled, !isResolvingSession, loadTask == nil,
       !messages.isEmpty,
       hasMore,
       requiresExplicitPagination,
@@ -183,40 +249,39 @@ final class NotificationsViewModel: ObservableObject {
   }
 
   func retryLoadMore() {
-    guard hasMore, loadMoreError != nil, !isLoadingMore else { return }
+    guard
+      isActive, !Task.isCancelled, !isResolvingSession, !isResolvingContentFilter,
+      loadTask == nil, hasMore, loadMoreError != nil, !isLoadingMore
+    else { return }
     load(page: currentPage + 1, replacing: false)
   }
 
   func cancel() {
     let shouldRearmPagination = !messages.isEmpty && isLoadingMore && hasMore
+    let checkpoint = loadCheckpoint
+    isActive = false
     invalidateTask()
     invalidateContentFilterTask()
     isLoadingMore = false
     if shouldRearmPagination {
       paginationEpoch &+= 1
     }
-    if state == .loading {
-      state = messages.isEmpty ? .idle : .loaded
-    }
+    restoreAfterCancellation(checkpoint)
   }
 
   private func beginNewEpoch(loadImmediately: Bool) {
     invalidateTask()
     invalidateContentFilterTask()
-    currentPage = 0
-    hasMore = true
-    loadedLease = nil
-    messages = []
-    loadMoreError = nil
-    pausesAutomaticPagination = false
-    state = loadImmediately ? .loading : .idle
-    if loadImmediately {
+    clearSnapshot()
+    state = .idle
+    if loadImmediately && isActive {
       load(page: 1, replacing: true)
     }
   }
 
   private func load(page: Int, replacing: Bool) {
-    guard page > 0 else { return }
+    guard isActive, !Task.isCancelled, page > 0, loadTask == nil else { return }
+    if replacing { invalidateContentFilterTask() }
     let service = service
     let vault = vault
     let contentFilterRepository = contentFilterRepository
@@ -224,7 +289,14 @@ final class NotificationsViewModel: ObservableObject {
     let requestedContentFilterEpoch = contentFilterEpoch
     epoch &+= 1
     let requestEpoch = epoch
+    let checkpoint = InboxLoadCheckpoint(
+      state: state, loadMoreError: loadMoreError, refreshError: refreshError
+    )
+    loadCheckpoint = checkpoint
+    isResolvingSession = loadedLease != nil
     if replacing {
+      state = .loading
+      refreshError = nil
       isResolvingContentFilter = true
     }
     if !replacing {
@@ -237,17 +309,20 @@ final class NotificationsViewModel: ObservableObject {
         if requestEpoch == epoch {
           isLoadingMore = false
           loadTask = nil
+          loadCheckpoint = nil
+          isResolvingSession = false
         }
       }
+      var validatedResponseLease: InboxSessionLease?
       do {
+        try Task.checkCancellation()
         if replacing {
           let replacementFilterSnapshot = await Self.readContentFilterSnapshot(
             from: contentFilterRepository
           )
           try Task.checkCancellation()
           guard requestEpoch == epoch else { return }
-          if
-            let replacementFilterSnapshot,
+          if let replacementFilterSnapshot,
             requestedContentFilterEpoch == contentFilterEpoch
           {
             contentFilterSnapshot = replacementFilterSnapshot
@@ -260,23 +335,43 @@ final class NotificationsViewModel: ObservableObject {
           throw BrowseError.unavailable("请先登录账户。")
         }
         try Task.checkCancellation()
-        guard requestEpoch == epoch else { return }
+        guard isActive, requestEpoch == epoch else { return }
         let lease = InboxSessionLease(sessionBeforeRequest)
         guard replacing || loadedLease == lease else {
           discardResultsFromChangedSession(requestEpoch: requestEpoch)
           return
         }
-        let response = try await service.notifications(
-          session: sessionBeforeRequest,
-          kind: requestedKind,
-          page: page
-        )
+        if let loadedLease, loadedLease != lease {
+          clearSnapshot()
+        }
+        isResolvingSession = false
+        let outcome: InboxRequestOutcome
+        do {
+          outcome = .success(
+            try await service.notifications(
+              session: sessionBeforeRequest,
+              kind: requestedKind,
+              page: page
+            ))
+        } catch is CancellationError {
+          throw CancellationError()
+        } catch {
+          outcome = .failure(error.localizedDescription)
+        }
         try Task.checkCancellation()
         let sessionAfterRequest = try await vault.activeSession()
         try Task.checkCancellation()
-        guard requestEpoch == epoch, requestedKind == selectedKind else { return }
+        guard isActive, requestEpoch == epoch, requestedKind == selectedKind else { return }
         guard let sessionAfterRequest, lease.matches(sessionAfterRequest) else {
           discardResultsFromChangedSession(requestEpoch: requestEpoch)
+          return
+        }
+        validatedResponseLease = lease
+        let response: InboxPage
+        switch outcome {
+        case .success(let page): response = page
+        case .failure(let message):
+          acceptFailure(message, replacing: replacing, checkpoint: checkpoint)
           return
         }
         try Self.validate(
@@ -293,10 +388,12 @@ final class NotificationsViewModel: ObservableObject {
         // A duplicate-only page cannot provide a new row whose appearance would advance paging.
         hasMore = response.hasMore && (replacing || mergedMessages.count > priorCount)
         loadedLease = lease
-        if !hasMore {
+        if !hasMore || (replacing && requestedContentFilterEpoch == contentFilterEpoch) {
           pausesAutomaticPagination = false
         }
         messages = mergedMessages
+        loadMoreError = nil
+        refreshError = nil
         state = .loaded
         if replacing && page == 1 {
           // Opening the first inbox page may change server unread counts. The runtime reads
@@ -304,14 +401,17 @@ final class NotificationsViewModel: ObservableObject {
           onValidatedFirstPage(lease.sessionRevision)
         }
       } catch is CancellationError {
+        if requestEpoch == epoch, !Task.isCancelled {
+          restoreAfterCancellation(checkpoint)
+          isResolvingContentFilter = false
+        }
         return
       } catch {
-        guard requestEpoch == epoch, !Task.isCancelled else { return }
-        if replacing {
-          state = .failed(error.localizedDescription)
-        } else {
-          loadMoreError = error.localizedDescription
+        guard isActive, requestEpoch == epoch, !Task.isCancelled else { return }
+        if loadedLease != nil && validatedResponseLease == nil {
+          clearSnapshot()
         }
+        acceptFailure(error.localizedDescription, replacing: replacing, checkpoint: checkpoint)
       }
     }
   }
@@ -319,19 +419,53 @@ final class NotificationsViewModel: ObservableObject {
   private func discardResultsFromChangedSession(requestEpoch: Int) {
     guard requestEpoch == epoch else { return }
     invalidateTask()
+    clearSnapshot()
+    state = .idle
+  }
+
+  private func clearSnapshot() {
+    paginationEpoch &+= 1
     currentPage = 0
     hasMore = true
     loadedLease = nil
     messages = []
     loadMoreError = nil
+    refreshError = nil
     pausesAutomaticPagination = false
-    state = .idle
+  }
+
+  private func acceptFailure(
+    _ message: String, replacing: Bool, checkpoint: InboxLoadCheckpoint
+  ) {
+    if loadedLease == nil {
+      state = .failed(message)
+    } else if replacing {
+      state = .loaded
+      loadMoreError = checkpoint.loadMoreError
+      refreshError = message
+    } else {
+      loadMoreError = message
+    }
+  }
+
+  private func restoreAfterCancellation(_ checkpoint: InboxLoadCheckpoint?) {
+    if let checkpoint, loadedLease != nil {
+      state = checkpoint.state
+      loadMoreError = checkpoint.loadMoreError
+      refreshError = checkpoint.refreshError
+    } else if state == .loading {
+      state = loadedLease == nil ? .idle : .loaded
+    }
   }
 
   private func invalidateTask() {
     epoch &+= 1
     loadTask?.cancel()
     loadTask = nil
+    loadCheckpoint = nil
+    activationTask?.cancel()
+    activationTask = nil
+    isResolvingSession = false
   }
 
   private func invalidateContentFilterTask() {
@@ -389,4 +523,15 @@ private struct InboxSessionLease: Equatable, Sendable {
   func matches(_ session: StoredAccountSession) -> Bool {
     userID == session.id && sessionRevision == session.sessionRevision
   }
+}
+
+private struct InboxLoadCheckpoint {
+  let state: LoadState
+  let loadMoreError: String?
+  let refreshError: String?
+}
+
+private enum InboxRequestOutcome {
+  case success(InboxPage)
+  case failure(String)
 }

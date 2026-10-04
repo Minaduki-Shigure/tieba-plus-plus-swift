@@ -28,6 +28,7 @@ final class NotificationsViewModelTests: XCTestCase {
     )
     observedModel = viewModel
 
+    viewModel.loadIfNeeded()
     await viewModel.refresh()
     XCTAssertEqual(callbacks, [active.sessionRevision])
     viewModel.loadMoreIfNeeded(current: try XCTUnwrap(viewModel.messages.last))
@@ -51,6 +52,7 @@ final class NotificationsViewModelTests: XCTestCase {
       onValidatedFirstPage: { callbacks.append($0) }
     )
 
+    viewModel.loadIfNeeded()
     for _ in 0..<4 { await viewModel.refresh() }
 
     XCTAssertTrue(callbacks.isEmpty)
@@ -76,6 +78,7 @@ final class NotificationsViewModelTests: XCTestCase {
       onValidatedFirstPage: { callbacks.append($0) }
     )
 
+    viewModel.loadIfNeeded()
     let refresh = Task { await viewModel.refresh() }
     try await waitForNotificationsTest { await service.requestCount() == 1 }
     await vault.replaceActive(with: replacement)
@@ -101,6 +104,7 @@ final class NotificationsViewModelTests: XCTestCase {
     )
     let viewModel = NotificationsViewModel(service: service, vault: vault)
 
+    viewModel.loadIfNeeded()
     await viewModel.refresh()
 
     XCTAssertEqual(viewModel.messages.map(\.id), [11, 12])
@@ -141,6 +145,7 @@ final class NotificationsViewModelTests: XCTestCase {
     )
     let viewModel = NotificationsViewModel(service: service, vault: vault)
 
+    viewModel.loadIfNeeded()
     await viewModel.refresh()
     let retained = try XCTUnwrap(viewModel.messages.first)
     XCTAssertNotNil(viewModel.replyIntent(for: retained))
@@ -195,6 +200,7 @@ final class NotificationsViewModelTests: XCTestCase {
       ]
     )
     let viewModel = NotificationsViewModel(service: service, vault: vault)
+    viewModel.loadIfNeeded()
     await viewModel.refresh()
 
     await vault.replaceActive(with: newSession)
@@ -225,6 +231,7 @@ final class NotificationsViewModelTests: XCTestCase {
       ]
     )
     let viewModel = NotificationsViewModel(service: service, vault: vault)
+    viewModel.loadIfNeeded()
     await viewModel.refresh()
 
     viewModel.select(.mentions)
@@ -238,7 +245,7 @@ final class NotificationsViewModelTests: XCTestCase {
     XCTAssertEqual(requests.map(\.requestedPage), [1, 1])
   }
 
-  func testNewRefreshCannotBeOverwrittenByLateResponseFromOldRefresh() async throws {
+  func testRestartAfterCancellationCannotBeOverwrittenByLateResponseFromOldRefresh() async throws {
     let active = session(userID: 7)
     let vault = NotificationsVaultSpy(session: active)
     let service = NotificationsServiceSpy(
@@ -254,8 +261,11 @@ final class NotificationsViewModelTests: XCTestCase {
     )
     let viewModel = NotificationsViewModel(service: service, vault: vault)
 
+    viewModel.loadIfNeeded()
     let oldRefresh = Task { await viewModel.refresh() }
     try await waitForNotificationsTest { await service.requestCount() == 1 }
+    viewModel.cancel()
+    viewModel.loadIfNeeded()
     await viewModel.refresh()
     await oldRefresh.value
 
@@ -282,6 +292,7 @@ final class NotificationsViewModelTests: XCTestCase {
     )
     let viewModel = NotificationsViewModel(service: service, vault: vault)
 
+    viewModel.loadIfNeeded()
     let oldRefresh = Task { await viewModel.refresh() }
     try await waitForNotificationsTest { await service.requestCount() == 1 }
     await vault.replaceActive(with: newSession)
@@ -314,6 +325,7 @@ final class NotificationsViewModelTests: XCTestCase {
     )
     let viewModel = NotificationsViewModel(service: service, vault: vault)
 
+    viewModel.loadIfNeeded()
     let oldRefresh = Task { await viewModel.refresh() }
     try await waitForNotificationsTest { await service.requestCount() == 1 }
     await vault.replaceActive(with: newSession)
@@ -339,6 +351,7 @@ final class NotificationsViewModelTests: XCTestCase {
       ]
     )
     let viewModel = NotificationsViewModel(service: service, vault: vault)
+    viewModel.loadIfNeeded()
     await viewModel.refresh()
 
     viewModel.loadMoreIfNeeded(current: try XCTUnwrap(viewModel.messages.last))
@@ -367,6 +380,7 @@ final class NotificationsViewModelTests: XCTestCase {
       ]
     )
     let viewModel = NotificationsViewModel(service: service, vault: vault)
+    viewModel.loadIfNeeded()
     await viewModel.refresh()
     let last = try XCTUnwrap(viewModel.messages.last)
 
@@ -394,6 +408,7 @@ final class NotificationsViewModelTests: XCTestCase {
     )
     let viewModel = NotificationsViewModel(service: service, vault: vault)
 
+    viewModel.loadIfNeeded()
     await viewModel.refresh()
 
     XCTAssertEqual(
@@ -432,6 +447,7 @@ final class NotificationsViewModelTests: XCTestCase {
       contentFilterRepository: repository
     )
 
+    viewModel.loadIfNeeded()
     let refresh = Task { await viewModel.refresh() }
     try await waitForNotificationsTest { await repository.readCount() == 1 }
 
@@ -475,10 +491,13 @@ final class NotificationsViewModelTests: XCTestCase {
       contentFilterRepository: repository
     )
 
+    viewModel.loadIfNeeded()
     let staleRefresh = Task { await viewModel.refresh() }
     try await waitForNotificationsTest { await repository.readCount() == 1 }
     XCTAssertTrue(viewModel.isResolvingContentFilter)
 
+    viewModel.cancel()
+    viewModel.loadIfNeeded()
     await viewModel.refresh()
     XCTAssertEqual(viewModel.messages.map(\.id), [12])
     XCTAssertFalse(viewModel.isResolvingContentFilter)
@@ -513,6 +532,7 @@ final class NotificationsViewModelTests: XCTestCase {
       contentFilterRepository: repository
     )
 
+    viewModel.loadIfNeeded()
     let refresh = Task { await viewModel.refresh() }
     try await waitForNotificationsTest { await repository.readCount() == 1 }
     await vault.replaceActive(with: newSession)
@@ -567,6 +587,7 @@ final class NotificationsViewModelTests: XCTestCase {
       contentFilterRepository: repository
     )
 
+    viewModel.loadIfNeeded()
     await viewModel.refresh()
 
     XCTAssertEqual(viewModel.messagePresentations.map(\.visibility), [.visible, .placeholder])
@@ -621,6 +642,7 @@ final class NotificationsViewModelTests: XCTestCase {
       ]
     )
     let viewModel = NotificationsViewModel(service: service, vault: vault)
+    viewModel.loadIfNeeded()
     await viewModel.refresh()
     let rawTail = try XCTUnwrap(viewModel.paginationTail)
     let messageTargets = viewModel.messages.map(\.navigationTarget)
@@ -660,6 +682,7 @@ final class NotificationsViewModelTests: XCTestCase {
       contentFilterRepository: repository
     )
 
+    viewModel.loadIfNeeded()
     await viewModel.refresh()
 
     XCTAssertTrue(viewModel.displayableMessages.isEmpty)
@@ -704,6 +727,7 @@ final class NotificationsViewModelTests: XCTestCase {
       vault: vault,
       contentFilterRepository: repository
     )
+    viewModel.loadIfNeeded()
     await viewModel.refresh()
     let rawTail = try XCTUnwrap(viewModel.paginationTail)
 
@@ -749,6 +773,7 @@ final class NotificationsViewModelTests: XCTestCase {
       vault: vault,
       contentFilterRepository: repository
     )
+    viewModel.loadIfNeeded()
     await viewModel.refresh()
 
     viewModel.loadIfNeeded()
@@ -787,6 +812,7 @@ final class NotificationsViewModelTests: XCTestCase {
       vault: vault,
       contentFilterRepository: repository
     )
+    viewModel.loadIfNeeded()
     await viewModel.refresh()
 
     viewModel.loadIfNeeded()
@@ -831,6 +857,7 @@ final class NotificationsViewModelTests: XCTestCase {
         contentFilterRepository: repository
       )
 
+      viewModel.loadIfNeeded()
       await viewModel.refresh()
 
       XCTAssertEqual(viewModel.messagePresentations.first?.visibility, displayMode.visibility)
@@ -869,6 +896,7 @@ final class NotificationsViewModelTests: XCTestCase {
       vault: vault,
       contentFilterRepository: repository
     )
+    viewModel.loadIfNeeded()
     await viewModel.refresh()
 
     viewModel.contentFilterDidChange()
@@ -907,6 +935,7 @@ final class NotificationsViewModelTests: XCTestCase {
       vault: vault,
       contentFilterRepository: repository
     )
+    viewModel.loadIfNeeded()
     await viewModel.refresh()
 
     viewModel.contentFilterDidChange()
@@ -1111,8 +1140,8 @@ private struct NotificationsTestFailure: LocalizedError, Sendable {
   var errorDescription: String? { message }
 }
 
-private extension ContentFilterDisplayMode {
-  var visibility: LocalContentVisibility {
+extension ContentFilterDisplayMode {
+  fileprivate var visibility: LocalContentVisibility {
     switch self {
     case .placeholder:
       .placeholder
@@ -1130,10 +1159,11 @@ private enum NotificationsContentFilterScript: Sendable {
 
 private actor NotificationsContentFilterRepositorySpy: ContentFilterRepository {
   private var scripts: [NotificationsContentFilterScript]
-  private var gatedSnapshots: [(
-    ContentFilterSnapshot,
-    CheckedContinuation<ContentFilterSnapshot, Never>
-  )] = []
+  private var gatedSnapshots:
+    [(
+      ContentFilterSnapshot,
+      CheckedContinuation<ContentFilterSnapshot, Never>
+    )] = []
   private var reads = 0
 
   init(scripts: [NotificationsContentFilterScript]) {
@@ -1266,7 +1296,7 @@ private actor NotificationsServiceSpy: AccountService {
   func requestsSnapshot() -> [NotificationsRequestKey] { requests }
 }
 
-private actor NotificationsVaultSpy: AccountVault {
+actor NotificationsVaultSpy: AccountVault {
   private var session: StoredAccountSession?
 
   init(session: StoredAccountSession?) {
