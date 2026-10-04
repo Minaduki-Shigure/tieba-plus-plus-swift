@@ -198,7 +198,8 @@
       profileProbe =
         arguments.contains("--profile-activity-ui-testing")
         ? ProfileActivityUITestProbe(
-          failsFirstRefresh: arguments.contains("--profile-activity-refresh-failure")) : nil
+          failsFirstRefresh: arguments.contains("--profile-activity-refresh-failure"),
+          failsInitialProfile: arguments.contains("--profile-activity-initial-failure")) : nil
       vault = ExploreRefreshUITestVault(
         isSignedOut: testsHome && arguments.contains("--home-refresh-signed-out"))
       let service = ExploreRefreshUITestService(
@@ -305,9 +306,11 @@
   private final class ProfileActivityUITestProbe: ObservableObject {
     @Published private var counts: [String: Int] = [:]
     let failsFirstRefresh: Bool
+    let failsInitialProfile: Bool
 
-    init(failsFirstRefresh: Bool = false) {
+    init(failsFirstRefresh: Bool = false, failsInitialProfile: Bool = false) {
       self.failsFirstRefresh = failsFirstRefresh
+      self.failsInitialProfile = failsInitialProfile
     }
 
     @discardableResult
@@ -731,6 +734,14 @@
         throw Self.unsupported
       }
       let request = await profileProbe.record("profile")
+      if await profileProbe.failsInitialProfile, request == 1 {
+        // The separate first topic page can finish and lay out its visible
+        // tail while the shared profile is still unavailable.
+        try await Task.sleep(nanoseconds: 350_000_000)
+        throw NSError(
+          domain: "ProfileActivityUITest", code: 2,
+          userInfo: [NSLocalizedDescriptionKey: "离线资料首次读取失败"])
+      }
       if await profileProbe.failsFirstRefresh, request > 1 {
         // Keep the profile contents identical so the UI regression isolates
         // loading/error rows rather than a genuine biography/header change.
@@ -756,7 +767,8 @@
         throw Self.unsupported
       }
       await profileProbe.record("threads")
-      let rows = (1...20).map { index in
+      let rowCount = await profileProbe.failsInitialProfile && page == 1 ? 1 : 20
+      let rows = (1...rowCount).map { index in
         let number = (page - 1) * 20 + index
         return profileThread(id: Int64(810_000 + number), title: "公开主题·帖子\(number)")
       }
