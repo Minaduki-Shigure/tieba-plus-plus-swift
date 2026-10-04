@@ -53,6 +53,13 @@ its text. Account and filtering checks retain their existing privacy behavior.
 This minimal geometry change still requires the unchanged hidden-page test and
 the original inbox workflows to pass natively before publication.
 
+The alpha.46 tag's [full CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37190889950)
+had passed 2,695 App tests with zero failures or skips, plus Core and anonymous
+integration, when the separate hidden-page failure was confirmed. The still
+running UI gate was cancelled intentionally; alpha.46 is not a passing release
+candidate and no IPA was published for it. The public source remains alpha.44
+until the replacement candidate completes all publication gates.
+
 The forum-search cancellation fix restores the pre-request state when leaving,
 including a loaded-empty response and any retry error. Returning resumes an
 interrupted first read, preserving the submitted query, sort and filter without
