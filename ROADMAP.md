@@ -25,12 +25,16 @@ searching on the visible foreground page; reactivation alone sends nothing.
 Submission, search cancellation, navigation away and backgrounding invalidate
 pending work and late responses. Suggestions do not replace the mounted results
 pager, and selection preserves the existing scope and history semantics.
-Static syntax and focused formatting checks pass; four lifecycle model tests
-have been added but have not yet completed native validation. The
-[native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37180968131)
-is running, including real suggestion selection and repository-write checks.
-No native pass, release version or additional parity credit is claimed; the
-80–82% estimate is unchanged.
+The [native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37180968131)
+passed 62 model tests and all five UI workflows with zero failures or skips:
+18 suggestion, 30 search, nine history and five history-view-model tests, plus
+the three existing search-scope and two new suggestion UI flows. Requests are
+observed at the service boundary and history writes at the repository boundary.
+Selecting a suggestion writes exactly once in the selected scope; cancelling
+or returning from a real thread adds no request, and the disabled setting sends
+none. The native evidence is iOS 18.5 on an iPhone 16 Pro simulator with offline
+responses. iOS 16, native background/tab transitions, full tagged regression
+and publication remain separate gates. The 80–82% estimate is unchanged.
 
 Alpha.44/build 122 follows TiebaLite `9701bfb6`'s reachable ReplyMe/AtMe pager
 with separate retained Replies and Mentions lists. Only the selected foreground

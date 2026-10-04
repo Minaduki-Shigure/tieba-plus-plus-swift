@@ -31,10 +31,14 @@ suggestions, after a 500 ms debounce; returning to the page does not resend old
 text. Submission, cancellation, navigation away and backgrounding cancel pending
 work and reject late responses. Choosing a suggestion uses the existing scope
 and history submission path, while displaying suggestions keeps the results
-pager mounted. Syntax and focused formatting checks pass, and four additional
-model tests are written. The [native candidate run](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37180968131)
-is in progress; native success and IPA availability are not yet established.
-The 80–82% parity estimate is unchanged.
+pager mounted. The [native candidate run](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37180968131)
+passed all 62 model tests and five UI workflows, with zero failures or skips.
+Actual requests and repository writes confirm one submission for a suggestion,
+no extra request after cancellation or detail return, and no suggestion request
+with the preference disabled. The existing three search-scope UI workflows also
+pass. This was an offline production SearchView on an iOS 18.5 simulator;
+iOS 16, native background/tab transitions, tagged regression and IPA publication
+remain separate checks. The 80–82% parity estimate is unchanged.
 
 ### Release and validation
 
