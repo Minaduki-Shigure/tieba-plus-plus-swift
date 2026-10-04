@@ -196,7 +196,9 @@
       forumProbe =
         arguments.contains("--forum-sections-ui-testing") ? ForumSectionsUITestProbe() : nil
       profileProbe =
-        arguments.contains("--profile-activity-ui-testing") ? ProfileActivityUITestProbe() : nil
+        arguments.contains("--profile-activity-ui-testing")
+        ? ProfileActivityUITestProbe(
+          failsFirstRefresh: arguments.contains("--profile-activity-refresh-failure")) : nil
       vault = ExploreRefreshUITestVault(
         isSignedOut: testsHome && arguments.contains("--home-refresh-signed-out"))
       let service = ExploreRefreshUITestService(
@@ -302,8 +304,17 @@
   @MainActor
   private final class ProfileActivityUITestProbe: ObservableObject {
     @Published private var counts: [String: Int] = [:]
+    let failsFirstRefresh: Bool
 
-    func record(_ key: String) { counts[key, default: 0] += 1 }
+    init(failsFirstRefresh: Bool = false) {
+      self.failsFirstRefresh = failsFirstRefresh
+    }
+
+    @discardableResult
+    func record(_ key: String) -> Int {
+      counts[key, default: 0] += 1
+      return counts[key, default: 0]
+    }
 
     var summary: String {
       ["profile", "threads", "replies", "relationship", "posts", "comments", "unexpected"]
@@ -719,7 +730,17 @@
         await profileProbe.record("unexpected")
         throw Self.unsupported
       }
-      await profileProbe.record("profile")
+      let request = await profileProbe.record("profile")
+      if await profileProbe.failsFirstRefresh, request > 1 {
+        // Keep the profile contents identical so the UI regression isolates
+        // loading/error rows rather than a genuine biography/header change.
+        try await Task.sleep(nanoseconds: 350_000_000)
+        if request == 2 {
+          throw NSError(
+            domain: "ProfileActivityUITest", code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "离线资料刷新失败"])
+        }
+      }
       return BrowseUserProfile(
         id: 8, tiebaUID: nil, username: "offline_user", displayName: "离线用户",
         portraitURL: nil, largePortraitURL: nil, growthLevel: 5, gender: .unknown,
