@@ -23,7 +23,8 @@ final class ForumPostSearchViewModel: ObservableObject {
   private var currentPage = 0
   private var hasMore = true
   private var searchTask: Task<Void, Never>?
-  private var historyRecordTask: Task<Void, Never>?
+  private let historyOperations = SearchHistoryOperationQueue()
+  private var initialHistoryLoadTask: Task<Void, Never>?
   private var searchGeneration = 0
   private var hasLoadedHistory = false
   private var lastHistoryTimestamp: Date?
@@ -47,7 +48,17 @@ final class ForumPostSearchViewModel: ObservableObject {
 
   func loadHistoryIfNeeded() async {
     guard !hasLoadedHistory else { return }
-    await reloadHistory()
+    if let initialHistoryLoadTask {
+      await initialHistoryLoadTask.value
+      return
+    }
+    let task = historyOperations.enqueue { [self] in
+      defer { initialHistoryLoadTask = nil }
+      guard !hasLoadedHistory else { return }
+      await reloadHistory()
+    }
+    initialHistoryLoadTask = task
+    await task.value
   }
 
   func submit(_ rawQuery: String) {
@@ -139,48 +150,52 @@ final class ForumPostSearchViewModel: ObservableObject {
   }
 
   func deleteHistory(id: String) async {
-    await historyRecordTask?.value
-    do {
-      try await historyRepository.delete(id: id)
-      history.removeAll { $0.id == id }
-      historyError = nil
-    } catch is CancellationError {
-      return
-    } catch {
-      historyError = error.localizedDescription
-    }
+    await historyOperations.enqueue { [self] in
+      do {
+        try await historyRepository.delete(id: id)
+        history.removeAll { $0.id == id }
+        historyError = nil
+      } catch is CancellationError {
+        return
+      } catch {
+        historyError = error.localizedDescription
+      }
+    }.value
   }
 
   func deleteAllHistory() async {
-    await historyRecordTask?.value
-    do {
-      try await historyRepository.deleteAll(forumName: forumName)
-      history = []
-      historyError = nil
-    } catch is CancellationError {
-      return
-    } catch {
-      historyError = error.localizedDescription
-    }
+    await historyOperations.enqueue { [self] in
+      do {
+        try await historyRepository.deleteAll(forumName: forumName)
+        history = []
+        historyError = nil
+      } catch is CancellationError {
+        return
+      } catch {
+        historyError = error.localizedDescription
+      }
+    }.value
   }
 
   func retryHistory() async {
-    await historyRecordTask?.value
-    await reloadHistory()
+    await historyOperations.enqueue { [self] in
+      await reloadHistory()
+    }.value
   }
 
   func resetHistory() async {
-    await historyRecordTask?.value
-    do {
-      try await historyRepository.reset()
-      history = []
-      hasLoadedHistory = true
-      historyError = nil
-    } catch is CancellationError {
-      return
-    } catch {
-      historyError = error.localizedDescription
-    }
+    await historyOperations.enqueue { [self] in
+      do {
+        try await historyRepository.reset()
+        history = []
+        hasLoadedHistory = true
+        historyError = nil
+      } catch is CancellationError {
+        return
+      } catch {
+        historyError = error.localizedDescription
+      }
+    }.value
   }
 
   func clearRefreshError() {
@@ -297,22 +312,18 @@ final class ForumPostSearchViewModel: ObservableObject {
   }
 
   private func recordHistory(_ query: String, at date: Date) {
-    let previousTask = historyRecordTask
-    let historyRepository = historyRepository
-    let forumName = forumName
-    historyRecordTask = Task { [weak self] in
-      await previousTask?.value
+    historyOperations.enqueue { [self] in
       do {
         try await historyRepository.record(
           query: query,
           forumName: forumName,
           at: date
         )
-        await self?.reloadHistory()
+        await reloadHistory()
       } catch is CancellationError {
         return
       } catch {
-        self?.historyError = error.localizedDescription
+        historyError = error.localizedDescription
       }
     }
   }
