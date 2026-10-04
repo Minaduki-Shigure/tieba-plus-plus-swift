@@ -1187,6 +1187,21 @@ entirely in memory. A `userID + sessionRevision` lease is checked before and
 after every page request so an account switch cannot display a previous
 account's private response.
 
+A candidate follows TiebaLite `9701bfb6`'s reachable ReplyMe/AtMe pager with
+separate native lists, snapshots, cursors and reading positions. Only the
+visible foreground channel may read; leaving it cancels pending work while
+preserving validated content and retry state. Cache activation checks the local
+vault lease before and after rereading local filtering, with private content
+hidden and actions disabled until validation finishes. An account-change event
+clears both channels synchronously, including when the UID stays the same but
+the session revision changes. Concurrent refreshes share an in-flight operation;
+a failed refresh preserves the validated snapshot and pagination cursor.
+Filtering still requires explicit continuation after a rule change or an
+all-hidden page. First-page success retains the existing unread reconciliation
+callback; cached selection neither invokes it nor infers an unread count from
+visible rows. Model and real-Root UI validation is pending, and this candidate
+is not yet in a published IPA. No endpoint or account write is added.
+
 The inbox's local filter projection inspects only `message.content` and the
 sender's exact UID, nickname, and username. Message titles, quoted content,
 forum labels, routing metadata, and other fields do not participate. A
