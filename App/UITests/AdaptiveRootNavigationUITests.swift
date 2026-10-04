@@ -82,7 +82,14 @@ final class AdaptiveRootNavigationUITests: XCTestCase {
     let inboxSearch = app.searchFields.firstMatch
     try tap(inboxSearch)
     inboxSearch.typeText("navigation\n")
-    try tap(app.buttons["取消"].firstMatch)
+    // UIKit may use the installed simulator's language for this system button,
+    // and some search presentations already leave editing after submission.
+    let cancelSearch = app.navigationBars.buttons.matching(
+      NSPredicate(format: "label == %@ OR label == %@", "取消", "Cancel")
+    ).firstMatch
+    if cancelSearch.exists {
+      try tap(cancelSearch)
+    }
     try wait(NSPredicate(format: "exists == false"), element: app.keyboards.firstMatch)
     try requireNavigationTitle("navigation", app: app)
     try tap(tab("account", mode: "sidebar", app: app))
