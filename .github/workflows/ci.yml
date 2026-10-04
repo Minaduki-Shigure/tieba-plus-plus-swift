@@ -256,10 +256,13 @@ jobs:
         run: ruby Scripts/report_xcode_errors.rb icon-ui-test.log
       - name: Export UI test attachments
         if: ${{ always() && (steps.icon_ui_tests.outcome == 'success' || steps.icon_ui_tests.outcome == 'failure') }}
-        run: >-
-          xcrun xcresulttool export attachments
-          --path icon-ui-results.xcresult
-          --output-path ui-test-attachments
+        run: |
+          set -euo pipefail
+          xcrun xcresulttool export attachments \
+            --path icon-ui-results.xcresult \
+            --output-path ui-test-attachments
+          xcrun xcresulttool get test-results summary \
+            --path icon-ui-results.xcresult --compact > icon-ui-test-summary.json
       - name: Upload UI results
         if: ${{ always() && (steps.icon_ui_tests.outcome == 'success' || steps.icon_ui_tests.outcome == 'failure') }}
         uses: actions/upload-artifact@v4
@@ -267,6 +270,7 @@ jobs:
           name: icon-ui-results-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             icon-ui-test.log
+            icon-ui-test-summary.json
             icon-ui-results.xcresult
             icon-assets.json
             ui-test-attachments/
@@ -341,6 +345,19 @@ jobs:
       - name: Fail when app validation fails
         if: ${{ always() && (steps.app_tests.outcome == 'failure' || steps.icon_assets.outcome == 'failure' || steps.icon_ui_tests.outcome == 'failure' || steps.adaptive_simulator.outcome == 'failure' || steps.adaptive_ui_tests.outcome == 'failure') }}
         run: exit 1
+      - name: Upload compact validation results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-summary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            app-test-summary.json
+            icon-ui-test-summary.json
+            adaptive-ui-test-summary.json
+            icon-ui-test.log
+            adaptive-ui-test.log
+          retention-days: 7
+          if-no-files-found: warn
       - name: Remove UI test simulator
         if: ${{ always() && env.ICON_UI_SIMULATOR_ID != '' }}
         run: |
