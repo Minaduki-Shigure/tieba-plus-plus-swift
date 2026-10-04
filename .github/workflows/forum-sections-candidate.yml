@@ -1,0 +1,76 @@
+name: Forum section candidate
+
+on:
+  push:
+    branches: [ci/forum-section-focused-1004]
+
+permissions:
+  contents: read
+
+jobs:
+  forum-sections:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Select iPhone simulator
+        run: |
+          set -euo pipefail
+          device_id="$(xcrun simctl list devices available -j | jq -r '
+            [.devices[][] | select(.isAvailable == true and (.name | startswith("iPhone")))] as $phones
+            | (($phones | map(select(.name == "iPhone 16 Pro"))) + $phones | .[0].udid // empty)
+          ')"
+          test -n "$device_id"
+          echo "FORUM_SIMULATOR_DESTINATION=platform=iOS Simulator,id=$device_id" >> "$GITHUB_ENV"
+      - name: Verify forum models and native retention
+        id: models
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild -project TiebaPlusPlus.xcodeproj -scheme TiebaPlusPlus \
+            -configuration Debug -derivedDataPath build/DerivedData \
+            -destination "$FORUM_SIMULATOR_DESTINATION" -parallel-testing-enabled NO \
+            -only-testing:TiebaPlusPlusTests/ForumSectionsViewModelTests \
+            -only-testing:TiebaPlusPlusTests/ForumSectionPagerTests \
+            -resultBundlePath forum-model-results.xcresult \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO \
+            test 2>&1 | tee forum-model-test.log
+      - name: Verify real forum navigation and paging
+        id: ui
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild -project TiebaPlusPlus.xcodeproj -scheme TiebaPlusPlusIconsUI \
+            -configuration Debug -derivedDataPath build/DerivedData \
+            -destination "$FORUM_SIMULATOR_DESTINATION" -parallel-testing-enabled NO \
+            -only-testing:TiebaPlusPlusUITests/ForumSectionsUITests \
+            -resultBundlePath forum-ui-results.xcresult \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO \
+            test 2>&1 | tee forum-ui-test.log
+      - name: Export model results
+        if: always()
+        run: |
+          xcrun xcresulttool get test-results summary \
+            --path forum-model-results.xcresult --compact > forum-model-summary.json
+      - name: Export UI evidence
+        if: always()
+        run: |
+          xcrun xcresulttool get test-results summary \
+            --path forum-ui-results.xcresult --compact > forum-ui-summary.json
+          xcrun xcresulttool export attachments \
+            --path forum-ui-results.xcresult --output-path forum-ui-attachments
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: forum-section-candidate
+          path: |
+            forum-model-test.log
+            forum-model-summary.json
+            forum-ui-test.log
+            forum-ui-summary.json
+            forum-ui-attachments/
+      - name: Enforce both validations
+        if: ${{ always() && (steps.models.outcome != 'success' || steps.ui.outcome != 'success') }}
+        run: exit 1
