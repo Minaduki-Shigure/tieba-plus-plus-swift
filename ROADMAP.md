@@ -1884,7 +1884,7 @@ virtualization. Return-to-top requests target only the current page's local
 scroll reader, and account-bound check-in state is shared by the forum instead
 of reloaded for each page. Model, native-view and actual swipe/navigation UI
 regressions are required before this development branch can be published;
-these changes are not part of the currently published alpha.39 release.
+these changes are not part of the currently published alpha.40 release.
 
 Thread-list mapping preserves the public topic kind, first-post ID, server state
 flags, author portrait, and available read-only counters through the application
