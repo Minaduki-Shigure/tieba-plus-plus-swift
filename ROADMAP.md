@@ -1861,6 +1861,26 @@ first advertised entry; a missing menu sends the protocol's `-1` sentinel.
 with both the page number and the final valid thread ID. Missing, duplicate, or
 stalled cursors terminate pagination instead of repeatedly loading one page.
 
+The forum-section development branch follows the reachable `ForumPage` in
+TiebaLite `9701bfb6`: Latest, Featured and general channels are separate pages
+with independent lists and pagination. The iOS coordinator keeps each visited
+section's model, sorting, featured classification, cursor and retry state for
+the lifetime of the forum view. Selecting an already loaded section does not
+reload it. Only the visible section starts reads; latest-list metadata updates
+reconcile channel IDs atomically, and removal or invalidated sorting cannot
+revive an old response. Content-filter changes and confirmed topic creation
+invalidate all cached lists while reloading only the active section.
+
+Native testing found that a page-style SwiftUI `TabView` could retain SwiftUI
+state while recreating the actual scroll view and resetting its offset. The
+new forum pager keeps stable pages in one eager horizontal stack with native
+paging, preserving the existing navigation environment and each List's row
+virtualization. Return-to-top requests target only the current page's local
+scroll reader, and account-bound check-in state is shared by the forum instead
+of reloaded for each page. Model, native-view and actual swipe/navigation UI
+regressions are required before this development branch can be published;
+these changes are not part of the currently published alpha.39 release.
+
 Thread-list mapping preserves the public topic kind, first-post ID, server state
 flags, author portrait, and available read-only counters through the application
 layer. Bare portraits from ordinary topic responses use the existing portrait
