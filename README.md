@@ -57,8 +57,11 @@ remain separate checks. The 80–82% parity estimate is unchanged.
   passed all 53 model tests and all three UI workflows, with zero failures or
   skips. Native positions remain within 3 pt; tests also verify real Thread and
   User Profile destinations, second pages, refresh failure and retry, with no
-  unexpected requests. Full tagged CI and anonymous integration remain release
-  gates, and real account/device behavior remains a separate validation step.
+  unexpected requests. Its
+  [tagged CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37179980777)
+  subsequently passed 2,665 App tests, all 19 phone UI workflows, all three iPad
+  UI workflows, Core and anonymous integration. Real account/device behavior
+  remains a separate validation step.
   Existing filtering and unread reconciliation remain in place. No endpoint or
   account write is added, and the weighted parity estimate is unchanged.
 - **`v0.65.0-alpha.43` retained search categories:** Forum, thread and user

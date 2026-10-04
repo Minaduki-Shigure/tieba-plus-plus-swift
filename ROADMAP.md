@@ -48,9 +48,12 @@ The [native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift
 passed all 53 model tests and three actual UI workflows, with zero failures or
 skips, covering positions within 3 pt, swipes, single-back destination returns,
 main-tab changes, second pages, both refresh directions, failure and retry.
-Request counts and order show zero unexpected requests. Tagged CI, anonymous
-integration and physical-device/account validation remain separate gates. This
-extends an existing credited area; the 80–82% weighted estimate is unchanged.
+Request counts and order show zero unexpected requests. Its
+[tagged CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37179980777)
+subsequently passed 2,665 App tests, all 19 phone UI workflows, all three iPad
+UI workflows, Core and anonymous integration. Physical-device/account
+validation remains a separate gate. This extends an existing credited area;
+the 80–82% weighted estimate is unchanged.
 
 A browsing-history candidate follows TiebaLite `9701bfb6`'s separate Thread and
 Forum history pages. Both native lists stay mounted and share a local archive
