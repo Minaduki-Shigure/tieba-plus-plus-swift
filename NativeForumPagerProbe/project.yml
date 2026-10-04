@@ -1,0 +1,40 @@
+name: ForumPagerProbe
+options:
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    CODE_SIGNING_ALLOWED: NO
+    GENERATE_INFOPLIST_FILE: YES
+targets:
+  ForumPagerProbe:
+    type: application
+    platform: iOS
+    sources:
+      - App.swift
+      - ../App/Sources/ForumSectionPager.swift
+    settings:
+      base:
+        PRODUCT_MODULE_NAME: TiebaPlusPlus
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.minaduki.forum-pager-probe
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+  ForumPagerProbeTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - ../App/Tests/ForumSectionPagerTests.swift
+    dependencies:
+      - target: ForumPagerProbe
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.minaduki.forum-pager-probe-tests
+schemes:
+  ForumPagerProbe:
+    build:
+      targets:
+        ForumPagerProbe: all
+        ForumPagerProbeTests: [test]
+    test:
+      targets: [ForumPagerProbeTests]

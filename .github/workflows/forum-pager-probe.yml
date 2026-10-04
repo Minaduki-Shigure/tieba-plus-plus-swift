@@ -1,0 +1,24 @@
+name: Forum pager native probe
+on:
+  push:
+    branches: [ci/forum-section-pager-1004]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+      - run: brew install xcodegen
+      - run: xcodegen generate --spec NativeForumPagerProbe/project.yml
+      - name: Check native page identity and scrolling
+        run: |
+          set -o pipefail
+          device_id="$(xcrun simctl list devices available -j | jq -r '[.devices[][] | select(.isAvailable == true and (.name | startswith("iPhone")))][0].udid')"
+          xcodebuild -project NativeForumPagerProbe/ForumPagerProbe.xcodeproj -scheme ForumPagerProbe -destination "platform=iOS Simulator,id=$device_id" -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO test 2>&1 | tee forum-pager-probe.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: forum-pager-native-probe
+          path: forum-pager-probe.log
