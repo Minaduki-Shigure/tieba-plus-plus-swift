@@ -1072,6 +1072,14 @@ disposable-account and physical-device validation gates.
 
 ## Next milestones
 
+The separate per-forum iOS Home Screen icon workflow has a
+[reviewed feasibility note](Docs/forum-shortcut-feasibility.md). Its isolated
+macOS Actions signing experiment confirmed that this runner requires iCloud
+sign-in even for a publicly shareable Shortcuts template. A one-time public
+template export from an already signed-in user device and subsequent import /
+standalone / LiveContainer device checks remain required; no completion credit
+is assigned to the current route-only groundwork.
+
 1. Real-device validation of multi-frame GIF, WebP, and HEIC/HEIF sequences in
    post bodies, list previews, and the zoom gallery on iOS 16 and iOS 18.7.2,
    including single-frame containers, Reduce Motion, backgrounding, rapid and
