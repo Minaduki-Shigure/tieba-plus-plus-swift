@@ -2454,6 +2454,16 @@ Search categories load independently so one endpoint failure does not discard
 another category's results. User search uses the credential-free Web endpoint,
 accepts the server's object/array result variants and 64-bit user identifiers,
 and opens the same anonymous public profile workflow used by author rows.
+The next candidate retains three separate native result Lists for forums,
+threads and users, matching TiebaLite's reachable search-page navigation.
+Category taps and horizontal swipes preserve each reading position; only the
+selected category starts reads. Leaving a category cancels its pending request
+without discarding its loaded snapshot, errors or thread pagination cursor,
+and late responses cannot change the new selection. Submitting a search again
+resets all three positions, while thread sort and local-filter changes reset
+only the thread results. Native model and interaction validation is pending;
+this candidate is not yet part of the published IPA. This work does not add
+endpoints, credentials or online suggestions to the results screen.
 Online suggestions are a separate, explicitly enabled pre-submission path. The
 switch defaults off and enabling it does not send text already in the field;
 only a later edit that remains valid for 500 milliseconds can issue a request.
