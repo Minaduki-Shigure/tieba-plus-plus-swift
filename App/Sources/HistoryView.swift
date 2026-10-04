@@ -7,33 +7,59 @@ final class BrowsingHistoryViewModel: ObservableObject {
   @Published private(set) var state: LoadState = .idle
   @Published private(set) var recordingEnabled = true
   @Published private(set) var operationError: String?
+  @Published private(set) var isActive = false
+  @Published private(set) var isMutating = false
   @Published var selectedKind: BrowsingHistoryKind = .thread
 
   private let repository: any BrowsingHistoryRepository
-  private var task: Task<Void, Never>?
+  private var readTask: Task<Void, Never>?
+  private var mutationTask: Task<Void, Never>?
   private var generation = 0
+  private var mutationGeneration = 0
+  private var latestRecordingMutation: Int?
+  private var confirmedRecordingEnabled = true
 
   init(repository: any BrowsingHistoryRepository) {
     self.repository = repository
   }
 
   var visibleEntries: [BrowsingHistoryEntry] {
-    entries.filter { $0.kind == selectedKind }
+    entries(for: selectedKind)
   }
 
   var forumEntries: [BrowsingHistoryEntry] {
-    entries.filter { $0.kind == .forum }
+    entries(for: .forum)
+  }
+
+  func entries(for kind: BrowsingHistoryKind) -> [BrowsingHistoryEntry] {
+    entries.filter { $0.kind == kind }
   }
 
   func sections(
     now: Date = Date(),
     calendar: Calendar = .autoupdatingCurrent
   ) -> (today: [BrowsingHistoryEntry], earlier: [BrowsingHistoryEntry]) {
-    let visibleEntries = visibleEntries
+    sections(kind: selectedKind, now: now, calendar: calendar)
+  }
+
+  func sections(
+    kind: BrowsingHistoryKind,
+    now: Date = Date(),
+    calendar: Calendar = .autoupdatingCurrent
+  ) -> (today: [BrowsingHistoryEntry], earlier: [BrowsingHistoryEntry]) {
+    let visibleEntries = entries(for: kind)
     return (
       visibleEntries.filter { calendar.isDate($0.lastVisitedAt, inSameDayAs: now) },
       visibleEntries.filter { !calendar.isDate($0.lastVisitedAt, inSameDayAs: now) }
     )
+  }
+
+  func activate() {
+    guard !isActive else { return }
+    isActive = true
+    // A detail visit can update the existing record's metadata and date.
+    // Refresh the shared snapshot without replacing either native List.
+    reload()
   }
 
   func loadIfNeeded() {
@@ -46,8 +72,15 @@ final class BrowsingHistoryViewModel: ObservableObject {
   }
 
   func refresh() async {
-    startLoading(showProgress: false)
-    await task?.value
+    guard !Task.isCancelled else { return }
+    if let mutationTask {
+      await mutationTask.value
+      return
+    }
+    if readTask == nil {
+      startLoading(showProgress: entries.isEmpty)
+    }
+    await readTask?.value
   }
 
   func delete(_ entry: BrowsingHistoryEntry) {
@@ -64,9 +97,7 @@ final class BrowsingHistoryViewModel: ObservableObject {
 
   func setRecordingEnabled(_ enabled: Bool) {
     guard recordingEnabled != enabled else { return }
-    let previousValue = recordingEnabled
-    recordingEnabled = enabled
-    mutate(onFailure: { [weak self] in self?.recordingEnabled = previousValue }) { repository in
+    mutate(recordingPreference: enabled) { repository in
       try await repository.setRecordingEnabled(enabled)
     }
   }
@@ -76,26 +107,35 @@ final class BrowsingHistoryViewModel: ObservableObject {
   }
 
   func cancel() {
+    isActive = false
+    cancelRead()
+  }
+
+  private func cancelRead() {
     generation &+= 1
-    task?.cancel()
-    task = nil
+    readTask?.cancel()
+    readTask = nil
     if state == .loading {
       state = entries.isEmpty ? .idle : .loaded
     }
   }
 
   private func startLoading(showProgress: Bool) {
+    // The final queued mutation reads back both projections. Do not race a
+    // second read against an accepted delete, clear, or recording preference.
+    guard mutationTask == nil else { return }
     generation &+= 1
     let currentGeneration = generation
-    task?.cancel()
+    readTask?.cancel()
+    operationError = nil
     if showProgress {
       state = .loading
     }
     let repository = repository
-    task = Task {
+    readTask = Task {
       defer {
         if currentGeneration == generation {
-          task = nil
+          readTask = nil
         }
       }
       do {
@@ -105,6 +145,7 @@ final class BrowsingHistoryViewModel: ObservableObject {
         try Task.checkCancellation()
         guard currentGeneration == generation else { return }
         self.entries = entries
+        confirmedRecordingEnabled = recordingEnabled
         self.recordingEnabled = recordingEnabled
         state = .loaded
       } catch is CancellationError {
@@ -112,36 +153,61 @@ final class BrowsingHistoryViewModel: ObservableObject {
       } catch {
         guard currentGeneration == generation, !Task.isCancelled else { return }
         state = .failed(error.localizedDescription)
+        if !entries.isEmpty { operationError = error.localizedDescription }
       }
     }
   }
 
   private func mutate(
-    onFailure: @escaping @MainActor () -> Void = {},
+    recordingPreference: Bool? = nil,
     operation: @escaping @Sendable (any BrowsingHistoryRepository) async throws -> Void
   ) {
-    generation &+= 1
-    let currentGeneration = generation
-    task?.cancel()
+    cancelRead()
+    mutationGeneration &+= 1
+    let currentMutation = mutationGeneration
+    let previousMutation = mutationTask
+    if let recordingPreference {
+      latestRecordingMutation = currentMutation
+      recordingEnabled = recordingPreference
+    }
+    isMutating = true
+    operationError = nil
     let repository = repository
-    task = Task {
+    mutationTask = Task {
+      // These are explicit local writes. Navigation cancellation and another
+      // user action must not drop an already accepted operation.
+      await previousMutation?.value
       defer {
-        if currentGeneration == generation {
-          task = nil
+        if currentMutation == mutationGeneration {
+          mutationTask = nil
+          isMutating = false
         }
       }
       do {
         try await operation(repository)
-        let entries = try await repository.entries(kind: nil)
-        try Task.checkCancellation()
-        guard currentGeneration == generation else { return }
-        self.entries = entries
-        state = .loaded
-      } catch is CancellationError {
-        return
+        if let recordingPreference {
+          confirmedRecordingEnabled = recordingPreference
+        }
       } catch {
-        guard currentGeneration == generation, !Task.isCancelled else { return }
-        onFailure()
+        operationError = error.localizedDescription
+      }
+      if latestRecordingMutation == currentMutation {
+        latestRecordingMutation = nil
+        recordingEnabled = confirmedRecordingEnabled
+      }
+      guard currentMutation == mutationGeneration else { return }
+      do {
+        async let loadedEntries = repository.entries(kind: nil)
+        async let loadedRecordingEnabled = repository.isRecordingEnabled()
+        let (entries, recordingEnabled) = try await (loadedEntries, loadedRecordingEnabled)
+        guard currentMutation == mutationGeneration else { return }
+        self.entries = entries
+        confirmedRecordingEnabled = recordingEnabled
+        self.recordingEnabled = recordingEnabled
+        state = .loaded
+      } catch {
+        guard currentMutation == mutationGeneration else { return }
+        state = .failed(error.localizedDescription)
         operationError = error.localizedDescription
       }
     }
@@ -163,19 +229,11 @@ struct HistoryView: View {
   }
 
   var body: some View {
-    Group {
-      if viewModel.entries.isEmpty {
-        switch viewModel.state {
-        case .idle, .loading:
-          ProgressView()
-        case .failed(let message):
-          ErrorStateView(message: message, retry: viewModel.reload)
-        case .loaded:
-          historyList
-        }
-      } else {
-        historyList
-      }
+    ForumSectionPager(
+      sections: BrowsingHistoryKind.allCases,
+      selection: $viewModel.selectedKind
+    ) { kind in
+      HistoryPageView(kind: kind, model: viewModel, onOpen: onOpen)
     }
     .navigationTitle("浏览记录")
     .navigationBarTitleDisplayMode(.inline)
@@ -231,7 +289,7 @@ struct HistoryView: View {
     } message: {
       Text(viewModel.operationError ?? "未知错误")
     }
-    .task { await viewModel.refresh() }
+    .onAppear(perform: viewModel.activate)
     .onDisappear(perform: viewModel.cancel)
   }
 
@@ -245,7 +303,9 @@ struct HistoryView: View {
         )
       ) {
         ForEach(BrowsingHistoryKind.allCases) { kind in
-          Text(kind.title).tag(kind)
+          Text(kind.title)
+            .tag(kind)
+            .accessibilityIdentifier("history-kind-\(kind.rawValue)")
         }
       }
       .pickerStyle(.segmented)
@@ -257,19 +317,52 @@ struct HistoryView: View {
       Divider()
     }
   }
+}
 
-  private var historyList: some View {
-    let sections = viewModel.sections()
-    return List {
-      if viewModel.visibleEntries.isEmpty {
+/// Both pages observe one repository snapshot. Keeping the List mounted through
+/// loading, empty, error, and selection changes preserves its native position.
+private struct HistoryPageView: View {
+  let kind: BrowsingHistoryKind
+  @ObservedObject var model: BrowsingHistoryViewModel
+  let onOpen: (BrowsingHistoryTarget) -> Void
+
+  var body: some View {
+    historyList
+      .allowsHitTesting(isActive)
+      .accessibilityHidden(!isActive)
+      .overlay { stateOverlay }
+  }
+
+  private var isActive: Bool {
+    model.isActive && model.selectedKind == kind
+  }
+
+  @ViewBuilder
+  private var stateOverlay: some View {
+    if model.entries(for: kind).isEmpty {
+      switch model.state {
+      case .idle, .loading:
+        ProgressView()
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+      case .failed(let message):
+        ErrorStateView(message: message) {
+          if isActive { model.reload() }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      case .loaded:
         EmptyStateView(
-          title: viewModel.selectedKind == .thread ? "暂无帖子记录" : "暂无贴吧记录",
+          title: kind == .thread ? "暂无帖子记录" : "暂无贴吧记录",
           systemImage: "clock"
         )
-        .frame(maxWidth: .infinity)
-        .listRowSeparator(.hidden)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(false)
       }
+    }
+  }
 
+  private var historyList: some View {
+    let sections = model.sections(kind: kind)
+    return List {
       if !sections.today.isEmpty {
         Section("今天") {
           historyRows(sections.today)
@@ -284,21 +377,29 @@ struct HistoryView: View {
     }
     .listStyle(.insetGrouped)
     .appScrollableSurface()
-    .refreshable { await viewModel.refresh() }
+    .accessibilityIdentifier("history-\(kind.rawValue)-list")
+    .refreshable {
+      // The refresh control may retain its initial closure when the initially
+      // hidden page mounts. Read activity from the shared model at invocation.
+      if model.isActive, model.selectedKind == kind, !Task.isCancelled {
+        await model.refresh()
+      }
+    }
   }
 
   @ViewBuilder
   private func historyRows(_ entries: [BrowsingHistoryEntry]) -> some View {
     ForEach(entries) { entry in
       Button {
-        onOpen(entry.target)
+        if isActive { onOpen(entry.target) }
       } label: {
         HistoryRow(entry: entry)
       }
       .buttonStyle(.plain)
+      .accessibilityIdentifier("history-entry-\(entry.id)")
       .swipeActions(edge: .trailing, allowsFullSwipe: true) {
         Button(role: .destructive) {
-          viewModel.delete(entry)
+          if isActive { model.delete(entry) }
         } label: {
           Label("删除", systemImage: "trash")
         }
