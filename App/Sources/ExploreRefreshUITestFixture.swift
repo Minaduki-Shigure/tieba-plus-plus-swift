@@ -9,7 +9,9 @@
   @MainActor
   enum TiebaPlusPlusDebugEntryPoint {
     static func main() {
-      if ProcessInfo.processInfo.arguments.contains("--explore-refresh-ui-testing") {
+      if ProcessInfo.processInfo.arguments.contains("--explore-refresh-ui-testing")
+        || ProcessInfo.processInfo.arguments.contains("--inbox-scopes-ui-testing")
+      {
         var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
         arguments[AppPreferenceKey.personalizedRecommendationPersona] = "anonymous"
         arguments[AppPreferenceKey.personalizedFollowedForumsOnly] = false
@@ -122,7 +124,8 @@
             accountService: dependencies.service,
             personalizedFeedbackService: dependencies.service,
             contentFilterRepository: dependencies.contentFilters,
-            startDestination: dependencies.homeProbe == nil ? .discovery : .home,
+            startDestination: dependencies.homeProbe == nil && dependencies.inboxProbe == nil
+              ? .discovery : .home,
             showsExploreTab: showsExplore
           )
         }
@@ -155,6 +158,9 @@
         }
         if let searchProbe = dependencies.searchProbe {
           SearchScopesUITestProbeView(probe: searchProbe)
+        }
+        if let inboxProbe = dependencies.inboxProbe {
+          InboxScopesUITestProbeView(probe: inboxProbe)
         }
       }
     }
@@ -191,6 +197,7 @@
     let forumProbe: ForumSectionsUITestProbe?
     let profileProbe: ProfileActivityUITestProbe?
     let searchProbe: SearchScopesUITestProbe?
+    let inboxProbe: InboxScopesUITestProbe?
     let globalSearchHistory: GlobalSearchHistoryViewModel
     let vault: ExploreRefreshUITestVault
     let repositories = ExploreRefreshUITestRepositories()
@@ -221,12 +228,16 @@
           failsInitialProfile: arguments.contains("--profile-activity-initial-failure")) : nil
       searchProbe =
         arguments.contains("--search-scopes-ui-testing") ? SearchScopesUITestProbe() : nil
+      inboxProbe =
+        arguments.contains("--inbox-scopes-ui-testing")
+        ? InboxScopesUITestProbe(
+          failsFirstRefresh: arguments.contains("--inbox-scopes-refresh-failure")) : nil
       globalSearchHistory = GlobalSearchHistoryViewModel(repository: repositories)
       vault = ExploreRefreshUITestVault(
         isSignedOut: testsHome && arguments.contains("--home-refresh-signed-out"))
       let service = ExploreRefreshUITestService(
         probe: probe, homeProbe: homeProbe, forumProbe: forumProbe, profileProbe: profileProbe,
-        searchProbe: searchProbe,
+        searchProbe: searchProbe, inboxProbe: inboxProbe,
         unreadReplyCount: testsAdaptiveNavigation ? 7 : 0)
       self.service = service
       accountAccess = AccountAccess(vault: vault, service: service)
@@ -392,6 +403,46 @@
     }
   }
 
+  @MainActor
+  private final class InboxScopesUITestProbe: ObservableObject {
+    @Published private var counts: [String: Int] = [:]
+    @Published private(set) var requests: [String] = []
+    let failsFirstRefresh: Bool
+
+    init(failsFirstRefresh: Bool) { self.failsFirstRefresh = failsFirstRefresh }
+
+    @discardableResult
+    func record(_ key: String, page: Int? = nil) -> Int {
+      counts[key, default: 0] += 1
+      if let page {
+        requests.append("\(key):\(page)")
+        if page > 1 { counts["page\(page)", default: 0] += 1 }
+      }
+      return counts[key, default: 0]
+    }
+
+    var summary: String {
+      ["replies", "mentions", "page2", "page3", "posts", "unexpected"]
+        .map { "\($0)=\(counts[$0, default: 0])" }.joined(separator: " ")
+    }
+  }
+
+  private struct InboxScopesUITestProbeView: View {
+    @ObservedObject var probe: InboxScopesUITestProbe
+
+    var body: some View {
+      VStack(alignment: .leading, spacing: 1) {
+        Text(probe.summary)
+          .accessibilityIdentifier("inbox-scope-request-counts")
+        Text(probe.requests.joined(separator: " | "))
+          .lineLimit(1)
+          .accessibilityLabel(probe.requests.joined(separator: " | "))
+          .accessibilityIdentifier("inbox-scope-request-log")
+      }
+      .font(.system(size: 7, design: .monospaced))
+    }
+  }
+
   private struct ExploreRefreshLifecycleProbeView: View {
     @ObservedObject var diagnostics: ExploreRefreshLifecycleDiagnostics
 
@@ -544,13 +595,15 @@
     private let forumProbe: ForumSectionsUITestProbe?
     private let profileProbe: ProfileActivityUITestProbe?
     private let searchProbe: SearchScopesUITestProbe?
+    private let inboxProbe: InboxScopesUITestProbe?
+    private var inboxFirstPageReads: [InboxKind: Int] = [:]
     private var homeGeneration = 0
     private var threadsByID: [Int64: BrowseThread] = [:]
 
     init(
       probe: ExploreRefreshUITestProbe, homeProbe: HomeRefreshUITestProbe?,
       forumProbe: ForumSectionsUITestProbe?, profileProbe: ProfileActivityUITestProbe?,
-      searchProbe: SearchScopesUITestProbe?,
+      searchProbe: SearchScopesUITestProbe?, inboxProbe: InboxScopesUITestProbe?,
       unreadReplyCount: Int
     ) {
       self.probe = probe
@@ -559,6 +612,7 @@
       self.forumProbe = forumProbe
       self.profileProbe = profileProbe
       self.searchProbe = searchProbe
+      self.inboxProbe = inboxProbe
     }
 
     private func thread(channel: String, title: String, id: Int64) async -> BrowseThread {
@@ -608,7 +662,17 @@
     ) async throws -> PostPageData {
       guard let thread = threadsByID[threadID] else {
         await searchProbe?.record("unexpected")
+        await inboxProbe?.record("unexpected")
         throw Self.unsupported
+      }
+      if let inboxProbe {
+        guard page == 1, location == .postID(thread.firstPostID),
+          options == ThreadBrowseOptions()
+        else {
+          await inboxProbe.record("unexpected")
+          throw Self.unsupported
+        }
+        await inboxProbe.record("posts")
       }
       if let searchProbe {
         guard page == 1, location == nil, options == ThreadBrowseOptions() else {
@@ -663,6 +727,52 @@
     func inboxUnreadSummary(session: StoredAccountSession) -> InboxUnreadSummary {
       InboxUnreadSummary(
         userID: session.id, replyCount: unreadReplyCount, mentionCount: 0, fanCount: 0)
+    }
+
+    func notifications(session: StoredAccountSession, kind: InboxKind, page: Int) async throws
+      -> InboxPage
+    {
+      guard let inboxProbe else {
+        // Preserve the protocol default used by all older fixture modes.
+        throw BrowseError.unavailable("当前账户服务不支持读取消息。")
+      }
+      guard session.id == 7, (1...3).contains(page) else {
+        await inboxProbe.record("unexpected")
+        throw Self.unsupported
+      }
+      await inboxProbe.record(kind.rawValue, page: page)
+      if page == 1 {
+        inboxFirstPageReads[kind, default: 0] += 1
+        if kind == .replies, inboxFirstPageReads[kind] == 2,
+          await inboxProbe.failsFirstRefresh
+        {
+          throw BrowseError.unavailable("离线回复刷新失败")
+        }
+      }
+      let prefix = kind == .replies ? "回复消息" : "提及消息"
+      let base: Int64 = kind == .replies ? 70_000 : 80_000
+      var messages: [InboxMessage] = []
+      for number in ((page - 1) * 20 + 1)...(page * 20) {
+        let threadID = base + Int64(number)
+        let postID = threadID + 1_000_000
+        let thread = BrowseThread(
+          id: threadID, forumID: 100, forumName: "离线消息", title: "消息原主题\(number)",
+          excerpt: "", authorName: "离线发送者", replyCount: 0, viewCount: 1,
+          createdAt: nil, lastReplyAt: nil, contents: [], authorID: 8, firstPostID: postID)
+        threadsByID[threadID] = thread
+        messages.append(
+          InboxMessage(
+            id: postID,
+            sender: InboxSender(
+              id: 8, username: "offline-sender", displayName: "离线发送者",
+              portraitURL: nil, isFriend: false, isFan: false),
+            quotedUser: nil, threadID: threadID, postID: postID, quotedPostID: nil,
+            title: thread.title, content: "\(prefix)·第\(number)条",
+            quotedContent: "独立保留阅读位置，切换消息后可以继续阅读。", forumName: "离线消息",
+            createdAt: nil, isFloorReply: false, isFirstPost: true, isUnread: false, threadType: 0))
+      }
+      return InboxPage(
+        userID: session.id, kind: kind, messages: messages, currentPage: page, hasMore: page < 3)
     }
 
     func checkInCatalog(session: StoredAccountSession) async throws -> ForumCheckInCatalogData {
