@@ -37,6 +37,18 @@ final class UserRepliesViewModel: ObservableObject {
   }
 
   func reload() {
+    _ = beginRefresh()
+  }
+
+  @discardableResult
+  func beginRefresh() -> Task<Void, Never> {
+    invalidateContents()
+    state = .loading
+    return loadInitialPage()
+  }
+
+  /// Clear stale filtered content without implicitly reading an offscreen page.
+  func invalidateContents() {
     invalidateCurrentLoad()
     replies = []
     currentPage = 0
@@ -44,13 +56,12 @@ final class UserRepliesViewModel: ObservableObject {
     isActivityHidden = false
     isLoadingMore = false
     loadMoreError = nil
-    state = .loading
-    loadInitialPage()
+    state = .idle
   }
 
   func refresh() async {
-    reload()
-    await loadTask?.value
+    guard !Task.isCancelled else { return }
+    await beginRefresh().value
   }
 
   func reloadAfterContentFilterChange() {
@@ -93,12 +104,12 @@ final class UserRepliesViewModel: ObservableObject {
     }
   }
 
-  private func loadInitialPage() {
+  private func loadInitialPage() -> Task<Void, Never> {
     let service = service
     let userID = userID
     loadGeneration &+= 1
     let generation = loadGeneration
-    loadTask = Task {
+    let task = Task {
       defer {
         if generation == loadGeneration {
           loadTask = nil
@@ -121,6 +132,8 @@ final class UserRepliesViewModel: ObservableObject {
         state = .failed(error.localizedDescription)
       }
     }
+    loadTask = task
+    return task
   }
 
   private func loadReplies(page: Int) {
