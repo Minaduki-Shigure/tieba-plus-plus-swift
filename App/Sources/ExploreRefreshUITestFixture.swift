@@ -80,6 +80,11 @@
             {
               ForumSearchResumeUITestCompletionControl(probe: probe, backend: backend)
             }
+            if let probe = dependencies.inboxFilteredPaginationProbe,
+              let backend = dependencies.inboxFilteredPaginationBackend
+            {
+              InboxFilteredPaginationUITestCompletionControl(probe: probe, backend: backend)
+            }
           }
       }
     }
@@ -177,6 +182,9 @@
         if let inboxProbe = dependencies.inboxProbe {
           InboxScopesUITestProbeView(probe: inboxProbe)
         }
+        if let probe = dependencies.inboxFilteredPaginationProbe {
+          InboxFilteredPaginationUITestProbeView(probe: probe)
+        }
         if let probe = dependencies.forumSearchResumeProbe {
           ForumSearchResumeUITestProbeView(probe: probe)
         }
@@ -217,12 +225,14 @@
     let profileProbe: ProfileActivityUITestProbe?
     let searchProbe: SearchScopesUITestProbe?
     let inboxProbe: InboxScopesUITestProbe?
+    let inboxFilteredPaginationProbe: InboxFilteredPaginationUITestProbe?
+    let inboxFilteredPaginationBackend: InboxFilteredPaginationUITestBackend?
     let forumSearchResumeProbe: ForumSearchResumeUITestProbe?
     let forumSearchResumeBackend: ForumSearchResumeUITestBackend?
     let globalSearchHistory: GlobalSearchHistoryViewModel
     let vault: ExploreRefreshUITestVault
     let repositories: ExploreRefreshUITestRepositories
-    let contentFilters = EmptyContentFilterRepository()
+    let contentFilters: any ContentFilterRepository
     let mediaPlayback = MediaPlaybackCoordinator()
     let externalWeb = ExternalWebPresentationModel()
     // Only the observable quick-action dependency, not a UIApplication/scene
@@ -254,6 +264,17 @@
         arguments.contains("--inbox-scopes-ui-testing")
         ? InboxScopesUITestProbe(
           failsFirstRefresh: arguments.contains("--inbox-scopes-refresh-failure")) : nil
+      inboxFilteredPaginationProbe =
+        arguments.contains("--inbox-scopes-filtered-middle-page")
+        ? InboxFilteredPaginationUITestProbe() : nil
+      inboxFilteredPaginationBackend = inboxFilteredPaginationProbe.map {
+        InboxFilteredPaginationUITestBackend(probe: $0)
+      }
+      if let backend = inboxFilteredPaginationBackend {
+        contentFilters = backend
+      } else {
+        contentFilters = EmptyContentFilterRepository()
+      }
       forumSearchResumeProbe =
         arguments.contains("--forum-search-resume-ui-testing")
         ? ForumSearchResumeUITestProbe() : nil
@@ -268,6 +289,7 @@
       let service = ExploreRefreshUITestService(
         probe: probe, homeProbe: homeProbe, forumProbe: forumProbe, profileProbe: profileProbe,
         searchProbe: searchProbe, inboxProbe: inboxProbe, testsHistory: testsHistory,
+        inboxFilteredPaginationBackend: inboxFilteredPaginationBackend,
         forumSearchResumeBackend: forumSearchResumeBackend,
         unreadReplyCount: testsAdaptiveNavigation ? 7 : 0)
       self.service = service
@@ -673,6 +695,7 @@
     private let profileProbe: ProfileActivityUITestProbe?
     private let searchProbe: SearchScopesUITestProbe?
     private let inboxProbe: InboxScopesUITestProbe?
+    private let inboxFilteredPaginationBackend: InboxFilteredPaginationUITestBackend?
     private let testsHistory: Bool
     private let forumSearchResumeBackend: ForumSearchResumeUITestBackend?
     private var inboxFirstPageReads: [InboxKind: Int] = [:]
@@ -684,6 +707,7 @@
       forumProbe: ForumSectionsUITestProbe?, profileProbe: ProfileActivityUITestProbe?,
       searchProbe: SearchScopesUITestProbe?, inboxProbe: InboxScopesUITestProbe?,
       testsHistory: Bool,
+      inboxFilteredPaginationBackend: InboxFilteredPaginationUITestBackend? = nil,
       forumSearchResumeBackend: ForumSearchResumeUITestBackend? = nil,
       unreadReplyCount: Int
     ) {
@@ -694,6 +718,7 @@
       self.profileProbe = profileProbe
       self.searchProbe = searchProbe
       self.inboxProbe = inboxProbe
+      self.inboxFilteredPaginationBackend = inboxFilteredPaginationBackend
       self.testsHistory = testsHistory
       self.forumSearchResumeBackend = forumSearchResumeBackend
       if testsHistory {
@@ -853,6 +878,9 @@
           excerpt: "", authorName: "离线发送者", replyCount: 0, viewCount: 1,
           createdAt: nil, lastReplyAt: nil, contents: [], authorID: 8, firstPostID: postID)
         threadsByID[threadID] = thread
+        let hiddenSuffix =
+          inboxFilteredPaginationBackend != nil && page == 2
+          ? "·\(InboxFilteredPaginationUITestBackend.hiddenMarker)" : ""
         messages.append(
           InboxMessage(
             id: postID,
@@ -860,12 +888,14 @@
               id: 8, username: "offline-sender", displayName: "离线发送者",
               portraitURL: nil, isFriend: false, isFan: false),
             quotedUser: nil, threadID: threadID, postID: postID, quotedPostID: nil,
-            title: thread.title, content: "\(prefix)·第\(number)条",
+            title: thread.title, content: "\(prefix)·第\(number)条\(hiddenSuffix)",
             quotedContent: "独立保留阅读位置，切换消息后可以继续阅读。", forumName: "离线消息",
             createdAt: nil, isFloorReply: false, isFirstPost: true, isUnread: false, threadType: 0))
       }
-      return InboxPage(
+      let response = InboxPage(
         userID: session.id, kind: kind, messages: messages, currentPage: page, hasMore: page < 3)
+      try await inboxFilteredPaginationBackend?.beforeReturning(response)
+      return response
     }
 
     func checkInCatalog(session: StoredAccountSession) async throws -> ForumCheckInCatalogData {
