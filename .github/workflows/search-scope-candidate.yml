@@ -1,0 +1,74 @@
+name: Search scopes candidate
+on:
+  push:
+    branches: [ci/search-scope-native-1004]
+permissions:
+  contents: read
+jobs:
+  search-scopes:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Select iPhone simulator
+        run: |
+          set -euo pipefail
+          device_id="$(xcrun simctl list devices available -j | jq -r '
+            [.devices[][] | select(.isAvailable == true and (.name | startswith("iPhone")))] as $phones
+            | (($phones | map(select(.name == "iPhone 16 Pro"))) + $phones | .[0].udid // empty)
+          ')"
+          test -n "$device_id"
+          echo "SEARCH_SIMULATOR_DESTINATION=platform=iOS Simulator,id=$device_id" >> "$GITHUB_ENV"
+      - name: Verify search lifecycle and local history
+        id: models
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild -project TiebaPlusPlus.xcodeproj -scheme TiebaPlusPlus \
+            -configuration Debug -derivedDataPath build/DerivedData \
+            -destination "$SEARCH_SIMULATOR_DESTINATION" -parallel-testing-enabled NO \
+            -only-testing:TiebaPlusPlusTests/SearchViewModelTests \
+            -only-testing:TiebaPlusPlusTests/GlobalSearchHistoryViewModelTests \
+            -only-testing:TiebaPlusPlusTests/GlobalSearchHistoryTests \
+            -resultBundlePath search-model-results.xcresult \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO \
+            test 2>&1 | tee search-model-test.log
+      - name: Verify native search scope navigation
+        id: ui
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild -project TiebaPlusPlus.xcodeproj -scheme TiebaPlusPlusIconsUI \
+            -configuration Debug -derivedDataPath build/DerivedData -enableCodeCoverage YES \
+            -destination "$SEARCH_SIMULATOR_DESTINATION" -parallel-testing-enabled NO \
+            -only-testing:TiebaPlusPlusUITests/SearchScopesUITests \
+            -resultBundlePath search-ui-results.xcresult \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO \
+            test 2>&1 | tee search-ui-test.log
+      - name: Export model results
+        if: always()
+        run: |
+          xcrun xcresulttool get test-results summary \
+            --path search-model-results.xcresult --compact > search-model-summary.json
+      - name: Export UI evidence
+        if: always()
+        run: |
+          xcrun xcresulttool get test-results summary \
+            --path search-ui-results.xcresult --compact > search-ui-summary.json
+          xcrun xcresulttool export attachments \
+            --path search-ui-results.xcresult --output-path search-ui-attachments
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: search-scope-candidate
+          path: |
+            search-model-test.log
+            search-model-summary.json
+            search-ui-test.log
+            search-ui-summary.json
+            search-ui-attachments/
+      - name: Enforce both validations
+        if: ${{ always() && (steps.models.outcome != 'success' || steps.ui.outcome != 'success') }}
+        run: exit 1
