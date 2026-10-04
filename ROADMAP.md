@@ -1925,9 +1925,12 @@ The [profile candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swif
 passed 61 model tests and three actual UI workflows, with zero failures or skips.
 They cover independent positions, swipes, detail returns, ordinary and nested
 reply destinations, original-topic navigation, pagination, and preservation of
-the other page after a failed refresh, retry and successful refresh. A later
-initial-profile visibility guard and its separate UI regression still need
-native validation. This development work is not part of alpha.41; full tagged
+the other page after a failed refresh, retry and successful refresh. The
+[final profile candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37171843648)
+passed the same 61 model tests and all four UI workflows, with zero failures or
+skips, including the initial-profile visibility guard: a failed profile read
+does not trigger hidden pagination, and retry restores visible-tail loading.
+This development work is not part of alpha.41; full tagged
 CI and physical-device validation remain separate requirements.
 
 Thread-list mapping preserves the public topic kind, first-post ID, server state
