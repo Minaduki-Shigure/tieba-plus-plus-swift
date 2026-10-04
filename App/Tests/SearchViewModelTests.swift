@@ -711,6 +711,319 @@ final class SearchViewModelTests: XCTestCase {
     let counts = await service.requestCounts()
     XCTAssertEqual(counts, SearchRequestCounts(forums: 0, threads: 0, users: 0))
   }
+
+  @MainActor
+  func testInactiveActionsDeferReadsUntilSelectedScopeAppears() async throws {
+    let service = ScriptedSearchService()
+    let viewModel = SearchViewModel(query: "swift", service: service)
+
+    viewModel.selectScope(.threads)
+    viewModel.setThreadSort(.relevance)
+    viewModel.reloadThreadsAfterContentFilterChange()
+    viewModel.retry()
+    await viewModel.refresh()
+    viewModel.submit("replacement")
+    viewModel.selectScope(.users)
+    viewModel.retryLoadMore()
+    await searchDrainMainActor()
+
+    XCTAssertFalse(viewModel.isActive)
+    let before = await service.requestCounts()
+    XCTAssertEqual(before, SearchRequestCounts(forums: 0, threads: 0, users: 0))
+    let user = SearchFixtures.user(id: 701, username: "replacement")
+    await service.enqueueUsers(.value(UserSearchData(exactMatch: user, related: [])))
+    viewModel.loadIfNeeded()
+    try await searchWaitUntil { viewModel.userState == .loaded }
+    XCTAssertTrue(viewModel.isActive)
+    XCTAssertEqual(viewModel.exactUser, user)
+    let after = await service.requestCounts()
+    XCTAssertEqual(after, SearchRequestCounts(forums: 0, threads: 0, users: 1))
+  }
+
+  @MainActor
+  func testLeavingInitialScopeCancelsItAndLateFailureCannotReplaceResumedLoad() async throws {
+    let service = ScriptedSearchService()
+    defer { Task { await service.cancelPendingRequests() } }
+    await service.enqueueThreads(.suspended(701))
+    await service.enqueueThreads(.suspended(702))
+    await service.enqueueUsers(.value(UserSearchData(exactMatch: nil, related: [])))
+    let viewModel = SearchViewModel(query: "swift", service: service, selectedScope: .threads)
+    viewModel.loadIfNeeded()
+    try await searchWaitUntil { await service.hasPendingThread(701) }
+
+    viewModel.selectScope(.users)
+    XCTAssertEqual(viewModel.threadState, .idle)
+    try await searchWaitUntil { viewModel.userState == .loaded }
+    viewModel.selectScope(.threads)
+    try await searchWaitUntil { await service.hasPendingThread(702) }
+    let rejected = await service.failThreads(id: 701, message: "late failure")
+    XCTAssertTrue(rejected)
+    try await searchWaitUntil { await service.cancelledThreadIDs().contains(701) }
+    XCTAssertEqual(viewModel.threadState, .loading)
+    XCTAssertNil(viewModel.refreshError)
+
+    viewModel.cancel()
+    let resumed = await service.resumeThreads(
+      id: 702,
+      returning: ThreadSearchPageData(
+        threads: [SearchFixtures.thread(id: 999)], currentPage: 1, hasMore: false
+      )
+    )
+    XCTAssertTrue(resumed)
+    try await searchWaitUntil { await service.cancelledThreadIDs().contains(702) }
+    XCTAssertEqual(viewModel.threadState, .idle)
+    XCTAssertTrue(viewModel.threads.isEmpty)
+  }
+
+  @MainActor
+  func testLeavingPaginationRetainsCursorAndResumesSamePageForHiddenTail() async throws {
+    let service = ScriptedSearchService()
+    defer { Task { await service.cancelPendingRequests() } }
+    let tail = SearchFixtures.thread(id: 711, localVisibility: .hidden)
+    await service.enqueueThreads(
+      .value(ThreadSearchPageData(threads: [tail], currentPage: 1, hasMore: true))
+    )
+    await service.enqueueThreads(.suspended(711))
+    await service.enqueueThreads(.suspended(712))
+    await service.enqueueUsers(.value(UserSearchData(exactMatch: nil, related: [])))
+    let viewModel = SearchViewModel(query: "swift", service: service, selectedScope: .threads)
+    viewModel.loadIfNeeded()
+    try await searchWaitUntil { viewModel.threadState == .loaded }
+    viewModel.loadMoreIfNeeded(current: tail)
+    try await searchWaitUntil { await service.hasPendingThread(711) }
+    let previousEpoch = viewModel.threadPaginationEpoch
+
+    viewModel.selectScope(.users)
+    XCTAssertFalse(viewModel.isLoadingMore)
+    XCTAssertEqual(viewModel.threadState, .loaded)
+    XCTAssertEqual(viewModel.threads, [tail])
+    XCTAssertGreaterThan(viewModel.threadPaginationEpoch, previousEpoch)
+    viewModel.loadMoreIfNeeded(current: tail)
+    viewModel.retryLoadMore()
+    try await searchWaitUntil { viewModel.userState == .loaded }
+    let hiddenRequests = await service.threadRequestSnapshot()
+    XCTAssertEqual(hiddenRequests.map(\.page), [1, 2])
+
+    viewModel.selectScope(.threads)
+    viewModel.loadMoreIfNeeded(current: tail)
+    try await searchWaitUntil { await service.hasPendingThread(712) }
+    let oldResumed = await service.resumeThreads(
+      id: 711,
+      returning: ThreadSearchPageData(
+        threads: [SearchFixtures.thread(id: 799)], currentPage: 8, hasMore: false
+      )
+    )
+    XCTAssertTrue(oldResumed)
+    try await searchWaitUntil { await service.cancelledThreadIDs().contains(711) }
+    XCTAssertTrue(viewModel.isLoadingMore)
+    XCTAssertEqual(viewModel.threads, [tail])
+
+    let currentResumed = await service.resumeThreads(
+      id: 712,
+      returning: ThreadSearchPageData(
+        threads: [SearchFixtures.thread(id: 712)], currentPage: 2, hasMore: false
+      )
+    )
+    XCTAssertTrue(currentResumed)
+    try await searchWaitUntil { !viewModel.isLoadingMore }
+    XCTAssertEqual(viewModel.threads.map(\.id), [711, 712])
+    let requests = await service.threadRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2, 2])
+  }
+
+  @MainActor
+  func testCancellingRefreshRestoresPaginationFailureAndPreservesRetryCursor() async throws {
+    let service = ScriptedSearchService()
+    defer { Task { await service.cancelPendingRequests() } }
+    let tail = SearchFixtures.thread(id: 721)
+    await service.enqueueThreads(
+      .value(ThreadSearchPageData(threads: [tail], currentPage: 3, hasMore: true))
+    )
+    await service.enqueueThreads(.failure(SearchStubFailure(message: "page failed")))
+    await service.enqueueThreads(.suspended(721))
+    await service.enqueueThreads(
+      .value(
+        ThreadSearchPageData(
+          threads: [SearchFixtures.thread(id: 722)], currentPage: 4, hasMore: false))
+    )
+    await service.enqueueUsers(.value(UserSearchData(exactMatch: nil, related: [])))
+    let viewModel = SearchViewModel(query: "swift", service: service, selectedScope: .threads)
+    viewModel.loadIfNeeded()
+    try await searchWaitUntil { viewModel.threadState == .loaded }
+    viewModel.loadMoreIfNeeded(current: tail)
+    try await searchWaitUntil { viewModel.loadMoreError == "page failed" }
+    let refresh = Task { @MainActor in await viewModel.refresh() }
+    try await searchWaitUntil { await service.hasPendingThread(721) }
+
+    viewModel.selectScope(.users)
+    XCTAssertEqual(viewModel.threads, [tail])
+    XCTAssertEqual(viewModel.threadState, .loaded)
+    XCTAssertEqual(viewModel.loadMoreError, "page failed")
+    viewModel.retryLoadMore()
+    try await searchWaitUntil { viewModel.userState == .loaded }
+    let before = await service.threadRequestSnapshot()
+    XCTAssertEqual(before.map(\.page), [1, 4, 1])
+    viewModel.selectScope(.threads)
+    viewModel.retryLoadMore()
+    try await searchWaitUntil { viewModel.threads.map(\.id) == [721, 722] }
+
+    let resumed = await service.failThreads(id: 721, message: "stale refresh")
+    XCTAssertTrue(resumed)
+    await refresh.value
+    XCTAssertNil(viewModel.refreshError)
+    XCTAssertNil(viewModel.loadMoreError)
+    XCTAssertEqual(viewModel.threads.map(\.id), [721, 722])
+    let requests = await service.threadRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 4, 1, 4])
+  }
+
+  @MainActor
+  func testLeavingEmptyLoadedScopeDuringRefreshKeepsLoadedEmptySnapshot() async throws {
+    let service = ScriptedSearchService()
+    defer { Task { await service.cancelPendingRequests() } }
+    await service.enqueueUsers(.value(UserSearchData(exactMatch: nil, related: [])))
+    await service.enqueueUsers(.suspended(731))
+    await service.enqueueForums(.value(ForumSearchData(exactMatch: nil, related: [])))
+    let viewModel = SearchViewModel(query: "swift", service: service, selectedScope: .users)
+    viewModel.loadIfNeeded()
+    try await searchWaitUntil { viewModel.userState == .loaded }
+    let refresh = Task { @MainActor in await viewModel.refresh() }
+    try await searchWaitUntil { await service.hasPendingUser(731) }
+
+    viewModel.selectScope(.forums)
+    XCTAssertEqual(viewModel.userState, .loaded)
+    XCTAssertFalse(viewModel.hasResults(for: .users))
+    try await searchWaitUntil { viewModel.forumState == .loaded }
+    viewModel.selectScope(.users)
+    let resumed = await service.resumeUsers(
+      id: 731,
+      returning: UserSearchData(
+        exactMatch: SearchFixtures.user(id: 731, username: "stale"), related: [])
+    )
+    XCTAssertTrue(resumed)
+    await refresh.value
+    XCTAssertNil(viewModel.exactUser)
+    XCTAssertEqual(viewModel.userState, .loaded)
+    let counts = await service.requestCounts()
+    XCTAssertEqual(counts, SearchRequestCounts(forums: 1, threads: 0, users: 2))
+  }
+
+  @MainActor
+  func testDetailDisappearanceDefersFilterInvalidationAndRejectsLatePage() async throws {
+    let service = ScriptedSearchService()
+    defer { Task { await service.cancelPendingRequests() } }
+    let initial = SearchFixtures.thread(id: 741)
+    await service.enqueueThreads(
+      .value(ThreadSearchPageData(threads: [initial], currentPage: 1, hasMore: true))
+    )
+    await service.enqueueThreads(.suspended(741))
+    await service.enqueueThreads(
+      .value(
+        ThreadSearchPageData(
+          threads: [SearchFixtures.thread(id: 742)], currentPage: 1, hasMore: false))
+    )
+    let viewModel = SearchViewModel(query: "swift", service: service, selectedScope: .threads)
+    viewModel.loadIfNeeded()
+    try await searchWaitUntil { viewModel.threadState == .loaded }
+    viewModel.loadMoreIfNeeded(current: initial)
+    try await searchWaitUntil { await service.hasPendingThread(741) }
+
+    viewModel.cancel()
+    let revision = viewModel.threadResultsRevision
+    viewModel.reloadThreadsAfterContentFilterChange()
+    viewModel.retry()
+    await viewModel.refresh()
+    XCTAssertFalse(viewModel.isActive)
+    XCTAssertEqual(viewModel.threadState, .idle)
+    XCTAssertEqual(viewModel.threadResultsRevision, revision + 1)
+    let hiddenCounts = await service.requestCounts()
+    XCTAssertEqual(hiddenCounts.threads, 2)
+
+    let resumed = await service.resumeThreads(
+      id: 741,
+      returning: ThreadSearchPageData(
+        threads: [SearchFixtures.thread(id: 799)], currentPage: 2, hasMore: false)
+    )
+    XCTAssertTrue(resumed)
+    try await searchWaitUntil { await service.cancelledThreadIDs().contains(741) }
+    XCTAssertTrue(viewModel.threads.isEmpty)
+    viewModel.loadIfNeeded()
+    try await searchWaitUntil { viewModel.threads.map(\.id) == [742] }
+    let requests = await service.threadRequestSnapshot()
+    XCTAssertEqual(requests.map(\.page), [1, 2, 1])
+  }
+
+  @MainActor
+  func testSameQuerySubmissionResetsAllScopeSnapshotsAndRejectsOldResponse() async throws {
+    let service = ScriptedSearchService()
+    defer { Task { await service.cancelPendingRequests() } }
+    await service.enqueueForums(
+      .value(ForumSearchData(exactMatch: SearchFixtures.forum(id: 751, name: "swift"), related: []))
+    )
+    await service.enqueueThreads(
+      .value(
+        ThreadSearchPageData(
+          threads: [SearchFixtures.thread(id: 752)], currentPage: 2, hasMore: true)))
+    await service.enqueueUsers(.suspended(751))
+    await service.enqueueUsers(
+      .value(
+        UserSearchData(exactMatch: SearchFixtures.user(id: 753, username: "fresh"), related: [])))
+    let viewModel = SearchViewModel(query: "swift", service: service)
+    viewModel.loadIfNeeded()
+    try await searchWaitUntil { viewModel.forumState == .loaded }
+    viewModel.selectScope(.threads)
+    try await searchWaitUntil { viewModel.threadState == .loaded }
+    viewModel.selectScope(.users)
+    try await searchWaitUntil { await service.hasPendingUser(751) }
+    let resultRevision = viewModel.resultRevision
+    let threadRevision = viewModel.threadResultsRevision
+
+    viewModel.submit(" swift ")
+    XCTAssertEqual(viewModel.resultRevision, resultRevision + 1)
+    XCTAssertEqual(viewModel.threadResultsRevision, threadRevision)
+    XCTAssertNil(viewModel.exactForum)
+    XCTAssertTrue(viewModel.threads.isEmpty)
+    XCTAssertEqual(viewModel.forumState, .idle)
+    XCTAssertEqual(viewModel.threadState, .idle)
+    try await searchWaitUntil { viewModel.exactUser?.id == 753 }
+    let resumed = await service.resumeUsers(
+      id: 751,
+      returning: UserSearchData(
+        exactMatch: SearchFixtures.user(id: 799, username: "stale"), related: [])
+    )
+    XCTAssertTrue(resumed)
+    await searchDrainMainActor()
+    XCTAssertEqual(viewModel.exactUser?.id, 753)
+  }
+
+  @MainActor
+  func testSortAndFilterRevisionsPreserveForumAndUserSnapshots() async throws {
+    let service = ScriptedSearchService()
+    let forum = SearchFixtures.forum(id: 761, name: "swift")
+    let user = SearchFixtures.user(id: 762, username: "swift")
+    await service.enqueueForums(.value(ForumSearchData(exactMatch: forum, related: [])))
+    await service.enqueueUsers(.value(UserSearchData(exactMatch: user, related: [])))
+    let viewModel = SearchViewModel(query: "swift", service: service)
+    viewModel.loadIfNeeded()
+    try await searchWaitUntil { viewModel.forumState == .loaded }
+    viewModel.selectScope(.users)
+    try await searchWaitUntil { viewModel.userState == .loaded }
+    let resultRevision = viewModel.resultRevision
+    let threadRevision = viewModel.threadResultsRevision
+
+    viewModel.setThreadSort(.oldest)
+    viewModel.reloadThreadsAfterContentFilterChange()
+    XCTAssertEqual(viewModel.resultRevision, resultRevision)
+    XCTAssertEqual(viewModel.threadResultsRevision, threadRevision + 2)
+    XCTAssertEqual(viewModel.exactForum, forum)
+    XCTAssertEqual(viewModel.exactUser, user)
+    XCTAssertEqual(viewModel.state(for: .forums), .loaded)
+    XCTAssertEqual(viewModel.state(for: .users), .loaded)
+    XCTAssertTrue(viewModel.hasResults(for: .forums))
+    XCTAssertTrue(viewModel.hasResults(for: .users))
+    let counts = await service.requestCounts()
+    XCTAssertEqual(counts, SearchRequestCounts(forums: 1, threads: 0, users: 1))
+  }
 }
 
 private struct SearchThreadRequest: Equatable, Sendable {
@@ -747,6 +1060,7 @@ private actor ScriptedSearchService: SearchService {
   private var pendingForums: [Int: CheckedContinuation<ForumSearchData, any Error>] = [:]
   private var pendingThreads: [Int: CheckedContinuation<ThreadSearchPageData, any Error>] = [:]
   private var pendingUsers: [Int: CheckedContinuation<UserSearchData, any Error>] = [:]
+  private var cancelledThreads: Set<Int> = []
 
   func enqueueForums(_ stub: SearchStub<ForumSearchData>) {
     forumStubs.append(stub)
@@ -797,6 +1111,9 @@ private actor ScriptedSearchService: SearchService {
     case .failure(let error):
       throw error
     case .suspended(let identifier):
+      defer {
+        if Task.isCancelled { cancelledThreads.insert(identifier) }
+      }
       return try await withCheckedThrowingContinuation { continuation in
         pendingThreads[identifier] = continuation
       }
@@ -836,6 +1153,25 @@ private actor ScriptedSearchService: SearchService {
     guard let continuation = pendingUsers.removeValue(forKey: id) else { return false }
     continuation.resume(returning: value)
     return true
+  }
+
+  func failThreads(id: Int, message: String) -> Bool {
+    guard let continuation = pendingThreads.removeValue(forKey: id) else { return false }
+    continuation.resume(throwing: SearchStubFailure(message: message))
+    return true
+  }
+
+  func hasPendingThread(_ id: Int) -> Bool { pendingThreads[id] != nil }
+  func hasPendingUser(_ id: Int) -> Bool { pendingUsers[id] != nil }
+  func cancelledThreadIDs() -> Set<Int> { cancelledThreads }
+
+  func cancelPendingRequests() {
+    for continuation in pendingForums.values { continuation.resume(throwing: CancellationError()) }
+    for continuation in pendingThreads.values { continuation.resume(throwing: CancellationError()) }
+    for continuation in pendingUsers.values { continuation.resume(throwing: CancellationError()) }
+    pendingForums.removeAll()
+    pendingThreads.removeAll()
+    pendingUsers.removeAll()
   }
 
   func requestCounts() -> SearchRequestCounts {
