@@ -109,14 +109,45 @@ final class HistoryScopesUITests: XCTestCase {
     try select("thread", app: app)
     // Return to the top through native scrolling and verify the visited row
     // moved there. The fixture never changes selection, offset or model state.
-    for _ in 0..<20 {
-      let first = historyList("thread", app: app).cells.firstMatch
-      if first.staticTexts[visited.title].isHittable { break }
+    let list = historyList("thread", app: app)
+    let today = list.staticTexts["今天"].firstMatch
+    let visitedID = "history-entry-thread:\(980_000 + number)"
+    let visitedRow = list.buttons[visitedID].firstMatch
+    for _ in 0..<8 {
+      let showsHeader = today.isHittable
+      if showsHeader, visitedRow.isHittable { break }
+      // The header means we reached the top. If the record is missing, fail
+      // the order assertion below rather than repeatedly pulling to refresh.
+      if showsHeader { break }
       drag(app, from: CGVector(dx: 0.5, dy: 0.4), to: CGVector(dx: 0.5, dy: 0.8))
     }
-    try wait("Visited thread is the first history entry") {
-      self.historyList("thread", app: app).cells.firstMatch.staticTexts[visited.title].isHittable
-    }
+    try wait(
+      "Reordered history is visible at the top",
+      diagnostics: {
+        self.attachState(app)
+        return "expectedFirst=\(visitedID), header=\(today.frame), record=\(visitedRow.frame)"
+      },
+      until: { today.isHittable && visitedRow.isHittable })
+    let headerFrame = today.frame
+    let listFrame = list.frame
+    // A native List can expose a section header as its first Cell. Inspect
+    // actual records once, after reaching the top, and sort by visual position.
+    let records = list.buttons.matching(
+      NSPredicate(format: "identifier BEGINSWITH %@", "history-entry-thread:")
+    ).allElementsBoundByIndex.map { (element: $0, frame: $0.frame) }
+      .filter { $0.frame.minY >= headerFrame.maxY && $0.frame.maxY <= listFrame.maxY }
+      .sorted { $0.frame.minY < $1.frame.minY }
+    let matches =
+      records.count >= 2
+      && records[0].element.identifier == visitedID
+      && records[1].element.identifier == "history-entry-thread:980001"
+      && records[0].frame.maxY <= records[1].frame.minY
+      && records[0].element.isHittable && records[1].element.isHittable
+    if !matches { attachState(app) }
+    XCTAssertTrue(
+      matches,
+      "expectedFirst=\(visitedID), expectedSecond=history-entry-thread:980001; "
+        + records.prefix(3).map { "\($0.element.identifier)=\($0.frame)" }.joined(separator: ", "))
   }
 
   private struct Anchor {
