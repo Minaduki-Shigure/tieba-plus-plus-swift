@@ -62,84 +62,107 @@ struct ForumView: View {
 
   var body: some View {
     Group {
-      ForumSectionPager(
-        sections: sectionsViewModel.sections.map(\.id), selection: selectedSection
-      ) { section in
-        if let model = sectionsViewModel.model(for: section) {
-          ForumSectionPage(
-            sectionID: section,
-            viewModel: model,
-            isActive: isVisible && section == sectionsViewModel.selectedSectionID,
-            scrollToTopRequestID: scrollToTopRequests[section, default: 0],
-            checkInViewModel: checkInViewModel,
-            onRetryCheckIn: { updateCheckIn { await $0.reload() } },
-            service: service,
-            historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository,
-            onNavigate: { navigationDestination = .thread($0) })
+      observedPage
+        .navigationDestination(isPresented: forumNavigationPresented) {
+          navigationContent
         }
-      }
+    }
+  }
+
+  // Separate opaque return types bound SwiftUI's type inference while keeping
+  // the pager and modifier order unchanged; no page is type-erased or rebuilt.
+  private var pagerContent: some View {
+    ForumSectionPager(
+      sections: sectionsViewModel.sections.map(\.id), selection: selectedSection
+    ) { section in
+      sectionPage(for: section)
+    }
+  }
+
+  @ViewBuilder
+  private func sectionPage(for section: ForumSectionID) -> some View {
+    if let model = sectionsViewModel.model(for: section) {
+      ForumSectionPage(
+        sectionID: section,
+        viewModel: model,
+        isActive: isVisible && section == sectionsViewModel.selectedSectionID,
+        scrollToTopRequestID: scrollToTopRequests[section, default: 0],
+        checkInViewModel: checkInViewModel,
+        onRetryCheckIn: { updateCheckIn { await $0.reload() } },
+        service: service,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository,
+        onNavigate: { navigationDestination = .thread($0) })
+    }
+  }
+
+  private var pageChrome: some View {
+    pagerContent
       .appPageSurface(.canvas)
       .navigationTitle(viewModel.forumName)
       .navigationBarTitleDisplayMode(.inline)
-      .toolbar {
-        ToolbarItemGroup(placement: .navigationBarTrailing) {
-          NavigationLink {
-            ForumPostSearchView(
-              forumName: viewModel.forumName,
-              service: service,
-              historyRepository: historyRepository,
-              favoritesRepository: favoritesRepository,
-              searchHistoryRepository: searchHistoryRepository
-            )
-          } label: {
-            Image(systemName: "magnifyingglass")
-          }
-          .accessibilityLabel("吧内搜索")
-          .help("吧内搜索")
-
-          if let action = primaryActionPolicy.toolbarAction {
-            Button {
-              performPrimaryAction(action)
-            } label: {
-              Image(systemName: action.systemImage)
-            }
-            .disabled(!primaryActionPolicy.canPerform(action))
-            .accessibilityLabel(action.title)
-            .help(action.title)
-            .accessibilityIdentifier("forum-primary-action-\(action.rawValue)")
-          }
-
-          if let accountAccess, viewModel.forum.id > 0 {
-            ForumMembershipToolbarControl(
-              forumID: viewModel.forum.id,
-              forumName: membershipForumName,
-              access: accountAccess
-            )
-            .id(
-              ForumMembershipTarget(
-                forumID: viewModel.forum.id,
-                forumName: membershipForumName
-              )
-            )
-          }
-
-          LocalFavoriteButton(
-            target: .forum(ForumHistorySnapshot(forum: viewModel.forum)),
-            repository: favoritesRepository
-          )
-
-          forumActionsMenu
-        }
-      }
+      .toolbar { forumToolbar }
       .safeAreaInset(edge: .top, spacing: 0) {
         optionsBar
       }
-      .onAppear {
-        isVisible = true
-        sectionsViewModel.activate()
+  }
+
+  @ToolbarContentBuilder
+  private var forumToolbar: some ToolbarContent {
+    ToolbarItemGroup(placement: .navigationBarTrailing) {
+      NavigationLink {
+        ForumPostSearchView(
+          forumName: viewModel.forumName,
+          service: service,
+          historyRepository: historyRepository,
+          favoritesRepository: favoritesRepository,
+          searchHistoryRepository: searchHistoryRepository
+        )
+      } label: {
+        Image(systemName: "magnifyingglass")
       }
+      .accessibilityLabel("吧内搜索")
+      .help("吧内搜索")
+
+      if let action = primaryActionPolicy.toolbarAction {
+        Button {
+          performPrimaryAction(action)
+        } label: {
+          Image(systemName: action.systemImage)
+        }
+        .disabled(!primaryActionPolicy.canPerform(action))
+        .accessibilityLabel(action.title)
+        .help(action.title)
+        .accessibilityIdentifier("forum-primary-action-\(action.rawValue)")
+      }
+
+      if let accountAccess, viewModel.forum.id > 0 {
+        ForumMembershipToolbarControl(
+          forumID: viewModel.forum.id,
+          forumName: membershipForumName,
+          access: accountAccess
+        )
+        .id(
+          ForumMembershipTarget(
+            forumID: viewModel.forum.id,
+            forumName: membershipForumName
+          )
+        )
+      }
+
+      LocalFavoriteButton(
+        target: .forum(ForumHistorySnapshot(forum: viewModel.forum)),
+        repository: favoritesRepository
+      )
+
+      forumActionsMenu
+    }
+  }
+
+  private var activePage: some View {
+    pageChrome
+      .onAppear(perform: activatePage)
       .task(id: sectionsViewModel.forum.id) {
         guard sectionsViewModel.forum.id > 0 else { return }
         try? await historyRepository.record(
@@ -149,17 +172,11 @@ struct ForumView: View {
       .task(id: ForumCheckInLoadIdentity(target: checkInTarget, isVisible: isVisible)) {
         await loadCheckInIfNeeded()
       }
-      .onDisappear {
-        isVisible = false
-        sectionsViewModel.deactivate()
-        let hasPendingCheckInUpdate = !checkInUpdateTasks.isEmpty
-        cancelCheckInUpdates()
-        // A cancelled read may not return immediately. Never reuse its loading
-        // state on a quick return; already loaded and in-flight writes survive.
-        if checkInViewModel?.state == .loading || hasPendingCheckInUpdate {
-          checkInViewModel = nil
-        }
-      }
+      .onDisappear(perform: deactivatePage)
+  }
+
+  private var observedPage: some View {
+    activePage
       .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
         sectionsViewModel.invalidateContentFilters()
       }
@@ -185,33 +202,51 @@ struct ForumView: View {
         guard sectionsViewModel.selectedSectionID == .latest else { return }
         ForumSortPreferences.save(sort, for: viewModel.forumName)
       }
-      .navigationDestination(isPresented: forumNavigationPresented) {
-        switch navigationDestination {
-        case .newThread(let target):
-          NewThreadComposerView(
-            target: target,
-            onConfirmed: handleConfirmedNewThread
-          )
-          .id("new-thread:\(target.id)")
-        case .createdThread(let createdThread):
-          ThreadView(
-            thread: createdThread,
-            service: service,
-            historyRepository: historyRepository,
-            favoritesRepository: favoritesRepository,
-            searchHistoryRepository: searchHistoryRepository,
-            linkRoute: TiebaThreadRoute(
-              threadID: createdThread.id,
-              postID: createdThread.firstPostID
-            )
-          )
-          .id("created-thread:\(createdThread.id):\(createdThread.firstPostID)")
-        case .thread(let request):
-          threadDestination(request)
-        case nil:
-          EmptyView()
-        }
-      }
+  }
+
+  @ViewBuilder
+  private var navigationContent: some View {
+    switch navigationDestination {
+    case .newThread(let target):
+      NewThreadComposerView(
+        target: target,
+        onConfirmed: handleConfirmedNewThread
+      )
+      .id("new-thread:\(target.id)")
+    case .createdThread(let createdThread):
+      ThreadView(
+        thread: createdThread,
+        service: service,
+        historyRepository: historyRepository,
+        favoritesRepository: favoritesRepository,
+        searchHistoryRepository: searchHistoryRepository,
+        linkRoute: TiebaThreadRoute(
+          threadID: createdThread.id,
+          postID: createdThread.firstPostID
+        )
+      )
+      .id("created-thread:\(createdThread.id):\(createdThread.firstPostID)")
+    case .thread(let request):
+      threadDestination(request)
+    case nil:
+      EmptyView()
+    }
+  }
+
+  private func activatePage() {
+    isVisible = true
+    sectionsViewModel.activate()
+  }
+
+  private func deactivatePage() {
+    isVisible = false
+    sectionsViewModel.deactivate()
+    let hasPendingCheckInUpdate = !checkInUpdateTasks.isEmpty
+    cancelCheckInUpdates()
+    // A cancelled read may not return immediately. Never reuse its loading
+    // state on a quick return; already loaded and in-flight writes survive.
+    if checkInViewModel?.state == .loading || hasPendingCheckInUpdate {
+      checkInViewModel = nil
     }
   }
 
