@@ -217,6 +217,7 @@ final class BrowsingHistoryViewModel: ObservableObject {
 struct HistoryView: View {
   let onOpen: (BrowsingHistoryTarget) -> Void
 
+  @Environment(\.layoutDirection) private var layoutDirection
   @StateObject private var viewModel: BrowsingHistoryViewModel
   @State private var showsClearConfirmation = false
 
@@ -229,12 +230,18 @@ struct HistoryView: View {
   }
 
   var body: some View {
-    ForumSectionPager(
-      sections: BrowsingHistoryKind.allCases,
-      selection: $viewModel.selectedKind
-    ) { kind in
-      HistoryPageView(kind: kind, model: viewModel, onOpen: onOpen)
+    // Keep both native lists mounted, but leave their horizontal gestures to
+    // row swipe actions. Category dragging belongs to the selector above them.
+    ZStack {
+      ForEach(BrowsingHistoryKind.allCases) { kind in
+        HistoryPageView(kind: kind, model: viewModel, onOpen: onOpen)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .opacity(viewModel.selectedKind == kind ? 1 : 0)
+          .allowsHitTesting(viewModel.selectedKind == kind)
+          .accessibilityHidden(viewModel.selectedKind != kind)
+      }
     }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
     .navigationTitle("浏览记录")
     .navigationBarTitleDisplayMode(.inline)
     .safeAreaInset(edge: .top, spacing: 0) {
@@ -251,13 +258,16 @@ struct HistoryView: View {
             )
           )
         } label: {
-          Image(
+          Label(
+            "浏览记录设置",
             systemName: viewModel.recordingEnabled
               ? "clock.arrow.circlepath"
               : "clock.badge.xmark"
           )
+          .labelStyle(.iconOnly)
+          .accessibilityLabel("浏览记录设置")
+          .accessibilityIdentifier("history-recording-menu")
         }
-        .accessibilityLabel("浏览记录设置")
         .help("浏览记录设置")
 
         Button(role: .destructive) {
@@ -316,6 +326,20 @@ struct HistoryView: View {
 
       Divider()
     }
+    .contentShape(Rectangle())
+    .simultaneousGesture(
+      DragGesture(minimumDistance: 24)
+        .onEnded { value in
+          let horizontal = value.translation.width
+          guard abs(horizontal) >= 40, abs(horizontal) > abs(value.translation.height) * 1.5 else {
+            return
+          }
+          // Use the destination rather than advancing from the current value:
+          // the native segmented control may already have tracked this drag.
+          let movesForward = layoutDirection == .rightToLeft ? horizontal > 0 : horizontal < 0
+          viewModel.selectedKind = movesForward ? .forum : .thread
+        }
+    )
   }
 }
 
