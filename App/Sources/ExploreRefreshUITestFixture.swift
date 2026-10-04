@@ -18,7 +18,8 @@
         arguments[AppPreferenceKey.personalizedFollowedForumsOnly] = false
         arguments[AppPreferenceKey.homeShowsDiscovery] = true
         arguments[AppPreferenceKey.homeShowsRecentForums] = false
-        arguments[AppPreferenceKey.searchSuggestionsEnabled] = false
+        arguments[AppPreferenceKey.searchSuggestionsEnabled] =
+          ProcessInfo.processInfo.arguments.contains("--search-suggestions-enabled")
         arguments[InboxNotificationRuntime.enabledKey] = false
         if ProcessInfo.processInfo.arguments.contains("--forum-sections-ui-testing") {
           arguments[AppPreferenceKey.forumPrimaryAction] = ForumPrimaryAction.scrollToTop.rawValue
@@ -86,6 +87,7 @@
               SearchView(
                 query: "测试", browseService: dependencies.service,
                 searchService: dependencies.service,
+                suggestionService: dependencies.service,
                 historyRepository: dependencies.repositories,
                 favoritesRepository: dependencies.repositories,
                 searchHistoryRepository: dependencies.repositories,
@@ -205,7 +207,7 @@
     let inboxProbe: InboxScopesUITestProbe?
     let globalSearchHistory: GlobalSearchHistoryViewModel
     let vault: ExploreRefreshUITestVault
-    let repositories = ExploreRefreshUITestRepositories()
+    let repositories: ExploreRefreshUITestRepositories
     let contentFilters = EmptyContentFilterRepository()
     let mediaPlayback = MediaPlaybackCoordinator()
     let externalWeb = ExternalWebPresentationModel()
@@ -238,6 +240,7 @@
         arguments.contains("--inbox-scopes-ui-testing")
         ? InboxScopesUITestProbe(
           failsFirstRefresh: arguments.contains("--inbox-scopes-refresh-failure")) : nil
+      repositories = ExploreRefreshUITestRepositories(searchProbe: searchProbe)
       globalSearchHistory = GlobalSearchHistoryViewModel(repository: repositories)
       vault = ExploreRefreshUITestVault(
         isSignedOut: testsHome && arguments.contains("--home-refresh-signed-out"))
@@ -379,6 +382,16 @@
   private final class SearchScopesUITestProbe: ObservableObject {
     @Published private var counts: [String: Int] = [:]
     @Published private(set) var requests: [String] = []
+    @Published private(set) var suggestionQueries: [String] = []
+    @Published private(set) var historyWrites: [String] = []
+    @Published private(set) var historyEntries: [String] = []
+
+    func recordSuggestion(_ query: String) { suggestionQueries.append(query) }
+
+    func recordHistoryWrite(_ query: String, entries: [GlobalSearchHistoryEntry]) {
+      historyWrites.append(query)
+      historyEntries = entries.map(\.query)
+    }
 
     func record(_ key: String, query: String? = nil, page: Int? = nil, sort: String? = nil) {
       counts[key, default: 0] += 1
@@ -404,6 +417,12 @@
           .lineLimit(1)
           .accessibilityLabel(probe.requests.joined(separator: " | "))
           .accessibilityIdentifier("search-scope-request-log")
+        Text("queries=\(probe.suggestionQueries.joined(separator: " | "))")
+          .accessibilityIdentifier("search-suggestion-request-log")
+        Text(
+          "writes=\(probe.historyWrites.count) entries=\(probe.historyEntries.joined(separator: " | "))"
+        )
+        .accessibilityIdentifier("search-history-write-summary")
       }
       .font(.system(size: 7, design: .monospaced))
     }
@@ -558,20 +577,31 @@
     func removeAll() throws { throw ExploreRefreshUITestService.unsupported }
   }
 
-  /// Empty local storage keeps the real navigation and view models independent
-  /// of a simulator's previous app data. No file-backed store is constructed.
+  /// Isolated local storage keeps the real navigation and view models independent
+  /// of a simulator's previous app data. Global search writes are observed at
+  /// the repository boundary, rather than inferred from a UI tap or callback.
   private actor ExploreRefreshUITestRepositories: BrowsingHistoryRepository,
     LocalFavoritesRepository, ForumSearchHistoryRepository, GlobalSearchHistoryRepository
   {
+    private let searchProbe: SearchScopesUITestProbe?
+    private var globalSearchEntries: [GlobalSearchHistoryEntry] = []
+
+    init(searchProbe: SearchScopesUITestProbe? = nil) { self.searchProbe = searchProbe }
+
     func entries(kind: BrowsingHistoryKind?) -> [BrowsingHistoryEntry] { [] }
     func entries(kind: LocalFavoriteKind?) -> [LocalFavoriteEntry] { [] }
     func entries(forumName: String) -> [ForumSearchHistoryEntry] { [] }
-    func entries() -> [GlobalSearchHistoryEntry] { [] }
+    func entries() -> [GlobalSearchHistoryEntry] { globalSearchEntries }
     func isRecordingEnabled() -> Bool { false }
     func setRecordingEnabled(_ enabled: Bool) {}
     func record(_ target: BrowsingHistoryTarget, at date: Date) {}
     func record(query: String, forumName: String, at date: Date) {}
-    func record(query: String, at date: Date) {}
+    func record(query: String, at date: Date) async {
+      let entry = GlobalSearchHistoryEntry(query: query, searchedAt: date)
+      globalSearchEntries.removeAll { $0.id == entry.id }
+      globalSearchEntries.insert(entry, at: 0)
+      await searchProbe?.recordHistoryWrite(query, entries: globalSearchEntries)
+    }
     func contains(id: String) -> Bool { false }
     func save(_ target: LocalFavoriteTarget, at date: Date) {}
     func setForumPinned(id: String, isPinned: Bool, at date: Date) {}
@@ -579,12 +609,12 @@
       threadID: Int64, postID: Int64, floor: Int, options: ThreadBrowseOptions, at date: Date
     ) {}
     func updateThreadOptions(threadID: Int64, options: ThreadBrowseOptions, at date: Date) {}
-    func delete(id: String) {}
+    func delete(id: String) { globalSearchEntries.removeAll { $0.id == id } }
     func deleteAll(kind: BrowsingHistoryKind?) {}
     func deleteAll(kind: LocalFavoriteKind?) {}
     func deleteAll(forumName: String) {}
-    func deleteAll() {}
-    func reset() {}
+    func deleteAll() { globalSearchEntries = [] }
+    func reset() { globalSearchEntries = [] }
   }
 
   /// Full RootView protocol surface, deliberately without a network transport.
@@ -874,7 +904,11 @@
       }
       return ThreadSearchPageData(threads: rows, currentPage: page, hasMore: page == 1)
     }
-    func searchSuggestions(query: String) -> [String] { [] }
+    func searchSuggestions(query: String) async -> [String] {
+      guard let searchProbe else { return [] }
+      await searchProbe.recordSuggestion(query)
+      return ["next", " next ", "", "bad\nvalue"]
+    }
     func preview(for target: TiebaLinkTarget) -> TiebaLinkPreviewMetadata? { nil }
 
     func threads(forumName: String, page: Int, pageSize: Int, options: ForumBrowseOptions)
