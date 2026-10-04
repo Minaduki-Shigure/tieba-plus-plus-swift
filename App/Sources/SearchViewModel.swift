@@ -22,6 +22,9 @@ enum SearchScope: String, CaseIterable, Hashable, Identifiable, Sendable {
 
 @MainActor
 final class SearchViewModel: ObservableObject {
+  @Published private(set) var isActive = false
+  @Published private(set) var resultRevision = 0
+  @Published private(set) var threadResultsRevision = 0
   @Published private(set) var submittedQuery: String
   @Published private(set) var selectedScope: SearchScope
   @Published private(set) var threadSort: GlobalThreadSearchSort
@@ -43,6 +46,15 @@ final class SearchViewModel: ObservableObject {
   private var hasMoreThreads = true
   private var tasks: [SearchScope: Task<Void, Never>] = [:]
   private var generations: [SearchScope: Int] = [:]
+  // An interrupted refresh must restore even a loaded-empty snapshot and its
+  // previous pagination error; result count alone cannot describe that state.
+  private var requestSnapshots: [SearchScope: RequestSnapshot] = [:]
+
+  private struct RequestSnapshot {
+    let state: LoadState
+    let refreshError: String?
+    let loadMoreError: String?
+  }
 
   init(
     query: String,
@@ -77,12 +89,15 @@ final class SearchViewModel: ObservableObject {
   }
 
   func loadIfNeeded() {
+    guard !Task.isCancelled else { return }
+    isActive = true
     guard !submittedQuery.isEmpty else { return }
     loadIfNeeded(selectedScope)
   }
 
   func selectScope(_ scope: SearchScope) {
     guard selectedScope != scope else { return }
+    cancelLoad(selectedScope)
     selectedScope = scope
     loadIfNeeded(scope)
   }
@@ -92,6 +107,7 @@ final class SearchViewModel: ObservableObject {
     invalidateAllLoads()
     resetAllResults()
     submittedQuery = query
+    resultRevision &+= 1
 
     guard !query.isEmpty else { return }
     loadIfNeeded(selectedScope)
@@ -102,6 +118,7 @@ final class SearchViewModel: ObservableObject {
     threadSort = sort
     invalidateLoad(.threads)
     resetResults(for: .threads)
+    threadResultsRevision &+= 1
     guard !submittedQuery.isEmpty else { return }
     guard selectedScope == .threads else { return }
     start(.threads, query: submittedQuery, preservingResults: false)
@@ -112,8 +129,13 @@ final class SearchViewModel: ObservableObject {
   }
 
   func refresh() async {
+    guard isActive, !Task.isCancelled else { return }
     let scope = selectedScope
-    restart(scope, preservingResults: hasResults(for: scope))
+    restart(
+      scope,
+      preservingResults: state(for: scope) == .loaded
+        || requestSnapshots[scope]?.state == .loaded || hasResults(for: scope)
+    )
     await tasks[scope]?.value
   }
 
@@ -124,6 +146,7 @@ final class SearchViewModel: ObservableObject {
   func reloadThreadsAfterContentFilterChange() {
     invalidateLoad(.threads)
     resetResults(for: .threads)
+    threadResultsRevision &+= 1
     guard !submittedQuery.isEmpty else { return }
     guard selectedScope == .threads else { return }
     start(.threads, query: submittedQuery, preservingResults: false)
@@ -131,6 +154,8 @@ final class SearchViewModel: ObservableObject {
 
   func loadMoreIfNeeded(current thread: BrowseThread) {
     guard
+      isActive,
+      !Task.isCancelled,
       selectedScope == .threads,
       thread.id == threads.last?.id,
       hasMoreThreads,
@@ -143,6 +168,9 @@ final class SearchViewModel: ObservableObject {
 
   func retryLoadMore() {
     guard
+      isActive,
+      !Task.isCancelled,
+      selectedScope == .threads,
       hasMoreThreads,
       !isLoadingMore,
       loadMoreError != nil,
@@ -152,20 +180,34 @@ final class SearchViewModel: ObservableObject {
   }
 
   func cancel() {
+    isActive = false
+    for scope in SearchScope.allCases {
+      cancelLoad(scope)
+    }
+  }
+
+  private func cancelLoad(_ scope: SearchScope) {
     let shouldAdvanceThreadPaginationEpoch =
-      !threads.isEmpty && (threadState == .loading || isLoadingMore)
-    invalidateAllLoads()
-    isLoadingMore = false
-    for scope in SearchScope.allCases where state(for: scope) == .loading {
+      scope == .threads && !threads.isEmpty && (threadState == .loading || isLoadingMore)
+    let snapshot = requestSnapshots[scope]
+    invalidateLoad(scope)
+    if let snapshot {
+      setState(snapshot.state, for: scope)
+      refreshErrors[scope] = snapshot.refreshError
+      if scope == .threads {
+        loadMoreError = snapshot.loadMoreError
+      }
+    } else if state(for: scope) == .loading {
       setState(hasResults(for: scope) ? .loaded : .idle, for: scope)
     }
+    if scope == .threads { isLoadingMore = false }
     if shouldAdvanceThreadPaginationEpoch {
       threadPaginationEpoch &+= 1
     }
   }
 
   private func loadIfNeeded(_ scope: SearchScope) {
-    guard !submittedQuery.isEmpty, state(for: scope) == .idle else { return }
+    guard isActive, !submittedQuery.isEmpty, state(for: scope) == .idle else { return }
     start(scope, query: submittedQuery, preservingResults: false)
   }
 
@@ -174,6 +216,13 @@ final class SearchViewModel: ObservableObject {
     query: String,
     preservingResults: Bool
   ) {
+    guard isActive, scope == selectedScope, !Task.isCancelled else { return }
+    requestSnapshots[scope] = RequestSnapshot(
+      state: state(for: scope),
+      refreshError: refreshErrors[scope],
+      loadMoreError: scope == .threads ? loadMoreError : nil
+    )
+    refreshErrors[scope] = nil
     switch scope {
     case .forums:
       loadForums(query: query, preservingResults: preservingResults)
@@ -185,12 +234,11 @@ final class SearchViewModel: ObservableObject {
   }
 
   private func restart(_ scope: SearchScope, preservingResults: Bool) {
-    guard !submittedQuery.isEmpty else { return }
-    invalidateLoad(scope)
+    guard isActive, !Task.isCancelled, !submittedQuery.isEmpty else { return }
+    cancelLoad(scope)
     if !preservingResults {
       resetResults(for: scope)
     }
-    refreshErrors[scope] = nil
     start(scope, query: submittedQuery, preservingResults: preservingResults)
   }
 
@@ -201,6 +249,7 @@ final class SearchViewModel: ObservableObject {
     tasks[.forums] = Task {
       defer { finishTask(for: .forums, generation: generation) }
       do {
+        try Task.checkCancellation()
         let response = try await service.searchForums(query: query)
         try Task.checkCancellation()
         guard isCurrent(.forums, generation: generation, query: query) else { return }
@@ -227,6 +276,7 @@ final class SearchViewModel: ObservableObject {
     tasks[.threads] = Task {
       defer { finishTask(for: .threads, generation: generation) }
       do {
+        try Task.checkCancellation()
         let response = try await service.searchThreads(
           query: query,
           page: 1,
@@ -260,6 +310,7 @@ final class SearchViewModel: ObservableObject {
     tasks[.users] = Task {
       defer { finishTask(for: .users, generation: generation) }
       do {
+        try Task.checkCancellation()
         let response = try await service.searchUsers(query: query)
         try Task.checkCancellation()
         guard isCurrent(.users, generation: generation, query: query) else { return }
@@ -282,6 +333,11 @@ final class SearchViewModel: ObservableObject {
     let sort = threadSort
     let generation = nextGeneration(for: .threads)
     let service = service
+    requestSnapshots[.threads] = RequestSnapshot(
+      state: threadState,
+      refreshError: refreshErrors[.threads],
+      loadMoreError: loadMoreError
+    )
     loadMoreError = nil
     isLoadingMore = true
     tasks[.threads] = Task {
@@ -289,9 +345,11 @@ final class SearchViewModel: ObservableObject {
         if generations[.threads] == generation {
           isLoadingMore = false
           tasks[.threads] = nil
+          requestSnapshots[.threads] = nil
         }
       }
       do {
+        try Task.checkCancellation()
         let response = try await service.searchThreads(
           query: query,
           page: page,
@@ -346,7 +404,7 @@ final class SearchViewModel: ObservableObject {
     for scope: SearchScope,
     preservingResults: Bool
   ) {
-    if preservingResults && hasResults(for: scope) {
+    if preservingResults {
       refreshErrors[scope] = error.localizedDescription
       setState(.loaded, for: scope)
     } else {
@@ -354,7 +412,7 @@ final class SearchViewModel: ObservableObject {
     }
   }
 
-  private func state(for scope: SearchScope) -> LoadState {
+  func state(for scope: SearchScope) -> LoadState {
     switch scope {
     case .forums:
       forumState
@@ -376,7 +434,7 @@ final class SearchViewModel: ObservableObject {
     }
   }
 
-  private func hasResults(for scope: SearchScope) -> Bool {
+  func hasResults(for scope: SearchScope) -> Bool {
     switch scope {
     case .forums:
       exactForum != nil || !relatedForums.isEmpty
@@ -394,7 +452,8 @@ final class SearchViewModel: ObservableObject {
   }
 
   private func isCurrent(_ scope: SearchScope, generation: Int, query: String) -> Bool {
-    generations[scope] == generation && submittedQuery == query && !Task.isCancelled
+    isActive && selectedScope == scope && generations[scope] == generation
+      && submittedQuery == query && !Task.isCancelled
   }
 
   private func isCurrentThread(
@@ -408,11 +467,13 @@ final class SearchViewModel: ObservableObject {
   private func finishTask(for scope: SearchScope, generation: Int) {
     guard generations[scope] == generation else { return }
     tasks[scope] = nil
+    requestSnapshots[scope] = nil
   }
 
   private func invalidateLoad(_ scope: SearchScope) {
     generations[scope] = (generations[scope] ?? 0) &+ 1
     tasks.removeValue(forKey: scope)?.cancel()
+    requestSnapshots[scope] = nil
   }
 
   private func invalidateAllLoads() {
