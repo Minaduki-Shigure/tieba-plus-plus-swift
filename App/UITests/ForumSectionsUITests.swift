@@ -18,7 +18,7 @@ final class ForumSectionsUITests: XCTestCase {
       try requireRow("\(title)·帖子1", app: app)
       scrollUp(app)
       scrollUp(app)
-      let row = try visibleRow(prefix: title, app: app)
+      let row = try visibleTitle(prefix: title, app: app)
       positions[id] = (row.label, row.frame.minY)
     }
     try requireUnchangedCounts(
@@ -27,16 +27,15 @@ final class ForumSectionsUITests: XCTestCase {
     for id in ["latest", "channel-72", "featured", "channel-71", "latest"] {
       try tap(app.buttons["forum-section-\(id)"])
       let saved = try XCTUnwrap(positions[id])
-      let row = app.buttons.matching(NSPredicate(format: "label == %@", saved.0)).firstMatch
-      try wait { row.isHittable && abs(row.frame.minY - saved.1) < 3 }
+      try requirePosition(title: saved.0, y: saved.1, context: "Switch back to \(id)", app: app)
     }
 
     let saved = try XCTUnwrap(positions["latest"])
-    let row = app.buttons.matching(NSPredicate(format: "label == %@", saved.0)).firstMatch
+    let row = app.staticTexts[saved.0].firstMatch
     try tap(row)
     let body = app.descendants(matching: .any)
       .matching(NSPredicate(format: "label == %@", "离线帖子正文")).firstMatch
-    try wait { body.isHittable }
+    try wait("Thread detail body becomes visible") { body.isHittable }
     // The system interactive pop must remain available alongside the horizontal
     // pager. A completed edge gesture returns to the same retained row.
     app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.55))
@@ -44,7 +43,8 @@ final class ForumSectionsUITests: XCTestCase {
         forDuration: 0.1,
         thenDragTo:
           app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.55)))
-    try wait { row.isHittable && abs(row.frame.minY - saved.1) < 3 }
+    try requirePosition(
+      title: saved.0, y: saved.1, context: "Interactive pop from thread", app: app)
     try requireUnchangedCounts(
       "latest=1 featured=1 channel71=1 channel72=1 account=1 unexpected=0", app: app)
 
@@ -56,9 +56,8 @@ final class ForumSectionsUITests: XCTestCase {
         thenDragTo:
           app.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.65)))
     let featured = try XCTUnwrap(positions["featured"])
-    let featuredRow = app.buttons.matching(NSPredicate(format: "label == %@", featured.0))
-      .firstMatch
-    try wait { featuredRow.isHittable && abs(featuredRow.frame.minY - featured.1) < 3 }
+    try requirePosition(
+      title: featured.0, y: featured.1, context: "Swipe to featured", app: app)
     try requireUnchangedCounts(
       "latest=1 featured=1 channel71=1 channel72=1 account=1 unexpected=0", app: app)
 
@@ -67,7 +66,9 @@ final class ForumSectionsUITests: XCTestCase {
         forDuration: 0.1,
         thenDragTo:
           app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.55)))
-    try wait { app.navigationBars["离线测试入口"].exists }
+    try wait("Interactive pop returns to fixture entry") {
+      app.navigationBars["离线测试入口"].exists
+    }
   }
 
   @MainActor
@@ -86,20 +87,19 @@ final class ForumSectionsUITests: XCTestCase {
     // Request counters advance at dispatch. Wait for actual second-page rows
     // before measuring the retained position, rather than observing old rows
     // while the response is still being applied.
-    let secondPageRow = app.buttons["打开主题 讨论·帖子31"].firstMatch
+    let secondPageRow = app.staticTexts["讨论·帖子31"].firstMatch
     for _ in 0..<6 {
       if secondPageRow.isHittable { break }
       scrollUp(app)
     }
-    try wait { secondPageRow.isHittable }
-    let row = try visibleRow(prefix: "讨论", app: app)
+    try wait("Channel second-page title becomes visible") { secondPageRow.isHittable }
+    let row = try visibleTitle(prefix: "讨论", app: app)
     let title = row.label
     let y = row.frame.minY
     try tap(app.buttons["forum-section-latest"])
     try requireRow("最新·帖子1", app: app)
     try tap(app.buttons["forum-section-channel-71"])
-    let retained = app.buttons.matching(NSPredicate(format: "label == %@", title)).firstMatch
-    try wait { retained.isHittable && abs(retained.frame.minY - y) < 3 }
+    try requirePosition(title: title, y: y, context: "Return to paginated channel", app: app)
     try tap(app.buttons["forum-primary-action-back_to_top"])
     try requireRow("讨论·帖子1", app: app)
     try requireUnchangedCounts(
@@ -120,7 +120,7 @@ final class ForumSectionsUITests: XCTestCase {
     try requireRow("最新·帖子1", app: app)
     let checkInStatus = app.descendants(matching: .any)
       .matching(identifier: "forum-check-in-status").firstMatch
-    try wait { checkInStatus.exists }
+    try wait("Initial shared check-in state loads") { checkInStatus.exists }
     try requireCounts(
       "latest=1 featured=0 channel71=0 channel72=0 account=1 unexpected=0", app: app)
     return app
@@ -128,15 +128,19 @@ final class ForumSectionsUITests: XCTestCase {
 
   @MainActor
   private func requireRow(_ title: String, app: XCUIApplication) throws {
-    let row = app.buttons.matching(NSPredicate(format: "label == %@", "打开主题 \(title)")).firstMatch
-    try wait { row.isHittable }
+    let row = app.staticTexts[title].firstMatch
+    try wait(
+      "Title becomes visible: \(title)", diagnostics: { "frame=\(row.frame)" },
+      until: { row.isHittable })
   }
 
   @MainActor
-  private func visibleRow(prefix: String, app: XCUIApplication) throws -> XCUIElement {
-    let rows = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "打开主题 \(prefix)·"))
+  private func visibleTitle(prefix: String, app: XCUIApplication) throws -> XCUIElement {
+    // A ThreadSummaryRow has separate metadata and footer buttons with the
+    // same "打开主题" label. Use its unique title for both sampling and lookup.
+    let rows = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "\(prefix)·帖子"))
     var result: XCUIElement?
-    try wait {
+    try wait("Find a fully visible \(prefix) title") {
       result = rows.allElementsBoundByIndex.first {
         $0.isHittable && $0.frame.minY > app.frame.height * 0.35
           && $0.frame.maxY < app.frame.height * 0.85
@@ -144,6 +148,21 @@ final class ForumSectionsUITests: XCTestCase {
       return result != nil
     }
     return try XCTUnwrap(result)
+  }
+
+  @MainActor
+  private func requirePosition(
+    title: String, y: CGFloat, context: String, app: XCUIApplication,
+    file: StaticString = #filePath, line: UInt = #line
+  ) throws {
+    let anchor = app.staticTexts[title].firstMatch
+    try wait(
+      "\(context): \(title)",
+      diagnostics: {
+        "expectedY=\(y), currentFrame=\(anchor.frame), "
+          + "exists=\(anchor.exists), hittable=\(anchor.isHittable)"
+      }, file: file, line: line,
+      until: { anchor.isHittable && abs(anchor.frame.minY - y) < 3 })
   }
 
   @MainActor
@@ -158,7 +177,9 @@ final class ForumSectionsUITests: XCTestCase {
   @MainActor
   private func requireCounts(_ expected: String, app: XCUIApplication) throws {
     let counts = app.staticTexts["forum-section-request-counts"]
-    try wait { counts.exists && counts.label == expected }
+    try wait(
+      "Request counts match", diagnostics: { "expected=\(expected), actual=\(counts.label)" },
+      until: { counts.exists && counts.label == expected })
   }
 
   @MainActor
@@ -173,16 +194,24 @@ final class ForumSectionsUITests: XCTestCase {
 
   @MainActor
   private func tap(_ element: XCUIElement) throws {
-    try wait { element.isHittable }
+    try wait(
+      "Tap target becomes hittable", diagnostics: { element.debugDescription },
+      until: { element.isHittable })
     element.tap()
   }
 
   @MainActor
-  private func wait(_ condition: @escaping () -> Bool) throws {
+  private func wait(
+    _ context: String, diagnostics: @escaping () -> String = { "" },
+    file: StaticString = #filePath, line: UInt = #line,
+    until condition: @escaping () -> Bool
+  ) throws {
     let expectation = XCTNSPredicateExpectation(
       predicate: NSPredicate { _, _ in MainActor.assumeIsolated { condition() } }, object: nil)
     guard XCTWaiter.wait(for: [expectation], timeout: 20) == .completed else {
-      throw ForumSectionsUITestError.timedOut
+      let message = "\(context). \(diagnostics())"
+      XCTFail(message, file: file, line: line)
+      throw ForumSectionsUITestError.timedOut(message)
     }
   }
 
@@ -197,4 +226,4 @@ final class ForumSectionsUITests: XCTestCase {
   }
 }
 
-private enum ForumSectionsUITestError: Error { case timedOut }
+private enum ForumSectionsUITestError: Error { case timedOut(String) }
