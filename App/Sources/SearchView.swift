@@ -21,7 +21,7 @@ struct SearchView: View {
   @State private var threadNavigationRequest: ThreadSummaryNavigationRequest?
   @State private var confirmsClearingSearchHistory = false
   @State private var visibleThreadKeys: Set<SearchThreadVisibilityKey> = []
-  @State private var visibleThreadTail: SearchThreadPaginationVisibilityKey?
+  @State private var visibleEmptyThreadResults: SearchThreadResultsIdentity?
   @FocusState private var searchIsFocused: Bool
 
   init(
@@ -114,6 +114,11 @@ struct SearchView: View {
     .onChange(of: viewModel.selectedScope) { _ in resumeVisibleThreadPagination() }
     .onChange(of: viewModel.isActive) { active in
       if active { resumeVisibleThreadPagination() }
+    }
+    .onChange(of: viewModel.threadState) { _ in resumeVisibleThreadPagination() }
+    .onChange(of: viewModel.threadPaginationEpoch) { _ in resumeVisibleThreadPagination() }
+    .onChange(of: viewModel.isLoadingMore) { loading in
+      if !loading { resumeVisibleThreadPagination() }
     }
     .onDisappear {
       isVisible = false
@@ -387,8 +392,8 @@ struct SearchView: View {
   private var threadResults: some View {
     let resultRevision = viewModel.resultRevision
     let threadResultsRevision = viewModel.threadResultsRevision
-    let paginationEpoch = viewModel.threadPaginationEpoch
-    let threadCount = viewModel.threads.count
+    let resultsIdentity = SearchThreadResultsIdentity(
+      resultRevision: resultRevision, threadResultsRevision: threadResultsRevision)
     return List {
       Section("帖子") {
         ForEach(viewModel.displayableThreads) { thread in
@@ -409,9 +414,7 @@ struct SearchView: View {
               threadID: thread.id, resultRevision: resultRevision,
               threadResultsRevision: threadResultsRevision)
             visibleThreadKeys.insert(key)
-            if isActive(.threads), isCurrent(key) {
-              viewModel.loadMoreIfNeeded(current: thread)
-            }
+            resumeVisibleThreadPagination()
           }
           .onDisappear {
             visibleThreadKeys.remove(
@@ -429,50 +432,32 @@ struct SearchView: View {
             .padding(.vertical, 8)
             .listRowSeparator(.hidden)
             .accessibilityElement(children: .combine)
-        }
-
-        if let lastThread = viewModel.threads.last {
-          Color.clear
-            .frame(height: 1)
-            .id(
-              "search-thread-pagination-\(lastThread.id)-\(viewModel.threads.count)-\(viewModel.threadPaginationEpoch)"
-            )
-            .listRowInsets(EdgeInsets())
-            .listRowSeparator(.hidden)
-            .accessibilityHidden(true)
             .onAppear {
-              let key = SearchThreadVisibilityKey(
-                threadID: lastThread.id, resultRevision: resultRevision,
-                threadResultsRevision: threadResultsRevision)
-              visibleThreadTail = SearchThreadPaginationVisibilityKey(
-                content: key, epoch: paginationEpoch, count: threadCount)
-              if isActive(.threads), isCurrent(key) {
-                viewModel.loadMoreIfNeeded(current: lastThread)
-              }
+              visibleEmptyThreadResults = resultsIdentity
+              resumeVisibleThreadPagination()
             }
             .onDisappear {
-              let key = SearchThreadVisibilityKey(
-                threadID: lastThread.id, resultRevision: resultRevision,
-                threadResultsRevision: threadResultsRevision)
-              let tail = SearchThreadPaginationVisibilityKey(
-                content: key, epoch: paginationEpoch, count: threadCount)
-              if visibleThreadTail == tail { visibleThreadTail = nil }
+              if visibleEmptyThreadResults == resultsIdentity { visibleEmptyThreadResults = nil }
             }
         }
 
-        if viewModel.isLoadingMore {
-          HStack {
-            Spacer()
-            ProgressView()
-            Spacer()
+        if !viewModel.threads.isEmpty {
+          // Appending results must not replace an invisible tail row or remove
+          // the loading row: List can otherwise move its scroll anchor along
+          // with the footer. Keep its geometry and paginate from real content.
+          VStack {
+            if let message = viewModel.loadMoreError {
+              LoadMoreErrorView(message: message) {
+                if isActive(.threads) { viewModel.retryLoadMore() }
+              }
+            } else {
+              ProgressView()
+                .opacity(viewModel.isLoadingMore ? 1 : 0)
+            }
           }
-          .frame(minHeight: 44)
-          .listRowSeparator(.hidden)
-        } else if let message = viewModel.loadMoreError {
-          LoadMoreErrorView(message: message) {
-            if isActive(.threads) { viewModel.retryLoadMore() }
-          }
-          .frame(minHeight: 44)
+          .frame(maxWidth: .infinity, minHeight: 44)
+          .allowsHitTesting(isActive(.threads) && viewModel.loadMoreError != nil)
+          .accessibilityHidden(!viewModel.isLoadingMore && viewModel.loadMoreError == nil)
           .listRowSeparator(.hidden)
         }
       }
@@ -514,21 +499,22 @@ struct SearchView: View {
     viewModel.isActive && viewModel.selectedScope == scope && !viewModel.submittedQuery.isEmpty
   }
 
-  private func isCurrent(_ key: SearchThreadVisibilityKey) -> Bool {
-    key.resultRevision == viewModel.resultRevision
-      && key.threadResultsRevision == viewModel.threadResultsRevision
-  }
-
   private func resumeVisibleThreadPagination() {
     guard isActive(.threads), let last = viewModel.threads.last else { return }
-    let key = SearchThreadVisibilityKey(
-      threadID: last.id, resultRevision: viewModel.resultRevision,
+    let identity = SearchThreadResultsIdentity(
+      resultRevision: viewModel.resultRevision,
       threadResultsRevision: viewModel.threadResultsRevision)
-    let tail = SearchThreadPaginationVisibilityKey(
-      content: key, epoch: viewModel.threadPaginationEpoch, count: viewModel.threads.count)
-    if visibleThreadKeys.contains(key) || visibleThreadTail == tail {
-      viewModel.loadMoreIfNeeded(current: last)
+    if let visibleTail = viewModel.displayableThreads.last {
+      let key = SearchThreadVisibilityKey(
+        threadID: visibleTail.id, resultRevision: identity.resultRevision,
+        threadResultsRevision: identity.threadResultsRevision)
+      guard visibleThreadKeys.contains(key) else { return }
+    } else {
+      guard visibleEmptyThreadResults == identity else { return }
     }
+    // The final server record may itself be hidden. It still owns the cursor;
+    // visibility is established by the actual visible tail or empty-state row.
+    viewModel.loadMoreIfNeeded(current: last)
   }
 
   private func forumLink(_ forum: ForumSearchItem) -> some View {
@@ -645,10 +631,9 @@ private struct SearchThreadVisibilityKey: Hashable {
   let threadResultsRevision: Int
 }
 
-private struct SearchThreadPaginationVisibilityKey: Hashable {
-  let content: SearchThreadVisibilityKey
-  let epoch: Int
-  let count: Int
+private struct SearchThreadResultsIdentity: Hashable {
+  let resultRevision: Int
+  let threadResultsRevision: Int
 }
 
 extension View {
