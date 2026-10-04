@@ -30,10 +30,14 @@ are associated with the attached window's screen before coordinate conversion.
 The [focused native validation](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37162548322)
 passed all 17 navigation/layout/keyboard tests, including actual mounted geometry,
 view and scroll identity, settled size-class changes and stale-screen rejection.
-Hosted-state/layout checks, existing iPhone workflows and dedicated offline iPad
-navigation/resize workflows are release gates. Real Split View/Stage Manager
-resizing, external displays and floating keyboards remain device-validation
-requirements. This extends an existing credited area; the 80–82% estimate stays.
+The [full-app candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37163548284)
+passed 2,610 app tests, seven iPhone workflows and three offline iPad workflows,
+with zero failures or skips. The iPad checks exercise width thresholds, rotation,
+retained pushed pages and four-tab navigation, hidden Explore, unread badges,
+large text and keyboard transitions. Tagged CI and anonymous integration remain
+publication gates. Real Split View/Stage Manager resizing, external displays
+and floating keyboards remain device-validation requirements. This extends an
+existing credited area; the 80–82% estimate stays.
 
 Alpha.39/build 117 WebP creation closes a format gap in TiebaLite `9701bfb6`'s `ReplyPage` →
 `ImagePicker` → `ImageUploader` flow: its image picker accepts WebP and its

@@ -37,9 +37,13 @@ and its verified metadata enters the public app source.
   The [focused native validation](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37162548322)
   passed 17 tests covering mounted layout, state and scroll retention, propagated
   size classes, right-to-left layout and keyboard/window lifecycle.
-  iPad simulator navigation/resize regressions are required before release;
-  Stage Manager, external displays and floating keyboards still need device
-  validation.
+  The [full-app candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37163548284)
+  passed 2,610 app tests, all seven iPhone UI flows and all three iPad UI flows,
+  with zero failures or skips. iPad coverage includes width thresholds,
+  rotation, retained pushed pages, tab paths, unread badges, large text and
+  keyboard transitions. Tag CI and anonymous integration remain publication
+  gates; Stage Manager, external displays and floating keyboards still need
+  device validation.
 - **`v0.65.0-alpha.39` WebP image creation:** New topics and direct topic replies can import static
   WebP in standard/high-quality mode as a metadata-stripped JPEG, or preserve
   static and animated WebP in original mode. Original mode keeps encoded image
