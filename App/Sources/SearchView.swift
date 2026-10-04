@@ -10,8 +10,14 @@ struct SearchView: View {
   let onSearchSubmitted: @MainActor (String) -> Void
 
   @StateObject private var viewModel: SearchViewModel
+  @StateObject private var suggestionViewModel: SearchSuggestionViewModel
   @ObservedObject private var globalSearchHistoryViewModel: GlobalSearchHistoryViewModel
+  @Environment(\.scenePhase) private var scenePhase
+  @AppStorage(AppPreferenceKey.searchSuggestionsEnabled)
+  private var searchSuggestionsEnabled = false
   @State private var query: String
+  @State private var isVisible = false
+  @State private var isSearchPresented = false
   @State private var threadNavigationRequest: ThreadSummaryNavigationRequest?
   @State private var confirmsClearingSearchHistory = false
   @State private var visibleThreadKeys: Set<SearchThreadVisibilityKey> = []
@@ -23,6 +29,7 @@ struct SearchView: View {
     browseService: any BrowseService & ForumPostSearchService & UserProfileService
       & ForumInformationService,
     searchService: any SearchService,
+    suggestionService: any SearchSuggestionService,
     historyRepository: any BrowsingHistoryRepository,
     favoritesRepository: any LocalFavoritesRepository,
     searchHistoryRepository: any ForumSearchHistoryRepository,
@@ -39,6 +46,9 @@ struct SearchView: View {
     )
     _query = State(initialValue: query)
     _viewModel = StateObject(wrappedValue: SearchViewModel(query: query, service: searchService))
+    _suggestionViewModel = StateObject(
+      wrappedValue: SearchSuggestionViewModel(service: suggestionService, isInputActive: false)
+    )
   }
 
   var body: some View {
@@ -66,10 +76,30 @@ struct SearchView: View {
     .appPageSurface()
     .navigationTitle(viewModel.submittedQuery.isEmpty ? "搜索" : viewModel.submittedQuery)
     .navigationBarTitleDisplayMode(.inline)
-    .searchable(text: $query, prompt: "搜索贴吧、帖子和用户")
+    .background {
+      // isSearching is supplied only below searchable, including on iOS 16/17
+      // where compatibleSearchFocus intentionally has no implementation.
+      SearchInputActivityObserver { isSearching in
+        isSearchPresented = isSearching
+        synchronizeSuggestionActivity(isSearching: isSearching)
+      }
+    }
+    .searchable(text: searchInput, prompt: "搜索贴吧、帖子和用户")
+    .searchSuggestions {
+      ForEach(suggestionViewModel.suggestions, id: \.self) { suggestion in
+        SearchSuggestionButton(suggestion: suggestion) {
+          guard suggestionViewModel.suggestions.contains(suggestion) else { return }
+          query = suggestion
+          submitSearch()
+        }
+      }
+    }
     .compatibleSearchFocus($searchIsFocused)
     .onSubmit(of: .search, submitSearch)
     .onAppear {
+      isVisible = true
+      suggestionViewModel.setEnabled(searchSuggestionsEnabled)
+      synchronizeSuggestionActivity(isVisible: true)
       viewModel.loadIfNeeded()
       resumeVisibleThreadPagination()
     }
@@ -85,7 +115,17 @@ struct SearchView: View {
     .onChange(of: viewModel.isActive) { active in
       if active { resumeVisibleThreadPagination() }
     }
-    .onDisappear(perform: viewModel.cancel)
+    .onDisappear {
+      isVisible = false
+      suggestionViewModel.setInputActive(false)
+      viewModel.cancel()
+    }
+    .onChange(of: scenePhase) { phase in
+      synchronizeSuggestionActivity(scenePhase: phase)
+    }
+    .onChange(of: searchSuggestionsEnabled) { enabled in
+      suggestionViewModel.setEnabled(enabled)
+    }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       Task { @MainActor in viewModel.reloadThreadsAfterContentFilterChange() }
     }
@@ -122,6 +162,7 @@ struct SearchView: View {
   }
 
   private func submitSearch() {
+    suggestionViewModel.cancelAndClear()
     let submittedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
     viewModel.submit(query)
     guard !submittedQuery.isEmpty else {
@@ -129,6 +170,30 @@ struct SearchView: View {
       return
     }
     onSearchSubmitted(submittedQuery)
+  }
+
+  private var searchInput: Binding<String> {
+    Binding(
+      get: { query },
+      set: { value in
+        guard value != query else { return }
+        query = value
+        // Programmatic choices use query directly, so selecting a suggestion or
+        // history entry cannot enqueue another suggestion request after submit.
+        suggestionViewModel.inputChanged(value)
+      }
+    )
+  }
+
+  private func synchronizeSuggestionActivity(
+    isVisible visible: Bool? = nil,
+    isSearching searching: Bool? = nil,
+    scenePhase phase: ScenePhase? = nil
+  ) {
+    suggestionViewModel.setInputActive(
+      (visible ?? isVisible) && (searching ?? isSearchPresented)
+        && (phase ?? scenePhase) == .active
+    )
   }
 
   private var threadSortPicker: some View {
@@ -536,6 +601,41 @@ struct SearchView: View {
     case .users:
       "person.crop.circle"
     }
+  }
+}
+
+private struct SearchInputActivityObserver: View {
+  @Environment(\.isSearching) private var isSearching
+  let onChange: (Bool) -> Void
+
+  var body: some View {
+    Color.clear
+      .allowsHitTesting(false)
+      .accessibilityHidden(true)
+      .onAppear { onChange(isSearching) }
+      .onChange(of: isSearching, perform: onChange)
+      .onDisappear { onChange(false) }
+  }
+}
+
+private struct SearchSuggestionButton: View {
+  @Environment(\.dismissSearch) private var dismissSearch
+  let suggestion: String
+  let select: () -> Void
+
+  var body: some View {
+    Button {
+      select()
+      dismissSearch()
+    } label: {
+      Label(suggestion, systemImage: "magnifyingglass")
+        .foregroundStyle(.primary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel("搜索建议：\(suggestion)")
+    .accessibilityIdentifier("search-suggestion-\(suggestion)")
   }
 }
 

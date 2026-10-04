@@ -324,6 +324,107 @@ final class SearchSuggestionViewModelTests: XCTestCase {
 
     XCTAssertEqual(viewModel.suggestions, ["吧"])
   }
+
+  @MainActor
+  func testInactiveSearchFieldAndReactivationDoNotSendRestoredText() async throws {
+    let service = ScriptedSearchSuggestionService()
+    await service.enqueue(.value(["edited result"]))
+    let viewModel = SearchSuggestionViewModel(
+      service: service, isInputActive: false, debounceNanoseconds: 0)
+    viewModel.setEnabled(true)
+
+    viewModel.inputChanged("restored query")
+    viewModel.setInputActive(true)
+    await suggestionDrainMainActor()
+    let beforeEdit = await service.requestSnapshot()
+    XCTAssertEqual(beforeEdit, [])
+
+    viewModel.inputChanged("edited query")
+    try await suggestionWaitUntil { viewModel.suggestions == ["edited result"] }
+    viewModel.setInputActive(false)
+    XCTAssertTrue(viewModel.suggestions.isEmpty)
+    viewModel.setInputActive(true)
+    await suggestionDrainMainActor()
+    let afterReturn = await service.requestSnapshot()
+    XCTAssertEqual(afterReturn, ["edited query"])
+  }
+
+  @MainActor
+  func testLeavingSearchDuringDebounceCancelsWithoutNetworkRequest() async throws {
+    let service = ScriptedSearchSuggestionService()
+    let sleeper = ControlledSearchSuggestionSleeper()
+    let viewModel = SearchSuggestionViewModel(
+      service: service,
+      sleeper: { try await sleeper.sleep(nanoseconds: $0) })
+    viewModel.setEnabled(true)
+    viewModel.inputChanged("pending input")
+    try await suggestionWaitUntil { (await sleeper.snapshot()).pendingCount == 1 }
+
+    viewModel.setInputActive(false)
+    try await suggestionWaitUntil { (await sleeper.snapshot()).cancelledCount == 1 }
+    viewModel.inputChanged("background edit")
+    viewModel.setInputActive(true)
+    await suggestionDrainMainActor()
+
+    let requests = await service.requestSnapshot()
+    XCTAssertEqual(requests, [])
+    let snapshot = await sleeper.snapshot()
+    XCTAssertEqual(snapshot.pendingCount, 0)
+    XCTAssertEqual(snapshot.startedCount, 1)
+  }
+
+  @MainActor
+  func testLateResponseFromPreviousSearchPresentationCannotReplaceNewInput() async throws {
+    let service = ScriptedSearchSuggestionService()
+    await service.enqueue(.suspended(41))
+    await service.enqueue(.value(["new result"]))
+    let viewModel = SearchSuggestionViewModel(service: service, debounceNanoseconds: 0)
+    viewModel.setEnabled(true)
+    viewModel.inputChanged("old query")
+    try await suggestionWaitUntil { await service.requestSnapshot() == ["old query"] }
+
+    viewModel.setInputActive(false)
+    viewModel.setInputActive(true)
+    viewModel.inputChanged("new query")
+    try await suggestionWaitUntil { viewModel.suggestions == ["new result"] }
+    let resumed = await service.resume(id: 41, returning: ["old result"])
+    XCTAssertTrue(resumed)
+    try await suggestionWaitUntil { await service.completionCount() == 2 }
+    await suggestionDrainMainActor()
+
+    XCTAssertEqual(viewModel.suggestions, ["new result"])
+    let requests = await service.requestSnapshot()
+    XCTAssertEqual(requests, ["old query", "new query"])
+  }
+
+  @MainActor
+  func testSubmissionCancelsDebounceAndASeparateEditCanRequestAgain() async throws {
+    let service = ScriptedSearchSuggestionService()
+    let sleeper = ControlledSearchSuggestionSleeper()
+    await service.enqueue(.value(["second result"]))
+    let viewModel = SearchSuggestionViewModel(
+      service: service,
+      sleeper: { try await sleeper.sleep(nanoseconds: $0) })
+    viewModel.setEnabled(true)
+    viewModel.inputChanged("submitted input")
+    try await suggestionWaitUntil { (await sleeper.snapshot()).pendingCount == 1 }
+
+    viewModel.cancelAndClear()
+    try await suggestionWaitUntil { (await sleeper.snapshot()).cancelledCount == 1 }
+    viewModel.setInputActive(false)
+    viewModel.setInputActive(true)
+    await suggestionDrainMainActor()
+    let afterSubmission = await service.requestSnapshot()
+    XCTAssertEqual(afterSubmission, [])
+
+    viewModel.inputChanged("second input")
+    try await suggestionWaitUntil { (await sleeper.snapshot()).pendingCount == 1 }
+    let released = await sleeper.releaseNext()
+    XCTAssertTrue(released)
+    try await suggestionWaitUntil { viewModel.suggestions == ["second result"] }
+    let requests = await service.requestSnapshot()
+    XCTAssertEqual(requests, ["second input"])
+  }
 }
 
 private enum SearchSuggestionStub: Sendable {
