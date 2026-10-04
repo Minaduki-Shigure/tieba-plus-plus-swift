@@ -15,7 +15,7 @@ jobs:
           set -euo pipefail
           mkdir -p Tools/SearchHistoryOrderingHarness/Sources/TiebaPlusPlus
           mkdir -p Tools/SearchHistoryOrderingHarness/Tests/TiebaPlusPlusTests
-          for source in GlobalSearchHistory GlobalSearchHistoryViewModel; do
+          for source in GlobalSearchHistory GlobalSearchHistoryViewModel SearchHistoryOperationQueue; do
             ln -s "../../../../App/Sources/${source}.swift" "Tools/SearchHistoryOrderingHarness/Sources/TiebaPlusPlus/${source}.swift"
           done
           for test in GlobalSearchHistoryTests GlobalSearchHistoryViewModelTests SearchHistoryOrderingTests; do
