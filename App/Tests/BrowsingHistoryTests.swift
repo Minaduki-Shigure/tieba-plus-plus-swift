@@ -501,7 +501,337 @@ final class BrowsingHistoryTests: XCTestCase {
     XCTAssertEqual(sections.today.map(\.id), ["thread:2"])
     XCTAssertEqual(sections.earlier.map(\.id), ["thread:1"])
     XCTAssertEqual(viewModel.forumEntries.map(\.id), ["forum:swift"])
+
+    viewModel.selectedKind = .forum
+    let threads = viewModel.sections(kind: .thread, now: now, calendar: calendar)
+    let forums = viewModel.sections(kind: .forum, now: now, calendar: calendar)
+    XCTAssertEqual(threads.today.map(\.id), ["thread:2"])
+    XCTAssertEqual(threads.earlier.map(\.id), ["thread:1"])
+    XCTAssertEqual(forums.today.map(\.id), ["forum:swift"])
+    XCTAssertTrue(forums.earlier.isEmpty)
+    XCTAssertEqual(viewModel.visibleEntries, viewModel.entries(for: .forum))
   }
+
+  @MainActor
+  func testDeleteSurvivesNavigationAndOnlyRemovesTheRequestedIdentity() async throws {
+    let thread = historyEntry(.thread(ThreadHistorySnapshot(threadID: 42, title: "Thread")))
+    let forum = historyEntry(.forum(ForumHistorySnapshot(name: "42")))
+    let repository = ControlledHistoryRepository(entries: [thread, forum])
+    let model = BrowsingHistoryViewModel(repository: repository)
+    model.activate()
+    try await waitUntil { model.state == .loaded }
+    await repository.setHoldsMutations(true)
+
+    model.delete(thread)
+    try await waitUntil { await repository.mutationCount == 1 }
+    model.selectedKind = .forum
+    model.cancel()
+    let refresh = Task { await model.refresh() }
+    let released = await repository.releaseMutation(1)
+    XCTAssertTrue(released)
+    try await waitUntil { !model.isMutating }
+    await refresh.value
+
+    XCTAssertFalse(model.isActive)
+    XCTAssertTrue(model.entries(for: .thread).isEmpty)
+    XCTAssertEqual(model.entries(for: .forum), [forum])
+    XCTAssertNil(model.operationError)
+    let mutations = await repository.mutations
+    XCTAssertEqual(mutations, [.delete("thread:42")])
+  }
+
+  @MainActor
+  func testClearQueuesBehindDeleteAndReplacesBothProjections() async throws {
+    let thread = historyEntry(.thread(ThreadHistorySnapshot(threadID: 42, title: "Thread")))
+    let forum = historyEntry(.forum(ForumHistorySnapshot(name: "swift")))
+    let repository = ControlledHistoryRepository(entries: [thread, forum])
+    let model = BrowsingHistoryViewModel(repository: repository)
+    await model.refresh()
+    await repository.setHoldsMutations(true)
+
+    model.delete(thread)
+    model.selectedKind = .forum
+    model.clearAll()
+    try await waitUntil { await repository.mutationCount == 1 }
+    let firstReleased = await repository.releaseMutation(1)
+    XCTAssertTrue(firstReleased)
+    try await waitUntil { await repository.mutationCount == 2 }
+    let secondReleased = await repository.releaseMutation(2)
+    XCTAssertTrue(secondReleased)
+    try await waitUntil { !model.isMutating }
+
+    XCTAssertTrue(model.entries(for: .thread).isEmpty)
+    XCTAssertTrue(model.entries(for: .forum).isEmpty)
+    XCTAssertEqual(model.state, .loaded)
+    XCTAssertTrue(model.recordingEnabled)
+    let mutations = await repository.mutations
+    XCTAssertEqual(mutations, [.delete("thread:42"), .clear(nil)])
+  }
+
+  @MainActor
+  func testRefreshFailurePreservesBothKindsAndCanRetry() async throws {
+    let thread = historyEntry(.thread(ThreadHistorySnapshot(threadID: 1, title: "Thread")))
+    let forum = historyEntry(.forum(ForumHistorySnapshot(name: "swift")))
+    let repository = ControlledHistoryRepository(entries: [thread, forum])
+    let model = BrowsingHistoryViewModel(repository: repository)
+    await model.refresh()
+    await repository.failNextRead()
+    model.selectedKind = .forum
+
+    await model.refresh()
+
+    XCTAssertEqual(model.entries(for: .thread), [thread])
+    XCTAssertEqual(model.entries(for: .forum), [forum])
+    XCTAssertEqual(model.state, .failed(BrowsingHistoryStoreError.readFailed.localizedDescription))
+    XCTAssertEqual(model.operationError, BrowsingHistoryStoreError.readFailed.localizedDescription)
+    model.dismissOperationError()
+    await model.refresh()
+    XCTAssertEqual(model.state, .loaded)
+    XCTAssertNil(model.operationError)
+  }
+
+  @MainActor
+  func testCancelledReadCannotPublishOrClearTheReplacementRead() async throws {
+    let old = historyEntry(.thread(ThreadHistorySnapshot(threadID: 1, title: "Old")))
+    let current = historyEntry(.forum(ForumHistorySnapshot(name: "current")))
+    let repository = ControlledHistoryRepository(entries: [old])
+    await repository.setHoldsReads(true)
+    let model = BrowsingHistoryViewModel(repository: repository)
+    let oldRefresh = Task { await model.refresh() }
+    try await waitUntil { await repository.readCount == 1 }
+    model.cancel()
+    await repository.replaceEntries([current])
+    model.activate()
+    try await waitUntil { await repository.readCount == 2 }
+
+    let oldReleased = await repository.releaseRead(1)
+    XCTAssertTrue(oldReleased)
+    await oldRefresh.value
+    XCTAssertTrue(model.entries.isEmpty)
+    XCTAssertEqual(model.state, .loading)
+    var joined = false
+    let joinedRefresh = Task {
+      joined = true
+      await model.refresh()
+    }
+    try await waitUntil { joined }
+    let readCount = await repository.readCount
+    XCTAssertEqual(readCount, 2)
+    let currentReleased = await repository.releaseRead(2)
+    XCTAssertTrue(currentReleased)
+    try await waitUntil { model.state == .loaded }
+    await joinedRefresh.value
+    XCTAssertEqual(model.entries, [current])
+    XCTAssertTrue(model.isActive)
+  }
+
+  @MainActor
+  func testReadStartedBeforeDeleteCannotRestoreDeletedContent() async throws {
+    let thread = historyEntry(.thread(ThreadHistorySnapshot(threadID: 1, title: "Thread")))
+    let forum = historyEntry(.forum(ForumHistorySnapshot(name: "swift")))
+    let repository = ControlledHistoryRepository(entries: [thread, forum])
+    let model = BrowsingHistoryViewModel(repository: repository)
+    await model.refresh()
+    await repository.setHoldsReads(true)
+    let oldRefresh = Task { await model.refresh() }
+    try await waitUntil { await repository.readCount == 2 }
+    await repository.setHoldsReads(false)
+
+    model.delete(thread)
+    try await waitUntil { !model.isMutating }
+    XCTAssertEqual(model.entries, [forum])
+    let oldReleased = await repository.releaseRead(2)
+    XCTAssertTrue(oldReleased)
+    await oldRefresh.value
+    XCTAssertEqual(model.entries, [forum])
+    XCTAssertNil(model.operationError)
+  }
+
+  @MainActor
+  func testEarlierRecordingFailureDoesNotUndoTheLatestRequestedPreference() async throws {
+    let repository = ControlledHistoryRepository(entries: [])
+    let model = BrowsingHistoryViewModel(repository: repository)
+    await model.refresh()
+    await repository.setHoldsMutations(true)
+    model.setRecordingEnabled(false)
+    model.setRecordingEnabled(true)
+    try await waitUntil { await repository.mutationCount == 1 }
+    XCTAssertTrue(model.recordingEnabled)
+    model.cancel()
+
+    let firstReleased = await repository.releaseMutation(1, error: .writeFailed)
+    XCTAssertTrue(firstReleased)
+    try await waitUntil { await repository.mutationCount == 2 }
+    XCTAssertTrue(model.recordingEnabled)
+    let secondReleased = await repository.releaseMutation(2)
+    XCTAssertTrue(secondReleased)
+    try await waitUntil { !model.isMutating }
+
+    XCTAssertTrue(model.recordingEnabled)
+    XCTAssertEqual(model.operationError, BrowsingHistoryStoreError.writeFailed.localizedDescription)
+    let persistedPreference = try await repository.isRecordingEnabled()
+    XCTAssertTrue(persistedPreference)
+    let mutations = await repository.mutations
+    XCTAssertEqual(mutations, [.recording(false), .recording(true)])
+  }
+
+  @MainActor
+  func testDeleteFailureRetainsSnapshotAndAllowsASecondAttempt() async throws {
+    let thread = historyEntry(.thread(ThreadHistorySnapshot(threadID: 1, title: "Thread")))
+    let repository = ControlledHistoryRepository(entries: [thread])
+    let model = BrowsingHistoryViewModel(repository: repository)
+    await model.refresh()
+    await repository.setHoldsMutations(true)
+    model.delete(thread)
+    try await waitUntil { await repository.mutationCount == 1 }
+    let released = await repository.releaseMutation(1, error: .writeFailed)
+    XCTAssertTrue(released)
+    try await waitUntil { !model.isMutating }
+
+    XCTAssertEqual(model.entries, [thread])
+    XCTAssertEqual(model.operationError, BrowsingHistoryStoreError.writeFailed.localizedDescription)
+    await repository.setHoldsMutations(false)
+    model.delete(thread)
+    try await waitUntil { !model.isMutating }
+    XCTAssertTrue(model.entries.isEmpty)
+    XCTAssertNil(model.operationError)
+  }
+
+  @MainActor
+  func testReturningFromAVisitRefreshesOrderWithStableRecordIdentities() async throws {
+    let location = try HistoryTestLocation()
+    defer { location.remove() }
+    let repository = FileBrowsingHistoryStore(fileURL: location.fileURL)
+    let first = BrowsingHistoryTarget.thread(ThreadHistorySnapshot(threadID: 1, title: "First"))
+    let second = BrowsingHistoryTarget.thread(ThreadHistorySnapshot(threadID: 2, title: "Second"))
+    try await repository.record(first, at: Date(timeIntervalSince1970: 10))
+    try await repository.record(second, at: Date(timeIntervalSince1970: 20))
+    let model = BrowsingHistoryViewModel(repository: repository)
+    model.activate()
+    try await waitUntil { model.state == .loaded }
+    XCTAssertEqual(model.entries.map(\.id), ["thread:2", "thread:1"])
+    model.cancel()
+    try await repository.record(first, at: Date(timeIntervalSince1970: 30))
+    model.activate()
+    try await waitUntil { model.entries.first?.id == "thread:1" }
+
+    XCTAssertEqual(model.entries.map(\.id), ["thread:1", "thread:2"])
+    XCTAssertEqual(model.entries.first?.visitCount, 2)
+  }
+}
+
+private func historyEntry(_ target: BrowsingHistoryTarget) -> BrowsingHistoryEntry {
+  BrowsingHistoryEntry(
+    target: target, lastVisitedAt: Date(timeIntervalSince1970: 10), visitCount: 1)
+}
+
+private actor ControlledHistoryRepository: BrowsingHistoryRepository {
+  enum Mutation: Equatable, Sendable {
+    case delete(String)
+    case clear(BrowsingHistoryKind?)
+    case recording(Bool)
+  }
+
+  private var storedEntries: [BrowsingHistoryEntry]
+  private var recordingEnabled = true
+  private var holdsReads = false
+  private var holdsMutations = false
+  private var nextReadFails = false
+  private(set) var readCount = 0
+  private(set) var mutations: [Mutation] = []
+  private var pendingReads:
+    [Int: (CheckedContinuation<[BrowsingHistoryEntry], any Error>, [BrowsingHistoryEntry])] = [:]
+  private var pendingMutations: [Int: CheckedContinuation<Void, any Error>] = [:]
+
+  init(entries: [BrowsingHistoryEntry]) { storedEntries = entries }
+
+  var mutationCount: Int { mutations.count }
+
+  func setHoldsReads(_ value: Bool) { holdsReads = value }
+  func setHoldsMutations(_ value: Bool) { holdsMutations = value }
+  func replaceEntries(_ value: [BrowsingHistoryEntry]) { storedEntries = value }
+  func failNextRead() { nextReadFails = true }
+
+  func entries(kind: BrowsingHistoryKind?) async throws -> [BrowsingHistoryEntry] {
+    readCount += 1
+    let request = readCount
+    if nextReadFails {
+      nextReadFails = false
+      throw BrowsingHistoryStoreError.readFailed
+    }
+    let snapshot = storedEntries.filter { kind == nil || $0.kind == kind }
+    guard holdsReads else { return snapshot }
+    // Deliberately ignore cancellation to exercise generation protection.
+    return try await withCheckedThrowingContinuation { continuation in
+      pendingReads[request] = (continuation, snapshot)
+      Task {
+        try? await Task.sleep(for: .seconds(2))
+        expireRead(request)
+      }
+    }
+  }
+
+  func releaseRead(_ request: Int) -> Bool {
+    guard let (continuation, snapshot) = pendingReads.removeValue(forKey: request) else {
+      return false
+    }
+    continuation.resume(returning: snapshot)
+    return true
+  }
+
+  private func expireRead(_ request: Int) {
+    pendingReads.removeValue(forKey: request)?.0.resume(throwing: HistoryWaitTimeout())
+  }
+
+  func isRecordingEnabled() async throws -> Bool { recordingEnabled }
+
+  func setRecordingEnabled(_ enabled: Bool) async throws {
+    try await perform(.recording(enabled))
+    recordingEnabled = enabled
+  }
+
+  func delete(id: String) async throws {
+    try await perform(.delete(id))
+    storedEntries.removeAll { $0.id == id }
+  }
+
+  func deleteAll(kind: BrowsingHistoryKind?) async throws {
+    try await perform(.clear(kind))
+    storedEntries.removeAll { kind == nil || $0.kind == kind }
+  }
+
+  private func perform(_ mutation: Mutation) async throws {
+    mutations.append(mutation)
+    let request = mutations.count
+    if holdsMutations {
+      try await withCheckedThrowingContinuation { continuation in
+        pendingMutations[request] = continuation
+        Task {
+          try? await Task.sleep(for: .seconds(2))
+          pendingMutations.removeValue(forKey: request)?.resume(throwing: HistoryWaitTimeout())
+        }
+      }
+    }
+    try Task.checkCancellation()
+  }
+
+  func releaseMutation(_ request: Int, error: BrowsingHistoryStoreError? = nil) -> Bool {
+    guard let continuation = pendingMutations.removeValue(forKey: request) else { return false }
+    if let error {
+      continuation.resume(throwing: error)
+    } else {
+      continuation.resume()
+    }
+    return true
+  }
+
+  func record(_ target: BrowsingHistoryTarget, at date: Date) async throws {}
+  func updateThreadProgress(
+    threadID: Int64, postID: Int64, floor: Int, options: ThreadBrowseOptions, at date: Date
+  ) async throws {}
+  func updateThreadOptions(
+    threadID: Int64, options: ThreadBrowseOptions, at date: Date
+  ) async throws {}
 }
 
 private struct HistoryTestLocation {
