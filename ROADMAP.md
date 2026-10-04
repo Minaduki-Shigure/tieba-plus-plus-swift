@@ -1870,6 +1870,11 @@ reload it. Only the visible section starts reads; latest-list metadata updates
 reconcile channel IDs atomically, and removal or invalidated sorting cannot
 revive an old response. Content-filter changes and confirmed topic creation
 invalidate all cached lists while reloading only the active section.
+Until the initial latest-list response supplies the forum identity and channel
+catalog, both the selector and pager expose only Latest. This prevents an early
+switch from cancelling the only authoritative metadata read; the existing
+error retry remains available. Once resolved, the directory remains available
+during later refreshes and failures.
 
 Native testing found that a page-style SwiftUI `TabView` could retain SwiftUI
 state while recreating the actual scroll view and resetting its offset. The
