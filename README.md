@@ -1300,7 +1300,8 @@ and its verified metadata enters the public app source.
   individual deletion, clearing, no-history mode, and corruption recovery.
   Recent forums are projected from the same browsing archive.
 - **Favorites:** Forums and threads use a separate local archive. Saved forums
-  can be pinned as home shortcuts; saved threads retain position and browse mode
+  can be pinned on the App's Home page; this does not create an iOS Home Screen
+  icon for an individual forum. Saved threads retain position and browse mode
   and can apply explicit only-author or descending overrides.
 - **Filtering:** Local literal-keyword, bounded non-backtracking regular-expression,
   exact user block/allow, and video-topic filters cover list, profile, floor,
