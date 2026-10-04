@@ -67,7 +67,9 @@ final class UserProfileActivityUITests: XCTestCase {
     try wait("Nested reply destination") { comment.isHittable }
     edgeBack(app)
     try wait("Nested reply return") { nested.isHittable }
-    try tap(app.buttons["打开原主题：回复原主题2"].firstMatch)
+    let originalTopic = app.buttons["打开原主题：回复原主题2"].firstMatch
+    try reveal(originalTopic, app: app)
+    try tap(originalTopic)
     try wait("Original topic destination") { app.staticTexts["离线帖子正文"].firstMatch.isHittable }
     edgeBack(app)
     try wait("Original topic return") { nested.isHittable }
@@ -90,10 +92,53 @@ final class UserProfileActivityUITests: XCTestCase {
       "profile=1 threads=1 replies=2 relationship=4 posts=2 comments=1 unexpected=0", app: app)
   }
 
+  @MainActor
+  func testRefreshingProfileAndRetryingPreserveTheOtherActivityPosition() throws {
+    let app = try launchFixture(failsFirstRefresh: true)
+    defer { attachState(app) }
+    try select(.replies, app: app)
+    scrollUp(app)
+    scrollUp(app)
+    let anchor = try visibleAnchor(app.buttons, prefix: "打开原主题：回复原主题", app: app)
+    let title = anchor.label
+    let y = anchor.frame.minY
+
+    try select(.threads, app: app)
+    pullToRefresh(app)
+    try wait("Refresh failure remains visible with the existing profile") {
+      app.staticTexts["离线资料刷新失败"].firstMatch.isHittable
+    }
+    try counts(
+      "profile=2 threads=2 replies=1 relationship=1 posts=0 comments=0 unexpected=0", app: app)
+    try select(.replies, app: app)
+    try position(app.buttons[title].firstMatch, y: y, context: "Other page after failed refresh")
+
+    try select(.threads, app: app)
+    try tap(app.buttons["重试加载"].firstMatch)
+    try counts(
+      "profile=3 threads=2 replies=1 relationship=1 posts=0 comments=0 unexpected=0", app: app)
+    try wait("Profile-only retry clears its error") {
+      !app.staticTexts["离线资料刷新失败"].exists && !app.staticTexts["正在刷新用户资料"].exists
+    }
+    try select(.replies, app: app)
+    try position(app.buttons[title].firstMatch, y: y, context: "Other page after profile retry")
+
+    try select(.threads, app: app)
+    pullToRefresh(app)
+    try counts(
+      "profile=4 threads=3 replies=1 relationship=1 posts=0 comments=0 unexpected=0", app: app)
+    try wait("Successful profile refresh finishes") {
+      !app.staticTexts["正在刷新用户资料"].exists
+    }
+    try select(.replies, app: app)
+    try position(
+      app.buttons[title].firstMatch, y: y, context: "Other page after successful refresh")
+  }
+
   private enum Activity: String { case threads, replies }
 
   @MainActor
-  private func launchFixture() throws -> XCUIApplication {
+  private func launchFixture(failsFirstRefresh: Bool = false) throws -> XCUIApplication {
     continueAfterFailure = false
     XCUIDevice.shared.orientation = .portrait
     let app = XCUIApplication()
@@ -101,6 +146,9 @@ final class UserProfileActivityUITests: XCTestCase {
       "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN",
       "--explore-refresh-ui-testing", "--profile-activity-ui-testing",
     ]
+    if failsFirstRefresh {
+      app.launchArguments.append("--profile-activity-refresh-failure")
+    }
     app.launch()
     try tap(app.buttons["进入离线用户主页"])
     try counts(
@@ -121,10 +169,21 @@ final class UserProfileActivityUITests: XCTestCase {
   @MainActor
   private func reveal(_ element: XCUIElement, app: XCUIApplication) throws {
     for _ in 0..<5 {
-      if element.isHittable { return }
+      if isFullyVisible(element, app: app) { return }
       scrollUp(app)
     }
-    try wait("Reveal reply", diagnostics: { element.debugDescription }) { element.isHittable }
+    try wait(
+      "Reveal reply", diagnostics: { element.debugDescription },
+      until: { self.isFullyVisible(element, app: app) })
+  }
+
+  @MainActor
+  private func isFullyVisible(_ element: XCUIElement, app: XCUIApplication) -> Bool {
+    // XCTest can report a clipped SwiftUI button as hittable and synthesize its
+    // tap inside the home-indicator area. Reveal the entire target first.
+    guard element.isHittable else { return false }
+    let frame = element.frame
+    return frame.minY > app.frame.height * 0.2 && frame.maxY < app.frame.height * 0.9
   }
 
   @MainActor
@@ -145,17 +204,17 @@ final class UserProfileActivityUITests: XCTestCase {
 
   @MainActor
   private func position(_ element: XCUIElement, y: CGFloat, context: String) throws {
-    try wait(context, diagnostics: { "expectedY=\(y), frame=\(element.frame)" }) {
-      element.isHittable && abs(element.frame.minY - y) < 3
-    }
+    try wait(
+      context, diagnostics: { "expectedY=\(y), frame=\(element.frame)" },
+      until: { element.isHittable && abs(element.frame.minY - y) < 3 })
   }
 
   @MainActor
   private func counts(_ expected: String, app: XCUIApplication) throws {
     let counter = app.staticTexts["profile-activity-request-counts"]
-    try wait("Request counts", diagnostics: { "expected=\(expected), actual=\(counter.label)" }) {
-      counter.exists && counter.label == expected
-    }
+    try wait(
+      "Request counts", diagnostics: { "expected=\(expected), actual=\(counter.label)" },
+      until: { counter.exists && counter.label == expected })
     let unchanged = XCTNSPredicateExpectation(
       predicate: NSPredicate(format: "label != %@", expected), object: counter)
     unchanged.isInverted = true
@@ -164,7 +223,8 @@ final class UserProfileActivityUITests: XCTestCase {
 
   @MainActor
   private func tap(_ element: XCUIElement) throws {
-    try wait("Tap target", diagnostics: { element.debugDescription }) { element.isHittable }
+    try wait(
+      "Tap target", diagnostics: { element.debugDescription }, until: { element.isHittable })
     element.tap()
   }
 
@@ -174,6 +234,14 @@ final class UserProfileActivityUITests: XCTestCase {
       .press(
         forDuration: 0.1,
         thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)))
+  }
+
+  @MainActor
+  private func pullToRefresh(_ app: XCUIApplication) {
+    app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
+      .press(
+        forDuration: 0.1,
+        thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85)))
   }
 
   @MainActor
