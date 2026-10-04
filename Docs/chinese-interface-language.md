@@ -16,6 +16,9 @@ Apple 的[语言选择说明](https://developer.apple.com/library/archive/qa/qa1
 的 `developmentLanguage` 默认值为 `en`。
 
 [原生候选 37179108351](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37179108351)
-复用已有两个首页、三个搜索 UI 流程，导出编译后的 Info.plist、真实截图和层级。
-尚需读取实际结果，特别确认粘贴/搜索取消等系统控件，而不能仅以 YAML 中出现中文
-语言代码作为界面完成证据。LiveContainer 的客体语言行为仍须实机验证。
+复用已有两个首页、三个搜索 UI 流程，实际全部通过，零失败、零跳过。编译后的
+Info.plist 确认 `CFBundleDevelopmentRegion=zh-Hans` 与
+`CFBundleLocalizations=[zh-Hans]`。真实首页截图显示“粘贴”，搜索截图及可访问性
+层级显示“取消”；导航、刷新、分页、排序、位置保留及重新搜索重置的原断言通过。
+验证环境为 iOS 18.5 模拟器、简体中文启动偏好。其他语言偏好和 LiveContainer
+客体环境没有由此获得实机验证，后续组合版本仍须经过完整发布测试。
