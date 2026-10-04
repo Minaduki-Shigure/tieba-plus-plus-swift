@@ -16,6 +16,22 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
+Alpha.43/build 121 follows TiebaLite `9701bfb6`'s reachable forum/thread/user
+search pager. Stable native Lists preserve separate reading positions,
+snapshots and retry state across category taps, horizontal swipes and detail
+returns. Only the selected category reads; leaving it cancels pending work
+without advancing its cursor or accepting a late response. A new search
+submission, including the same term, resets all categories, while thread sort
+and local filtering reset only thread results. The thread sort bar stays within
+its page so neighboring viewports keep their height.
+The [native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37174111711)
+passed 44 model tests and all three actual UI workflows, with zero failures or
+skips. Tests cover positions within 3 pt, real keyboard submission, selected-page
+request counts, second-page preservation, sorting, swipes and detail return.
+Full tagged CI and anonymous integration remain publication gates, with
+physical-device behavior a separate validation step. No new endpoints or
+credentials are involved, and the 80–82% weighted estimate is unchanged.
+
 Alpha.42/build 120 follows TiebaLite `9701bfb6`'s reachable user-profile activity
 pager with retained Public Topics and Public Replies lists. Each keeps its own
 reading position, pagination and retry state across selection, swipes and detail
@@ -260,7 +276,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-serves `v0.65.0-alpha.42` (build 120) after publication, whose app-code snapshot includes
+serves `v0.65.0-alpha.43` (build 121) after publication, whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -368,7 +384,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.65.0-alpha.42` app-code snapshot is at 80–82%; all experimental
+The public `v0.65.0-alpha.43` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
@@ -2454,7 +2470,7 @@ Search categories load independently so one endpoint failure does not discard
 another category's results. User search uses the credential-free Web endpoint,
 accepts the server's object/array result variants and 64-bit user identifiers,
 and opens the same anonymous public profile workflow used by author rows.
-The next candidate retains three separate native result Lists for forums,
+The search page retains three separate native result Lists for forums,
 threads and users, matching TiebaLite's reachable search-page navigation.
 Category taps and horizontal swipes preserve each reading position; only the
 selected category starts reads. Leaving a category cancels its pending request
@@ -2467,8 +2483,8 @@ passed all 44 search/history model tests and all three actual UI flows, with
 zero failures or skips. The UI checks separate reading positions within 3 pt,
 horizontal paging, detail return, pagination, sort isolation and a real keyboard
 submission that resets all scopes while loading only the current one.
-Tagged full regression and physical-device validation remain separate gates;
-this candidate is not yet part of the published IPA. This work does not add
+Tagged full regression and physical-device validation remain separate gates.
+This work does not add
 endpoints, credentials or online suggestions to the results screen.
 Online suggestions are a separate, explicitly enabled pre-submission path. The
 switch defaults off and enabling it does not send text already in the field;
