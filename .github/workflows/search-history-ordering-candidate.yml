@@ -1,0 +1,37 @@
+name: Search history ordering candidate
+on:
+  push:
+    branches: [ci/search-history-ordering-1004]
+permissions:
+  contents: read
+jobs:
+  history-ordering:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+      - name: Link unchanged production files into the focused macOS harness
+        run: |
+          set -euo pipefail
+          mkdir -p Tools/SearchHistoryOrderingHarness/Sources/TiebaPlusPlus
+          mkdir -p Tools/SearchHistoryOrderingHarness/Tests/TiebaPlusPlusTests
+          for source in GlobalSearchHistory GlobalSearchHistoryViewModel; do
+            ln -s "../../../../App/Sources/${source}.swift" "Tools/SearchHistoryOrderingHarness/Sources/TiebaPlusPlus/${source}.swift"
+          done
+          for test in GlobalSearchHistoryTests GlobalSearchHistoryViewModelTests SearchHistoryOrderingTests; do
+            ln -s "../../../../App/Tests/${test}.swift" "Tools/SearchHistoryOrderingHarness/Tests/TiebaPlusPlusTests/${test}.swift"
+          done
+      - name: Test actual search history model and file archive
+        id: tests
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          swift test --package-path Tools/SearchHistoryOrderingHarness 2>&1 | tee search-history-ordering.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: search-history-ordering-candidate
+          path: search-history-ordering.log
+      - name: Enforce validation
+        if: ${{ always() && steps.tests.outcome != 'success' }}
+        run: exit 1
