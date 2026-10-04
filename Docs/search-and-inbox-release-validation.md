@@ -1,9 +1,36 @@
 # Search and inbox release validation
 
-Alpha.47/build 125 is the replacement release candidate. Its focused native
+Alpha.48/build 126 is the replacement release candidate. Its earlier focused native
 checks below have passed; full tagged CI, IPA packaging/publication and final
 public source/asset verification remain pending. No full-suite result or
 published IPA is claimed by these candidate results.
+
+The [alpha.47 full run](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37193998175)
+passed all 2,695 App tests and 25 of 26 phone UI tests, with no skips. All four
+inbox regressions passed. The remaining failure was search thread pagination;
+it was a separate real product issue and the candidate was withheld.
+
+The search recording shows titles 17–19 at video PTS 73.3 seconds with one thread
+request, then titles 36–39 at 73.8 seconds with two requests. Roughly nineteen
+200 pt rows moved in half a second, while the ongoing 250 pt/s drag accounts
+for only about 125 pt. The corrected viewport helper never observed title 21
+in this run. This is different from alpha.45's separately documented viewport
+threshold mistake; extending the swipe loop would not fix the product jump.
+
+Search still used a transparent pagination row whose identity changed with its
+tail, count and request epoch, plus a loading row removed after each request.
+The new candidate removes the transparent row and keeps the loading row mounted.
+It uses actual visible result rows to request the raw server tail, including a
+hidden raw tail; the existing all-hidden status row retains continuation for
+fully hidden results. Query/result identities, active-scope checks and the model's
+request/error guards still apply. Completion and reactivation reevaluate the
+visible tail without replacing a layout anchor.
+
+The original three SearchScopes tests remain unchanged. A new native fixture
+holds page two at the service boundary, records title 20's settled position,
+then releases only the service response. Without another gesture, title 20 must
+stay within 3 pt before the test scrolls to title 21. The request log must contain
+exactly pages one and two. This additional candidate validation is pending.
 
 The alpha.45 tag's [full regression](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37184079790)
 passed all 2,677 App tests, three iPad UI workflows, Core and anonymous integration.
@@ -93,6 +120,6 @@ The fixtures use offline, in-memory data and no real account. The ordered-histor
 and suggestion integration also passed [90 model tests and two UI workflows](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37188924914);
 its evidence is recorded in [search history ordering](search-history-ordering.md).
 These focused suites overlap and must not be added together as a full-suite
-test count. Alpha.47's full regression, IPA packaging/publication and public
+test count. Alpha.48's full regression, IPA packaging/publication and public
 source/asset verification remain pending. Simulator success does not replace
 iOS 16, LiveContainer or physical-device checks.

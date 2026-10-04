@@ -16,7 +16,7 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
-Alpha.47/build 125 includes ordered global/forum keyword-history operations and
+Alpha.48/build 126 includes ordered global/forum keyword-history operations and
 resumption of an interrupted forum search without a duplicate history record.
 It also includes the history, suggestion and language work prepared for alpha.45.
 Alpha.45 was withheld after two native UI failures: video showed a real inbox
@@ -30,12 +30,15 @@ passed all four unchanged UI regressions, including the hidden-page case's
 passed [90 history/search model tests and two suggestion UI flows](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37188924914)
 and [35 forum-search model tests and six search UI flows](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37189754514),
 all with zero failures or skips. These are overlapping focused suites, not
-additional counts to sum into a full regression result. Alpha.47's full tagged
+additional counts to sum into a full regression result. Alpha.47's full phone
+regression exposed an additional real search-results append jump; the search
+list now also uses stable content rows and a persistent loading row, with a
+held-response native position test. Alpha.48's full tagged
 CI, IPA publication and public source verification are still pending. Details are in
 [the release validation record](Docs/search-and-inbox-release-validation.md).
 These are corrections within credited areas; the 80–82% estimate is unchanged.
 
-Alpha.47 closes the search-suggestion gap between Home's
+Alpha.48 closes the search-suggestion gap between Home's
 existing suggestions and TiebaLite `9701bfb6`'s reachable
 [SearchPage input and suggestion selection](https://github.com/zzc10086/TiebaLite/blob/9701bfb6aaf261cc37b20b5793a8404261077f49/app/src/main/java/com/huanchengfly/tieba/post/ui/page/search/SearchPage.kt#L284).
 The search page reuses the anonymous service, default-off setting, 500 ms
@@ -74,7 +77,7 @@ UI workflows, Core and anonymous integration. Physical-device/account
 validation remains a separate gate. This extends an existing credited area;
 the 80–82% weighted estimate is unchanged.
 
-The alpha.47 candidate also follows TiebaLite `9701bfb6`'s separate Thread and
+The alpha.48 candidate also follows TiebaLite `9701bfb6`'s separate Thread and
 Forum history pages. Both native lists stay mounted and share a local archive
 snapshot, retaining independent positions through category changes and detail
 navigation. Returning from a recorded visit rereads the shared archive while
@@ -94,7 +97,7 @@ switching and real Thread/Forum returns. Native deletion, clear cancellation and
 confirmation, recording changes and the order of revisited records are checked
 against an independently reopened temporary file archive. The visited record is
 visually first, followed by the old first record, and both identities match disk.
-The alpha.47 candidate also declares the implemented Simplified Chinese bundle language;
+The alpha.48 candidate also declares the implemented Simplified Chinese bundle language;
 [five native Home/Search UI workflows](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37179108351)
 passed and the compiled declaration and Chinese Paste/Cancel controls were
 verified. See [language verification and limits](Docs/chinese-interface-language.md).
@@ -365,7 +368,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-serves `v0.65.0-alpha.47` (build 125) after publication, whose app-code snapshot includes
+serves `v0.65.0-alpha.48` (build 126) after publication, whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -473,7 +476,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The `v0.65.0-alpha.47` app-code snapshot is at 80–82%; all experimental
+The `v0.65.0-alpha.48` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55

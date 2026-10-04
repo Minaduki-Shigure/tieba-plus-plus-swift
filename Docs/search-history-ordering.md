@@ -37,5 +37,6 @@ UI 测试，均零失败、零跳过。UI 记录确认选取联想只写一次�
 [35 项模型测试和六项搜索 UI 回归](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37189754514)，
 消息分页修复另通过[四项原生 UI 回归](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37192652980)，
 均零失败、零跳过。这些专项测试有重叠，不能相加作为完整测试数量。
-alpha.47/build 125 的完整标签 CI、IPA 发布及公开应用源验证仍在门禁中；
+alpha.47 的完整界面回归另外发现了搜索结果追加时的真实跳动，未发布。
+修复后的 alpha.48/build 126 的完整标签 CI、IPA 发布及公开应用源验证仍在门禁中；
 截至本记录，这些修改尚未随 IPA 发布。详见[发布验证记录](search-and-inbox-release-validation.md)。
