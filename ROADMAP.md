@@ -16,6 +16,22 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
+Alpha.42/build 120 follows TiebaLite `9701bfb6`'s reachable user-profile activity
+pager with retained Public Topics and Public Replies lists. Each keeps its own
+reading position, pagination and retry state across selection, swipes and detail
+navigation, while profile data and the relationship owner remain shared.
+Refresh captures the selected activity before suspension, preserving the other
+page. Initial profile loading and failure keep the List containers mounted but
+do not mount invisible activity rows or trigger further pagination. A retry
+restores actual visible-tail loading. Existing public replies for other users
+remain available under server visibility and filtering, unlike upstream's
+self-only Posts tab. No new endpoint or private access is added.
+The [native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37171843648)
+passed 61 model tests and four actual UI workflows, with zero failures or skips,
+including refresh failure/retry, retained positions and initial-profile failure.
+Full tagged CI and anonymous integration remain publication gates; real-device
+gesture behavior remains separate. The 80–82% weighted estimate is unchanged.
+
 Alpha.41/build 119 retains independent Latest, Featured and general-channel
 pages, following TiebaLite `9701bfb6`'s reachable `ForumPage`. The coordinator
 preserves each page's list, sort, featured classification, cursor and retry
@@ -244,7 +260,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-serves `v0.65.0-alpha.41` (build 119) after publication, whose app-code snapshot includes
+serves `v0.65.0-alpha.42` (build 120) after publication, whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -352,7 +368,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.65.0-alpha.41` app-code snapshot is at 80–82%; all experimental
+The public `v0.65.0-alpha.42` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
@@ -1905,7 +1921,7 @@ after layout updates because SwiftUI can reset it on the same native scroll
 view. Model, native-view and actual swipe/navigation UI regressions remain
 release gates; device scrolling and gesture validation is separate.
 
-The profile-activity development branch follows TiebaLite `9701bfb6`'s reachable
+Retained profile activity follows TiebaLite `9701bfb6`'s reachable
 `ThreadPage` to `UserProfilePage` flow. Its keyed horizontal pager gives each
 `UserPostPage` an independent model and list position. The iOS implementation
 keeps Public Topics and Public Replies in two retained native Lists, preserving
@@ -1930,8 +1946,7 @@ the other page after a failed refresh, retry and successful refresh. The
 passed the same 61 model tests and all four UI workflows, with zero failures or
 skips, including the initial-profile visibility guard: a failed profile read
 does not trigger hidden pagination, and retry restores visible-tail loading.
-This development work is not part of alpha.41; full tagged
-CI and physical-device validation remain separate requirements.
+Full tagged CI and physical-device validation remain separate requirements.
 
 Thread-list mapping preserves the public topic kind, first-post ID, server state
 flags, author portrait, and available read-only counters through the application
