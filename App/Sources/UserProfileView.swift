@@ -125,20 +125,6 @@ struct UserLikedForumsPreviewPresentation: Equatable, Sendable {
   }
 }
 
-private enum UserProfileActivity: String, CaseIterable, Hashable, Identifiable, Sendable {
-  case threads
-  case replies
-
-  var id: Self { self }
-
-  var title: String {
-    switch self {
-    case .threads: "主题"
-    case .replies: "回复"
-    }
-  }
-}
-
 struct UserActivityReplyRowPresentation: Equatable, Sendable {
   let replyTarget: UserReplyNavigationTarget?
   let originThreadTarget: UserReplyNavigationTarget?
@@ -164,7 +150,8 @@ struct UserActivityReplyRowPresentation: Equatable, Sendable {
       accessibilityLabel = originTarget == nil ? nil : "查看原主题"
     } else {
       displayTitle = title
-      accessibilityLabel = originTarget == nil
+      accessibilityLabel =
+        originTarget == nil
         ? nil
         : "打开原主题：\(title)"
     }
@@ -189,15 +176,18 @@ struct UserProfileView: View {
 
   @StateObject private var viewModel: UserProfileViewModel
   @StateObject private var repliesViewModel: UserRepliesViewModel
+  @StateObject private var activityViewModel: UserProfileActivityViewModel
   @StateObject private var accountIdentity = UserProfileAccountIdentityViewModel()
-  @State private var selectedActivity: UserProfileActivity = .threads
+  @State private var visibleThreadIDs = Set<Int64>()
+  @State private var visibleThreadTailID: Int64?
+  @State private var visibleReplyIDs = Set<BrowseUserReplyID>()
+  @State private var visibleReplyTailID: BrowseUserReplyID?
   @State private var contentFilterMessage: String?
   @State private var portraitPresentation: UserProfilePortraitPresentation?
   @State private var relationKind: UserRelationKind?
   @State private var threadNavigationRequest: ThreadSummaryNavigationRequest?
   @State private var userReplyNavigationTarget: UserReplyNavigationTarget?
-  @State private var interactionRestrictionsPresentation:
-    UserInteractionRestrictionsPresentation?
+  @State private var interactionRestrictionsPresentation: UserInteractionRestrictionsPresentation?
 
   init(
     userID: Int64,
@@ -213,148 +203,159 @@ struct UserProfileView: View {
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
     self.showsUserFilterActions = showsUserFilterActions
-    _viewModel = StateObject(
-      wrappedValue: UserProfileViewModel(userID: userID, service: service)
-    )
-    _repliesViewModel = StateObject(
-      wrappedValue: UserRepliesViewModel(userID: userID, service: service)
-    )
+    let activity = UserProfileActivityViewModel(userID: userID, service: service)
+    _activityViewModel = StateObject(wrappedValue: activity)
+    _viewModel = StateObject(wrappedValue: activity.profileModel)
+    _repliesViewModel = StateObject(wrappedValue: activity.repliesModel)
   }
 
   var body: some View {
-    Group {
-      switch viewModel.state {
-      case .idle, .loading:
-        ProgressView()
-      case .failed(let message):
-        ErrorStateView(message: message, retry: viewModel.reload)
-      case .loaded:
-        profileList
+    if let accountAccess {
+      UserProfileRelationshipOwner(
+        targetUserID: viewModel.userID,
+        targetName: viewModel.profile?.preferredName ?? navigationTitle,
+        access: accountAccess,
+        isActive: activityViewModel.isActive && viewModel.profile != nil
+      ) { relationship in
+        observedPage(relationship: relationship)
       }
+    } else {
+      observedPage(relationship: nil)
     }
-    .navigationTitle(navigationTitle)
-    .navigationBarTitleDisplayMode(.inline)
-    .toolbar {
-      if showsUserFilterActions, let profile = viewModel.profile, profile.id > 0 {
-        ToolbarItem(placement: .navigationBarTrailing) {
-          Menu {
-            Section("本地内容过滤") {
-              Button {
-                addUserRule(profile, to: .block)
-              } label: {
-                Label("加入屏蔽列表", systemImage: "hand.raised")
-              }
-              Button {
-                addUserRule(profile, to: .allow)
-              } label: {
-                Label("加入白名单", systemImage: "checkmark.shield")
-              }
-            }
+  }
 
-            if let accountAccess, accountIdentity.isResolved,
-              let activeAccountUserID = accountIdentity.userID,
-              activeAccountUserID != profile.id
-            {
-              Section("贴吧账户") {
+  private func presentedPage(relationship: UserProfileRelationshipPresentation?) -> some View {
+    profileContent(relationship: relationship)
+      .navigationTitle(navigationTitle)
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        if showsUserFilterActions, let profile = viewModel.profile, profile.id > 0 {
+          ToolbarItem(placement: .navigationBarTrailing) {
+            Menu {
+              Section("本地内容过滤") {
                 Button {
-                  interactionRestrictionsPresentation =
-                    UserInteractionRestrictionsPresentation(
-                      targetUserID: profile.id,
-                      targetName: profile.preferredName
-                    )
+                  addUserRule(profile, to: .block)
                 } label: {
-                  Label("互动权限", systemImage: "person.crop.circle.badge.xmark")
+                  Label("加入屏蔽列表", systemImage: "hand.raised")
+                }
+                Button {
+                  addUserRule(profile, to: .allow)
+                } label: {
+                  Label("加入白名单", systemImage: "checkmark.shield")
                 }
               }
+
+              if let accountAccess, accountIdentity.isResolved,
+                let activeAccountUserID = accountIdentity.userID,
+                activeAccountUserID != profile.id
+              {
+                Section("贴吧账户") {
+                  Button {
+                    interactionRestrictionsPresentation =
+                      UserInteractionRestrictionsPresentation(
+                        targetUserID: profile.id,
+                        targetName: profile.preferredName
+                      )
+                  } label: {
+                    Label("互动权限", systemImage: "person.crop.circle.badge.xmark")
+                  }
+                }
+              }
+            } label: {
+              Image(systemName: "ellipsis.circle")
             }
-          } label: {
-            Image(systemName: "ellipsis.circle")
+            .accessibilityLabel("用户操作")
+            .help("用户操作")
           }
-          .accessibilityLabel("用户操作")
-          .help("用户操作")
         }
       }
-    }
-    .alert(
-      "本地用户规则",
-      isPresented: Binding(
-        get: { contentFilterMessage != nil },
-        set: { if !$0 { contentFilterMessage = nil } }
-      )
-    ) {
-      Button("好") { contentFilterMessage = nil }
-    } message: {
-      Text(contentFilterMessage ?? "")
-    }
-    .fullScreenCover(item: $portraitPresentation) { presentation in
-      ImageViewer(
-        url: presentation.sourceURL,
-        onClose: { portraitPresentation = nil }
-      )
-    }
-    .sheet(item: $interactionRestrictionsPresentation) { presentation in
-      if let accountAccess {
-        UserInteractionRestrictionsSheet(
-          targetUserID: presentation.targetUserID,
-          targetName: presentation.targetName,
-          access: accountAccess,
-          onClose: { interactionRestrictionsPresentation = nil }
+      .alert(
+        "本地用户规则",
+        isPresented: Binding(
+          get: { contentFilterMessage != nil },
+          set: { if !$0 { contentFilterMessage = nil } }
+        )
+      ) {
+        Button("好") { contentFilterMessage = nil }
+      } message: {
+        Text(contentFilterMessage ?? "")
+      }
+      .fullScreenCover(item: $portraitPresentation) { presentation in
+        ImageViewer(
+          url: presentation.sourceURL,
+          onClose: { portraitPresentation = nil }
         )
       }
-    }
-    .navigationDestination(isPresented: relationsPresented) {
-      if let relationKind {
-        UserRelationsView(
-          userID: viewModel.userID,
-          initialKind: relationKind,
-          accountAccess: accountAccess,
-          service: service,
-          historyRepository: historyRepository,
-          favoritesRepository: favoritesRepository,
-          searchHistoryRepository: searchHistoryRepository
-        )
+      .sheet(item: $interactionRestrictionsPresentation) { presentation in
+        if let accountAccess {
+          UserInteractionRestrictionsSheet(
+            targetUserID: presentation.targetUserID,
+            targetName: presentation.targetName,
+            access: accountAccess,
+            onClose: { interactionRestrictionsPresentation = nil }
+          )
+        }
       }
-    }
-    .navigationDestination(isPresented: threadNavigationPresented) {
-      if let request = threadNavigationRequest {
-        threadDestination(request)
-      } else {
-        EmptyView()
+  }
+
+  private func navigablePage(relationship: UserProfileRelationshipPresentation?) -> some View {
+    presentedPage(relationship: relationship)
+      .navigationDestination(isPresented: relationsPresented) {
+        if let relationKind {
+          UserRelationsView(
+            userID: viewModel.userID,
+            initialKind: relationKind,
+            accountAccess: accountAccess,
+            service: service,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository
+          )
+        }
       }
-    }
-    .navigationDestination(isPresented: userReplyNavigationPresented) {
-      if let target = userReplyNavigationTarget {
-        userReplyDestination(for: target)
-      } else {
-        EmptyView()
+      .navigationDestination(isPresented: threadNavigationPresented) {
+        if let request = threadNavigationRequest {
+          threadDestination(request)
+        } else {
+          EmptyView()
+        }
       }
-    }
-    .task { viewModel.loadIfNeeded() }
-    .task { await accountIdentity.resolve(access: accountAccess) }
-    .task(id: selectedActivity) {
-      if selectedActivity == .replies {
-        repliesViewModel.loadIfNeeded()
+      .navigationDestination(isPresented: userReplyNavigationPresented) {
+        if let target = userReplyNavigationTarget {
+          userReplyDestination(for: target)
+        } else {
+          EmptyView()
+        }
       }
-    }
-    .onDisappear {
-      interactionRestrictionsPresentation = nil
-      accountIdentity.invalidate()
-      viewModel.cancel()
-      repliesViewModel.cancel()
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
-      let token = accountIdentity.beginResolution()
-      Task {
-        @MainActor in
-        await accountIdentity.resolve(access: accountAccess, ifCurrent: token)
+  }
+
+  private func observedPage(relationship: UserProfileRelationshipPresentation?) -> some View {
+    navigablePage(relationship: relationship)
+      .onAppear { activityViewModel.activate() }
+      .task { await accountIdentity.resolve(access: accountAccess) }
+      .onChange(of: activityViewModel.selectedSection) { _ in
+        resumeVisiblePagination()
       }
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
-      Task { @MainActor in
-        viewModel.reloadThreadsAfterContentFilterChange()
-        repliesViewModel.reloadAfterContentFilterChange()
+      .onChange(of: activityViewModel.isActive) { active in
+        if active { resumeVisiblePagination() }
       }
-    }
+      .onDisappear {
+        interactionRestrictionsPresentation = nil
+        accountIdentity.invalidate()
+        activityViewModel.deactivate()
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+        let token = accountIdentity.beginResolution()
+        Task {
+          @MainActor in
+          await accountIdentity.resolve(access: accountAccess, ifCurrent: token)
+        }
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
+        Task { @MainActor in
+          activityViewModel.invalidateContentFilters()
+        }
+      }
   }
 
   private var navigationTitle: String {
@@ -366,35 +367,87 @@ struct UserProfileView: View {
     )
   }
 
-  private var profileList: some View {
+  private var selectedActivity: Binding<UserProfileActivitySection> {
+    Binding(
+      get: { activityViewModel.selectedSection },
+      set: { if activityViewModel.isActive { activityViewModel.select($0) } })
+  }
+
+  private func profileContent(relationship: UserProfileRelationshipPresentation?) -> some View {
+    ZStack {
+      VStack(spacing: 0) {
+        activitySelector
+        ForumSectionPager(
+          sections: UserProfileActivitySection.allCases, selection: selectedActivity
+        ) { section in
+          profileList(section: section, relationship: relationship)
+        }
+      }
+      .opacity(viewModel.profile == nil ? 0 : 1)
+      .allowsHitTesting(viewModel.profile != nil)
+      .accessibilityHidden(viewModel.profile == nil)
+      if viewModel.profile == nil {
+        initialProfileState
+      }
+    }
+  }
+
+  private var activitySelector: some View {
+    Picker("公开动态", selection: selectedActivity) {
+      ForEach(UserProfileActivitySection.allCases) { section in
+        Text(section.title)
+          .tag(section)
+          .accessibilityIdentifier("user-profile-section-\(section.rawValue)")
+      }
+    }
+    .pickerStyle(.segmented)
+    .accessibilityLabel("公开动态")
+    .padding(.horizontal, 16)
+    .padding(.vertical, 8)
+    .appRegularMaterialSurface()
+  }
+
+  @ViewBuilder
+  private var initialProfileState: some View {
+    Group {
+      switch viewModel.state {
+      case .idle, .loading:
+        ProgressView()
+      case .failed(let message):
+        ErrorStateView(message: message) {
+          if activityViewModel.isActive { activityViewModel.retryProfile() }
+        }
+        .accessibilityIdentifier("user-profile-initial-retry")
+      case .loaded:
+        EmptyView()
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .appPageSurface()
+  }
+
+  private func profileList(
+    section: UserProfileActivitySection,
+    relationship: UserProfileRelationshipPresentation?
+  ) -> some View {
     List {
       if let profile = viewModel.profile {
+        profileRefreshStatus(section: section)
         UserProfileHeader(
           profile: profile,
-          accountAccess: accountAccess,
+          relationship: relationship,
           onOpenPortrait: {
             portraitPresentation = UserProfilePortraitPresentation(profile: profile)
           },
           onOpenFollowing: { relationKind = .following },
           onOpenFollowers: { relationKind = .followers }
         )
-          .listRowSeparator(.hidden)
+        .listRowSeparator(.hidden)
 
         likedForumPreview(profile)
       }
 
-      Section {
-        Picker("公开动态", selection: $selectedActivity) {
-          ForEach(UserProfileActivity.allCases) { activity in
-            Text(activity.title).tag(activity)
-          }
-        }
-        .pickerStyle(.segmented)
-        .accessibilityLabel("公开动态")
-      }
-      .listRowSeparator(.hidden)
-
-      if selectedActivity == .threads {
+      if section == .threads {
         publicThreadsSection
       } else {
         publicRepliesSection
@@ -403,7 +456,28 @@ struct UserProfileView: View {
     .environment(\.defaultMinListRowHeight, 1)
     .listStyle(.plain)
     .appScrollableSurface()
-    .refreshable { await refresh() }
+    .accessibilityIdentifier("user-profile-\(section.rawValue)-list")
+    .refreshable {
+      if isActive(section) { await activityViewModel.refresh() }
+    }
+  }
+
+  @ViewBuilder
+  private func profileRefreshStatus(section: UserProfileActivitySection) -> some View {
+    if viewModel.isRefreshingProfile {
+      HStack {
+        ProgressView().controlSize(.small)
+        Text("正在刷新用户资料").foregroundStyle(.secondary)
+      }
+      .font(.footnote)
+      .listRowSeparator(.hidden)
+    } else if let message = viewModel.profileRefreshError {
+      LoadMoreErrorView(message: message) {
+        if isActive(section) { activityViewModel.retryProfile() }
+      }
+      .accessibilityIdentifier("user-profile-refresh-retry")
+      .listRowSeparator(.hidden)
+    }
   }
 
   private var publicThreadsSection: some View {
@@ -417,8 +491,10 @@ struct UserProfileView: View {
         }
         .listRowSeparator(.hidden)
       case .failed(let message):
-        ErrorStateView(message: message, retry: viewModel.retryInitialThreads)
-          .listRowSeparator(.hidden)
+        ErrorStateView(message: message) {
+          if isActive(.threads) { viewModel.retryInitialThreads() }
+        }
+        .listRowSeparator(.hidden)
       case .loaded:
         Group {
           if viewModel.isActivityHidden {
@@ -449,6 +525,11 @@ struct UserProfileView: View {
                 )
               }
               .frame(minHeight: 44)
+              .onAppear {
+                visibleThreadIDs.insert(thread.id)
+                if isActive(.threads) { viewModel.loadMoreIfNeeded(current: thread) }
+              }
+              .onDisappear { visibleThreadIDs.remove(thread.id) }
             }
           }
 
@@ -461,7 +542,13 @@ struct UserProfileView: View {
               .listRowInsets(EdgeInsets())
               .listRowSeparator(.hidden)
               .accessibilityHidden(true)
-              .onAppear { viewModel.loadMoreIfNeeded(current: lastThread) }
+              .onAppear {
+                visibleThreadTailID = lastThread.id
+                if isActive(.threads) { viewModel.loadMoreIfNeeded(current: lastThread) }
+              }
+              .onDisappear {
+                if visibleThreadTailID == lastThread.id { visibleThreadTailID = nil }
+              }
           }
 
           if viewModel.isLoadingMore {
@@ -472,8 +559,10 @@ struct UserProfileView: View {
             }
             .listRowSeparator(.hidden)
           } else if let message = viewModel.loadMoreError {
-            LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
-              .listRowSeparator(.hidden)
+            LoadMoreErrorView(message: message) {
+              if isActive(.threads) { viewModel.retryLoadMore() }
+            }
+            .listRowSeparator(.hidden)
           }
         }
       }
@@ -497,8 +586,10 @@ struct UserProfileView: View {
         }
         .listRowSeparator(.hidden)
       case .failed(let message):
-        ErrorStateView(message: message, retry: repliesViewModel.reload)
-          .listRowSeparator(.hidden)
+        ErrorStateView(message: message) {
+          if isActive(.replies) { repliesViewModel.reload() }
+        }
+        .listRowSeparator(.hidden)
       case .loaded:
         if repliesViewModel.isActivityHidden {
           Label("该用户未公开回复", systemImage: "eye.slash")
@@ -525,6 +616,11 @@ struct UserProfileView: View {
               }
             }
             .frame(minHeight: 44)
+            .onAppear {
+              visibleReplyIDs.insert(reply.id)
+              if isActive(.replies) { repliesViewModel.loadMoreIfNeeded(current: reply) }
+            }
+            .onDisappear { visibleReplyIDs.remove(reply.id) }
           }
         }
 
@@ -537,7 +633,13 @@ struct UserProfileView: View {
             .listRowInsets(EdgeInsets())
             .listRowSeparator(.hidden)
             .accessibilityHidden(true)
-            .onAppear { repliesViewModel.loadMoreIfNeeded(current: lastReply) }
+            .onAppear {
+              visibleReplyTailID = lastReply.id
+              if isActive(.replies) { repliesViewModel.loadMoreIfNeeded(current: lastReply) }
+            }
+            .onDisappear {
+              if visibleReplyTailID == lastReply.id { visibleReplyTailID = nil }
+            }
         }
 
         if repliesViewModel.isLoadingMore {
@@ -548,8 +650,10 @@ struct UserProfileView: View {
           }
           .listRowSeparator(.hidden)
         } else if let message = repliesViewModel.loadMoreError {
-          LoadMoreErrorView(message: message, retry: repliesViewModel.retryLoadMore)
-            .listRowSeparator(.hidden)
+          LoadMoreErrorView(message: message) {
+            if isActive(.replies) { repliesViewModel.retryLoadMore() }
+          }
+          .listRowSeparator(.hidden)
         }
       }
     } header: {
@@ -586,10 +690,25 @@ struct UserProfileView: View {
     }
   }
 
-  private func refresh() async {
-    await viewModel.refresh()
-    if selectedActivity == .replies {
-      await repliesViewModel.refresh()
+  private func isActive(_ section: UserProfileActivitySection) -> Bool {
+    activityViewModel.isActive && activityViewModel.selectedSection == section
+  }
+
+  private func resumeVisiblePagination() {
+    guard activityViewModel.isActive else { return }
+    switch activityViewModel.selectedSection {
+    case .threads:
+      if let last = viewModel.threads.last,
+        visibleThreadIDs.contains(last.id) || visibleThreadTailID == last.id
+      {
+        viewModel.loadMoreIfNeeded(current: last)
+      }
+    case .replies:
+      if let last = repliesViewModel.replies.last,
+        visibleReplyIDs.contains(last.id) || visibleReplyTailID == last.id
+      {
+        repliesViewModel.loadMoreIfNeeded(current: last)
+      }
     }
   }
 
@@ -707,7 +826,7 @@ struct UserProfileView: View {
 
 private struct UserProfileHeader: View {
   let profile: BrowseUserProfile
-  let accountAccess: AccountAccess?
+  let relationship: UserProfileRelationshipPresentation?
   let onOpenPortrait: () -> Void
   let onOpenFollowing: () -> Void
   let onOpenFollowers: () -> Void
@@ -776,12 +895,8 @@ private struct UserProfileHeader: View {
           .foregroundStyle(.secondary)
         }
         Spacer(minLength: 8)
-        if let accountAccess {
-          UserRelationshipControl(
-            targetUserID: profile.id,
-            targetName: profile.preferredName,
-            access: accountAccess
-          )
+        if let relationship {
+          UserRelationshipControl(presentation: relationship)
         }
       }
 
@@ -1097,13 +1212,29 @@ private struct UserInteractionRestrictionsSheet: View {
   }
 }
 
-private struct UserRelationshipControl: View {
+private struct UserProfileRelationshipPresentation {
+  let state: UserRelationshipState
+  let onRequestFollowed: (Bool) -> Void
+  let onRetry: () -> Void
+}
+
+/// One owner spans both retained activity pages. Headers only render its state;
+/// changing pages must not create another relationship read or dialog owner.
+private struct UserProfileRelationshipOwner<Content: View>: View {
   @StateObject private var viewModel: UserRelationshipViewModel
   @State private var pendingFollowedState: Bool?
+  @State private var reloadTask: Task<Void, Never>?
   private let targetName: String
+  private let isActive: Bool
+  private let content: (UserProfileRelationshipPresentation) -> Content
 
-  init(targetUserID: Int64, targetName: String, access: AccountAccess) {
+  init(
+    targetUserID: Int64, targetName: String, access: AccountAccess, isActive: Bool,
+    @ViewBuilder content: @escaping (UserProfileRelationshipPresentation) -> Content
+  ) {
     self.targetName = targetName
+    self.isActive = isActive
+    self.content = content
     _viewModel = StateObject(
       wrappedValue: UserRelationshipViewModel(
         targetUserID: targetUserID,
@@ -1113,59 +1244,95 @@ private struct UserRelationshipControl: View {
   }
 
   var body: some View {
-    control
-      .task { await viewModel.loadIfNeeded() }
-      .onDisappear {
+    content(
+      UserProfileRelationshipPresentation(
+        state: viewModel.state,
+        onRequestFollowed: { if isActive { pendingFollowedState = $0 } },
+        onRetry: retryRelationship
+      )
+    )
+    .task(id: isActive) {
+      guard isActive, !Task.isCancelled else { return }
+      await viewModel.loadIfNeeded()
+    }
+    .onChange(of: isActive) { if !$0 { deactivate() } }
+    .onDisappear(perform: deactivate)
+    .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+      pendingFollowedState = nil
+      reloadTask?.cancel()
+      let token = viewModel.invalidateForAccountSessionChange()
+      guard isActive else { return }
+      reloadTask = Task { @MainActor in
+        guard !Task.isCancelled else { return }
+        await viewModel.reloadAfterAccountSessionChange(ifCurrent: token)
+      }
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .userRelationshipDidChange)) {
+      notification in
+      guard let change = UserRelationshipChange(notification) else { return }
+      if viewModel.userRelationshipDidChange(change) {
         pendingFollowedState = nil
-        viewModel.cancel()
       }
-      .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
-        pendingFollowedState = nil
-        let token = viewModel.invalidateForAccountSessionChange()
-        Task { @MainActor in
-          await viewModel.reloadAfterAccountSessionChange(ifCurrent: token)
-        }
+    }
+    .confirmationDialog(
+      pendingFollowedState == true ? "关注这名用户？" : "取消关注这名用户？",
+      isPresented: Binding(
+        get: { isActive && pendingFollowedState != nil },
+        set: { if !$0 { pendingFollowedState = nil } }
+      ),
+      titleVisibility: .visible
+    ) {
+      if pendingFollowedState == true {
+        Button("关注") { confirmFollowedState(true) }
+      } else if pendingFollowedState == false {
+        Button("取消关注", role: .destructive) { confirmFollowedState(false) }
       }
-      .onReceive(NotificationCenter.default.publisher(for: .userRelationshipDidChange)) {
-        notification in
-        guard let change = UserRelationshipChange(notification) else { return }
-        if viewModel.userRelationshipDidChange(change) {
-          pendingFollowedState = nil
-        }
-      }
-      .confirmationDialog(
-        pendingFollowedState == true ? "关注这名用户？" : "取消关注这名用户？",
-        isPresented: Binding(
-          get: { pendingFollowedState != nil },
-          set: { if !$0 { pendingFollowedState = nil } }
-        ),
-        titleVisibility: .visible
-      ) {
-        if pendingFollowedState == true {
-          Button("关注") { confirmFollowedState(true) }
-        } else if pendingFollowedState == false {
-          Button("取消关注", role: .destructive) { confirmFollowedState(false) }
-        }
-        Button("取消", role: .cancel) { pendingFollowedState = nil }
-      } message: {
-        Text("这会修改当前贴吧账户对“\(targetName)”的关注状态。")
-      }
-      .alert(
-        "无法更新用户关注",
-        isPresented: Binding(
-          get: { viewModel.errorMessage != nil },
-          set: { if !$0 { viewModel.dismissError() } }
-        )
-      ) {
-        Button("好", role: .cancel) { viewModel.dismissError() }
-      } message: {
-        Text(viewModel.errorMessage ?? "无法完成用户关注操作。")
-      }
+      Button("取消", role: .cancel) { pendingFollowedState = nil }
+    } message: {
+      Text("这会修改当前贴吧账户对“\(targetName)”的关注状态。")
+    }
+    .alert(
+      "无法更新用户关注",
+      isPresented: Binding(
+        get: { isActive && viewModel.errorMessage != nil },
+        set: { if !$0 { viewModel.dismissError() } }
+      )
+    ) {
+      Button("好", role: .cancel) { viewModel.dismissError() }
+    } message: {
+      Text(viewModel.errorMessage ?? "无法完成用户关注操作。")
+    }
   }
 
+  private func deactivate() {
+    pendingFollowedState = nil
+    reloadTask?.cancel()
+    reloadTask = nil
+    viewModel.cancel()
+  }
+
+  private func retryRelationship() {
+    guard isActive else { return }
+    reloadTask?.cancel()
+    reloadTask = Task { @MainActor in
+      guard !Task.isCancelled else { return }
+      await viewModel.reload()
+    }
+  }
+
+  private func confirmFollowedState(_ isFollowed: Bool) {
+    pendingFollowedState = nil
+    guard isActive else { return }
+    Task { @MainActor in await viewModel.setFollowed(isFollowed) }
+  }
+}
+
+private struct UserRelationshipControl: View {
+  let presentation: UserProfileRelationshipPresentation
+
   @ViewBuilder
-  private var control: some View {
-    switch viewModel.state {
+  var body: some View {
+    switch presentation.state {
     case .idle, .hidden, .signedOut:
       EmptyView()
     case .loading, .mutating:
@@ -1176,7 +1343,7 @@ private struct UserRelationshipControl: View {
     case .ready(let isFollowed):
       if isFollowed {
         Button {
-          pendingFollowedState = false
+          presentation.onRequestFollowed(false)
         } label: {
           Label("已关注", systemImage: "person.crop.circle.badge.checkmark")
         }
@@ -1184,7 +1351,7 @@ private struct UserRelationshipControl: View {
         .accessibilityLabel("取消关注用户")
       } else {
         Button {
-          pendingFollowedState = true
+          presentation.onRequestFollowed(true)
         } label: {
           Label("关注", systemImage: "person.badge.plus")
         }
@@ -1193,7 +1360,7 @@ private struct UserRelationshipControl: View {
       }
     case .failed:
       Button {
-        Task { @MainActor in await viewModel.reload() }
+        presentation.onRetry()
       } label: {
         Image(systemName: "arrow.clockwise")
           .frame(width: 24, height: 24)
@@ -1202,11 +1369,6 @@ private struct UserRelationshipControl: View {
       .accessibilityLabel("重试读取用户关注状态")
       .help("重试读取用户关注状态")
     }
-  }
-
-  private func confirmFollowedState(_ isFollowed: Bool) {
-    pendingFollowedState = nil
-    Task { @MainActor in await viewModel.setFollowed(isFollowed) }
   }
 }
 
