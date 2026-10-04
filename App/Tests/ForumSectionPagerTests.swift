@@ -140,6 +140,32 @@ final class ForumSectionPagerTests: XCTestCase {
     XCTAssertEqual(pager.contentOffset.x, pager.bounds.width * 3, accuracy: 0.5)
   }
 
+  func testRepeatedInitialRightToLeftTransitionKeepsPagingBridgeConfigured() async throws {
+    // Reconfiguring SwiftUI's existing scroll view can reset native paging.
+    // Repeat fresh mounts because the order of layout and configuration varies.
+    for iteration in 0..<20 {
+      let harness = try ForumSectionPagerTestHarness(sections: [0, 1, 2, 3])
+      defer { harness.close() }
+      let first = try await visiblePage(0, in: harness)
+      first.setContentOffset(CGPoint(x: 0, y: 233), animated: false)
+      harness.selection.layoutDirection = .rightToLeft
+      try await harness.settleLayout()
+      let sameFirst = try await visiblePage(0, in: harness)
+      XCTAssertTrue(sameFirst === first, "Iteration \(iteration)")
+      XCTAssertEqual(sameFirst.contentOffset.y, 233, accuracy: 0.5)
+      let pager = try await pagingScroll(containing: sameFirst, in: harness)
+      XCTAssertEqual(pager.contentOffset.x, pager.bounds.width * 3, accuracy: 0.5)
+      pager.setContentOffset(.zero, animated: false)
+      try await waitForSelection(3, in: harness)
+      _ = try await visiblePage(3, in: harness)
+      harness.selection.layoutDirection = .leftToRight
+      try await harness.settleLayout()
+      _ = try await visiblePage(3, in: harness)
+      XCTAssertEqual(harness.selection.value, 3)
+      XCTAssertEqual(pager.contentOffset.x, pager.bounds.width * 3, accuracy: 0.5)
+    }
+  }
+
   private func pagingScroll(
     containing view: UIView, in harness: ForumSectionPagerTestHarness,
     file: StaticString = #filePath, line: UInt = #line
