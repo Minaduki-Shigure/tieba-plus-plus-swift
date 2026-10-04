@@ -74,7 +74,6 @@ struct NotificationsView: View {
       ForumSectionPager(sections: InboxKind.allCases, selection: selectedKind) { kind in
         NotificationsPageView(
           model: viewModel.model(for: kind),
-          isActive: viewModel.isActive(kind),
           onRefresh: { await viewModel.refresh(kind: kind) }
         ) { presentation in
           interactiveMessageRow(presentation, kind: kind)
