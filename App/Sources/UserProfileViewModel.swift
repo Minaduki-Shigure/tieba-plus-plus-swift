@@ -6,6 +6,8 @@ final class UserProfileViewModel: ObservableObject {
   @Published private(set) var profile: BrowseUserProfile?
   @Published private(set) var threads: [BrowseThread] = []
   @Published private(set) var state: LoadState = .idle
+  @Published private(set) var isRefreshingProfile = false
+  @Published private(set) var profileRefreshError: String?
   @Published private(set) var threadState: LoadState = .idle
   @Published private(set) var isLoadingMore = false
   @Published private(set) var loadMoreError: String?
@@ -48,9 +50,43 @@ final class UserProfileViewModel: ObservableObject {
   }
 
   func refresh() async {
+    guard !Task.isCancelled else { return }
     let tasks = beginFullReload()
     await tasks.profile.value
     await tasks.threads.value
+  }
+
+  /// Shared profile data has its own lifetime, independent of the visible
+  /// public-activity page. Creating the other page must not fetch threads.
+  func loadProfileIfNeeded() {
+    guard state == .idle else { return }
+    _ = beginProfileRefresh()
+  }
+
+  func loadThreadsIfNeeded() {
+    guard threadState == .idle else { return }
+    reloadThreads()
+  }
+
+  @discardableResult
+  func beginProfileRefresh() -> Task<Void, Never> {
+    cancelProfileLoad()
+    profileRefreshError = nil
+    isRefreshingProfile = profile != nil
+    state = profile == nil ? .loading : .loaded
+    return loadProfile()
+  }
+
+  @discardableResult
+  func beginThreadsRefresh() -> Task<Void, Never> {
+    resetThreads()
+    threadState = .loading
+    return loadInitialThreads()
+  }
+
+  func invalidateThreads() {
+    resetThreads()
+    threadState = .idle
   }
 
   func retryInitialThreads() {
@@ -87,15 +123,20 @@ final class UserProfileViewModel: ObservableObject {
   }
 
   func cancel() {
-    let shouldRearmPagination = !threads.isEmpty && isLoadingMore
     cancelProfileLoad()
+    isRefreshingProfile = false
+    if state == .loading {
+      state = profile == nil ? .idle : .loaded
+    }
+    cancelThreads()
+  }
+
+  func cancelThreads() {
+    let shouldRearmPagination = !threads.isEmpty && isLoadingMore
     cancelThreadLoad()
     isLoadingMore = false
     if shouldRearmPagination {
       threadPaginationEpoch &+= 1
-    }
-    if state == .loading {
-      state = profile == nil ? .idle : .loaded
     }
     if threadState == .loading {
       threadState = .idle
@@ -106,20 +147,13 @@ final class UserProfileViewModel: ObservableObject {
     profile: Task<Void, Never>,
     threads: Task<Void, Never>
   ) {
-    cancelProfileLoad()
-    resetThreads()
-    profile = nil
-    state = .loading
-    threadState = .loading
-    let profileTask = loadProfile()
-    let threadTask = loadInitialThreads()
+    let profileTask = beginProfileRefresh()
+    let threadTask = beginThreadsRefresh()
     return (profileTask, threadTask)
   }
 
   private func reloadThreads() {
-    resetThreads()
-    threadState = .loading
-    _ = loadInitialThreads()
+    _ = beginThreadsRefresh()
   }
 
   private func resetThreads() {
@@ -142,6 +176,7 @@ final class UserProfileViewModel: ObservableObject {
       defer {
         if generation == profileGeneration {
           profileTask = nil
+          isRefreshingProfile = false
         }
       }
       do {
@@ -154,7 +189,11 @@ final class UserProfileViewModel: ObservableObject {
         return
       } catch {
         guard generation == profileGeneration, !Task.isCancelled else { return }
-        state = .failed(error.localizedDescription)
+        if profile == nil {
+          state = .failed(error.localizedDescription)
+        } else {
+          profileRefreshError = error.localizedDescription
+        }
       }
     }
     profileTask = task
