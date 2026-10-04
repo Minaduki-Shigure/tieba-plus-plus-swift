@@ -14,8 +14,10 @@ final class ForumViewModel: ObservableObject {
   @Published private(set) var selectedChannelSort: ForumChannelSort = .unspecified
 
   let forumName: String
+  var onMetadataLoaded: (@MainActor (ForumMetadataSnapshot) -> Void)?
 
   private let service: any BrowseService
+  private let sectionID: ForumSectionID?
   private var currentPage = 0
   private var hasMore = true
   private var channelCursor: Int64?
@@ -26,12 +28,33 @@ final class ForumViewModel: ObservableObject {
   init(
     forumName: String,
     service: any BrowseService,
-    options: ForumBrowseOptions = ForumBrowseOptions()
+    options: ForumBrowseOptions = ForumBrowseOptions(),
+    sectionID: ForumSectionID? = nil,
+    metadata: ForumMetadataSnapshot? = nil
   ) {
     self.forumName = forumName
-    self.forum = .placeholder(name: forumName)
+    self.forum = metadata?.forum ?? .placeholder(name: forumName)
     self.service = service
-    self.options = options
+    self.sectionID = sectionID
+    var initialOptions = options
+    switch sectionID {
+    case .latest, .channel:
+      initialOptions.featuredOnly = false
+      initialOptions.featuredClassificationID = nil
+    case .featured:
+      initialOptions.featuredOnly = true
+    case nil:
+      break
+    }
+    self.options = initialOptions
+    if let metadata { channels = metadata.channels }
+    if case .channel(let id) = sectionID {
+      selectedChannelID = id
+      if let channel = channels.first(where: { $0.id == id }) {
+        selectedChannelSort = channel.sortOptions.first?.sort ?? .unspecified
+        channelSortMemory[id] = selectedChannelSort
+      }
+    }
   }
 
   func loadIfNeeded() {
@@ -40,6 +63,13 @@ final class ForumViewModel: ObservableObject {
   }
 
   func reload() {
+    invalidateContents()
+    state = .loading
+    load(page: 1, replacing: true)
+  }
+
+  /// Drop stale rows and cursors without loading an inactive retained page.
+  func invalidateContents() {
     invalidateCurrentLoad()
     currentPage = 0
     hasMore = true
@@ -47,8 +77,31 @@ final class ForumViewModel: ObservableObject {
     isLoadingMore = false
     loadMoreError = nil
     threads = []
-    state = .loading
-    load(page: 1, replacing: true)
+    state = .idle
+  }
+
+  /// Reconcile a complete catalog without changing this page's identity or
+  /// making a request. The coordinator decides which invalidated page loads.
+  func synchronizeMetadata(_ snapshot: ForumMetadataSnapshot) {
+    let previousForumID = forum.id
+    let previousSort = selectedChannelSort
+    let previousClassification = options.featuredClassificationID
+    forum = snapshot.forum
+    applyChannels(snapshot.channels)
+    if case .channel(let id) = sectionID {
+      // Removed fixed pages can no longer fall back to the unrelated FRS list.
+      selectedChannelID = id
+    }
+    if options.featuredOnly, let classification = options.featuredClassificationID,
+      !snapshot.forum.featuredClassifications.contains(where: { $0.id == classification })
+    {
+      options.featuredClassificationID = nil
+    }
+    if previousForumID != forum.id || previousSort != selectedChannelSort
+      || previousClassification != options.featuredClassificationID
+    {
+      invalidateContents()
+    }
   }
 
   func refresh() async {
@@ -64,6 +117,7 @@ final class ForumViewModel: ObservableObject {
   }
 
   func setChannelID(_ channelID: Int?) {
+    guard sectionID == nil else { return }
     let channel = channelID.flatMap { requestedID in
       channels.first { $0.id == requestedID }
     }
@@ -98,6 +152,7 @@ final class ForumViewModel: ObservableObject {
   }
 
   func setFeaturedOnly(_ featuredOnly: Bool) {
+    guard sectionID == nil else { return }
     guard selectedChannelID == nil else { return }
     guard options.featuredOnly != featuredOnly else { return }
     options.featuredOnly = featuredOnly
@@ -108,6 +163,7 @@ final class ForumViewModel: ObservableObject {
   }
 
   func setFeaturedClassificationID(_ classificationID: Int?) {
+    guard sectionID == nil || sectionID == .featured else { return }
     guard selectedChannelID == nil else { return }
     guard options.featuredClassificationID != classificationID else { return }
     options.featuredOnly = true
@@ -163,6 +219,9 @@ final class ForumViewModel: ObservableObject {
         }
       }
       do {
+        if case .channel = sectionID, selectedChannel == nil || forum.id <= 0 {
+          throw BrowseError.unavailable("当前频道信息不可用，请返回最新列表刷新后重试。")
+        }
         if let selectedChannel, forum.id > 0 {
           let response = try await service.forumChannelThreads(
             forumID: forum.id,
@@ -204,6 +263,9 @@ final class ForumViewModel: ObservableObject {
           threads = replacing ? response.threads : merge(threads, response.threads)
         }
         state = .loaded
+        if selectedChannel == nil {
+          onMetadataLoaded?(ForumMetadataSnapshot(forum: self.forum, channels: channels))
+        }
       } catch is CancellationError {
         return
       } catch {
