@@ -17,6 +17,7 @@ struct NotificationsView: View {
   @Environment(\.hidesReplyEntryPoints) private var hidesReplyEntryPoints
   @Environment(\.scenePhase) private var scenePhase
   @StateObject private var viewModel: NotificationsActivityViewModel
+  @State private var browseRoute: NotificationBrowseRoute?
   @State private var replyRouteState = NotificationsReplyRouteState()
   @State private var replyNotice: String?
   @State private var isPresented = false
@@ -101,6 +102,14 @@ struct NotificationsView: View {
         notificationReplyDestination(for: replyRoute)
       }
     }
+    .navigationDestination(isPresented: browseRoutePresented) {
+      if let browseRoute {
+        switch browseRoute {
+        case .message(let message): notificationDestination(for: message)
+        case .sender(let route): notificationSenderDestination(for: route)
+        }
+      }
+    }
     .onAppear {
       isPresented = true
       synchronizeActivation()
@@ -167,14 +176,16 @@ struct NotificationsView: View {
         VStack(alignment: .leading, spacing: 5) {
           notificationMessageHeader(message: message, route: senderRoute)
 
-          NavigationLink {
-            notificationDestination(for: message)
+          Button {
+            guard acceptsAutomaticRequests, viewModel.isActive(kind) else { return }
+            browseRoute = .message(message)
           } label: {
             NotificationMessageBody(message: message)
               .frame(maxWidth: .infinity, minHeight: 44, alignment: .topLeading)
               .contentShape(Rectangle())
           }
-          .buttonStyle(.plain)
+          .buttonStyle(.borderless)
+          .foregroundStyle(.primary)
         }
         .padding(.vertical, 3)
       }
@@ -203,14 +214,15 @@ struct NotificationsView: View {
     route: NotificationSenderProfileRoute?
   ) -> some View {
     if let route {
-      NavigationLink {
-        notificationSenderDestination(for: route)
+      Button {
+        guard acceptsAutomaticRequests else { return }
+        browseRoute = .sender(route)
       } label: {
         NotificationMessageAvatar(message: message)
           .frame(width: 44, height: 44)
           .contentShape(Rectangle())
       }
-      .buttonStyle(.plain)
+      .buttonStyle(.borderless)
       .accessibilityLabel("查看 \(message.sender.preferredName) 的主页")
     } else {
       NotificationMessageAvatar(message: message)
@@ -224,14 +236,15 @@ struct NotificationsView: View {
     route: NotificationSenderProfileRoute?
   ) -> some View {
     if let route {
-      NavigationLink {
-        notificationSenderDestination(for: route)
+      Button {
+        guard acceptsAutomaticRequests else { return }
+        browseRoute = .sender(route)
       } label: {
         NotificationMessageSenderName(message: message)
           .frame(minWidth: 44, minHeight: 44, alignment: .leading)
           .contentShape(Rectangle())
       }
-      .buttonStyle(.plain)
+      .buttonStyle(.borderless)
       .accessibilityLabel("查看 \(message.sender.preferredName) 的主页")
     } else {
       NotificationMessageSenderName(message: message)
@@ -359,6 +372,12 @@ struct NotificationsView: View {
     )
   }
 
+  private var browseRoutePresented: Binding<Bool> {
+    Binding(
+      get: { browseRoute != nil },
+      set: { if !$0 { browseRoute = nil } })
+  }
+
   private var replyEntriesVisible: Bool {
     ReplyEntryVisibilityPolicy(
       preferenceHidden: hidesReplyEntryPoints,
@@ -424,6 +443,14 @@ struct NotificationsView: View {
     .padding(.vertical, 10)
     .appRegularMaterialSurface()
   }
+}
+
+/// Multiple destination-style NavigationLinks in one native List row can push
+/// both the sender and the body destination. Explicit buttons select exactly
+/// one parent-owned route and keep those hit regions independent.
+private enum NotificationBrowseRoute {
+  case message(InboxMessage)
+  case sender(NotificationSenderProfileRoute)
 }
 
 struct NotificationSenderProfileRoute: Hashable, Sendable {
