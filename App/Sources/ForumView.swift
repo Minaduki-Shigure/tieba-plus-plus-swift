@@ -3,7 +3,7 @@ import Foundation
 import SwiftUI
 
 private enum ForumScrollTarget: Hashable {
-  case top
+  case top(ForumSectionID)
 }
 
 private enum ForumNavigationDestination {
@@ -19,9 +19,12 @@ struct ForumView: View {
   let favoritesRepository: any LocalFavoritesRepository
   let searchHistoryRepository: any ForumSearchHistoryRepository
 
-  @StateObject private var viewModel: ForumViewModel
+  @StateObject private var sectionsViewModel: ForumSectionsViewModel
   @State private var navigationDestination: ForumNavigationDestination?
-  @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @State private var isVisible = false
+  @State private var checkInViewModel: ForumCheckInViewModel?
+  @State private var checkInUpdateTasks: [UUID: Task<Void, Never>] = [:]
+  @State private var scrollToTopRequests: [ForumSectionID: UInt64] = [:]
   @Environment(\.accountAccess) private var accountAccess
   @AppStorage(AppPreferenceKey.forumPrimaryAction)
   private var forumPrimaryAction = ForumPrimaryAction.defaultValue.rawValue
@@ -38,8 +41,8 @@ struct ForumView: View {
     self.historyRepository = historyRepository
     self.favoritesRepository = favoritesRepository
     self.searchHistoryRepository = searchHistoryRepository
-    _viewModel = StateObject(
-      wrappedValue: ForumViewModel(
+    _sectionsViewModel = StateObject(
+      wrappedValue: ForumSectionsViewModel(
         forumName: forumName,
         service: service,
         options: ForumBrowseOptions(
@@ -49,20 +52,32 @@ struct ForumView: View {
     )
   }
 
+  private var viewModel: ForumViewModel { sectionsViewModel.currentModel }
+
+  private var selectedSection: Binding<ForumSectionID> {
+    Binding(
+      get: { sectionsViewModel.selectedSectionID },
+      set: { sectionsViewModel.select($0) })
+  }
+
   var body: some View {
-    ScrollViewReader { proxy in
-      Group {
-        if viewModel.threads.isEmpty {
-          switch viewModel.state {
-          case .idle, .loading:
-            ProgressView()
-          case .failed(let message):
-            ErrorStateView(message: message, retry: viewModel.reload)
-          case .loaded:
-            EmptyStateView(title: "暂无帖子", systemImage: "text.bubble")
-          }
-        } else {
-          threadList
+    Group {
+      ForumSectionPager(
+        sections: sectionsViewModel.sections.map(\.id), selection: selectedSection
+      ) { section in
+        if let model = sectionsViewModel.model(for: section) {
+          ForumSectionPage(
+            sectionID: section,
+            viewModel: model,
+            isActive: isVisible && section == sectionsViewModel.selectedSectionID,
+            scrollToTopRequestID: scrollToTopRequests[section, default: 0],
+            checkInViewModel: checkInViewModel,
+            onRetryCheckIn: { updateCheckIn { await $0.reload() } },
+            service: service,
+            historyRepository: historyRepository,
+            favoritesRepository: favoritesRepository,
+            searchHistoryRepository: searchHistoryRepository,
+            onNavigate: { navigationDestination = .thread($0) })
         }
       }
       .appPageSurface(.canvas)
@@ -86,7 +101,7 @@ struct ForumView: View {
 
           if let action = primaryActionPolicy.toolbarAction {
             Button {
-              performPrimaryAction(action, proxy: proxy)
+              performPrimaryAction(action)
             } label: {
               Image(systemName: action.systemImage)
             }
@@ -115,24 +130,56 @@ struct ForumView: View {
             repository: favoritesRepository
           )
 
-          forumActionsMenu(proxy: proxy)
+          forumActionsMenu
         }
       }
       .safeAreaInset(edge: .top, spacing: 0) {
         optionsBar
       }
-      .task { viewModel.loadIfNeeded() }
-      .task(id: viewModel.forum.id) {
-        guard viewModel.forum.id > 0 else { return }
+      .onAppear {
+        isVisible = true
+        sectionsViewModel.activate()
+      }
+      .task(id: sectionsViewModel.forum.id) {
+        guard sectionsViewModel.forum.id > 0 else { return }
         try? await historyRepository.record(
-          .forum(ForumHistorySnapshot(forum: viewModel.forum))
+          .forum(ForumHistorySnapshot(forum: sectionsViewModel.forum))
         )
       }
-      .onDisappear(perform: viewModel.cancel)
+      .task(id: ForumCheckInLoadIdentity(target: checkInTarget, isVisible: isVisible)) {
+        await loadCheckInIfNeeded()
+      }
+      .onDisappear {
+        isVisible = false
+        sectionsViewModel.deactivate()
+        cancelCheckInUpdates()
+        // A cancelled read may not return immediately. Never reuse its loading
+        // state on a quick return; already loaded and in-flight writes survive.
+        if checkInViewModel?.state == .loading { checkInViewModel = nil }
+      }
       .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
-        Task { @MainActor in viewModel.reload() }
+        sectionsViewModel.invalidateContentFilters()
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
+        cancelCheckInUpdates()
+        updateCheckIn { await $0.accountSessionDidChange() }
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .forumMembershipDidChange)) {
+        notification in
+        guard let change = ForumMembershipChange(notification),
+          change.forumID == sectionsViewModel.forum.id
+        else { return }
+        updateCheckIn { await $0.forumMembershipDidChange(change) }
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .forumCheckInDidChange)) {
+        notification in
+        guard let change = ForumCheckInChange(notification),
+          change.forumID == sectionsViewModel.forum.id
+        else { return }
+        updateCheckIn { await $0.forumCheckInDidChange(change) }
       }
       .onChange(of: viewModel.options.sort) { sort in
+        guard sectionsViewModel.selectedSectionID == .latest else { return }
         ForumSortPreferences.save(sort, for: viewModel.forumName)
       }
       .navigationDestination(isPresented: forumNavigationPresented) {
@@ -166,8 +213,56 @@ struct ForumView: View {
   }
 
   private var membershipForumName: String {
-    let name = viewModel.forum.name.trimmingCharacters(in: .whitespacesAndNewlines)
+    let name = sectionsViewModel.forum.name.trimmingCharacters(in: .whitespacesAndNewlines)
     return name.isEmpty ? viewModel.forumName : name
+  }
+
+  private var checkInTarget: ForumCheckInTarget? {
+    guard accountAccess != nil, sectionsViewModel.forum.id > 0 else { return nil }
+    return ForumCheckInTarget(
+      forumID: sectionsViewModel.forum.id, forumName: membershipForumName)
+  }
+
+  private func loadCheckInIfNeeded() async {
+    guard isVisible, !Task.isCancelled else { return }
+    guard let target = checkInTarget, let accountAccess else {
+      checkInViewModel = nil
+      return
+    }
+    // One account-bound check-in state belongs to the forum, not to each
+    // neighboring pager page. Preloading a page must not duplicate these reads.
+    let model: ForumCheckInViewModel
+    if let existing = checkInViewModel,
+      existing.forumID == target.forumID, existing.forumName == target.forumName
+    {
+      model = existing
+    } else {
+      model = ForumCheckInViewModel(
+        forumID: target.forumID, forumName: target.forumName, access: accountAccess)
+      checkInViewModel = model
+    }
+    await model.loadIfNeeded()
+  }
+
+  private func updateCheckIn(
+    _ update: @escaping @MainActor (ForumCheckInViewModel) async -> Void
+  ) {
+    guard isVisible else {
+      checkInViewModel = nil
+      return
+    }
+    guard let model = checkInViewModel else { return }
+    let id = UUID()
+    checkInUpdateTasks[id] = Task { @MainActor in
+      defer { checkInUpdateTasks[id] = nil }
+      guard !Task.isCancelled else { return }
+      await update(model)
+    }
+  }
+
+  private func cancelCheckInUpdates() {
+    for task in checkInUpdateTasks.values { task.cancel() }
+    checkInUpdateTasks.removeAll()
   }
 
   private var newThreadTarget: NewThreadTarget? {
@@ -220,11 +315,11 @@ struct ForumView: View {
       contents: [.text(content)],
       firstPostID: receipt.firstPostID
     )
-    viewModel.reload()
+    sectionsViewModel.invalidateContents()
     navigationDestination = .createdThread(thread)
   }
 
-  private func forumActionsMenu(proxy: ScrollViewProxy) -> some View {
+  private var forumActionsMenu: some View {
     Menu {
       if let target = newThreadTarget {
         Button {
@@ -244,7 +339,7 @@ struct ForumView: View {
       .disabled(viewModel.state == .loading)
 
       Button {
-        scrollToTop(proxy: proxy)
+        scrollToTop()
       } label: {
         Label("回到顶部", systemImage: "arrow.up.to.line")
       }
@@ -266,10 +361,7 @@ struct ForumView: View {
     .help("更多贴吧操作")
   }
 
-  private func performPrimaryAction(
-    _ action: ForumPrimaryAction,
-    proxy: ScrollViewProxy
-  ) {
+  private func performPrimaryAction(_ action: ForumPrimaryAction) {
     guard primaryActionPolicy.canPerform(action) else { return }
     switch action {
     case .newThread:
@@ -278,7 +370,7 @@ struct ForumView: View {
     case .refresh:
       refreshForum()
     case .scrollToTop:
-      scrollToTop(proxy: proxy)
+      scrollToTop()
     case .hidden:
       return
     }
@@ -291,60 +383,27 @@ struct ForumView: View {
 
   private func refreshForum() {
     guard viewModel.state != .loading else { return }
-    Task { @MainActor in await viewModel.refresh() }
+    Task { @MainActor in await sectionsViewModel.refresh() }
   }
 
-  private func scrollToTop(proxy: ScrollViewProxy) {
+  private func scrollToTop() {
     guard !viewModel.threads.isEmpty else { return }
-    proxy.scrollTo(ForumScrollTarget.top, anchor: .top)
+    scrollToTopRequests[sectionsViewModel.selectedSectionID, default: 0] &+= 1
   }
 
   private var optionsBar: some View {
     VStack(spacing: 0) {
-      if !viewModel.channels.isEmpty {
-        HStack(spacing: 10) {
-          Label("频道", systemImage: "rectangle.3.group")
-          Spacer(minLength: 0)
-          Picker(
-            "频道",
-            selection: Binding(
-              get: { viewModel.selectedChannelID },
-              set: { channelID in viewModel.setChannelID(channelID) }
-            )
-          ) {
-            Text("全部主题").tag(Int?.none)
-            ForEach(viewModel.channels) { channel in
-              Text(channel.name).tag(Optional(channel.id))
-            }
-          }
-          .pickerStyle(.menu)
-          .accessibilityIdentifier("forum-channel-picker")
-        }
-        .font(.subheadline)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .appRegularMaterialSurface()
-      }
+      ForumSectionSelector(
+        sections: sectionsViewModel.sections,
+        selectedSection: sectionsViewModel.selectedSectionID,
+        onSelect: sectionsViewModel.select)
 
       if viewModel.selectedChannelID == nil {
-        Group {
-          if AppDynamicTypeLayout.prefersExpandedControls(for: dynamicTypeSize) {
-            VStack(alignment: .leading, spacing: 8) {
-              forumSortPicker
-              forumFeaturedToggle
-            }
-          } else {
-            HStack(spacing: 12) {
-              forumSortPicker
-              forumFeaturedToggle
-                .fixedSize()
-            }
-          }
-        }
-        .font(.subheadline)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .appRegularMaterialSurface()
+        forumSortPicker
+          .font(.subheadline)
+          .padding(.horizontal, 12)
+          .padding(.vertical, 8)
+          .appRegularMaterialSurface()
       } else if viewModel.selectedChannelSortOptions.count > 1 {
         HStack(spacing: 10) {
           Label("频道排序", systemImage: "arrow.up.arrow.down")
@@ -420,17 +479,122 @@ struct ForumView: View {
     .accessibilityIdentifier("forum-sort-picker")
   }
 
-  private var forumFeaturedToggle: some View {
-    Toggle(
-      "精华",
-      isOn: Binding(
-        get: { viewModel.options.featuredOnly },
-        set: { featuredOnly in viewModel.setFeaturedOnly(featuredOnly) }
-      )
+  private func threadDestination(_ request: ThreadSummaryNavigationRequest) -> some View {
+    ThreadView(
+      thread: request.thread,
+      service: service,
+      historyRepository: historyRepository,
+      favoritesRepository: favoritesRepository,
+      searchHistoryRepository: searchHistoryRepository,
+      linkRoute: request.linkRoute,
+      initialFocus: request.initialFocus
     )
-    .toggleStyle(.switch)
-    .controlSize(.small)
-    .accessibilityIdentifier("forum-featured-toggle")
+    .id(request.destinationID)
+  }
+}
+
+private struct ForumSectionSelector: View {
+  let sections: [ForumSection]
+  let selectedSection: ForumSectionID
+  let onSelect: (ForumSectionID) -> Void
+  @Environment(\.appAccentColor) private var accentColor
+
+  var body: some View {
+    ScrollViewReader { proxy in
+      ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: 8) {
+          ForEach(sections) { section in
+            Button {
+              onSelect(section.id)
+            } label: {
+              Text(section.title)
+                .font(.subheadline.weight(section.id == selectedSection ? .semibold : .regular))
+                .fixedSize()
+                .padding(.horizontal, 12)
+                .frame(minHeight: 44)
+                .foregroundStyle(
+                  section.id == selectedSection ? accentColor.color : Color.secondary
+                )
+                .background {
+                  if section.id == selectedSection {
+                    RoundedRectangle(cornerRadius: 8)
+                      .fill(accentColor.color.opacity(0.12))
+                  }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(section.id == selectedSection ? .isSelected : [])
+            .accessibilityIdentifier("forum-section-\(identifier(section.id))")
+            .id(section.id)
+          }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+      }
+      .onChange(of: selectedSection) { section in
+        proxy.scrollTo(section, anchor: .center)
+      }
+    }
+    .appRegularMaterialSurface()
+    .accessibilityIdentifier("forum-section-selector")
+  }
+
+  private func identifier(_ id: ForumSectionID) -> String {
+    switch id {
+    case .latest: "latest"
+    case .featured: "featured"
+    case .channel(let channelID): "channel-\(channelID)"
+    }
+  }
+}
+
+private struct ForumSectionPage: View {
+  let sectionID: ForumSectionID
+  @ObservedObject var viewModel: ForumViewModel
+  let isActive: Bool
+  let scrollToTopRequestID: UInt64
+  let checkInViewModel: ForumCheckInViewModel?
+  let onRetryCheckIn: () -> Void
+  let service:
+    any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
+  let historyRepository: any BrowsingHistoryRepository
+  let favoritesRepository: any LocalFavoritesRepository
+  let searchHistoryRepository: any ForumSearchHistoryRepository
+  let onNavigate: (ThreadSummaryNavigationRequest) -> Void
+  @State private var visibleThreadIDs = Set<Int64>()
+  @State private var visibleTailID: Int64?
+
+  var body: some View {
+    ScrollViewReader { proxy in
+      Group {
+        if viewModel.threads.isEmpty {
+          switch viewModel.state {
+          case .idle, .loading:
+            ProgressView()
+          case .failed(let message):
+            ErrorStateView(message: message, retry: { if isActive { viewModel.reload() } })
+          case .loaded:
+            EmptyStateView(title: "暂无帖子", systemImage: "text.bubble")
+          }
+        } else {
+          threadList
+        }
+      }
+      .onChange(of: scrollToTopRequestID) { _ in
+        guard isActive else { return }
+        proxy.scrollTo(ForumScrollTarget.top(sectionID), anchor: .top)
+      }
+      .onChange(of: isActive) { active in
+        guard active, let last = viewModel.threads.last,
+          visibleThreadIDs.contains(last.id) || visibleTailID == last.id
+        else { return }
+        // Retained rows do not necessarily appear again when a cancelled
+        // pagination request's page becomes active. Resume only at its tail.
+        viewModel.loadMoreIfNeeded(current: last)
+      }
+    }
+    .accessibilityIdentifier("forum-section-page")
   }
 
   private var threadList: some View {
@@ -448,20 +612,12 @@ struct ForumView: View {
           ForumHeaderView(forum: viewModel.forum)
         }
         .disabled(viewModel.forum.id <= 0)
-        .id(ForumScrollTarget.top)
+        .id(ForumScrollTarget.top(sectionID))
         .listRowSeparator(.hidden)
 
-        if let accountAccess, viewModel.forum.id > 0 {
+        if let checkInViewModel {
           ForumCheckInRow(
-            forumID: viewModel.forum.id,
-            forumName: membershipForumName,
-            access: accountAccess
-          )
-          .id(
-            ForumCheckInTarget(
-              forumID: viewModel.forum.id,
-              forumName: membershipForumName
-            )
+            viewModel: checkInViewModel, isActive: isActive, onRetry: onRetryCheckIn
           )
           .listRowSeparator(.hidden)
         }
@@ -475,12 +631,14 @@ struct ForumView: View {
               thread: thread,
               mediaInteraction: .openThread,
               interactionMode: .threadFocused,
-              onNavigate: { navigationDestination = .thread($0) }
+              onNavigate: onNavigate
             )
           }
           .onAppear {
-            viewModel.loadMoreIfNeeded(current: thread)
+            visibleThreadIDs.insert(thread.id)
+            if isActive { viewModel.loadMoreIfNeeded(current: thread) }
           }
+          .onDisappear { visibleThreadIDs.remove(thread.id) }
         }
 
         if let lastThread = viewModel.threads.last {
@@ -489,7 +647,13 @@ struct ForumView: View {
             .listRowInsets(EdgeInsets())
             .listRowSeparator(.hidden)
             .accessibilityHidden(true)
-            .onAppear { viewModel.loadMoreIfNeeded(current: lastThread) }
+            .onAppear {
+              visibleTailID = lastThread.id
+              if isActive { viewModel.loadMoreIfNeeded(current: lastThread) }
+            }
+            .onDisappear {
+              if visibleTailID == lastThread.id { visibleTailID = nil }
+            }
         }
 
         if viewModel.isLoadingMore {
@@ -500,7 +664,7 @@ struct ForumView: View {
           }
           .listRowSeparator(.hidden)
         } else if let message = viewModel.loadMoreError {
-          LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
+          LoadMoreErrorView(message: message, retry: { if isActive { viewModel.retryLoadMore() } })
             .listRowSeparator(.hidden)
         }
       }
@@ -508,20 +672,7 @@ struct ForumView: View {
     }
     .listStyle(.plain)
     .appScrollableSurface(.canvas)
-    .refreshable { await viewModel.refresh() }
-  }
-
-  private func threadDestination(_ request: ThreadSummaryNavigationRequest) -> some View {
-    ThreadView(
-      thread: request.thread,
-      service: service,
-      historyRepository: historyRepository,
-      favoritesRepository: favoritesRepository,
-      searchHistoryRepository: searchHistoryRepository,
-      linkRoute: request.linkRoute,
-      initialFocus: request.initialFocus
-    )
-    .id(request.destinationID)
+    .refreshable { if isActive { await viewModel.refresh() } }
   }
 }
 
@@ -533,6 +684,11 @@ private struct ForumMembershipTarget: Hashable {
 private struct ForumCheckInTarget: Hashable {
   let forumID: Int64
   let forumName: String
+}
+
+private struct ForumCheckInLoadIdentity: Hashable {
+  let target: ForumCheckInTarget?
+  let isVisible: Bool
 }
 
 enum ForumCheckInRowVisibility {
@@ -552,35 +708,18 @@ enum ForumCheckInRowVisibility {
 }
 
 private struct ForumCheckInRow: View {
-  @StateObject private var viewModel: ForumCheckInViewModel
+  @ObservedObject var viewModel: ForumCheckInViewModel
+  let isActive: Bool
+  let onRetry: () -> Void
   @State private var isConfirmationPresented = false
-
-  init(forumID: Int64, forumName: String, access: AccountAccess) {
-    _viewModel = StateObject(
-      wrappedValue: ForumCheckInViewModel(
-        forumID: forumID,
-        forumName: forumName,
-        access: access
-      )
-    )
-  }
 
   var body: some View {
     rowContent
-      .task { await viewModel.loadIfNeeded() }
       .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
         isConfirmationPresented = false
-        Task { @MainActor in await viewModel.accountSessionDidChange() }
       }
-      .onReceive(NotificationCenter.default.publisher(for: .forumMembershipDidChange)) {
-        notification in
-        guard let change = ForumMembershipChange(notification) else { return }
-        Task { @MainActor in await viewModel.forumMembershipDidChange(change) }
-      }
-      .onReceive(NotificationCenter.default.publisher(for: .forumCheckInDidChange)) {
-        notification in
-        guard let change = ForumCheckInChange(notification) else { return }
-        Task { @MainActor in await viewModel.forumCheckInDidChange(change) }
+      .onChange(of: isActive) { active in
+        if !active { isConfirmationPresented = false }
       }
       .confirmationDialog(
         "签到 \(viewModel.forumName)吧？",
@@ -589,6 +728,7 @@ private struct ForumCheckInRow: View {
       ) {
         Button("签到") {
           isConfirmationPresented = false
+          guard isActive else { return }
           Task { @MainActor in await viewModel.checkIn() }
         }
         Button("取消", role: .cancel) { isConfirmationPresented = false }
@@ -598,8 +738,8 @@ private struct ForumCheckInRow: View {
       .alert(
         "无法完成贴吧签到",
         isPresented: Binding(
-          get: { viewModel.errorMessage != nil },
-          set: { if !$0 { viewModel.dismissError() } }
+          get: { isActive && viewModel.errorMessage != nil },
+          set: { if !$0, isActive { viewModel.dismissError() } }
         )
       ) {
         Button("好", role: .cancel) { viewModel.dismissError() }
@@ -651,6 +791,7 @@ private struct ForumCheckInRow: View {
     case .ready:
       accountRow {
         Button {
+          guard isActive else { return }
           isConfirmationPresented = true
         } label: {
           Label("签到", systemImage: "checkmark.seal")
@@ -687,7 +828,7 @@ private struct ForumCheckInRow: View {
     case .failed:
       accountRow {
         Button {
-          Task { @MainActor in await viewModel.reload() }
+          if isActive { onRetry() }
         } label: {
           Label("重试读取签到状态", systemImage: "arrow.clockwise")
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
