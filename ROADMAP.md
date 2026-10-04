@@ -1199,8 +1199,21 @@ a failed refresh preserves the validated snapshot and pagination cursor.
 Filtering still requires explicit continuation after a rule change or an
 all-hidden page. First-page success retains the existing unread reconciliation
 callback; cached selection neither invokes it nor infers an unread count from
-visible rows. Model and real-Root UI validation is pending, and this candidate
-is not yet in a published IPA. No endpoint or account write is added.
+visible rows.
+The first native run exposed two UI integration bugs: several NavigationLinks
+in one List row could push multiple destinations, and an initially inactive
+page's refresh closure could retain its initial activity value. Message bodies
+and sender controls now use independent borderless buttons with one owned
+browse destination; refresh eligibility is read from the live shared model.
+The [follow-up native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37176955255)
+passed all 53 model tests and three actual UI workflows with zero failures or
+skips. They exercise both channels' positions within 3 pt, horizontal paging,
+single-back returns from real Thread and User Profile destinations, main-tab
+changes, preserved second pages, each channel's pull-to-refresh and a failed
+refresh followed by pagination and explicit retry. Request counts and order
+show only the selected channel reads, with zero unexpected requests. This
+candidate is not yet in a published IPA; full tagged CI and physical-device
+validation remain separate gates. No endpoint or account write is added.
 
 The inbox's local filter projection inspects only `message.content` and the
 sender's exact UID, nickname, and username. Message titles, quoted content,
