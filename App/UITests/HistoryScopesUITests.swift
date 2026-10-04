@@ -52,8 +52,15 @@ final class HistoryScopesUITests: XCTestCase {
     try select("thread", app: app)
     let row = app.cells.containing(.staticText, identifier: "历史帖子·1").firstMatch
     try wait("First thread row is visible") { row.isHittable }
-    row.swipeLeft()
-    try tap(row.buttons["删除"].firstMatch)
+    // A short native row drag reveals its action without full-swipe deletion.
+    // The count and selected category must stay unchanged until Delete is tapped.
+    row.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)).press(
+      forDuration: 0.05,
+      thenDragTo: row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)),
+      withVelocity: .slow, thenHoldForDuration: 0.2)
+    try store(threads: 30, forums: 30, app: app)
+    XCTAssertTrue(app.buttons["history-kind-thread"].isSelected)
+    try tap(app.buttons["删除"].firstMatch)
     try store(threads: 29, forums: 30, firstThread: "thread:980002", app: app)
     XCTAssertFalse(app.staticTexts["历史帖子·1"].exists)
     XCTAssertTrue(app.buttons["history-kind-thread"].isSelected)
@@ -81,7 +88,7 @@ final class HistoryScopesUITests: XCTestCase {
     scrollUp(app)
     let forum = try anchor(prefix: "历史贴吧·", app: app)
     try select("thread", app: app)
-    try tap(app.buttons["浏览记录设置"])
+    try tap(app.buttons["history-recording-menu"])
     try tap(app.buttons["记录浏览历史"].firstMatch)
     try store(threads: 30, forums: 30, recording: true, app: app)
     scrollUp(app)
@@ -207,9 +214,14 @@ final class HistoryScopesUITests: XCTestCase {
 
   @MainActor
   private func horizontalSwipe(left: Bool, app: XCUIApplication) {
-    drag(
-      app, from: CGVector(dx: left ? 0.85 : 0.15, dy: 0.65),
-      to: CGVector(dx: left ? 0.15 : 0.85, dy: 0.65))
+    // Category swipes belong to the category strip. Row swipes must remain
+    // available to the native List's destructive action, with no pager theft.
+    let strip = app.segmentedControls["history-kind-picker"]
+    strip.coordinate(withNormalizedOffset: CGVector(dx: left ? 0.8 : 0.2, dy: 0.5)).press(
+      forDuration: 0.05,
+      thenDragTo: strip.coordinate(
+        withNormalizedOffset: CGVector(dx: left ? 0.2 : 0.8, dy: 0.5)),
+      withVelocity: .slow, thenHoldForDuration: 0.2)
   }
 
   @MainActor
