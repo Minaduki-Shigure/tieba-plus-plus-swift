@@ -16,16 +16,19 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
-Alpha.46/build 124 includes ordered global/forum keyword-history operations and
+Alpha.47/build 125 includes ordered global/forum keyword-history operations and
 resumption of an interrupted forum search without a duplicate history record.
 It also includes the history, suggestion and language work prepared for alpha.45.
 Alpha.45 was withheld after two native UI failures: video showed a real inbox
 pagination jump and a separate search-test viewport error. Neither was bypassed
-by publishing the failed candidate. Details and current validation gates are in
+by publishing the failed candidate. A further held-response native test exposed
+a smaller reading-position jump when an entirely hidden page finished; alpha.46
+was withheld and the loading footer now remains mounted between requests.
+Details and current validation gates are in
 [the release validation record](Docs/search-and-inbox-release-validation.md).
 These are corrections within credited areas; the 80–82% estimate is unchanged.
 
-Alpha.46 closes the search-suggestion gap between Home's
+Alpha.47 closes the search-suggestion gap between Home's
 existing suggestions and TiebaLite `9701bfb6`'s reachable
 [SearchPage input and suggestion selection](https://github.com/zzc10086/TiebaLite/blob/9701bfb6aaf261cc37b20b5793a8404261077f49/app/src/main/java/com/huanchengfly/tieba/post/ui/page/search/SearchPage.kt#L284).
 The search page reuses the anonymous service, default-off setting, 500 ms
@@ -355,7 +358,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-serves `v0.65.0-alpha.46` (build 124) after publication, whose app-code snapshot includes
+serves `v0.65.0-alpha.47` (build 125) after publication, whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -463,7 +466,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The `v0.65.0-alpha.46` app-code snapshot is at 80–82%; all experimental
+The `v0.65.0-alpha.47` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55

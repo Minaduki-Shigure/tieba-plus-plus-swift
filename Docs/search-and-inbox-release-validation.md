@@ -38,7 +38,20 @@ when loading finishes, subject to the same account/activity/error/has-more
 guards. A separate fixture holds pages two and three at the transport boundary,
 hides page two through the real filter repository, and requires continuation
 without another drag plus a stable page-one tail before reading page three.
-Its dedicated native validation remains pending.
+The [first dedicated native run](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37190333135)
+passed the three unchanged inbox workflows but failed the new hidden-page case.
+Automatic continuation correctly requested page three exactly once, but title
+20 moved from Y=716.67 to Y=810 while that response was still held. The native
+video shows the displacement after page two completes, not during the fixture
+button tap. Its strict 3 pt assertion therefore catches a real position change.
+
+The next candidate keeps one measured loading-status row mounted whenever the
+list has messages. It changes the spinner's opacity rather than removing and
+reinserting that row between requests or when pagination ends. Idle status is
+hidden from accessibility and hit testing; a retry error can still grow to fit
+its text. Account and filtering checks retain their existing privacy behavior.
+This minimal geometry change still requires the unchanged hidden-page test and
+the original inbox workflows to pass natively before publication.
 
 The forum-search cancellation fix restores the pre-request state when leaving,
 including a loaded-empty response and any retry error. Returning resumes an
@@ -47,7 +60,12 @@ calling the history-recording path. A DEBUG fixture exercises the actual
 RootView → ForumView → ForumPostSearchView route and native tab changes, then
 delivers the cancelled response after the fresh one to check rejection. It
 replaces transport and repositories only; it does not invoke the view model or
-inject navigation/activation from the test.
+inject navigation/activation from the test. Its
+[native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37189754514)
+passed all 35 model tests and six UI workflows with zero failures or skips.
+The latter include the new resume flow, the three corrected SearchScopes tests
+and both suggestion flows. The held old response did not replace the new result,
+and returning again did not create another request or history write.
 
 The fixture uses offline, in-memory data and no real account. Native candidate
 results, the full new tag's regression, IPA packaging and public source/asset
