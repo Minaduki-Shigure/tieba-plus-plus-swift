@@ -50,8 +50,13 @@ list has messages. It changes the spinner's opacity rather than removing and
 reinserting that row between requests or when pagination ends. Idle status is
 hidden from accessibility and hit testing; a retry error can still grow to fit
 its text. Account and filtering checks retain their existing privacy behavior.
-This minimal geometry change still requires the unchanged hidden-page test and
-the original inbox workflows to pass natively before publication.
+The [fixed native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37192652980)
+passed the unchanged hidden-page regression: one test, zero failures, skips or
+expected failures on iPhone 16 Pro / iOS 18.5. It verifies the original tail stays
+within 3 pt both while page three is pending and after its visible rows append,
+then reads title 41 with exactly pages 1, 2 and 3 requested and no hidden content
+exposed. The three original inbox workflows run separately against the same
+compiled candidate; full tagged regression remains a publication gate.
 
 The alpha.46 tag's [full CI](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37190889950)
 had passed 2,695 App tests with zero failures or skips, plus Core and anonymous
