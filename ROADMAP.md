@@ -2461,7 +2461,13 @@ selected category starts reads. Leaving a category cancels its pending request
 without discarding its loaded snapshot, errors or thread pagination cursor,
 and late responses cannot change the new selection. Submitting a search again
 resets all three positions, while thread sort and local-filter changes reset
-only the thread results. Native model and interaction validation is pending;
+only the thread results. The
+[native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37174111711)
+passed all 44 search/history model tests and all three actual UI flows, with
+zero failures or skips. The UI checks separate reading positions within 3 pt,
+horizontal paging, detail return, pagination, sort isolation and a real keyboard
+submission that resets all scopes while loading only the current one.
+Tagged full regression and physical-device validation remain separate gates;
 this candidate is not yet part of the published IPA. This work does not add
 endpoints, credentials or online suggestions to the results screen.
 Online suggestions are a separate, explicitly enabled pre-submission path. The
