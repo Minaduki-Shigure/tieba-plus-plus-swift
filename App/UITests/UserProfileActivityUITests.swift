@@ -147,11 +147,14 @@ final class UserProfileActivityUITests: XCTestCase {
     XCTAssertFalse(app.staticTexts["公开主题·帖子1"].firstMatch.isHittable)
 
     try tap(app.buttons["重试"].firstMatch)
-    try counts(
-      "profile=2 threads=2 replies=0 relationship=1 posts=0 comments=0 unexpected=0", app: app)
     try wait("Retry reveals the retained activity page") {
       app.buttons["user-profile-section-threads"].isHittable
     }
+    // The profile header may fill the initial viewport. Reveal the actual last
+    // row before expecting pagination, rather than requiring a hidden read.
+    try reveal(app.staticTexts["公开主题·帖子1"].firstMatch, app: app)
+    try counts(
+      "profile=2 threads=2 replies=0 relationship=1 posts=0 comments=0 unexpected=0", app: app)
     let secondPage = app.staticTexts["公开主题·帖子21"].firstMatch
     try reveal(secondPage, app: app)
     try counts(
