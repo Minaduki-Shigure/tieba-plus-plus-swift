@@ -2,6 +2,7 @@ name: TiebaPlusPlus
 
 options:
   minimumXcodeGenVersion: 2.45.4
+  developmentLanguage: zh-Hans
   deploymentTarget:
     iOS: "16.0"
   groupSortPosition: top
@@ -43,6 +44,9 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: "贴吧++"
+        CFBundleDevelopmentRegion: zh-Hans
+        CFBundleLocalizations:
+          - zh-Hans
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSApplicationCategoryType: public.app-category.social-networking
