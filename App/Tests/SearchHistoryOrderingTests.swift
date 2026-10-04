@@ -65,6 +65,62 @@ final class SearchHistoryOrderingTests: XCTestCase {
   }
 
   @MainActor
+  func testCancellingClearWaiterDoesNotDiscardAcceptedWriteOrLaterSearch() async throws {
+    let repository = OrderedSearchHistoryRepository(suspendedOperation: .clear)
+    let model = GlobalSearchHistoryViewModel(repository: repository)
+    await model.loadIfNeeded()
+    let clear = Task { await model.deleteAll() }
+    try await wait { await repository.isSuspended }
+    clear.cancel()
+    model.record("after cancelled waiter")
+    await repository.resume()
+    await clear.value
+    await model.retry()
+    let stored = await repository.snapshot()
+    XCTAssertEqual(stored.map(\.query), ["after cancelled waiter"])
+    XCTAssertEqual(model.entries, stored)
+    XCTAssertNil(model.errorMessage)
+  }
+
+  @MainActor
+  func testFailedClearPreservesArchiveAndDoesNotPreventLaterRecord() async throws {
+    let repository = OrderedSearchHistoryRepository(suspendedOperation: .clear, failsClear: true)
+    let model = GlobalSearchHistoryViewModel(repository: repository)
+    await model.loadIfNeeded()
+    let clear = Task { await model.deleteAll() }
+    try await wait { await repository.isSuspended }
+    await repository.resume()
+    await clear.value
+    XCTAssertNotNil(model.errorMessage)
+    XCTAssertEqual(model.entries.map(\.query), ["old search"])
+    model.record("after failure")
+    await model.retry()
+    let stored = await repository.snapshot()
+    XCTAssertEqual(stored.map(\.query), ["after failure", "old search"])
+    XCTAssertEqual(model.entries, stored)
+    XCTAssertNil(model.errorMessage)
+  }
+
+  @MainActor
+  func testExplicitResetFinishesBeforeLaterSearchIsRecorded() async throws {
+    let repository = OrderedSearchHistoryRepository(suspendedOperation: .reset)
+    let model = GlobalSearchHistoryViewModel(repository: repository)
+    await model.loadIfNeeded()
+    let reset = Task { await model.reset() }
+    try await wait { await repository.isSuspended }
+    model.record("after reset")
+    await drain()
+    let events = await repository.events
+    XCTAssertFalse(events.contains("record:after reset"))
+    await repository.resume()
+    await reset.value
+    await model.retry()
+    let stored = await repository.snapshot()
+    XCTAssertEqual(stored.map(\.query), ["after reset"])
+    XCTAssertEqual(model.entries, stored)
+  }
+
+  @MainActor
   private func wait(_ condition: @MainActor () async -> Bool) async throws {
     let deadline = Date().addingTimeInterval(3)
     while !(await condition()) {
@@ -79,21 +135,25 @@ final class SearchHistoryOrderingTests: XCTestCase {
   }
 }
 
-private enum OrderingTestError: Error { case timeout }
+private enum OrderingTestError: Error { case timeout, rejected }
 
 /// Hold an operation between its request and completion. Reads return the
 /// snapshot captured when requested, just as a completed file read may wait
 /// for its MainActor caller while another action updates the archive.
 private actor OrderedSearchHistoryRepository: GlobalSearchHistoryRepository {
-  enum Operation { case read, clear, delete }
+  enum Operation { case read, clear, delete, reset }
   private var suspension: Operation?
+  private let failsClear: Bool
   private var continuation: CheckedContinuation<Void, Never>?
   private(set) var events: [String] = []
   private var stored = [
     GlobalSearchHistoryEntry(query: "old search", searchedAt: Date(timeIntervalSince1970: 1))
   ]
 
-  init(suspendedOperation: Operation) { suspension = suspendedOperation }
+  init(suspendedOperation: Operation, failsClear: Bool = false) {
+    suspension = suspendedOperation
+    self.failsClear = failsClear
+  }
   var isSuspended: Bool { continuation != nil }
 
   func entries() async throws -> [GlobalSearchHistoryEntry] {
@@ -120,11 +180,16 @@ private actor OrderedSearchHistoryRepository: GlobalSearchHistoryRepository {
   func deleteAll() async throws {
     events.append("clear:requested")
     await suspendIfNeeded(.clear)
+    try Task.checkCancellation()
+    if failsClear { throw OrderingTestError.rejected }
     stored = []
     events.append("clear:committed")
   }
 
-  func reset() async throws { stored = [] }
+  func reset() async throws {
+    await suspendIfNeeded(.reset)
+    stored = []
+  }
   func snapshot() -> [GlobalSearchHistoryEntry] { stored }
 
   func resume() {
