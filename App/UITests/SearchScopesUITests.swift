@@ -4,6 +4,8 @@ import XCTest
 /// Exercises the production SearchView, its native Lists and navigation through
 /// an offline service. The fixture does not initialize live transport or Keychain.
 final class SearchScopesUITests: XCTestCase {
+  @MainActor private var launchedApplication: XCUIApplication?
+
   @MainActor
   func testThreeScopesRetainPositionsAcrossTapsSwipesAndDetailReturn() throws {
     let app = try launchFixture()
@@ -59,11 +61,7 @@ final class SearchScopesUITests: XCTestCase {
     try requireTitle(Scope.threads.firstTitle, app: app)
 
     let secondPage = app.staticTexts["测试·最新·帖子21"].firstMatch
-    for _ in 0..<25 {
-      if fullyVisible(secondPage, app: app) { break }
-      scrollUp(app)
-    }
-    try wait("Second thread page becomes visible") { self.fullyVisible(secondPage, app: app) }
+    try revealThread(secondPage, app: app)
     let anchor = try visibleTitle(prefix: Scope.threads.titlePrefix, app: app)
     let threadPosition = (anchor.label, anchor.frame.minY)
     try counts("forums=1 threads=2 users=1 posts=0 unexpected=0", app: app)
@@ -154,6 +152,7 @@ final class SearchScopesUITests: XCTestCase {
     continueAfterFailure = false
     XCUIDevice.shared.orientation = .portrait
     let app = XCUIApplication()
+    launchedApplication = app
     app.launchArguments = [
       "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN",
       "--explore-refresh-ui-testing", "--search-scopes-ui-testing",
@@ -182,6 +181,57 @@ final class SearchScopesUITests: XCTestCase {
   private func fullyVisible(_ element: XCUIElement, app: XCUIApplication) -> Bool {
     element.isHittable && element.frame.minY > app.frame.height * 0.35
       && element.frame.maxY < app.frame.height * 0.85
+  }
+
+  @MainActor
+  private func threadViewport(_ app: XCUIApplication) -> CGRect {
+    let list = app.descendants(matching: .any)
+      .matching(identifier: "search-threads-list").firstMatch.frame
+    let picker = app.segmentedControls["global-thread-search-sort-picker"].frame
+    let window = app.windows.firstMatch.frame
+    let top = max(list.minY, picker.maxY) + 8
+    let bottom = min(list.maxY, window.maxY) - 16
+    return CGRect(
+      x: list.minX + 8, y: top, width: max(0, list.width - 16), height: max(0, bottom - top))
+  }
+
+  @MainActor
+  private func revealThread(_ target: XCUIElement, app: XCUIApplication) throws {
+    var trace: [String] = []
+    for _ in 0..<25 {
+      let viewport = threadViewport(app)
+      let frame = target.exists ? target.frame : .null
+      trace.append("target=\(frame), viewport=\(viewport)")
+      if !frame.isNull, viewport.contains(frame), target.isHittable { return }
+      guard viewport.height > 0 else { break }
+
+      // A title just below the picker is already visible. A fixed 35% screen
+      // threshold rejected it and another full swipe carried it offscreen.
+      // Once the target is measured, use its actual position for a short drag
+      // in either direction, then hold to stop inertia before sampling again.
+      let distance: CGFloat
+      if !frame.isNull {
+        distance = min(140, max(-140, frame.midY - viewport.midY))
+      } else {
+        distance = min(240, viewport.height * 0.45)
+      }
+      let start = CGPoint(x: viewport.midX, y: viewport.midY + distance / 2)
+      let end = CGPoint(x: viewport.midX, y: viewport.midY - distance / 2)
+      let origin = app.coordinate(withNormalizedOffset: .zero)
+      origin.withOffset(CGVector(dx: start.x, dy: start.y)).press(
+        forDuration: 0.05,
+        thenDragTo: origin.withOffset(CGVector(dx: end.x, dy: end.y)),
+        withVelocity: .slow, thenHoldForDuration: 0.2)
+    }
+    try wait(
+      "Second thread page becomes visible",
+      diagnostics: {
+        trace.joined(separator: "\n") + "\n" + target.debugDescription
+          + "\n" + app.staticTexts["search-scope-request-counts"].label
+      },
+      until: {
+        target.exists && target.isHittable && self.threadViewport(app).contains(target.frame)
+      })
   }
 
   @MainActor
@@ -270,17 +320,22 @@ final class SearchScopesUITests: XCTestCase {
       predicate: NSPredicate { _, _ in MainActor.assumeIsolated { condition() } }, object: nil)
     guard XCTWaiter.wait(for: [expectation], timeout: 20) == .completed else {
       let message = "\(context). \(diagnostics())"
+      // XCTest can abort before a Swift defer executes when continuation is
+      // disabled. Capture the actual page before recording the failure.
+      if let app = launchedApplication { attachState(app, name: context) }
       XCTFail(message, file: file, line: line)
       throw SearchScopesUITestError.timedOut(message)
     }
   }
 
   @MainActor
-  private func attachState(_ app: XCUIApplication) {
+  private func attachState(_ app: XCUIApplication, name: String = "Search scope final state") {
     let hierarchy = XCTAttachment(string: app.debugDescription)
+    hierarchy.name = "\(name) hierarchy"
     hierarchy.lifetime = .keepAlways
     add(hierarchy)
     let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+    screenshot.name = name
     screenshot.lifetime = .keepAlways
     add(screenshot)
   }
