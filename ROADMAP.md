@@ -16,6 +16,22 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
+Alpha.44/build 122 follows TiebaLite `9701bfb6`'s reachable ReplyMe/AtMe pager
+with separate retained Replies and Mentions lists. Only the selected foreground
+channel reads. Cached private content stays hidden until its local session and
+filtering are validated, and a session change clears both channels. Each page
+preserves its position, messages, retry state and cursor through switching,
+detail return and a failed refresh. Independent message/sender buttons share
+one browse destination, preventing multiple pushes from one List row; refresh
+reads the current model's activity instead of an initially captured value.
+The [native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37176955255)
+passed all 53 model tests and three actual UI workflows, with zero failures or
+skips, covering positions within 3 pt, swipes, single-back destination returns,
+main-tab changes, second pages, both refresh directions, failure and retry.
+Request counts and order show zero unexpected requests. Tagged CI, anonymous
+integration and physical-device/account validation remain separate gates. This
+extends an existing credited area; the 80–82% weighted estimate is unchanged.
+
 Alpha.43/build 121 follows TiebaLite `9701bfb6`'s reachable forum/thread/user
 search pager. Stable native Lists preserve separate reading positions,
 snapshots and retry state across category taps, horizontal swipes and detail
@@ -278,7 +294,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-serves `v0.65.0-alpha.43` (build 121) after publication, whose app-code snapshot includes
+serves `v0.65.0-alpha.44` (build 122) after publication, whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -386,7 +402,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.65.0-alpha.43` app-code snapshot is at 80–82%; all experimental
+The public `v0.65.0-alpha.44` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55
@@ -1187,7 +1203,7 @@ entirely in memory. A `userID + sessionRevision` lease is checked before and
 after every page request so an account switch cannot display a previous
 account's private response.
 
-A candidate follows TiebaLite `9701bfb6`'s reachable ReplyMe/AtMe pager with
+Alpha.44 follows TiebaLite `9701bfb6`'s reachable ReplyMe/AtMe pager with
 separate native lists, snapshots, cursors and reading positions. Only the
 visible foreground channel may read; leaving it cancels pending work while
 preserving validated content and retry state. Cache activation checks the local
@@ -1211,9 +1227,9 @@ skips. They exercise both channels' positions within 3 pt, horizontal paging,
 single-back returns from real Thread and User Profile destinations, main-tab
 changes, preserved second pages, each channel's pull-to-refresh and a failed
 refresh followed by pagination and explicit retry. Request counts and order
-show only the selected channel reads, with zero unexpected requests. This
-candidate is not yet in a published IPA; full tagged CI and physical-device
-validation remain separate gates. No endpoint or account write is added.
+show only the selected channel reads, with zero unexpected requests. Full
+tagged CI and physical-device validation remain separate gates, and publication
+follows the existing tested-IPA pipeline. No endpoint or account write is added.
 
 The inbox's local filter projection inspects only `message.content` and the
 sender's exact UID, nickname, and username. Message titles, quoted content,
