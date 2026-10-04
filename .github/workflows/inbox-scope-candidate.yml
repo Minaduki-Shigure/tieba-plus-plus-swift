@@ -31,7 +31,7 @@ jobs:
             -destination "$INBOX_SIMULATOR_DESTINATION" -parallel-testing-enabled NO \
             -only-testing:TiebaPlusPlusTests/NotificationsViewModelTests \
             -only-testing:TiebaPlusPlusTests/NotificationsActivityViewModelTests \
-            -only-testing:TiebaPlusPlusTests/InboxReplyResolverTests \
+            -only-testing:TiebaPlusPlusTests/InboxReplyIntentTests \
             -resultBundlePath inbox-model-results.xcresult \
             -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO \
             test 2>&1 | tee inbox-model-test.log
