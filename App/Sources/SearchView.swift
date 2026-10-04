@@ -14,6 +14,8 @@ struct SearchView: View {
   @State private var query: String
   @State private var threadNavigationRequest: ThreadSummaryNavigationRequest?
   @State private var confirmsClearingSearchHistory = false
+  @State private var visibleThreadKeys: Set<SearchThreadVisibilityKey> = []
+  @State private var visibleThreadTail: SearchThreadPaginationVisibilityKey?
   @FocusState private var searchIsFocused: Bool
 
   init(
@@ -44,13 +46,12 @@ struct SearchView: View {
       if !viewModel.submittedQuery.isEmpty {
         Picker(
           "搜索范围",
-          selection: Binding(
-            get: { viewModel.selectedScope },
-            set: { viewModel.selectScope($0) }
-          )
+          selection: selectedScope
         ) {
           ForEach(SearchScope.allCases) { scope in
-            Text(scope.title).tag(scope)
+            Text(scope.title)
+              .tag(scope)
+              .accessibilityIdentifier("search-scope-\(scope.rawValue)")
           }
         }
         .pickerStyle(.segmented)
@@ -59,10 +60,6 @@ struct SearchView: View {
         .appRegularMaterialSurface()
 
         Divider()
-        if viewModel.selectedScope == .threads {
-          threadSortPicker
-          Divider()
-        }
       }
       selectedResults
     }
@@ -72,14 +69,21 @@ struct SearchView: View {
     .searchable(text: $query, prompt: "搜索贴吧、帖子和用户")
     .compatibleSearchFocus($searchIsFocused)
     .onSubmit(of: .search, submitSearch)
-    .task {
+    .onAppear {
       viewModel.loadIfNeeded()
+      resumeVisibleThreadPagination()
+    }
+    .task {
       guard viewModel.submittedQuery.isEmpty else { return }
       await globalSearchHistoryViewModel.loadIfNeeded()
       guard !Task.isCancelled, viewModel.submittedQuery.isEmpty else { return }
       if #available(iOS 18.0, *) {
         searchIsFocused = true
       }
+    }
+    .onChange(of: viewModel.selectedScope) { _ in resumeVisibleThreadPagination() }
+    .onChange(of: viewModel.isActive) { active in
+      if active { resumeVisibleThreadPagination() }
     }
     .onDisappear(perform: viewModel.cancel)
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
@@ -132,7 +136,7 @@ struct SearchView: View {
       "帖子排序",
       selection: Binding(
         get: { viewModel.threadSort },
-        set: { viewModel.setThreadSort($0) }
+        set: { if isActive(.threads) { viewModel.setThreadSort($0) } }
       )
     ) {
       ForEach(GlobalThreadSearchSort.allCases) { sort in
@@ -151,24 +155,55 @@ struct SearchView: View {
   private var selectedResults: some View {
     if viewModel.submittedQuery.isEmpty {
       searchLanding
-    } else if !viewModel.hasResults {
-      switch viewModel.state {
+    } else {
+      ForumSectionPager(sections: SearchScope.allCases, selection: selectedScope) { scope in
+        resultsPage(for: scope)
+      }
+      // A newly submitted search deliberately starts all scopes at the top.
+      // Scope switches keep the same native Lists and their scroll positions.
+      .id(viewModel.resultRevision)
+    }
+  }
+
+  private var selectedScope: Binding<SearchScope> {
+    Binding(
+      get: { viewModel.selectedScope },
+      set: { if viewModel.isActive { viewModel.selectScope($0) } })
+  }
+
+  @ViewBuilder
+  private func resultsPage(for scope: SearchScope) -> some View {
+    switch scope {
+    case .forums:
+      forumResults
+        .overlay { resultState(for: .forums) }
+    case .threads:
+      VStack(spacing: 0) {
+        threadSortPicker
+        Divider()
+        threadResults
+          .overlay { resultState(for: .threads) }
+          .id(viewModel.threadResultsRevision)
+      }
+    case .users:
+      userResults
+        .overlay { resultState(for: .users) }
+    }
+  }
+
+  @ViewBuilder
+  private func resultState(for scope: SearchScope) -> some View {
+    if !viewModel.hasResults(for: scope) {
+      switch viewModel.state(for: scope) {
       case .idle, .loading:
         ProgressView()
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
       case .failed(let message):
-        ErrorStateView(message: message, retry: viewModel.retry)
+        ErrorStateView(message: message) {
+          if isActive(scope) { viewModel.retry() }
+        }
       case .loaded:
-        emptyResults
-      }
-    } else {
-      switch viewModel.selectedScope {
-      case .forums:
-        forumResults
-      case .threads:
-        threadResults
-      case .users:
-        userResults
+        EmptyStateView(title: emptyTitle(for: scope), systemImage: emptySystemImage(for: scope))
+          .allowsHitTesting(false)
       }
     }
   }
@@ -278,11 +313,18 @@ struct SearchView: View {
     }
     .listStyle(.insetGrouped)
     .appScrollableSurface()
-    .refreshable { await viewModel.refresh() }
+    .accessibilityIdentifier("search-forums-list")
+    .refreshable {
+      if isActive(.forums), !Task.isCancelled { await viewModel.refresh() }
+    }
   }
 
   private var threadResults: some View {
-    List {
+    let resultRevision = viewModel.resultRevision
+    let threadResultsRevision = viewModel.threadResultsRevision
+    let paginationEpoch = viewModel.threadPaginationEpoch
+    let threadCount = viewModel.threads.count
+    return List {
       Section("帖子") {
         ForEach(viewModel.displayableThreads) { thread in
           LocallyFilteredContent(
@@ -297,7 +339,21 @@ struct SearchView: View {
             )
           }
           .frame(minHeight: 44)
-          .onAppear { viewModel.loadMoreIfNeeded(current: thread) }
+          .onAppear {
+            let key = SearchThreadVisibilityKey(
+              threadID: thread.id, resultRevision: resultRevision,
+              threadResultsRevision: threadResultsRevision)
+            visibleThreadKeys.insert(key)
+            if isActive(.threads), isCurrent(key) {
+              viewModel.loadMoreIfNeeded(current: thread)
+            }
+          }
+          .onDisappear {
+            visibleThreadKeys.remove(
+              SearchThreadVisibilityKey(
+                threadID: thread.id, resultRevision: resultRevision,
+                threadResultsRevision: threadResultsRevision))
+          }
         }
 
         if !viewModel.threads.isEmpty && !viewModel.hasDisplayableThreads {
@@ -319,7 +375,24 @@ struct SearchView: View {
             .listRowInsets(EdgeInsets())
             .listRowSeparator(.hidden)
             .accessibilityHidden(true)
-            .onAppear { viewModel.loadMoreIfNeeded(current: lastThread) }
+            .onAppear {
+              let key = SearchThreadVisibilityKey(
+                threadID: lastThread.id, resultRevision: resultRevision,
+                threadResultsRevision: threadResultsRevision)
+              visibleThreadTail = SearchThreadPaginationVisibilityKey(
+                content: key, epoch: paginationEpoch, count: threadCount)
+              if isActive(.threads), isCurrent(key) {
+                viewModel.loadMoreIfNeeded(current: lastThread)
+              }
+            }
+            .onDisappear {
+              let key = SearchThreadVisibilityKey(
+                threadID: lastThread.id, resultRevision: resultRevision,
+                threadResultsRevision: threadResultsRevision)
+              let tail = SearchThreadPaginationVisibilityKey(
+                content: key, epoch: paginationEpoch, count: threadCount)
+              if visibleThreadTail == tail { visibleThreadTail = nil }
+            }
         }
 
         if viewModel.isLoadingMore {
@@ -331,16 +404,21 @@ struct SearchView: View {
           .frame(minHeight: 44)
           .listRowSeparator(.hidden)
         } else if let message = viewModel.loadMoreError {
-          LoadMoreErrorView(message: message, retry: viewModel.retryLoadMore)
-            .frame(minHeight: 44)
-            .listRowSeparator(.hidden)
+          LoadMoreErrorView(message: message) {
+            if isActive(.threads) { viewModel.retryLoadMore() }
+          }
+          .frame(minHeight: 44)
+          .listRowSeparator(.hidden)
         }
       }
     }
     .environment(\.defaultMinListRowHeight, 1)
     .listStyle(.insetGrouped)
     .appScrollableSurface()
-    .refreshable { await viewModel.refresh() }
+    .accessibilityIdentifier("search-threads-list")
+    .refreshable {
+      if isActive(.threads), !Task.isCancelled { await viewModel.refresh() }
+    }
   }
 
   private var userResults: some View {
@@ -361,17 +439,31 @@ struct SearchView: View {
     }
     .listStyle(.insetGrouped)
     .appScrollableSurface()
-    .refreshable { await viewModel.refresh() }
+    .accessibilityIdentifier("search-users-list")
+    .refreshable {
+      if isActive(.users), !Task.isCancelled { await viewModel.refresh() }
+    }
   }
 
-  private var emptyResults: some View {
-    List {}
-      .listStyle(.insetGrouped)
-      .appScrollableSurface()
-      .overlay {
-        EmptyStateView(title: emptyTitle, systemImage: emptySystemImage)
-      }
-      .refreshable { await viewModel.refresh() }
+  private func isActive(_ scope: SearchScope) -> Bool {
+    viewModel.isActive && viewModel.selectedScope == scope && !viewModel.submittedQuery.isEmpty
+  }
+
+  private func isCurrent(_ key: SearchThreadVisibilityKey) -> Bool {
+    key.resultRevision == viewModel.resultRevision
+      && key.threadResultsRevision == viewModel.threadResultsRevision
+  }
+
+  private func resumeVisibleThreadPagination() {
+    guard isActive(.threads), let last = viewModel.threads.last else { return }
+    let key = SearchThreadVisibilityKey(
+      threadID: last.id, resultRevision: viewModel.resultRevision,
+      threadResultsRevision: viewModel.threadResultsRevision)
+    let tail = SearchThreadPaginationVisibilityKey(
+      content: key, epoch: viewModel.threadPaginationEpoch, count: viewModel.threads.count)
+    if visibleThreadKeys.contains(key) || visibleThreadTail == tail {
+      viewModel.loadMoreIfNeeded(current: last)
+    }
   }
 
   private func forumLink(_ forum: ForumSearchItem) -> some View {
@@ -424,8 +516,8 @@ struct SearchView: View {
     .id(request.destinationID)
   }
 
-  private var emptyTitle: String {
-    switch viewModel.selectedScope {
+  private func emptyTitle(for scope: SearchScope) -> String {
+    switch scope {
     case .forums:
       "没有找到贴吧"
     case .threads:
@@ -435,8 +527,8 @@ struct SearchView: View {
     }
   }
 
-  private var emptySystemImage: String {
-    switch viewModel.selectedScope {
+  private func emptySystemImage(for scope: SearchScope) -> String {
+    switch scope {
     case .forums:
       "text.bubble"
     case .threads:
@@ -447,9 +539,21 @@ struct SearchView: View {
   }
 }
 
-private extension View {
+private struct SearchThreadVisibilityKey: Hashable {
+  let threadID: Int64
+  let resultRevision: Int
+  let threadResultsRevision: Int
+}
+
+private struct SearchThreadPaginationVisibilityKey: Hashable {
+  let content: SearchThreadVisibilityKey
+  let epoch: Int
+  let count: Int
+}
+
+extension View {
   @ViewBuilder
-  func compatibleSearchFocus(_ binding: FocusState<Bool>.Binding) -> some View {
+  fileprivate func compatibleSearchFocus(_ binding: FocusState<Bool>.Binding) -> some View {
     if #available(iOS 18.0, *) {
       searchFocused(binding)
     } else {
