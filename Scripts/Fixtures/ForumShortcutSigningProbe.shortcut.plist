@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Experimental unsigned fixture, not a distributable or validated iOS shortcut.
+  It contains one fixed Open URLs action and no account information.
+  Apple documents the CLI signing flow, not this serialized plist format:
+  https://support.apple.com/guide/shortcuts-mac/apd455c82f02/mac
+  The action identifier and literal WFInput shape match published shortcut
+  source; no import-question or dynamic-template format is assumed here.
+  https://gist.github.com/extratone/889a0bdd7adf356b8f028ac3b7ba4c8c
+-->
+<plist version="1.0">
+<dict>
+  <key>WFWorkflowName</key>
+  <string>Tieba Forum Signing Probe</string>
+  <key>WFWorkflowClientVersion</key>
+  <string>2302.0.5</string>
+  <key>WFWorkflowMinimumClientVersion</key>
+  <integer>900</integer>
+  <key>WFWorkflowMinimumClientVersionString</key>
+  <string>900</string>
+  <key>WFWorkflowActions</key>
+  <array>
+    <dict>
+      <key>WFWorkflowActionIdentifier</key>
+      <string>is.workflow.actions.openurl</string>
+      <key>WFWorkflowActionParameters</key>
+      <dict>
+        <key>WFInput</key>
+        <string>tieba-plus-plus://forum/swift</string>
+      </dict>
+    </dict>
+  </array>
+  <key>WFWorkflowImportQuestions</key>
+  <array/>
+  <key>WFWorkflowInputContentItemClasses</key>
+  <array/>
+  <key>WFWorkflowOutputContentItemClasses</key>
+  <array/>
+  <key>WFWorkflowTypes</key>
+  <array/>
+  <key>WFWorkflowHasOutputFallback</key>
+  <false/>
+</dict>
+</plist>

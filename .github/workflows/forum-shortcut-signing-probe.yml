@@ -1,0 +1,91 @@
+name: Forum shortcut signing probe
+
+on:
+  push:
+    branches: [ci/forum-shortcut-signing-1004]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shortcut-signing:
+    name: Sign a fixed forum shortcut without account setup
+    runs-on: macos-15
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Observe CLI and attempt signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p shortcut-signing-evidence
+          sw_vers | tee shortcut-signing-evidence/macos-version.txt
+
+          # No Apple account login, credentials, shortcut import or execution.
+          # Apple documents this signing command, but does not promise that
+          # the Anyone mode works on a runner without an iCloud account:
+          # https://support.apple.com/guide/shortcuts-mac/apd455c82f02/mac
+          # Signing success alone does not establish iOS import or launch support.
+          run_probe() {
+            local label="$1"
+            shift
+            set +e
+            /usr/bin/perl -e 'alarm shift; exec @ARGV' 60 "$@" \
+              2>&1 | tee "shortcut-signing-evidence/$label.log"
+            local result="${PIPESTATUS[0]}"
+            set -e
+            printf '%s\n' "$result" > "shortcut-signing-evidence/$label.exit-code.txt"
+          }
+
+          run_probe help /usr/bin/shortcuts --help
+          run_probe list /usr/bin/shortcuts list
+          run_probe sign-help /usr/bin/shortcuts sign --help
+
+          cp Scripts/Fixtures/ForumShortcutSigningProbe.shortcut.plist \
+            shortcut-signing-evidence/ForumShortcutSigningProbe.shortcut.plist
+          plutil -lint shortcut-signing-evidence/ForumShortcutSigningProbe.shortcut.plist \
+            | tee shortcut-signing-evidence/plist-lint.log
+          plutil -convert binary1 \
+            -o shortcut-signing-evidence/ForumShortcutSigningProbe.unsigned.shortcut \
+            shortcut-signing-evidence/ForumShortcutSigningProbe.shortcut.plist
+          shasum -a 256 shortcut-signing-evidence/ForumShortcutSigningProbe.* \
+            | tee shortcut-signing-evidence/input-sha256.txt
+
+          run_probe sign /usr/bin/shortcuts sign --mode anyone \
+            --input shortcut-signing-evidence/ForumShortcutSigningProbe.unsigned.shortcut \
+            --output shortcut-signing-evidence/ForumShortcutSigningProbe.signed.shortcut
+
+          {
+            printf '## Fixed forum shortcut signing probe\n\n'
+            printf 'No account setup, credentials, shortcut import or execution was performed.\n\n'
+            printf '| Command | Exit code |\n| --- | --- |\n'
+            for label in help list sign-help sign; do
+              printf '| %s | %s |\n' "$label" "$(<"shortcut-signing-evidence/$label.exit-code.txt")"
+            done
+            printf '\nSigning is only a transport experiment; iOS import, configurable parameters, and Home Screen launch remain untested.\n'
+          } | tee shortcut-signing-evidence/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+          if test -f shortcut-signing-evidence/ForumShortcutSigningProbe.signed.shortcut; then
+            file shortcut-signing-evidence/ForumShortcutSigningProbe.signed.shortcut \
+              | tee shortcut-signing-evidence/signed-file-type.txt
+            wc -c shortcut-signing-evidence/ForumShortcutSigningProbe.signed.shortcut \
+              | tee shortcut-signing-evidence/signed-file-size.txt
+            shasum -a 256 shortcut-signing-evidence/ForumShortcutSigningProbe.signed.shortcut \
+              | tee shortcut-signing-evidence/signed-file-sha256.txt
+          fi
+      - name: Upload signing evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forum-shortcut-signing-${{ github.run_id }}-${{ github.run_attempt }}
+          path: shortcut-signing-evidence/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Require a successful signing result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(<shortcut-signing-evidence/sign.exit-code.txt)" = 0
+          test -s shortcut-signing-evidence/ForumShortcutSigningProbe.signed.shortcut
