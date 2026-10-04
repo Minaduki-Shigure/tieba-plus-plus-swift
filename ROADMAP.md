@@ -16,7 +16,7 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
-An unpublished search-suggestions candidate closes the gap between Home's
+Alpha.45/build 123 closes the search-suggestion gap between Home's
 existing suggestions and TiebaLite `9701bfb6`'s reachable
 [SearchPage input and suggestion selection](https://github.com/zzc10086/TiebaLite/blob/9701bfb6aaf261cc37b20b5793a8404261077f49/app/src/main/java/com/huanchengfly/tieba/post/ui/page/search/SearchPage.kt#L284).
 The search page reuses the anonymous service, default-off setting, 500 ms
@@ -55,7 +55,7 @@ UI workflows, Core and anonymous integration. Physical-device/account
 validation remains a separate gate. This extends an existing credited area;
 the 80–82% weighted estimate is unchanged.
 
-A browsing-history candidate follows TiebaLite `9701bfb6`'s separate Thread and
+Alpha.45 also follows TiebaLite `9701bfb6`'s separate Thread and
 Forum history pages. Both native lists stay mounted and share a local archive
 snapshot, retaining independent positions through category changes and detail
 navigation. Returning from a recorded visit rereads the shared archive while
@@ -63,17 +63,24 @@ preserving record identities. Local delete, clear and recording-setting writes
 are serialized and survive navigation; cancelled or outdated reads cannot
 restore removed entries, and an older failed setting write cannot revert a
 newer choice. Refresh failures preserve the existing snapshot for retry.
-The [first native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37178097669)
-passed all 24 history model tests and the position/detail-return UI flow, but
-failed the other two UI workflows. Video and disk readback showed the outer
-pager taking the row's left swipe instead of revealing Delete; a toolbar menu's
-outer accessibility element was also not hittable. History now separates those
-interactions: two permanently mounted pages use category taps or a swipe on the
-category strip, while row swipes remain owned by the native List. The standard
-menu label names its actual control. Follow-up native validation is required for
-swipe deletion, clear confirmation, recording changes and independent reopening
-of a temporary file archive. This candidate is not a published IPA.
-No account operation or endpoint is added, and the weighted estimate is unchanged.
+The category selector owns category taps and horizontal drags, while each native
+List owns row deletion; an outer horizontal pager otherwise intercepts the
+record's swipe. The toolbar recording menu labels its actual native control.
+All 24 history model tests passed in the
+[model candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37181364762).
+The [final UI candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37182956747)
+passed all three workflows with zero failures or skips; production code was
+unchanged between those runs. Actual list positions remain within 3 pt through
+switching and real Thread/Forum returns. Native deletion, clear cancellation and
+confirmation, recording changes and the order of revisited records are checked
+against an independently reopened temporary file archive. The visited record is
+visually first, followed by the old first record, and both identities match disk.
+Alpha.45 also declares the implemented Simplified Chinese bundle language;
+[five native Home/Search UI workflows](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37179108351)
+passed and the compiled declaration and Chinese Paste/Cancel controls were
+verified. See [language verification and limits](Docs/chinese-interface-language.md).
+Full tagged regression and publication remain separate gates. No account
+operation or endpoint is added, and the weighted estimate is unchanged.
 
 Alpha.43/build 121 follows TiebaLite `9701bfb6`'s reachable forum/thread/user
 search pager. Stable native Lists preserve separate reading positions,
@@ -339,7 +346,7 @@ source, not line count or endpoint count. Full credit requires an end-to-end
 implementation with automated contract coverage; a substantial workflow that
 still needs disposable-account or physical-device validation receives partial
 credit. Ranges reflect remaining edge-case uncertainty. The public app source
-serves `v0.65.0-alpha.44` (build 122) after publication, whose app-code snapshot includes
+serves `v0.65.0-alpha.45` (build 123) after publication, whose app-code snapshot includes
 the complete protobuf image-source fallbacks, release-era media, the configurable
 Home/Explore/Messages/My shell, My/Messages shortcuts, highlighted search results,
 cloud-favorite author links, guarded native profile text editing, Home/account,
@@ -447,7 +454,7 @@ physical-device-validation percentage. Current `main` receives partial credit
 for the end-to-end static-image composer workflow and one additional server-write
 point for the bounded recommendation-feedback workflow, bringing that row to 14.
 The latter adds no anonymous data source, so the anonymous subtotal is unchanged.
-The public `v0.65.0-alpha.44` app-code snapshot is at 80–82%; all experimental
+The `v0.65.0-alpha.45` app-code snapshot is at 80–82%; all experimental
 account paths retain the validation gates documented below.
 
 The first three rows form the anonymous reading-and-media subtotal: 50–52 of 55

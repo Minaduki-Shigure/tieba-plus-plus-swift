@@ -4,7 +4,7 @@
 为 `en`，未声明 `CFBundleLocalizations`，包内也没有 `.lproj` 资源目录。
 应用自身界面文本以简体中文提供，但包的语言声明仍是英语。
 
-候选将项目开发语言、`CFBundleDevelopmentRegion` 设为 `zh-Hans`，并用
+alpha.45（build 123）将项目开发语言、`CFBundleDevelopmentRegion` 设为 `zh-Hans`，并用
 `CFBundleLocalizations: [zh-Hans]` 声明当前实际支持的语言。它不伪造英文或繁体
 翻译，不改系统语言、日期/数字格式偏好，也不覆盖 SwiftUI 的全局 locale。
 

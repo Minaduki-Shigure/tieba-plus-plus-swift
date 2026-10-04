@@ -20,28 +20,41 @@ and its verified metadata enters the public app source.
 | Local features | Available with TiebaLite-aligned Home, Explore, Messages, and My primary tabs backed by independent system navigation stacks; an independent default-on preference can remove only Explore from the tab bar without changing the Home discovery-section preference or saved startup destination. My groups local favorites, history, an inline appearance choice, settings, and About, while Messages exposes global search in its own stack. History, favorites, filtering, appearance with an independent system/OLED dark-surface choice, media preferences, explicit standard/pure/only-author immersive thread-reading modes, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, a next-launch destination including personalized discovery and the inbox, and ordered iOS Home Screen quick actions for existing destinations are also available. The primary-tab shell and reply notice's system handoff attempt remain pending physical-device validation |
 | Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary and guarded native nickname/sex/biography/avatar editor, a credential-free handoff to Baidu's fixed official username-management page, followed forums with validated level-up progress and account-bound today-check-in marks where the server supplies them, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with a shared Home-toolbar/account-page message badge, separate optional fan-reminder badge, and authoritative reply actions, Tieba cloud favorites with a saved-position-to-latest-update handoff, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded profile text and avatar edits, forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies plus explicitly confirmed deletion of the active account's own topic, ordinary floor or nested reply, or another author's ordinary floor or nested reply in its own topic; these newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
-| TiebaLite parity | Current `main` and public `v0.65.0-alpha.44`: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
-| Distribution | The public SideStore/LiveContainer source serves `v0.65.0-alpha.44` (build 122) after its tested IPA is published |
-
-An **unpublished search-suggestions candidate** follows TiebaLite's reachable
-[SearchPage suggestion picker](https://github.com/zzc10086/TiebaLite/blob/9701bfb6aaf261cc37b20b5793a8404261077f49/app/src/main/java/com/huanchengfly/tieba/post/ui/page/search/SearchPage.kt#L284).
-It reuses the existing anonymous suggestion service and default-off preference
-inside the search page. Only user edits in a visible, active search field request
-suggestions, after a 500 ms debounce; returning to the page does not resend old
-text. Submission, cancellation, navigation away and backgrounding cancel pending
-work and reject late responses. Choosing a suggestion uses the existing scope
-and history submission path, while displaying suggestions keeps the results
-pager mounted. The [native candidate run](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37180968131)
-passed all 62 model tests and five UI workflows, with zero failures or skips.
-Actual requests and repository writes confirm one submission for a suggestion,
-no extra request after cancellation or detail return, and no suggestion request
-with the preference disabled. The existing three search-scope UI workflows also
-pass. This was an offline production SearchView on an iOS 18.5 simulator;
-iOS 16, native background/tab transitions, tagged regression and IPA publication
-remain separate checks. The 80–82% parity estimate is unchanged.
+| TiebaLite parity | Current source and the `v0.65.0-alpha.45` release target: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
+| Distribution | The public SideStore/LiveContainer source activates `v0.65.0-alpha.45` (build 123) only after its tested IPA is published; until then it retains the preceding verified release |
 
 ### Release and validation
 
+- **`v0.65.0-alpha.45` history, search suggestions and Chinese system controls:**
+  Thread and forum browsing history keep separate native lists and reading
+  positions through category changes and real detail returns. Tap or swipe the
+  category strip to switch; swiping a record remains the native delete gesture.
+  Both lists share one archive, reread recorded visits on return, and serialize
+  deletion, clearing and recording preferences so navigation or an old read
+  cannot undo accepted writes. The unchanged production model passed all 24
+  [history tests](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37181364762),
+  and the [final native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37182956747)
+  passed all three UI workflows, with zero failures or skips. They verify
+  positions within 3 pt, native deletion, clear cancellation/confirmation,
+  recording changes, and visible record order against an independently reopened
+  temporary archive.
+  The global Search page now offers the existing default-off anonymous online
+  suggestions. Only user edits in the visible, active field request suggestions
+  after a 500 ms debounce; submission, cancellation, navigation away and
+  backgrounding reject pending or late results. Selecting a suggestion preserves
+  the chosen scope, submits and records history once, and leaves the results
+  pager mounted. Its [native candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37180968131)
+  passed all 62 model tests and five UI workflows, including disabled-setting
+  silence, cancellation, detail return and the existing scope workflows.
+  The bundle now declares its implemented Simplified Chinese language, allowing
+  system controls such as Paste and Cancel to follow it without overriding
+  date/number preferences. A separate [native language candidate](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/37179108351)
+  passed all five Home/Search UI workflows and verified the compiled declaration
+  and actual Chinese controls. These candidates use iOS 18.5 simulators and
+  offline fixtures. Full tagged CI, anonymous integration and IPA verification
+  remain publication gates; iOS 16, native background/tab transitions, other
+  language preferences and LiveContainer/device behavior need separate validation.
+  No endpoint or account write is added; the weighted parity estimate is unchanged.
 - **`v0.65.0-alpha.44` retained inbox categories:** Replies and Mentions keep
   separate native lists, reading positions, validated content and pagination.
   Taps, horizontal swipes, main-tab changes and detail returns preserve them;
@@ -1128,7 +1141,7 @@ remain separate checks. The 80–82% parity estimate is unchanged.
   IPA and checks it against the published source. The public source therefore
   never exposes the release-preparation commit by itself; version, graph, or
   concurrent-source mismatches fail closed.
-  The source distributes the verified `v0.65.0-alpha.44` IPA (build 122) after publication.
+  The source distributes the verified `v0.65.0-alpha.45` IPA (build 123) after publication.
 - **Login hotfix:** `v0.54.0-alpha.1` can reach Tieba's account page without
   completing because its callback and Cookie matching are too strict.
   `v0.54.1-alpha.1` made that failure explicit and confirmed that iOS 18.7.2
@@ -1320,7 +1333,10 @@ remain separate checks. The 80–82% parity estimate is unchanged.
   account boundaries, and eager local history/cache reads unchanged.
 - **History:** Versioned browsing and search history support restoration,
   individual deletion, clearing, no-history mode, and corruption recovery.
-  Recent forums are projected from the same browsing archive.
+  Thread and forum browsing lists retain independent positions through category
+  changes and detail return. Native row deletion and category-strip navigation
+  have separate gestures; accepted local writes survive navigation. Recent
+  forums are projected from the same browsing archive.
 - **Favorites:** Forums and threads use a separate local archive. Saved forums
   can be pinned on the App's Home page; this does not create an iOS Home Screen
   icon for an individual forum. Saved threads retain position and browse mode
@@ -1631,7 +1647,7 @@ remain separate checks. The 80–82% parity estimate is unchanged.
   about 18–20%; its anonymous reading and media subtotal remains about 91–95%.
   This measures implemented end-to-end workflows with partial credit for
   device-validation gates; it is not a claim that every path is release-ready.
-  The public `v0.65.0-alpha.44` app-code snapshot has the same 80–82% weighted
+  The `v0.65.0-alpha.45` app-code snapshot has the same 80–82% weighted
   estimate and includes the adaptive configurable primary shell, My/Messages shortcuts,
   search highlighting, cloud-favorite author links, guarded profile text and
   avatar editing, authoritative content-approval readback, and optional background
