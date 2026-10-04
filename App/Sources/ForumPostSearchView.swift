@@ -15,7 +15,9 @@ struct ForumPostSearchView: View {
 
   @Environment(\.showsBothUsernameAndNickname) private var showsBothNames
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+  @Environment(\.scenePhase) private var scenePhase
   @StateObject private var viewModel: ForumPostSearchViewModel
+  @State private var isVisible = false
   @State private var query = ""
   @State private var historyAction: ForumSearchHistoryAction?
   @State private var selectedDestination: ForumPostSearchDestination?
@@ -36,7 +38,8 @@ struct ForumPostSearchView: View {
       wrappedValue: ForumPostSearchViewModel(
         forumName: forumName,
         service: service,
-        historyRepository: searchHistoryRepository
+        historyRepository: searchHistoryRepository,
+        isActive: false
       )
     )
   }
@@ -62,7 +65,9 @@ struct ForumPostSearchView: View {
     .toolbar {
       if viewModel.isShowingHistory, viewModel.historyError != nil {
         ToolbarItem(placement: .navigationBarTrailing) {
-          Button(role: .destructive) { historyAction = .resetAll } label: {
+          Button(role: .destructive) {
+            historyAction = .resetAll
+          } label: {
             Image(systemName: "trash.slash")
           }
           .accessibilityLabel("重置全部吧内搜索记录")
@@ -70,7 +75,9 @@ struct ForumPostSearchView: View {
         }
       } else if viewModel.isShowingHistory, !viewModel.history.isEmpty {
         ToolbarItem(placement: .navigationBarTrailing) {
-          Button(role: .destructive) { historyAction = .clearForum } label: {
+          Button(role: .destructive) {
+            historyAction = .clearForum
+          } label: {
             Image(systemName: "trash")
           }
           .accessibilityLabel("清空本吧搜索记录")
@@ -79,7 +86,21 @@ struct ForumPostSearchView: View {
       }
     }
     .task { await viewModel.loadHistoryIfNeeded() }
-    .onDisappear(perform: viewModel.cancel)
+    .onAppear {
+      isVisible = true
+      if scenePhase != .background { viewModel.activate() }
+    }
+    .onDisappear {
+      isVisible = false
+      viewModel.cancel()
+    }
+    .onChange(of: scenePhase) { phase in
+      if phase == .background {
+        viewModel.cancel()
+      } else if phase == .active, isVisible {
+        viewModel.activate()
+      }
+    }
     .onReceive(NotificationCenter.default.publisher(for: .contentFilterDidChange)) { _ in
       Task { @MainActor in viewModel.reloadAfterContentFilterChange() }
     }
@@ -120,7 +141,7 @@ struct ForumPostSearchView: View {
 
   private var refreshErrorIsPresented: Binding<Bool> {
     Binding(
-      get: { viewModel.refreshError != nil },
+      get: { viewModel.isActive && viewModel.refreshError != nil },
       set: { isPresented in
         guard !isPresented else { return }
         viewModel.clearRefreshError()
@@ -418,7 +439,7 @@ struct ForumPostSearchView: View {
             result: result,
             searchQuery: viewModel.submittedQuery
           )
-            .frame(maxWidth: .infinity, alignment: .leading)
+          .frame(maxWidth: .infinity, alignment: .leading)
           Image(systemName: "chevron.right")
             .font(.caption.weight(.semibold))
             .foregroundStyle(.tertiary)
@@ -434,7 +455,7 @@ struct ForumPostSearchView: View {
         result: result,
         searchQuery: viewModel.submittedQuery
       )
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+      .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
     }
   }
 
@@ -447,12 +468,10 @@ struct ForumPostSearchView: View {
       visibility: context.summary.localVisibility,
       placeholder: "已屏蔽\(context.target.title)"
     ) {
-      if
-        let destination = ForumPostSearchNavigationPolicy.contextDestination(
-          for: result,
-          context: context
-        )
-      {
+      if let destination = ForumPostSearchNavigationPolicy.contextDestination(
+        for: result,
+        context: context
+      ) {
         Button {
           selectedDestination = destination
         } label: {
@@ -461,7 +480,7 @@ struct ForumPostSearchView: View {
               context: context,
               searchQuery: viewModel.submittedQuery
             )
-              .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
             Image(systemName: "chevron.right")
               .font(.caption.weight(.semibold))
               .foregroundStyle(.tertiary)

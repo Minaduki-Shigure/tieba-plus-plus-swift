@@ -3,6 +3,7 @@ import Foundation
 
 @MainActor
 final class ForumPostSearchViewModel: ObservableObject {
+  @Published private(set) var isActive: Bool
   @Published private(set) var submittedQuery = ""
   @Published private(set) var results: [ForumPostSearchItem] = []
   @Published private(set) var state: LoadState = .idle
@@ -28,15 +29,24 @@ final class ForumPostSearchViewModel: ObservableObject {
   private var searchGeneration = 0
   private var hasLoadedHistory = false
   private var lastHistoryTimestamp: Date?
+  private var requestSnapshot: RequestSnapshot?
+
+  private struct RequestSnapshot {
+    let state: LoadState
+    let loadMoreError: String?
+    let refreshError: String?
+  }
 
   init(
     forumName: String,
     service: any ForumPostSearchService,
-    historyRepository: any ForumSearchHistoryRepository
+    historyRepository: any ForumSearchHistoryRepository,
+    isActive: Bool = true
   ) {
     self.forumName = forumName.trimmingCharacters(in: .whitespacesAndNewlines)
     self.service = service
     self.historyRepository = historyRepository
+    self.isActive = isActive
   }
 
   var hasResults: Bool { !results.isEmpty }
@@ -45,6 +55,19 @@ final class ForumPostSearchViewModel: ObservableObject {
   }
   var hasDisplayableResults: Bool { !displayableResults.isEmpty }
   var isShowingHistory: Bool { submittedQuery.isEmpty }
+
+  func activate() {
+    guard !Task.isCancelled else { return }
+    let wasActive = isActive
+    isActive = true
+    if state == .idle, !submittedQuery.isEmpty {
+      // Resume the submitted search, without recording another user submission.
+      restart(preservingResults: false)
+    } else if !wasActive, state == .loaded, !results.isEmpty {
+      // A retained list's tail may already have appeared while this page was hidden.
+      resultPaginationEpoch &+= 1
+    }
+  }
 
   func loadHistoryIfNeeded() async {
     guard !hasLoadedHistory else { return }
@@ -89,7 +112,7 @@ final class ForumPostSearchViewModel: ObservableObject {
     isLoadingMore = false
     loadMoreError = nil
     refreshError = nil
-    state = .loading
+    state = .idle
     recordHistory(query, at: nextHistoryTimestamp())
     load(page: 1, replacing: true, preservingResults: false)
   }
@@ -108,11 +131,17 @@ final class ForumPostSearchViewModel: ObservableObject {
   }
 
   func retry() {
+    guard isActive, !Task.isCancelled else { return }
     restart(preservingResults: false)
   }
 
   func refresh() async {
-    restart(preservingResults: hasResults)
+    guard isActive, !Task.isCancelled else { return }
+    if let searchTask {
+      await searchTask.value
+      return
+    }
+    restart(preservingResults: state == .loaded || hasResults)
     await searchTask?.value
   }
 
@@ -135,6 +164,8 @@ final class ForumPostSearchViewModel: ObservableObject {
 
   func loadMoreIfNeeded(current result: ForumPostSearchItem) {
     guard
+      isActive,
+      !Task.isCancelled,
       result.id == results.last?.id,
       hasMore,
       !isLoadingMore,
@@ -145,7 +176,9 @@ final class ForumPostSearchViewModel: ObservableObject {
   }
 
   func retryLoadMore() {
-    guard hasMore, !isLoadingMore, loadMoreError != nil, state == .loaded else { return }
+    guard isActive, !Task.isCancelled, hasMore, !isLoadingMore,
+      loadMoreError != nil, state == .loaded
+    else { return }
     load(page: currentPage + 1, replacing: false, preservingResults: true)
   }
 
@@ -203,13 +236,17 @@ final class ForumPostSearchViewModel: ObservableObject {
   }
 
   func cancel() {
+    isActive = false
     let shouldRearmPagination = !results.isEmpty && (state == .loading || isLoadingMore)
+    let snapshot = requestSnapshot
     invalidateSearch()
     isLoadingMore = false
     if shouldRearmPagination {
       resultPaginationEpoch &+= 1
     }
-    if state == .loading {
+    if let snapshot {
+      restore(snapshot)
+    } else if state == .loading {
       state = results.isEmpty ? .idle : .loaded
     }
   }
@@ -232,11 +269,11 @@ final class ForumPostSearchViewModel: ObservableObject {
       results = []
       currentPage = 0
       hasMore = true
+      state = .idle
+      loadMoreError = nil
+      refreshError = nil
     }
     isLoadingMore = false
-    loadMoreError = nil
-    refreshError = nil
-    state = .loading
     load(
       page: 1,
       replacing: true,
@@ -249,6 +286,7 @@ final class ForumPostSearchViewModel: ObservableObject {
     replacing: Bool,
     preservingResults: Bool
   ) {
+    guard isActive, !Task.isCancelled else { return }
     let query = submittedQuery
     let forumName = forumName
     let sort = sort
@@ -256,8 +294,14 @@ final class ForumPostSearchViewModel: ObservableObject {
     let service = service
     searchGeneration &+= 1
     let generation = searchGeneration
-    if !replacing {
-      loadMoreError = nil
+    requestSnapshot = RequestSnapshot(
+      state: state, loadMoreError: loadMoreError, refreshError: refreshError
+    )
+    loadMoreError = nil
+    refreshError = nil
+    if replacing {
+      state = .loading
+    } else {
       isLoadingMore = true
     }
 
@@ -266,9 +310,11 @@ final class ForumPostSearchViewModel: ObservableObject {
         if generation == searchGeneration {
           isLoadingMore = false
           searchTask = nil
+          requestSnapshot = nil
         }
       }
       do {
+        try Task.checkCancellation()
         let response = try await service.searchForumPosts(
           query: query,
           forumName: forumName,
@@ -293,6 +339,9 @@ final class ForumPostSearchViewModel: ObservableObject {
           resultPaginationEpoch &+= 1
         }
       } catch is CancellationError {
+        if generation == searchGeneration, let snapshot = requestSnapshot {
+          restore(snapshot)
+        }
         return
       } catch {
         guard isCurrent(generation: generation, query: query, sort: sort, filter: filter)
@@ -300,7 +349,7 @@ final class ForumPostSearchViewModel: ObservableObject {
         if !replacing {
           loadMoreError = error.localizedDescription
           state = .loaded
-        } else if preservingResults, !results.isEmpty {
+        } else if preservingResults {
           resultPaginationEpoch &+= 1
           refreshError = error.localizedDescription
           state = .loaded
@@ -360,6 +409,13 @@ final class ForumPostSearchViewModel: ObservableObject {
     searchGeneration &+= 1
     searchTask?.cancel()
     searchTask = nil
+    requestSnapshot = nil
+  }
+
+  private func restore(_ snapshot: RequestSnapshot) {
+    state = snapshot.state
+    loadMoreError = snapshot.loadMoreError
+    refreshError = snapshot.refreshError
   }
 
   private func isCurrent(
@@ -368,7 +424,7 @@ final class ForumPostSearchViewModel: ObservableObject {
     sort: ForumPostSearchSort,
     filter: ForumPostSearchFilter
   ) -> Bool {
-    generation == searchGeneration
+    isActive && generation == searchGeneration
       && query == submittedQuery
       && sort == self.sort
       && filter == self.filter
