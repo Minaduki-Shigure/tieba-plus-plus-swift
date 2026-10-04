@@ -6,7 +6,7 @@ struct NotificationsPageView<Row: View>: View {
   @ObservedObject var model: NotificationsViewModel
   let onRefresh: () async -> Void
   @ViewBuilder let row: (InboxMessagePresentation) -> Row
-  @State private var visibleTail: InboxPaginationVisibilityKey?
+  @State private var visibleMessageIDs: Set<Int64> = []
 
   var body: some View {
     messageList
@@ -21,6 +21,7 @@ struct NotificationsPageView<Row: View>: View {
       .onChange(of: model.isResolvingSession) { _ in resumeVisiblePagination() }
       .onChange(of: model.isResolvingContentFilter) { _ in resumeVisiblePagination() }
       .onChange(of: model.state) { _ in resumeVisiblePagination() }
+      .onChange(of: model.paginationEpoch) { _ in resumeVisiblePagination() }
       .alert(
         "刷新失败",
         isPresented: Binding(
@@ -83,16 +84,21 @@ struct NotificationsPageView<Row: View>: View {
         .padding(.vertical, 8)
         .listRowSeparator(.hidden)
         .accessibilityElement(children: .combine)
-      } else {
-        ForEach(model.displayableMessages) { presentation in
-          LocallyFilteredContent(
-            visibility: presentation.visibility,
-            placeholder: "已屏蔽此消息"
-          ) {
-            row(presentation)
-          }
-          .frame(minHeight: 44)
+      }
+
+      ForEach(model.displayableMessages) { presentation in
+        LocallyFilteredContent(
+          visibility: presentation.visibility,
+          placeholder: "已屏蔽此消息"
+        ) {
+          row(presentation)
         }
+        .frame(minHeight: 44)
+        .onAppear {
+          visibleMessageIDs.insert(presentation.id)
+          resumeVisiblePagination()
+        }
+        .onDisappear { visibleMessageIDs.remove(presentation.id) }
       }
 
       if !model.messages.isEmpty && model.requiresExplicitPagination {
@@ -104,22 +110,6 @@ struct NotificationsPageView<Row: View>: View {
         }
         .disabled(model.isLoadingMore || model.loadMoreError != nil)
         .listRowSeparator(.hidden)
-      } else if model.hasNextPage, let tail = model.paginationTail {
-        let key = InboxPaginationVisibilityKey(
-          messageID: tail.id, count: model.messages.count, epoch: model.paginationEpoch)
-        Color.clear
-          .frame(height: 1)
-          .id(key)
-          .listRowInsets(EdgeInsets())
-          .listRowSeparator(.hidden)
-          .accessibilityHidden(true)
-          .onAppear {
-            visibleTail = key
-            resumeVisiblePagination()
-          }
-          .onDisappear {
-            if visibleTail == key { visibleTail = nil }
-          }
       }
 
       if model.isLoadingMore {
@@ -153,17 +143,13 @@ struct NotificationsPageView<Row: View>: View {
   }
 
   private func resumeVisiblePagination() {
-    guard acceptsActions, let tail = model.paginationTail,
-      visibleTail
-        == InboxPaginationVisibilityKey(
-          messageID: tail.id, count: model.messages.count, epoch: model.paginationEpoch)
+    // Anchor pagination to a real row that keeps its identity when a page is
+    // appended. Replacing an invisible footer's ID at the end of a native List
+    // can move the reading position along with that footer during insertion.
+    guard acceptsActions, !model.requiresExplicitPagination,
+      let visibleTail = model.displayableMessages.last,
+      visibleMessageIDs.contains(visibleTail.id), let tail = model.paginationTail
     else { return }
     model.loadMoreIfNeeded(current: tail)
   }
-}
-
-private struct InboxPaginationVisibilityKey: Hashable {
-  let messageID: Int64
-  let count: Int
-  let epoch: Int
 }
