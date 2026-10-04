@@ -764,7 +764,7 @@ the source metadata is updated to that tested IPA.
 - Ranked anonymous hot-topic discovery with images and discussion counts
 - Hot-topic details with related forums and cursor-aware thread pagination
 - Categorized anonymous forum, thread, and user search
-- Default-off anonymous online suggestions for the home search field
+- Default-off anonymous online suggestions for the Home and global Search fields
 - Local home-entry customization with a next-launch home, personalized discovery,
   ranking, topic, inbox, favorite, or history destination, an optional home
   discovery section, and an independent default-on Explore-tab visibility choice
@@ -2584,18 +2584,20 @@ zero failures or skips. The UI checks separate reading positions within 3 pt,
 horizontal paging, detail return, pagination, sort isolation and a real keyboard
 submission that resets all scopes while loading only the current one.
 Tagged full regression and physical-device validation remain separate gates.
-This work does not add
-endpoints, credentials or online suggestions to the results screen.
-Online suggestions are a separate, explicitly enabled pre-submission path. The
+Online suggestions are an explicitly enabled pre-submission path shared by the
+Home field and the global Search page, without adding endpoints or credentials. The
 switch defaults off and enabling it does not send text already in the field;
 only a later edit that remains valid for 500 milliseconds can issue a request.
 That minimal protobuf request contains the bounded public keyword and fixed
 global-search discriminator, but no `CommonReq`, account credential, cookie, or
 device identifier. Suggestions are never cached, logged, or added to local
 history; only an explicit suggestion tap or ordinary search submission records
-the final term. Leaving the home flow, backgrounding the app, or disabling the
-setting cancels and clears the current suggestion state, although cancellation
-cannot retract a request that has already reached the server.
+the final term. Submitting, cancelling the Search field, leaving the current
+search surface, backgrounding the app, or disabling the setting cancels and
+clears the current suggestion state. Returning to a surface does not request
+suggestions until another user edit; the Search results pager stays mounted
+while suggestions are visible. Cancellation cannot retract a request that has
+already reached the server.
 Global post search defaults to newest and keeps its newest/oldest/relevance
 selection across first-page retries, refreshes, and pagination. Its wire values
 are intentionally modeled separately from per-forum search because the two Web
