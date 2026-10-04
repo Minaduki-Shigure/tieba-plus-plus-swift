@@ -19,6 +19,12 @@ final class HistoryScopesUITests: XCTestCase {
       try select("forum", app: app)
       try position(forum, app: app)
     }
+    try tap(app.staticTexts[forum.title].firstMatch)
+    try wait("Real forum opened") {
+      app.navigationBars[forum.title].exists && app.staticTexts["暂无帖子"].firstMatch.isHittable
+    }
+    edgeBack(app)
+    try position(forum, app: app)
     try select("thread", app: app)
     try position(thread, app: app)
     try tap(app.staticTexts[thread.title].firstMatch)
