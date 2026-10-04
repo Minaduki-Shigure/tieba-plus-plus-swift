@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, ci/forum-section-native-1004]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -179,6 +179,11 @@ jobs:
           -derivedDataPath build/DerivedData
           -resultBundlePath app-test-results.xcresult
           -destination "$IOS_SIMULATOR_DESTINATION"
+          -parallel-testing-enabled NO
+          -only-testing:TiebaPlusPlusTests/ForumSectionsViewModelTests
+          -only-testing:TiebaPlusPlusTests/ForumSectionPagerTests
+          -only-testing:TiebaPlusPlusTests/BrowseViewModelTests
+          -only-testing:TiebaPlusPlusTests/ForumCheckInViewModelTests
           -skipPackagePluginValidation
           CODE_SIGNING_ALLOWED=NO
           test 2>&1 | tee xcodebuild.log
@@ -246,6 +251,7 @@ jobs:
           -enableCodeCoverage YES
           -destination "$ICON_UI_SIMULATOR_DESTINATION"
           -parallel-testing-enabled NO
+          -only-testing:TiebaPlusPlusUITests/ForumSectionsUITests
           -resultBundlePath icon-ui-results.xcresult
           -skipPackagePluginValidation
           CODE_SIGNING_ALLOWED=NO
