@@ -58,6 +58,8 @@ private struct NewThreadComposerContentView: View {
   @State private var imageQuality = ComposerImageAttachmentQuality.standard
   @State private var imageWatermark = TiebaStaticImageWatermark.forumName
   @State private var contentSelection = ComposerTextSelection.start
+  @StateObject private var editorController = ComposerTextEditorController()
+  @State private var editorDocumentID = UUID()
   @State private var didHydrateDraft = false
   @State private var pendingSubmission: NewThreadSubmission?
   @State private var isDiscardConfirmationPresented = false
@@ -134,6 +136,8 @@ private struct NewThreadComposerContentView: View {
           text: $content,
           selection: $contentSelection,
           isFocused: contentEditorIsFocused,
+          controller: editorController,
+          documentID: editorDocumentID,
           isEditable: editorAllowsEditing,
           accessibilityLabel: "主题正文",
           accessibilityIdentifier: "new-thread-content"
@@ -396,6 +400,7 @@ private struct NewThreadComposerContentView: View {
         isEmoticonPickerPresented = false
         didHydrateDraft = false
         title = ""
+        resetEditorDocument()
         content = ""
         attachments = []
         imageQuality = .standard
@@ -457,9 +462,10 @@ private struct NewThreadComposerContentView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
       let cleanupOwnerUserID = attachmentOwnerUserID
-      let cleanupCandidates = cleanupOwnerUserID.map {
-        imageCleanupCandidates.attachments(for: $0)
-      } ?? []
+      let cleanupCandidates =
+        cleanupOwnerUserID.map {
+          imageCleanupCandidates.attachments(for: $0)
+        } ?? []
       imageImportCancellationController.cancel()
       if let cleanupOwnerUserID {
         cleanImageCandidates(
@@ -473,6 +479,7 @@ private struct NewThreadComposerContentView: View {
       didHydrateDraft = false
       attachmentOwnerUserID = nil
       title = ""
+      resetEditorDocument()
       content = ""
       attachments = []
       imageQuality = .standard
@@ -524,9 +531,9 @@ private struct NewThreadComposerContentView: View {
     Button("开始新主题") {
       isConfirmedResetConfirmationPresented = true
     }
-      .buttonStyle(.bordered)
-      .controlSize(.small)
-      .accessibilityIdentifier("new-thread-reset-confirmed")
+    .buttonStyle(.bordered)
+    .controlSize(.small)
+    .accessibilityIdentifier("new-thread-reset-confirmed")
   }
 
   private var openConfirmedThreadButton: some View {
@@ -678,6 +685,7 @@ private struct NewThreadComposerContentView: View {
       return
     default:
       title = entry.draft?.title ?? ""
+      resetEditorDocument()
       content = entry.draft?.content ?? ""
       attachments = entry.draft?.attachments ?? []
       imageQuality = entry.draft?.attachments.last?.quality ?? .standard
@@ -933,6 +941,7 @@ private struct NewThreadComposerContentView: View {
       do {
         try await store.discardDraft(for: target)
         title = ""
+        resetEditorDocument()
         content = ""
         attachments = []
         imageQuality = .standard
@@ -971,6 +980,7 @@ private struct NewThreadComposerContentView: View {
       do {
         try await store.discardDraft(for: target)
         title = ""
+        resetEditorDocument()
         content = ""
         attachments = []
         imageQuality = .standard
@@ -1018,8 +1028,13 @@ private struct NewThreadComposerContentView: View {
         attachmentCount: attachments.count
       )
     else { return }
-    content = result.text
-    contentSelection = result.selection
+    editorController.insert(
+      token, expectedText: content, selection: contentSelection, documentID: editorDocumentID)
+  }
+
+  private func resetEditorDocument() {
+    editorController.invalidateDocument()
+    editorDocumentID = UUID()
   }
 
   private func restoreContentEditorFocus() {
@@ -1241,12 +1256,13 @@ struct NewThreadComposerPresentation: Equatable {
         )
       case .locked(_, let operation):
         imageRecoveryAction = nil
-        let message: String = switch operation {
-        case .attachment:
-          "一张图片的上传结果无法确认，草稿已锁定；应用不会自动重试。"
-        case .finalSubmission:
-          "主题发布请求的结果无法确认，草稿已锁定；请勿重复发布。"
-        }
+        let message: String =
+          switch operation {
+          case .attachment:
+            "一张图片的上传结果无法确认，草稿已锁定；应用不会自动重试。"
+          case .finalSubmission:
+            "主题发布请求的结果无法确认，草稿已锁定；请勿重复发布。"
+          }
         status = Status(
           message: message,
           systemImage: "questionmark.circle",

@@ -1,0 +1,61 @@
+name: Composer inline emoticon candidate
+on:
+  push:
+    branches: [feat/composer-inline-1013]
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Create simulator
+        run: |
+          set -euo pipefail
+          runtime="$(xcrun simctl list runtimes -j | jq -r '.runtimes[] | select(.isAvailable and .version == "18.5") | .identifier' | head -1)"
+          test -n "$runtime"
+          simulator="$(xcrun simctl create "Composer candidate $GITHUB_RUN_ID" com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro "$runtime")"
+          echo "COMPOSER_SIMULATOR=$simulator" >> "$GITHUB_ENV"
+      - name: Test production editor and source contracts
+        id: native
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild -project TiebaPlusPlus.xcodeproj -scheme TiebaPlusPlus \
+            -configuration Debug -derivedDataPath build/DerivedData \
+            -destination "platform=iOS Simulator,id=$COMPOSER_SIMULATOR" \
+            -parallel-testing-enabled NO -resultBundlePath composer-results.xcresult \
+            -only-testing:TiebaPlusPlusTests/ComposerEmoticonSpansTests \
+            -only-testing:TiebaPlusPlusTests/ComposerEmoticonTextViewTests \
+            -only-testing:TiebaPlusPlusTests/ComposerTextEditorNativeTests \
+            -only-testing:TiebaPlusPlusTests/ComposerTextEditorTests \
+            -only-testing:TiebaPlusPlusTests/ClassicEmoticonPickerTests \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO test 2>&1 | tee composer-test.log
+      - name: Export native evidence
+        if: always()
+        run: |
+          if [ -d composer-results.xcresult ]; then
+            xcrun xcresulttool get test-results summary --path composer-results.xcresult > composer-summary.json
+            xcrun xcresulttool export attachments --path composer-results.xcresult --output-path composer-attachments
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: composer-candidate-${{ github.run_id }}
+          path: |
+            composer-test.log
+            composer-summary.json
+            composer-attachments/
+          retention-days: 7
+      - name: Delete simulator
+        if: ${{ always() && env.COMPOSER_SIMULATOR != '' }}
+        run: |
+          xcrun simctl shutdown "$COMPOSER_SIMULATOR" || true
+          xcrun simctl delete "$COMPOSER_SIMULATOR"
+      - name: Enforce native result
+        if: ${{ always() && steps.native.outcome != 'success' }}
+        run: exit 1

@@ -71,6 +71,8 @@ private struct ReplyComposerContentView: View {
   @State private var imageQuality = ComposerImageAttachmentQuality.standard
   @State private var imageWatermark = TiebaStaticImageWatermark.forumName
   @State private var textSelection = ComposerTextSelection.start
+  @StateObject private var editorController = ComposerTextEditorController()
+  @State private var editorDocumentID = UUID()
   @State private var didHydrateDraft = false
   @State private var pendingSubmission: TextReplySubmission?
   @State private var isDiscardConfirmationPresented = false
@@ -320,6 +322,7 @@ private struct ReplyComposerContentView: View {
         pendingSubmission = nil
         isEmoticonPickerPresented = false
         didHydrateDraft = false
+        resetEditorDocument()
         text = ""
         attachments = []
         imageQuality = .standard
@@ -383,9 +386,10 @@ private struct ReplyComposerContentView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: .accountSessionDidChange)) { _ in
       let cleanupOwnerUserID = attachmentOwnerUserID
-      let cleanupCandidates = cleanupOwnerUserID.map {
-        imageCleanupCandidates.attachments(for: $0)
-      } ?? []
+      let cleanupCandidates =
+        cleanupOwnerUserID.map {
+          imageCleanupCandidates.attachments(for: $0)
+        } ?? []
       imageImportCancellationController.cancel()
       if let cleanupOwnerUserID {
         cleanImageCandidates(
@@ -400,6 +404,7 @@ private struct ReplyComposerContentView: View {
       isEmoticonPickerPresented = false
       didHydrateDraft = false
       attachmentOwnerUserID = nil
+      resetEditorDocument()
       text = ""
       attachments = []
       imageQuality = .standard
@@ -430,6 +435,8 @@ private struct ReplyComposerContentView: View {
         text: $text,
         selection: $textSelection,
         isFocused: $editorIsFocused,
+        controller: editorController,
+        documentID: editorDocumentID,
         isEditable: editorAllowsEditing,
         accessibilityLabel: context.composerTitle,
         accessibilityIdentifier: "reply-composer-editor"
@@ -626,8 +633,10 @@ private struct ReplyComposerContentView: View {
     case .inactive, .loading:
       return
     default:
+      resetEditorDocument()
       text = entry.draft?.content ?? ""
-      attachments = ReplyComposerImagePolicy.allowsAttachments(for: context.target)
+      attachments =
+        ReplyComposerImagePolicy.allowsAttachments(for: context.target)
         ? entry.draft?.attachments ?? []
         : []
       imageQuality = attachments.last?.quality ?? .standard
@@ -923,6 +932,7 @@ private struct ReplyComposerContentView: View {
     Task { @MainActor in
       do {
         try await store.discardDraft(for: context.target)
+        resetEditorDocument()
         text = ""
         attachments = []
         imageQuality = .standard
@@ -962,8 +972,13 @@ private struct ReplyComposerContentView: View {
         target: context.target
       )
     else { return }
-    text = result.text
-    textSelection = result.selection
+    editorController.insert(
+      token, expectedText: text, selection: textSelection, documentID: editorDocumentID)
+  }
+
+  private func resetEditorDocument() {
+    editorController.invalidateDocument()
+    editorDocumentID = UUID()
   }
 
   private func restoreEditorFocus() {
@@ -1154,7 +1169,9 @@ enum TextReplyVisibilityProof {
       separatorAndText.removeFirst(2)
     } else if separatorAndText.hasPrefix(":") {
       separatorAndText.removeFirst()
-    } else { return nil }
+    } else {
+      return nil
+    }
     if separatorAndText.isEmpty {
       bodyContents.removeFirst()
     } else {
@@ -1280,12 +1297,13 @@ struct TextReplyComposerPresentation: Equatable {
         )
       case .locked(_, let operation):
         imageRecoveryAction = nil
-        let message: String = switch operation {
-        case .attachment:
-          "一张图片的上传结果无法确认，草稿已锁定；应用不会自动重试。"
-        case .finalSubmission:
-          "回复发布请求的结果无法确认，草稿已锁定；请勿重复发送。"
-        }
+        let message: String =
+          switch operation {
+          case .attachment:
+            "一张图片的上传结果无法确认，草稿已锁定；应用不会自动重试。"
+          case .finalSubmission:
+            "回复发布请求的结果无法确认，草稿已锁定；请勿重复发送。"
+          }
         status = Status(
           message: message,
           systemImage: "questionmark.circle",

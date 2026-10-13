@@ -29,9 +29,9 @@ struct ComposerTextSelection: Equatable, Sendable {
     let utf16Count = text.utf16.count
     guard
       location >= 0
-      && length >= 0
-      && location <= utf16Count
-      && length <= utf16Count - location
+        && length >= 0
+        && location <= utf16Count
+        && length <= utf16Count - location
     else { return nil }
 
     let lowerOffset = location
@@ -84,12 +84,82 @@ enum ComposerTextInsertionPolicy {
   }
 }
 
+/// The picker performs a native editing operation on the mounted editor. Draft
+/// restoration remains a separate document replacement, never an undoable edit.
+@MainActor
+final class ComposerTextEditorController: ObservableObject {
+  private weak var textView: UITextView?
+  private var documentID: UUID?
+  private var didEdit: ((UITextView) -> Void)?
+
+  func attach(
+    to textView: UITextView,
+    documentID: UUID,
+    didEdit: @escaping (UITextView) -> Void
+  ) {
+    self.textView = textView
+    self.documentID = documentID
+    self.didEdit = didEdit
+  }
+
+  func detach(from textView: UITextView) {
+    guard self.textView === textView else { return }
+    self.textView = nil
+    documentID = nil
+    didEdit = nil
+  }
+
+  /// Invalidate synchronously, before SwiftUI has applied the new document ID.
+  /// Even identical source text in another account must not share undo history.
+  func invalidateDocument() {
+    documentID = nil
+    textView?.undoManager?.removeAllActions()
+  }
+
+  @discardableResult
+  func insert(
+    _ insertion: String,
+    expectedText: String,
+    selection: ComposerTextSelection,
+    documentID: UUID
+  ) -> Bool {
+    guard
+      self.documentID == documentID,
+      let textView,
+      textView.window != nil,
+      textView.isEditable,
+      textView.markedTextRange == nil,
+      textView.text.utf8.elementsEqual(expectedText.utf8),
+      textView.selectedRange == selection.nsRange,
+      let result = ComposerTextInsertionPolicy.replacingSelection(
+        in: expectedText, selection: selection, with: insertion),
+      let undoManager = textView.undoManager
+    else { return false }
+
+    // insertText also replaces a selected range. Do not assign text or mutate
+    // textStorage: only the native editing path registers the matching undo.
+    undoManager.beginUndoGrouping()
+    textView.insertText(insertion)
+    undoManager.endUndoGrouping()
+    // A picker sheet may own first responder. Publish synchronously even if
+    // UIKit does not emit an editing callback for this programmatic insertion.
+    didEdit?(textView)
+    return textView.text.utf8.elementsEqual(result.text.utf8)
+      && textView.selectedRange == result.selection.nsRange
+  }
+}
+
 @MainActor
 struct ComposerTextEditor: UIViewRepresentable {
+  @Environment(\.contentMediaLoadPolicy) private var mediaLoadPolicy
+  @Environment(\.contentMediaLoadBehavior) private var mediaLoadBehavior
+  @Environment(\.contentImagePreviewNetworkAccess) private var previewNetworkAccess
   @Binding var text: String
   @Binding var selection: ComposerTextSelection
   @Binding var isFocused: Bool
 
+  let controller: ComposerTextEditorController
+  let documentID: UUID
   let isEditable: Bool
   let accessibilityLabel: String
   let accessibilityIdentifier: String
@@ -99,7 +169,7 @@ struct ComposerTextEditor: UIViewRepresentable {
   }
 
   func makeUIView(context: Context) -> UITextView {
-    let textView = UITextView()
+    let textView = ComposerEmoticonTextView()
     textView.delegate = context.coordinator
     textView.backgroundColor = .clear
     textView.font = UIFont.preferredFont(forTextStyle: .body)
@@ -111,15 +181,26 @@ struct ComposerTextEditor: UIViewRepresentable {
     textView.accessibilityLabel = accessibilityLabel
     textView.accessibilityIdentifier = accessibilityIdentifier
     context.coordinator.apply(parent: self, to: textView)
+    textView.updateEmoticonImages(fetchPolicy: emoticonFetchPolicy)
     return textView
   }
 
   func updateUIView(_ textView: UITextView, context: Context) {
     context.coordinator.parent = self
     context.coordinator.apply(parent: self, to: textView)
+    (textView as? ComposerEmoticonTextView)?.updateEmoticonImages(fetchPolicy: emoticonFetchPolicy)
+  }
+
+  private var emoticonFetchPolicy: DownsampledImageFetchPolicy {
+    ContentRemoteImageLoadDecision.fetchPolicy(
+      policy: mediaLoadPolicy, behavior: mediaLoadBehavior, lastObservedPolicy: nil,
+      request: .init(url: nil, maxPixelSize: ClassicEmoticonThumbnailRequest.maximumPixelSize),
+      authorizedRequest: nil, networkAccess: previewNetworkAccess)
   }
 
   static func dismantleUIView(_ textView: UITextView, coordinator: Coordinator) {
+    (textView as? ComposerEmoticonTextView)?.stopLoadingImages()
+    coordinator.parent.controller.detach(from: textView)
     textView.delegate = nil
     if textView.isFirstResponder {
       textView.resignFirstResponder()
@@ -130,6 +211,7 @@ struct ComposerTextEditor: UIViewRepresentable {
   final class Coordinator: NSObject, UITextViewDelegate {
     var parent: ComposerTextEditor
     private var isApplyingParentState = false
+    private var appliedDocumentID: UUID?
 
     init(parent: ComposerTextEditor) {
       self.parent = parent
@@ -139,9 +221,17 @@ struct ComposerTextEditor: UIViewRepresentable {
       isApplyingParentState = true
       defer { isApplyingParentState = false }
 
-      if !textView.text.utf8.elementsEqual(parent.text.utf8) {
-        textView.text = parent.text
+      let isNewDocument = appliedDocumentID != parent.documentID
+      if isNewDocument {
+        textView.unmarkText()
       }
+      let sourceChanged = !textView.text.utf8.elementsEqual(parent.text.utf8)
+      if isNewDocument || (sourceChanged && textView.markedTextRange == nil) {
+        textView.undoManager?.removeAllActions()
+        if sourceChanged { textView.text = parent.text }
+        textView.undoManager?.removeAllActions()
+      }
+      appliedDocumentID = parent.documentID
       if parent.selection.isValid(for: parent.text),
         textView.selectedRange != parent.selection.nsRange,
         textView.markedTextRange == nil
@@ -152,6 +242,9 @@ struct ComposerTextEditor: UIViewRepresentable {
       textView.isSelectable = true
       textView.accessibilityLabel = parent.accessibilityLabel
       textView.accessibilityIdentifier = parent.accessibilityIdentifier
+      parent.controller.attach(to: textView, documentID: parent.documentID) { [weak self] view in
+        self?.textViewDidChange(view)
+      }
 
       if parent.isFocused, parent.isEditable, !textView.isFirstResponder {
         Task { @MainActor [weak self, weak textView] in
@@ -164,7 +257,7 @@ struct ComposerTextEditor: UIViewRepresentable {
           else { return }
           textView.becomeFirstResponder()
         }
-      } else if (!parent.isFocused || !parent.isEditable), textView.isFirstResponder {
+      } else if !parent.isFocused || !parent.isEditable, textView.isFirstResponder {
         textView.resignFirstResponder()
       }
     }
@@ -172,11 +265,14 @@ struct ComposerTextEditor: UIViewRepresentable {
     func textViewDidChange(_ textView: UITextView) {
       guard !isApplyingParentState else { return }
       parent.text = textView.text
+      (textView as? ComposerEmoticonTextView)?.normalizeSelection()
       publishSelection(textView.selectedRange)
     }
 
     func textViewDidChangeSelection(_ textView: UITextView) {
       guard !isApplyingParentState else { return }
+      (textView as? ComposerEmoticonTextView)?.normalizeSelection(
+        movingFrom: parent.selection.nsRange)
       publishSelection(textView.selectedRange)
     }
 
