@@ -16,13 +16,18 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
-The alpha.49 candidate adds TiebaLite `9701bfb6`'s reachable **服务中心** entry
+The published alpha.49 release adds TiebaLite `9701bfb6`'s reachable **服务中心** entry
 under My for signed-in accounts. It uses the existing external-browser preference
 and a fixed HTTPS URL without copying App credentials or Android device markers.
 An anonymous 2026-10-13 check returned the official page and service configuration
 without those query parameters. Four focused App tests cover destination validation,
 native-link routing exclusion, in-app browser presentation acceptance, and browser
-fallback. Native test execution and release gates are pending; browser login,
+fallback. Its
+[tagged regression](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/38376130896)
+passed 2,699 App tests, 27 phone UI tests and three iPad UI tests, with zero
+failures or skips, plus Core and anonymous integration. IPA build, publication
+and the subsequent public source/IPA validation passed; an independent download
+matched the published size, SHA-256 and build 127 metadata. Browser login,
 appeals, feedback submission, and LiveContainer behavior still need device checks.
 This closes an entry-point gap within an existing credited area and does not add
 a weighted point. The [new spot audit](Docs/tiebalite-reachable-workflow-audit.md)

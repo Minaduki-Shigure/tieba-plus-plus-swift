@@ -20,18 +20,25 @@ and its verified metadata enters the public app source.
 | Local features | Available with TiebaLite-aligned Home, Explore, Messages, and My primary tabs backed by independent system navigation stacks; an independent default-on preference can remove only Explore from the tab bar without changing the Home discovery-section preference or saved startup destination. My groups local favorites, history, an inline appearance choice, settings, and About, while Messages exposes global search in its own stack. History, favorites, filtering, appearance with an independent system/OLED dark-surface choice, media preferences, explicit standard/pure/only-author immersive thread-reading modes, account-isolated followed-forum pinning and layout, separate local/cloud favorite opening habits, a configurable forum primary action, reply-entry visibility, a default-on posting/reply risk notice, a shared selectable-text panel for visible floors and nested replies, a next-launch destination including personalized discovery and the inbox, and ordered iOS Home Screen quick actions for existing destinations are also available. The primary-tab shell and reply notice's system handoff attempt remain pending physical-device validation |
 | Accounts | Current `main` supports bound Web login, Home-toolbar quick switching and direct account addition, logout, an account-bound self-profile summary and guarded native nickname/sex/biography/avatar editor, a credential-free handoff to Baidu's fixed official username-management page, followed forums with validated level-up progress and account-bound today-check-in marks where the server supplies them, authenticated inline management plus a TiebaLite-style mutual filter for the active account's following list, login-gated complete liked-forum lists for the current or another user, target-bound user relationship and interaction-restriction reads, independently selectable anonymous or saved-account recommendation personas, a default-off persona-bound followed-forum recommendation filter, a foreground concern feed and ReplyMe/AtMe inbox with a shared Home-toolbar/account-page message badge, separate optional fan-reminder badge, and authoritative reply actions, Tieba cloud favorites with a saved-position-to-latest-update handoff, per-forum state, the same explicitly confirmed foreground one-click check-in page from Home and Account for an active full-credential session with confirmation-frozen execution settings, authenticated poll state, and experimental content approval |
 | Server-side writes | Guarded profile text and avatar edits, forum and user follow/unfollow, user interaction restrictions, single-forum and foreground batch check-in, poll voting, content approval, thread-detail and verified list-level cloud-favorite changes, text plus fixed-catalog classic-emoticon topic/floor/nested replies, equivalent new-topic creation, and server-reason-bound personalized recommendation dislike feedback are in device validation. Current `main` additionally wires bounded static-image creation into new topics and direct topic replies plus explicitly confirmed deletion of the active account's own topic, ordinary floor or nested reply, or another author's ordinary floor or nested reply in its own topic; these newer workflows remain disposable-account and physical-device validation gates. Visible topics, floors, and nested replies can also open Tieba's official report form through SafariServices without exporting App credentials; other writes stay disabled |
-| TiebaLite parity | Current source and the published `v0.65.0-alpha.48` release: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
-| Distribution | The public SideStore/LiveContainer source serves the verified [v0.65.0-alpha.48 release](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/releases/tag/v0.65.0-alpha.48) (build 126). The alpha.45, alpha.46 and alpha.47 candidates were withheld after native regression findings |
+| TiebaLite parity | Current source and the published `v0.65.0-alpha.49` release: about 81% overall (estimated range 80–82%, with 18–20% remaining). Anonymous reading and media remain about 91–95% |
+| Distribution | The public SideStore/LiveContainer source serves the verified [v0.65.0-alpha.49 release](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/releases/tag/v0.65.0-alpha.49) (build 127). The alpha.45, alpha.46 and alpha.47 candidates were withheld after native regression findings |
 
 ### Release and validation
 
-The alpha.49 candidate adds **My → 服务中心** for signed-in accounts, matching
+The published alpha.49 release adds **My → 服务中心** for signed-in accounts, matching
 TiebaLite's official service-center entry. It opens the fixed official HTTPS
 page using the existing browser preference; the page uses its own browser login.
 No saved App credentials or device identifiers are attached. Anonymous checks
 on 2026-10-13 confirmed that the page and its service configuration load without
-TiebaLite's Android/CUID parameters. Native regression and publication are still
-pending for this candidate; the application source continues to serve alpha.48.
+TiebaLite's Android/CUID parameters. The
+[tagged regression](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/38376130896)
+passed 2,699 App tests, 27 phone UI tests and three iPad UI tests, with zero
+failures or skips, plus Core and anonymous integration. The
+[IPA build and publication](https://github.com/Minaduki-Shigure/tieba-plus-plus-swift/actions/runs/38384993317)
+and subsequent public source/IPA validation passed. The downloaded public IPA
+also independently matched the source's size, SHA-256 and build 127 metadata.
+Browser login, appeals, feedback submission and LiveContainer behavior still
+need physical-device validation.
 See the [reachable-workflow spot audit](Docs/tiebalite-reachable-workflow-audit.md)
 for the source comparison and the remaining inline-emoticon editor gap.
 
