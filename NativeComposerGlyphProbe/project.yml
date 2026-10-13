@@ -1,0 +1,41 @@
+name: ComposerGlyphProbe
+options:
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    CODE_SIGNING_ALLOWED: NO
+    GENERATE_INFOPLIST_FILE: YES
+targets:
+  ComposerGlyphProbe:
+    type: application
+    platform: iOS
+    sources:
+      - App.swift
+      - SourceGlyphLayout.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.minaduki.composer-glyph-probe
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+  ComposerGlyphProbeTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - ProbeTests.swift
+    dependencies:
+      - target: ComposerGlyphProbe
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.minaduki.composer-glyph-probe-tests
+schemes:
+  ComposerGlyphProbe:
+    build:
+      targets:
+        ComposerGlyphProbe: all
+        ComposerGlyphProbeTests: [test]
+    test:
+      targets: [ComposerGlyphProbeTests]
+      parallelizable: false

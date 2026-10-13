@@ -1,0 +1,57 @@
+name: Composer source glyph native probe
+on:
+  push:
+    branches: [ci/composer-glyph-probe-1013]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+      - run: brew install xcodegen
+      - run: xcodegen generate --spec NativeComposerGlyphProbe/project.yml
+      - name: Create isolated simulator
+        run: |
+          set -euo pipefail
+          runtime="$(xcrun simctl list runtimes -j | jq -r '.runtimes[] | select(.isAvailable and .version == "18.5") | .identifier' | head -1)"
+          test -n "$runtime"
+          simulator="$(xcrun simctl create "Composer glyph probe $GITHUB_RUN_ID" com.apple.CoreSimulator.SimDeviceType.iPhone-16 "$runtime")"
+          echo "GLYPH_PROBE_SIMULATOR=$simulator" >> "$GITHUB_ENV"
+      - name: Run strict native glyph experiments
+        id: native
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild -project NativeComposerGlyphProbe/ComposerGlyphProbe.xcodeproj \
+            -scheme ComposerGlyphProbe \
+            -destination "platform=iOS Simulator,id=$GLYPH_PROBE_SIMULATOR" \
+            -parallel-testing-enabled NO \
+            -resultBundlePath ComposerGlyphProbe.xcresult \
+            CODE_SIGNING_ALLOWED=NO test 2>&1 | tee composer-glyph-probe.log
+      - name: Export measurements and screenshots
+        if: always()
+        run: |
+          if [ -d ComposerGlyphProbe.xcresult ]; then
+            xcrun xcresulttool get test-results summary --path ComposerGlyphProbe.xcresult > probe-summary.json
+            xcrun xcresulttool export attachments --path ComposerGlyphProbe.xcresult --output-path probe-attachments
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: composer-glyph-probe-${{ github.run_id }}
+          path: |
+            composer-glyph-probe.log
+            probe-summary.json
+            probe-attachments/
+          retention-days: 7
+      - name: Delete isolated simulator
+        if: ${{ always() && env.GLYPH_PROBE_SIMULATOR != '' }}
+        run: |
+          xcrun simctl shutdown "$GLYPH_PROBE_SIMULATOR" || true
+          xcrun simctl delete "$GLYPH_PROBE_SIMULATOR"
+      - name: Fail if a native experiment failed
+        if: ${{ always() && steps.native.outcome != 'success' }}
+        run: exit 1
