@@ -61,6 +61,12 @@ jobs:
             xcrun xcresulttool get test-results summary --path composer-ui-results.xcresult > composer-ui-summary.json
             xcrun xcresulttool export attachments --path composer-ui-results.xcresult --output-path composer-ui-attachments
           fi
+      - name: Export failed UI process diagnostics
+        if: ${{ always() && steps.ui.outcome == 'failure' }}
+        run: |
+          if [ -d composer-ui-results.xcresult ]; then
+            xcrun xcresulttool export diagnostics --path composer-ui-results.xcresult --output-path composer-ui-diagnostics
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -72,6 +78,7 @@ jobs:
             composer-ui-test.log
             composer-ui-summary.json
             composer-ui-attachments/
+            composer-ui-diagnostics/
           retention-days: 7
       - name: Delete simulator
         if: ${{ always() && env.COMPOSER_SIMULATOR != '' }}
