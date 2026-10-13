@@ -199,6 +199,7 @@ struct ComposerTextEditor: UIViewRepresentable {
   }
 
   static func dismantleUIView(_ textView: UITextView, coordinator: Coordinator) {
+    coordinator.cancelFocusUpdate()
     (textView as? ComposerEmoticonTextView)?.stopLoadingImages()
     coordinator.parent.controller.detach(from: textView)
     textView.delegate = nil
@@ -212,6 +213,7 @@ struct ComposerTextEditor: UIViewRepresentable {
     var parent: ComposerTextEditor
     private var isApplyingParentState = false
     private var appliedDocumentID: UUID?
+    private var focusUpdateTask: Task<Void, Never>?
 
     init(parent: ComposerTextEditor) {
       self.parent = parent
@@ -246,19 +248,40 @@ struct ComposerTextEditor: UIViewRepresentable {
         self?.textViewDidChange(view)
       }
 
-      if parent.isFocused, parent.isEditable, !textView.isFirstResponder {
-        Task { @MainActor [weak self, weak textView] in
-          guard
-            let self,
-            let textView,
-            self.parent.isFocused,
-            self.parent.isEditable,
-            textView.window != nil
-          else { return }
-          textView.becomeFirstResponder()
+      scheduleFocusUpdate(for: textView)
+    }
+
+    func cancelFocusUpdate() {
+      focusUpdateTask?.cancel()
+      focusUpdateTask = nil
+    }
+
+    private func scheduleFocusUpdate(for textView: UITextView) {
+      cancelFocusUpdate()
+      let documentID = parent.documentID
+      // Both gaining and losing first responder can synchronously update the
+      // SwiftUI keyboard toolbar. Perform neither inside updateUIView: opening
+      // the picker while resigning there can reenter the presentation graph.
+      focusUpdateTask = Task { @MainActor [weak self, weak textView] in
+        guard
+          !Task.isCancelled,
+          let self,
+          let textView,
+          textView.delegate === self,
+          self.parent.documentID == documentID,
+          self.appliedDocumentID == documentID
+        else { return }
+        self.focusUpdateTask = nil
+
+        // A newer SwiftUI update, user interaction, or dismantle may have
+        // superseded this request. Read the current bindings, not a snapshot.
+        if self.parent.isFocused, self.parent.isEditable {
+          if !textView.isFirstResponder, textView.window != nil {
+            textView.becomeFirstResponder()
+          }
+        } else if textView.isFirstResponder {
+          textView.resignFirstResponder()
         }
-      } else if !parent.isFocused || !parent.isEditable, textView.isFirstResponder {
-        textView.resignFirstResponder()
       }
     }
 
@@ -277,6 +300,7 @@ struct ComposerTextEditor: UIViewRepresentable {
     }
 
     func textViewDidBeginEditing(_ textView: UITextView) {
+      guard !isApplyingParentState else { return }
       if !parent.isFocused {
         parent.isFocused = true
       }
@@ -284,6 +308,7 @@ struct ComposerTextEditor: UIViewRepresentable {
     }
 
     func textViewDidEndEditing(_ textView: UITextView) {
+      guard !isApplyingParentState else { return }
       publishSelection(textView.selectedRange)
       if parent.isFocused {
         parent.isFocused = false

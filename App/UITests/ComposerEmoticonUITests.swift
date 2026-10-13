@@ -100,8 +100,8 @@ final class ComposerEmoticonUITests: XCTestCase {
   @MainActor
   private func finishKeyboardIntroductionIfPresented(_ app: XCUIApplication) throws {
     // A fresh simulator can present QuickPath's first-keyboard introduction.
-    // Finish that real system UI before requesting another presentation; its
-    // pending keyboard transition otherwise blocks the reply's picker sheet.
+    // Finish that real system UI before interacting with the composer. The
+    // application must also work when this introduction is never presented.
     let introduction = app.staticTexts.matching(
       NSPredicate(
         format: "label CONTAINS %@",

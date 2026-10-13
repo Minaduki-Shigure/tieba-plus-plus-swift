@@ -144,12 +144,90 @@ final class ComposerTextEditorNativeTests: XCTestCase {
     XCTAssertNil(fixture.view.delegate)
   }
 
+  func testParentFocusRemovalWaitsUntilAfterApplyWithoutWritingBindings() async {
+    let fixture = Fixture(text: "正在编辑的回复")
+    defer { fixture.close() }
+    XCTAssertTrue(fixture.view.becomeFirstResponder())
+    XCTAssertTrue(fixture.state.isFocused)
+    let editingEnded = XCTNSNotificationExpectation(
+      name: UITextView.textDidEndEditingNotification, object: fixture.view)
+
+    fixture.state.isFocused = false
+    fixture.state.bindingWriteCount = 0
+    fixture.apply()
+
+    XCTAssertTrue(
+      fixture.view.isFirstResponder,
+      "Representable updates must not synchronously resign the keyboard while SwiftUI is rendering")
+    XCTAssertEqual(fixture.state.bindingWriteCount, 0)
+    await fulfillment(of: [editingEnded], timeout: 3)
+    XCTAssertFalse(fixture.view.isFirstResponder)
+    XCTAssertFalse(fixture.state.isFocused)
+    XCTAssertEqual(fixture.state.bindingWriteCount, 0)
+    XCTAssertEqual(fixture.state.text, "正在编辑的回复")
+  }
+
+  func testLatestFocusRequestCancelsPendingResignationWithoutLosingKeyboard() async {
+    let fixture = Fixture(text: "保留当前输入焦点")
+    defer { fixture.close() }
+    XCTAssertTrue(fixture.view.becomeFirstResponder())
+    let editingEnded = XCTNSNotificationExpectation(
+      name: UITextView.textDidEndEditingNotification, object: fixture.view)
+    editingEnded.isInverted = true
+    fixture.state.bindingWriteCount = 0
+
+    // Both requests occur in one main-actor turn, before either queued focus
+    // update can run. The stale resignation must not briefly hide the keyboard.
+    fixture.state.isFocused = false
+    fixture.apply()
+    fixture.state.isFocused = true
+    fixture.apply()
+    XCTAssertTrue(fixture.view.isFirstResponder)
+    XCTAssertEqual(fixture.state.bindingWriteCount, 0)
+    await finishQueuedMainActorWork()
+    await fulfillment(of: [editingEnded], timeout: 0.2)
+    XCTAssertTrue(fixture.view.isFirstResponder)
+    XCTAssertTrue(fixture.state.isFocused)
+    XCTAssertEqual(fixture.state.bindingWriteCount, 0)
+  }
+
+  func testDismantlingCancelsPendingFocusEvenWhileViewRemainsInWindow() async {
+    let fixture = Fixture(text: "离开编辑器")
+    defer { fixture.close() }
+    XCTAssertFalse(fixture.view.isFirstResponder)
+    let editingBegan = XCTNSNotificationExpectation(
+      name: UITextView.textDidBeginEditingNotification, object: fixture.view)
+    editingBegan.isInverted = true
+    fixture.state.bindingWriteCount = 0
+    fixture.state.isFocused = true
+    fixture.apply()
+    XCTAssertFalse(fixture.view.isFirstResponder)
+
+    ComposerTextEditor.dismantleUIView(fixture.view, coordinator: fixture.coordinator)
+    // Keep the view mounted and strongly retained: a window/weak-view guard
+    // alone cannot prevent a stale task from taking focus after dismantling.
+    XCTAssertNotNil(fixture.view.window)
+    await finishQueuedMainActorWork()
+    await fulfillment(of: [editingBegan], timeout: 0.2)
+    XCTAssertFalse(fixture.view.isFirstResponder)
+    XCTAssertNil(fixture.view.delegate)
+    XCTAssertEqual(fixture.state.bindingWriteCount, 0)
+    XCTAssertFalse(fixture.insert("#(滑稽)"))
+  }
+
+  private func finishQueuedMainActorWork() async {
+    let sentinel = expectation(description: "Main actor runs after the queued focus requests")
+    Task { @MainActor in sentinel.fulfill() }
+    await fulfillment(of: [sentinel], timeout: 3)
+  }
+
   @MainActor
   private final class State {
     var text: String
     var selection: ComposerTextSelection
     var isFocused = false
     var documentID = UUID()
+    var bindingWriteCount = 0
 
     init(text: String) {
       self.text = text
@@ -208,9 +286,24 @@ final class ComposerTextEditorNativeTests: XCTestCase {
       state: State, controller: ComposerTextEditorController
     ) -> ComposerTextEditor {
       ComposerTextEditor(
-        text: Binding(get: { state.text }, set: { state.text = $0 }),
-        selection: Binding(get: { state.selection }, set: { state.selection = $0 }),
-        isFocused: Binding(get: { state.isFocused }, set: { state.isFocused = $0 }),
+        text: Binding(
+          get: { state.text },
+          set: {
+            state.bindingWriteCount += 1
+            state.text = $0
+          }),
+        selection: Binding(
+          get: { state.selection },
+          set: {
+            state.bindingWriteCount += 1
+            state.selection = $0
+          }),
+        isFocused: Binding(
+          get: { state.isFocused },
+          set: {
+            state.bindingWriteCount += 1
+            state.isFocused = $0
+          }),
         controller: controller, documentID: state.documentID, isEditable: true,
         accessibilityLabel: "测试正文", accessibilityIdentifier: "composer-native-test")
     }
