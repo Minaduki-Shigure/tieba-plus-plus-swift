@@ -3,9 +3,7 @@ import UIKit
 /// TextKit renders catalog tokens as one face while NSTextStorage, UIKit input,
 /// the pasteboard, drafts and submission continue to use the original text.
 /// Missing images stay literal; no attachment character enters the document.
-final class ComposerEmoticonLayoutManager: NSLayoutManager, NSLayoutManagerDelegate,
-  NSTextStorageDelegate
-{
+final class ComposerEmoticonLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
   private(set) var plan = ComposerEmoticonSpans(source: "")
   private(set) var images: [URL: UIImage] = [:]
   var markedSourceRange: NSRange?
@@ -20,12 +18,16 @@ final class ComposerEmoticonLayoutManager: NSLayoutManager, NSLayoutManagerDeleg
   required init?(coder: NSCoder) { nil }
 
   func refreshSource() {
+    scanSource()
+    invalidateRendering()
+  }
+
+  private func scanSource() {
     guard let textStorage else { return }
     plan = ComposerEmoticonSpans(
       source: textStorage.string,
       excluding: markedSourceRange,
       availableURLs: suspendsReplacement ? [] : Set(images.keys))
-    invalidateRendering()
   }
 
   func setImages(_ images: [URL: UIImage]) {
@@ -40,13 +42,20 @@ final class ComposerEmoticonLayoutManager: NSLayoutManager, NSLayoutManagerDeleg
     invalidateDisplay(forCharacterRange: range)
   }
 
-  func textStorage(
-    _ textStorage: NSTextStorage, didProcessEditing editedMask: NSTextStorage.EditActions,
-    range editedRange: NSRange, changeInLength delta: Int
+  override func processEditing(
+    for textStorage: NSTextStorage, edited editMask: NSTextStorage.EditActions,
+    range newCharRange: NSRange, changeInLength delta: Int,
+    invalidatedRange invalidatedCharRange: NSRange
   ) {
-    guard editedMask.contains(.editedCharacters) else { return }
-    refreshSource()
-    sourceDidChange?()
+    // Manual invalidation during a storage edit can cause UIKit to regenerate
+    // its insertion-point glyphs before endEditing, which raises an exception.
+    // Keep the real edit/delta and let TextKit perform its normal invalidation.
+    // Regenerate the whole plan because changing ')' can expose an entire token.
+    scanSource()
+    super.processEditing(
+      for: textStorage, edited: editMask, range: newCharRange, changeInLength: delta,
+      invalidatedRange: NSRange(location: 0, length: textStorage.length))
+    if editMask.contains(.editedCharacters) { sourceDidChange?() }
   }
 
   func layoutManager(
@@ -126,6 +135,7 @@ final class ComposerEmoticonLayoutManager: NSLayoutManager, NSLayoutManagerDeleg
 final class ComposerEmoticonTextView: UITextView {
   let emoticonLayout: ComposerEmoticonLayoutManager
   private var imageTask: Task<Void, Never>?
+  private var sourceUpdateTask: Task<Void, Never>?
   private var imageRequest: InlineEmoticonImageRequest?
   private var imageAttempt: UUID?
   private var fetchPolicy: DownsampledImageFetchPolicy = .cacheOnly(.preview)
@@ -141,10 +151,9 @@ final class ComposerEmoticonTextView: UITextView {
     layout.addTextContainer(container)
     storage.addLayoutManager(layout)
     super.init(frame: .zero, textContainer: container)
-    storage.delegate = layout
     // NSTextStorage is owned exclusively by this UIKit view on the main thread.
     layout.sourceDidChange = { [weak self] in
-      MainActor.assumeIsolated { self?.updateImageRequest() }
+      MainActor.assumeIsolated { self?.scheduleSourceUpdate() }
     }
   }
 
@@ -153,6 +162,19 @@ final class ComposerEmoticonTextView: UITextView {
   func updateEmoticonImages(fetchPolicy: DownsampledImageFetchPolicy) {
     self.fetchPolicy = fetchPolicy
     updateImageRequest()
+    scheduleSourceUpdate()
+  }
+
+  private func scheduleSourceUpdate() {
+    guard sourceUpdateTask == nil else { return }
+    // Never load cached images or alter selection from processEditing itself.
+    // Read the current document when this coalesced main-actor task executes.
+    sourceUpdateTask = Task { @MainActor [weak self] in
+      guard !Task.isCancelled, let self else { return }
+      self.sourceUpdateTask = nil
+      self.updateImageRequest()
+      self.normalizeSelection()
+    }
   }
 
   private func updateImageRequest() {
@@ -164,7 +186,10 @@ final class ComposerEmoticonTextView: UITextView {
     imageTask?.cancel()
     let attempt = UUID()
     imageAttempt = attempt
-    var available = emoticonLayout.images.filter { request.urls.contains($0.key) }
+    // Keep already decoded catalog faces for this editor's lifetime so deleting
+    // and undoing a token does not briefly unfold it after global cache eviction.
+    // The compiled catalog bounds this palette; requests still use current text.
+    var available = emoticonLayout.images
     for (url, asset) in imageLoader.cachedImages(for: request) { available[url] = asset.image }
     emoticonLayout.setImages(available)
     let missing = InlineEmoticonImageRequest(
@@ -182,6 +207,8 @@ final class ComposerEmoticonTextView: UITextView {
   }
 
   func stopLoadingImages() {
+    sourceUpdateTask?.cancel()
+    sourceUpdateTask = nil
     imageTask?.cancel()
     imageTask = nil
     imageAttempt = nil
@@ -211,6 +238,18 @@ final class ComposerEmoticonTextView: UITextView {
       }
     }
     super.deleteBackward()
+    synchronizeMarkedRange()
+  }
+
+  override func insertText(_ text: String) {
+    super.insertText(text)
+    synchronizeMarkedRange()
+    normalizeSelection()
+  }
+
+  override func replace(_ range: UITextRange, withText text: String) {
+    super.replace(range, withText: text)
+    synchronizeMarkedRange()
   }
 
   override func setMarkedText(_ markedText: String?, selectedRange: NSRange) {
@@ -226,11 +265,15 @@ final class ComposerEmoticonTextView: UITextView {
   }
 
   private func synchronizeMarkedRange() {
-    emoticonLayout.markedSourceRange = markedTextRange.map {
+    let range = markedTextRange.map {
       NSRange(
         location: offset(from: beginningOfDocument, to: $0.start),
         length: offset(from: $0.start, to: $0.end))
     }
+    guard range != emoticonLayout.markedSourceRange || emoticonLayout.suspendsReplacement else {
+      return
+    }
+    emoticonLayout.markedSourceRange = range
     emoticonLayout.suspendsReplacement = false
     emoticonLayout.refreshSource()
   }

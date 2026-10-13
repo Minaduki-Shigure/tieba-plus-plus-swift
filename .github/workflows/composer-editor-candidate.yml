@@ -42,6 +42,25 @@ jobs:
             xcrun xcresulttool get test-results summary --path composer-results.xcresult > composer-summary.json
             xcrun xcresulttool export attachments --path composer-results.xcresult --output-path composer-attachments
           fi
+      - name: Test actual composer picker and file draft restoration
+        id: ui
+        if: ${{ steps.native.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild -project TiebaPlusPlus.xcodeproj -scheme TiebaPlusPlusIconsUI \
+            -configuration Debug -derivedDataPath build/DerivedData \
+            -destination "platform=iOS Simulator,id=$COMPOSER_SIMULATOR" \
+            -parallel-testing-enabled NO -resultBundlePath composer-ui-results.xcresult \
+            -only-testing:TiebaPlusPlusUITests/ComposerEmoticonUITests \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO test 2>&1 | tee composer-ui-test.log
+      - name: Export composer UI evidence
+        if: always()
+        run: |
+          if [ -d composer-ui-results.xcresult ]; then
+            xcrun xcresulttool get test-results summary --path composer-ui-results.xcresult > composer-ui-summary.json
+            xcrun xcresulttool export attachments --path composer-ui-results.xcresult --output-path composer-ui-attachments
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -50,6 +69,9 @@ jobs:
             composer-test.log
             composer-summary.json
             composer-attachments/
+            composer-ui-test.log
+            composer-ui-summary.json
+            composer-ui-attachments/
           retention-days: 7
       - name: Delete simulator
         if: ${{ always() && env.COMPOSER_SIMULATOR != '' }}
@@ -57,5 +79,5 @@ jobs:
           xcrun simctl shutdown "$COMPOSER_SIMULATOR" || true
           xcrun simctl delete "$COMPOSER_SIMULATOR"
       - name: Enforce native result
-        if: ${{ always() && steps.native.outcome != 'success' }}
+        if: ${{ always() && (steps.native.outcome != 'success' || steps.ui.outcome != 'success') }}
         run: exit 1

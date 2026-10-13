@@ -111,11 +111,29 @@ final class ComposerEmoticonTextViewTests: XCTestCase {
     XCTAssertEqual(fixture.view.textStorage.string, source)
   }
 
+  func testInputMethodCommitThroughInsertTextUpdatesMarkedRangeAndFoldedFace() {
+    let fixture = Fixture(source: "前后")
+    defer { fixture.close() }
+    let view = fixture.view
+    fixture.loadFaces()
+    XCTAssertTrue(view.becomeFirstResponder())
+    view.selectedRange = NSRange(location: 1, length: 0)
+    view.setMarkedText("拼音", selectedRange: NSRange(location: 2, length: 0))
+    XCTAssertNotNil(view.markedTextRange)
+    view.insertText("#(滑稽)")
+    XCTAssertNil(view.markedTextRange)
+    XCTAssertNil(view.emoticonLayout.markedSourceRange)
+    XCTAssertEqual(view.textStorage.string, "前#(滑稽)后")
+    XCTAssertEqual(view.emoticonLayout.plan.spans.map(\.token), ["#(滑稽)"])
+    XCTAssertEqual(view.selectedRange, NSRange(location: 6, length: 0))
+  }
+
   private func caret(_ view: UITextView, offset: Int) throws -> CGRect {
     view.caretRect(
       for: try XCTUnwrap(view.position(from: view.beginningOfDocument, offset: offset)))
   }
 
+  @MainActor
   private final class Fixture {
     let view = ComposerEmoticonTextView()
     let window: UIWindow

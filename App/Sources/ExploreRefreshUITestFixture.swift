@@ -9,6 +9,13 @@
   @MainActor
   enum TiebaPlusPlusDebugEntryPoint {
     static func main() {
+      if ProcessInfo.processInfo.arguments.contains("--composer-emoticon-ui-testing") {
+        var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        arguments[AppPreferenceKey.showsPostAndReplyRiskNotice] = false
+        UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+        ComposerEmoticonUITestApp.main()
+        return
+      }
       if ProcessInfo.processInfo.arguments.contains("--explore-refresh-ui-testing")
         || ProcessInfo.processInfo.arguments.contains("--inbox-scopes-ui-testing")
         || ProcessInfo.processInfo.arguments.contains("--history-scopes-ui-testing")
