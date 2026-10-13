@@ -16,6 +16,19 @@ That narrower comparison does not replace the full-product audit above.
 
 ## Progress audit
 
+The alpha.49 candidate adds TiebaLite `9701bfb6`'s reachable **服务中心** entry
+under My for signed-in accounts. It uses the existing external-browser preference
+and a fixed HTTPS URL without copying App credentials or Android device markers.
+An anonymous 2026-10-13 check returned the official page and service configuration
+without those query parameters. Four focused App tests cover destination validation,
+native-link routing exclusion, in-app browser presentation acceptance, and browser
+fallback. Native test execution and release gates are pending; browser login,
+appeals, feedback submission, and LiveContainer behavior still need device checks.
+This closes an entry-point gap within an existing credited area and does not add
+a weighted point. The [new spot audit](Docs/tiebalite-reachable-workflow-audit.md)
+also separates reachable upstream workflows from unused declarations; it is not
+a replacement for a full parity inventory.
+
 Alpha.48/build 126 includes ordered global/forum keyword-history operations and
 resumption of an interrupted forum search without a duplicate history record.
 It also includes the history, suggestion and language work prepared for alpha.45.

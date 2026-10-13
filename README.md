@@ -25,6 +25,16 @@ and its verified metadata enters the public app source.
 
 ### Release and validation
 
+The alpha.49 candidate adds **My → 服务中心** for signed-in accounts, matching
+TiebaLite's official service-center entry. It opens the fixed official HTTPS
+page using the existing browser preference; the page uses its own browser login.
+No saved App credentials or device identifiers are attached. Anonymous checks
+on 2026-10-13 confirmed that the page and its service configuration load without
+TiebaLite's Android/CUID parameters. Native regression and publication are still
+pending for this candidate; the application source continues to serve alpha.48.
+See the [reachable-workflow spot audit](Docs/tiebalite-reachable-workflow-audit.md)
+for the source comparison and the remaining inline-emoticon editor gap.
+
 - **`v0.65.0-alpha.48` search recovery and ordered history:** Global and forum
   keyword-history reads, records, deletion, clearing and reset now complete in
   invocation order. Accepted local writes survive navigation, and old reads or
