@@ -219,7 +219,13 @@ final class CloudFavoriteRecordRemovalTests: XCTestCase {
     let session = cleanupSession()
     let ledger = CleanupCancellationAwareLedger()
     let pause = CleanupTestGate()
-    let client = CleanupClient(ledger: ledger, afterHook: { await pause.wait() })
+    let dispatched = expectation(description: "Cleanup request reached the transport")
+    let client = CleanupClient(
+      ledger: ledger,
+      afterHook: {
+        dispatched.fulfill()
+        await pause.wait()
+      })
     let service = TiebaCoreAccountService(
       client: client, cloudFavoriteMutationGate: .init(ledger: ledger),
       cloudFavoriteVault: CleanupVault(session)
@@ -227,10 +233,9 @@ final class CloudFavoriteRecordRemovalTests: XCTestCase {
     let task = Task {
       try await service.removeCloudFavoriteRecord(session: session, target: cleanupTarget(session))
     }
-    for _ in 0..<1_000 {
-      if await client.dispatches == 1 { break }
-      await Task.yield()
-    }
+    // Yield counts do not establish that the worker reached the cancellation
+    // boundary. Wait for the actual hook, while its receipt remains suspended.
+    await fulfillment(of: [dispatched], timeout: 5)
     let count = await client.dispatches
     XCTAssertEqual(count, 1)
     task.cancel()
@@ -248,9 +253,13 @@ final class CloudFavoriteRecordRemovalTests: XCTestCase {
     let session = cleanupSession()
     let ledger = CleanupCancellationAwareLedger()
     let pause = CleanupTestGate()
+    let dispatched = expectation(description: "Rejected cleanup request reached the transport")
     let client = CleanupClient(
       ledger: ledger, outcome: .rejected(code: 4, message: "Rejected"),
-      afterHook: { await pause.wait() }
+      afterHook: {
+        dispatched.fulfill()
+        await pause.wait()
+      }
     )
     let service = TiebaCoreAccountService(
       client: client, cloudFavoriteMutationGate: .init(ledger: ledger),
@@ -259,10 +268,7 @@ final class CloudFavoriteRecordRemovalTests: XCTestCase {
     let task = Task {
       try await service.removeCloudFavoriteRecord(session: session, target: cleanupTarget(session))
     }
-    for _ in 0..<1_000 {
-      if await client.dispatches == 1 { break }
-      await Task.yield()
-    }
+    await fulfillment(of: [dispatched], timeout: 5)
     let count = await client.dispatches
     XCTAssertEqual(count, 1)
     task.cancel()
@@ -283,7 +289,12 @@ final class CloudFavoriteRecordRemovalTests: XCTestCase {
   func testCancellationAfterPendingPersistenceButBeforeDispatchRemovesIntent() async throws {
     let session = cleanupSession()
     let pause = CleanupTestGate()
-    let ledger = CleanupCancellationAwareLedger(afterPrepare: { await pause.wait() })
+    let persisted = expectation(description: "Pending cleanup intent was persisted")
+    let ledger = CleanupCancellationAwareLedger(
+      afterPrepare: {
+        persisted.fulfill()
+        await pause.wait()
+      })
     let client = CleanupClient(ledger: ledger)
     let service = TiebaCoreAccountService(
       client: client, cloudFavoriteMutationGate: .init(ledger: ledger),
@@ -292,11 +303,7 @@ final class CloudFavoriteRecordRemovalTests: XCTestCase {
     let task = Task {
       try await service.removeCloudFavoriteRecord(session: session, target: cleanupTarget(session))
     }
-    for _ in 0..<1_000 {
-      let pending = try await ledger.records()
-      if !pending.isEmpty { break }
-      await Task.yield()
-    }
+    await fulfillment(of: [persisted], timeout: 5)
     let before = try await ledger.records()
     XCTAssertEqual(before.map(\.phase), [.dispatchPending])
     task.cancel()
@@ -398,8 +405,13 @@ final class CloudFavoriteRecordRemovalTests: XCTestCase {
     let session = cleanupSession()
     let ledger = CleanupCancellationAwareLedger()
     let pause = CleanupTestGate()
+    let hookCompleted = expectation(description: "Cleanup pre-dispatch hook completed")
     let client = CleanupClient(
-      ledger: ledger, outcome: .notDispatched, afterHook: { await pause.wait() })
+      ledger: ledger, outcome: .notDispatched,
+      afterHook: {
+        hookCompleted.fulfill()
+        await pause.wait()
+      })
     let service = TiebaCoreAccountService(
       client: client, cloudFavoriteMutationGate: .init(ledger: ledger),
       cloudFavoriteVault: CleanupVault(session))
@@ -407,10 +419,7 @@ final class CloudFavoriteRecordRemovalTests: XCTestCase {
     let task = Task {
       try await service.removeCloudFavoriteRecord(session: session, target: target)
     }
-    for _ in 0..<1_000 {
-      if await client.prepared == 1 { break }
-      await Task.yield()
-    }
+    await fulfillment(of: [hookCompleted], timeout: 5)
     let prepared = await client.prepared
     XCTAssertEqual(prepared, 1, "The hook must have returned before cancelling")
     task.cancel()
