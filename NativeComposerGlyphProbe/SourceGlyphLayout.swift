@@ -3,7 +3,7 @@ import UIKit
 // Isolated feasibility probe, not a production editor. Source text and character
 // indexes are preserved; only the generated glyph properties/layout/drawing change.
 // https://developer.apple.com/documentation/uikit/display-text-with-a-custom-layout
-final class SourceGlyphLayout: NSLayoutManager, NSLayoutManagerDelegate, NSTextStorageDelegate {
+final class SourceGlyphLayout: NSLayoutManager, NSLayoutManagerDelegate {
   private(set) var tokenRanges: [NSRange] = []
   private(set) var generationCalls = 0
   private(set) var controlBoxCalls = 0
@@ -21,6 +21,15 @@ final class SourceGlyphLayout: NSLayoutManager, NSLayoutManagerDelegate, NSTextS
   }
 
   func refreshSourceRanges() {
+    scanSourceRanges()
+    guard let textStorage else { return }
+    let fullRange = NSRange(location: 0, length: textStorage.length)
+    invalidateGlyphs(forCharacterRange: fullRange, changeInLength: 0, actualCharacterRange: nil)
+    invalidateLayout(forCharacterRange: fullRange, actualCharacterRange: nil)
+    invalidateDisplay(forCharacterRange: fullRange)
+  }
+
+  private func scanSourceRanges() {
     guard let textStorage else { return }
     let source = textStorage.string as NSString
     var ranges: [NSRange] = []
@@ -35,19 +44,23 @@ final class SourceGlyphLayout: NSLayoutManager, NSLayoutManagerDelegate, NSTextS
       }
     }
     tokenRanges = ranges.sorted { $0.location < $1.location }
-    let fullRange = NSRange(location: 0, length: source.length)
-    invalidateGlyphs(forCharacterRange: fullRange, changeInLength: 0, actualCharacterRange: nil)
-    invalidateLayout(forCharacterRange: fullRange, actualCharacterRange: nil)
-    invalidateDisplay(forCharacterRange: fullRange)
   }
 
-  func textStorage(
-    _ textStorage: NSTextStorage,
-    didProcessEditing editedMask: NSTextStorage.EditActions,
-    range editedRange: NSRange,
-    changeInLength delta: Int
+  override func processEditing(
+    for textStorage: NSTextStorage,
+    edited editMask: NSTextStorage.EditActions,
+    range newCharRange: NSRange,
+    changeInLength delta: Int,
+    invalidatedRange invalidatedCharRange: NSRange
   ) {
-    if editedMask.contains(.editedCharacters) { refreshSourceRanges() }
+    // Invalidating layout from NSTextStorageDelegate.didProcessEditing made
+    // UIKit regenerate insertion-point glyphs while the storage was editing.
+    // Update the source plan here, then let TextKit invalidate it as part of its
+    // normal edit notification, keeping the real edit range and delta intact.
+    scanSourceRanges()
+    super.processEditing(
+      for: textStorage, edited: editMask, range: newCharRange, changeInLength: delta,
+      invalidatedRange: NSRange(location: 0, length: textStorage.length))
   }
 
   private func replacementRange(at characterIndex: Int) -> NSRange? {
@@ -149,7 +162,6 @@ final class SourceGlyphTextView: UITextView {
     layout.addTextContainer(container)
     storage.addLayoutManager(layout)
     super.init(frame: frame, textContainer: container)
-    storage.delegate = layout
     font = .systemFont(ofSize: fontSize)
     textColor = .label
     backgroundColor = .systemBackground
