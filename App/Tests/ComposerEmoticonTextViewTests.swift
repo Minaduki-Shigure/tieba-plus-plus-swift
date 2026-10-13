@@ -31,7 +31,7 @@ final class ComposerEmoticonTextViewTests: XCTestCase {
     }
   }
 
-  func testNativeCopyCutPasteAndUndoPreserveCanonicalTokens() throws {
+  func testNativeCopyCutPasteAndUndoPreserveCanonicalTokens() async throws {
     let fixture = Fixture(source: "前😀#(滑稽)后")
     defer { fixture.close() }
     fixture.loadFaces()
@@ -50,8 +50,17 @@ final class ComposerEmoticonTextViewTests: XCTestCase {
     undo.undo()
     XCTAssertEqual(view.text, "前😀#(滑稽)后")
     view.selectedRange = NSRange(location: view.textStorage.length, length: 0)
+    let pasteCompleted = expectation(description: "Native paste changes the text view")
+    let observer = PasteCompletionObserver(
+      originalSource: view.textStorage.string, completion: pasteCompleted)
+    view.delegate = observer
+    defer { view.delegate = nil }
+    // UIKit's paste item-provider pipeline may finish after paste(_:) returns.
+    // Observe the real editing callback; do not replace the system paste path.
     view.paste(nil)
+    await fulfillment(of: [pasteCompleted], timeout: 5)
     XCTAssertEqual(view.text, "前😀#(滑稽)后#(滑稽)")
+    XCTAssertEqual(observer.pastedSource, "前😀#(滑稽)后#(滑稽)")
     XCTAssertEqual(view.textStorage.string, view.text)
     XCTAssertFalse(view.text.contains("\u{fffc}"))
   }
@@ -131,6 +140,26 @@ final class ComposerEmoticonTextViewTests: XCTestCase {
   private func caret(_ view: UITextView, offset: Int) throws -> CGRect {
     view.caretRect(
       for: try XCTUnwrap(view.position(from: view.beginningOfDocument, offset: offset)))
+  }
+
+  @MainActor
+  private final class PasteCompletionObserver: NSObject, UITextViewDelegate {
+    private let originalSource: String
+    private var completion: XCTestExpectation?
+    private(set) var pastedSource: String?
+
+    init(originalSource: String, completion: XCTestExpectation) {
+      self.originalSource = originalSource
+      self.completion = completion
+    }
+
+    func textViewDidChange(_ textView: UITextView) {
+      let source = textView.textStorage.string
+      guard let completion, !source.utf8.elementsEqual(originalSource.utf8) else { return }
+      self.completion = nil
+      pastedSource = source
+      completion.fulfill()
+    }
   }
 
   @MainActor
