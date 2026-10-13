@@ -38,12 +38,14 @@ final class ComposerEmoticonUITests: XCTestCase {
     try requireSource(original, editor: editor, app: app)
     try tap(app.buttons["composer-fixture-inspect"], app: app)
     try requireUndoState("undo=0 redo=0", app: app)
+    try finishKeyboardIntroductionIfPresented(app)
 
     // Restored selection is at the end. Opening the real picker resigns the
     // editor; searching makes the picker's field the actual first responder.
     try tap(app.buttons["插入经典表情"], app: app)
     let search = app.searchFields.firstMatch
     try tap(search, app: app)
+    try finishKeyboardIntroductionIfPresented(app)
     search.typeText("滑稽")
     try tap(app.buttons["表情 滑稽"], app: app)
     try wait("Picker closes", app: app) { !app.navigationBars["经典表情"].exists }
@@ -93,6 +95,22 @@ final class ComposerEmoticonUITests: XCTestCase {
   private func requireUndoState(_ expected: String, app: XCUIApplication) throws {
     let state = app.staticTexts["composer-fixture-undo-state"]
     try wait("Native undo state \(expected)", app: app) { state.label == expected }
+  }
+
+  @MainActor
+  private func finishKeyboardIntroductionIfPresented(_ app: XCUIApplication) throws {
+    // A fresh simulator can present QuickPath's first-keyboard introduction.
+    // Finish that real system UI before requesting another presentation; its
+    // pending keyboard transition otherwise blocks the reply's picker sheet.
+    let introduction = app.staticTexts.matching(
+      NSPredicate(
+        format: "label CONTAINS %@",
+        "Speed up your typing by sliding your finger across the letters to compose a word.")
+    ).firstMatch
+    guard introduction.waitForExistence(timeout: 2) else { return }
+    attachState(app, name: "System QuickPath introduction before composer interaction")
+    try tap(app.buttons["Continue"], app: app)
+    try wait("QuickPath introduction dismisses", app: app) { !introduction.exists }
   }
 
   @MainActor
