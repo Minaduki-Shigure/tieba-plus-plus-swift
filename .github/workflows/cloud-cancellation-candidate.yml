@@ -1,0 +1,58 @@
+name: Cloud favorite cancellation regression
+on:
+  push:
+    branches: [fix/actions-cloud-cancel-1013]
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Create simulator
+        run: |
+          set -euo pipefail
+          runtime="$(xcrun simctl list runtimes -j | jq -r '.runtimes[] | select(.isAvailable and .version == "18.5") | .identifier' | head -1)"
+          test -n "$runtime"
+          simulator="$(xcrun simctl create "Cloud cancellation $GITHUB_RUN_ID" com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro "$runtime")"
+          echo "CLOUD_SIMULATOR=$simulator" >> "$GITHUB_ENV"
+      - name: Repeat all cloud record removal tests ten times
+        id: tests
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          xcodebuild -project TiebaPlusPlus.xcodeproj -scheme TiebaPlusPlus \
+            -configuration Debug -derivedDataPath build/DerivedData \
+            -destination "platform=iOS Simulator,id=$CLOUD_SIMULATOR" \
+            -parallel-testing-enabled NO -resultBundlePath cloud-cancellation.xcresult \
+            -only-testing:TiebaPlusPlusTests/CloudFavoriteRecordRemovalTests \
+            -test-iterations 10 -test-repetition-relaunch-enabled NO \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO test 2>&1 | tee cloud-cancellation.log
+      - name: Export native results
+        if: always()
+        run: |
+          if [ -d cloud-cancellation.xcresult ]; then
+            xcrun xcresulttool get test-results summary --path cloud-cancellation.xcresult > cloud-cancellation-summary.json
+            xcrun xcresulttool get test-results tests --path cloud-cancellation.xcresult > cloud-cancellation-tests.json
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cloud-cancellation-${{ github.run_id }}
+          path: |
+            cloud-cancellation.log
+            cloud-cancellation-summary.json
+            cloud-cancellation-tests.json
+          retention-days: 7
+      - name: Delete simulator
+        if: ${{ always() && env.CLOUD_SIMULATOR != '' }}
+        run: |
+          xcrun simctl shutdown "$CLOUD_SIMULATOR" || true
+          xcrun simctl delete "$CLOUD_SIMULATOR"
+      - name: Enforce native result
+        if: ${{ always() && steps.tests.outcome != 'success' }}
+        run: exit 1
