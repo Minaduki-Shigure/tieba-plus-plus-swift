@@ -77,7 +77,7 @@ final class ComposerGlyphProbeTests: XCTestCase {
     try capture(
       "single-token-metrics", view: view, window: window,
       values: [
-        "beforeCaret": NSStringFromCGRect(before), "afterCaret": NSStringFromCGRect(after),
+        "beforeCaret": NSCoder.string(for: before), "afterCaret": NSCoder.string(for: after),
         "advance": after.minX - before.minX,
       ])
     XCTAssertEqual(view.text, source)
@@ -105,7 +105,7 @@ final class ComposerGlyphProbeTests: XCTestCase {
         location: 0, length: view.layoutManager.numberOfGlyphs)
     ) { rect, used, _, _, _ in
       lines.insert(Int(rect.minY.rounded()))
-      boxes.append(NSStringFromCGRect(used))
+      boxes.append(NSCoder.string(for: used))
       XCTAssertLessThanOrEqual(used.maxX, view.textContainer.size.width + 0.5)
     }
     XCTAssertGreaterThan(lines.count, 2)
@@ -153,8 +153,8 @@ final class ComposerGlyphProbeTests: XCTestCase {
         let rect = view.layoutManager.boundingRect(
           forGlyphRange: NSRange(location: glyph, length: 1), in: view.textContainer)
         metrics.append([
-          "before": NSStringFromCGRect(before), "after": NSStringFromCGRect(after),
-          "glyphBounds": NSStringFromCGRect(rect),
+          "before": NSCoder.string(for: before), "after": NSCoder.string(for: after),
+          "glyphBounds": NSCoder.string(for: rect),
         ])
         XCTAssertEqual(rect.width, view.sourceLayout.tokenWidth, accuracy: 0.5)
         XCTAssertLessThanOrEqual(rect.maxX, view.textContainer.size.width + 0.5)
