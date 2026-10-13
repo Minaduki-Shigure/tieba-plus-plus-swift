@@ -55,6 +55,59 @@ enum OfficialBaiduUsernameManagementHandoff {
   }
 }
 
+enum OfficialTiebaServiceCenterHandoff {
+  static let absoluteString =
+    "https://tieba.baidu.com/mo/q/hybrid-main-service/uegServiceCenter"
+
+  static var validatedURL: URL? {
+    validatedURL(from: absoluteString)
+  }
+
+  static func validatedURL(from absoluteString: String) -> URL? {
+    guard
+      absoluteString == Self.absoluteString,
+      let components = URLComponents(string: absoluteString),
+      components.scheme == "https",
+      components.host == "tieba.baidu.com",
+      components.user == nil,
+      components.password == nil,
+      components.port == nil,
+      components.percentEncodedPath == "/mo/q/hybrid-main-service/uegServiceCenter",
+      components.query == nil,
+      components.fragment == nil,
+      let url = components.url,
+      url.absoluteString == absoluteString
+    else { return nil }
+    return url
+  }
+
+  static func disposition(mode: ExternalWebOpenMode) -> BrowseContentLinkDisposition {
+    guard let validatedURL else { return .rejected }
+    return BrowseContentLinkRouter.disposition(for: validatedURL, mode: mode)
+  }
+
+  @MainActor
+  @discardableResult
+  static func open(
+    mode: ExternalWebOpenMode,
+    inAppSafari: (URL) -> Bool,
+    systemBrowser: (URL) -> Void
+  ) -> Bool {
+    switch disposition(mode: mode) {
+    case .system(let validatedURL):
+      systemBrowser(validatedURL)
+      return true
+    case .inAppSafari(let validatedURL):
+      if !inAppSafari(validatedURL) {
+        systemBrowser(validatedURL)
+      }
+      return true
+    case .tieba, .rejected:
+      return false
+    }
+  }
+}
+
 struct AccountView: View {
   let browseService:
     any BrowseService & ForumPostSearchService & UserProfileService & ForumInformationService
@@ -386,6 +439,24 @@ struct AccountView: View {
               .accessibilityIdentifier("account-manage-baidu-username")
             }
 
+            Button {
+              guard serviceCenterIsAvailable else { return }
+              openServiceCenter()
+            } label: {
+              Label {
+                VStack(alignment: .leading, spacing: 2) {
+                  Text("服务中心")
+                  Text("官方网页，使用网页中登录的账号")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+              } icon: {
+                Image(systemName: "questionmark.circle")
+              }
+            }
+            .disabled(!serviceCenterIsAvailable)
+            .accessibilityIdentifier("account-official-service-center")
+
             NavigationLink {
               FollowedForumsView(
                 browseService: browseService,
@@ -530,6 +601,20 @@ struct AccountView: View {
 
   private func openUsernameManagement() {
     OfficialBaiduUsernameManagementHandoff.open(
+      mode: externalWebOpenMode,
+      inAppSafari: { openExternalWeb($0) },
+      systemBrowser: { openURL($0) }
+    )
+  }
+
+  private var serviceCenterIsAvailable: Bool {
+    viewModel.activeAccount != nil
+      && !viewModel.isMutating
+      && OfficialTiebaServiceCenterHandoff.validatedURL != nil
+  }
+
+  private func openServiceCenter() {
+    OfficialTiebaServiceCenterHandoff.open(
       mode: externalWebOpenMode,
       inAppSafari: { openExternalWeb($0) },
       systemBrowser: { openURL($0) }
