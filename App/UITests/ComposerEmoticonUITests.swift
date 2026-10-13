@@ -105,7 +105,7 @@ final class ComposerEmoticonUITests: XCTestCase {
     let introduction = app.staticTexts.matching(
       NSPredicate(
         format: "label CONTAINS %@",
-        "Speed up your typing by sliding your finger across the letters to compose a word.")
+        "Speed up your typing by sliding")
     ).firstMatch
     guard introduction.waitForExistence(timeout: 2) else { return }
     attachState(app, name: "System QuickPath introduction before composer interaction")
